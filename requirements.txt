@@ -27,7 +27,7 @@ fire==0.6.0
 flatbuffers==24.3.25
 fonttools==4.51.0
 fsspec==2024.3.1
-gradio==4.29.0
+gradio==4.37.1
 gradio_client==0.16.1
 h11==0.14.0
 httpcore==1.0.5
