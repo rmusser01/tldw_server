@@ -2,11 +2,14 @@
 
 ## Overview
 
-API uses FastAPI to provide a RESTful interface to the backend services. The API is designed to be simple and easy to use, with a focus on providing a clean interface for the frontend to interact with.
+API uses FastAPI framework.
+Designed to be simple and easy to use.
+Generative endpoints follow openai API spec where possible.
 
 - **URLs**
     - Main page: http://127.0.0.1:8000
     - API Documentation page: http://127.0.0.1:8000/docs
+
 
 
 
