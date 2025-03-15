@@ -1,21 +1,4 @@
-# API Plan
-
-## Overview
-- First stab at a mapping of the API endpoints and their functionality
-
-- Very much a WIP, not complete and not all functionality is defined yet.
-
-HTTP Everywhere.
-Passing JSON data.
-Overly descriptive vs asbtract.
-Complexity hides in payloads vs endpoints
-Liberal in allowed input, strict in parsing/operations on parsed data. (If it isn't valid, its junk)
-- **URLs**
-    - Main page: http://tldwproject.com
-    - API Documentation page: http://tldwproject.com/docs
-    - API Redoc page: http://tldwproject.com/redoc
-    - API url: http://tldwproject.com/api/v1/
-- **Endpoints**
+Version 1.0.0
     - **Search**
         Each search endpoint accepts a JSON payload with the search query and returns a list of results.
         Media search supports RAG and FTS. 
@@ -174,4 +157,3 @@ Liberal in allowed input, strict in parsing/operations on parsed data. (If it is
             GET /api/v1/evals - List all available evaluations
             POST /api/v1/evals - Evaluate a model
         ```
-
