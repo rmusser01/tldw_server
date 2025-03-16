@@ -17,6 +17,7 @@ import hashlib
 from datetime import datetime
 import json
 import os
+import time
 import tempfile
 from typing import Any, Dict, List, Union, Optional, Tuple
 #
@@ -30,8 +31,10 @@ import xml.etree.ElementTree as xET
 from bs4 import BeautifulSoup
 import pandas as pd
 from playwright.async_api import async_playwright
+from playwright_stealth import stealth_async
 import requests
 import trafilatura
+import html2text
 from tqdm import tqdm
 #
 # Import Local
@@ -53,57 +56,75 @@ web_scraping_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit
 def get_page_title(url: str) -> str:
     try:
         response = requests.get(url)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        title_tag = soup.find('title')
-        title = title_tag.string.strip() if title_tag else "Untitled"
-        log_counter("page_title_extracted", labels={"success": "true"})
-        return title
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            title_tag = soup.find('title')
+            title = title_tag.string.strip() if title_tag and title_tag.string else "Untitled"
+            log_counter("page_title_extracted", labels={"success": "true"})
+            return title
+        else:
+            logging.error(f"Failed to fetch {url}, status code: {response.status_code}")
+            return "Untitled"
     except requests.RequestException as e:
         logging.error(f"Error fetching page title: {e}")
         log_counter("page_title_extracted", labels={"success": "false"})
         return "Untitled"
 
 
+
+
 async def scrape_article(url: str, custom_cookies: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     logging.info(f"Scraping article from URL: {url}")
+
+
     async def fetch_html(url: str) -> str:
-        logging.info(f"Fetching HTML from {url}")
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+        retries = 3  # Number of retries
+        timeout_ms = 60_000  # Increased timeout to 60s
+        for attempt in range(retries):
             try:
-                context = await browser.new_context(
-                    user_agent=web_scraping_user_agent,
-                #viewport = {"width": 1280, "height": 720},
-                #java_script_enabled = True
-                )
-                if custom_cookies:
-                    await context.add_cookies(custom_cookies)
-                page = await context.new_page()
-                try:
-                    await page.goto(url, wait_until="domcontentloaded", timeout=10000)  # 10-second timeout
-                    await page.wait_for_load_state("networkidle", timeout=10000)  # 10-second timeout
+                logging.info(f"Fetching HTML from {url} (Attempt {attempt + 1})")
+                async with async_playwright() as p:
+                    browser = await p.chromium.launch(headless=True)  # Test with headless=False
+                    context = await browser.new_context(
+                        user_agent=web_scraping_user_agent,
+                        viewport={"width": 1280, "height": 720}  # Simulate a normal browser size
+                    )
+                    if custom_cookies:
+                        await context.add_cookies(custom_cookies)
+                    page = await context.new_page()
+                    
+                    await stealth_async(page)  # Apply stealth
+                    await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)  # Use a different wait strategy
+                    
+                    await page.wait_for_timeout(5000)  # Wait 5 seconds to ensure full rendering
                     content = await page.content()
+                    
                     logging.info(f"HTML fetched successfully from {url}")
                     log_counter("html_fetched", labels={"url": url})
+                    await browser.close()
                     return content
-                except Exception as e:
-                    logging.error(f"Error fetching HTML for {url}: {e}")
+            except Exception as e:
+                logging.error(f"Error fetching HTML for {url} on attempt {attempt + 1}: {str(e)}")
+                if attempt < retries - 1:
+                    logging.info("Retrying...")
+                    time.sleep(2)  # Wait for 2 seconds before retrying
+                else:
+                    logging.error("Max retries reached, skipping this URL.")
+                    log_counter("html_fetch_error", labels={"url": url, "error": str(e)})
                     return ""
-            finally:
-                await browser.close()
+
+
 
     def extract_article_data(html: str, url: str) -> dict:
         logging.info(f"Extracting article data from HTML for {url}")
-        # FIXME - Add option for extracting comments/tables/images
         downloaded = trafilatura.extract(html, include_comments=False, include_tables=False, include_images=False)
         metadata = trafilatura.extract_metadata(html)
 
         result = {
-            'title': 'N/A',
-            'author': 'N/A',
+            'title': 'No Title',
+            'author': 'No Author',
             'content': '',
-            'date': 'N/A',
+            'date': 'No Date',
             'url': url,
             'extraction_successful': False
         }
@@ -111,7 +132,6 @@ async def scrape_article(url: str, custom_cookies: Optional[List[Dict[str, Any]]
         if downloaded:
             logging.info(f"Content extracted successfully from {url}")
             log_counter("article_extracted", labels={"success": "true", "url": url})
-            # Add metadata to content
             result['content'] = ContentMetadataHandler.format_content_with_metadata(
                 url=url,
                 content=downloaded,
@@ -125,9 +145,9 @@ async def scrape_article(url: str, custom_cookies: Optional[List[Dict[str, Any]]
 
         if metadata:
             result.update({
-                'title': metadata.title if metadata.title else 'N/A',
-                'author': metadata.author if metadata.author else 'N/A',
-                'date': metadata.date if metadata.date else 'N/A'
+                'title': metadata.title if metadata and metadata.title else "No Title",
+                'author': metadata.author if metadata and metadata.author else "No Author",
+                'date': metadata.date if metadata and metadata.date else "No Date"
             })
         else:
             log_counter("article_extracted", labels={"success": "false", "url": url})
@@ -137,6 +157,7 @@ async def scrape_article(url: str, custom_cookies: Optional[List[Dict[str, Any]]
             logging.warning("Content extraction failed.")
 
         return result
+
 
     def convert_html_to_markdown(html: str) -> str:
         logging.info("Converting HTML to Markdown")

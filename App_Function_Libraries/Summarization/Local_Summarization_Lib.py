@@ -1405,7 +1405,7 @@ def summarize_with_ollama(
                 # Mount adapters for both HTTP and HTTPS
                 session.mount("http://", adapter)
                 session.mount("https://", adapter)
-                response_data = session.json()
+                response_data = response.json()
             except json.JSONDecodeError:
                 logging.error("Ollama: Failed to parse JSON response.")
                 return "Ollama: JSON parse error from summarization API."

@@ -151,7 +151,6 @@ def create_ollama_tab():
         gr.Markdown("# Ollama Model Serving")
 
         with gr.Row():
-            # Initialize Dropdowns with placeholders
             model_list = gr.Dropdown(
                 label="Available Models",
                 choices=["Click 'Refresh Model List' to load models"],
@@ -194,18 +193,17 @@ def create_ollama_tab():
 
         def async_update_model_lists():
             """
-            Asynchronously updates the model lists to prevent blocking.
+            Runs `update_model_lists()` asynchronously in a thread and returns the result to Gradio.
             """
             def task():
-                choices1, choices2 = update_model_lists()
-                model_list.update(choices=choices1['choices'], value=choices1.get('value'))
-                serve_model.update(choices=choices2['choices'], value=choices2.get('value'))
-            threading.Thread(target=task).start()
+                return update_model_lists()  # ✅ Now returning the updates
 
-        # Bind the refresh button to the asynchronous update function
-        refresh_button.click(fn=async_update_model_lists, inputs=[], outputs=[])
+            return threading.Thread(target=task, daemon=True).start()  # ✅ Run it properly
 
-        # Bind the pull, serve, and stop buttons to their respective functions
+        # ✅ Bind the refresh button to the async update function and return updates
+        refresh_button.click(fn=update_model_lists, inputs=[], outputs=[model_list, serve_model])
+
+        # ✅ Bind the pull, serve, and stop buttons to their respective functions
         pull_button.click(fn=pull_ollama_model, inputs=[new_model_name], outputs=[pull_output])
         serve_button.click(fn=serve_ollama_model, inputs=[serve_model, port], outputs=[serve_output])
         stop_button.click(fn=stop_ollama_server, inputs=[pid], outputs=[stop_output])
