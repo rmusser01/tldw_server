@@ -265,7 +265,7 @@ class Database:
             cursor.executemany(query, params_list)
 
     def table_exists(self, table_name: str) -> bool:
-        query = 'SELECT name FROM sqlite_master WHERE type="table" AND name=?'
+        query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
         result = self.execute_query(query, (table_name,))
         return bool(result)
 
