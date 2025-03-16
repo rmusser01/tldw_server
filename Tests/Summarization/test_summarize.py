@@ -11,10 +11,11 @@ import os
 import tempfile
 from unittest.mock import patch, MagicMock, mock_open
 import sys
+
 #
 # Local Imports
 from App_Function_Libraries.Summarization.Summarization_General_Lib import summarize
-from summarize import main, load_and_log_configs, platform_check, cuda_check, check_ffmpeg, extract_video_info, download_video, perform_transcription, perform_summarization, add_media_to_database, semantic_chunk_long_file, ingest_text_file, local_llm_function
+from summarize import main, load_and_log_configs, platform_check, cuda_check, check_ffmpeg, extract_video_info, download_video, perform_transcription, perform_summarization, add_media_to_database, semantic_chunk_long_file, ingest_text_file, summarize_with_local_llm
 #
 #
 ####################################################################################################
