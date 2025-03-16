@@ -19,6 +19,7 @@ import json
 import os
 import tempfile
 from typing import Any, Dict, List, Union, Optional, Tuple
+import time
 #
 # 3rd-Party Imports
 import asyncio
@@ -30,6 +31,7 @@ import xml.etree.ElementTree as xET
 from bs4 import BeautifulSoup
 import pandas as pd
 from playwright.async_api import async_playwright
+from playwright_stealth import stealth_async
 import requests
 import trafilatura
 from tqdm import tqdm
@@ -53,12 +55,15 @@ web_scraping_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit
 def get_page_title(url: str) -> str:
     try:
         response = requests.get(url)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        title_tag = soup.find('title')
-        title = title_tag.string.strip() if title_tag else "Untitled"
-        log_counter("page_title_extracted", labels={"success": "true"})
-        return title
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            title_tag = soup.find('title')
+            title = title_tag.string.strip() if title_tag and title_tag.string else "Untitled"
+            log_counter("page_title_extracted", labels={"success": "true"})
+            return title
+        else: #debug code for problem in suceeded request but non 200 code
+            logging.error(f"Failed to fetch {url}, status code: {response.status_code}")
+            return "Untitled"
     except requests.RequestException as e:
         logging.error(f"Error fetching page title: {e}")
         log_counter("page_title_extracted", labels={"success": "false"})
@@ -68,28 +73,49 @@ def get_page_title(url: str) -> str:
 async def scrape_article(url: str, custom_cookies: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     logging.info(f"Scraping article from URL: {url}")
     async def fetch_html(url: str) -> str:
-        logging.info(f"Fetching HTML from {url}")
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+        retries = 3  # Number of retries added to handle transient failures
+        timeout_ms = 60_000  # Increased timeout from 10s to 60s to accommodate slow-loading pages
+
+        for attempt in range(retries):  # Introduced a retry loop to attempt fetching HTML multiple times
             try:
-                context = await browser.new_context(
-                    user_agent=web_scraping_user_agent,
-                #viewport = {"width": 1280, "height": 720},
-                #java_script_enabled = True
-                )
-                if custom_cookies:
-                    await context.add_cookies(custom_cookies)
-                page = await context.new_page()
-                try:
-                    await page.goto(url, wait_until="domcontentloaded", timeout=10000)  # 10-second timeout
-                    await page.wait_for_load_state("networkidle", timeout=10000)  # 10-second timeout
+                logging.info(f"Fetching HTML from {url} (Attempt {attempt + 1})")
+                
+                async with async_playwright() as p:
+                    browser = await p.chromium.launch(headless=True) 
+                    context = await browser.new_context(
+                        user_agent=web_scraping_user_agent,
+                        viewport={"width": 1280, "height": 720}  # Simulating a normal browser window size for better compatibility
+                    )
+
+                    if custom_cookies:
+                        await context.add_cookies(custom_cookies)  # Apply cookies if provided
+
+                    page = await context.new_page()
+
+                    await stealth_async(page)  # Added stealth mode to help avoid bot detection
+
+                    await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)  # Increased timeout and changed wait strategy
+
+                    await page.wait_for_timeout(5000)  # Added a 5-second delay after page load to ensure full rendering
+
                     content = await page.content()
+
                     logging.info(f"HTML fetched successfully from {url}")
                     log_counter("html_fetched", labels={"url": url})
+
+                    await browser.close()  # Ensure the browser is closed before returning
                     return content
-                except Exception as e:
-                    logging.error(f"Error fetching HTML for {url}: {e}")
-                    return ""
+            except Exception as e:
+                logging.error(f"Error fetching HTML for {url} on attempt {attempt + 1}: {str(e)}")
+
+                if attempt < retries - 1:  # Only retry if not on the last attempt
+                    logging.info("Retrying...")
+                    time.sleep(2)  # Added a 2-second delay before retrying to avoid hammering the server
+                else:
+                    logging.error("Max retries reached, skipping this URL.")
+                    log_counter("html_fetch_error", labels={"url": url, "error": str(e)})  # Log failure
+                    return ""  # Return an empty string if all retries fail
+
             finally:
                 await browser.close()
 
