@@ -63,16 +63,20 @@ def cuda_check():
                 "Not found")
             print(f"NVIDIA GPU with CUDA Version {cuda_version} is available.")
             processing_choice = "cuda"
+            return True #fix 'Asserion error: none is not true' in Tests\Summarization\test_summarize.py
         else:
             print("CUDA is not installed or configured correctly.")
             processing_choice = "cpu"
+            return False
 
     except subprocess.CalledProcessError as e:
         print(f"Failed to run 'nvidia-smi': {str(e)}")
         processing_choice = "cpu"
+        return False
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         processing_choice = "cpu"
+        return False
 
     # Optionally, check for the CUDA_VISIBLE_DEVICES env variable as an additional check
     if "CUDA_VISIBLE_DEVICES" in os.environ:
@@ -133,13 +137,7 @@ def check_ffmpeg():
 
 # Download ffmpeg
 def download_ffmpeg():
-    """
-    Downloads and extracts ffmpeg to the ./Bin directory (Windows only).
-
-    Returns:
-      True if download was succesful, False otherwise.
-    """
-
+    FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
     user_choice = input("Do you want to download ffmpeg? (y/N): ")
     if user_choice.lower() not in ['y', 'yes', '1']:  # Simplified input check
         print("ffmpeg will not be downloaded.")
