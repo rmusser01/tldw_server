@@ -9,6 +9,15 @@ import signal
 import sys
 import threading
 import time
+
+# Imports required by Tests\Summarization\test_summarize.py
+import sqlite3
+import subprocess
+import requests
+import torch
+import yt_dlp
+import platform
+
 #
 # 3rd-Party Imports
 import nltk

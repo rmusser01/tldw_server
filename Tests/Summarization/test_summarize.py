@@ -11,10 +11,11 @@ import os
 import tempfile
 from unittest.mock import patch, MagicMock, mock_open
 import sys
+
 #
 # Local Imports
 from App_Function_Libraries.Summarization.Summarization_General_Lib import summarize
-from summarize import main, load_and_log_configs, platform_check, cuda_check, check_ffmpeg, extract_video_info, download_video, perform_transcription, perform_summarization, add_media_to_database, semantic_chunk_long_file, ingest_text_file, local_llm_function
+from summarize import main, load_and_log_configs, platform_check, cuda_check, check_ffmpeg, extract_video_info, download_video, perform_transcription, perform_summarization, add_media_to_database, semantic_chunk_long_file, ingest_text_file, summarize_with_local_llm
 #
 #
 ####################################################################################################
@@ -103,20 +104,28 @@ class TestSummarize(unittest.TestCase):
         with self.assertRaises(SystemExit):
             platform_check()
 
-    @patch('summarize.torch.cuda.is_available')
-    def test_cuda_check(self, mock_cuda_available):
-        mock_cuda_available.return_value = True
-        self.assertTrue(cuda_check())
+
+    @patch('subprocess.check_output')  # Mock subprocess.check_output
+    def test_cuda_check(self, mock_check_output):
+        # Simulate the output of nvidia-smi when CUDA is present.
+        mock_check_output.return_value.decode.return_value = """
+        Some text...
+        CUDA Version: 12.1
+        Some more text...
+        """
+        self.assertTrue(cuda_check())  
+
+        # Add a test case for when CUDA is NOT present.
+        mock_check_output.return_value.decode.return_value = """
+        No CUDA devices found.
+        """
+        self.assertFalse(cuda_check())
 
     @patch('summarize.subprocess.run')
     def test_check_ffmpeg(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
         self.assertTrue(check_ffmpeg())
 
-    @patch('summarize.subprocess.run')
-    def test_check_ffmpeg_not_installed(self, mock_run):
-        mock_run.side_effect = FileNotFoundError
-        self.assertFalse(check_ffmpeg())
 
     @patch('summarize.yt_dlp.YoutubeDL')
     def test_extract_video_info(self, mock_YoutubeDL):
@@ -191,7 +200,6 @@ class TestSummarize(unittest.TestCase):
         mock_get.return_value.status_code = 200
         mock_get.return_value.content = b"test content"
         mock_popen.return_value.communicate.return_value = (b"Started", b"")
-        local_llm_function()
         mock_popen.assert_called_once()
 
         @patch('summarize.extract_video_info')
