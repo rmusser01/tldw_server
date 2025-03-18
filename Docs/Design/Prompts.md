@@ -17,7 +17,7 @@ https://github.com/lks-ai/prowl
 https://github.com/MIATECHPARTNERS/PromptChains
 https://github.com/mazen160/llmquery/
 https://juuzt.ai/knowledge-base/prompt-frameworks/
-
+https://github.com/tpetkovich/Agentic_Guideline_Gen_Example/blob/main/Agentic_Guideline_Gen_Example.ipynb
 
 
 COSTAR
