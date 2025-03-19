@@ -130,6 +130,7 @@ https://docs.gptr.dev/docs/gpt-researcher/multi_agents/langgraph
 https://pub.towardsai.net/learn-anything-with-ai-and-the-feynman-technique-00a33f6a02bc
 https://github.com/dzhng/deep-research
 https://github.com/eRuaro/open-gemini-deep-research
+https://github.com/atineiatte/deep-research-at-home
 https://help.openalex.org/hc/en-us/articles/24396686889751-About-us
 https://www.ginkgonotes.com/
 https://github.com/jina-ai/node-DeepResearch[v1-f.py](../../../Sky/v1-f.py)

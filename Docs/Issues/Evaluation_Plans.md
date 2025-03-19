@@ -14,6 +14,11 @@
 ----------------------------------------------------------------------------------------------------------------
 
 https://github.com/JackHopkins/factorio-learning-environment
+https://github.com/lechmazur
+https://arxiv.org/abs/2503.05244
+
+System Eval
+    https://github.com/plasma-umass/scalene
 
 
     Answer Correctness: Checks the accuracy of the generated llm response compared to the ground truth.

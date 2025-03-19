@@ -4,6 +4,11 @@
 https://medium.com/@eliot64/bridging-legal-ai-and-trust-how-we-won-the-llm-x-law-hackathon-45081a8681d9
 https://github.com/Kain-90/RAG-Play
 https://github.com/superlinear-ai/raglite
+https://levelup.gitconnected.com/testing-18-rag-techniques-to-find-the-best-094d166af27f
+https://arxiv.org/abs/2503.10357
+
+
+
 
 
 Unsorted

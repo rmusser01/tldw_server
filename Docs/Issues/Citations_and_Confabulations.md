@@ -18,7 +18,12 @@ https://huggingface.co/papers/2502.09604
 https://github.com/voidism/SelfCite
 https://www.reddit.com/r/LocalLLaMA/comments/1j5lym7/lightweight_hallucination_detector_for_local_rag/
 https://liveideabench.com/
+https://www.archgw.com/blogs/detecting-hallucinations-in-llm-function-calling-with-entropy-and-varentropy
 https://github.com/lechmazur/confabulations
+https://python.langchain.com/docs/how_to/qa_citations/
+
+
+
 RAG
   https://www.lycee.ai/blog/rag-ragallucinations-and-how-to-fight-them
   https://huggingface.co/PleIAs/Pleias-Nano
@@ -33,6 +38,7 @@ RAG
   https://arxiv.org/abs/2411.06037
   https://www.sciencedirect.com/science/article/abs/pii/S0306457320309675
   https://github.com/Huffon/factsumm
+  https://diamantai.substack.com/p/graph-rag-explained?utm_campaign=post&triedRedirect=true
   https://arxiv.org/abs/2410.07176
 
 Finetuning: 
