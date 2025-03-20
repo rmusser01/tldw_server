@@ -24,4 +24,4 @@ https://github.com/glowingjade/obsidian-smart-composer
 https://www.deepwriter.com
 https://github.com/kleer001/Text_Loom
 
-
+https://github.com/langchain-ai/open-canvas

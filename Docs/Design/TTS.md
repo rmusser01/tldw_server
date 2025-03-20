@@ -25,7 +25,7 @@ https://github.com/zenforic/csm-multi
 https://huggingface.co/DavidBrowne17/Muchi
 https://www.reddit.com/r/LocalLLaMA/comments/1jcufi6/improvements_to_kokoro_tts_v10/
     https://github.com/nazdridoy/kokoro-tts
-
+https://webrtchacks.com/the-unofficial-guide-to-openai-realtime-webrtc-api/
 
 
 

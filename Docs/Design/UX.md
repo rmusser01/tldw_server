@@ -142,3 +142,38 @@ Prompt Engineering page:
 
 Website features
 https://github.com/albirrkarim/react-speech-highlight-demo
+
+
+### Buttons
+- Making better buttons
+    - Make buttons look like buttons, don't use unusual shapes or styles
+    - Differentiate between buttons and links - Buttons does something, links take you somewhere
+    - Make the primary action button stand out - use color, size, and placement
+    - Use simple labels for buttons - Don't use jargon or technical terms
+    - Use clear and concise labels for buttons - Don't use long phrases or sentences
+    - Use relevant labels for buttons - Don't use generic labels like "click here"
+    - Use a 'large' font size for buttons.
+    - Don't wrap text on buttons - text should be on one line
+    - Use action verbs as button labels 
+    - Don't use disabled buttons when possible - Show an error or CTA instead
+    - Place buttons side-by-side when possible
+    - Use standard layout for buttons - Don't use unusual icons or styles for buttons
+    - Avoid icon-only buttons, use labels with icons whenever possible
+    - Don't use two icons in the same button, one button, one icon.
+    - Use enough/proper color contrast for buttons - Don't use low contrast colors
+        * https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html
+        * maintain a minimum contrast ratio of 4.5:1 for normal text and 3:1 for larger text.
+    - Use the right size for buttons - Don't use small buttons and don't use large buttons
+        - Sizing of buttons can be used to denote priority, low-med-high
+    - Use proper spacing & kerning for buttons - Don't use too much or too little spacing
+    - Use a clear focused and hover states for buttons - visible focus state is important for keyboard users
+    - Don't rely on colors to indicate states - use text / color / icons as well
+    - Confirm with users the buttons work. Do user testing.
+
+
+### User interaction Messages
+- Success Messages
+  - Avoid unnecessary words
+  - Start with a Noun or verb
+  - Drop Articles (a, the, an)
+  - Be clear & Direct
