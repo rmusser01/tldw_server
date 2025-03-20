@@ -507,85 +507,102 @@ def create_view_embeddings_tab():
                 logging.error(f"Error in check_embedding_status: {str(e)}", exc_info=True)
                 return f"Error processing item: {selected_item}. Details: {str(e)}", "", ""
 
-        def refresh_and_update(database_type):
-            choices_update, new_mapping = get_items_with_embedding_status(database_type)
-            return choices_update, new_mapping
 
-        def create_new_embedding_for_item(selected_item, database_type, provider, hf_model, openai_model,
-                                        custom_model, api_url, method, max_size, overlap, adaptive,
-                                        item_mapping, use_contextual, contextual_api_choice=None):
+        def create_new_embedding_for_item(
+                selected_item,
+                database_type,
+                provider,
+                hf_model,
+                openai_model,
+                custom_model,
+                api_url,
+                method,
+                max_size,
+                overlap,
+                adaptive,
+                item_mapping,
+                use_contextual,
+                contextual_api_choice=None,
+        ):
             if not selected_item:
                 return "Please select an item", "", ""
 
             try:
+                # 1. Figure out the item_id from the item_mapping
                 item_id = item_mapping.get(selected_item)
                 if item_id is None:
                     return f"Invalid item selected: {selected_item}", "", ""
 
-                # Get item content based on database type
+                # 2. Grab the content from the correct database
                 if database_type == "Media DB":
                     items = get_all_content_from_database()
-                    item = next((item for item in items if item['id'] == item_id), None)
+                    item = next((x for x in items if x["id"] == item_id), None)
                 elif database_type == "RAG Chat":
                     item = {
-                        'id': item_id,
-                        'content': get_conversation_text(item_id),
-                        'title': selected_item.rsplit(' (', 1)[0],
-                        'type': 'conversation'
+                        "id": item_id,
+                        "content": get_conversation_text(item_id),
+                        "title": selected_item.rsplit(" (", 1)[0],
+                        "type": "conversation",
                     }
-                else:  # Character Chat
+                else:  # database_type == "Character Chat"
                     note = get_note_by_id(item_id)
                     item = {
-                        'id': item_id,
-                        'content': f"{note['title']}\n\n{note['content']}",
-                        'title': note['title'],
-                        'type': 'note'
+                        "id": item_id,
+                        "content": f"{note['title']}\n\n{note['content']}",
+                        "title": note["title"],
+                        "type": "note",
                     }
 
-                if not item:
-                    return f"Item not found: {item_id}", "", ""
+                    if not item:
+                        return f"Item not found: {item_id}", "", ""
 
+                # 3. Prepare chunking options
                 chunk_options = {
-                    'method': method,
-                    'max_size': max_size,
-                    'overlap': overlap,
-                    'adaptive': adaptive
+                    "method": method,
+                    "max_size": max_size,
+                    "overlap": overlap,
+                    "adaptive": adaptive,
                 }
-
                 logging.info(f"Chunking content for item: {item['title']} (ID: {item_id})")
-                chunks = chunk_for_embedding(item['content'], item['title'], chunk_options)
+                chunks = chunk_for_embedding(item["content"], item["title"], chunk_options)
+
+                # 4. Grab or create the Chroma collection
                 collection_name = f"{database_type.lower().replace(' ', '_')}_embeddings"
                 collection = chroma_client.get_or_create_collection(name=collection_name)
 
-                # Delete existing embeddings for this item
+                # 5. Delete existing embeddings
                 existing_ids = [f"{database_type.lower()}_{item_id}_chunk_{i}" for i in range(len(chunks))]
                 collection.delete(ids=existing_ids)
                 logging.info(f"Deleted {len(existing_ids)} existing embeddings for item {item_id}")
 
-                texts, ids, metadatas = [], [], []
-                chunk_count = 0
+                # 6. Prepare for batch embedding
+                texts = []
+                ids = []
+                metadatas = []
                 logging.info("Generating contextual summaries and preparing chunks for embedding")
                 for i, chunk in enumerate(chunks):
-                    chunk_text = chunk['text']
-                    chunk_metadata = chunk['metadata']
-                    if use_contextual:
-                        logging.debug(f"Generating contextual summary for chunk {chunk_count}")
-                        context = situate_context(contextual_api_choice, item['content'], chunk_text)
-                        contextualized_text = f"{chunk_text}\n\nContextual Summary: {context}"
-                    else:
-                        contextualized_text = chunk_text
-                        context = None
-
+                    chunk_text = chunk["text"]
+                    chunk_metadata = chunk["metadata"]
                     chunk_id = f"{database_type.lower()}_{item_id}_chunk_{i}"
 
-                    # Determine the model to use
-                    if provider == "huggingface":
-                        model = custom_model if hf_model == "custom" else hf_model
-                    elif provider == "openai":
-                        model = openai_model
+                    # Optionally do the contextual summary
+                    if use_contextual:
+                        logging.debug(f"Generating contextual summary for chunk {i}")
+                        context = situate_context(contextual_api_choice, item["content"], chunk_text)
+                        contextualized_text = f"{chunk_text}\n\nContextual Summary: {context}"
                     else:
-                        model = custom_model
+                        context = None
+                        contextualized_text = chunk_text
 
+                    # 7. Decide which model to use, based on provider
+                    if provider == "huggingface":
+                        final_model = custom_model if hf_model == "custom" else hf_model
+                    elif provider == "openai":
+                        final_model = openai_model
+                    else:  # "local" or any other
+                        final_model = custom_model
+
+                    # Build each chunk’s metadata
                     metadata = {
                         "content_id": str(item_id),
                         "chunk_index": i,
@@ -594,44 +611,46 @@ def create_view_embeddings_tab():
                         "max_chunk_size": max_size,
                         "chunk_overlap": overlap,
                         "adaptive_chunking": adaptive,
-                        "embedding_model": model,
+                        "embedding_model": final_model,
                         "embedding_provider": provider,
                         "original_text": chunk_text,
                         "use_contextual_embeddings": use_contextual,
                         "contextual_summary": context,
-                        **chunk_metadata
+                        **chunk_metadata,
                     }
 
+                    # Collect them for a batch
                     texts.append(contextualized_text)
                     ids.append(chunk_id)
                     metadatas.append(metadata)
-                    chunk_count += 1
 
-                # Create embeddings in batch
-                logging.info(f"Creating embeddings for {len(texts)} chunks")
-                embeddings = create_embeddings_batch(texts, provider, model, api_url)
+                    # At this point we have the entire list of texts for all chunks
+                    # 8. Create embeddings for the entire chunk set in a single batch call
+                    logging.info(f"Creating embeddings for {len(texts)} chunks with provider={provider}")
+                    embeddings = create_embeddings_batch(texts, provider, final_model, api_url)
 
-                # Store in Chroma
-                store_in_chroma(collection_name, texts, embeddings, ids, metadatas)
+                    # 9. Store in Chroma
+                    store_in_chroma(collection_name, texts, embeddings, ids, metadatas)
 
-                # Create a preview of the first embedding
-                if isinstance(embeddings, np.ndarray) and embeddings.size > 0:
-                    embedding_preview = str(embeddings[0][:50])
-                elif isinstance(embeddings, list) and len(embeddings) > 0:
-                    embedding_preview = str(embeddings[0][:50])
-                else:
-                    embedding_preview = "No embeddings created"
+                    # Prepare the preview (just from the first embedding)
+                    if isinstance(embeddings, np.ndarray) and embeddings.size > 0:
+                        embedding_preview = str(embeddings[0][:50])
+                    elif isinstance(embeddings, list) and len(embeddings) > 0:
+                        embedding_preview = str(embeddings[0][:50])
+                    else:
+                        embedding_preview = "No embeddings created"
 
-                # Return status message
-                status = f"New embeddings created and stored for item: {item['title']} (ID: {item_id})"
+                    # Return status message
+                    status = f"New embeddings created and stored for item: {item['title']} (ID: {item_id})"
 
-                # Add contextual summaries to status message if enabled
-                if use_contextual:
-                    status += " (with contextual summaries)"
+                    # Add contextual summaries to status message if enabled
+                    if use_contextual:
+                        status += " (with contextual summaries)"
 
-                # Return status message, embedding preview, and metadata
-                return status, f"First 50 elements of new embedding:\n{embedding_preview}", json.dumps(metadatas[0],
-                                                                                                       indent=2)
+                    # Return status message, embedding preview, and metadata
+                    return status, f"First 50 elements of new embedding:\n{embedding_preview}", json.dumps(metadatas[0],
+                                                                                                           indent=2
+                                                                                                           )
             except Exception as e:
                 logging.error(f"Error in create_new_embedding_for_item: {str(e)}", exc_info=True)
                 return f"Error creating embedding: {str(e)}", "", ""
@@ -657,9 +676,21 @@ def create_view_embeddings_tab():
 
         create_new_embedding_button.click(
             create_new_embedding_for_item,
-            inputs=[item_dropdown, embedding_provider, huggingface_model, openai_model, custom_embedding_model, embedding_api_url,
-                    chunking_method, max_chunk_size, chunk_overlap, adaptive_chunking, item_mapping,
-                    use_contextual_embeddings, contextual_api_choice],
+            inputs=[
+                item_dropdown,
+                database_selection,
+                embedding_provider,
+                huggingface_model,
+                openai_model,
+                custom_embedding_model,
+                embedding_api_url,
+                chunking_method,
+                max_chunk_size,
+                chunk_overlap,
+                adaptive_chunking,
+                item_mapping,
+                use_contextual_embeddings,
+                contextual_api_choice],
             outputs=[embedding_status, embedding_preview, embedding_metadata]
         )
         embedding_provider.change(

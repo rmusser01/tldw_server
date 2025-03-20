@@ -717,6 +717,15 @@ def load_and_log_configs():
         search_result_relevance_eval_prompt = config.get('Prompts', 'search_result_relevance_eval_prompt', fallback='')
         analyze_search_results_prompt = config.get('Prompts', 'analyze_search_results_prompt', fallback='')
 
+        # Web Scraper settings
+        web_scraper_api_key = config.get('Web-Scraper', 'web_scraper_api_key', fallback='')
+        web_scraper_api_url = config.get('Web-Scraper', 'web_scraper_api_url', fallback='')
+        web_scraper_api_timeout = config.get('Web-Scraper', 'web_scraper_api_timeout', fallback='90')
+        web_scraper_api_retries = config.get('Web-Scraper', 'web_scraper_api_retries', fallback='3')
+        web_scraper_api_retry_delay = config.get('Web-Scraper', 'web_scraper_api_retry_delay', fallback='5')
+        web_scraper_retry_count = config.get('Web-Scraper', 'web_scraper_retry_count', fallback='3')
+        web_scraper_retry_timeout = config.get('Web-Scraper', 'web_scraper_retry_timeout', fallback='5')
+        web_scraper_stealth_playwright = config.get('Web-Scraper', 'web_scraper_stealth_playwright', fallback='False')
 
         return {
             'anthropic_api': {
@@ -1174,6 +1183,16 @@ def load_and_log_configs():
                 'search_result_relevance_eval_prompt': search_result_relevance_eval_prompt,
                 'analyze_search_results_prompt': analyze_search_results_prompt,
             },
+            'web_scraper':{
+                'web_scraper_api_key': web_scraper_api_key,
+                'web_scraper_api_url': web_scraper_api_url,
+                'web_scraper_api_timeout': web_scraper_api_timeout,
+                'web_scraper_api_retries': web_scraper_api_retries,
+                'web_scraper_api_retry_delay': web_scraper_api_retry_delay,
+                'web_scraper_retry_count': web_scraper_retry_count,
+                'web_scraper_retry_timeout': web_scraper_retry_timeout,
+                'web_scraper_stealth_playwright': web_scraper_stealth_playwright,
+            }
         }
     except Exception as e:
         logging.error(f"Error loading config: {str(e)}")
