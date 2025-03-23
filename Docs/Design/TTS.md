@@ -26,6 +26,13 @@ https://huggingface.co/DavidBrowne17/Muchi
 https://www.reddit.com/r/LocalLLaMA/comments/1jcufi6/improvements_to_kokoro_tts_v10/
     https://github.com/nazdridoy/kokoro-tts
 https://webrtchacks.com/the-unofficial-guide-to-openai-realtime-webrtc-api/
+https://github.com/canopyai/Orpheus-TTS
+    https://github.com/canopyai/Orpheus-TTS
+    https://github.com/isaiahbjork/orpheus-tts-local/
+    https://github.com/Lex-au/Orpheus-FastAPI
+webrtc
+https://huggingface.co/spaces/fastrtc/talk-to-claude/blob/main/app.py
+https://github.com/freddyaboulton/fastrtc
 
 
 

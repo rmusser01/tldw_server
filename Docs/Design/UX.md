@@ -67,6 +67,10 @@ https://github.com/woshixiaobai2019/mirau-chat-ui
 https://uxdesign.cc/the-importance-of-hover-states-c9312d7fd516
 https://trends.uxdesign.cc/
 https://brandingstyleguides.com
+https://zeroheight.com/how-we-document/design-system-report-2025-brought-to-you-by-zeroheight/
+https://www.a11y-collective.com/blog/cognitive-accessibility/
+
+https://atomicdesign.bradfrost.com/chapter-1/
 https://bolters.io/
 https://github.com/abhishekkrthakur/aiaio
 https://www.phind.com/blog/phind-2-model-creation
