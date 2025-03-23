@@ -12,6 +12,11 @@ https://arxiv.org/abs/2503.10357
 
 
 Unsorted
+https://ai.gopubby.com/8-common-mistakes-in-vector-search-and-how-to-avoid-them-e48d849c23f8
+
+
+
+
 
 Graphs (GraphRAG / KnowledgeGraphs)
 	GARLIC
