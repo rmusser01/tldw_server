@@ -228,11 +228,18 @@ router = APIRouter()
 
 class MediaProcessUrlRequest(BaseModel):
     url: str
-    mode: str = "persist"  # "ephemeral" or "persist"
-    # plus any other optional fields like diarize, whisper_model, etc.
-    diarize: bool = False
+    media_type: str = "video"   # can be "audio" or "video"
+    mode: str = "persist"       # "ephemeral" or "persist"
     whisper_model: str = "medium"
-    # etc...
+    api_name: Optional[str] = None
+    api_key: Optional[str] = None
+    keywords: Optional[List[str]] = []
+    diarize: bool = False
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    include_timestamps: bool = True
+    keep_original: bool = False
+    # Add any other fields relevant to audio or video
 
 
 class MediaProcessUrlResponse(BaseModel):
@@ -243,47 +250,81 @@ class MediaProcessUrlResponse(BaseModel):
     # plus maybe some metadata
 
 
-@router.post("/process/url", response_model=MediaProcessUrlResponse)
-async def process_media_url_endpoint(payload: MediaProcessUrlRequest, background_tasks: BackgroundTasks):
+@router.post("/process/url", summary="Process a remote media file by URL")
+async def process_media_url_endpoint(
+    payload: MediaProcessUrlRequest
+):
     """
-    Ingests/transcribes a remote video by URL.
-    Depending on 'mode', either store ephemeral or in DB.
+    Ingest/transcribe a remote file. Depending on 'media_type', use audio or video logic.
+    Depending on 'mode', store ephemeral or in DB.
     """
     try:
-        # 1) Possibly spawn a background task if you want the call to return immediately
-        #    For now, let's do synchronous to show the pattern.
-
-        # result would contain transcript, metadata, etc.
-        result = process_video_url(
-            url=payload.url,
-            diarize=payload.diarize,
-            whisper_model=payload.whisper_model,
-            # ... pass other fields
-        )
-
-        # 2) If ephemeral, store in ephemeral_storage. If persist, store in DB
-        if payload.mode == "ephemeral":
-            # store in ephemeral_store
-            ephemeral_id = ephemeral_storage.store_data(result)
-            return MediaProcessUrlResponse(
-                status="ephemeral-ok",
-                media_id=ephemeral_id
+        # Step 1) Distinguish audio vs. video ingestion
+        if payload.media_type.lower() == "audio":
+            # Call your audio ingestion logic
+            result = process_audio_url(
+                url=payload.url,
+                whisper_model=payload.whisper_model,
+                api_name=payload.api_name,
+                api_key=payload.api_key,
+                keywords=payload.keywords,
+                diarize=payload.diarize,
+                include_timestamps=payload.include_timestamps,
+                keep_original=payload.keep_original,
+                start_time=payload.start_time,
+                end_time=payload.end_time,
             )
         else:
-            # store in DB, returning a numeric or string ID
-            media_id = store_in_db(result)  # implement your DB logic
-            return MediaProcessUrlResponse(
-                status="persist-ok",
-                media_id=str(media_id)  # convert to str for uniformity
+            # Default to video
+            result = process_video_url(
+                url=payload.url,
+                whisper_model=payload.whisper_model,
+                api_name=payload.api_name,
+                api_key=payload.api_key,
+                keywords=payload.keywords,
+                diarize=payload.diarize,
+                include_timestamps=payload.include_timestamps,
+                keep_original_video=payload.keep_original,
+                start_time=payload.start_time,
+                end_time=payload.end_time,
             )
+
+        # result is presumably a dict containing transcript, some metadata, etc.
+        if not result:
+            raise HTTPException(status_code=500, detail="Processing failed or returned no result")
+
+        # Step 2) ephemeral vs. persist
+        if payload.mode == "ephemeral":
+            ephemeral_id = ephemeral_storage.store_data(result)
+            return {
+                "status": "ephemeral-ok",
+                "media_id": ephemeral_id,
+                "media_type": payload.media_type
+            }
+        else:
+            # If you want to store in your main DB, do so:
+            media_id = store_in_db(result)  # or add_media_to_database(...) from DB_Manager
+            return {
+                "status": "persist-ok",
+                "media_id": str(media_id),
+                "media_type": payload.media_type
+            }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# The function process_audio_url(...) is not part of your code yet, but it’s easy to adapt from your existing download_audio_file(...) + transcription approach. You can unify that into a new function (like your process_audio_files(...), but specialized for a single URL).
+# Similarly, store_in_db(...) might just call your add_media_with_keywords(...) or add_media_to_database(...).
+
 
 
 
 # Handling File uploads vs URLs
 # /app/api/v1/endpoints/media.py
+
+# We can’t use BaseModel directly for `File` inputs, so we read them with `Form(...)`
+# or keep them in separate function parameters.
+# For ephemeral/persistent, chunking, etc., we can still do a "Form" field for each.
 
 class MediaProcessFileResponse(BaseModel):
     status: str
@@ -292,31 +333,55 @@ class MediaProcessFileResponse(BaseModel):
 @router.post("/process/file", response_model=MediaProcessFileResponse)
 async def process_media_file_endpoint(
     file: UploadFile = File(...),
-    mode: str = Form("persist"),   # ephemeral or persist
+    media_type: str = Form("video"),  # or "audio"
+    mode: str = Form("persist"),      # ephemeral or persist
     diarize: bool = Form(False),
-    whisper_model: str = Form("medium")
-    # etc...
+    whisper_model: str = Form("medium"),
+    api_name: Optional[str] = Form(None),
+    api_key: Optional[str] = Form(None),
+    keep_original: bool = Form(False),
+    include_timestamps: bool = Form(True)
+    # ... etc.
 ):
     """
     Ingest/transcribe an uploaded file.
-    If 'mode=ephemeral', store ephemeral; otherwise DB.
+    If media_type=audio, use audio logic; if video, use video logic.
+    If 'mode=ephemeral', store ephemeral; otherwise store in DB.
     """
     try:
-        # 1) Save temp file or read it in memory
-        temp_path = f"/tmp/{file.filename}"
-        with open(temp_path, "wb") as out_f:
+        # 1) Save the uploaded file to a temp location
+        tmp_path = f"/tmp/{file.filename}"
+        with open(tmp_path, "wb") as out_f:
             content = await file.read()
             out_f.write(content)
 
-        # 2) process file
-        result = process_video_file(
-            filepath=temp_path,
-            diarize=diarize,
-            whisper_model=whisper_model
-            # ...
-        )
+        # 2) Decide audio vs. video
+        if media_type.lower() == "audio":
+            result = process_audio_file(
+                filepath=tmp_path,
+                whisper_model=whisper_model,
+                api_name=api_name,
+                api_key=api_key,
+                diarize=diarize,
+                include_timestamps=include_timestamps,
+                keep_original=keep_original,
+            )
+        else:
+            # default to video
+            result = process_video_file(
+                filepath=tmp_path,
+                whisper_model=whisper_model,
+                api_name=api_name,
+                api_key=api_key,
+                diarize=diarize,
+                include_timestamps=include_timestamps,
+                keep_original_video=keep_original
+            )
 
-        # 3) ephemeral vs persist
+        if not result:
+            raise HTTPException(status_code=500, detail="Processing file failed or returned no result")
+
+        # 3) ephemeral vs. persist
         if mode == "ephemeral":
             ephemeral_id = ephemeral_storage.store_data(result)
             return MediaProcessFileResponse(
@@ -332,6 +397,12 @@ async def process_media_file_endpoint(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# Where do we get process_audio_file from?
+#     You can create a helper in your “audio ingestion library” that runs “download → reencode → transcribe → (optionally) summarize → returns a dictionary with transcript + summary.”
+# Where do we store the final results?
+#     If ephemeral, we do ephemeral_storage.store_data(...).
+#     If persistent, we call your DB manager code.
 
 
 # Media ingestion and analysis in a single endpoint
