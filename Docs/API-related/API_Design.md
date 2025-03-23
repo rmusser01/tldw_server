@@ -196,3 +196,54 @@ Liberal in allowed input, strict in parsing/operations on parsed data. (If it is
 ## Links
 https://levelup.gitconnected.com/great-api-design-comprehensive-guide-from-basics-to-best-practices-9b4e0b613a44
 https://github.com/TypeError/secure
+
+
+
+.
+├── Server_API
+│   └── app
+│       ├── main.py             # The main FastAPI application
+│       ├── api                 # API package that houses routers
+│       │   └── v1
+│       │       ├── endpoints   # Directory for endpoint files (one file per resource, typically)
+│       │       │   ├── media.py
+│       │       │   ├── auth.py
+│       │       │   ├── chats.py
+│       │       │   ├── ... (etc. for each resource)
+│       │       │   └── __init__.py
+│       │       └── __init__.py
+│       ├── core                # Could remain for your specialized logic, like config, exceptions, logging
+│       │   ├── config.py
+│       │   ├── exceptions.py
+│       │   ├── logging.py
+│       │   ├── ... (other domain-specific directories can remain if you want)
+│       │   └── __init__.py
+│       ├── db                  # Database-specific setup (SQLAlchemy models, session, etc.)
+│       │   ├── database.py
+│       │   ├── models          # If you separate out models from database logic
+│       │   │   ├── media.py
+│       │   │   ├── user.py
+│       │   │   └── __init__.py
+│       │   └── __init__.py
+│       ├── schemas             # Pydantic models (request/response schemas)
+│       │   ├── media.py
+│       │   ├── user.py
+│       │   └── __init__.py
+│       ├── services            # Additional “services” or “managers” that handle business logic
+│       │   ├── media.py
+│       │   ├── video_processing_service.py
+│       │   └── ...
+│       └── __init__.py
+└── ...
+Structure Explained:
+    1. main.py is small. It sets up the FastAPI instance, includes routers, and handles any global configuration (e.g., custom exception handlers).
+    2. api/v1/endpoints/ has one file per resource. For example, auth.py for authentication endpoints, media.py for the media endpoints, etc.
+    3. core/ can house your existing modules or specialized logic (like local LLM management, RAG logic) if it doesn't fit neatly in “services.” Some people call this internal or usecases.
+    4. db/ has database.py (your engine, session, Base = declarative_base()) and possibly a separate models/ folder for each SQLAlchemy model (e.g., Media, User, etc.).
+    5. schemas/ contains all Pydantic models for request/response validation. This helps keep the “shape of your data” separate from the database representation.
+    6. services/ (optional) can hold the more sophisticated logic that orchestrates multiple pieces, such as your video ingestion or summarization flows.
+
+
+
+
+
