@@ -1,5 +1,7 @@
+# /Server_API/app/db/models/media.py
+
 from sqlalchemy import Column, Integer, String, Boolean, DateTime
-from Server_API.db.database import Base
+from ..database import Base  # relative import from db.database
 
 class Media(Base):
     __tablename__ = "media"
