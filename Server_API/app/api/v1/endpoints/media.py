@@ -461,3 +461,179 @@ def process_and_analyze(payload: ProcessAndAnalyzeRequest):
 
 
 
+# Podcast Integration
+# /Server_API/app/api/v1/endpoints/media.py
+
+from fastapi import APIRouter, HTTPException, BackgroundTasks
+from pydantic import BaseModel
+from typing import Optional, List
+
+from app.services.podcast_processing_service import process_podcast_task
+from app.services.ephemeral_store import ephemeral_storage
+from app.core.DB_Management.DB_Manager import add_media_to_database
+
+router = APIRouter()
+
+class PodcastIngestRequest(BaseModel):
+    url: str
+    custom_prompt: Optional[str] = None
+    api_name: Optional[str] = None
+    api_key: Optional[str] = None
+    keywords: Optional[List[str]] = []
+    diarize: bool = False
+    whisper_model: str = "medium"
+    keep_original_audio: bool = False
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    include_timestamps: bool = True
+    mode: str = "persist"  # or "ephemeral"
+    cookies: Optional[str] = None  # for advanced usage if needed
+
+@router.post("/process-podcast", summary="Ingest & process a podcast by URL")
+async def process_podcast_endpoint(payload: PodcastIngestRequest, background_tasks: BackgroundTasks):
+    """
+    Ingests a podcast from the given URL, transcribes and summarizes it.
+    Depending on 'mode' (ephemeral or persist), store in ephemeral_store or DB.
+    """
+    try:
+        # (1) Run the “podcast processing service”
+        result_data = await process_podcast_task(
+            url=payload.url,
+            custom_prompt=payload.custom_prompt,
+            api_name=payload.api_name,
+            api_key=payload.api_key,
+            keywords=payload.keywords,
+            diarize=payload.diarize,
+            whisper_model=payload.whisper_model,
+            keep_original_audio=payload.keep_original_audio,
+            start_time=payload.start_time,
+            end_time=payload.end_time,
+            include_timestamps=payload.include_timestamps,
+            cookies=payload.cookies,
+        )
+
+        # (2) Ephemeral vs. persist
+        if payload.mode == "ephemeral":
+            ephemeral_id = ephemeral_storage.store_data(result_data)
+            return {
+                "status": "ephemeral-ok",
+                "media_id": ephemeral_id,
+                "podcast_title": result_data.get("podcast_title")
+            }
+        else:
+            # store in DB
+            # Build up the DB data structure
+            info_dict = {
+                "title": result_data.get("podcast_title"),
+                "author": result_data.get("podcast_author"),
+            }
+            transcript_segments = [{"Text": seg["Text"]} for seg in result_data["segments"]]
+
+            # Insert into DB
+            media_id = add_media_to_database(
+                url=payload.url,
+                info_dict=info_dict,
+                segments=transcript_segments,
+                summary=result_data["summary"],
+                keywords=",".join(payload.keywords),
+                custom_prompt_input=payload.custom_prompt or "",
+                whisper_model=payload.whisper_model,
+                overwrite=False
+            )
+            return {
+                "status": "persist-ok",
+                "media_id": str(media_id),
+                "podcast_title": result_data.get("podcast_title")
+            }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Ebook Ingestion Endpoint
+# /Server_API/app/api/v1/endpoints/media.py
+
+from fastapi import UploadFile, File, Form
+from app.services.ebook_processing_service import process_ebook_task
+
+class EbookIngestRequest(BaseModel):
+    # If you want to handle only file uploads, skip URL
+    # or if you do both, you can add a union
+    title: Optional[str] = None
+    author: Optional[str] = None
+    keywords: Optional[List[str]] = []
+    custom_prompt: Optional[str] = None
+    api_name: Optional[str] = None
+    api_key: Optional[str] = None
+    mode: str = "persist"
+    chunk_size: int = 500
+    chunk_overlap: int = 200
+
+@router.post("/process-ebook", summary="Ingest & process an e-book file")
+async def process_ebook_endpoint(
+    background_tasks: BackgroundTasks,
+    payload: EbookIngestRequest = Form(...),
+    file: UploadFile = File(...)
+):
+    """
+    Ingests an eBook (e.g. .epub).
+    You can pass all your custom fields in the form data plus the file itself.
+    """
+    try:
+        # 1) Save file to a tmp path
+        tmp_path = f"/tmp/{file.filename}"
+        with open(tmp_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+
+        # 2) Process eBook
+        result_data = await process_ebook_task(
+            file_path=tmp_path,
+            title=payload.title,
+            author=payload.author,
+            keywords=payload.keywords,
+            custom_prompt=payload.custom_prompt,
+            api_name=payload.api_name,
+            api_key=payload.api_key,
+            chunk_size=payload.chunk_size,
+            chunk_overlap=payload.chunk_overlap
+        )
+
+        # 3) ephemeral vs. persist
+        if payload.mode == "ephemeral":
+            ephemeral_id = ephemeral_storage.store_data(result_data)
+            return {
+                "status": "ephemeral-ok",
+                "media_id": ephemeral_id,
+                "ebook_title": result_data.get("ebook_title")
+            }
+        else:
+            # If persisting to DB:
+            info_dict = {
+                "title": result_data.get("ebook_title"),
+                "author": result_data.get("ebook_author"),
+            }
+            # Possibly you chunk the text into segments—just an example:
+            segments = [{"Text": result_data["text"]}]
+            media_id = add_media_to_database(
+                url=file.filename,
+                info_dict=info_dict,
+                segments=segments,
+                summary=result_data["summary"],
+                keywords=",".join(payload.keywords),
+                custom_prompt_input=payload.custom_prompt or "",
+                whisper_model="ebook-imported",  # or something else
+                overwrite=False
+            )
+            return {
+                "status": "persist-ok",
+                "media_id": str(media_id),
+                "ebook_title": result_data.get("ebook_title")
+            }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# If you want to also accept an eBook by URL (for direct download) instead of a file-upload, you can adapt the request model and your service function accordingly.
+# If you want chunk-by-chapter logic or more advanced processing, integrate your existing import_epub(...) from Book_Ingestion_Lib.py.
+
