@@ -12,7 +12,7 @@ Existing Pages:
 	7. Website Scraping
 	8. PDF Ingestion
 	9. Re-Summarize
-	10. Live Recording & TRanscription
+	10. Live Recording & Transcription
 	11. Audio Generation Playground
 	12. Arxiv Search & Ingest
 	13. Semantic Scholar Search

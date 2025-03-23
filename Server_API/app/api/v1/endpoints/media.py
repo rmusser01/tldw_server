@@ -637,3 +637,284 @@ async def process_ebook_endpoint(
 # If you want to also accept an eBook by URL (for direct download) instead of a file-upload, you can adapt the request model and your service function accordingly.
 # If you want chunk-by-chapter logic or more advanced processing, integrate your existing import_epub(...) from Book_Ingestion_Lib.py.
 
+
+
+
+# Plaintext / document handling
+# /Server_API/app/api/v1/endpoints/media.py
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel
+from typing import Optional, List
+import os
+import tempfile
+
+from app.services.document_processing_service import process_document_task
+from app.services.ephemeral_store import ephemeral_storage
+from app.core.DB_Management.DB_Manager import add_media_to_database
+
+router = APIRouter()
+
+class DocumentIngestRequest(BaseModel):
+    api_name: Optional[str] = None
+    api_key: Optional[str] = None
+    custom_prompt: Optional[str] = None
+    system_prompt: Optional[str] = None
+    keywords: Optional[List[str]] = []
+    auto_summarize: bool = False
+    mode: str = "persist"  # or "ephemeral"
+
+@router.post("/process-document")
+async def process_document_endpoint(
+    payload: DocumentIngestRequest = Form(...),
+    file: UploadFile = File(...)
+):
+    """
+    Ingest a docx/txt/rtf (or .zip of them), optionally summarize,
+    then either store ephemeral or persist in DB.
+    """
+    try:
+        # 1) Read file bytes + filename
+        file_bytes = await file.read()
+        filename = file.filename
+
+        # 2) Document processing service
+        result_data = await process_document_task(
+            file_bytes=file_bytes,
+            filename=filename,
+            custom_prompt=payload.custom_prompt,
+            api_name=payload.api_name,
+            api_key=payload.api_key,
+            keywords=payload.keywords or [],
+            system_prompt=payload.system_prompt,
+            auto_summarize=payload.auto_summarize
+        )
+
+        # 3) ephemeral vs. persist
+        if payload.mode == "ephemeral":
+            ephemeral_id = ephemeral_storage.store_data(result_data)
+            return {
+                "status": "ephemeral-ok",
+                "media_id": ephemeral_id,
+                "filename": filename
+            }
+        else:
+            # Store in DB
+            doc_text = result_data["text_content"]
+            summary = result_data["summary"]
+            prompts_joined = (payload.system_prompt or "") + "\n\n" + (payload.custom_prompt or "")
+
+            # Create “info_dict” for DB
+            info_dict = {
+                "title": os.path.splitext(filename)[0],  # or user-supplied
+                "source_file": filename
+            }
+
+            segments = [{"Text": doc_text}]
+
+            # Insert:
+            media_id = add_media_to_database(
+                url=filename,
+                info_dict=info_dict,
+                segments=segments,
+                summary=summary,
+                keywords=",".join(payload.keywords),
+                custom_prompt_input=prompts_joined,
+                whisper_model="doc-import",
+                media_type="document",
+                overwrite=False
+            )
+
+            return {
+                "status": "persist-ok",
+                "media_id": str(media_id),
+                "filename": filename
+            }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# PDF Parsing endpoint
+# /Server_API/app/api/v1/endpoints/media.py
+
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel
+from typing import Optional, List
+import os
+
+from app.services.pdf_processing_service import process_pdf_task
+from app.services.ephemeral_store import ephemeral_storage
+from app.core.DB_Management.DB_Manager import add_media_to_database
+
+router = APIRouter()
+
+class PDFIngestRequest(BaseModel):
+    parser: Optional[str] = "pymupdf4llm"  # or "pymupdf", "docling"
+    custom_prompt: Optional[str] = None
+    system_prompt: Optional[str] = None
+    api_name: Optional[str] = None
+    api_key: Optional[str] = None
+    auto_summarize: bool = False
+    keywords: Optional[List[str]] = []
+    mode: str = "persist"  # "ephemeral" or "persist"
+
+
+@router.post("/process-pdf")
+async def process_pdf_endpoint(
+    payload: PDFIngestRequest = Form(...),
+    file: UploadFile = File(...)
+):
+    """
+    Ingest a PDF file, optionally summarize, and either ephemeral or persist to DB.
+    """
+    try:
+        # 1) read the file bytes
+        file_bytes = await file.read()
+        filename = file.filename
+
+        # 2) call the service
+        result_data = await process_pdf_task(
+            file_bytes=file_bytes,
+            filename=filename,
+            parser=payload.parser,
+            custom_prompt=payload.custom_prompt,
+            api_name=payload.api_name,
+            api_key=payload.api_key,
+            auto_summarize=payload.auto_summarize,
+            keywords=payload.keywords,
+            system_prompt=payload.system_prompt
+        )
+
+        # 3) ephemeral vs. persist
+        if payload.mode == "ephemeral":
+            ephemeral_id = ephemeral_storage.store_data(result_data)
+            return {
+                "status": "ephemeral-ok",
+                "media_id": ephemeral_id,
+                "title": result_data["title"]
+            }
+        else:
+            # persist in DB
+            segments = [{"Text": result_data["text_content"]}]
+            summary = result_data["summary"]
+            # combine prompts for storing
+            combined_prompt = (payload.system_prompt or "") + "\n\n" + (payload.custom_prompt or "")
+
+            info_dict = {
+                "title": result_data["title"],
+                "author": result_data["author"],
+                "parser_used": result_data["parser_used"]
+            }
+
+            # Insert into DB
+            media_id = add_media_to_database(
+                url=filename,
+                info_dict=info_dict,
+                segments=segments,
+                summary=summary,
+                keywords=",".join(payload.keywords or []),
+                custom_prompt_input=combined_prompt,
+                whisper_model="pdf-ingest",
+                media_type="document",
+                overwrite=False
+            )
+
+            return {
+                "status": "persist-ok",
+                "media_id": str(media_id),
+                "title": result_data["title"]
+            }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+#XML File handling
+# /Server_API/app/api/v1/endpoints/media.py
+
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel
+from typing import Optional, List
+
+from app.services.xml_processing_service import process_xml_task
+from app.services.ephemeral_store import ephemeral_storage
+from app.core.DB_Management.DB_Manager import add_media_to_database
+
+router = APIRouter()
+
+class XMLIngestRequest(BaseModel):
+    title: Optional[str] = None
+    author: Optional[str] = None
+    keywords: Optional[List[str]] = []
+    system_prompt: Optional[str] = None
+    custom_prompt: Optional[str] = None
+    auto_summarize: bool = False
+    api_name: Optional[str] = None
+    api_key: Optional[str] = None
+    mode: str = "persist"  # or "ephemeral"
+
+@router.post("/process-xml")
+async def process_xml_endpoint(
+    payload: XMLIngestRequest = Form(...),
+    file: UploadFile = File(...)
+):
+    """
+    Ingest an XML file, optionally summarize it,
+    then either store ephemeral or persist in DB.
+    """
+    try:
+        file_bytes = await file.read()
+        filename = file.filename
+
+        # 1) call the service
+        result_data = await process_xml_task(
+            file_bytes=file_bytes,
+            filename=filename,
+            title=payload.title,
+            author=payload.author,
+            keywords=payload.keywords or [],
+            system_prompt=payload.system_prompt,
+            custom_prompt=payload.custom_prompt,
+            auto_summarize=payload.auto_summarize,
+            api_name=payload.api_name,
+            api_key=payload.api_key
+        )
+
+        # 2) ephemeral vs. persist
+        if payload.mode == "ephemeral":
+            ephemeral_id = ephemeral_storage.store_data(result_data)
+            return {
+                "status": "ephemeral-ok",
+                "media_id": ephemeral_id,
+                "title": result_data["info_dict"]["title"]
+            }
+        else:
+            # store in DB
+            info_dict = result_data["info_dict"]
+            summary = result_data["summary"]
+            segments = result_data["segments"]
+            combined_prompt = (payload.system_prompt or "") + "\n\n" + (payload.custom_prompt or "")
+
+            media_id = add_media_to_database(
+                url=filename,
+                info_dict=info_dict,
+                segments=segments,
+                summary=summary,
+                keywords=",".join(payload.keywords or []),
+                custom_prompt_input=combined_prompt,
+                whisper_model="xml-import",
+                media_type="xml_document",
+                overwrite=False
+            )
+
+            return {
+                "status": "persist-ok",
+                "media_id": str(media_id),
+                "title": info_dict["title"]
+            }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Your gradio_xml_ingestion_tab.py is already set up to call import_xml_handler(...) directly. If you’d prefer to unify it with the new approach, you can simply have your Gradio UI call the new POST /process-xml route, sending the file as UploadFile plus all your form fields. The existing code is fine for a local approach, but if you want your new single endpoint approach, you might adapt the code in the click() callback to do an HTTP request to /process-xml with the “mode” param, etc.
