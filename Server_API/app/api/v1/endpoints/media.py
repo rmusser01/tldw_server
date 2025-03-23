@@ -918,3 +918,103 @@ async def process_xml_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 # Your gradio_xml_ingestion_tab.py is already set up to call import_xml_handler(...) directly. If you’d prefer to unify it with the new approach, you can simply have your Gradio UI call the new POST /process-xml route, sending the file as UploadFile plus all your form fields. The existing code is fine for a local approach, but if you want your new single endpoint approach, you might adapt the code in the click() callback to do an HTTP request to /process-xml with the “mode” param, etc.
+
+
+# Web Scraping
+#     Accepts JSON body describing the scraping method, URL(s), etc.
+#     Calls process_web_scraping_task(...).
+#     Returns ephemeral or persistent results.
+# POST /api/v1/media/process-web-scraping
+# that takes a JSON body in the shape of WebScrapingRequest and uses your same “Gradio logic” behind the scenes, but in an API-friendly manner.
+#
+# Clients can now POST JSON like:
+# {
+#   "scrape_method": "Individual URLs",
+#   "url_input": "https://example.com/article1\nhttps://example.com/article2",
+#   "url_level": null,
+#   "max_pages": 10,
+#   "max_depth": 3,
+#   "summarize_checkbox": true,
+#   "custom_prompt": "Please summarize with bullet points only.",
+#   "api_name": "openai",
+#   "api_key": "sk-1234",
+#   "keywords": "web, scraping, example",
+#   "custom_titles": "Article 1 Title\nArticle 2 Title",
+#   "system_prompt": "You are a bulleted-notes specialist...",
+#   "temperature": 0.7,
+#   "custom_cookies": [{"name":"mycookie", "value":"abc", "domain":".example.com"}],
+#   "mode": "ephemeral"
+# }
+#
+#     scrape_method can be "Individual URLs", "Sitemap", "URL Level", or "Recursive Scraping".
+#     url_input is either:
+#         Multi-line list of URLs (for "Individual URLs"),
+#         A single sitemap URL (for "Sitemap"),
+#         A single base URL (for "URL Level" or "Recursive Scraping"),
+#     url_level only matters if scrape_method="URL Level".
+#     max_pages and max_depth matter if scrape_method="Recursive Scraping".
+#     summarize_checkbox indicates if you want to run summarization afterwards.
+#     api_name + api_key for whichever LLM you want to do summarization.
+#     custom_cookies is an optional list of cookie dicts for e.g. paywalls or login.
+#     mode can be "ephemeral" or "persist".
+#
+# The endpoint returns a structure describing ephemeral or persisted results, consistent with your other ingestion endpoints.
+
+# /Server_API/app/api/v1/endpoints/media.py
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+import json
+
+from app.services.web_scraping_service import process_web_scraping_task
+from app.services.ephemeral_store import ephemeral_storage
+
+router = APIRouter()
+
+class WebScrapingRequest(BaseModel):
+    scrape_method: str  # "Individual URLs", "Sitemap", "URL Level", "Recursive Scraping"
+    url_input: str
+    url_level: Optional[int] = None
+    max_pages: int = 10
+    max_depth: int = 3
+    summarize_checkbox: bool = False
+    custom_prompt: Optional[str] = None
+    api_name: Optional[str] = None
+    api_key: Optional[str] = None
+    keywords: Optional[str] = "default,no_keyword_set"
+    custom_titles: Optional[str] = None
+    system_prompt: Optional[str] = None
+    temperature: float = 0.7
+    custom_cookies: Optional[List[Dict[str, Any]]] = None  # e.g. [{"name":"mycookie","value":"abc"}]
+    mode: str = "persist"  # or "ephemeral"
+
+@router.post("/process-web-scraping")
+async def process_web_scraping_endpoint(payload: WebScrapingRequest):
+    """
+    Ingest / scrape data from websites or sitemaps, optionally summarize,
+    then either store ephemeral or persist in DB.
+    """
+    try:
+        # Delegates to the service
+        result = await process_web_scraping_task(
+            scrape_method=payload.scrape_method,
+            url_input=payload.url_input,
+            url_level=payload.url_level,
+            max_pages=payload.max_pages,
+            max_depth=payload.max_depth,
+            summarize_checkbox=payload.summarize_checkbox,
+            custom_prompt=payload.custom_prompt,
+            api_name=payload.api_name,
+            api_key=payload.api_key,
+            keywords=payload.keywords or "",
+            custom_titles=payload.custom_titles,
+            system_prompt=payload.system_prompt,
+            temperature=payload.temperature,
+            custom_cookies=payload.custom_cookies,
+            mode=payload.mode
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
