@@ -9,6 +9,7 @@ from starlette.middleware.cors import CORSMiddleware
 #
 # Local Imports
 from .api.v1.endpoints.media import router as media_router
+from .api.v1.endpoints.trash import router as trash_router
 #
 ########################################################################################################################
 #
@@ -33,6 +34,14 @@ app.add_middleware(
 async def root():
     return {"message": "Welcome to the tldw API"}
 
-# Then, include routers for your resources, for example:
+# Router for media endpoints/media file handling
 app.include_router(media_router, prefix="/api/v1/media", tags=["media"])
+
+# Router for trash endpoints - deletion of media items / trash file handling (FIXME: Secure delete vs lag on delete?)
+app.include_router(trash_router, prefix="/api/v1/trash", tags=["trash"])
+
+# Router for authentication endpoint
+app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+# The docs at http://localhost:8000/docs will show an “Authorize” button. You can log in by calling POST /api/v1/auth/login with a form that includes username and password. The docs interface is automatically aware because we used OAuth2PasswordBearer.
+
 

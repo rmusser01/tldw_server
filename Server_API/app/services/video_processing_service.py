@@ -1,8 +1,8 @@
-from app.core.logging import logger
-from App_Function_Libraries.Video_DL_Ingestion_Lib import extract_metadata, download_video
-from App_Function_Libraries.Summarization.Summarization_General_Lib import perform_transcription, perform_summarization, save_transcription_and_summary
-from App_Function_Libraries.Utils.Utils import convert_to_seconds, create_download_directory, extract_text_from_segments
-from App_Function_Libraries.DB_Manager import add_media_to_database
+from Server_API.app.core.logging import logger
+from Server_API.app.core.Ingestion_Media_Processing.Video_DL_Ingestion_Lib import extract_metadata, download_video
+from Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_transcription, perform_summarization, save_transcription_and_summary
+from Server_API.app.core.Utils.Utils import convert_to_seconds, create_download_directory, extract_text_from_segments
+from Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
 
 async def process_video_task(url, whisper_model, custom_prompt, api_name, api_key, keywords, diarize,
                              start_time, end_time, include_timestamps, keep_original_video):
