@@ -8,7 +8,7 @@
 4. chromadb fails to install - https://github.com/chroma-core/chroma/issues/189
 
 
-
+cc
 Inspo
     https://github.com/hoarder-app/hoarder
     kokoro voice mixing - https://github.com/NeuralFalconYT/Kokoro-82M-WebUI

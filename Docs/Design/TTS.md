@@ -20,6 +20,7 @@ https://huggingface.co/collections/stepfun-ai/step-audio-67b33accf45735bb21131b0
 https://github.com/mbzuai-oryx/LLMVoX
 https://github.com/abus-aikorea/voice-pro
 https://github.com/rmusser01/LiveBench/tree/llamacpp-api
+https://github.com/santinic/audiblez
 https://github.com/KartDriver/mira_converse/blob/main/server/src/server_audio_core.py
 https://github.com/zenforic/csm-multi
 https://huggingface.co/DavidBrowne17/Muchi
@@ -34,6 +35,9 @@ webrtc
 https://huggingface.co/spaces/fastrtc/talk-to-claude/blob/main/app.py
 https://github.com/freddyaboulton/fastrtc
 
+Canary
+    https://huggingface.co/nvidia/canary-1b-flash
+    https://huggingface.co/nvidia/canary-180m-flash
 
 
 ### Services
@@ -190,6 +194,8 @@ Outte
 Parler
     https://github.com/huggingface/parler-tts
 Paroli - Streaming mode implementation of the Piper TTS with RK3588 NPU acceleration support.
+Phi-4
+    https://huggingface.co/microsoft/Phi-4-multimodal-instruct
 PiperTTS - A fast, local neural text to speech system that is optimized for the Raspberry Pi 4.
     https://github.com/rhasspy/piper
     https://github.com/rhasspy/piper/issues/644
