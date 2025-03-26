@@ -1,13 +1,51 @@
-# /Server_API/app/api/v1/endpoints/media.py
+# Server_API/app/api/v1/endpoints/media.py
+# Description: This code provides a FastAPI endpoint for media ingestion, processing, and
+#   storage under the `/media` endpoint
+#
+# Imports
 from typing import Dict, List, Any, Optional
-
-from fastapi import APIRouter, Query, HTTPException
+#
+# 3rd-party imports
+from fastapi import APIRouter, Query, Header, HTTPException
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel
+#
+# Local Imports
 from Server_API.app.core.DB_Management.DB_Manager import add_media_to_database, search_media_db, \
     fetch_item_details_single
+#
+#######################################################################################################################
+#
+# Functions:
 
+# All functions below are endpoints callable via HTTP requests and the corresponding code executed as a result of it.
+
+# Create a new router instance
 router = APIRouter()
 
-# 1) Example Pydantic schema for creation
+# Integrating DB
+# 3.4. Replace “Standard” SQLAlchemy Patterns with Your DB Library
+#
+# In a typical FastAPI + SQLAlchemy setup, you’d inject a Session object via Depends(get_db). However:
+#
+#     You have a single db object that’s effectively a wrapper around your SQLite connection in DB_Manager.py.
+#
+#     The “CRUD” style is replaced by function calls like add_media_to_database(), check_media_exists(), search_media_db(), etc.
+#
+# So all you need is:
+#
+#     Import from DB_Manager.py.
+#
+#     Create a Pydantic schema for the request body (if needed).
+#
+#     Write an endpoint that calls your library function in a try/except.
+#
+#     Return the result (or raise HTTPException if an error occurs).
+#
+# That’s the entire integration step.
+
+# Pydantic base schema for media creation
+# FIXME - This is a dummy implementation. Replace with actual logic
 class MediaCreate(BaseModel):
     url: str
     info_dict: Dict[str, Any]  # e.g. {"title": "my video title", "uploader": "someone", ...}
@@ -18,7 +56,35 @@ class MediaCreate(BaseModel):
     whisper_model: str
     overwrite: bool = False
 
-# 2) Endpoint that calls the DB function
+
+
+###########################################################################################
+#
+# Media Ingestion & Analysis
+# Endpoints:
+#     GET /api/v1/media/
+#     POST /api/v1/media/
+#     GET /api/v1/media/{media_id}
+
+
+
+# Ephemeral vs persistent media store
+class MediaProcessUrlRequest(BaseModel):
+    url: str
+    media_type: str = "video"   # can be "audio" or "video"
+    mode: str = "persist"       # "ephemeral" or "persist"
+    whisper_model: str = "medium"
+    api_name: Optional[str] = None
+    api_key: Optional[str] = None
+    keywords: Optional[List[str]] = []
+    diarize: bool = False
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    include_timestamps: bool = True
+    keep_original: bool = False
+    # Add any other fields relevant to audio or video
+
+# Create Media Endpoint
 @router.post("/", summary="Create a new media record")
 def create_media(payload: MediaCreate):
     """
@@ -40,6 +106,7 @@ def create_media(payload: MediaCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Retrieve a listing of all media, returning a list of media items. Limited by paging and rate limiting.
 @router.get("/", summary="Get all media")
 async def get_all_media():
     # For now, just return a placeholder list
@@ -48,13 +115,13 @@ async def get_all_media():
         {"id": 2, "title": "Another Media Item"},
     ]
 
-# The MediaCreate schema dictates what the client must send in JSON form.
-# We then unpack those fields and pass them to add_media_to_database() (which lives in DB_Manager.py).
-# On success, we return {"detail": result}, or raise a 500 error if something fails.
 
-
-@router.get("/", summary="List/search media")
-def list_media(
+# Search Media Endpoint
+# We define query parameters for search_query, keywords, page, etc.
+# We pass them to DB_Manager.search_media_db().
+# We return the raw results or transform them as needed.
+@router.get("/", summary="Search media")
+def search_media(
     search_query: str = Query(None, description="Search term"),
     keywords: str = Query(None, description="Comma-separated keywords"),
     page: int = Query(1, ge=1, description="Page number"),
@@ -84,11 +151,7 @@ def list_media(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# We define query parameters for search_query, keywords, page, etc.
-# We pass them to DB_Manager.search_media_db().
-# We return the raw results or transform them as needed.
-
-
+# Obtain details of a single media item using its ID
 @router.get("/{media_id}", summary="Get details about a single media item")
 def get_media_item(media_id: int):
     """
@@ -106,32 +169,48 @@ def get_media_item(media_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Per-User Media Ingestion and Analysis
+@router.post("/add")
+def add_media(
+        db_name: str,
+        url: str,
+        token: str = Header(..., description="Bearer token in Authorization header or pass it explicitly"),
+):
+    """
+    Suppose we pass which DB we want in 'db_name' param,
+    and read the token from the 'Authorization' header.
+    """
+    # 1) get the DB instance for the current user & the requested db_name
+    user_db = get_user_db(token, db_name)
 
-# 3.4. Replace “Standard” SQLAlchemy Patterns with Your DB Library
+    # 2) now use user_db in place of your typical "db" object
+    # or pass it to your DB_Manager functions if they accept a db instance
+    # or if your DB_Manager uses a global approach, override the path, etc.
+
+    # Example call
+    result = add_media_to_database(
+        url=url,
+        info_dict={},
+        segments=[],
+        summary="",
+        keywords="",
+        custom_prompt_input="",
+        whisper_model="",
+        overwrite=False,
+        db=user_db  # pass the instance
+    )
+    return {"detail": result}
+
 #
-# In a typical FastAPI + SQLAlchemy setup, you’d inject a Session object via Depends(get_db). However:
-#
-#     You have a single db object that’s effectively a wrapper around your SQLite connection in DB_Manager.py.
-#
-#     The “CRUD” style is replaced by function calls like add_media_to_database(), check_media_exists(), search_media_db(), etc.
-#
-# So all you need is:
-#
-#     Import from DB_Manager.py.
-#
-#     Create a Pydantic schema for the request body (if needed).
-#
-#     Write an endpoint that calls your library function in a try/except.
-#
-#     Return the result (or raise HTTPException if an error occurs).
-#
-# That’s the entire integration step.
+# End of media ingestion and analysis
+####################################################################################
 
 
+######################## Video Ingestion Endpoint ###################################
+# Endpoints:
+# FIXME
 
-# Suppose your ingestion code is here:
-from app.services.video_processing_service import process_video_task
-# Or from App_Function_Libraries.Video_DL_Ingestion_Lib import parse_and_expand_urls,
+
 class VideoIngestRequest(BaseModel):
     url: str
     whisper_model: Optional[str] = "medium"
@@ -170,77 +249,15 @@ async def process_video_endpoint(payload: VideoIngestRequest):
         return {"detail": "Video processed successfully", "url": payload.url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# Per-user DB Handling
-from fastapi import APIRouter, Depends, Header
-from app.dependencies.database import get_user_db
-from app.core.DB_Management.DB_Manager import add_media_to_database
-
-router = APIRouter()
-
-
-@router.post("/add")
-def add_media(
-        db_name: str,
-        url: str,
-        token: str = Header(..., description="Bearer token in Authorization header or pass it explicitly"),
-):
-    """
-    Suppose we pass which DB we want in 'db_name' param,
-    and read the token from the 'Authorization' header.
-    """
-    # 1) get the DB instance for the current user & the requested db_name
-    user_db = get_user_db(token, db_name)
-
-    # 2) now use user_db in place of your typical "db" object
-    # or pass it to your DB_Manager functions if they accept a db instance
-    # or if your DB_Manager uses a global approach, override the path, etc.
-
-    # Example call
-    result = add_media_to_database(
-        url=url,
-        info_dict={},
-        segments=[],
-        summary="",
-        keywords="",
-        custom_prompt_input="",
-        whisper_model="",
-        overwrite=False,
-        db=user_db  # pass the instance
-    )
-    return {"detail": result}
+#
+# End of video ingestion
+####################################################################################
 
 
 
-
-# Ephemeral vs persistent media store
-# /app/api/v1/endpoints/media.py
-
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-
-from app.services.video_processing import process_video_file, process_video_url
-from app.services.ephemeral_store import ephemeral_storage
-
-router = APIRouter()
-
-class MediaProcessUrlRequest(BaseModel):
-    url: str
-    media_type: str = "video"   # can be "audio" or "video"
-    mode: str = "persist"       # "ephemeral" or "persist"
-    whisper_model: str = "medium"
-    api_name: Optional[str] = None
-    api_key: Optional[str] = None
-    keywords: Optional[List[str]] = []
-    diarize: bool = False
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
-    include_timestamps: bool = True
-    keep_original: bool = False
-    # Add any other fields relevant to audio or video
-
+######################## URL Ingestion Endpoint ###################################
+# Endpoints:
+# FIXME - This is a dummy implementation. Replace with actual logic
 
 class MediaProcessUrlResponse(BaseModel):
     status: str
@@ -312,12 +329,15 @@ async def process_media_url_endpoint(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+#
+# End of URL Ingestion Endpoint
+#######################################################################################
 
+
+######################## Audio Ingestion Endpoint ###################################
+# Endpoints:
 # The function process_audio_url(...) is not part of your code yet, but it’s easy to adapt from your existing download_audio_file(...) + transcription approach. You can unify that into a new function (like your process_audio_files(...), but specialized for a single URL).
 # Similarly, store_in_db(...) might just call your add_media_with_keywords(...) or add_media_to_database(...).
-
-
-
 
 # Handling File uploads vs URLs
 # /app/api/v1/endpoints/media.py
@@ -548,7 +568,15 @@ async def process_podcast_endpoint(payload: PodcastIngestRequest, background_tas
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+#
+# End of Audio Ingestion
+##############################################################################################
 
+
+
+######################## Ebook Ingestion Endpoint ###################################
+# Endpoints:
+# FIXME
 
 # Ebook Ingestion Endpoint
 # /Server_API/app/api/v1/endpoints/media.py
@@ -637,8 +665,15 @@ async def process_ebook_endpoint(
 # If you want to also accept an eBook by URL (for direct download) instead of a file-upload, you can adapt the request model and your service function accordingly.
 # If you want chunk-by-chapter logic or more advanced processing, integrate your existing import_epub(...) from Book_Ingestion_Lib.py.
 
+#
+# End of Ebook Ingestion
+#################################################################################################
 
 
+
+######################## Document Ingestion Endpoint ###################################
+# Endpoints:
+# FIXME
 
 # Plaintext / document handling
 # /Server_API/app/api/v1/endpoints/media.py
@@ -733,6 +768,14 @@ async def process_document_endpoint(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+#
+# End of Document Ingestion
+############################################################################################
+
+
+######################## PDF Ingestion Endpoint ###################################
+# Endpoints:
+# FIXME
 
 
 # PDF Parsing endpoint
@@ -829,6 +872,14 @@ async def process_pdf_endpoint(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+#
+# End of PDF Ingestion
+############################################################################################
+
+
+######################## XML Ingestion Endpoint ###################################
+# Endpoints:
+# FIXME
 
 #XML File handling
 # /Server_API/app/api/v1/endpoints/media.py
@@ -918,7 +969,13 @@ async def process_xml_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 # Your gradio_xml_ingestion_tab.py is already set up to call import_xml_handler(...) directly. If you’d prefer to unify it with the new approach, you can simply have your Gradio UI call the new POST /process-xml route, sending the file as UploadFile plus all your form fields. The existing code is fine for a local approach, but if you want your new single endpoint approach, you might adapt the code in the click() callback to do an HTTP request to /process-xml with the “mode” param, etc.
+#
+# End of XML Ingestion
+############################################################################################################
 
+
+######################## Web Scraping Ingestion Endpoint ###################################
+# Endpoints:
 
 # Web Scraping
 #     Accepts JSON body describing the scraping method, URL(s), etc.
@@ -962,15 +1019,9 @@ async def process_xml_endpoint(
 
 # /Server_API/app/api/v1/endpoints/media.py
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-import json
-
 from app.services.web_scraping_service import process_web_scraping_task
 from app.services.ephemeral_store import ephemeral_storage
 
-router = APIRouter()
 
 class WebScrapingRequest(BaseModel):
     scrape_method: str  # "Individual URLs", "Sitemap", "URL Level", "Recursive Scraping"
@@ -1018,3 +1069,11 @@ async def process_web_scraping_endpoint(payload: WebScrapingRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+#
+# End of Web Scraping Ingestion
+#####################################################################################
+
+
+#
+# End of media.py
+#######################################################################################################################

@@ -63,6 +63,7 @@ https://docs.replit.com/replitai/agent
 https://bolt.new/
 https://github.com/rmusser01/agentic_rag/tree/main
 https://github.com/astramind-ai/Pulsar
+https://github.com/CodeUpdaterBot/ClickUi
 https://github.com/woshixiaobai2019/mirau-chat-ui
 https://uxdesign.cc/the-importance-of-hover-states-c9312d7fd516
 https://trends.uxdesign.cc/
@@ -123,6 +124,11 @@ https://github.com/satellitecomponent/Neurite
 https://uxdesign.cc/ai-and-cognitive-offloading-sharing-the-thinking-process-with-machines-2d27e66e0f31
 https://www.typingmind.com
 https://github.com/felladrin/MiniSearch
+
+Style guide
+  https://contentdesign.london/blog/create-a-great-style-guide-that-people-use
+  https://archive.is/2laTl
+  https://archive.is/30Wkf
 
 
 Turn into notes

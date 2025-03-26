@@ -6,7 +6,7 @@ https://github.com/Kain-90/RAG-Play
 https://github.com/superlinear-ai/raglite
 https://levelup.gitconnected.com/testing-18-rag-techniques-to-find-the-best-094d166af27f
 https://arxiv.org/abs/2503.10357
-
+https://arxiv.org/pdf/2502.08826v2
 
 
 
@@ -14,7 +14,9 @@ https://arxiv.org/abs/2503.10357
 Unsorted
 https://ai.gopubby.com/8-common-mistakes-in-vector-search-and-how-to-avoid-them-e48d849c23f8
 
-
+Agentic RAG
+	https://arxiv.org/pdf/2501.09136
+	https://github.com/asinghcsu/AgenticRAG-Survey
 
 
 
