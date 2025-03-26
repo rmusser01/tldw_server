@@ -243,6 +243,8 @@ class Database:
     def transaction(self):
         with self.get_connection() as conn:
             try:
+                # Write-Ahead-Logging enable/disable
+                #conn.execute("PRAGMA journal_mode = WAL;")
                 conn.execute("BEGIN")
                 yield conn
                 conn.execute("COMMIT")

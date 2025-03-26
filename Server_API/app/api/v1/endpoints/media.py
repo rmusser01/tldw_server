@@ -3,16 +3,30 @@
 #   storage under the `/media` endpoint
 #
 # Imports
-from typing import Dict, List, Any, Optional
+import json
+from typing import Any, Dict, List, Optional
 #
 # 3rd-party imports
-from fastapi import APIRouter, Query, Header, HTTPException
-from typing import Optional, List, Dict, Any
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    UploadFile
+    )
 from pydantic import BaseModel
 #
 # Local Imports
-from Server_API.app.core.DB_Management.DB_Manager import add_media_to_database, search_media_db, \
+from Server_API.app.core.DB_Management.DB_Manager import (
+    add_media_to_database,
+    search_media_db,
     fetch_item_details_single
+    )
+from Server_API.app.core.DB_Management.Users_DB import get_user_db
+from Server_API.app.schemas.media_models import VideoIngestRequest
+from Server_API.app.core.Ingestion_Media_Processing.Video_DL_Ingestion_Lib  import process_videos
 #
 #######################################################################################################################
 #
@@ -120,7 +134,7 @@ async def get_all_media():
 # We define query parameters for search_query, keywords, page, etc.
 # We pass them to DB_Manager.search_media_db().
 # We return the raw results or transform them as needed.
-@router.get("/", summary="Search media")
+@router.get("/search", summary="Search media")
 def search_media(
     search_query: str = Query(None, description="Search term"),
     keywords: str = Query(None, description="Comma-separated keywords"),
@@ -210,45 +224,77 @@ def add_media(
 # Endpoints:
 # FIXME
 
-
-class VideoIngestRequest(BaseModel):
-    url: str
-    whisper_model: Optional[str] = "medium"
-    custom_prompt: Optional[str] = None
-    api_name: Optional[str] = None
-    api_key: Optional[str] = None
-    keywords: Optional[List[str]] = []
-    diarize: bool = False
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
-    include_timestamps: bool = True
-    keep_original_video: bool = False
-
-# FIXME - This is a dummy implementation. Replace with actual logic
-@router.post("/process-video", summary="Process a video by URL")
-async def process_video_endpoint(payload: VideoIngestRequest):
-    """
-    Ingests a video, runs transcription and summarization, stores results in DB.
-    """
+@router.post("/process-video")
+async def process_video_endpoint(
+    metadata: str = Form(...),
+    files: List[UploadFile] = File([]),  # zero or more local video uploads
+) -> Dict[str, Any]:
     try:
-        result = await process_video_task(
-            url=payload.url,
-            whisper_model=payload.whisper_model,
-            custom_prompt=payload.custom_prompt,
-            api_name=payload.api_name,
-            api_key=payload.api_key,
-            keywords=payload.keywords,
-            diarize=payload.diarize,
-            start_time=payload.start_time,
-            end_time=payload.end_time,
-            include_timestamps=payload.include_timestamps,
-            keep_original_video=payload.keep_original_video,
+        # 1) Parse JSON
+        try:
+            req_data = json.loads(metadata)
+            req_model = VideoIngestRequest(**req_data)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON in metadata: {e}")
+
+        # 2) Convert any uploaded files -> local temp paths
+        local_paths = []
+        for f in files:
+            tmp_path = f"/tmp/{f.filename}"
+            with open(tmp_path, "wb") as out_f:
+                out_f.write(await f.read())
+            local_paths.append(tmp_path)
+
+        # 3) Combine the user’s `urls` from the JSON + the newly saved local paths
+        all_inputs = (req_model.urls or []) + local_paths
+        if not all_inputs:
+            raise HTTPException(status_code=400, detail="No inputs (no URLs, no files)")
+
+        # 4) ephemeral vs. persist
+        ephemeral = (req_model.mode.lower() == "ephemeral")
+
+        # 5) Call your new process_videos function
+        results_dict = process_videos(
+            inputs=all_inputs,
+            start_time=req_model.start_time,
+            end_time=req_model.end_time,
+            diarize=req_model.diarize,
+            vad_use=req_model.vad,
+            whisper_model=req_model.whisper_model,
+            custom_prompt_checkbox=req_model.custom_prompt_checkbox,
+            custom_prompt=req_model.custom_prompt,
+            perform_chunking=req_model.perform_chunking,
+            chunk_method=req_model.chunk_method,
+            max_chunk_size=req_model.max_chunk_size,
+            chunk_overlap=req_model.chunk_overlap,
+            use_adaptive_chunking=req_model.use_adaptive_chunking,
+            use_multi_level_chunking=req_model.use_multi_level_chunking,
+            chunk_language=req_model.chunk_language,
+            summarize_recursively=req_model.summarize_recursively,
+            api_name=req_model.api_name,
+            api_key=req_model.api_key,
+            keywords=req_model.keywords,
+            use_cookies=req_model.use_cookies,
+            cookies=req_model.cookies,
+            timestamp_option=req_model.timestamp_option,
+            keep_original_video=req_model.keep_original_video,
+            confab_checkbox=req_model.confab_checkbox,
+            overwrite_existing=req_model.overwrite_existing,
+            store_in_db=(not ephemeral),
         )
-        if not result:
-            raise HTTPException(status_code=500, detail="Video processing failed or returned False")
-        return {"detail": "Video processed successfully", "url": payload.url}
+
+        # 6) Return a final JSON
+        return {
+            "mode": req_model.mode,
+            **results_dict  # merges processed_count, errors, results, etc.
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 #
 # End of video ingestion
 ####################################################################################
