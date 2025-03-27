@@ -362,7 +362,7 @@ def process_videos(
     diarize: bool,
     vad_use: bool,
     whisper_model: str,
-    custom_prompt_checkbox: bool,
+    use_custom_prompt: bool,
     custom_prompt: Optional[str],
     perform_chunking: bool,
     chunk_method: Optional[str],
@@ -460,7 +460,7 @@ def process_videos(
                 diarize=diarize,
                 vad_use=vad_use,
                 whisper_model=whisper_model,
-                custom_prompt_checkbox=custom_prompt_checkbox,
+                use_custom_prompt=use_custom_prompt,
                 custom_prompt=custom_prompt,
                 perform_chunking=perform_chunking,
                 chunk_method=chunk_method,
@@ -573,7 +573,7 @@ def process_single_video(
     diarize: bool,
     vad_use: bool,
     whisper_model: str,
-    custom_prompt_checkbox: bool,
+    use_custom_prompt: bool,
     custom_prompt: Optional[str],
     perform_chunking: bool,
     chunk_method: Optional[str],
@@ -654,6 +654,7 @@ def process_single_video(
             downloaded_video_path = download_video(
                 video_input,
                 create_download_directory("Video_Downloads"),
+                # FIXME - Auto-gen'd code
                 info_dict=None,  # or a real info dict from ytdlp
                 download_video_flag=True,  # or if you only want audio, pass False
                 current_whisper_model=whisper_model
@@ -705,7 +706,7 @@ def process_single_video(
         transcription_text = extract_text_from_segments(segments)
         full_text_with_metadata = f"{json.dumps(info_dict, indent=2)}\n\n{transcription_text}"
 
-        # Summarize if API is set
+        # Analyze video transcript if API is set
         summary_text = None
         if api_name and api_name.lower() != "none":
             # If chunking is requested

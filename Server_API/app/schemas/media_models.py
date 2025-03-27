@@ -73,7 +73,7 @@ def get_media_item(media_id: int):
 
 ######################## Video Ingestion Model ###################################
 #
-# This is a schema for video ingestion and analysis. It includes various options for processing the video, such as chunking, summarization, and more.
+# This is a schema for video ingestion and analysis.
 
 class VideoIngestRequest(BaseModel):
     # You can rename / remove / add fields as you prefer:
@@ -84,7 +84,7 @@ class VideoIngestRequest(BaseModel):
     whisper_model: str = "distil-large-v3"
     diarize: bool = False
     vad: bool = True
-    custom_prompt_checkbox: bool = False
+    use_custom_prompt: bool = False
     custom_prompt: Optional[str] = None
     system_prompt: Optional[str] = None
 
@@ -116,6 +116,41 @@ class VideoIngestRequest(BaseModel):
 # End of Video ingestion and analysis model schema
 ####################################################################################
 
+
+######################## Video Ingestion Model ###################################
+#
+# This is a schema for audio ingestion and analysis.
+
+class AudioIngestRequest(BaseModel):
+    mode: str = "persist"  # "ephemeral" or "persist"
+
+    # Normal audio vs. podcast
+    is_podcast: bool = False
+
+    urls: Optional[List[str]] = None
+    whisper_model: str = "distil-large-v3"
+    diarize: bool = False
+    keep_timestamps: bool = True
+
+    api_name: Optional[str] = None
+    api_key: Optional[str] = None
+    custom_prompt: Optional[str] = None
+    chunk_method: Optional[str] = None
+    max_chunk_size: int = 300
+    chunk_overlap: int = 0
+    use_adaptive_chunking: bool = False
+    use_multi_level_chunking: bool = False
+    chunk_language: str = "english"
+
+    keywords: str = ""
+    keep_original_audio: bool = False
+    use_cookies: bool = False
+    cookies: Optional[str] = None
+    custom_title: Optional[str] = None
+
+#
+# End of Video ingestion and analysis model schema
+####################################################################################
 
 #
 # End of media_models.py
