@@ -146,18 +146,18 @@ async def get_all_media(
     Retrieve a paginated listing of all media items.
     """
     try:
-        results, total_pages = get_paginated_files(page, results_per_page)
+        results, total_pages, current_page = get_paginated_files(page, results_per_page)  # Unpack all 3 values
         return {
             "items": [
                 {
                     "id": item[0],
                     "title": item[1],
-                    "url": f"/api/v1/media/{item[0]}"  # Add URL to the individual item
+                    "url": f"/api/v1/media/{item[0]}"
                 }
                 for item in results
             ],
             "pagination": {
-                "page": page,
+                "page": current_page,  # Use the returned page
                 "results_per_page": results_per_page,
                 "total_pages": total_pages
             }
