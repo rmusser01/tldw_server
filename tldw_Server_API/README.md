@@ -33,12 +33,33 @@ FastAPI has a bug, which is caused by starlette, caused by python.
 
 - `GET /media`
   - Returns a list of all media items in the database.
-  - Example response:
-    ```json
-    [
-    ]
+    - Example response:
+      ```json
+      {
+        "items": [
+          {
+            "id": 4,
+            "title": "ARCHIVE INTERVIEW: Robert Leyland - Jumpin' Jack Software - Early Saturn Development",
+            "url": "/api/v1/media/4"
+          },
+          {
+            "id": 3,
+            "title": "Everything You Wanted to Know About LLM Post-Training, with Nathan Lambert of Allen Institute for AI",
+            "url": "/api/v1/media/3"
+          },
+          {
+            "id": 111,
+            "title": "How One Of NYC's Best Chefs Makes Pancakes | Made to Order | Bon Appétit",
+            "url": "/api/v1/media/111"
+          },
+        "pagination": {
+          "page": 1,
+          "results_per_page": 10,
+          "total_pages": 12
+        }
+      }
     ```
-    
+  
 - `POST /media`
 -  Adds a new media item to the database.
   - Request body:
