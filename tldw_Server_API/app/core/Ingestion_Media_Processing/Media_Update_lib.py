@@ -16,6 +16,8 @@ from typing import Optional, List
 from fastapi import HTTPException, Depends
 
 from tldw_Server_API.app.core.DB_Management.DB_Dependency import get_db_manager
+from tldw_Server_API.app.core.DB_Management.DB_Manager import get_full_media_details, create_document_version, \
+    update_keywords_for_media
 
 
 def process_media_update(

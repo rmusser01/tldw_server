@@ -25,6 +25,10 @@ FastAPI has a bug, which is caused by starlette, caused by python.
   - `python -m uvicorn tldw_Server_API.app.main:app --reload`
   - Visit the API via `127.0.0.1:8000/docs`
 
+- Launching tests
+  - `pip install pytest httpx`
+  - `python -m pytest test_media_versions.py -v`
+  - 
 
 
 ## Endpoints

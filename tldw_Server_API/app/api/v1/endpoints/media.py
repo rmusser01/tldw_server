@@ -58,11 +58,12 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     get_paginated_files,
     get_media_title,
     fetch_keywords_for_media, get_full_media_details, create_document_version, update_keywords_for_media,
-    get_all_document_versions, get_document_version
+    get_all_document_versions, get_document_version, rollback_to_version, delete_document_version
 )
 from tldw_Server_API.app.core.DB_Management.SQLite_DB import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_db
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Processing import process_audio
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Media_Update_lib import process_media_update
 from tldw_Server_API.app.core.Utils.Utils import format_transcript, truncate_content, logging
 from tldw_Server_API.app.schemas.media_models import VideoIngestRequest, AudioIngestRequest, MediaSearchResponse, \
     MediaItemResponse, MediaUpdateRequest, VersionCreateRequest, VersionResponse, VersionRollbackRequest
@@ -134,7 +135,6 @@ def invalidate_cache(media_id: int):
 #
 # Endpoints:\
 #     GET /api/v1/media - `"/"`
-#     GET /api/v1/media/search - `"/search"`
 #     GET /api/v1/media/{media_id} - `"/{media_id}"`
 
 
@@ -235,9 +235,16 @@ def get_media_item(media_id: int):
 
 
 ##############################################################################
-#
 ############################## MEDIA Versioning ##############################
 #
+# Endpoints:
+#   POST /api/v1/media/{media_id}/versions
+#   GET /api/v1/media/{media_id}/versions
+#   GET /api/v1/media/{media_id}/versions/{version_number}
+#   DELETE /api/v1/media/{media_id}/versions/{version_number}
+#   POST /api/v1/media/{media_id}/versions/rollback
+#   PUT /api/v1/media/{media_id}
+
 @router.post("/{media_id}/versions", response_model=VersionResponse)
 async def create_version(
     media_id: int,
@@ -343,7 +350,14 @@ async def update_media_item(
     )
 
 
-# Search Media Endpoint
+##############################################################################
+############################## MEDIA Search ##################################
+#
+# Search Media Endpoints
+
+# Endpoints:
+#     GET /api/v1/media/search - `"/search"`
+
 @router.get("/search", summary="Search media", response_model=MediaSearchResponse)
 @limiter.limit("20/minute")
 async def search_media(

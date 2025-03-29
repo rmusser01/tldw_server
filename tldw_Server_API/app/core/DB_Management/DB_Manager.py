@@ -36,25 +36,42 @@ from tldw_Server_API.app.core.DB_Management.SQLite_DB import (
     add_media_with_keywords as sqlite_add_media_with_keywords,
     check_media_and_whisper_model as sqlite_check_media_and_whisper_model, \
     create_document_version as sqlite_create_document_version,
-    get_document_version as sqlite_get_document_version, search_media_db as sqlite_search_media_db, add_media_chunk as sqlite_add_media_chunk,
-    sqlite_update_fts_for_media, get_unprocessed_media as sqlite_get_unprocessed_media, fetch_item_details as sqlite_fetch_item_details, \
-    search_media_database as sqlite_search_media_database, mark_as_trash as sqlite_mark_as_trash, \
-    get_media_transcripts as sqlite_get_media_transcripts, get_specific_transcript as sqlite_get_specific_transcript, \
-    get_media_summaries as sqlite_get_media_summaries, get_specific_summary as sqlite_get_specific_summary, \
-    get_media_prompts as sqlite_get_media_prompts, get_specific_prompt as sqlite_get_specific_prompt, \
+    get_document_version as sqlite_get_document_version,
+    search_media_db as sqlite_search_media_db,
+    add_media_chunk as sqlite_add_media_chunk,
+    sqlite_update_fts_for_media, get_unprocessed_media as sqlite_get_unprocessed_media,
+    fetch_item_details as sqlite_fetch_item_details, \
+    search_media_database as sqlite_search_media_database,
+    mark_as_trash as sqlite_mark_as_trash, \
+    get_media_transcripts as sqlite_get_media_transcripts,
+    get_specific_transcript as sqlite_get_specific_transcript, \
+    get_media_summaries as sqlite_get_media_summaries,
+    get_specific_summary as sqlite_get_specific_summary, \
+    get_media_prompts as sqlite_get_media_prompts,
+    get_specific_prompt as sqlite_get_specific_prompt, \
     delete_specific_transcript as sqlite_delete_specific_transcript,
     delete_specific_summary as sqlite_delete_specific_summary, \
     delete_specific_prompt as sqlite_delete_specific_prompt,
     fetch_keywords_for_media as sqlite_fetch_keywords_for_media, \
-    update_keywords_for_media as sqlite_update_keywords_for_media, check_media_exists as sqlite_check_media_exists, \
-    get_media_content as sqlite_get_media_content, get_paginated_files as sqlite_get_paginated_files, \
-    get_media_title as sqlite_get_media_title, get_all_content_from_database as sqlite_get_all_content_from_database, \
-    get_next_media_id as sqlite_get_next_media_id, batch_insert_chunks as sqlite_batch_insert_chunks, Database, \
-    save_workflow_chat_to_db as sqlite_save_workflow_chat_to_db, get_workflow_chat as sqlite_get_workflow_chat, \
+    update_keywords_for_media as sqlite_update_keywords_for_media,
+    check_media_exists as sqlite_check_media_exists, \
+    get_media_content as sqlite_get_media_content,
+    get_paginated_files as sqlite_get_paginated_files, \
+    get_media_title as sqlite_get_media_title,
+    get_all_content_from_database as sqlite_get_all_content_from_database, \
+    get_next_media_id as sqlite_get_next_media_id,
+    batch_insert_chunks as sqlite_batch_insert_chunks, Database, \
+    save_workflow_chat_to_db as sqlite_save_workflow_chat_to_db,
+    get_workflow_chat as sqlite_get_workflow_chat, \
     update_media_content_with_version as sqlite_update_media_content_with_version, \
-    check_existing_media as sqlite_check_existing_media, get_all_document_versions as sqlite_get_all_document_versions, \
-    fetch_paginated_data as sqlite_fetch_paginated_data, get_latest_transcription as sqlite_get_latest_transcription, \
+    check_existing_media as sqlite_check_existing_media,
+    get_all_document_versions as sqlite_get_all_document_versions, \
+    fetch_paginated_data as sqlite_fetch_paginated_data,
+    get_latest_transcription as sqlite_get_latest_transcription, \
     mark_media_as_processed as sqlite_mark_media_as_processed,
+    get_full_media_details as sqlite_get_full_media_details,
+    create_document_version as sqlite_create_document_version,
+    update_keywords_for_media as sqlite_update_keywords_for_media,
 )
 from tldw_Server_API.app.core.DB_Management.RAG_QA_Chat_DB import start_new_conversation as sqlite_start_new_conversation, \
     save_message as sqlite_save_message, load_chat_history as sqlite_load_chat_history, \
@@ -481,6 +498,57 @@ def mark_media_as_processed(*args, **kwargs):
     else:
         raise ValueError(f"Unsupported database type: {db_type}")
 
+
+def create_document_version(*args, **kwargs):
+    if db_type == 'sqlite':
+        return sqlite_create_document_version(*args, **kwargs)
+    elif db_type == 'elasticsearch':
+        # Implement Elasticsearch version
+        raise NotImplementedError("Elasticsearch version of create_document_version not yet implemented")
+    elif db_type == 'postgres':
+        # Implement Postgres version
+        raise NotImplementedError("Postgres version of create_document_version not yet implemented")
+    else:
+        raise ValueError(f"Unsupported database type: {db_type}")
+
+
+def update_keywords_for_media(*args, **kwargs):
+    if db_type == 'sqlite':
+        return sqlite_update_keywords_for_media(*args, **kwargs)
+    elif db_type == 'elasticsearch':
+        # Implement Elasticsearch version
+        raise NotImplementedError("Elasticsearch version of update_keywords_for_media not yet implemented")
+    elif db_type == 'postgres':
+        # Implement Postgres version
+        raise NotImplementedError("Postgres version of update_keywords_for_media not yet implemented")
+    else:
+        raise ValueError(f"Unsupported database type: {db_type}")
+
+
+def rollback_to_version(*arg, **kwargs):
+    if db_type == 'sqlite':
+        return sqlite_get_document_version(*arg, **kwargs)
+    elif db_type == 'elasticsearch':
+        # Implement Elasticsearch version
+        raise NotImplementedError("Elasticsearch version of rollback_to_version not yet implemented")
+    elif db_type == 'postgres':
+        # Implement Postgres version
+        raise NotImplementedError("Postgres version of rollback_to_version not yet implemented")
+    else:
+        raise ValueError(f"Unsupported database type: {db_type}")
+
+
+def delete_document_version(*args, **kwargs):
+    if db_type == 'sqlite':
+        return sqlite_delete_specific_transcript(*args, **kwargs)
+    elif db_type == 'elasticsearch':
+        # Implement Elasticsearch version
+        raise NotImplementedError("Elasticsearch version of delete_document_version not yet implemented")
+    elif db_type == 'postgres':
+        # Implement Postgres version
+        raise NotImplementedError("Postgres version of delete_document_version not yet implemented")
+    else:
+        raise ValueError(f"Unsupported database type: {db_type}")
 
 #
 # End of DB-Ingestion functions
