@@ -150,3 +150,10 @@ Repository = "https://github.com/rmusser01/tldw"
 
 [tool.setuptools.packages.find]
 where = ["App_Function_Libraries"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:pkg_resources:",
+    "ignore::DeprecationWarning:pyannote.core.notebook:",
+    "ignore::DeprecationWarning:speechbrain.pretrained:"
+]

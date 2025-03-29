@@ -45,7 +45,8 @@ from fastapi import (
     UploadFile
 )
 # API Rate Limiter/Caching via Redis
-from slowapi import Limiter
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 import redis
 #

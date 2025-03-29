@@ -2,13 +2,13 @@
 # Description: Shared functions used across unit tests.
 #
 # Imports
-import tempfile
 from contextlib import contextmanager
+import tempfile
 #
 # 3rd-party Libraries
 #
 # Local Imports
-from your_app.db import Database
+from tldw_Server_API.app.core.DB_Management.SQLite_DB import Database
 #
 ########################################################################################################################
 #
@@ -27,13 +27,14 @@ def temp_db():
         if os.path.exists(db_path):
             os.unlink(db_path)
 
-def create_test_media(db, title="Test Media", content="Test content"):
-    """Helper to create test media"""
+# In test_utils.py
+def create_test_media(db: Database, title: str, content: str, media_type: str = "document"):
     db.execute_query('''
         INSERT INTO Media (title, type, content)
         VALUES (?, ?, ?)
-    ''', (title, "document", content))
-    return db.execute_query("SELECT last_insert_rowid()")[0][0]
+    ''', (title, media_type, content))
+    media_id = db.execute_query("SELECT last_insert_rowid()")[0][0]
+    return media_id
 
 #
 # End of test_utils.py

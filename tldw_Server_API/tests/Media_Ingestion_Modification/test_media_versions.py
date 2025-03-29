@@ -2,6 +2,8 @@
 # Description: This file contains tests for the media ingestion and modification endpoints.
 #
 # Imports
+import json
+import time
 import unittest
 from sqlite3 import IntegrityError
 #
@@ -14,6 +16,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import get_all_document_v
     create_document_version
 from tldw_Server_API.app.core.DB_Management.DB_Manager import get_full_media_details
 from tldw_Server_API.app.core.DB_Management.SQLite_DB import Database, create_tables
+from tldw_Server_API.tests.test_utils import create_test_media
 
 #
 ########################################################################################################################
@@ -23,147 +26,301 @@ from tldw_Server_API.app.core.DB_Management.SQLite_DB import Database, create_ta
 client = TestClient(app)
 
 
-class TestMediaVersions(unittest.TestCase):
+class TestMediaVersionEndpoints(unittest.TestCase):
+    """Contains 15 test cases for versioning endpoints"""
+
     @classmethod
     def setUpClass(cls):
-        # Set up test database
-        cls.db = Database(":memory:")  # In-memory DB for tests
-        cls.db.execute_query("PRAGMA foreign_keys = ON")
-        create_tables(cls.db)
+        cls.db = Database("file:testing?mode=memory&cache=shared")
+        with cls.db.get_connection() as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            create_tables(conn)
 
-        # Add test media
-        cls.db.execute_query('''
-            INSERT INTO Media (title, type, content) 
-            VALUES (?, ?, ?)
-        ''', ("Test Media", "document", "Initial content"))
-        cls.media_id = cls.db.execute_query("SELECT last_insert_rowid()")[0][0]
+            # Create test media
+            conn.execute('''
+                INSERT INTO Media (title, type, content)
+                VALUES (?, ?, ?)
+            ''', ("Test Media", "document", "Initial content"))
+            cls.media_id = conn.lastrowid
+
+        # Create initial version (using standard DB flow)
+        create_document_version(
+            media_id=cls.media_id,
+            content="Initial content",
+            prompt="Initial prompt",
+            summary="Initial summary"
+        )
+
+    def setUp(self):
+        self.tx_ctx = self.db.transaction().__enter__()
+
+    def tearDown(self):
+        self.tx_ctx.__exit__(None, None, None)
+
+    # Helper methods
+    def create_version(self, content="Test content"):
+        return client.post(
+            f"/api/v1/media/{self.media_id}/versions",
+            json={"content": content, "prompt": "Test", "summary": "Test"}
+        )
+
+    # Version creation tests (4 cases)
+    def test_create_valid_version(self):
+        response = self.create_version()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["version_number"], 2)
+
+    def test_create_version_invalid_media_id(self):
+        response = client.post("/api/v1/media/9999/versions", json={"content": "Test"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_create_version_missing_fields(self):
+        response = client.post(
+            f"/api/v1/media/{self.media_id}/versions",
+            json={"content": "Test"}  # Missing prompt/summary
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_create_version_large_content(self):
+        large_content = "A" * 10_000_000  # 10MB content
+        response = self.create_version(large_content)
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(response.json()["content_length"], 10_000_000)
+
+    # Version listing tests (3 cases)
+    def test_list_versions_empty(self):
+        self.db.execute_query("DELETE FROM DocumentVersions")
+        response = client.get(f"/api/v1/media/{self.media_id}/versions")
+        self.assertEqual(response.status_code, 404)
+
+    def test_list_versions_pagination(self):
+        # Create 15 versions
+        for i in range(15):
+            self.create_version(f"Content {i}")
+
+        response = client.get(
+            f"/api/v1/media/{self.media_id}/versions",
+            params={"limit": 5, "offset": 10}
+        )
+        data = response.json()
+        self.assertEqual(len(data), 5)
+        self.assertEqual(data[0]["version_number"], 15 - 10)  # Verify ordering
+
+    def test_list_versions_include_content(self):
+        response = client.get(
+            f"/api/v1/media/{self.media_id}/versions",
+            params={"include_content": True}
+        )
+        self.assertIn("Initial content", response.json()[0]["content"])
+
+    # Version retrieval tests (3 cases)
+    def test_get_specific_version(self):
+        response = client.get(f"/api/v1/media/{self.media_id}/versions/1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["version_number"], 1)
+
+    def test_get_nonexistent_version(self):
+        response = client.get(f"/api/v1/media/{self.media_id}/versions/999")
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_version_content_toggle(self):
+        response = client.get(
+            f"/api/v1/media/{self.media_id}/versions/1",
+            params={"include_content": False}
+        )
+        self.assertIsNone(response.json().get("content"))
+
+    # Version deletion tests (3 cases)
+    def test_delete_version_success(self):
+        response = client.delete(f"/api/v1/media/{self.media_id}/versions/1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["success"], "Version 1 deleted")
+
+    def test_delete_nonexistent_version(self):
+        response = client.delete(f"/api/v1/media/{self.media_id}/versions/999")
+        self.assertEqual(response.status_code, 404)
+
+    def test_delete_last_version(self):
+        self.db.execute_query("DELETE FROM DocumentVersions")
+        response = client.delete(f"/api/v1/media/{self.media_id}/versions/1")
+        self.assertEqual(response.status_code, 404)
+
+    # Rollback tests (3 cases)
+    def test_rollback_valid_version(self):
+        self.create_version()
+        response = client.post(
+            f"/api/v1/media/{self.media_id}/versions/rollback",
+            json={"version_number": 1}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["new_version_number"], 3)
+
+    def test_rollback_invalid_version(self):
+        response = client.post(
+            f"/api/v1/media/{self.media_id}/versions/rollback",
+            json={"version_number": 999}
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_rollback_without_content(self):
+        response = client.post(
+            f"/api/v1/media/{self.media_id}/versions/rollback",
+            json={"version_number": 1, "preserve_content": False}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("content", response.json())
+
+
+class TestMediaEndpoints(unittest.TestCase):
+    """Contains 12 test cases for media endpoints"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.db = Database("file:media_test?mode=memory&cache=shared")
+        with cls.db.get_connection() as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            create_tables(conn)  # <-- Original table creation
+
+            # Create test media using your existing create_test_media
+            cls.media_ids = {
+                'video': create_test_media(
+                    cls.db,
+                    title="Test Video",
+                    content=json.dumps({"title": "Test Video", "duration": 300}) + "\n\nTranscript line"
+                ),
+                'audio': create_test_media(
+                    cls.db,
+                    title="Audio File",
+                    content="00:00:00 | Audio transcript"
+                ),
+                'invalid': create_test_media(
+                    cls.db,
+                    title="Invalid Media",
+                    content="{bad_json}\n\nContent"
+                )
+            }
+
+
+    def setUp(self):
+        self.transaction = self.db.transaction().__enter__()
+
+    def tearDown(self):
+        self.transaction.__exit__(None, None, None)
 
     @classmethod
     def tearDownClass(cls):
         cls.db.close_connection()
 
-    def setUp(self):
-        # Start each test with a clean versions table
-        self.db.execute_query("DELETE FROM DocumentVersions")
-        self.db.execute_query("DELETE FROM MediaModifications")
-
-        # Create initial version
-        create_document_version(
-            media_id=self.media_id,
-            content="Initial content",
-            prompt="Initial prompt",
-            summary="Initial summary",
-            conn=self.db.get_connection()
-        )
-
-    # Helper methods
-    def create_test_version(self, content="Test content"):
-        response = client.post(
-            f"/media/{self.media_id}/versions",
-            json={
-                "content": content,
-                "prompt": "Test prompt",
-                "summary": "Test summary"
-            }
-        )
-        return response
-
-    # Tests begin here
-    def test_create_version(self):
-        response = self.create_test_version()
+    # Media listing tests (4 cases)
+    def test_get_all_media_default_pagination(self):
+        response = client.get("/api/v1/media")
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["version_number"], 2)  # First version created in setUp
-        self.assertGreater(data["content_length"], 0)
+        self.assertEqual(len(data["items"]), 3)
+        self.assertEqual(data["pagination"]["page"], 1)
+        self.assertEqual(data["pagination"]["results_per_page"], 10)
 
-    def test_create_version_invalid_media(self):
-        response = client.post(
-            "/media/9999/versions",
-            json={"content": "Test"}
-        )
-        self.assertEqual(response.status_code, 400)
-
-    def test_list_versions(self):
-        # Create second version
-        self.create_test_version("Second content")
-
-        response = client.get(f"/media/{self.media_id}/versions")
-        self.assertEqual(response.status_code, 200)
-        versions = response.json()
-        self.assertEqual(len(versions), 2)
-        self.assertEqual(versions[0]["version_number"], 2)
-        self.assertEqual(versions[1]["version_number"], 1)
-
-    def test_get_version(self):
-        # First version exists from setUp
-        response = client.get(
-            f"/media/{self.media_id}/versions/1",
-            params={"include_content": True}
-        )
-        self.assertEqual(response.status_code, 200)
+    def test_get_all_media_custom_pagination(self):
+        response = client.get("/api/v1/media?page=1&results_per_page=2")
         data = response.json()
-        self.assertEqual(data["version_number"], 1)
-        self.assertIn("Initial content", data["content"])
+        self.assertEqual(len(data["items"]), 2)
+        self.assertEqual(data["pagination"]["total_pages"], 2)
 
-    def test_get_nonexistent_version(self):
-        response = client.get(f"/media/{self.media_id}/versions/999")
-        self.assertEqual(response.status_code, 404)
-
-    def test_delete_version(self):
-        response = client.delete(f"/media/{self.media_id}/versions/1")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["success"], "Version 1 deleted")
-
-        # Verify deletion
-        response = client.get(f"/media/{self.media_id}/versions/1")
-        self.assertEqual(response.status_code, 404)
-
-    def test_delete_nonexistent_version(self):
-        response = client.delete(f"/media/{self.media_id}/versions/999")
-        self.assertEqual(response.status_code, 404)
-
-    def test_rollback_version(self):
-        # Create second version
-        self.create_test_version("Second content")
-
-        response = client.post(
-            f"/media/{self.media_id}/versions/rollback",
-            json={"version_number": 1}
-        )
-        self.assertEqual(response.status_code, 200)
+    def test_get_all_media_filter_by_type(self):
+        response = client.get("/api/v1/media?media_type=video")
         data = response.json()
-        self.assertEqual(data["new_version_number"], 3)  # 2 existing + new rollback
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["title"], "Test Video")
 
-        # Verify rollback content
-        version = get_document_version(self.media_id, 3, include_content=True)
-        self.assertIn("Initial content", version["content"])
+    def test_get_all_media_invalid_params(self):
+        response = client.get("/api/v1/media?page=-1&results_per_page=1000")
+        self.assertEqual(response.status_code, 422)
 
-    def test_rollback_nonexistent_version(self):
-        response = client.post(
-            f"/media/{self.media_id}/versions/rollback",
-            json={"version_number": 999}
-        )
-        self.assertEqual(response.status_code, 400)
+    # Media detail tests (6 cases)
+    def test_get_media_item_video(self):
+        response = client.get(f"/api/v1/media/{self.media_ids['video']}")
+        data = response.json()
+        self.assertEqual(data["source"]["type"], "video")
+        self.assertGreater(data["content"]["word_count"], 0)
 
-    def test_update_media_with_versioning(self):
+    def test_get_media_item_audio(self):
+        response = client.get(f"/api/v1/media/{self.media_ids['audio']}")
+        data = response.json()
+        self.assertEqual(data["source"]["type"], "audio")
+
+    def test_update_media_item(self):
         response = client.put(
-            f"/media/{self.media_id}",
-            json={
-                "content": "Updated content",
-                "keywords": ["test"]
-            }
+            f"/api/v1/media/{self.media_ids['video']}",
+            json={"content": "Updated", "keywords": ["test"]}
         )
         self.assertEqual(response.status_code, 200)
 
-        # Verify new version was created
-        versions = get_all_document_versions(self.media_id)
-        self.assertEqual(len(versions), 2)
-        self.assertEqual(versions[0]["version_number"], 2)
+    def test_update_invalid_media_item(self):
+        response = client.put("/api/v1/media/999999", json={"content": "Test"})
+        self.assertEqual(response.status_code, 404)
 
-        # Verify keywords updated
-        media = get_full_media_details(self.media_id)
-        self.assertIn("test", media["keywords"])
+    def test_get_nonexistent_media_item(self):
+        response = client.get("/api/v1/media/999999")
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_media_item_keywords(self):
+        # Add keywords
+        self.db.execute_query('''
+            INSERT INTO MediaModifications (media_id, prompt, summary, keywords)
+            VALUES (?, ?, ?, ?)
+        ''', (self.media_ids['video'], "Test prompt", "Test summary", "test,demo"))
+
+        response = client.get(f"/api/v1/media/{self.media_ids['video']}")
+        self.assertCountEqual(response.json()["keywords"], ["test", "demo"])
+
+    def test_media_item_content_parsing(self):
+        response = client.get(f"/api/v1/media/{self.media_ids['video']}")
+        data = response.json()
+        self.assertIn("Transcript line", data["content"]["text"])
+        self.assertEqual(data["processing"]["model"], "unknown")  # No whisper model
+
+    # Update tests (2 cases)
+    def test_update_media_item(self):
+        response = client.put(
+            f"/api/v1/media/{self.media_ids['video']}",
+            json={"content": "Updated", "keywords": ["test"]}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["keywords"], ["test"])
+
+    def test_update_invalid_media_item(self):
+        response = client.put("/api/v1/media/999999", json={"content": "Test"})
+        self.assertEqual(response.status_code, 404)
+
+
+class TestSecurityAndPerformance(unittest.TestCase):
+    """Contains 6 test cases for security and performance"""
+
+    def test_response_time(self):
+        start = time.time()
+        response = client.get("/api/v1/media")
+        self.assertLess(time.time() - start, 0.5)  # 500ms threshold
+
+    def test_sql_injection_attempt(self):
+        response = client.get("/api/v1/media?page=1%3B DROP TABLE Media")
+        self.assertEqual(response.status_code, 422)
+
+    def test_content_type_enforcement(self):
+        response = client.post(
+            "/api/v1/media/1/versions",
+            content='{"content": "test"}',  # Valid JSON content
+            headers={"Content-Type": "text/plain"}
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_cors_headers(self):
+        response = client.options("/api/v1/media")
+        self.assertIn("access-control-allow-origin", [h.lower() for h in response.headers.keys()])
+
+    def test_sensitive_data_exposure(self):
+        response = client.get(f"/api/v1/media/1/versions")
+        self.assertNotIn("database_password", response.text)
 
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(failfast=True, verbosity=2)

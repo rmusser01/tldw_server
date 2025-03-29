@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from fastapi import FastAPI
-from starlette.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 #
 # Local Imports
 from tldw_Server_API.app.api.v1.endpoints.media import router as media_router
@@ -26,13 +26,13 @@ app = FastAPI(
 
 # FIXME - CORS
 # # -- If you have any global middleware, add it here --
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],  # or specify domains
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"]
+)
 
 @app.get("/")
 async def root():
