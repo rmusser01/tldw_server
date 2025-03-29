@@ -52,6 +52,29 @@ class MediaSearchResponse(BaseModel):
     results: List[MediaItem]
     pagination: PaginationInfo
 
+class MediaUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    author: Optional[str] = None
+    prompt: Optional[str] = None
+    summary: Optional[str] = None
+    keywords: Optional[List[str]] = None
+
+
+# Request/Response Models
+class VersionCreateRequest(BaseModel):
+    content: str
+    prompt: Optional[str] = None
+    summary: Optional[str] = None
+
+class VersionResponse(BaseModel):
+    id: int
+    version_number: int
+    created_at: str
+    content_length: int
+
+class VersionRollbackRequest(BaseModel):
+    version_number: int
 
 ######################## Video Ingestion Model ###################################
 #

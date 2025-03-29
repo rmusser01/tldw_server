@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 from datetime import datetime, timedelta
 from math import ceil
 from typing import Any, Dict, List, Optional, Tuple
@@ -34,6 +35,7 @@ from fastapi import (
     status,
     UploadFile
 )
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from fastapi import (
     APIRouter,
@@ -55,12 +57,15 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     fetch_item_details_single,
     get_paginated_files,
     get_media_title,
-    fetch_keywords_for_media, get_full_media_details
+    fetch_keywords_for_media, get_full_media_details, create_document_version, update_keywords_for_media,
+    get_all_document_versions, get_document_version
 )
+from tldw_Server_API.app.core.DB_Management.SQLite_DB import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_db
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Processing import process_audio
 from tldw_Server_API.app.core.Utils.Utils import format_transcript, truncate_content, logging
-from tldw_Server_API.app.schemas.media_models import VideoIngestRequest, AudioIngestRequest, MediaSearchResponse
+from tldw_Server_API.app.schemas.media_models import VideoIngestRequest, AudioIngestRequest, MediaSearchResponse, \
+    MediaItemResponse, MediaUpdateRequest, VersionCreateRequest, VersionResponse, VersionRollbackRequest
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
 from tldw_Server_API.app.services.document_processing_service import process_document_task
 from tldw_Server_API.app.services.ebook_processing_service import process_ebook_task
@@ -166,6 +171,178 @@ async def get_all_media(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Obtain details of a single media item using its ID
+@router.get("/{media_id}", summary="Get details about a single media item")
+def get_media_item(media_id: int):
+    try:
+        prompt, summary, raw_content = fetch_item_details_single(media_id)
+
+        # Parse metadata and content
+        metadata = {}
+        transcript = []
+        timestamps = []
+
+        if raw_content:
+            # Split metadata and transcript
+            parts = raw_content.split('\n\n', 1)
+            if parts[0].startswith('{'):
+                try:
+                    metadata = json.loads(parts[0])
+                    transcript = parts[1].split('\n') if len(parts) > 1 else []
+                except json.JSONDecodeError:
+                    transcript = raw_content.split('\n')
+            else:
+                transcript = raw_content.split('\n')
+
+            # Extract timestamps
+            timestamps = [line.split('|')[0].strip() for line in transcript if '|' in line]
+
+        # Clean prompt formatting
+        clean_prompt = re.sub(r'\s+', ' ', prompt).strip() if prompt else ""
+
+        # Find whisper model
+        whisper_model = "unknown"
+        for line in transcript[:3]:
+            if "whisper model:" in line:
+                whisper_model = line.split(":")[-1].strip()
+                break
+
+        return {
+            "media_id": media_id,
+            "source": {
+                "url": metadata.get("webpage_url"),
+                "title": metadata.get("title"),
+                "duration": metadata.get("duration"),
+                "type": "video"  # Add actual type if available
+            },
+            "processing": {
+                "prompt": clean_prompt,
+                "summary": summary,
+                "model": whisper_model,
+                "timestamp_option": True  # Add actual value if available
+            },
+            "content": {
+                "metadata": metadata,
+                "text": "\n".join(transcript),
+                "word_count": len(" ".join(transcript).split())
+            },
+            "keywords": ["default"],  # Add actual keywords from DB
+            "timestamps": timestamps
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+##############################################################################
+#
+############################## MEDIA Versioning ##############################
+#
+@router.post("/{media_id}/versions", response_model=VersionResponse)
+async def create_version(
+    media_id: int,
+    request: VersionCreateRequest,
+    db=Depends(get_db_manager)
+):
+    """Create a new document version"""
+    try:
+        result = create_document_version(
+            media_id=media_id,
+            content=request.content,
+            prompt=request.prompt,
+            summary=request.summary
+        )
+        return result
+    except DatabaseError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error(f"Version creation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/{media_id}/versions", response_model=List[VersionResponse])
+async def list_versions(
+    media_id: int,
+    include_content: bool = False,
+    limit: int = 10,
+    offset: int = 0,
+    db=Depends(get_db_manager)
+):
+    """List all versions for a media item"""
+    versions = get_all_document_versions(
+        media_id=media_id,
+        include_content=include_content,
+        limit=limit,
+        offset=offset
+    )
+    if isinstance(versions, list) and any('error' in v for v in versions):
+        raise HTTPException(status_code=404, detail="Versions not found")
+    return versions
+
+
+@router.get("/{media_id}/versions/{version_number}", response_model=VersionResponse)
+async def get_version(
+    media_id: int,
+    version_number: int,
+    include_content: bool = True,
+    db=Depends(get_db_manager)
+):
+    """Get specific version"""
+    version = get_document_version(
+        media_id=media_id,
+        version_number=version_number,
+        include_content=include_content
+    )
+    if 'error' in version:
+        raise HTTPException(status_code=404, detail=version['error'])
+    return version
+
+
+@router.delete("/{media_id}/versions/{version_number}")
+async def delete_version(
+    media_id: int,
+    version_number: int,
+    db=Depends(get_db_manager)
+):
+    """Delete a specific version"""
+    result = delete_document_version(media_id, version_number)
+    if 'error' in result:
+        raise HTTPException(status_code=404, detail=result['error'])
+    return result
+
+@router.post("/{media_id}/versions/rollback", response_model=VersionResponse)
+async def rollback_version(
+    media_id: int,
+    request: VersionRollbackRequest,
+    db=Depends(get_db_manager)
+):
+    """Rollback to a previous version"""
+    result = rollback_to_version(media_id, request.version_number)
+    if 'error' in result:
+        raise HTTPException(status_code=400, detail=result['error'])
+    return result
+
+
+@router.put("/{media_id}", response_model=MediaItemResponse)
+@limiter.limit("10/minute")
+async def update_media_item(
+    media_id: int,
+    request: MediaUpdateRequest,
+    db=Depends(get_db_manager)
+):
+    """
+    Update media item with versioning support
+    """
+    return process_media_update(
+        media_id=media_id,
+        content=request.content,
+        prompt=request.prompt,
+        summary=request.summary,
+        keywords=request.keywords,
+        db=db
+    )
+
+
 # Search Media Endpoint
 @router.get("/search", summary="Search media", response_model=MediaSearchResponse)
 @limiter.limit("20/minute")
@@ -263,70 +440,6 @@ def parse_advanced_query(search_request: SearchRequest) -> Dict:
         'boost': search_request.boost_fields or {'title': 2.0, 'content': 1.0}
     }
     return query_params
-
-
-
-# Obtain details of a single media item using its ID
-@router.get("/{media_id}", summary="Get details about a single media item")
-def get_media_item(media_id: int):
-    try:
-        prompt, summary, raw_content = fetch_item_details_single(media_id)
-
-        # Parse metadata and content
-        metadata = {}
-        transcript = []
-        timestamps = []
-
-        if raw_content:
-            # Split metadata and transcript
-            parts = raw_content.split('\n\n', 1)
-            if parts[0].startswith('{'):
-                try:
-                    metadata = json.loads(parts[0])
-                    transcript = parts[1].split('\n') if len(parts) > 1 else []
-                except json.JSONDecodeError:
-                    transcript = raw_content.split('\n')
-            else:
-                transcript = raw_content.split('\n')
-
-            # Extract timestamps
-            timestamps = [line.split('|')[0].strip() for line in transcript if '|' in line]
-
-        # Clean prompt formatting
-        clean_prompt = re.sub(r'\s+', ' ', prompt).strip() if prompt else ""
-
-        # Find whisper model
-        whisper_model = "unknown"
-        for line in transcript[:3]:
-            if "whisper model:" in line:
-                whisper_model = line.split(":")[-1].strip()
-                break
-
-        return {
-            "media_id": media_id,
-            "source": {
-                "url": metadata.get("webpage_url"),
-                "title": metadata.get("title"),
-                "duration": metadata.get("duration"),
-                "type": "video"  # Add actual type if available
-            },
-            "processing": {
-                "prompt": clean_prompt,
-                "summary": summary,
-                "model": whisper_model,
-                "timestamp_option": True  # Add actual value if available
-            },
-            "content": {
-                "metadata": metadata,
-                "text": "\n".join(transcript),
-                "word_count": len(" ".join(transcript).split())
-            },
-            "keywords": ["default"],  # Add actual keywords from DB
-            "timestamps": timestamps
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 #
 # End of Bare Media Endpoint Functions/Routes

@@ -1077,26 +1077,48 @@ def fetch_keywords_for_media(media_id):
         logging.error(f"Error fetching keywords: {e}")
         return []
 
-def update_keywords_for_media(media_id, keyword_list):
+def update_keywords_for_media(media_id: int, keywords: List[str]):
+    """Update keywords with validation and error handling"""
     try:
-        with db.get_connection() as conn:
+        valid_keywords = [k.strip().lower() for k in keywords if k.strip()]
+        if not valid_keywords:
+            return
+
+        with db.transaction() as conn:
             cursor = conn.cursor()
 
-            # Remove old keywords
+            # Clear existing keywords
             cursor.execute('DELETE FROM MediaKeywords WHERE media_id = ?', (media_id,))
 
-            # Add new keywords
-            for keyword in keyword_list:
-                cursor.execute('INSERT OR IGNORE INTO Keywords (keyword) VALUES (?)', (keyword,))
-                cursor.execute('SELECT id FROM Keywords WHERE keyword = ?', (keyword,))
-                keyword_id = cursor.fetchone()[0]
-                cursor.execute('INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (?, ?)', (media_id, keyword_id))
+            # Insert new keywords
+            keyword_ids = []
+            for keyword in set(valid_keywords):
+                # Insert or ignore existing keywords
+                cursor.execute('''
+                    INSERT OR IGNORE INTO Keywords (keyword) VALUES (?)
+                ''', (keyword,))
 
-            conn.commit()
-        return "Keywords updated successfully."
+                # Get keyword ID
+                cursor.execute('''
+                    SELECT id FROM Keywords WHERE keyword = ?
+                ''', (keyword,))
+                result = cursor.fetchone()
+                if not result:
+                    raise ValueError(f"Keyword '{keyword}' not found after insertion")
+                keyword_ids.append(result[0])
+
+            # Insert relationships
+            cursor.executemany('''
+                INSERT INTO MediaKeywords (media_id, keyword_id)
+                VALUES (?, ?)
+            ''', [(media_id, kid) for kid in keyword_ids])
+
     except sqlite3.Error as e:
-        logging.error(f"Error updating keywords: {e}")
-        return "Error updating keywords."
+        logging.error(f"Database error updating keywords: {e}")
+        raise DatabaseError(f"Keyword update failed: {e}")
+    except ValueError as e:
+        logging.error(f"Keyword validation error: {e}")
+        raise DatabaseError(str(e))
 
 #
 # End of Keyword-related functions
@@ -1665,107 +1687,6 @@ def fetch_item_details_single(media_id: int):
     except sqlite3.Error as e:
         logging.error(f"Error fetching item details: {e}")
         return "Error fetching prompt.", "Error fetching summary.", "Error fetching content."
-
-
-def get_full_media_details(media_id: int) -> dict[str | Any, Any] | None:
-    """Get complete media item details with metadata"""
-    try:
-        with db.get_connection() as conn:
-            cursor = conn.cursor()
-
-            # Get basic media info
-            cursor.execute("""
-                SELECT m.id, m.title, m.type, m.url, m.author, m.ingestion_date,
-                       m.description, m.duration, m.upload_date, m.content
-                FROM Media m
-                WHERE m.id = ?
-            """, (media_id,))
-            media_data = cursor.fetchone()
-
-            # Get latest modifications
-            cursor.execute("""
-                SELECT prompt, summary 
-                FROM MediaModifications 
-                WHERE media_id = ? 
-                ORDER BY modification_date DESC 
-                LIMIT 1
-            """, (media_id,))
-            modifications = cursor.fetchone()
-
-            # Get keywords
-            cursor.execute("""
-                SELECT k.keyword
-                FROM Keywords k
-                JOIN MediaKeywords mk ON k.id = mk.keyword_id
-                WHERE mk.media_id = ?
-            """, (media_id,))
-            keywords = [row[0] for row in cursor.fetchall()]
-
-            # Get versions
-            cursor.execute("""
-                SELECT version_number, created_at 
-                FROM DocumentVersions
-                WHERE media_id = ?
-                ORDER BY version_number DESC
-            """, (media_id,))
-            versions = [{"version": row[0], "created_at": row[1]} for row in cursor.fetchall()]
-
-            # Get transcripts
-            cursor.execute("""
-                SELECT id, created_at, whisper_model 
-                FROM Transcripts
-                WHERE media_id = ?
-                ORDER BY created_at DESC
-            """, (media_id,))
-            transcripts = [{"id": row[0], "date": row[1], "model": row[2]} for row in cursor.fetchall()]
-
-        if not media_data:
-            return None
-
-        try:
-            # Split JSON metadata from transcript
-            if media_data.content.startswith('{'):
-                json_end = media_data.content.find('}\n') + 2
-                metadata = json.loads(media_data.content[:json_end])
-                transcript = media_data.content[json_end:]
-            else:
-                metadata = {}
-                transcript = media_data.content
-
-            # Clean up prompt formatting
-            clean_prompt = " ".join(
-                line.strip()
-                for line in media_data.prompt.split('\n')
-                if line.strip()
-            )
-
-        except json.JSONDecodeError:
-            metadata = {"error": "Invalid metadata format"}
-            transcript = media_data.content
-
-        return {
-            "id": media_data[0],
-            "title": media_data[1],
-            "type": media_data[2],
-            "url": media_data[3],
-            "author": media_data[4],
-            "ingestion_date": media_data[5],
-            "description": media_data[6],
-            "duration": media_data[7],
-            "upload_date": media_data[8] or None,
-            "content": media_data[9],
-            "prompt": modifications[0] if modifications else None,
-            "summary": modifications[1] if modifications else None,
-            "keywords": keywords,
-            "versions": versions or None,
-            "transcripts": transcripts,
-            "metadata": metadata,
-            "transcript": transcript,
-            "clean_prompt": clean_prompt
-        }
-    except Exception as e:
-        logger.error(f"Error getting full media details: {str(e)}")
-        return None
 
 
 def convert_to_markdown(item):
@@ -2391,179 +2312,299 @@ def get_paginated_files(page: int = 1, results_per_page: int = 50) -> Tuple[List
 #
 # Functions to manage document versions
 
-def create_document_version(media_id: int, content: str) -> int:
-    logging.info(f"Attempting to create document version for media_id: {media_id}")
+def get_full_media_details(media_id: int) -> Optional[Dict]:
+    """Get complete media details with versions and keywords"""
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
-            
-            # Start a transaction
-            cursor.execute("BEGIN EXCLUSIVE TRANSACTION")
 
-            try:
-                # Verify media_id exists and get the latest version in one query
-                cursor.execute('''
-                    SELECT m.id, COALESCE(MAX(dv.version_number), 0)
-                    FROM Media m
-                    LEFT JOIN DocumentVersions dv ON m.id = dv.media_id
-                    WHERE m.id = ?
-                    GROUP BY m.id
-                ''', (media_id,))
-                result = cursor.fetchone()
+            # Get basic media info - matching your exact schema
+            cursor.execute('''
+                SELECT 
+                    id, url, title, type, content,
+                    author, ingestion_date, prompt, summary,
+                    transcription_model, is_trash, trash_date,
+                    vector_embedding, chunking_status, vector_processing,
+                    content_hash
+                FROM Media
+                WHERE id = ?
+            ''', (media_id,))
+            media = cursor.fetchone()
 
-                if not result:
-                    raise ValueError(f"No Media entry found for id: {media_id}")
+            if not media:
+                return None
 
-                _, latest_version = result
-                new_version = latest_version + 1
+            # Convert to dict with all schema fields
+            media_dict = {
+                "id": media[0],
+                "url": media[1],
+                "title": media[2],
+                "type": media[3],
+                "content": media[4],
+                "author": media[5],
+                "ingestion_date": media[6],
+                "prompt": media[7],
+                "summary": media[8],
+                "transcription_model": media[9],
+                "is_trash": bool(media[10]),
+                "trash_date": media[11],
+                "vector_embedding": media[12],
+                "chunking_status": media[13],
+                "vector_processing": media[14],
+                "content_hash": media[15],
+                "keywords": [],
+                "versions": []
+            }
 
-                logging.debug(f"Inserting new version {new_version} for media_id: {media_id}")
+            # Get keywords
+            cursor.execute('''
+                SELECT k.keyword
+                FROM Keywords k
+                JOIN MediaKeywords mk ON k.id = mk.keyword_id
+                WHERE mk.media_id = ?
+            ''', (media_id,))
+            media_dict["keywords"] = [row[0] for row in cursor.fetchall()]
 
-                # Insert new version
-                cursor.execute('''
-                    INSERT INTO DocumentVersions (media_id, version_number, content)
-                    VALUES (?, ?, ?)
-                ''', (media_id, new_version, content))
+            # Get versions
+            media_dict["versions"] = get_all_document_versions(media_id)
 
-                # Commit the transaction
-                conn.commit()
-                logging.info(f"Successfully created document version {new_version} for media_id: {media_id}")
-                return new_version
-            except Exception as e:
-                # If any error occurs, roll back the transaction
-                conn.rollback()
-                raise e
-    except sqlite3.Error as e:
-        logging.error(f"Database error creating document version: {e}")
-        logging.error(f"Error details - media_id: {media_id}, content length: {len(content)}")
-        raise DatabaseError(f"Failed to create document version: {e}")
+            return media_dict
+
     except Exception as e:
-        logging.error(f"Unexpected error creating document version: {e}")
-        logging.error(f"Error details - media_id: {media_id}, content length: {len(content)}")
+        logging.error(f"Error in get_full_media_details: {str(e)}")
+        return None
+
+
+def create_document_version(
+        media_id: int,
+        content: str,
+        prompt: Optional[str] = None,
+        summary: Optional[str] = None,
+        conn: Optional[sqlite3.Connection] = None
+) -> Dict[str, Any]:
+    """
+    Creates a new document version with optional prompt and summary.
+    Returns the created version info.
+    """
+    try:
+        # Combine content with prompt/summary if provided
+        full_content = content
+        if prompt or summary:
+            full_content = f"Prompt: {prompt or ''}\n\nSummary: {summary or ''}\n\nContent:\n{content}"
+
+        def _create(connection):
+            cursor = connection.cursor()
+
+            # Get next version number
+            cursor.execute('''
+                SELECT COALESCE(MAX(version_number), 0) + 1 
+                FROM DocumentVersions 
+                WHERE media_id = ?
+            ''', (media_id,))
+            version_number = cursor.fetchone()[0]
+
+            # Insert new version
+            cursor.execute('''
+                INSERT INTO DocumentVersions 
+                (media_id, version_number, content)
+                VALUES (?, ?, ?)
+            ''', (media_id, version_number, full_content))
+
+            # Also update MediaModifications if prompt/summary provided
+            if prompt or summary:
+                cursor.execute('''
+                    INSERT INTO MediaModifications 
+                    (media_id, prompt, summary, modification_date)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(media_id) DO UPDATE SET
+                        prompt = excluded.prompt,
+                        summary = excluded.summary,
+                        modification_date = excluded.modification_date
+                ''', (media_id, prompt, summary))
+
+            return {
+                'media_id': media_id,
+                'version_number': version_number,
+                'content_length': len(full_content)
+            }
+
+        if conn:
+            return _create(conn)
+        else:
+            with db.transaction() as connection:
+                return _create(connection)
+
+    except sqlite3.Error as e:
+        logging.error(f"Database error creating document version: {str(e)}")
+        raise DatabaseError(f"Failed to create document version: {str(e)}")
+    except Exception as e:
+        logging.error(f"Unexpected error creating document version: {str(e)}")
         raise
 
 
-def get_document_version(media_id: int, version_number: int = None) -> Dict[str, Any]:
+def get_document_version(
+        media_id: int,
+        version_number: Optional[int] = None,
+        include_content: bool = True
+) -> Dict[str, Any]:
+    """
+    Get specific or latest document version.
+    Set include_content=False for metadata-only retrieval.
+    """
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
 
             if version_number is None:
-                # Get the latest version
+                # Get latest version
                 cursor.execute('''
-                    SELECT id, version_number, content, created_at
+                    SELECT id, version_number, created_at
+                    ''' + (', content' if include_content else '') + '''
                     FROM DocumentVersions
                     WHERE media_id = ?
                     ORDER BY version_number DESC
                     LIMIT 1
                 ''', (media_id,))
             else:
+                # Get specific version
                 cursor.execute('''
-                    SELECT id, version_number, content, created_at
+                    SELECT id, version_number, created_at
+                    ''' + (', content' if include_content else '') + '''
                     FROM DocumentVersions
                     WHERE media_id = ? AND version_number = ?
                 ''', (media_id, version_number))
 
             result = cursor.fetchone()
+            if not result:
+                return {'error': 'Version not found'}
 
-            if result:
-                return {
-                    'id': result[0],
-                    'version_number': result[1],
-                    'content': result[2],
-                    'created_at': result[3]
-                }
-            else:
-                return {'error': f"No document version found for media_id {media_id}" + (f" and version_number {version_number}" if version_number is not None else "")}
+            version = {
+                'id': result[0],
+                'version_number': result[1],
+                'created_at': result[2],
+                'media_id': media_id
+            }
+
+            if include_content:
+                version['content'] = result[3]
+
+            return version
+
     except sqlite3.Error as e:
-        error_message = f"Error retrieving document version: {e}"
-        logging.error(error_message)
-        return {'error': error_message}
+        logging.error(f"Database error retrieving version: {str(e)}")
+        return {'error': str(e)}
 
-def get_all_document_versions(media_id: int) -> List[Dict[str, Any]]:
+
+def get_all_document_versions(
+        media_id: int,
+        include_content: bool = False,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
+) -> List[Dict[str, Any]]:
+    """
+    Get all versions for a media item with pagination support.
+    """
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT id, version_number, content, created_at
+
+            query = '''
+                SELECT id, version_number, created_at
+                ''' + (', content' if include_content else '') + '''
                 FROM DocumentVersions
                 WHERE media_id = ?
                 ORDER BY version_number DESC
-            ''', (media_id,))
-            results = cursor.fetchall()
+            '''
 
-            if results:
-                return [
-                    {
-                        'id': row[0],
-                        'version_number': row[1],
-                        'content': row[2],
-                        'created_at': row[3]
-                    }
-                    for row in results
-                ]
-            else:
-                return []
+            params = [media_id]
+
+            if limit is not None:
+                query += ' LIMIT ?'
+                params.append(limit)
+                if offset is not None:
+                    query += ' OFFSET ?'
+                    params.append(offset)
+
+            cursor.execute(query, params)
+
+            return [{
+                'id': row[0],
+                'version_number': row[1],
+                'created_at': row[2],
+                'media_id': media_id,
+                **({'content': row[3]} if include_content else {})
+            } for row in cursor.fetchall()]
+
     except sqlite3.Error as e:
-        error_message = f"Error retrieving all document versions: {e}"
-        logging.error(error_message)
-        return [{'error': error_message}]
+        logging.error(f"Database error retrieving versions: {str(e)}")
+        return []
 
-def delete_document_version(media_id: int, version_number: int) -> Dict[str, Any]:
+
+def delete_document_version(
+        media_id: int,
+        version_number: int
+) -> Dict[str, Any]:
+    """
+    Delete a specific document version.
+    Returns success/error message.
+    """
     try:
-        with db.get_connection() as conn:
+        with db.transaction() as conn:
             cursor = conn.cursor()
+
+            # First verify version exists
+            cursor.execute('''
+                SELECT 1 FROM DocumentVersions
+                WHERE media_id = ? AND version_number = ?
+            ''', (media_id, version_number))
+
+            if not cursor.fetchone():
+                return {'error': 'Version not found'}
+
+            # Delete the version
             cursor.execute('''
                 DELETE FROM DocumentVersions
                 WHERE media_id = ? AND version_number = ?
             ''', (media_id, version_number))
-            conn.commit()
 
-            if cursor.rowcount > 0:
-                return {'success': f"Document version {version_number} for media_id {media_id} deleted successfully"}
-            else:
-                return {'error': f"No document version found for media_id {media_id} and version_number {version_number}"}
+            return {'success': f'Version {version_number} deleted'}
+
     except sqlite3.Error as e:
-        error_message = f"Error deleting document version: {e}"
-        logging.error(error_message)
-        return {'error': error_message}
+        logging.error(f"Database error deleting version: {str(e)}")
+        return {'error': str(e)}
 
-def rollback_to_version(media_id: int, version_number: int) -> Dict[str, Any]:
+
+def rollback_to_version(
+        media_id: int,
+        version_number: int
+) -> Dict[str, Any]:
+    """
+    Rollback to a previous version by creating a new version with old content.
+    """
     try:
-        with db.get_connection() as conn:
+        with db.transaction() as conn:
             cursor = conn.cursor()
-            
-            # Get the content of the version to rollback to
-            cursor.execute('''
-                SELECT content
-                FROM DocumentVersions
-                WHERE media_id = ? AND version_number = ?
-            ''', (media_id, version_number))
-            result = cursor.fetchone()
-            
-            if not result:
-                return {'error': f"No document version found for media_id {media_id} and version_number {version_number}"}
-            
-            rollback_content = result[0]
-            
-            # Create a new version with the content of the version to rollback to
-            cursor.execute('''
-                INSERT INTO DocumentVersions (media_id, version_number, content)
-                VALUES (?, (SELECT COALESCE(MAX(version_number), 0) + 1 FROM DocumentVersions WHERE media_id = ?), ?)
-            ''', (media_id, media_id, rollback_content))
-            
-            new_version_number = cursor.lastrowid
-            
-            conn.commit()
-            
+
+            # Get the target version content
+            version = get_document_version(media_id, version_number, include_content=True)
+            if 'error' in version:
+                return version
+
+            # Create new version with this content
+            result = create_document_version(
+                media_id=media_id,
+                content=version['content'],
+                conn=conn
+            )
+
             return {
-                'success': f"Rolled back to version {version_number} for media_id {media_id}",
-                'new_version_number': new_version_number
+                'success': f'Rolled back to version {version_number}',
+                'new_version_number': result['version_number']
             }
+
     except sqlite3.Error as e:
-        error_message = f"Error rolling back to document version: {e}"
-        logging.error(error_message)
-        return {'error': error_message}
+        logging.error(f"Database error during rollback: {str(e)}")
+        return {'error': str(e)}
 
 #
 # End of Functions to manage document versions
