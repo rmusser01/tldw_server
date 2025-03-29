@@ -124,6 +124,7 @@ https://github.com/satellitecomponent/Neurite
 https://uxdesign.cc/ai-and-cognitive-offloading-sharing-the-thinking-process-with-machines-2d27e66e0f31
 https://www.typingmind.com
 https://github.com/felladrin/MiniSearch
+https://uxdesign.cc/human-centered-ai-5-key-frameworks-for-ux-designers-6b1ad9e53d23
 
 Style guide
   https://contentdesign.london/blog/create-a-great-style-guide-that-people-use
@@ -150,6 +151,12 @@ Prompt Engineering page:
   - Response
 - Looks like Claude Workshop UI window
 
+
+Queue prompts while waiting for a response, split existing chat off into a new thread
+  why can’t I queue a prompt while waiting for a response to generate?
+  would be a huge QOL upgrade if we didn’t have to wait a full minute or two to submit follow-up queries
+  even if it was just a single slot to put one query “on-deck” that would be huge
+  add multiple slots and let the AI help manage the queue and now your chat interface is agentic
 
 
 Website features

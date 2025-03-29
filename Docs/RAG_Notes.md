@@ -7,6 +7,8 @@ https://github.com/superlinear-ai/raglite
 https://levelup.gitconnected.com/testing-18-rag-techniques-to-find-the-best-094d166af27f
 https://arxiv.org/abs/2503.10357
 https://arxiv.org/pdf/2502.08826v2
+https://github.com/yale-nlp/MCTS-RAG
+https://arxiv.org/abs/2503.21729
 
 
 
