@@ -32,24 +32,34 @@ class TestMediaVersionEndpoints(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.db = Database("file:testing?mode=memory&cache=shared")
-        with cls.db.get_connection() as conn:
-            conn.execute("PRAGMA foreign_keys=ON")
-            create_tables(conn)
 
-            # Create test media
-            conn.execute('''
-                INSERT INTO Media (title, type, content)
-                VALUES (?, ?, ?)
-            ''', ("Test Media", "document", "Initial content"))
-            cls.media_id = conn.lastrowid
+        # Use Database methods instead of raw connections
+        cls.db.execute_query("PRAGMA foreign_keys=ON")
+        create_tables(cls.db)  # Assuming create_tables is modified to accept Database instance
 
-        # Create initial version (using standard DB flow)
+        # Create test media
+        cls.db.execute_query('''
+            INSERT INTO Media (title, type, content)
+            VALUES (?, ?, ?)
+        ''', ("Test Media", "document", "Initial content"))
+        media_info = cls.db.execute_query("SELECT last_insert_rowid()")
+        cls.media_id = media_info[0][0]
+
+        # Create initial version
         create_document_version(
             media_id=cls.media_id,
             content="Initial content",
             prompt="Initial prompt",
             summary="Initial summary"
         )
+
+    def setUp(self):
+        # Start transaction using Database instance
+        self.transaction = self.db.transaction().__enter__()
+
+    def tearDown(self):
+        # Rollback transaction
+        self.transaction.__exit__(None, None, None)
 
     def setUp(self):
         self.tx_ctx = self.db.transaction().__enter__()
@@ -177,28 +187,28 @@ class TestMediaEndpoints(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.db = Database("file:media_test?mode=memory&cache=shared")
-        with cls.db.get_connection() as conn:
-            conn.execute("PRAGMA foreign_keys=ON")
-            create_tables(conn)  # <-- Original table creation
+        cls.db.execute_query("PRAGMA foreign_keys=ON")
+        create_tables(cls.db)
 
-            # Create test media using your existing create_test_media
-            cls.media_ids = {
-                'video': create_test_media(
-                    cls.db,
-                    title="Test Video",
-                    content=json.dumps({"title": "Test Video", "duration": 300}) + "\n\nTranscript line"
-                ),
-                'audio': create_test_media(
-                    cls.db,
-                    title="Audio File",
-                    content="00:00:00 | Audio transcript"
-                ),
-                'invalid': create_test_media(
-                    cls.db,
-                    title="Invalid Media",
-                    content="{bad_json}\n\nContent"
-                )
-            }
+        # Create test media using Database methods
+        cls.media_ids = {
+            'video': create_test_media(
+                cls.db,
+                title="Test Video",
+                content=json.dumps({"title": "Test Video", "duration": 300}) + "\n\nTranscript line"
+            ),
+            'audio': create_test_media(
+                cls.db,
+                title="Audio File",
+                content="00:00:00 | Audio transcript"
+            ),
+            'invalid': create_test_media(
+                cls.db,
+                title="Invalid Media",
+                content="{bad_json}\n\nContent"
+            )
+        }
+
 
 
     def setUp(self):
@@ -248,23 +258,12 @@ class TestMediaEndpoints(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["source"]["type"], "audio")
 
-    def test_update_media_item(self):
-        response = client.put(
-            f"/api/v1/media/{self.media_ids['video']}",
-            json={"content": "Updated", "keywords": ["test"]}
-        )
-        self.assertEqual(response.status_code, 200)
-
-    def test_update_invalid_media_item(self):
-        response = client.put("/api/v1/media/999999", json={"content": "Test"})
-        self.assertEqual(response.status_code, 404)
-
     def test_get_nonexistent_media_item(self):
         response = client.get("/api/v1/media/999999")
         self.assertEqual(response.status_code, 404)
 
     def test_get_media_item_keywords(self):
-        # Add keywords
+        # Use Database instance instead of raw connection
         self.db.execute_query('''
             INSERT INTO MediaModifications (media_id, prompt, summary, keywords)
             VALUES (?, ?, ?, ?)

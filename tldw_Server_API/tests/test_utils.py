@@ -27,12 +27,12 @@ def temp_db():
         if os.path.exists(db_path):
             os.unlink(db_path)
 
-# In test_utils.py
-def create_test_media(db: Database, title: str, content: str, media_type: str = "document"):
+
+def create_test_media(db: Database, title: str, content: str):
     db.execute_query('''
         INSERT INTO Media (title, type, content)
         VALUES (?, ?, ?)
-    ''', (title, media_type, content))
+    ''', (title, "document", content))
     media_id = db.execute_query("SELECT last_insert_rowid()")[0][0]
     return media_id
 
