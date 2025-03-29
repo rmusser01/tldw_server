@@ -28,7 +28,8 @@ FastAPI has a bug, which is caused by starlette, caused by python.
 - Launching tests
   - `pip install pytest httpx`
   - `python -m pytest test_media_versions.py -v`
-  - 
+  - `python -m pytest .\tldw_Server_API\tests\Media_Ingestion_Modification\test_media_versions.py -v
+`
 
 
 ## Endpoints

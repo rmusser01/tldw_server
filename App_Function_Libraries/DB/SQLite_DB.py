@@ -331,7 +331,7 @@ def create_tables(db) -> None:
         '''
         CREATE TABLE IF NOT EXISTS MediaModifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            media_id INTEGER NOT NULL,
+            media_id INTEGER NOT NULL UNIQUE,
             prompt TEXT,
             summary TEXT,
             modification_date TEXT,

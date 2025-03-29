@@ -6,6 +6,8 @@ import json
 import time
 import unittest
 from sqlite3 import IntegrityError
+from uuid import uuid4
+
 #
 # 3rd-party Libraries
 from fastapi.testclient import TestClient
@@ -31,17 +33,25 @@ class TestMediaVersionEndpoints(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.db = Database("file:testing?mode=memory&cache=shared")
+        cls.db = Database(f"file:testing_{uuid4()}?mode=memory&cache=shared")
+        cls.db.execute_query("DROP TABLE IF EXISTS MediaModifications")
+        create_tables(cls.db)
+        cls.db = Database(f"file:testing_{uuid4()}?mode=memory&cache=shared")
+        cls.db.execute_query("DROP TABLE IF EXISTS MediaModifications")
+        create_tables(cls.db)
+        columns = cls.db.execute_query("PRAGMA table_info(MediaModifications)")
+        print("MediaModifications columns:", columns)
+        indexes = cls.db.execute_query("PRAGMA index_list(MediaModifications)")
+        print("MediaModifications indexes:", indexes)
 
-        # Use Database methods instead of raw connections
+        # Foreign keys on:
         cls.db.execute_query("PRAGMA foreign_keys=ON")
-        create_tables(cls.db)  # Assuming create_tables is modified to accept Database instance
 
-        # Create test media
+        # Insert initial media:
         cls.db.execute_query('''
-            INSERT INTO Media (title, type, content)
-            VALUES (?, ?, ?)
-        ''', ("Test Media", "document", "Initial content"))
+            INSERT INTO Media (title, type, content, author)
+            VALUES (?, ?, ?, ?)
+        ''', ("Test Media", "document", "Initial content", "Tester"))
         media_info = cls.db.execute_query("SELECT last_insert_rowid()")
         cls.media_id = media_info[0][0]
 
@@ -60,12 +70,6 @@ class TestMediaVersionEndpoints(unittest.TestCase):
     def tearDown(self):
         # Rollback transaction
         self.transaction.__exit__(None, None, None)
-
-    def setUp(self):
-        self.tx_ctx = self.db.transaction().__enter__()
-
-    def tearDown(self):
-        self.tx_ctx.__exit__(None, None, None)
 
     # Helper methods
     def create_version(self, content="Test content"):
@@ -186,30 +190,32 @@ class TestMediaEndpoints(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.db = Database("file:media_test?mode=memory&cache=shared")
-        cls.db.execute_query("PRAGMA foreign_keys=ON")
+        cls.db = Database(f"file:testing_{uuid4()}?mode=memory&cache=shared")
+        cls.db.execute_query("DROP TABLE IF EXISTS MediaModifications")
         create_tables(cls.db)
+        columns = cls.db.execute_query("PRAGMA table_info(MediaModifications)")
+        print("MediaModifications columns:", columns)
+        indexes = cls.db.execute_query("PRAGMA index_list(MediaModifications)")
+        print("MediaModifications indexes:", indexes)
 
-        # Create test media using Database methods
-        cls.media_ids = {
-            'video': create_test_media(
-                cls.db,
-                title="Test Video",
-                content=json.dumps({"title": "Test Video", "duration": 300}) + "\n\nTranscript line"
-            ),
-            'audio': create_test_media(
-                cls.db,
-                title="Audio File",
-                content="00:00:00 | Audio transcript"
-            ),
-            'invalid': create_test_media(
-                cls.db,
-                title="Invalid Media",
-                content="{bad_json}\n\nContent"
-            )
-        }
+        # Foreign keys on:
+        cls.db.execute_query("PRAGMA foreign_keys=ON")
 
+        # Insert initial media:
+        cls.db.execute_query('''
+            INSERT INTO Media (title, type, content, author)
+            VALUES (?, ?, ?, ?)
+        ''', ("Test Media", "document", "Initial content", "Tester"))
+        media_info = cls.db.execute_query("SELECT last_insert_rowid()")
+        cls.media_id = media_info[0][0]
 
+        # Create initial version
+        create_document_version(
+            media_id=cls.media_id,
+            content="Initial content",
+            prompt="Initial prompt",
+            summary="Initial summary"
+        )
 
     def setUp(self):
         self.transaction = self.db.transaction().__enter__()
