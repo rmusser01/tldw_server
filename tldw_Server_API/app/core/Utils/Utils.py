@@ -42,7 +42,7 @@ import tempfile
 import time
 import uuid
 from datetime import timedelta, datetime
-from typing import Union, AnyStr, Tuple, List, Protocol, cast
+from typing import Union, AnyStr, Tuple, List, Optional, Protocol, cast
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 #
 # 3rd-Party Imports

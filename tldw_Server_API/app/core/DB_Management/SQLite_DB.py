@@ -1200,32 +1200,22 @@ def search_media_db(
 ) -> Tuple[List[Tuple], int]:
     """
     Search for media items with advanced filtering options.
-
-    Args:
-        search_query: Text to search for in specified fields
-        search_fields: Database fields to search in
-        keywords: List of keywords to filter by
-        page: Page number (1-based)
-        results_per_page: Number of results per page
-        connection: Optional database connection
-
-    Returns:
-        Tuple containing list of results and total match count
     """
-    # Input validation
+    # Input validation (keep as is)
     if page < 1:
         raise ValueError("Page number must be 1 or greater")
     if results_per_page < 1 or results_per_page > 100:
         raise ValueError("Results per page must be between 1 and 100")
 
-    # Sanitize and validate search fields to prevent SQL injection
+    # Sanitize and validate search fields (keep as is)
     valid_fields = {"title", "content", "author", "type"}
     sanitized_fields = [field for field in search_fields if field in valid_fields]
     if not sanitized_fields and search_query:
         raise ValueError("No valid search fields provided")
 
     def execute_query(conn):
-        with conn.cursor() as cursor:
+        cursor = conn.cursor()
+        try:
             # Build query components
             offset = (page - 1) * results_per_page
             params = []
@@ -1254,34 +1244,35 @@ def search_media_db(
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
 
-            # Optimize by using a single query with COUNT(*) OVER()
+            # First get the total count
+            count_query = f"""
+                SELECT COUNT(DISTINCT Media.id)
+                FROM Media
+                WHERE {where_clause}
+            """
+            cursor.execute(count_query, params.copy())
+            total_matches = cursor.fetchone()[0]
+
+            # Then get the paginated results
             results_query = f"""
                 SELECT 
                     Media.id, Media.url, Media.title, Media.type, 
-                    Media.content, Media.author, Media.ingestion_date,
-                    COUNT(*) OVER() as total_count
+                    Media.content, Media.author, Media.ingestion_date
                 FROM Media
                 WHERE {where_clause}
                 ORDER BY Media.ingestion_date DESC
                 LIMIT ? OFFSET ?
             """
             params.extend([results_per_page, offset])
+            cursor.execute(results_query, params)
+            results = cursor.fetchall()
 
-            try:
-                cursor.execute(results_query, params)
-                results = cursor.fetchall()
-
-                # Extract total count from first row if available
-                total_matches = results[0][-1] if results else 0
-
-                # Remove the count column from results
-                actual_results = [row[:-1] for row in results]
-
-                return actual_results, total_matches
-            except Exception as e:
-                # Log the error and re-raise
-                logger.error(f"Database error in search_media_db: {str(e)}", exc_info=True)
-                raise
+            return results, total_matches
+        except Exception as e:
+            logger.error(f"Database error in search_media_db: {str(e)}", exc_info=True)
+            raise
+        finally:
+            cursor.close()
 
     # Execute with provided connection or get a new one
     if connection:

@@ -17,7 +17,7 @@ import os
 import re
 from datetime import datetime, timedelta
 from math import ceil
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 #
 # 3rd-party imports
 from fastapi import (
@@ -59,7 +59,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
 )
 from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_db
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Processing import process_audio
-from tldw_Server_API.app.core.Utils.Utils import format_transcript, truncate_content
+from tldw_Server_API.app.core.Utils.Utils import format_transcript, truncate_content, logging
 from tldw_Server_API.app.schemas.media_models import VideoIngestRequest, AudioIngestRequest, MediaSearchResponse
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
 from tldw_Server_API.app.services.document_processing_service import process_document_task
@@ -186,7 +186,7 @@ async def search_media(
         raise HTTPException(status_code=400, detail="Either search_query or keywords must be provided")
 
     # Process keywords if provided
-    keyword_list = []
+    keyword_list: List[str] = []  # Explicitly specify type
     if keywords:
         keyword_list = [k.strip().lower() for k in keywords.split(",") if k.strip()]
 
@@ -209,8 +209,8 @@ async def search_media(
                 "type": item[3],
                 "content_preview": truncate_content(item[4], 200),
                 "author": item[5] or "Unknown",
-                "date": item[6].isoformat() if item[6] else None,
-                "keywords": fetch_keywords_for_media(item[0])  # Consider fetching in bulk
+                "date": item[6].isoformat() if hasattr(item[6], 'isoformat') else item[6],  # Handle string dates
+                "keywords": fetch_keywords_for_media(item[0])
             }
             for item in results
         ]
@@ -228,7 +228,7 @@ async def search_media(
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
-        logger.error(f"Error searching media: {str(e)}", exc_info=True)
+        logging.error(f"Error searching media: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while searching")
 
 

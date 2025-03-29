@@ -16,6 +16,10 @@
   - 
 
 
+FastAPI has a bug, which is caused by starlette, caused by python.
+- The gist is that you can't kill the python server on windows without killing the process itself, or issuing a 'stop' command from within the process.
+- 
+
 
 - Launch the API:
   - `python -m uvicorn tldw_Server_API.app.main:app --reload`
