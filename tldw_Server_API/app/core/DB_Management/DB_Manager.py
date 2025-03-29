@@ -11,12 +11,12 @@ from typing import List, Optional, Tuple, Union, Dict, Any
 #
 # Import your existing SQLite functions
 from App_Function_Libraries.DB.SQLite_DB import DatabaseError
-from App_Function_Libraries.DB.Prompts_DB import list_prompts as sqlite_list_prompts, \
+from tldw_Server_API.app.core.DB_Management.Prompts_DB import list_prompts as sqlite_list_prompts, \
     fetch_prompt_details as sqlite_fetch_prompt_details, add_prompt as sqlite_add_prompt, \
     search_prompts as sqlite_search_prompts, add_or_update_prompt as sqlite_add_or_update_prompt, \
     load_prompt_details as sqlite_load_prompt_details, insert_prompt_to_db as sqlite_insert_prompt_to_db, \
     delete_prompt as sqlite_delete_prompt
-from App_Function_Libraries.DB.SQLite_DB import (
+from tldw_Server_API.app.core.DB_Management.SQLite_DB import (
     update_media_content as sqlite_update_media_content,
     search_and_display as sqlite_search_and_display,
     keywords_browser_interface as sqlite_keywords_browser_interface,
@@ -56,7 +56,7 @@ from App_Function_Libraries.DB.SQLite_DB import (
     fetch_paginated_data as sqlite_fetch_paginated_data, get_latest_transcription as sqlite_get_latest_transcription, \
     mark_media_as_processed as sqlite_mark_media_as_processed,
 )
-from App_Function_Libraries.DB.RAG_QA_Chat_DB import start_new_conversation as sqlite_start_new_conversation, \
+from tldw_Server_API.app.core.DB_Management.RAG_QA_Chat_DB import start_new_conversation as sqlite_start_new_conversation, \
     save_message as sqlite_save_message, load_chat_history as sqlite_load_chat_history, \
     get_all_conversations as sqlite_get_all_conversations, get_notes_by_keywords as sqlite_get_notes_by_keywords, \
     get_note_by_id as sqlite_get_note_by_id, update_note as sqlite_update_note, save_notes as sqlite_save_notes, \
@@ -70,7 +70,7 @@ from App_Function_Libraries.DB.RAG_QA_Chat_DB import start_new_conversation as s
     fetch_conversations_by_ids as sqlite_fetch_conversations_by_ids, fetch_notes_by_ids as sqlite_fetch_notes_by_ids, \
     delete_messages_in_conversation as sqlite_delete_messages_in_conversation, \
     get_conversation_text as sqlite_get_conversation_text, search_notes_titles as sqlite_search_notes_titles
-from App_Function_Libraries.DB.Character_Chat_DB import (
+from tldw_Server_API.app.core.DB_Management.Character_Chat_DB import (
     add_character_card as sqlite_add_character_card, get_character_cards as sqlite_get_character_cards, \
     get_character_card_by_id as sqlite_get_character_card_by_id, update_character_card as sqlite_update_character_card, \
     delete_character_card as sqlite_delete_character_card, add_character_chat as sqlite_add_character_chat, \
@@ -79,7 +79,7 @@ from App_Function_Libraries.DB.Character_Chat_DB import (
 )
 #
 # Local Imports
-from App_Function_Libraries.Utils.Utils import load_comprehensive_config, get_database_path, get_project_relative_path, \
+from tldw_Server_API.app.core.Utils.Utils import load_comprehensive_config, get_database_path, get_project_relative_path, \
     logger, logging
 
 #

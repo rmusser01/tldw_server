@@ -60,7 +60,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
 from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_db
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Processing import process_audio
 from tldw_Server_API.app.core.Utils.Utils import format_transcript, truncate_content
-from tldw_Server_API.app.schemas.media_models import VideoIngestRequest, AudioIngestRequest
+from tldw_Server_API.app.schemas.media_models import VideoIngestRequest, AudioIngestRequest, MediaSearchResponse
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
 from tldw_Server_API.app.services.document_processing_service import process_document_task
 from tldw_Server_API.app.services.ebook_processing_service import process_ebook_task
