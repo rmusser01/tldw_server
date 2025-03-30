@@ -71,6 +71,7 @@ from tldw_Server_API.app.core.DB_Management.SQLite_DB import (
     mark_media_as_processed as sqlite_mark_media_as_processed,
     get_full_media_details as sqlite_get_full_media_details,
     update_keywords_for_media as sqlite_update_keywords_for_media,
+    delete_document_version as sqlite_delete_document_version, \
 )
 from tldw_Server_API.app.core.DB_Management.RAG_QA_Chat_DB import start_new_conversation as sqlite_start_new_conversation, \
     save_message as sqlite_save_message, load_chat_history as sqlite_load_chat_history, \
@@ -342,6 +343,14 @@ def get_transcripts(*args, **kwargs):
         # Implement Postgres version
         raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
 
+def delete_specific_transcript(*args, **kwargs) -> str:
+    if db_type == 'sqlite':
+        return sqlite_delete_specific_transcript(*args, **kwargs)
+    elif db_type == 'elasticsearch':
+        raise NotImplementedError("Elasticsearch version of delete_specific_transcript not yet implemented")
+    else:
+        raise ValueError(f"Unsupported database type: {db_type}")
+
 #
 # End of Transcript-related Functions
 ############################################################################################################
@@ -526,7 +535,7 @@ def rollback_to_version(*arg, **kwargs):
 
 def delete_document_version(*args, **kwargs):
     if db_type == 'sqlite':
-        return sqlite_delete_specific_transcript(*args, **kwargs)
+        return sqlite_delete_document_version(*args, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of delete_document_version not yet implemented")
@@ -739,14 +748,6 @@ def get_specific_prompt(prompt_id: int) -> Dict:
         raise NotImplementedError("Elasticsearch version of get_specific_prompt not yet implemented")
     else:
         return {'error': f"Unsupported database type: {db_type}"}
-
-def delete_specific_transcript(transcript_id: int) -> str:
-    if db_type == 'sqlite':
-        return sqlite_delete_specific_transcript(transcript_id)
-    elif db_type == 'elasticsearch':
-        raise NotImplementedError("Elasticsearch version of delete_specific_transcript not yet implemented")
-    else:
-        raise ValueError(f"Unsupported database type: {db_type}")
 
 def delete_specific_summary(summary_id: int) -> str:
     if db_type == 'sqlite':

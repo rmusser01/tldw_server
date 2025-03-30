@@ -177,7 +177,9 @@ async def get_all_media(
 def get_media_item(media_id: int):
     try:
         prompt, summary, raw_content = fetch_item_details_single(media_id)
-
+        row = fetch_item_details_single(media_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Media not found")
         # Parse metadata and content
         metadata = {}
         transcript = []
@@ -208,13 +210,17 @@ def get_media_item(media_id: int):
                 whisper_model = line.split(":")[-1].strip()
                 break
 
+        # FIXME
+        #media_type = fetch_media_type(media_id)
+        media_type = "video" # Placeholder
+
         return {
             "media_id": media_id,
             "source": {
                 "url": metadata.get("webpage_url"),
                 "title": metadata.get("title"),
                 "duration": metadata.get("duration"),
-                "type": "video"  # Add actual type if available
+                "type": media_type
             },
             "processing": {
                 "prompt": clean_prompt,
@@ -246,7 +252,7 @@ def get_media_item(media_id: int):
 #   POST /api/v1/media/{media_id}/versions/rollback
 #   PUT /api/v1/media/{media_id}
 
-@router.post("/{media_id}/versions", response_model=VersionResponse)
+@router.post("/{media_id}/versions", )
 async def create_version(
     media_id: int,
     request: VersionCreateRequest,
@@ -268,7 +274,7 @@ async def create_version(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/{media_id}/versions", response_model=List[VersionResponse])
+@router.get("/{media_id}/versions")
 async def list_versions(
     media_id: int,
     include_content: bool = False,
@@ -283,12 +289,12 @@ async def list_versions(
         limit=limit,
         offset=offset
     )
-    if isinstance(versions, list) and any('error' in v for v in versions):
-        raise HTTPException(status_code=404, detail="Versions not found")
+    if not versions:
+        raise HTTPException(status_code=404, detail="No versions found")
     return versions
 
 
-@router.get("/{media_id}/versions/{version_number}", response_model=VersionResponse)
+@router.get("/{media_id}/versions/{version_number}")
 async def get_version(
     media_id: int,
     version_number: int,
@@ -318,7 +324,7 @@ async def delete_version(
         raise HTTPException(status_code=404, detail=result['error'])
     return result
 
-@router.post("/{media_id}/versions/rollback", response_model=VersionResponse)
+@router.post("/{media_id}/versions/rollback")
 async def rollback_version(
     media_id: int,
     request: VersionRollbackRequest,
@@ -331,7 +337,7 @@ async def rollback_version(
     return result
 
 
-@router.put("/{media_id}", response_model=MediaItemResponse)
+@router.put("/{media_id}")
 @limiter.limit("10/minute")
 async def update_media_item(
     media_id: int,
@@ -359,7 +365,7 @@ async def update_media_item(
 # Endpoints:
 #     GET /api/v1/media/search - `"/search"`
 
-@router.get("/search", summary="Search media", response_model=MediaSearchResponse)
+@router.get("/search", summary="Search media")
 @limiter.limit("20/minute")
 async def search_media(
         request: Request,
