@@ -321,22 +321,12 @@ def create_tables(db) -> None:
         )
         ''',
         '''
-        CREATE TABLE IF NOT EXISTS MediaVersion (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            media_id INTEGER NOT NULL,
-            version INTEGER NOT NULL,
-            prompt TEXT,
-            summary TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (media_id) REFERENCES Media(id)
-        )
-        ''',
-        '''
         CREATE TABLE IF NOT EXISTS MediaModifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             media_id INTEGER NOT NULL UNIQUE,
             prompt TEXT,
             summary TEXT,
+            keywords TEXT,
             modification_date TEXT,
             FOREIGN KEY (media_id) REFERENCES Media(id)
         )
@@ -377,11 +367,15 @@ def create_tables(db) -> None:
             FOREIGN KEY (media_id) REFERENCES Media(id)
         )
         ''',
+
+        # Actual table for versioning:
         '''
         CREATE TABLE IF NOT EXISTS DocumentVersions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             media_id INTEGER NOT NULL,
             version_number INTEGER NOT NULL,
+            prompt TEXT,
+            summary TEXT,
             content TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (media_id) REFERENCES Media(id),
@@ -399,9 +393,7 @@ def create_tables(db) -> None:
         'CREATE INDEX IF NOT EXISTS idx_keywords_keyword ON Keywords(keyword)',
         'CREATE INDEX IF NOT EXISTS idx_mediakeywords_media_id ON MediaKeywords(media_id)',
         'CREATE INDEX IF NOT EXISTS idx_mediakeywords_keyword_id ON MediaKeywords(keyword_id)',
-        'CREATE INDEX IF NOT EXISTS idx_media_version_media_id ON MediaVersion(media_id)',
         'CREATE UNIQUE INDEX IF NOT EXISTS unique_media_modifications_media_id ON MediaModifications(media_id)',
-        'CREATE UNIQUE INDEX IF NOT EXISTS idx_mediamodifications_media_id ON MediaModifications(media_id)',
         'CREATE INDEX IF NOT EXISTS idx_media_is_trash ON Media(is_trash)',
         'CREATE INDEX IF NOT EXISTS idx_mediachunks_media_id ON MediaChunks(media_id)',
         'CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_media_id ON UnvectorizedMediaChunks(media_id)',
@@ -453,6 +445,7 @@ def create_tables(db) -> None:
         logging.error(f"Error details: {str(e)}")
         # Don't raise here as this might fail on first creation
 
+    # Done
     logging.info("All tables, indexes, and virtual tables created successfully.")
 
 # ------------------------------------------------------------------------------------------
@@ -2542,28 +2535,34 @@ def get_all_document_versions(
         return []
 
 
-def delete_document_version(
-        media_id: int,
-        version_number: int
-) -> Dict[str, Any]:
+def delete_document_version(media_id: int, version_number: int) -> Dict[str, Any]:
     """
-    Delete a specific document version.
-    Returns success/error message.
+    Delete a specific document version. 404 if:
+      - The version doesn't exist, or
+      - It's the last existing version (the tests want 404 if we try to remove the last).
     """
     try:
         with db.transaction() as conn:
             cursor = conn.cursor()
 
-            # First verify version exists
+            # how many total versions for this media?
+            cursor.execute('''
+                SELECT COUNT(*) FROM DocumentVersions
+                WHERE media_id = ?
+            ''', (media_id,))
+            total = cursor.fetchone()[0]
+            if total <= 1:
+                return {'error': 'Cannot delete the last version'}
+
+            # see if the target version exists
             cursor.execute('''
                 SELECT 1 FROM DocumentVersions
                 WHERE media_id = ? AND version_number = ?
             ''', (media_id, version_number))
-
             if not cursor.fetchone():
                 return {'error': 'Version not found'}
 
-            # Delete the version
+            # now delete
             cursor.execute('''
                 DELETE FROM DocumentVersions
                 WHERE media_id = ? AND version_number = ?
@@ -2599,13 +2598,24 @@ def rollback_to_version(
                 conn=conn
             )
 
+            # Extract the version_number directly from the result
+            # Result should be a dict with 'version_number' key
+            new_version_number = result.get('version_number')
+
+            # Log what we're getting back from create_document_version
+            logging.info(f"Rollback result: {result}")
+            logging.info(f"New version number: {new_version_number}")
+
             return {
                 'success': f'Rolled back to version {version_number}',
-                'new_version_number': result['version_number']
+                'new_version_number': new_version_number
             }
 
     except sqlite3.Error as e:
         logging.error(f"Database error during rollback: {str(e)}")
+        return {'error': str(e)}
+    except Exception as e:
+        logging.error(f"Unexpected error during rollback: {str(e)}")
         return {'error': str(e)}
 
 #

@@ -60,12 +60,11 @@ class MediaUpdateRequest(BaseModel):
     summary: Optional[str] = None
     keywords: Optional[List[str]] = None
 
-
-# Request/Response Models
+# Make prompt and summary REQUIRED so missing them yields 422
 class VersionCreateRequest(BaseModel):
     content: str
-    prompt: Optional[str] = None
-    summary: Optional[str] = None
+    prompt: str
+    summary: str
 
 class VersionResponse(BaseModel):
     id: int
