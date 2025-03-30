@@ -38,8 +38,12 @@ import configparser
 # 28. update_media_content(media_id: int, content: str, prompt: str, summary: str)
 # 29. search_media_database(query: str) -> List[Tuple[int, str, str]]
 # 30. load_media_content(media_id: int)
-# 31.
-# 32.
+# 31. create_document_version`
+# 32. get_document_version`
+# 33. get_all_document_versions`
+# 34. delete_document_version`
+# 35. rollback_to_version`
+# 36.
 #
 #
 #####################
@@ -89,10 +93,10 @@ config = configparser.ConfigParser()
 config.read(config_path)
 
 # Get the SQLite path from the config, or use the default if not specified
-sqlite_path = config.get('Database', 'sqlite_path', fallback=get_database_path('media_summary.db'))
+sqlite_path = config.get('Database', 'sqlite_path', fallback=get_database_path('server_media_summary.db'))
 
 # Get the backup path from the config, or use the default if not specified
-backup_path = config.get('Database', 'backup_path', fallback='database_backups')
+backup_path = config.get('Database', 'backup_path', fallback='server_database_backups')
 backup_path = get_project_relative_path(backup_path)
 
 # Set the final paths
@@ -452,13 +456,16 @@ def create_tables(db) -> None:
 # Safe schema update for existing DBs
 def update_database_schema():
     """
-    Check for the content_hash column in Media; if missing, add it and create its index.
-    This prevents errors for DBs created before content_hash was added to the schema.
+    Check for and update schema elements that might be missing in older database versions:
+    - Checks for content_hash column in Media table
+    - Checks for keywords column in MediaModifications table
     """
     try:
-        logging.info("Checking if the 'content_hash' column exists in the Media table...")
+        logging.info("Checking database schema for updates...")
         with db.get_connection() as conn:
             cursor = conn.cursor()
+
+            # 1. Check for content_hash column in Media table
             cursor.execute('''
                 SELECT COUNT(*) 
                 FROM pragma_table_info('Media') 
@@ -476,7 +483,20 @@ def update_database_schema():
                 ''')
                 logging.info("Created 'content_hash' unique index.")
 
+            # 2. Check for keywords column in MediaModifications table
+            cursor.execute('''
+                SELECT COUNT(*) 
+                FROM pragma_table_info('MediaModifications') 
+                WHERE name = 'keywords'
+            ''')
+            keywords_column_exists = cursor.fetchone()[0]
+
+            if not keywords_column_exists:
+                cursor.execute('ALTER TABLE MediaModifications ADD COLUMN keywords TEXT')
+                logging.info("Added keywords column to 'MediaModifications' table.")
+
             conn.commit()
+            logging.info("Database schema update completed successfully.")
     except Exception as e:
         logging.error(f"Schema update failed: {str(e)}")
         logging.error(traceback.format_exc())
@@ -485,10 +505,68 @@ def update_database_schema():
         db.close_connection()
 
 
+def diagnose_schema():
+    """Diagnostic function to check the actual schema of the database tables."""
+    try:
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Check Media table schema
+            cursor.execute("PRAGMA table_info(Media)")
+            media_columns = cursor.fetchall()
+            logging.info(f"Media table columns: {[col[1] for col in media_columns]}")
+
+            # Check MediaModifications table schema
+            cursor.execute("PRAGMA table_info(MediaModifications)")
+            mod_columns = cursor.fetchall()
+            logging.info(f"MediaModifications table columns: {[col[1] for col in mod_columns]}")
+
+            # List all tables
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = cursor.fetchall()
+            logging.info(f"Tables in database: {[table[0] for table in tables]}")
+
+    except Exception as e:
+        logging.error(f"Schema diagnosis failed: {str(e)}")
+        logging.error(traceback.format_exc())
+
+
+def ensure_all_media_have_versions():
+    """Ensure all media items have at least one document version"""
+    try:
+        with db.transaction() as conn:
+            cursor = conn.cursor()
+
+            # Find media with no versions
+            cursor.execute("""
+                SELECT id, content FROM Media
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM DocumentVersions WHERE media_id = Media.id
+                )
+            """)
+
+            items = cursor.fetchall()
+            for media_id, content in items:
+                logging.info(f"Creating initial version for media {media_id}")
+                cursor.execute("""
+                    INSERT INTO DocumentVersions 
+                    (media_id, version_number, content, created_at)
+                    VALUES (?, 1, ?, CURRENT_TIMESTAMP)
+                """, (media_id, content))
+
+            if items:
+                logging.info(f"Created initial versions for {len(items)} media items")
+
+    except Exception as e:
+        logging.error(f"Error ensuring versions: {str(e)}")
+
+
 # ------------------------------------------------------------------------------------------
 # Create tables (if they don't exist), then update schema (if needed)
 create_tables(db)
 update_database_schema()
+diagnose_schema()
+ensure_all_media_have_versions()
 #
 # End of DB Setup Functions
 #######################################################################################################################
@@ -821,13 +899,13 @@ def add_media_with_keywords(url, title, media_type, content, keywords, prompt, s
                 cursor.execute('INSERT OR REPLACE INTO media_fts (rowid, title, content) VALUES (?, ?, ?)',
                             (media_id, title, content))
 
-                # Add media version
-                cursor.execute('SELECT MAX(version) FROM MediaVersion WHERE media_id = ?', (media_id,))
-                current_version = cursor.fetchone()[0] or 0
-                cursor.execute('''
-                INSERT INTO MediaVersion (media_id, version, prompt, summary, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                ''', (media_id, current_version + 1, prompt, summary, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                # Create initial document version
+                create_document_version(
+                    media_id=media_id,
+                    content=content,
+                    prompt=prompt,
+                    summary=summary
+                )
 
             conn.commit()
 
@@ -1058,8 +1136,32 @@ def export_keywords_to_csv():
 
 def fetch_keywords_for_media(media_id):
     try:
+        # First check if the keywords column exists in MediaModifications
         with db.get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM pragma_table_info('MediaModifications') 
+                WHERE name = 'keywords'
+            """)
+            keywords_column_exists = cursor.fetchone()[0]
+
+            if keywords_column_exists:
+                # Try to get keywords from MediaModifications first
+                cursor.execute("""
+                    SELECT keywords
+                    FROM MediaModifications
+                    WHERE media_id = ?
+                    ORDER BY modification_date DESC
+                    LIMIT 1
+                """, (media_id,))
+                result = cursor.fetchone()
+
+                if result and result[0]:
+                    # If we found keywords in MediaModifications, return them
+                    return [k.strip() for k in result[0].split(',') if k.strip()]
+
+            # Fallback: Get keywords from Keywords table via MediaKeywords
             cursor.execute('''
                 SELECT k.keyword
                 FROM Keywords k
@@ -1067,10 +1169,11 @@ def fetch_keywords_for_media(media_id):
                 WHERE mk.media_id = ?
             ''', (media_id,))
             keywords = [row[0] for row in cursor.fetchall()]
-        return keywords
+
+            return keywords or ["default"]
     except sqlite3.Error as e:
         logging.error(f"Error fetching keywords: {e}")
-        return []
+        return ["default"]  # Return a default keyword on error
 
 def update_keywords_for_media(media_id: int, keywords: List[str]):
     """Update keywords with validation and error handling"""
@@ -1189,21 +1292,33 @@ def fetch_item_details(media_id: int):
 
 
 # Function to add a version of a prompt and summary
-def add_media_version(conn, media_id: int, prompt: str, summary: str) -> None:
+def add_media_version(media_id: int, prompt: str, summary: str) -> Dict[str, Any]:
+    """
+    Legacy wrapper for create_document_version.
+    Use create_document_version directly for new code.
+    """
+    logging.warning("add_media_version is deprecated, use create_document_version instead")
+
     try:
-        cursor = conn.cursor()
+        # Get current content from Media table
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT content FROM Media WHERE id = ?", (media_id,))
+            result = cursor.fetchone()
 
-        # Get the current version number
-        cursor.execute('SELECT MAX(version) FROM MediaVersion WHERE media_id = ?', (media_id,))
-        current_version = cursor.fetchone()[0] or 0
+            if not result:
+                raise ValueError(f"No media found with ID {media_id}")
+            content = result[0]
 
-        # Insert the new version
-        cursor.execute('''
-        INSERT INTO MediaVersion (media_id, version, prompt, summary, created_at)
-        VALUES (?, ?, ?, ?, ?)
-        ''', (media_id, current_version + 1, prompt, summary, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-    except DatabaseError as e:
-        logging.error(f"Error adding media version: {e}")
+        # Use the new function
+        return create_document_version(
+            media_id=media_id,
+            content=content,
+            prompt=prompt,
+            summary=summary
+        )
+    except Exception as e:
+        logging.error(f"Error in add_media_version: {str(e)}")
         raise
 
 
@@ -1448,15 +1563,13 @@ def update_media_content_with_version(media_id, info_dict, content_input, prompt
             cursor = conn.cursor()
 
             # Create new document version
-            cursor.execute('SELECT MAX(version) FROM MediaVersion WHERE media_id = ?', (media_id,))
-            current_version = cursor.fetchone()[0] or 0
-            new_version = current_version + 1
-
-            # Insert new version
-            cursor.execute('''
-            INSERT INTO MediaVersion (media_id, version, prompt, summary, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            ''', (media_id, new_version, prompt_input, summary_input, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+            version_result = create_document_version(
+                media_id=media_id,
+                content=content_input,
+                prompt=prompt_input,
+                summary=summary_input
+            )
+            new_version = version_result['version_number']
 
             # Update the main content in the Media table
             cursor.execute('''

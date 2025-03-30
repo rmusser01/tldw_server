@@ -178,7 +178,7 @@ async def get_all_media(
 
 # Obtain details of a single media item using its ID
 @router.get("/{media_id}", summary="Get details about a single media item")
-def get_media_item(media_id: int):
+def get_media_item(media_id: int, db=Depends(get_db_manager)):
     try:
         # Check if the media row even exists
         row = db.execute_query(
@@ -190,20 +190,24 @@ def get_media_item(media_id: int):
 
         media_type, raw_content, author, title = row[0]
 
-        # fetch the latest prompt, summary
+        # Get keywords via the available function
+        kw_list = fetch_keywords_for_media(media_id) or []
+
+        # Fetch just prompt and summary from modifications
         mod_res = db.execute_query('''
-            SELECT prompt, summary, keywords
+            SELECT prompt, summary 
             FROM MediaModifications
             WHERE media_id = ?
             ORDER BY modification_date DESC
             LIMIT 1
         ''', (media_id,))
-        if mod_res:
-            prompt, summary, keywords_str = mod_res[0]
-        else:
-            prompt, summary, keywords_str = None, None, None
 
-        # If your code tries to parse JSON from content, do it carefully:
+        if mod_res:
+            prompt, summary = mod_res[0]
+        else:
+            prompt, summary = None, None
+
+        # This part was missing - initialize these variables
         metadata = {}
         transcript = []
         timestamps = []
@@ -234,11 +238,6 @@ def get_media_item(media_id: int):
             if "whisper model:" in line.lower():
                 whisper_model = line.split(":")[-1].strip()
                 break
-
-        # Convert keywords_str => list
-        kw_list = []
-        if keywords_str:
-            kw_list = [k.strip() for k in keywords_str.split(',') if k.strip()]
 
         return {
             "media_id": media_id,
@@ -1329,6 +1328,44 @@ async def process_web_scraping_endpoint(payload: WebScrapingRequest):
 # End of Web Scraping Ingestion
 #####################################################################################
 
+
+
+######################## Debugging and Diagnostics ###################################
+# Endpoints:
+#     GET /api/v1/media/debug/schema
+# Debugging and Diagnostics
+@router.get("/debug/schema")
+async def debug_schema():
+    """Diagnostic endpoint to check database schema."""
+    try:
+        schema_info = {}
+
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Get list of tables
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            schema_info["tables"] = [table[0] for table in cursor.fetchall()]
+
+            # Get Media table columns
+            cursor.execute("PRAGMA table_info(Media)")
+            schema_info["media_columns"] = [col[1] for col in cursor.fetchall()]
+
+            # Get MediaModifications table columns
+            cursor.execute("PRAGMA table_info(MediaModifications)")
+            schema_info["media_mods_columns"] = [col[1] for col in cursor.fetchall()]
+
+            # Count media rows
+            cursor.execute("SELECT COUNT(*) FROM Media")
+            schema_info["media_count"] = cursor.fetchone()[0]
+
+        return schema_info
+    except Exception as e:
+        return {"error": str(e)}
+
+#
+# End of Debugging and Diagnostics
+#####################################################################################
 
 #
 # End of media.py
