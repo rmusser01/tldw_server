@@ -67,6 +67,8 @@ https://github.com/CodeUpdaterBot/ClickUi
 https://github.com/woshixiaobai2019/mirau-chat-ui
 https://uxdesign.cc/the-importance-of-hover-states-c9312d7fd516
 https://trends.uxdesign.cc/
+https://silkhq.co/
+https://github.com/shokuninstudio/Dou
 https://brandingstyleguides.com
 https://zeroheight.com/how-we-document/design-system-report-2025-brought-to-you-by-zeroheight/
 https://www.a11y-collective.com/blog/cognitive-accessibility/
