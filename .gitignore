@@ -504,3 +504,4 @@ app.log
 *.dll
 /.gradio
 Config_Files/config.txt
+/Databases

@@ -20,18 +20,20 @@ from tldw_Server_API.app.core.DB_Management.SQLite_DB import Database, create_ta
 
 @contextmanager
 def temp_db():
-    """Context manager for a temporary DB using the standard schema."""
-    db_path = tempfile.mktemp()
-    db = Database(db_path)
-
-    try:
-        create_tables(db)
-        verify_media_db_schema(db)
-        yield db
-    finally:
-        db.close_connection()
-        if os.path.exists(db_path):
-            os.unlink(db_path)
+    # Create a temporary directory; it will be deleted automatically
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Build a database path inside the temporary directory.
+        db_path = os.path.join(temp_dir, "test.db")
+        db = Database(db_path)
+        try:
+            # Create tables using your current schema.
+            create_tables(db)
+            # Optionally, verify the schema.
+            verify_media_db_schema(db)
+            # Yield the fresh database instance.
+            yield db
+        finally:
+            db.close_connection()
 
 def verify_media_db_schema(db):
     """Ensure critical columns exist in Media table."""

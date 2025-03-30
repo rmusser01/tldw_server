@@ -223,7 +223,7 @@ class InputError(Exception):
 
 
 class Database:
-    def __init__(self, db_name='media_summary.db'):
+    def __init__(self, db_name='server_media_summary.db'):
         self.db_path = get_database_path(db_name)
         self.timeout = 10.0
         self._local = threading.local()
@@ -400,7 +400,8 @@ def create_tables(db) -> None:
         'CREATE INDEX IF NOT EXISTS idx_mediakeywords_media_id ON MediaKeywords(media_id)',
         'CREATE INDEX IF NOT EXISTS idx_mediakeywords_keyword_id ON MediaKeywords(keyword_id)',
         'CREATE INDEX IF NOT EXISTS idx_media_version_media_id ON MediaVersion(media_id)',
-        'CREATE INDEX IF NOT EXISTS idx_mediamodifications_media_id ON MediaModifications(media_id)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS unique_media_modifications_media_id ON MediaModifications(media_id)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_mediamodifications_media_id ON MediaModifications(media_id)',
         'CREATE INDEX IF NOT EXISTS idx_media_is_trash ON Media(is_trash)',
         'CREATE INDEX IF NOT EXISTS idx_mediachunks_media_id ON MediaChunks(media_id)',
         'CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_media_id ON UnvectorizedMediaChunks(media_id)',

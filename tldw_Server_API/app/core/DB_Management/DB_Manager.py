@@ -70,7 +70,6 @@ from tldw_Server_API.app.core.DB_Management.SQLite_DB import (
     get_latest_transcription as sqlite_get_latest_transcription, \
     mark_media_as_processed as sqlite_mark_media_as_processed,
     get_full_media_details as sqlite_get_full_media_details,
-    create_document_version as sqlite_create_document_version,
     update_keywords_for_media as sqlite_update_keywords_for_media,
 )
 from tldw_Server_API.app.core.DB_Management.RAG_QA_Chat_DB import start_new_conversation as sqlite_start_new_conversation, \
@@ -495,19 +494,6 @@ def mark_media_as_processed(*args, **kwargs):
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of mark_media_as_processed not yet implemented")
-    else:
-        raise ValueError(f"Unsupported database type: {db_type}")
-
-
-def create_document_version(*args, **kwargs):
-    if db_type == 'sqlite':
-        return sqlite_create_document_version(*args, **kwargs)
-    elif db_type == 'elasticsearch':
-        # Implement Elasticsearch version
-        raise NotImplementedError("Elasticsearch version of create_document_version not yet implemented")
-    elif db_type == 'postgres':
-        # Implement Postgres version
-        raise NotImplementedError("Postgres version of create_document_version not yet implemented")
     else:
         raise ValueError(f"Unsupported database type: {db_type}")
 
