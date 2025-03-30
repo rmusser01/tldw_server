@@ -4,7 +4,7 @@
 # This library is used to perform summarization with a 'local' inference engine.
 #
 ####
-from typing import Union, Any, Generator
+from typing import Any, Generator
 
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
@@ -24,7 +24,6 @@ from urllib3 import Retry
 ####################
 # Import necessary libraries
 # Import Local
-from App_Function_Libraries.Utils.Utils import *
 #
 #######################################################################################################################
 # Function Definitions

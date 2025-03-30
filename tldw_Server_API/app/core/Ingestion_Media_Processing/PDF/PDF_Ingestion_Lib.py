@@ -24,9 +24,9 @@ import pymupdf4llm
 from docling.document_converter import DocumentConverter
 #
 # Import Local
-from App_Function_Libraries.DB.DB_Manager import add_media_with_keywords
-from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
-from App_Function_Libraries.Utils.Utils import logging
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_with_keywords
+from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from PoC_Version.App_Function_Libraries.Utils import logging
 
 #
 # Constants

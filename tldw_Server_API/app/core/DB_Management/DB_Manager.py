@@ -4,13 +4,12 @@
 # Imports
 import configparser
 import os
-from typing import List, Optional, Tuple, Union, Dict, Any
+from typing import List, Tuple, Union, Dict
 #
 # 3rd-Party Libraries
 #from elasticsearch import Elasticsearch
 #
 # Import your existing SQLite functions
-from App_Function_Libraries.DB.SQLite_DB import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import list_prompts as sqlite_list_prompts, \
     fetch_prompt_details as sqlite_fetch_prompt_details, add_prompt as sqlite_add_prompt, \
     search_prompts as sqlite_search_prompts, add_or_update_prompt as sqlite_add_or_update_prompt, \
@@ -53,7 +52,6 @@ from tldw_Server_API.app.core.DB_Management.SQLite_DB import (
     delete_specific_summary as sqlite_delete_specific_summary, \
     delete_specific_prompt as sqlite_delete_specific_prompt,
     fetch_keywords_for_media as sqlite_fetch_keywords_for_media, \
-    update_keywords_for_media as sqlite_update_keywords_for_media,
     check_media_exists as sqlite_check_media_exists, \
     get_media_content as sqlite_get_media_content,
     get_paginated_files as sqlite_get_paginated_files, \
@@ -69,7 +67,6 @@ from tldw_Server_API.app.core.DB_Management.SQLite_DB import (
     fetch_paginated_data as sqlite_fetch_paginated_data,
     get_latest_transcription as sqlite_get_latest_transcription, \
     mark_media_as_processed as sqlite_mark_media_as_processed,
-    get_full_media_details as sqlite_get_full_media_details,
     update_keywords_for_media as sqlite_update_keywords_for_media,
     delete_document_version as sqlite_delete_document_version, \
 )
@@ -96,8 +93,7 @@ from tldw_Server_API.app.core.DB_Management.Character_Chat_DB import (
 )
 #
 # Local Imports
-from tldw_Server_API.app.core.Utils.Utils import load_comprehensive_config, get_database_path, get_project_relative_path, \
-    logger, logging
+from tldw_Server_API.app.core.Utils.Utils import load_comprehensive_config, get_database_path, get_project_relative_path
 
 #
 # End of imports

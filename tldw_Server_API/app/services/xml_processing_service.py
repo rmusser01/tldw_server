@@ -7,19 +7,14 @@
 # Optionally summarize.
 # Return all final data in a dictionary.
 
-import os
 import tempfile
 import xml.etree.ElementTree as ET
 from typing import Optional, List
 
 from fastapi import HTTPException
 from tldw_Server_API.app.core.logging import logger
-from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
-from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
-from tldw_Server_API.app.core.Utils.Utils import logging
 
-from App_Function_Libraries.Summarization.Summarization_General_Lib import perform_summarization
-from App_Function_Libraries.Chunk_Lib import chunk_xml
+from PoC_Version.App_Function_Libraries.Chunk_Lib import chunk_xml
 
 async def process_xml_task(
     file_bytes: bytes,

@@ -20,7 +20,7 @@ import inspect
 import json
 import os
 import time
-from typing import Optional, Any, Generator, Literal
+from typing import Optional
 #
 import requests
 from requests.adapters import HTTPAdapter
@@ -28,17 +28,17 @@ from urllib3 import Retry
 
 #
 # Import Local
-from App_Function_Libraries.Audio.Audio_Transcription_Lib import convert_to_wav, speech_to_text
-from App_Function_Libraries.Chunk_Lib import semantic_chunking, rolling_summarize, recursive_summarize_chunks, \
+from PoC_Version.App_Function_Libraries.Audio.Audio_Transcription_Lib import convert_to_wav, speech_to_text
+from PoC_Version.App_Function_Libraries.Chunk_Lib import semantic_chunking, rolling_summarize, recursive_summarize_chunks, \
     improved_chunking_process
-from App_Function_Libraries.Audio.Diarization_Lib import combine_transcription_and_diarization
-from App_Function_Libraries.Summarization.Local_Summarization_Lib import summarize_with_llama, summarize_with_kobold, \
+from PoC_Version.App_Function_Libraries.Audio import combine_transcription_and_diarization
+from PoC_Version.App_Function_Libraries.Summarization import summarize_with_llama, summarize_with_kobold, \
     summarize_with_oobabooga, summarize_with_tabbyapi, summarize_with_vllm, summarize_with_local_llm, \
     summarize_with_ollama, summarize_with_custom_openai, summarize_with_custom_openai_2
-from App_Function_Libraries.DB.DB_Manager import add_media_to_database
-from App_Function_Libraries.Utils.Utils import (load_and_log_configs, sanitize_filename, clean_youtube_url,
-                                                create_download_directory, is_valid_url, logging)
-from App_Function_Libraries.Video_DL_Ingestion_Lib import download_video, extract_video_info
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_to_database
+from PoC_Version.App_Function_Libraries.Utils import (load_and_log_configs, sanitize_filename, clean_youtube_url,
+                                                      create_download_directory, is_valid_url, logging)
+from PoC_Version.App_Function_Libraries.Video_DL_Ingestion_Lib import download_video, extract_video_info
 #
 #######################################################################################################################
 # Function Definitions

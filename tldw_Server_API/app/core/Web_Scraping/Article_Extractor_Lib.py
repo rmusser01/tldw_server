@@ -21,8 +21,6 @@ import os
 import random
 import tempfile
 from typing import Any, Dict, List, Union, Optional, Tuple
-import time
-from urllib.parse import urlparse, urljoin
 #
 # 3rd-Party Imports
 import asyncio
@@ -46,10 +44,10 @@ import trafilatura
 from tqdm import tqdm
 #
 # Import Local
-from App_Function_Libraries.DB.DB_Manager import ingest_article_to_db
-from App_Function_Libraries.Summarization.Summarization_General_Lib import summarize
-from App_Function_Libraries.Metrics.metrics_logger import log_histogram, log_counter
-from App_Function_Libraries.Utils.Utils import logging, load_and_log_configs
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import ingest_article_to_db
+from PoC_Version.App_Function_Libraries.Summarization import summarize
+from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_histogram, log_counter
+from PoC_Version.App_Function_Libraries.Utils import logging, load_and_log_configs
 #
 #######################################################################################################################
 # Function Definitions

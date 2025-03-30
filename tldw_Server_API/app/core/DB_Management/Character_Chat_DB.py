@@ -9,8 +9,8 @@ import os
 import sys
 from typing import List, Dict, Optional, Tuple, Any, Union
 
-from App_Function_Libraries.Utils.Utils import get_database_dir, get_project_relative_path, get_database_path
-from Tests.Chat_APIs.Chat_APIs_Integration_test import logging
+from PoC_Version.App_Function_Libraries.Utils import get_database_dir, get_project_relative_path, get_database_path
+from PoC_Version.Tests import logging
 
 #
 #######################################################################################################################

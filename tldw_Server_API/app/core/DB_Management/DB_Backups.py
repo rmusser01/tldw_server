@@ -7,9 +7,9 @@ import sqlite3
 from datetime import datetime
 #
 # Local Imports:
-from App_Function_Libraries.DB.Character_Chat_DB import chat_DB_PATH
-from App_Function_Libraries.DB.RAG_QA_Chat_DB import get_rag_qa_db_path
-from App_Function_Libraries.Utils.Utils import get_project_relative_path, logging
+from PoC_Version.App_Function_Libraries.DB.Character_Chat_DB import chat_DB_PATH
+from PoC_Version.App_Function_Libraries.DB.RAG_QA_Chat_DB import get_rag_qa_db_path
+from PoC_Version.App_Function_Libraries.Utils import get_project_relative_path, logging
 
 
 #

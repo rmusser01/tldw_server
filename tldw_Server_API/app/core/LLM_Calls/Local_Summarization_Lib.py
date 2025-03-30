@@ -20,8 +20,6 @@
 # Import necessary libraries
 import json
 import os
-import time
-from typing import Union, Any, Generator
 
 # Import 3rd-party Libraries
 import requests
@@ -30,7 +28,7 @@ from urllib3 import Retry
 
 #
 # Import Local Libraries
-from App_Function_Libraries.Utils.Utils import load_and_log_configs, extract_text_from_segments, logging
+from PoC_Version.App_Function_Libraries.Utils import load_and_log_configs, extract_text_from_segments, logging
 
 #
 #######################################################################################################################

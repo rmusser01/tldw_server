@@ -11,7 +11,7 @@ import psutil
 # Third-party Imports
 #
 # Local Imports
-from App_Function_Libraries.Metrics.logger_config import logger
+from PoC_Version.App_Function_Libraries.Metrics import logger
 #
 ############################################################################################################
 #

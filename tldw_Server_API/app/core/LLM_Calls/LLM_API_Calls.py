@@ -31,7 +31,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 #
 # Import Local libraries
-from App_Function_Libraries.Utils.Utils import load_and_log_configs, logging
+from PoC_Version.App_Function_Libraries.Utils import load_and_log_configs, logging
 #
 #######################################################################################################################
 # Function Definitions

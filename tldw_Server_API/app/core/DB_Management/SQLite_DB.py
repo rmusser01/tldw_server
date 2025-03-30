@@ -65,10 +65,10 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import List, Tuple, Dict, Any, Optional
 # Local Libraries
-from App_Function_Libraries.Utils.Utils import get_project_relative_path, get_database_path, \
+from tldw_Server_API.app.core.Utils.Utils import get_project_relative_path, get_database_path, \
     get_database_dir, logger, logging
-from App_Function_Libraries.Chunk_Lib import chunk_options, chunk_text
-from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_options, chunk_text
+from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 #
 # Third-Party Libraries
 import gradio as gr
@@ -93,7 +93,7 @@ config = configparser.ConfigParser()
 config.read(config_path)
 
 # Get the SQLite path from the config, or use the default if not specified
-sqlite_path = config.get('Database', 'sqlite_path', fallback=get_database_path('server_media_summary.db'))
+sqlite_path = config.get('Database', 'sqlite_path', fallback=get_database_path('tldw_Server_API\Databases\server_media_summary.db'))
 
 # Get the backup path from the config, or use the default if not specified
 backup_path = config.get('Database', 'backup_path', fallback='server_database_backups')

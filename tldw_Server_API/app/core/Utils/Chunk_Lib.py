@@ -18,12 +18,12 @@ from tqdm import tqdm
 from langdetect import detect
 from transformers import GPT2Tokenizer
 import nltk
-from nltk.tokenize import sent_tokenize, word_tokenize
+from nltk.tokenize import sent_tokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 #
 # Import Local
-from App_Function_Libraries.Utils.Utils import load_and_log_configs, logging
+from PoC_Version.App_Function_Libraries.Utils import load_and_log_configs, logging
 
 
 #

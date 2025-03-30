@@ -34,34 +34,29 @@ from urllib.parse import urlparse, parse_qs
 import yt_dlp
 import unicodedata
 # Import Local
-from App_Function_Libraries.DB.DB_Manager import check_media_and_whisper_model
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import check_media_and_whisper_model
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     add_media_to_database,
     check_media_and_whisper_model,
     check_existing_media,
     update_media_content_with_version
 )
-from App_Function_Libraries.Utils.Utils import (
+from PoC_Version.App_Function_Libraries.Utils import (
     convert_to_seconds,
-    safe_read_file,
-    format_transcription,
     create_download_directory,
     generate_unique_identifier,
     extract_text_from_segments,
-    load_and_log_configs,
     logging
 )
-from App_Function_Libraries.Summarization.Summarization_General_Lib import (
+from PoC_Version.App_Function_Libraries.Summarization import (
     perform_transcription,
-    perform_summarization,
-    save_transcription_and_summary
+    perform_summarization
 )
-from App_Function_Libraries.Chunk_Lib import improved_chunking_process
-from App_Function_Libraries.Metrics.metrics_logger import (
+from PoC_Version.App_Function_Libraries.Chunk_Lib import improved_chunking_process
+from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import (
     log_counter, log_histogram
 )
 # If you need confabulation check:
-from App_Function_Libraries.Benchmarks_Evaluations.ms_g_eval import run_geval
 
 #
 #######################################################################################################################

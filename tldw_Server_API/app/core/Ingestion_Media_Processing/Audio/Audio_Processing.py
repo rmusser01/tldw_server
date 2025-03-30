@@ -1,19 +1,14 @@
 # file: Server_API/app/core/audio_processing.py
 
 import os
-import json
-import uuid
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
-import requests
-
-from App_Function_Libraries.DB.DB_Manager import (
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import (
     add_media_with_keywords,
-    add_media_to_database,        # or whichever you'd like
+    # or whichever you'd like
     check_media_and_whisper_model,
-    check_existing_media,
 )
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
@@ -21,8 +16,6 @@ from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 from tldw_Server_API.app.core.Utils.Utils import (
     logging,
     create_download_directory,
-    extract_text_from_segments,
-    format_transcription,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import speech_to_text, format_transcription_with_timestamps
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import extract_metadata, download_video
