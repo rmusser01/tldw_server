@@ -44,10 +44,10 @@ import trafilatura
 from tqdm import tqdm
 #
 # Import Local
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import ingest_article_to_db
-from PoC_Version.App_Function_Libraries.Summarization import summarize
-from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_histogram, log_counter
-from PoC_Version.App_Function_Libraries.Utils import logging, load_and_log_configs
+from tldw_Server_API.app.core.DB_Management.DB_Manager import ingest_article_to_db
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
+from tldw_Server_API.app.core.Metrics.metrics_logger import log_histogram, log_counter
+from tldw_Server_API.app.core.Utils.Utils import logging, load_and_log_configs
 #
 #######################################################################################################################
 # Function Definitions

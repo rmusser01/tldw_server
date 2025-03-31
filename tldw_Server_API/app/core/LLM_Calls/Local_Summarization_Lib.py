@@ -20,16 +20,13 @@
 # Import necessary libraries
 import json
 import os
-
 # Import 3rd-party Libraries
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
-
 #
 # Import Local Libraries
-from PoC_Version.App_Function_Libraries.Utils import load_and_log_configs, extract_text_from_segments, logging
-
+from tldw_Server_API.app.core.Utils.Utils import load_and_log_configs, extract_text_from_segments, logging
 #
 #######################################################################################################################
 # Function Definitions

@@ -28,17 +28,34 @@ from urllib3 import Retry
 
 #
 # Import Local
-from PoC_Version.App_Function_Libraries.Audio.Audio_Transcription_Lib import convert_to_wav, speech_to_text
-from PoC_Version.App_Function_Libraries.Chunk_Lib import semantic_chunking, rolling_summarize, recursive_summarize_chunks, \
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import convert_to_wav, speech_to_text
+from tldw_Server_API.app.core.Utils.Chunk_Lib import (
+    semantic_chunking,
+    rolling_summarize,
+    recursive_summarize_chunks,
     improved_chunking_process
-from PoC_Version.App_Function_Libraries.Audio import combine_transcription_and_diarization
-from PoC_Version.App_Function_Libraries.Summarization import summarize_with_llama, summarize_with_kobold, \
-    summarize_with_oobabooga, summarize_with_tabbyapi, summarize_with_vllm, summarize_with_local_llm, \
-    summarize_with_ollama, summarize_with_custom_openai, summarize_with_custom_openai_2
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_to_database
-from PoC_Version.App_Function_Libraries.Utils import (load_and_log_configs, sanitize_filename, clean_youtube_url,
-                                                      create_download_directory, is_valid_url, logging)
-from PoC_Version.App_Function_Libraries.Video_DL_Ingestion_Lib import download_video, extract_video_info
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Diarization_Lib import combine_transcription_and_diarization
+from tldw_Server_API.app.core.LLM_Calls.Local_Summarization_Lib import (
+    summarize_with_llama,
+    summarize_with_kobold,
+    summarize_with_oobabooga,
+    summarize_with_tabbyapi,
+    summarize_with_vllm,
+    summarize_with_local_llm,
+    summarize_with_ollama,
+    summarize_with_custom_openai,
+    summarize_with_custom_openai_2
+)
+from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
+from tldw_Server_API.app.core.Utils.Utils import (
+    load_and_log_configs,
+    sanitize_filename,
+    clean_youtube_url,
+    create_download_directory,
+    is_valid_url,
+    logging
+)
 #
 #######################################################################################################################
 # Function Definitions
@@ -1927,6 +1944,7 @@ def process_video_urls(url_list, num_speakers, whisper_model, custom_prompt_inpu
     #return current_progress, success_message, summary, json_file_path, summary_file_path, None
 
 def perform_transcription(video_path, offset, whisper_model, vad_filter, diarize=False, overwrite=False):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import convert_to_wav, speech_to_text
     temp_files = []
     logging.info(f"Processing media: {video_path}")
     global segments_json_path

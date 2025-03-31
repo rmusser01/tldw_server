@@ -39,8 +39,8 @@ import sounddevice as sd
 import wave
 #
 # Import Local
-from PoC_Version.App_Function_Libraries.Utils import sanitize_filename, load_and_log_configs, logging
-from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram, timeit
+from tldw_Server_API.app.core.Utils.Utils import sanitize_filename, load_and_log_configs, logging
+from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram, timeit
 #
 #######################################################################################################################
 # Function Definitions

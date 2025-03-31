@@ -24,10 +24,9 @@ import pymupdf4llm
 from docling.document_converter import DocumentConverter
 #
 # Import Local
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_with_keywords
-from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
-from PoC_Version.App_Function_Libraries.Utils import logging
-
+from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords
+from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.Utils.Utils import logging
 #
 # Constants
 MAX_FILE_SIZE_MB = 50

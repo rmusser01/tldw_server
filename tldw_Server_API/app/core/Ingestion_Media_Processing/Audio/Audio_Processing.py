@@ -1,17 +1,21 @@
-# file: Server_API/app/core/audio_processing.py
-
+# Server_API/app/core/audio_processing.py
+# Description:
+#
+# Imports
 import os
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import (
+#
+# 3rd-party Libraries
+#
+# Local Imports
+from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     add_media_with_keywords,
     # or whichever you'd like
     check_media_and_whisper_model,
 )
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
 from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 from tldw_Server_API.app.core.Utils.Utils import (
     logging,
@@ -19,6 +23,11 @@ from tldw_Server_API.app.core.Utils.Utils import (
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import speech_to_text, format_transcription_with_timestamps
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import extract_metadata, download_video
+#
+########################################################################################################################
+#
+# Functions:
+
 
 # For ephemeral logic, we'll just skip DB calls if store_in_db=False. If you want an ephemeral storage approach,
 # you can store results in an in-memory dict keyed by a UUID. The code below demonstrates skipping DB entirely.
@@ -201,6 +210,7 @@ def process_audio(
             if api_name and api_name.lower() != "none":
                 # chunk + summarize
                 chunked_texts = improved_chunking_process(transcript, chunk_options)
+                from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
                 summary_text = perform_summarization(api_name, chunked_texts, custom_prompt, api_key)
             else:
                 summary_text = "[No summary requested]"

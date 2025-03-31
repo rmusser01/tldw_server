@@ -12,15 +12,18 @@ from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
 
 # If you want your summarization logic:
-from PoC_Version.App_Function_Libraries.Summarization import summarize
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
 # If you want the functions from your existing library:
-from PoC_Version.App_Function_Libraries.Web_Scraping import (
+from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
     scrape_and_summarize_multiple,  # or whichever you prefer
     scrape_from_sitemap,
     scrape_by_url_level,
 )
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import recursive_scrape
-
+#
+########################################################################################################################
+#
+# Functions:
 
 async def process_web_scraping_task(
     scrape_method: str,

@@ -11,7 +11,7 @@ import psutil
 # Third-party Imports
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Metrics import logger
+from tldw_Server_API.app.core.Utils.Utils import logger
 #
 ############################################################################################################
 #

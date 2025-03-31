@@ -34,30 +34,24 @@ from urllib.parse import urlparse, parse_qs
 import yt_dlp
 import unicodedata
 # Import Local
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import check_media_and_whisper_model
+from tldw_Server_API.app.core.DB_Management.DB_Manager import check_media_and_whisper_model
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     add_media_to_database,
     check_media_and_whisper_model,
     check_existing_media,
     update_media_content_with_version
 )
-from PoC_Version.App_Function_Libraries.Utils import (
+from tldw_Server_API.app.core.Utils.Utils import (
     convert_to_seconds,
     create_download_directory,
     generate_unique_identifier,
     extract_text_from_segments,
     logging
 )
-from PoC_Version.App_Function_Libraries.Summarization import (
-    perform_transcription,
-    perform_summarization
-)
-from PoC_Version.App_Function_Libraries.Chunk_Lib import improved_chunking_process
-from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import (
+from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
+from tldw_Server_API.app.core.Metrics.metrics_logger import (
     log_counter, log_histogram
 )
-# If you need confabulation check:
-
 #
 #######################################################################################################################
 # Function Definitions
@@ -665,6 +659,8 @@ def process_single_video(
             video_path = video_input
 
         # Perform transcription
+        from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_transcription, \
+            perform_summarization
         audio_file_path, segments = perform_transcription(
             video_path, start_seconds, whisper_model, vad_use,
             diarize, overwrite_existing
