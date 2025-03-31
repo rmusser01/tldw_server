@@ -15,9 +15,13 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
+import tempfile
+import uuid
 from datetime import datetime, timedelta
 from math import ceil
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 #
 # 3rd-party imports
@@ -545,39 +549,400 @@ def extract_id_from_result(result: str) -> int:
 
 # Per-User Media Ingestion and Analysis
 @router.post("/add")
-def add_media(
-        db_name: str,
+async def add_media(
         url: str,
-        token: str = Header(..., description="Bearer token in Authorization header or pass it explicitly"),
+        media_type: str,
+        background_tasks: BackgroundTasks,
+        file: Optional[UploadFile] = File(None),
+        title: Optional[str] = None,
+        author: Optional[str] = None,
+        keywords: str = "",
+        custom_prompt: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        whisper_model: str = "base",
+        diarize: bool = False,
+        timestamp_option: bool = True,
+        keep_original: bool = False,
+        overwrite: bool = False,
+        api_name: Optional[str] = None,
+        api_key: Optional[str] = None,
+        pdf_parsing_engine: Optional[str] = None,
+        token: str = Header(..., description="Authentication token"),
         db=Depends(get_db_manager)
 ):
     """
-    Add new media to the database.
+    Add new media to the database with processing.
+
+    This endpoint processes a URL or uploaded file based on the media type, then adds the
+    processed content to the database. It handles different types of media with appropriate
+    processing functions.
+
+    Parameters:
+    - url: Source URL of the media (or identifier for uploaded file)
+    - media_type: Type of media (video, audio, document, pdf, ebook, xml)
+    - file: Optional file upload if not using a URL
+    - title: Optional title for the media
+    - author: Optional author name
+    - keywords: Optional comma-separated keywords
+    - custom_prompt: Optional custom prompt for processing
+    - whisper_model: Whisper model to use for audio/video transcription
+    - diarize: Whether to diarize audio/video content
+    - timestamp_option: Whether to include timestamps
+    - keep_original: Whether to keep the original file
+    - overwrite: Whether to overwrite existing media with the same URL
+    - api_name: Optional API name for processing (e.g., "openai")
+    - api_key: Optional API key for processing
+    - token: Authentication token
     """
+    # Create a temporary directory that will be automatically cleaned up
+    temp_dir = None
+    local_file_path = None
+
     try:
-        # 1) get the DB instance for the current user & the requested db_name
-        user_db = get_user_db(token, db_name)
+        # Validate media type
+        valid_types = ['video', 'audio', 'document', 'pdf', 'ebook', 'xml', 'web']
+        if media_type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid media_type. Must be one of: {', '.join(valid_types)}"
+            )
 
-        # 2) Add media with default values
-        result = add_media_to_database(
-            url=url,
-            info_dict={},
-            segments=[],
-            summary="",
-            keywords="",
-            custom_prompt_input="",
-            whisper_model="",
-            overwrite=False,
-            db=user_db
-        )
+        # Handle file upload if provided
+        if file:
+            # Create a secure temporary directory
+            temp_dir = tempfile.mkdtemp(prefix="media_processing_")
 
-        return {
-            "status": "success",
-            "message": result,
-            "media_url": f"/api/v1/media/{extract_id_from_result(result)}"  # Helper function needed
-        }
+            # Generate a secure filename with the correct extension
+            original_extension = Path(file.filename).suffix
+            secure_filename = f"{uuid.uuid4()}{original_extension}"
+            local_file_path = Path(temp_dir) / secure_filename
+
+            # Save uploaded file to secure location
+            with open(local_file_path, "wb") as buffer:
+                content = await file.read()
+                buffer.write(content)
+
+            # Schedule cleanup for temp directory in background task
+            if not keep_original:
+                background_tasks.add_task(shutil.rmtree, temp_dir, ignore_errors=True)
+
+            # If no URL provided, use the filename (but not the path)
+            if not url or url == "":
+                url = file.filename
+
+        # Process based on media type
+        if media_type == 'video':
+            logging.info(f"Processing video: {url}")
+            inputs = [local_file_path] if local_file_path else [url]
+            result = process_videos(
+                inputs=inputs,
+                diarize=diarize,
+                whisper_model=whisper_model,
+                use_custom_prompt=(custom_prompt is not None),
+                custom_prompt=custom_prompt,
+                keywords=keywords,
+                timestamp_option=timestamp_option,
+                keep_original_video=keep_original,
+                overwrite_existing=overwrite,
+                store_in_db=True,
+            )
+            # Extract the media ID from the result
+            processed_items = result.get('results', [])
+            if processed_items and len(processed_items) > 0:
+                first_result = processed_items[0]
+                media_id = first_result.get('db_id')
+                if media_id:
+                    return {
+                        "status": "success",
+                        "message": f"Video processed and added with ID: {media_id}",
+                        "media_id": media_id,
+                        "media_url": f"/api/v1/media/{media_id}"
+                    }
+
+            # If we couldn't extract an ID, return the whole result
+            return {
+                "status": "success",
+                "message": "Video processed, see details in results",
+                "results": result
+            }
+
+        elif media_type == 'audio':
+            logging.info(f"Processing audio: {url}")
+            urls = [url] if url else []
+            local_files = [local_file_path] if local_file_path else []
+
+            result = process_audio(
+                urls=urls,
+                local_files=local_files,
+                whisper_model=whisper_model,
+                diarize=diarize,
+                keep_timestamps=timestamp_option,
+                api_name=api_name,
+                api_key=api_key,
+                custom_prompt=custom_prompt,
+                keywords=keywords,
+                keep_original_audio=keep_original,
+                store_in_db=True,
+                custom_title=title,
+            )
+
+            # Extract the media ID from the result
+            processed_items = result.get('results', [])
+            if processed_items and len(processed_items) > 0:
+                first_result = processed_items[0]
+                media_id = first_result.get('db_id')
+                if media_id:
+                    return {
+                        "status": "success",
+                        "message": f"Audio processed and added with ID: {media_id}",
+                        "media_id": media_id,
+                        "media_url": f"/api/v1/media/{media_id}"
+                    }
+
+            # If we couldn't extract an ID, return the whole result
+            return {
+                "status": "success",
+                "message": "Audio processed, see details in results",
+                "results": result
+            }
+
+        elif media_type == 'document':
+            logging.info(f"Processing document: {url or local_file_path}")
+
+            if local_file_path:
+                with open(local_file_path, "rb") as f:
+                    file_bytes = f.read()
+                filename = file.filename
+            else:
+                # Download the file from URL
+                import requests
+                response = requests.get(url)
+                file_bytes = response.content
+                filename = url.split('/')[-1]
+
+            # Process document
+            result_data = await process_document_task(
+                file_bytes=file_bytes,
+                filename=filename,
+                custom_prompt=custom_prompt,
+                api_name=api_name,
+                api_key=api_key,
+                keywords=keywords.split(',') if keywords else [],
+                system_prompt=None,
+                auto_summarize=False
+            )
+
+            # Store in DB
+            doc_text = result_data["text_content"]
+            summary = result_data.get("summary", "")
+
+            # Create "info_dict" for DB
+            info_dict = {
+                "title": title or os.path.splitext(filename)[0],
+                "source_file": filename,
+                "author": author or "Unknown"
+            }
+
+            segments = [{"Text": doc_text}]
+
+            # Insert into database
+            result = add_media_to_database(
+                url=url or filename,
+                info_dict=info_dict,
+                segments=segments,
+                summary=summary,
+                keywords=keywords,
+                custom_prompt_input=custom_prompt or "",
+                whisper_model="doc-import",
+                media_type=media_type,
+                overwrite=overwrite
+            )
+
+            media_id = extract_id_from_result(result)
+
+            return {
+                "status": "success",
+                "message": result,
+                "media_id": media_id,
+                "media_url": f"/api/v1/media/{media_id}"
+            }
+
+        elif media_type == 'pdf':
+            logging.info(f"Processing PDF: {url or local_file_path}")
+
+            if local_file_path:
+                with open(local_file_path, "rb") as f:
+                    file_bytes = f.read()
+                filename = file.filename
+            else:
+                # Download the file from URL
+                import requests
+                response = requests.get(url)
+                file_bytes = response.content
+                filename = url.split('/')[-1]
+
+            # Process PDF
+            result_data = await process_pdf_task(
+                file_bytes=file_bytes,
+                filename=filename,
+                parser=pdf_parsing_engine,
+                custom_prompt=custom_prompt,
+                api_name=api_name,
+                api_key=api_key,
+                auto_summarize=True,
+                keywords=keywords.split(',') if keywords else [],
+                system_prompt=system_prompt
+            )
+
+            # Store in DB
+            segments = [{"Text": result_data["text_content"]}]
+            summary = result_data.get("summary", "")
+
+            info_dict = {
+                "title": title or result_data.get("title", os.path.splitext(filename)[0]),
+                "author": author or result_data.get("author", "Unknown"),
+                "parser_used": result_data.get("parser_used", "pymupdf4llm")
+            }
+
+            # Insert into DB
+            result = add_media_to_database(
+                url=url or filename,
+                info_dict=info_dict,
+                segments=segments,
+                summary=summary,
+                keywords=keywords,
+                custom_prompt_input=custom_prompt or "",
+                whisper_model="pdf-import",
+                media_type=media_type,
+                overwrite=overwrite
+            )
+
+            media_id = extract_id_from_result(result)
+
+            return {
+                "status": "success",
+                "message": result,
+                "media_id": media_id,
+                "media_url": f"/api/v1/media/{media_id}"
+            }
+
+        elif media_type == 'ebook':
+            logging.info(f"Processing eBook: {url or local_file_path}")
+
+            if not local_file_path and url:
+                # Download the file from URL
+                import requests
+                response = requests.get(url)
+                local_file_path = f"/tmp/{url.split('/')[-1]}"
+                with open(local_file_path, "wb") as f:
+                    f.write(response.content)
+
+            if not local_file_path:
+                raise HTTPException(status_code=400, detail="No file provided for ebook processing")
+
+            # Process eBook
+            result_data = await process_ebook_task(
+                file_path=local_file_path,
+                title=title,
+                author=author,
+                keywords=keywords.split(',') if keywords else [],
+                custom_prompt=custom_prompt,
+                api_name=api_name,
+                api_key=api_key,
+                chunk_size=500,
+                chunk_overlap=200
+            )
+
+            # Store in DB
+            info_dict = {
+                "title": title or result_data.get("ebook_title", "Untitled eBook"),
+                "author": author or result_data.get("ebook_author", "Unknown")
+            }
+
+            segments = [{"Text": result_data.get("text", "")}]
+            summary = result_data.get("summary", "")
+
+            # Insert into DB
+            result = add_media_to_database(
+                url=url or os.path.basename(local_file_path),
+                info_dict=info_dict,
+                segments=segments,
+                summary=summary,
+                keywords=keywords,
+                custom_prompt_input=custom_prompt or "",
+                whisper_model="ebook-import",
+                media_type=media_type,
+                overwrite=overwrite
+            )
+
+            media_id = extract_id_from_result(result)
+
+            return {
+                "status": "success",
+                "message": result,
+                "media_id": media_id,
+                "media_url": f"/api/v1/media/{media_id}"
+            }
+
+        elif media_type == 'web':
+            logging.info(f"Processing web content: {url}")
+
+            if not url:
+                raise HTTPException(status_code=400, detail="URL is required for web scraping")
+
+            # Call the web scraping service
+            result = await process_web_scraping_task(
+                scrape_method="Individual URLs",
+                url_input=url,
+                summarize_checkbox=True,
+                custom_prompt=custom_prompt,
+                api_name=api_name,
+                api_key=api_key,
+                keywords=keywords,
+                mode="persist"  # Always persist in this endpoint
+            )
+
+            # The web scraping task should return the media ID if successful
+            if 'media_id' in result:
+                media_id = result['media_id']
+                return {
+                    "status": "success",
+                    "message": "Web content processed and added",
+                    "media_id": media_id,
+                    "media_url": f"/api/v1/media/{media_id}"
+                }
+
+            # If no media ID, return the whole result
+            return {
+                "status": "success",
+                "message": "Web content processed, see details in results",
+                "results": result
+            }
+
+        else:
+            # This shouldn't happen due to validation, but just in case
+            raise HTTPException(
+                status_code=400,
+                detail=f"Processing for media type '{media_type}' not implemented"
+            )
+
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # Clean up temp directory if an exception occurred and we're not keeping files
+        if temp_dir and not keep_original:
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception as cleanup_error:
+                logging.warning(f"Failed to clean up temp directory: {str(cleanup_error)}")
+
+        logging.error(f"Error processing and adding media: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Clean up temp file if needed
+        if local_file_path and os.path.exists(local_file_path) and not keep_original:
+            try:
+                os.remove(local_file_path)
+            except Exception as e:
+                logging.warning(f"Failed to remove temp file {local_file_path}: {str(e)}")
 
 #
 # End of media ingestion and analysis

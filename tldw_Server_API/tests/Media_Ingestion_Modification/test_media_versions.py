@@ -180,7 +180,7 @@ class TestMediaVersionEndpoints:
         assert data.get("version_number") == 1
 
     def test_get_nonexistent_version(self):
-        response = self.client.get(f"/api/v1/media/{self.media_id}/versions/999")
+        response = self.client.get(f"/api/v1/media/{self.media_id}/versions/99999")
         assert response.status_code == 404
 
     def test_get_version_content_toggle(self):

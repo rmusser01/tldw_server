@@ -31,13 +31,10 @@ from PoC_Version.App_Function_Libraries.Summarization.Summarization_General_Lib 
 from PoC_Version.App_Function_Libraries.Chunk_Lib import chunk_ebook_by_chapters
 from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
 from PoC_Version.App_Function_Libraries.Utils.Utils import logging
-
-
 #
 #######################################################################################################################
 # Function Definitions
 #
-
 def import_epub(file_path,
                 title=None,
                 author=None,
