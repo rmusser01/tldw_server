@@ -31,7 +31,7 @@ video_summarize_prompt = "Above is the transcript of a video. Please read throug
 
 [Database]
 type = sqlite
-sqlite_path = Databases/media_summary.db
+sqlite_path = Databases/server_media_summary.db
 backup_path = ./tldw_DB_Backups/
 #Path to the backup location for the database. If the path does not exist, the backup will not be created.
 elasticsearch_host = localhost

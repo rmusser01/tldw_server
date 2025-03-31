@@ -2,7 +2,7 @@
 
 # Database settings
 database:
-  sqlite_path: './Databases/media_summary.db'
+  sqlite_path: './Databases/server_media_summary.db'
   chroma_db_path: 'chroma_db'
 
 # Chunking options

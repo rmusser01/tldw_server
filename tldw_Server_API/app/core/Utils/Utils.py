@@ -1052,7 +1052,7 @@ def load_and_log_configs():
             'db_config': {
                 'prompt_path': get_project_relative_path(config.get('Prompts', 'prompt_path', fallback='Databases/prompts.db')),
                 'db_type': config.get('Database', 'type', fallback='sqlite'),
-                'sqlite_path': get_project_relative_path(config.get('Database', 'sqlite_path', fallback='Databases/media_summary.db')),
+                'sqlite_path': get_project_relative_path(config.get('Database', 'sqlite_path', fallback='Databases/server_media_summary.db')),
                 'elasticsearch_host': config.get('Database', 'elasticsearch_host', fallback='localhost'),
                 'elasticsearch_port': config.getint('Database', 'elasticsearch_port', fallback=9200),
                 'chroma_db_path': get_project_relative_path(config.get('Database', 'chroma_db_path', fallback='Databases/chroma.db'))
@@ -1667,7 +1667,7 @@ def get_db_config():
     # Return the database configuration
     return {
         'type': config['Database']['type'],
-        'sqlite_path': config.get('Database', 'sqlite_path', fallback='./Databases/media_summary.db'),
+        'sqlite_path': config.get('Database', 'sqlite_path', fallback='./Databases/server_media_summary.db'),
         'elasticsearch_host': config.get('Database', 'elasticsearch_host', fallback='localhost'),
         'elasticsearch_port': config.getint('Database', 'elasticsearch_port', fallback=9200)
     }

@@ -1846,7 +1846,7 @@ def view_database(page: int, results_per_page: int) -> Tuple[str, str, int]:
 def search_and_display_items(query, search_type, page, entries_per_page,char_count):
     offset = (page - 1) * entries_per_page
     try:
-        with sqlite3.connect('./Databases/media_summary.db') as conn:
+        with sqlite3.connect('./Databases/server_media_summary.db') as conn:
             cursor = conn.cursor()
 
             # Adjust the SQL query based on the search type

@@ -152,7 +152,7 @@ def setup_backup_config():
     logging.info(f"Media backup directory: {os.path.abspath(media_backup_dir)}")
 
     media_db_config = {
-        'db_path': os.path.join(os.path.dirname(chat_DB_PATH), 'media_summary.db'),
+        'db_path': os.path.join(os.path.dirname(chat_DB_PATH), 'server_media_summary.db'),
         'backup_dir': media_backup_dir,
         'db_name': 'media'
     }

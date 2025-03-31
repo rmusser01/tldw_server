@@ -106,7 +106,7 @@ config_path = get_project_relative_path('Config_Files/config.txt')
 config = configparser.ConfigParser()
 config.read(config_path)
 
-db_path: str = config.get('Database', 'sqlite_path', fallback='./Databases/media_summary.db')
+db_path: str = config.get('Database', 'sqlite_path', fallback='./Databases/server_media_summary.db')
 backup_path: str = config.get('Database', 'backup_path', fallback='database_backups')
 backup_dir: Union[str, bytes] = os.environ.get('DB_BACKUP_DIR', backup_path)
 
@@ -120,7 +120,7 @@ def get_db_config():
 
         return {
             'type': config.get('Database', 'type', fallback='sqlite'),
-            'sqlite_path': config.get('Database', 'sqlite_path', fallback='Databases/media_summary.db'),
+            'sqlite_path': config.get('Database', 'sqlite_path', fallback='Databases/server_media_summary.db'),
             'elasticsearch_host': config.get('Database', 'elasticsearch_host', fallback='localhost'),
             'elasticsearch_port': config.getint('Database', 'elasticsearch_port', fallback=9200)
         }
@@ -134,7 +134,7 @@ def get_db_config():
 def default_db_config():
     return {
         'type': 'sqlite',
-        'sqlite_path': get_database_path('media_summary.db'),
+        'sqlite_path': get_database_path('server_media_summary.db'),
         'elasticsearch_host': 'localhost',
         'elasticsearch_port': 9200
     }
@@ -167,7 +167,7 @@ def get_db_config():
 
         return {
             'type': config.get('Database', 'type', fallback='sqlite'),
-            'sqlite_path': config.get('Database', 'sqlite_path', fallback='Databases/media_summary.db'),
+            'sqlite_path': config.get('Database', 'sqlite_path', fallback='Databases/server_media_summary.db'),
             'elasticsearch_host': config.get('Database', 'elasticsearch_host', fallback='localhost'),
             'elasticsearch_port': config.getint('Database', 'elasticsearch_port', fallback=9200)
         }
@@ -183,7 +183,7 @@ def default_db_config():
     """Return the default database configuration with project-relative paths."""
     return {
         'type': 'sqlite',
-        'sqlite_path': get_database_path('media_summary.db'),
+        'sqlite_path': get_database_path('server_media_summary.db'),
         'elasticsearch_host': 'localhost',
         'elasticsearch_port': 9200
     }
