@@ -556,7 +556,7 @@ async def add_media(
         file: Optional[UploadFile] = File(None),
         title: Optional[str] = None,
         author: Optional[str] = None,
-        keywords: List[str] = "",
+        keywords: str = "",
         custom_prompt: Optional[str] = None,
         system_prompt: Optional[str] = None,
         whisper_model: str = "deepml/distil-large-v3",  # Default High-Quality model for audio/video transcription
@@ -689,6 +689,7 @@ async def add_media(
                 # api_key: Optional[str],
                 api_key=api_key,
                 # keywords: str,
+                # FIXME - type issue
                 keywords=keywords.split(',') if keywords else [],  # Split keywords by comma for processing
                 # use_cookies: bool,
                 use_cookies=False,  # Default to False unless specified otherwise
@@ -731,18 +732,32 @@ async def add_media(
             local_files = [local_file_path] if local_file_path else []
 
             result = process_audio(
-                urls=urls,
-                local_files=local_files,
-                whisper_model=whisper_model,
-                diarize=diarize,
-                keep_timestamps=timestamp_option,
-                api_name=api_name,
-                api_key=api_key,
-                custom_prompt=custom_prompt,
-                keywords=keywords,
-                keep_original_audio=keep_original,
-                store_in_db=True,
-                custom_title=title,
+                # audio_urls,
+                urls=urls,  # List of URLs to process
+                #  audio_files,
+                audio_files=local_files,  # List of local files to process
+
+                #  whisper_model,
+                #  api_name,
+                #  api_key,
+                #  use_cookies,
+                #  cookies,
+                #  keep_original,
+                #  custom_keywords,
+                #  custom_prompt_input,
+                #  chunk_method,
+                #  max_chunk_size,
+                #  chunk_overlap,
+                #  use_adaptive_chunking,
+                #  use_multi_level_chunking,
+                #  chunk_language,
+                #  diarize,
+                #  keep_timestamps,
+                #  custom_title,
+                #  record_system_audio,
+                #  recording_duration,
+                #  system_audio_device,
+                #  consent
             )
 
             # Extract the media ID from the result
