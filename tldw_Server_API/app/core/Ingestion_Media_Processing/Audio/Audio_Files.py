@@ -28,15 +28,15 @@ import requests
 import yt_dlp
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_with_keywords, \
+from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords, \
     check_media_and_whisper_model
-from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
-from PoC_Version.App_Function_Libraries.Summarization import perform_summarization
-from PoC_Version.App_Function_Libraries.Utils import downloaded_files, \
+from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
+from tldw_Server_API.app.core.Utils.Utils import downloaded_files, \
     sanitize_filename, logging
-from PoC_Version.App_Function_Libraries.Video_DL_Ingestion_Lib import extract_metadata
-from PoC_Version.App_Function_Libraries.Audio.Audio_Transcription_Lib import speech_to_text
-from PoC_Version.App_Function_Libraries.Chunk_Lib import improved_chunking_process
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import extract_metadata
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import speech_to_text
+from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 #
 #######################################################################################################################
 # Function Definitions
@@ -104,12 +104,31 @@ def download_audio_file(url, current_whisper_model="", use_cookies=False, cookie
         logging.error(f"Unexpected error downloading audio file: {str(e)}")
         raise
 
-def process_audio_files(audio_urls, audio_files, whisper_model, api_name, api_key, use_cookies, cookies, keep_original,
-                        custom_keywords, custom_prompt_input, chunk_method, max_chunk_size, chunk_overlap,
-                        use_adaptive_chunking, use_multi_level_chunking, chunk_language, diarize,
-                        keep_timestamps, custom_title, record_system_audio, recording_duration,
-                        system_audio_device, consent):
-
+def process_audio_files(
+        audio_urls,
+        audio_files,
+        whisper_model,
+        api_name,
+        api_key,
+        use_cookies,
+        cookies,
+        keep_original,
+        custom_keywords,
+        custom_prompt_input,
+        chunk_method,
+        max_chunk_size,
+        chunk_overlap,
+        use_adaptive_chunking,
+        use_multi_level_chunking,
+        chunk_language,
+        diarize,
+        keep_timestamps,
+        custom_title,
+        record_system_audio,
+        recording_duration,
+        system_audio_device,
+        consent
+    ):
     # Add validation at the start of the function
     if record_system_audio:
         if not consent:

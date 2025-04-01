@@ -1,5 +1,6 @@
-fastapi
-pydantic
-slowapi
-uvicorn
-redis
+fastapi # FastAPI for building the API
+pydantic # FastAPI
+slowapi # For rate limiting in FastAPI
+uvicorn # ASGI server for FastAPI
+redis # In-Memory Caching, Rate Limiting
+yara # File scanning
