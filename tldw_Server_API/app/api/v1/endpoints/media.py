@@ -556,22 +556,37 @@ async def add_media(
         file: Optional[UploadFile] = File(None),
         title: Optional[str] = None,
         author: Optional[str] = None,
-        keywords: str = "",
+        keywords: List[str] = "",
         custom_prompt: Optional[str] = None,
         system_prompt: Optional[str] = None,
-        whisper_model: str = "base",
+        whisper_model: str = "deepml/distil-large-v3",  # Default High-Quality model for audio/video transcription
+        transcription_language: str = "en",  # Language for Audio transcription
         diarize: bool = False,
         timestamp_option: bool = True,
-        keep_original: bool = False,
-        overwrite: bool = False,
+        keep_original_file: bool = False,
+        overwrite_existing: bool = False,
+        perfrom_analysis: bool = True,  # Whether to perform analysis on the media (default is True)
+        perform_rolling_summarization: bool = False,  # Whether to perform rolling summarization on the media
         api_name: Optional[str] = None,
         api_key: Optional[str] = None,
         pdf_parsing_engine: Optional[str] = None,
+        perform_chunking: bool = True,
+        chunk_method: Optional[str] = None,
+        use_adaptive_chunking: bool = False,
+        use_multi_level_chunking: bool = False,
+        chunk_language: Optional[str] = None,
+        chunk_size: int = 500,
+        chunk_overlap: int = 200,
+        use_cookies=False,
+        cookies: Optional[str] = None,
+        perform_confabulation_check_of_analysis: bool = False,
+        store_in_temp_db: bool = False,
         token: str = Header(..., description="Authentication token"),
-        db=Depends(get_db_manager)
+        db=Depends(get_db_manager),
 ):
     """
     Add new media to the database with processing.
+    Take in arguments + File(s), return media ID(s) for ingested items.
 
     This endpoint processes a URL or uploaded file based on the media type, then adds the
     processed content to the database. It handles different types of media with appropriate
@@ -589,10 +604,11 @@ async def add_media(
     - diarize: Whether to diarize audio/video content
     - timestamp_option: Whether to include timestamps
     - keep_original: Whether to keep the original file
-    - overwrite: Whether to overwrite existing media with the same URL
+    - overwrite: Whether to overwrite existing media with the same URL/Title/Hash
     - api_name: Optional API name for processing (e.g., "openai")
     - api_key: Optional API key for processing
     - token: Authentication token
+    -
     """
     # Create a temporary directory that will be automatically cleaned up
     temp_dir = None
@@ -623,7 +639,7 @@ async def add_media(
                 buffer.write(content)
 
             # Schedule cleanup for temp directory in background task
-            if not keep_original:
+            if not keep_original_file:
                 background_tasks.add_task(shutil.rmtree, temp_dir, ignore_errors=True)
 
             # If no URL provided, use the filename (but not the path)
@@ -635,15 +651,58 @@ async def add_media(
             logging.info(f"Processing video: {url}")
             inputs = [local_file_path] if local_file_path else [url]
             result = process_videos(
+
+                # inputs: List[str],
                 inputs=inputs,
+                # start_time: Optional[str],
+                start_time=None,
+                # end_time: Optional[str],
+                end_time=None,
+                # diarize: bool,
                 diarize=diarize,
+                # vad_use: bool,
+                vad_use=True,  # Default to True for video processing unless specified otherwise
+                # whisper_model: str,
                 whisper_model=whisper_model,
-                use_custom_prompt=(custom_prompt is not None),
+                # use_custom_prompt: bool,
+                use_custom_prompt=(custom_prompt is not None),  # Use custom prompt if provided
+                # custom_prompt: Optional[str],
                 custom_prompt=custom_prompt,
-                keywords=keywords,
+                # perform_chunking: bool,
+                perform_chunking=perform_chunking,  # Allow chunking by default unless specified otherwise
+                # chunk_method: Optional[str],
+                chunk_method=chunk_method,
+                # max_chunk_size: int,
+                max_chunk_size=chunk_size,  # Default chunk size for video processing
+                # chunk_overlap: int,
+                chunk_overlap=chunk_overlap,  # Default overlap for video processing
+                # use_adaptive_chunking: bool,
+                use_adaptive_chunking=False,  # Default to False unless specified otherwise
+                # use_multi_level_chunking: bool,
+                use_multi_level_chunking=False,  # Default to False unless specified otherwise
+                # chunk_language: Optional[str],
+                chunk_language=None,  # Default to None unless specified otherwise
+                # summarize_recursively: bool,
+                summarize_recursively=False,
+                # api_name: Optional[str],
+                api_name=api_name,
+                # api_key: Optional[str],
+                api_key=api_key,
+                # keywords: str,
+                keywords=keywords.split(',') if keywords else [],  # Split keywords by comma for processing
+                # use_cookies: bool,
+                use_cookies=False,  # Default to False unless specified otherwise
+                # cookies: Optional[str],
+                cookies=cookies if use_cookies else None,  # Use cookies if specified
+                # timestamp_option: bool,
                 timestamp_option=timestamp_option,
-                keep_original_video=keep_original,
-                overwrite_existing=overwrite,
+                # keep_original_video: bool,
+                keep_original_video=keep_original_file,  # Keep original video if specified
+                # confab_checkbox: bool,
+                confab_checkbox=perform_confabulation_check_of_analysis,  # Perform confabulation check if specified
+                # overwrite_existing: bool,
+                overwrite_existing=overwrite_existing,  # Allow overwriting existing media
+                # store_in_db: bool = True,
                 store_in_db=True,
             )
             # Extract the media ID from the result

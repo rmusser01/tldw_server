@@ -24,6 +24,7 @@ https://github.com/rmusser01/LiveBench/tree/llamacpp-api
 https://github.com/santinic/audiblez
 https://github.com/KartDriver/mira_converse/blob/main/server/src/server_audio_core.py
 https://github.com/zenforic/csm-multi
+https://github.com/isaiahbjork/orpheus-tts-local
 https://huggingface.co/DavidBrowne17/Muchi
 https://www.reddit.com/r/LocalLLaMA/comments/1jcufi6/improvements_to_kokoro_tts_v10/
     https://github.com/nazdridoy/kokoro-tts
