@@ -159,6 +159,18 @@ def initialize_database():
         END;
         """)
 
+        # Create CharacterChatMessages table
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS CharacterChatMessages (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id          INTEGER NOT NULL,               -- Which chat this belongs to
+            parent_message_id INTEGER,                       -- The previous message's ID in the chain
+            sender           TEXT NOT NULL,                  -- e.g. 'user', 'system', or 'assistant'
+            content          TEXT NOT NULL,                  -- The message text
+            created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (chat_id) REFERENCES CharacterChats(id) ON DELETE CASCADE;
+        """)
+
         # Create ChatKeywords table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS ChatKeywords (

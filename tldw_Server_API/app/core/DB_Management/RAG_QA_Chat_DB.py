@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS conversation_metadata (
     last_updated DATETIME NOT NULL,
     title TEXT NOT NULL,
     media_id INTEGER,
+    parent_conversation_id TEXT REFERENCES conversation_metadata(conversation_id);
+    forked_from_message_id INTEGER REFERENCES rag_qa_chats(id);
     rating INTEGER CHECK(rating BETWEEN 1 AND 3)
 );
 
