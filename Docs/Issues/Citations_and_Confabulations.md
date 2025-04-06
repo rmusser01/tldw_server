@@ -21,7 +21,10 @@ https://liveideabench.com/
 https://www.archgw.com/blogs/detecting-hallucinations-in-llm-function-calling-with-entropy-and-varentropy
 https://github.com/lechmazur/confabulations
 https://python.langchain.com/docs/how_to/qa_citations/
+https://oumi.ai/blog/posts/introducing-halloumi
 
+https://github.com/jacobwarren/Latent-Space-Verification-for-Self-Correcting-LLMs
+https://huggingface.co/jacobpwarren/Qwen2.5-7B-Latent_Verification/discussions
 
 
 RAG

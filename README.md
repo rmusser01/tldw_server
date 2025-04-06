@@ -66,10 +66,10 @@ Nov 1st:
 </details>
 
 
-#### ![Video Walkthrough of a Fresh Install](PoC_Version/Docs/Screenshots/tldw-run-through-blank.webm)
+#### ![Video Walkthrough of a Fresh Install](Docs/Screenshots/tldw-run-through-blank.webm)
 
 ### Screenshots of the UI
-Screenshot of the Frontpage ![Screenshot](PoC_Version/Docs/Screenshots/blank-front.png)
+Screenshot of the Frontpage ![Screenshot](Docs/Screenshots/blank-front.png)
 
 
 #### Key Features:

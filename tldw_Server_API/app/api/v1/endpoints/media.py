@@ -63,7 +63,8 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     get_paginated_files,
     get_media_title,
     fetch_keywords_for_media, get_full_media_details, create_document_version, update_keywords_for_media,
-    get_all_document_versions, get_document_version, rollback_to_version, delete_document_version, db
+    get_all_document_versions, get_document_version, rollback_to_version, delete_document_version, db,
+    fetch_item_details
 )
 from tldw_Server_API.app.core.DB_Management.SQLite_DB import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_db
@@ -184,34 +185,27 @@ async def get_all_media(
 @router.get("/{media_id}", summary="Get details about a single media item")
 def get_media_item(media_id: int, db=Depends(get_db_manager)):
     try:
-        # Check if the media row even exists
-        row = db.execute_query(
-            "SELECT type, content, author, title FROM Media WHERE id = ?",
-            (media_id,)
-        )
-        if not row:
+        # -- 1) Fetch the main record (includes title, type, content, author, etc.)
+        media_info = get_full_media_details(media_id)
+        if not media_info:
             raise HTTPException(status_code=404, detail="Media not found")
 
-        media_type, raw_content, author, title = row[0]
+        media_type = media_info['type']
+        raw_content = media_info['content']
+        author = media_info['author']
+        title = media_info['title']
 
-        # Get keywords via the available function
-        kw_list = fetch_keywords_for_media(media_id) or []
+        # -- 2) Get keywords. You can use the next line, or just grab media_info['keywords']:
+        # kw_list = fetch_keywords_for_media(media_id) or []
+        kw_list = media_info.get('keywords') or ["default"]
 
-        # Fetch just prompt and summary from modifications
-        mod_res = db.execute_query('''
-            SELECT prompt, summary 
-            FROM MediaModifications
-            WHERE media_id = ?
-            ORDER BY modification_date DESC
-            LIMIT 1
-        ''', (media_id,))
+        # -- 3) Fetch the latest prompt & summary from MediaModifications
+        prompt, summary, _ = fetch_item_details(media_id)
+        if not prompt:
+            prompt = None
+        if not summary:
+            summary = None
 
-        if mod_res:
-            prompt, summary = mod_res[0]
-        else:
-            prompt, summary = None, None
-
-        # This part was missing - initialize these variables
         metadata = {}
         transcript = []
         timestamps = []
@@ -219,8 +213,8 @@ def get_media_item(media_id: int, db=Depends(get_db_manager)):
         if raw_content:
             # Split metadata and transcript
             parts = raw_content.split('\n\n', 1)
-            # If the first block is JSON, parse it
             if parts[0].startswith('{'):
+                # If the first block is JSON, parse it
                 try:
                     metadata = json.loads(parts[0])
                     if len(parts) > 1:
@@ -565,7 +559,7 @@ async def add_media(
         timestamp_option: bool = True,
         keep_original_file: bool = False,
         overwrite_existing: bool = False,
-        perfrom_analysis: bool = True,  # Whether to perform analysis on the media (default is True)
+        perform_analysis: bool = True,  # Whether to perform analysis on the media (default is True)
         perform_rolling_summarization: bool = False,  # Whether to perform rolling summarization on the media
         api_name: Optional[str] = None,
         api_key: Optional[str] = None,
@@ -829,7 +823,7 @@ async def add_media(
                 custom_prompt_input=custom_prompt or "",
                 whisper_model="doc-import",
                 media_type=media_type,
-                overwrite=overwrite
+                overwrite=overwrite_existing
             )
 
             media_id = extract_id_from_result(result)
@@ -888,7 +882,7 @@ async def add_media(
                 custom_prompt_input=custom_prompt or "",
                 whisper_model="pdf-import",
                 media_type=media_type,
-                overwrite=overwrite
+                overwrite=overwrite_existing
             )
 
             media_id = extract_id_from_result(result)
@@ -946,7 +940,7 @@ async def add_media(
                 custom_prompt_input=custom_prompt or "",
                 whisper_model="ebook-import",
                 media_type=media_type,
-                overwrite=overwrite
+                overwrite=overwrite_existing
             )
 
             media_id = extract_id_from_result(result)

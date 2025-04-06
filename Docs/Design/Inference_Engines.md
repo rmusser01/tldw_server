@@ -29,3 +29,7 @@ https://github.com/GoogleCloudPlatform/generative-ai/blob/main/open-models/servi
 https://github.com/Infini-AI-Lab/UMbreLLa
 https://huggingface.co/blog/andthattoo/dpab-a
 https://arxiv.org/abs/2502.20604
+https://www.anyscale.com/blog/continuous-batching-llm-inference
+https://huggingface.co/blog/Kseniase/testtimecompute
+
+

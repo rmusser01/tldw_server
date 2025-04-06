@@ -22,9 +22,15 @@ https://github.com/mbzuai-oryx/LLMVoX
 https://github.com/abus-aikorea/voice-pro
 https://github.com/rmusser01/LiveBench/tree/llamacpp-api
 https://github.com/santinic/audiblez
+https://github.com/davidbrowne17/csm-streaming
+https://github.com/yukiarimo/hanasu
+https://codingwithcody.com/2025/04/02/containerized-voice-identification/
+https://github.com/NullMagic2/SoftWhisper
+
 https://github.com/KartDriver/mira_converse/blob/main/server/src/server_audio_core.py
 https://github.com/zenforic/csm-multi
 https://github.com/isaiahbjork/orpheus-tts-local
+https://github.com/tarun7r/Vocal-Agent
 https://huggingface.co/DavidBrowne17/Muchi
 https://www.reddit.com/r/LocalLLaMA/comments/1jcufi6/improvements_to_kokoro_tts_v10/
     https://github.com/nazdridoy/kokoro-tts

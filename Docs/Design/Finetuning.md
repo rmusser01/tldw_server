@@ -11,7 +11,7 @@ https://colab.research.google.com/drive/1TT6NED5iFUGratZj4aHe13iOJkDTUUVT?usp=sh
 https://kaitchup.substack.com/p/the-recipe-for-extremely-accurate-quantization?triedRedirect=true
 https://github.com/Kiln-AI/Kiln
 https://huggingface.co/blog/train-reranker
-
+https://arxiv.org/abs/2503.21676
 
 
 

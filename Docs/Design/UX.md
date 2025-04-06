@@ -69,6 +69,7 @@ https://uxdesign.cc/the-importance-of-hover-states-c9312d7fd516
 https://trends.uxdesign.cc/
 https://silkhq.co/
 https://github.com/shokuninstudio/Dou
+https://oumi.ai/blog/posts/introducing-halloumi
 https://brandingstyleguides.com
 https://zeroheight.com/how-we-document/design-system-report-2025-brought-to-you-by-zeroheight/
 https://www.a11y-collective.com/blog/cognitive-accessibility/
@@ -102,6 +103,7 @@ https://github.com/stackblitz-labs/bolt.diy
 https://github.com/Haervwe/open-webui-tools
 https://uxdesign.cc/the-evolution-of-attention-c6154276f1b4
 https://otranscribe.com/
+https://github.com/rusiaaman/chat.md
 https://www.dive.club/ideas/new-types-of-ui-that-generative-ai-has-necessitated
 https://southbridge-research.notion.site/A-review-of-editing-with-LLMs-1755fec70db180149cc3fc4b1210823d
 https://interactjs.io/
