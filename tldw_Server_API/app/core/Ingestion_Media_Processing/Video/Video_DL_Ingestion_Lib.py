@@ -353,6 +353,7 @@ def process_videos(
     whisper_model: str,
     use_custom_prompt: bool,
     custom_prompt: Optional[str],
+    system_prompt: Optional[str],
     perform_chunking: bool,
     chunk_method: Optional[str],
     max_chunk_size: int,
@@ -367,10 +368,8 @@ def process_videos(
     use_cookies: bool,
     cookies: Optional[str],
     timestamp_option: bool,
-    keep_original_video: bool,
-    confab_checkbox: bool,
+    confab_check: bool,
     overwrite_existing: bool,
-    store_in_db: bool = True,
 ) -> Dict[str, Any]:
     """
     Processes multiple videos or local file paths, transcribes, summarizes,
@@ -465,9 +464,8 @@ def process_videos(
                 use_cookies=use_cookies,
                 cookies=cookies,
                 timestamp_option=timestamp_option,
-                keep_original_video=keep_original_video,
+
                 overwrite_existing=overwrite_existing,
-                store_in_db=store_in_db,
             )
             if single_result["status"] == "Success":
                 # Append to results list

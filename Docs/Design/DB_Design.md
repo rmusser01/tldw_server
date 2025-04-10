@@ -22,6 +22,13 @@ Migrating to sqlite-vec
     https://github.com/Mozilla-Ocho/llamafile/pull/644
 
 
+https://github.com/erikbern/ann-benchmarks/
+https://github.com/dicroce/hnsw
+https://blog.vectorchord.ai/postgresql-full-text-search-fast-when-done-right-debunking-the-slow-myth
+
+
+
+
 https://github.com/integral-business-intelligence/chroma-auditor
 https://ai.plainenglish.io/top-interview-questions-on-data-modeling-concepts-3d1587c86214
 https://briandouglas.ie/sqlite-defaults/

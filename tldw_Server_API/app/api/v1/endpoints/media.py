@@ -640,6 +640,16 @@ async def add_media(
             if not url or url == "":
                 url = file.filename
 
+        # Handle Chunking
+        if perform_chunking:
+            # Set default chunking parameters
+            chunk_method = chunk_method or "sentences"
+            use_adaptive_chunking = use_adaptive_chunking or False
+            use_multi_level_chunking = use_multi_level_chunking or False
+            chunk_language = chunk_language or transcription_language
+            chunk_size = chunk_size or 500
+            chunk_overlap = chunk_overlap or 200
+
         # Process based on media type
         if media_type == 'video':
             logging.info(f"Processing video: {url}")

@@ -26,7 +26,10 @@ https://github.com/davidbrowne17/csm-streaming
 https://github.com/yukiarimo/hanasu
 https://codingwithcody.com/2025/04/02/containerized-voice-identification/
 https://github.com/NullMagic2/SoftWhisper
-
+https://github.com/thomasgauthier/csm-hf/
+https://github.com/zeropointnine/tts-toy
+https://github.com/edwko/OuteTTS
+https://index-tts.github.io/#section2
 https://github.com/KartDriver/mira_converse/blob/main/server/src/server_audio_core.py
 https://github.com/zenforic/csm-multi
 https://github.com/isaiahbjork/orpheus-tts-local

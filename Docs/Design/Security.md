@@ -9,3 +9,6 @@ https://www.tmbench.com/about
 
 
 
+
+
+https://github.com/Lu3ky13/Search-for-all-leaked-keys-secrets-using-one-regex-

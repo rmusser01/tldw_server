@@ -104,6 +104,8 @@ https://github.com/Haervwe/open-webui-tools
 https://uxdesign.cc/the-evolution-of-attention-c6154276f1b4
 https://otranscribe.com/
 https://github.com/rusiaaman/chat.md
+https://chartscss.org/
+https://echarts.apache.org/en/index.html
 https://www.dive.club/ideas/new-types-of-ui-that-generative-ai-has-necessitated
 https://southbridge-research.notion.site/A-review-of-editing-with-LLMs-1755fec70db180149cc3fc4b1210823d
 https://interactjs.io/
