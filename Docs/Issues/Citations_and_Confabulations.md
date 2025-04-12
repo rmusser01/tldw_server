@@ -6,7 +6,7 @@
 3. [References](#references)
 
 
-
+https://huggingface.co/spaces/LISA-Kadi/LISA-demo/tree/main
 https://arxiv.org/abs/2412.07965
 https://arxiv.org/abs/2501.08292
 https://huggingface.co/QuantFactory/gemma-7b-aps-it-GGUF
@@ -25,6 +25,10 @@ https://oumi.ai/blog/posts/introducing-halloumi
 
 https://github.com/jacobwarren/Latent-Space-Verification-for-Self-Correcting-LLMs
 https://huggingface.co/jacobpwarren/Qwen2.5-7B-Latent_Verification/discussions
+https://arxiv.org/abs/2504.07527
+https://arxiv.org/abs/2504.00824
+https://arxiv.org/abs/2503.22216
+https://allenai.org/blog/olmotrace
 
 
 RAG

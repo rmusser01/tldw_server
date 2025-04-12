@@ -68,6 +68,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
 )
 from tldw_Server_API.app.core.DB_Management.SQLite_DB import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_db
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Processing import process_audio
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Media_Update_lib import process_media_update
 from tldw_Server_API.app.core.Utils.Utils import format_transcript, truncate_content, logging
@@ -574,7 +575,6 @@ async def add_media(
         use_cookies=False,
         cookies: Optional[str] = None,
         perform_confabulation_check_of_analysis: bool = False,
-        store_in_temp_db: bool = False,
         token: str = Header(..., description="Authentication token"),
         db=Depends(get_db_manager),
 ):
@@ -616,6 +616,7 @@ async def add_media(
                 status_code=400,
                 detail=f"Invalid media_type. Must be one of: {', '.join(valid_types)}"
             )
+        # FIXME - integrate file upload sink
 
         # Handle file upload if provided
         if file:
@@ -672,6 +673,8 @@ async def add_media(
                 use_custom_prompt=(custom_prompt is not None),  # Use custom prompt if provided
                 # custom_prompt: Optional[str],
                 custom_prompt=custom_prompt,
+                # system_prompt: Optional[str],
+                system_prompt=system_prompt,
                 # perform_chunking: bool,
                 perform_chunking=perform_chunking,  # Allow chunking by default unless specified otherwise
                 # chunk_method: Optional[str],
@@ -693,16 +696,13 @@ async def add_media(
                 # api_key: Optional[str],
                 api_key=api_key,
                 # keywords: str,
-                # FIXME - type issue
-                keywords=keywords.split(',') if keywords else [],  # Split keywords by comma for processing
+                keywords=keywords if keywords else "",  # Pass as string; split later in processing
                 # use_cookies: bool,
                 use_cookies=False,  # Default to False unless specified otherwise
                 # cookies: Optional[str],
                 cookies=cookies if use_cookies else None,  # Use cookies if specified
                 # timestamp_option: bool,
                 timestamp_option=timestamp_option,
-                # keep_original_video: bool,
-                keep_original_video=keep_original_file,  # Keep original video if specified
                 # confab_checkbox: bool,
                 confab_checkbox=perform_confabulation_check_of_analysis,  # Perform confabulation check if specified
                 # overwrite_existing: bool,
@@ -726,62 +726,46 @@ async def add_media(
             # If we couldn't extract an ID, return the whole result
             return {
                 "status": "success",
-                "message": "Video processed, see details in results",
+                "message": "Video(s) processed, see details in results",
                 "results": result
             }
 
         elif media_type == 'audio':
             logging.info(f"Processing audio: {url}")
-            urls = [url] if url else []
-            local_files = [local_file_path] if local_file_path else []
+            # Convert single `url` to list if needed
+            urls = [url] if (url and url.strip()) else []
+            files = [str(local_file_path)] if local_file_path else []
 
-            result = process_audio(
-                # audio_urls,
-                urls=urls,  # List of URLs to process
-                #  audio_files,
-                audio_files=local_files,  # List of local files to process
-
-                #  whisper_model,
-                #  api_name,
-                #  api_key,
-                #  use_cookies,
-                #  cookies,
-                #  keep_original,
-                #  custom_keywords,
-                #  custom_prompt_input,
-                #  chunk_method,
-                #  max_chunk_size,
-                #  chunk_overlap,
-                #  use_adaptive_chunking,
-                #  use_multi_level_chunking,
-                #  chunk_language,
-                #  diarize,
-                #  keep_timestamps,
-                #  custom_title,
-                #  record_system_audio,
-                #  recording_duration,
-                #  system_audio_device,
-                #  consent
+            result = process_audio_files(
+                audio_urls=urls,
+                audio_files=files,
+                whisper_model=whisper_model,
+                transcription_language=transcription_language,
+                api_name=api_name,
+                api_key=api_key,
+                use_cookies=use_cookies,
+                cookies=cookies,
+                keep_original=keep_original_file,
+                custom_keywords=(keywords.split(",") if keywords else []),
+                custom_prompt_input=custom_prompt,
+                system_prompt_input=system_prompt,
+                chunk_method=chunk_method,
+                max_chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                use_adaptive_chunking=use_adaptive_chunking,
+                use_multi_level_chunking=use_multi_level_chunking,
+                chunk_language=chunk_language,
+                diarize=diarize,
+                keep_timestamps=timestamp_option,
+                custom_title=title
             )
 
-            # Extract the media ID from the result
-            processed_items = result.get('results', [])
-            if processed_items and len(processed_items) > 0:
-                first_result = processed_items[0]
-                media_id = first_result.get('db_id')
-                if media_id:
-                    return {
-                        "status": "success",
-                        "message": f"Audio processed and added with ID: {media_id}",
-                        "media_id": media_id,
-                        "media_url": f"/api/v1/media/{media_id}"
-                    }
-
-            # If we couldn't extract an ID, return the whole result
+            # 'result' is now a dict you can return directly, or parse further:
             return {
-                "status": "success",
-                "message": "Audio processed, see details in results",
-                "results": result
+                "status": result["status"],
+                "message": result["message"],
+                "processed_items": len(result["results"]),
+                "results": result["results"],
             }
 
         elif media_type == 'document':
@@ -1006,7 +990,7 @@ async def add_media(
 
     except Exception as e:
         # Clean up temp directory if an exception occurred and we're not keeping files
-        if temp_dir and not keep_original:
+        if temp_dir:
             try:
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except Exception as cleanup_error:
@@ -1016,7 +1000,7 @@ async def add_media(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         # Clean up temp file if needed
-        if local_file_path and os.path.exists(local_file_path) and not keep_original:
+        if local_file_path and os.path.exists(local_file_path):
             try:
                 os.remove(local_file_path)
             except Exception as e:

@@ -26,7 +26,7 @@ https://github.com/kleer001/Text_Loom
 https://arxiv.org/abs/2503.17126
 https://github.com/langchain-ai/open-canvas
 https://github.com/aomukai/Writingway
-
+https://github.com/sam-paech/antislop-sampler
 
 
 

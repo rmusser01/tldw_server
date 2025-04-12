@@ -125,6 +125,8 @@ https://github.com/pkargupta/tree-of-debate
 https://github.com/binary-husky/gpt_academic/blob/master/docs/README.English.md
 https://arxiv.org/abs/2409.13741
 https://github.com/sentient-agi/OpenDeepSearch
+https://github.com/qx-labs/agents-deep-research
+https://researcher.iqidis.ai
 https://github.com/zjunlp/OmniThink
 https://github.com/neuml/annotateai
 https://docs.gptr.dev/docs/gpt-researcher/multi_agents/langgraph

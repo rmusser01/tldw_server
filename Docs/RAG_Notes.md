@@ -16,6 +16,10 @@ https://github.com/huggingface/yourbench
 
 Unsorted
 https://ai.gopubby.com/8-common-mistakes-in-vector-search-and-how-to-avoid-them-e48d849c23f8
+https://arxiv.org/pdf/2501.11551v4
+https://aiexpjourney.substack.com/p/the-mystery-of-rag-optimization-insights
+
+
 
 Agentic RAG
 	https://arxiv.org/pdf/2501.09136

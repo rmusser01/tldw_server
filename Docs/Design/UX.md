@@ -105,7 +105,11 @@ https://uxdesign.cc/the-evolution-of-attention-c6154276f1b4
 https://otranscribe.com/
 https://github.com/rusiaaman/chat.md
 https://chartscss.org/
+https://departmentofproduct.substack.com/p/deep-the-ux-of-notifications
 https://echarts.apache.org/en/index.html
+https://github.com/botoxparty/XP.css
+https://www.nngroup.com/articles/discoverability-ai-amazon
+https://uxdesign.cc/designing-for-ai-engineers-what-ui-patterns-and-principles-you-need-to-know-8b16a5b62a61
 https://www.dive.club/ideas/new-types-of-ui-that-generative-ai-has-necessitated
 https://southbridge-research.notion.site/A-review-of-editing-with-LLMs-1755fec70db180149cc3fc4b1210823d
 https://interactjs.io/

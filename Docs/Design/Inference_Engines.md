@@ -31,5 +31,8 @@ https://huggingface.co/blog/andthattoo/dpab-a
 https://arxiv.org/abs/2502.20604
 https://www.anyscale.com/blog/continuous-batching-llm-inference
 https://huggingface.co/blog/Kseniase/testtimecompute
+https://eqimp.github.io/hogwild_llm/
+https://transformer-circuits.pub/2025/attribution-graphs/biology.html
+https://arxiv.org/pdf/2502.17601
 
 

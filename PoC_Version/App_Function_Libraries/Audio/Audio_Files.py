@@ -104,6 +104,7 @@ def download_audio_file(url, current_whisper_model="", use_cookies=False, cookie
         logging.error(f"Unexpected error downloading audio file: {str(e)}")
         raise
 
+
 def process_audio_files(audio_urls, audio_files, whisper_model, api_name, api_key, use_cookies, cookies, keep_original,
                         custom_keywords, custom_prompt_input, chunk_method, max_chunk_size, chunk_overlap,
                         use_adaptive_chunking, use_multi_level_chunking, chunk_language, diarize,

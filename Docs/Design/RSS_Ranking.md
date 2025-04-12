@@ -20,6 +20,8 @@ https://arxiv.org/abs/2412.18082
 https://github.com/tsinghua-fib-lab/LLM-Agent-for-Recommendation-and-Search
 https://arxiv.org/abs/2502.13131
 https://blog.badsectorlabs.com/files/blogs.txt
+https://github.com/svpino/rfeed
+https://github.com/NicolasLM/feedsubs
 https://arxiv.org/abs/2412.08604
 https://blog.continua.ai/p/making-sense-of-the-digital-deluge
 https://arxiv.org/abs/2411.18814

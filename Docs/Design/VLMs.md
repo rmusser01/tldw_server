@@ -6,7 +6,7 @@
 ### Link Dump:
 
 
-
+https://careersatdoordash.com/blog/doordash-llm-transcribe-menu/
 MAMBA
     https://ivy-lvlm.github.io/Video-MA2MBA/
 

@@ -34,16 +34,15 @@ from urllib.parse import urlparse, parse_qs
 import yt_dlp
 import unicodedata
 # Import Local
-from tldw_Server_API.app.core.DB_Management.DB_Manager import check_media_and_whisper_model
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     add_media_to_database,
     check_media_and_whisper_model,
     check_existing_media,
     update_media_content_with_version
 )
+from tldw_Server_API.app.core.Evaluations.ms_g_eval import run_geval
 from tldw_Server_API.app.core.Utils.Utils import (
     convert_to_seconds,
-    create_download_directory,
     generate_unique_identifier,
     extract_text_from_segments,
     logging
@@ -368,8 +367,9 @@ def process_videos(
     use_cookies: bool,
     cookies: Optional[str],
     timestamp_option: bool,
-    confab_check: bool,
+    confab_checkbox: bool,
     overwrite_existing: bool,
+    store_in_db: bool,
 ) -> Dict[str, Any]:
     """
     Processes multiple videos or local file paths, transcribes, summarizes,
@@ -384,8 +384,9 @@ def process_videos(
     :param diarize: Enable speaker diarization.
     :param vad_use: Enable Voice Activity Detection.
     :param whisper_model: Name of the Whisper model to use.
-    :param custom_prompt_checkbox: If True, we use the user’s custom prompt.
+    :param use_custom_prompt: If True, we use the user’s custom prompt.
     :param custom_prompt: The user’s custom text prompt for summarization.
+    :param system_prompt: The system prompt for the LLM.
     :param perform_chunking: If True, break transcripts into chunks before summarizing.
     :param chunk_method: "words", "sentences", etc.
     :param max_chunk_size: Maximum chunk size for chunking.
@@ -400,7 +401,6 @@ def process_videos(
     :param use_cookies: If True, use cookies for authenticated video downloads.
     :param cookies: The user-supplied cookies in JSON or Netscape format.
     :param timestamp_option: If True, keep timestamps in final transcript.
-    :param keep_original_video: If True, do not delete the downloaded video after processing.
     :param confab_checkbox: If True, run confabulation check on the summary.
     :param overwrite_existing: If True, re-process media even if a matching item is in DB.
     :param store_in_db: If False, skip writing to DB (ephemeral mode).
@@ -450,6 +450,7 @@ def process_videos(
                 whisper_model=whisper_model,
                 use_custom_prompt=use_custom_prompt,
                 custom_prompt=custom_prompt,
+                system_prompt=system_prompt,
                 perform_chunking=perform_chunking,
                 chunk_method=chunk_method,
                 max_chunk_size=max_chunk_size,
@@ -464,8 +465,9 @@ def process_videos(
                 use_cookies=use_cookies,
                 cookies=cookies,
                 timestamp_option=timestamp_option,
-
+                keep_original_video=False,
                 overwrite_existing=overwrite_existing,
+                store_in_db=store_in_db,
             )
             if single_result["status"] == "Success":
                 # Append to results list
@@ -523,26 +525,39 @@ def process_videos(
                 value=1
             )
 
-    # Optionally, run a confabulation check on the entire set of summaries if you want
+    # Optionally, run a confabulation check on the entire set of summaries
     confabulation_results = None
-    if confab_checkbox:
-        # In your Gradio code, you called ms_g_eval.run_geval(...) with
-        # the transcript or summary. Up to you how you do it here:
-        # confabulation_results = run_geval(all_transcriptions, all_summaries, api_key, api_name)
-        # Or do something else. For demonstration:
-        confabulation_results = "Confab check completed (placeholder)."
+    if confab_checkbox and all_transcriptions:
+        confab_results = []
+        # Process each transcript-summary pair individually for g_eval check
+        for url, transcript in all_transcriptions.items():
+            # Extract the corresponding summary for this URL
+            url_pattern = f"Video Input: {re.escape(url)}\nTranscription:.*?\nSummary:\n(.*?)\n\n---\n\n"
+            summary_match = re.search(url_pattern, all_summaries, re.DOTALL)
 
-    # If you want to store all transcriptions/summaries in a file in ephemeral mode,
-    # do so here. Or return them directly.
+            if summary_match:
+                # FIXME - validate this call
+                individual_summary = summary_match.group(1)
+                # Create single-item collections for this transcript-summary pair
+                single_transcript_dict = f"URL: + {url} : {transcript}"
+                single_summary = f"Video Input: {url}\nTranscription:\n{transcript}\n\nSummary:\n{individual_summary}\n\n"
 
-    # Example: Save them to disk in the local dir
-    try:
-        with open("all_transcriptions.json", "w", encoding="utf-8") as f:
-            json.dump(all_transcriptions, f, indent=2, ensure_ascii=False)
-        with open("all_summaries.txt", "w", encoding="utf-8") as f:
-            f.write(all_summaries)
-    except Exception as e:
-        logging.warning(f"Could not save aggregated transcripts or summaries: {e}")
+                # Run g_eval on this single pair
+                pair_result = run_geval(single_transcript_dict, single_summary, api_key, api_name)
+                confab_results.append(f"URL: {url} - {pair_result}")
+            else:
+                logging.warning(f"Could not find matching summary for URL: {url}")
+
+        confabulation_results = f"Confabulation checks completed:\n" + "\n".join(confab_results)
+
+    # Save them to disk in the local dir
+    # try:
+    #     with open("all_transcriptions.json", "w", encoding="utf-8") as f:
+    #         json.dump(all_transcriptions, f, indent=2, ensure_ascii=False)
+    #     with open("all_summaries.txt", "w", encoding="utf-8") as f:
+    #         f.write(all_summaries)
+    # except Exception as e:
+    #     logging.warning(f"Could not save aggregated transcripts or summaries: {e}")
 
     return {
         "processed_count": len(results),
@@ -562,6 +577,7 @@ def process_single_video(
     whisper_model: str,
     use_custom_prompt: bool,
     custom_prompt: Optional[str],
+    system_prompt: Optional[str],
     perform_chunking: bool,
     chunk_method: Optional[str],
     max_chunk_size: int,
@@ -634,27 +650,7 @@ def process_single_video(
                     "error": f"Already processed with same model: {reason}"
                 }
 
-        # Download video if remote
-        downloaded_video_path = None
-        if is_remote:
-            # Attempt download
-            downloaded_video_path = download_video(
-                video_input,
-                create_download_directory("Video_Downloads"),
-                # FIXME - Auto-gen'd code
-                info_dict=None,  # or a real info dict from ytdlp
-                download_video_flag=True,  # or if you only want audio, pass False
-                current_whisper_model=whisper_model
-            )
-            if not downloaded_video_path:
-                return {
-                    "video_input": video_input,
-                    "status": "Error",
-                    "error": f"Download returned None; skipping {video_input}"
-                }
-            video_path = downloaded_video_path
-        else:
-            video_path = video_input
+        video_path = video_input
 
         # Perform transcription
         from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_transcription, \
@@ -677,13 +673,6 @@ def process_single_video(
             except Exception as e:
                 logging.warning(f"Failed to remove audio file: {e}")
 
-        # if user does not want the original, remove it
-        if not keep_original_video and downloaded_video_path and os.path.exists(downloaded_video_path):
-            try:
-                os.remove(downloaded_video_path)
-            except Exception as e:
-                logging.warning(f"Failed to remove downloaded video file: {e}")
-
         # Possibly strip timestamps
         if not timestamp_option:
             # remove timestamps
@@ -696,7 +685,7 @@ def process_single_video(
         full_text_with_metadata = f"{json.dumps(info_dict, indent=2)}\n\n{transcription_text}"
 
         # Analyze video transcript if API is set
-        summary_text = None
+        analysis_text = None
         if api_name and api_name.lower() != "none":
             # If chunking is requested
             if perform_chunking:
@@ -711,7 +700,7 @@ def process_single_video(
                 chunked_texts = improved_chunking_process(full_text_with_metadata, chunk_opts)
                 if not chunked_texts:
                     # Fallback to one-shot summarization
-                    summary_text = perform_summarization(api_name, full_text_with_metadata, custom_prompt, api_key)
+                    analysis_text = perform_summarization(api_name, full_text_with_metadata, custom_prompt, api_key, recursive_summarization=None, temp=None, system_message=system_prompt)
                 else:
                     chunk_summaries = []
                     for chunk_block in chunked_texts:
@@ -721,12 +710,12 @@ def process_single_video(
                     if chunk_summaries:
                         if summarize_recursively and len(chunk_summaries) > 1:
                             combined_text = "\n\n".join(chunk_summaries)
-                            summary_text = perform_summarization(api_name, combined_text, custom_prompt, api_key)
+                            analysis_text = perform_summarization(api_name, combined_text, custom_prompt, api_key)
                         else:
-                            summary_text = "\n\n".join(chunk_summaries)
+                            analysis_text = "\n\n".join(chunk_summaries)
             else:
-                # Single pass summarization
-                summary_text = perform_summarization(api_name, full_text_with_metadata, custom_prompt, api_key)
+                # Single pass analysis
+                analysis_text = perform_summarization(api_name, full_text_with_metadata, custom_prompt, api_key, recursive_summarization=None, temp=None, system_message=system_prompt)
 
         # Possibly store in DB
         media_id = None
@@ -746,7 +735,7 @@ def process_single_video(
                     info_dict,
                     full_text_with_metadata,
                     custom_prompt,
-                    summary_text,
+                    analysis_text,
                     whisper_model
                 )
             else:
@@ -755,7 +744,7 @@ def process_single_video(
                     url=info_dict['webpage_url'],
                     info_dict=info_dict,
                     segments=segments,
-                    summary=summary_text,
+                    summary=analysis_text,
                     keywords=keywords_list,
                     custom_prompt_input=custom_prompt or "",
                     whisper_model=whisper_model,
@@ -770,7 +759,7 @@ def process_single_video(
             "video_input": video_input,
             "status": "Success",
             "transcript": transcription_text,
-            "summary": summary_text,
+            "summary": analysis_text,
             "db_id": media_id,
         }
     except Exception as e:

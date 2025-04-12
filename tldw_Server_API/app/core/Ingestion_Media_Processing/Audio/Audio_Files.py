@@ -7,10 +7,6 @@
 #
 # Functions:
 #
-# download_audio_file(url, save_path)
-# process_audio(
-# process_audio_file(audio_url, audio_file, whisper_model="small.en", api_name=None, api_key=None)
-#
 #
 #########################################
 # Imports
@@ -22,6 +18,8 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, List, Dict, Any
+
 #
 # External Imports
 import requests
@@ -105,342 +103,295 @@ def download_audio_file(url, current_whisper_model="", use_cookies=False, cookie
         raise
 
 def process_audio_files(
-        audio_urls,
-        audio_files,
-        whisper_model,
-        api_name,
-        api_key,
-        use_cookies,
-        cookies,
-        keep_original,
-        custom_keywords,
-        custom_prompt_input,
-        chunk_method,
-        max_chunk_size,
-        chunk_overlap,
-        use_adaptive_chunking,
-        use_multi_level_chunking,
-        chunk_language,
-        diarize,
-        keep_timestamps,
-        custom_title,
-        record_system_audio,
-        recording_duration,
-        system_audio_device,
-        consent
-    ):
-    # Add validation at the start of the function
-    if record_system_audio:
-        if not consent:
-            raise ValueError("You must confirm you have consent to record audio")
-        if not system_audio_device:
-            raise ValueError("Please select an audio output device to record from")
+    audio_urls: Optional[List[str]],
+    audio_files: Optional[List[str]],
+    whisper_model: str,
+    transcription_language: str,
+    api_name: Optional[str],
+    api_key: Optional[str],
+    use_cookies: bool,
+    cookies: Optional[str],
+    keep_original: bool,
+    custom_keywords: Optional[List[str]],
+    custom_prompt_input: Optional[str],
+    system_prompt_input: Optional[str],
+    chunk_method: Optional[str],
+    max_chunk_size: int,
+    chunk_overlap: int,
+    use_adaptive_chunking: bool,
+    use_multi_level_chunking: bool,
+    chunk_language: Optional[str],
+    diarize: bool,
+    keep_timestamps: bool,
+    custom_title: Optional[str] = None,
+    recursive_summarization=None
+) -> Dict[str, Any]:
+    """
+    Process one or multiple audio files or URLs, returning structured results suitable for
+    an API response. The function:
+      - Optionally downloads remote files
+      - Re-encodes to MP3, converts to WAV
+      - Transcribes, optionally performs summarization
+      - Returns a JSON-like dict with success/failure info
+    """
 
-    # Add recording logic before processing files
-    recorded_files = []
-    start_time = time.time()  # Start time for processing
+    # A small helper to keep track of progress messages
+    progress_log = []
+    def update_progress(message: str):
+        progress_log.append(message)
+
+    # Keep track of processed items, to return them at the end
+    results = []
+    start_time = time.time()
     processed_count = 0
     failed_count = 0
-    progress = []
-    all_transcriptions = []
-    all_summaries = []
-    temp_files = []  # Keep track of temporary files
 
-    if record_system_audio:
-        try:
-            # Extract device ID from the selected device string
-            device_id = int(system_audio_device.split(":")[0])
-            recorded_file = record_system_audio(
-                duration=recording_duration,
-                device_id=device_id
-            )
-            recorded_files.append(recorded_file)
-            temp_files.append(recorded_file)
-        except Exception as e:
-            return print(f"Recording failed: {str(e)}"), "", ""
+    # Keep track of temporary files (for cleanup, if keep_original=False)
+    temp_files = []
 
-    # Process recorded files along with others
-    if recorded_files:
-        if not isinstance(audio_files, list):
-            audio_files = []
-        audio_files.extend(recorded_files)
+    # Choose your ffmpeg command logic
+    if os.name == "nt":
+        # On Windows, maybe supply your local ffmpeg path
+        ffmpeg_cmd = os.path.join(os.getcwd(), "Bin", "ffmpeg.exe")
+    else:
+        # On non-Windows, assume 'ffmpeg' is in PATH
+        ffmpeg_cmd = "ffmpeg"
 
-    def format_transcription_with_timestamps(segments):
-        if keep_timestamps:
-            formatted_segments = []
-            for segment in segments:
-                start = segment.get('Time_Start', 0)
-                end = segment.get('Time_End', 0)
-                text = segment.get('Text', '').strip()
+    if os.name == "nt" and not os.path.exists(ffmpeg_cmd):
+        raise FileNotFoundError(f"ffmpeg executable not found at path: {ffmpeg_cmd}")
 
-                # Check if start and end are already formatted strings
-                if isinstance(start, str) and ':' in start:
-                    # Already in HH:MM:SS format, use directly
-                    formatted_segments.append(f"[{start}-{end}] {text}")
-                else:
-                    # Numeric seconds, convert to time format
-                    try:
-                        start_time1 = time.strftime('%H:%M:%S', time.gmtime(float(start)))
-                        end_time = time.strftime('%H:%M:%S', time.gmtime(float(end)))
-                        formatted_segments.append(f"[{start_time1}-{end_time}] {text}")
-                    except (ValueError, TypeError):
-                        # Fallback if conversion fails
-                        formatted_segments.append(f"[{start}-{end}] {text}")
+    # Define your chunk options once
+    chunk_options = {
+        'method': chunk_method,
+        'max_size': max_chunk_size,
+        'overlap': chunk_overlap,
+        'adaptive': use_adaptive_chunking,
+        'multi_level': use_multi_level_chunking,
+        'language': chunk_language,
+    }
 
-            # Join the segments with a newline to ensure proper formatting
-            return "\n".join(formatted_segments)
-        else:
-            # Join the text without timestamps
-            return "\n".join([segment.get('Text', '').strip() for segment in segments])
-
-    def update_progress(message):
-        progress.append(message)
-        return "\n".join(progress)
-
-    def cleanup_files():
-        if not keep_original:
-            for file in temp_files:
-                try:
-                    if os.path.exists(file):
-                        os.remove(file)
-                        update_progress(f"Temporary file {file} removed.")
-                except Exception as e:
-                    update_progress(f"Failed to remove temporary file {file}: {str(e)}")
-            # Also clean recorded files
-            for file in recorded_files:
-                try:
-                    if os.path.exists(file):
-                        os.remove(file)
-                except:
-                    pass
-
-    def reencode_mp3(mp3_file_path):
+    def reencode_mp3(mp3_file_path: str) -> str:
+        """
+        Re-encode the original MP3 (in case it has unusual bitrates/codecs).
+        """
         try:
             reencoded_mp3_path = mp3_file_path.replace(".mp3", "_reencoded.mp3")
-            subprocess.run([ffmpeg_cmd, '-i', mp3_file_path, '-codec:a', 'libmp3lame', reencoded_mp3_path], check=True)
+            subprocess.run(
+                [ffmpeg_cmd, '-i', mp3_file_path, '-codec:a', 'libmp3lame', reencoded_mp3_path],
+                check=True
+            )
             update_progress(f"Re-encoded {mp3_file_path} to {reencoded_mp3_path}.")
             return reencoded_mp3_path
-        except subprocess.CalledProcessError as e:
-            update_progress(f"Error re-encoding {mp3_file_path}: {str(e)}")
-            raise
+        except subprocess.CalledProcessError as exc:
+            msg = f"Error re-encoding {mp3_file_path}: {str(exc)}"
+            update_progress(msg)
+            raise RuntimeError(msg) from exc
 
-    def convert_mp3_to_wav(mp3_file_path):
+    def convert_mp3_to_wav(mp3_file_path: str) -> str:
+        """
+        Convert MP3 to WAV to feed into the speech-to-text engine.
+        """
         try:
             wav_file_path = mp3_file_path.replace(".mp3", ".wav")
-            subprocess.run([ffmpeg_cmd, '-i', mp3_file_path, wav_file_path], check=True)
+            subprocess.run(
+                [ffmpeg_cmd, '-i', mp3_file_path, wav_file_path],
+                check=True
+            )
             update_progress(f"Converted {mp3_file_path} to {wav_file_path}.")
             return wav_file_path
-        except subprocess.CalledProcessError as e:
-            update_progress(f"Error converting {mp3_file_path} to WAV: {str(e)}")
-            raise
+        except subprocess.CalledProcessError as exc:
+            msg = f"Error converting {mp3_file_path} to WAV: {str(exc)}"
+            update_progress(msg)
+            raise RuntimeError(msg) from exc
 
-    try:
-        # Check and set the ffmpeg command
-        global ffmpeg_cmd
-        if os.name == "nt":
-            logging.debug("Running on Windows")
-            ffmpeg_cmd = os.path.join(os.getcwd(), "Bin", "ffmpeg.exe")
-        else:
-            ffmpeg_cmd = 'ffmpeg'  # Assume 'ffmpeg' is in PATH for non-Windows systems
+    def cleanup_files():
+        """
+        Remove downloaded or intermediate files if the user chose not to keep them.
+        """
+        for file_path in temp_files:
+            if not file_path:
+                continue
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    update_progress(f"Temporary file {file_path} removed.")
+            except Exception as exc:
+                update_progress(f"Failed to remove temporary file {file_path}: {str(exc)}")
 
-        # Ensure ffmpeg is accessible
-        if not os.path.exists(ffmpeg_cmd) and os.name == "nt":
-            raise FileNotFoundError(f"ffmpeg executable not found at path: {ffmpeg_cmd}")
+    # ---------------------
+    #  Process URLs first
+    # ---------------------
+    if audio_urls:
+        for i, url in enumerate(audio_urls, start=1):
+            item_result = {
+                "input": url,
+                "success": False,
+                "transcription": None,
+                "summary": None,
+                "error": None
+            }
+            try:
+                update_progress(f"Downloading audio from URL {i}/{len(audio_urls)}: {url}")
+                audio_file_path = download_audio_file(url, whisper_model, use_cookies, cookies)
+                if not audio_file_path:
+                    raise FileNotFoundError(f"Failed to download: {url}")
 
-        # Define chunk options early to avoid undefined errors
-        chunk_options = {
-            'method': chunk_method,
-            'max_size': max_chunk_size,
-            'overlap': chunk_overlap,
-            'adaptive': use_adaptive_chunking,
-            'multi_level': use_multi_level_chunking,
-            'language': chunk_language
-        }
+                temp_files.append(audio_file_path)
 
-        # Process URLs if provided
-        if audio_urls:
-            urls = [url.strip() for url in audio_urls.split('\n') if url.strip()]
-            for i, url in enumerate(urls, 1):
-                try:
-                    update_progress(f"Processing URL {i}/{len(urls)}: {url}")
+                # Re-encode and convert
+                reencoded_mp3_path = reencode_mp3(audio_file_path)
+                temp_files.append(reencoded_mp3_path)
 
-                    # Download and process audio file
-                    audio_file_path = download_audio_file(url, use_cookies, cookies)
-                    if not audio_file_path:
-                        raise FileNotFoundError(f"Failed to download audio from URL: {url}")
+                wav_file_path = convert_mp3_to_wav(reencoded_mp3_path)
+                temp_files.append(wav_file_path)
 
-                    temp_files.append(audio_file_path)
+                # Transcribe
+                segments = speech_to_text(
+                    wav_file_path,
+                    whisper_model=whisper_model,
+                    selected_source_lang=transcription_language,
+                    vad_filter=True,
+                    diarize=diarize,
+                )
+                # Some speech_to_text() functions return dict with "segments"; adapt as needed
+                if isinstance(segments, dict) and 'segments' in segments:
+                    segments = segments['segments']
 
-                    # Process the audio file
-                    reencoded_mp3_path = reencode_mp3(audio_file_path)
-                    temp_files.append(reencoded_mp3_path)
+                if not isinstance(segments, list):
+                    raise ValueError("Unexpected segments format from speech_to_text()")
 
-                    wav_file_path = convert_mp3_to_wav(reencoded_mp3_path)
-                    temp_files.append(wav_file_path)
+                transcription = format_transcription_with_timestamps(segments)
+                if not transcription.strip():
+                    raise ValueError("Empty transcription generated.")
 
-                    # Transcribe audio
-                    segments = speech_to_text(wav_file_path, whisper_model=whisper_model, diarize=diarize)
+                item_result["transcription"] = transcription
 
-                    # Handle segments format
-                    if isinstance(segments, dict) and 'segments' in segments:
-                        segments = segments['segments']
+                # Summarize
+                if api_name and api_name.lower() != "none":
+                    try:
+                        chunked_text = improved_chunking_process(transcription, chunk_options)
+                        summary_result = perform_summarization(
+                            api_name=api_name,
+                            input_data=chunked_text,
+                            custom_prompt_input=custom_prompt_input,
+                            api_key=api_key,
+                            recursive_summarization=recursive_summarization,
+                            temp=None,
+                            system_message=system_prompt_input
+                        )
+                        item_result["summary"] = summary_result or "No summary available"
+                    except Exception as exc:
+                        msg = f"Summarization failed: {str(exc)}"
+                        update_progress(msg)
+                        item_result["summary"] = "Summary generation failed"
 
-                    if not isinstance(segments, list):
-                        raise ValueError("Unexpected segments format received from speech_to_text")
+                item_result["success"] = True
+                processed_count += 1
+                update_progress(f"Processed URL {i} successfully.")
 
-                    transcription = format_transcription_with_timestamps(segments)
-                    if not transcription.strip():
-                        raise ValueError("Empty transcription generated")
-                    logging.debug(f"Transcription: {transcription}")
+            except Exception as exc:
+                failed_count += 1
+                item_result["error"] = str(exc)
+                update_progress(f"Failed to process URL {i}: {str(exc)}")
 
-                    # Initialize summary with default value
-                    summary = "No summary available"
+            results.append(item_result)
 
-                    # Attempt summarization if API is provided
-                    if api_name not in (None, "None", "none"):
-                        logging.debug(f"Summarizing audio with API: {api_name}")
-                        try:
-                            chunked_text = improved_chunking_process(transcription, chunk_options)
-                            summary_result = perform_summarization(api_name, chunked_text, custom_prompt_input, api_key)
-                            if summary_result:
-                                summary = summary_result
-                            update_progress("Audio summarized successfully.")
-                        except Exception as e:
-                            logging.error(f"Summarization failed: {str(e)}")
-                            summary = "Summary generation failed"
+    # ----------------------
+    #  Process local files
+    # ----------------------
+    if audio_files:
+        for i, file_path in enumerate(audio_files, start=1):
+            # The “file_path” might be a real path or
+            # something like an upload file with .name property, adapt as needed
+            filename = os.path.basename(file_path) if file_path else f"audio_{i}"
 
-                    # Add to results
-                    all_transcriptions.append(transcription)
-                    all_summaries.append(summary)
+            item_result = {
+                "input": filename,
+                "success": False,
+                "transcription": None,
+                "summary": None,
+                "error": None
+            }
 
-                    # Add to database
-                    title = custom_title if custom_title else os.path.basename(wav_file_path)
-                    add_media_with_keywords(
-                        url=url,
-                        title=title,
-                        media_type='audio',
-                        content=transcription,
-                        keywords=custom_keywords,
-                        prompt=custom_prompt_input,
-                        summary=summary,
-                        transcription_model=whisper_model,
-                        author="Unknown",
-                        ingestion_date=datetime.now().strftime('%Y-%m-%d')
-                    )
+            try:
+                # Possibly check file size
+                # if os.path.getsize(file_path) > MAX_FILE_SIZE:
+                #     raise ValueError(f"File size exceeds {MAX_FILE_SIZE / (1024 * 1024):.2f}MB")
 
-                    processed_count += 1
-                    update_progress(f"Successfully processed URL {i}")
-                    log_counter("audio_files_processed_total", 1, {"whisper_model": whisper_model, "api_name": api_name})
+                reencoded_mp3_path = reencode_mp3(file_path)
+                temp_files.append(reencoded_mp3_path)
 
-                except Exception as e:
-                    failed_count += 1
-                    update_progress(f"Failed to process URL {i}: {str(e)}")
-                    log_counter("audio_files_failed_total", 1, {"whisper_model": whisper_model, "api_name": api_name})
-                    continue
+                wav_file_path = convert_mp3_to_wav(reencoded_mp3_path)
+                temp_files.append(wav_file_path)
 
-        # Process uploaded files if provided
-        if audio_files:
-            # Convert to list if single file
-            if not isinstance(audio_files, list):
-                audio_files = [audio_files]
+                # Transcribe
+                segments = speech_to_text(
+                    audio_file_path=wav_file_path,
+                    whisper_model=whisper_model,
+                    selected_source_lang=transcription_language,
+                    vad_filter=True,
+                    diarize=diarize,
+                )
+                if isinstance(segments, dict) and 'segments' in segments:
+                    segments = segments['segments']
 
-            for i, audio_file in enumerate(audio_files, 1):
-                try:
-                    file_title = f"{custom_title}_{i}" if custom_title else os.path.basename(audio_file.name)
-                    update_progress(f"Processing file {i}/{len(audio_files)}: {file_title}")
+                if not isinstance(segments, list):
+                    raise ValueError("Unexpected segments format from speech_to_text()")
 
-                    if os.path.getsize(audio_file.name) > MAX_FILE_SIZE:
-                        raise ValueError(f"File {file_title} size exceeds maximum limit of {MAX_FILE_SIZE / (1024 * 1024):.2f}MB")
+                transcription = format_transcription_with_timestamps(segments)
+                if not transcription.strip():
+                    raise ValueError("Empty transcription generated")
 
-                    # Process the audio file
-                    reencoded_mp3_path = reencode_mp3(audio_file.name)
-                    temp_files.append(reencoded_mp3_path)
+                item_result["transcription"] = transcription
 
-                    wav_file_path = convert_mp3_to_wav(reencoded_mp3_path)
-                    temp_files.append(wav_file_path)
+                # Summarize if API is provided
+                if api_name and api_name.lower() != "none":
+                    try:
+                        chunked_text = improved_chunking_process(transcription, chunk_options)
+                        summary_result = perform_summarization(
+                            api_name=api_name,
+                            input_data=chunked_text,
+                            custom_prompt_input=custom_prompt_input,
+                            api_key=api_key,
+                            recursive_summarization=recursive_summarization,
+                            temp=None,
+                            system_message=system_prompt_input
+                        )
+                        item_result["summary"] = summary_result or "No summary available"
+                        update_progress(f"File {filename} summarized successfully.")
+                    except Exception as exc:
+                        msg = f"Summarization failed: {str(exc)}"
+                        update_progress(msg)
+                        item_result["summary"] = "Summary generation failed"
 
-                    # Transcribe audio
-                    segments = speech_to_text(wav_file_path, whisper_model=whisper_model, diarize=diarize)
+                item_result["success"] = True
+                processed_count += 1
+                update_progress(f"Processed file {i}/{len(audio_files)}: {filename}")
 
-                    if isinstance(segments, dict) and 'segments' in segments:
-                        segments = segments['segments']
+            except Exception as exc:
+                failed_count += 1
+                item_result["error"] = str(exc)
+                update_progress(f"Failed to process file {i} ({filename}): {str(exc)}")
 
-                    if not isinstance(segments, list):
-                        raise ValueError("Unexpected segments format received from speech_to_text")
+            results.append(item_result)
 
-                    transcription = format_transcription_with_timestamps(segments)
-                    if not transcription.strip():
-                        raise ValueError("Empty transcription generated")
+    # ---------------------
+    # Cleanup if needed
+    # ---------------------
+    if not keep_original:
+        cleanup_files()
 
-                    # Initialize summary with default value
-                    summary = "No summary available"
+    # End timing
+    total_time = time.time() - start_time
+    update_progress(f"Processing complete. Success: {processed_count}, Failed: {failed_count}, Time: {total_time:.2f}s")
 
-                    # Attempt summarization if API is provided
-                    if api_name and api_name.lower() != "none":
-                        try:
-                            chunked_text = improved_chunking_process(transcription, chunk_options)
-                            summary_result = perform_summarization(api_name, chunked_text, custom_prompt_input, api_key)
-                            if summary_result:
-                                summary = summary_result
-                            update_progress(f"Audio file {i} summarized successfully.")
-                        except Exception as e:
-                            logging.error(f"Summarization failed for file {i}: {str(e)}")
-                            summary = "Summary generation failed"
-
-                    # Add to results with file identifier
-                    all_transcriptions.append(f"=== {file_title} ===\n{transcription}")
-                    all_summaries.append(f"=== {file_title} ===\n{summary}")
-
-                    # Add to database
-                    add_media_with_keywords(
-                        url="Uploaded File",
-                        title=file_title,
-                        media_type='audio',
-                        content=transcription,
-                        keywords=custom_keywords,
-                        prompt=custom_prompt_input,
-                        summary=summary,
-                        transcription_model=whisper_model,
-                        author="Unknown",
-                        ingestion_date=datetime.now().strftime('%Y-%m-%d')
-                    )
-
-                    processed_count += 1
-                    update_progress(f"Successfully processed file {i}")
-                    log_counter("audio_files_processed_total", 1, {"whisper_model": whisper_model, "api_name": api_name})
-
-                except Exception as e:
-                    failed_count += 1
-                    update_progress(f"Failed to process file {i}: {str(e)}")
-                    log_counter("audio_files_failed_total", 1, {"whisper_model": whisper_model, "api_name": api_name})
-                    continue
-
-        # Cleanup temporary files
-        if not keep_original:
-            cleanup_files()
-
-        # Log processing metrics
-        processing_time = time.time() - start_time
-        log_histogram("audio_processing_time_seconds", processing_time,
-                     {"whisper_model": whisper_model, "api_name": api_name})
-        log_counter("total_audio_files_processed", processed_count,
-                   {"whisper_model": whisper_model, "api_name": api_name})
-        log_counter("total_audio_files_failed", failed_count,
-                   {"whisper_model": whisper_model, "api_name": api_name})
-
-        # Prepare final output
-        final_progress = update_progress(f"Processing complete. Processed: {processed_count}, Failed: {failed_count}")
-        final_transcriptions = "\n\n".join(all_transcriptions) if all_transcriptions else "No transcriptions available"
-        final_summaries = "\n\n".join(all_summaries) if all_summaries else "No summaries available"
-
-        return final_progress, final_transcriptions, final_summaries
-
-    except Exception as e:
-        logging.error(f"Error in process_audio_files: {str(e)}")
-        log_counter("audio_files_failed_total", 1, {"whisper_model": whisper_model, "api_name": api_name})
-        if not keep_original:
-            cleanup_files()
-        return update_progress(f"Processing failed: {str(e)}"), "No transcriptions available", "No summaries available"
+    # Return a structured response:
+    return {
+        "status": "success" if failed_count == 0 else "partial",
+        "message": f"Processed: {processed_count}, Failed: {failed_count}",
+        "progress": progress_log,  # If you want to see step-by-step progress
+        "results": results
+    }
 
 
 def format_transcription_with_timestamps(segments, keep_timestamps=True):
