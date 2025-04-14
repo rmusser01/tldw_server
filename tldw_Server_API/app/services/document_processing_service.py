@@ -16,7 +16,7 @@ from pypandoc import convert_file
 
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
 from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
-from tldw_Server_API.app.core.logging import logger
+from tldw_Server_API.app.core.Utils.Utils import logger
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
 from tldw_Server_API.app.core.Utils.Utils import logging

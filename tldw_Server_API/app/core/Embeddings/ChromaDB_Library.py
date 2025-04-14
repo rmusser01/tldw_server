@@ -11,12 +11,12 @@ from itertools import islice
 import numpy as np
 #
 # Local Imports:
-from PoC_Version.App_Function_Libraries.Chunk_Lib import chunk_for_embedding, chunk_options
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import mark_media_as_processed
-from PoC_Version.App_Function_Libraries.DB.SQLite_DB import process_chunks
-from PoC_Version.App_Function_Libraries.RAG.Embeddings_Create import create_embedding, create_embeddings_batch
-from PoC_Version.App_Function_Libraries.Summarization import summarize
-from PoC_Version.App_Function_Libraries.Utils import get_database_path, ensure_directory_exists, load_and_log_configs, logger, \
+from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_for_embedding, chunk_options
+from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
+from tldw_Server_API.app.core.DB_Management.SQLite_DB import process_chunks
+from tldw_Server_API.app.core.Embeddings.Embeddings_Create import create_embedding, create_embeddings_batch
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
+from tldw_Server_API.app.core.Utils.Utils import get_database_path, ensure_directory_exists, load_and_log_configs, logger, \
     logging
 #
 #######################################################################################################################

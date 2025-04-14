@@ -10,7 +10,7 @@ from datetime import datetime
 # 3rd-Party Imports
 from loguru import logger
 # Local Imports
-from PoC_Version.App_Function_Libraries.Utils import load_and_log_configs
+from tldw_Server_API.app.core.Utils.Utils import load_and_log_configs
 #
 ############################################################################################################
 #

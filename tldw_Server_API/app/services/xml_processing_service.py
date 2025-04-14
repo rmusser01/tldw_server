@@ -12,9 +12,9 @@ import xml.etree.ElementTree as ET
 from typing import Optional, List
 
 from fastapi import HTTPException
-from tldw_Server_API.app.core.logging import logger
+from tldw_Server_API.app.core.Utils.Utils import logger
 
-from PoC_Version.App_Function_Libraries.Chunk_Lib import chunk_xml
+from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_xml
 
 async def process_xml_task(
     file_bytes: bytes,

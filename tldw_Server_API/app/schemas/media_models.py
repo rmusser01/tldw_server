@@ -81,7 +81,7 @@ class VersionRollbackRequest(BaseModel):
 # This is a schema for all media except web scraping ingestion and analysis.
 
 class AddMediaRequest(BaseModel):
-    url: str = Field(..., description="The URL of the media to add")
+    url: Optional[str] = Field(None, description="The URL of the media to add") # Allow None if file is provided
     media_type: str = Field(..., description="Type of media (e.g., 'audio', 'video', 'pdf')")
     title: Optional[str] = Field(None, description="Optional title of the media")
     author: Optional[str] = Field(None, description="Optional author of the media")

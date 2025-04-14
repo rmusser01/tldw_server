@@ -93,7 +93,7 @@ config = configparser.ConfigParser()
 config.read(config_path)
 
 # Get the SQLite path from the config, or use the default if not specified
-sqlite_path = config.get('Database', 'sqlite_path', fallback=get_database_path('tldw_Server_API\Databases\server_media_summary.db'))
+sqlite_path = config.get('Database', 'sqlite_path', fallback=get_database_path('tldw_Server_API\\Databases\\server_media_summary.db'))
 
 # Get the backup path from the config, or use the default if not specified
 backup_path = config.get('Database', 'backup_path', fallback='server_database_backups')
@@ -2422,11 +2422,13 @@ def get_paginated_files(page: int = 1, results_per_page: int = 50) -> Tuple[List
 
 def get_full_media_details(media_id: int) -> Optional[Dict]:
     """Get complete media details with versions and keywords"""
+    logger.debug(f"Attempting to get full details for ID: {media_id}")
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
 
             # Get basic media info - matching your exact schema
+            logger.debug("Executing main media query...")
             cursor.execute('''
                 SELECT 
                     id, url, title, type, content,
@@ -2438,11 +2440,14 @@ def get_full_media_details(media_id: int) -> Optional[Dict]:
                 WHERE id = ?
             ''', (media_id,))
             media = cursor.fetchone()
+            logger.debug(f"fetchone() result type: {type(media)}") # Should be <class 'tuple'> or None
 
             if not media:
+                logger.warning(f"No media found for ID {media_id} in DB.")
                 return None
 
             # Convert to dict with all schema fields
+            logger.debug("Attempting to create media_dict...")
             media_dict = {
                 "id": media[0],
                 "url": media[1],
@@ -2463,15 +2468,20 @@ def get_full_media_details(media_id: int) -> Optional[Dict]:
                 "keywords": [],
                 "versions": []
             }
+            logger.debug(f"media_dict created. Type: {type(media_dict)}") # Should be <class 'dict'>
 
             # Get keywords
+            logger.debug("Fetching keywords...")
             cursor.execute('''
                 SELECT k.keyword
                 FROM Keywords k
                 JOIN MediaKeywords mk ON k.id = mk.keyword_id
                 WHERE mk.media_id = ?
             ''', (media_id,))
+
+            logger.debug("Fetching versions...")
             media_dict["keywords"] = [row[0] for row in cursor.fetchall()]
+            logger.debug(f"Keywords fetched: {media_dict['keywords']}")
 
             # Get versions
             media_dict["versions"] = get_all_document_versions(media_id)
@@ -2479,7 +2489,7 @@ def get_full_media_details(media_id: int) -> Optional[Dict]:
             return media_dict
 
     except Exception as e:
-        logging.error(f"Error in get_full_media_details: {str(e)}")
+        logger.error(f"Error within get_full_media_details for ID {media_id}: {e}", exc_info=True)
         return None
 
 

@@ -254,7 +254,14 @@ To Do:
 - [ ] Add API endpoint for video download from URL, storing as temp file for X time before auto-deletion.
 - [ ] Add API endpoint for status of media file processing - Can query endpoint with media_id to get status of processing.
 - [ ] Config file option/check for default user agent
-
+- [ ] Add XML to document ingestion pipeline0
+- [ ] Global variables in Video library - currently uses global variables for paths. This needs to be refactored to instead take/return file paths per-user.
+- [ ] Add 'rolling_summarization' option to processing pipelines
+- [ ] VAD Use and `store_in_db` options are hardcoded when calling `process_videos` - re-examine, so can use process_videos without perm storage
+- [ ] Regex in confab check
+      Issue: The process_videos function uses a regular expression to extract the summary text from a formatted string (all_summaries) for the run_geval check. This relies heavily on the exact string format and can easily break if the format changes.
+        Recommendation: Make process_single_video return a structured dictionary like {"video_input": ..., "status": ..., "transcript": ..., "summary": ..., "db_id": ...}. Then, process_videos can collect these dictionaries in its results list. When running the confabulation check, iterate through the results list and directly access item['transcript'] and item['summary'] to pass to run_geval. This avoids fragile string parsing.
+- [ ] Set proper paths for model files in config.txt
 
 
 

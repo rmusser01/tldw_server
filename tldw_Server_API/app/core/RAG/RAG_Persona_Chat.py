@@ -7,12 +7,10 @@ from typing import List, Dict, Any, Tuple
 # External Imports
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.RAG.Embeddings_Create import create_embedding, embedding_provider, embedding_model, \
+from tldw_Server_API.app.core.Embeddings.Embeddings_Create import create_embedding, embedding_provider, embedding_model, \
     embedding_api_url
-from PoC_Version.App_Function_Libraries.RAG.ChromaDB_Library import chroma_client, store_in_chroma
-from PoC_Version.App_Function_Libraries.Utils import logging
-
-
+from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import chroma_client, store_in_chroma
+from tldw_Server_API.app.core.Utils.Utils import logging
 #
 #######################################################################################################################
 #

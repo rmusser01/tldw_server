@@ -2,11 +2,12 @@
 # Description: This file contains the main FastAPI application, which serves as the primary API for the tldw application.
 #
 # Imports
+import logging
 #
 # 3rd-party Libraries
 import sys
 from pathlib import Path
-
+from loguru import logger
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 #
@@ -17,6 +18,52 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 ########################################################################################################################
 #
 # Functions:
+
+
+# --- Loguru Configuration with Intercept Handler ---
+
+# Define a handler class to intercept standard logging messages
+class InterceptHandler(logging.Handler):
+    def emit(self, record):
+        # Get corresponding Loguru level if it exists
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        # Find caller from where originated the logged message
+        frame, depth = logging.currentframe(), 2
+        while frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        logger.opt(depth=depth, exception=record.exc_info).log(
+            level, record.getMessage()
+        )
+
+# Remove default handler
+logger.remove()
+
+# Add your desired Loguru sink (e.g., stderr)
+log_level = "INFO" # Or load from environment variable/config
+logger.add(
+    sys.stderr,
+    level=log_level,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    colorize=True,
+)
+
+# Configure standard logging to use the InterceptHandler
+logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True) # level=0 captures everything for InterceptHandler to filter
+logging.getLogger("uvicorn").handlers = [InterceptHandler()]
+logging.getLogger("uvicorn.access").handlers = [InterceptHandler()]
+logging.getLogger("uvicorn.error").handlers = [InterceptHandler()]
+# Optionally configure other library loggers if needed
+# logging.getLogger("sqlalchemy.engine").handlers = [InterceptHandler()]
+
+
+logger.info("Loguru logger configured with standard logging interception!")
+
 
 app = FastAPI(
     title="tldw API",

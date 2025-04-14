@@ -2,7 +2,7 @@
 
 # FIXME - File is dummy code, needs to be updated
 
-from tldw_Server_API.app.core.logging import logger
+from tldw_Server_API.app.core.Utils.Utils import logger
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
 # from App_Function_Libraries.Books.Book_Ingestion_Lib import import_epub, ...

@@ -6,10 +6,10 @@ import xml.etree.ElementTree as ET
 # External Imports
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Summarization import perform_summarization
-from PoC_Version.App_Function_Libraries.Chunk_Lib import chunk_xml
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_to_database
-from PoC_Version.App_Function_Libraries.Utils import logging
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
+from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_xml
+from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
+from tldw_Server_API.app.core.Utils.Utils import logging
 #
 #######################################################################################################################
 #

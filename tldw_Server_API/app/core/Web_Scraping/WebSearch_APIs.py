@@ -19,13 +19,12 @@ from lxml.html import document_fromstring
 from requests import RequestException
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
-
-from PoC_Version.App_Function_Libraries.Summarization import summarize
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Utils import loaded_config_data, logging
-from PoC_Version.App_Function_Libraries.Web_Scraping import scrape_article
-from PoC_Version.App_Function_Libraries.Chat.Chat_Functions import chat_api_call
+from tldw_Server_API.app.core.Utils.Utils import loaded_config_data, logging
+from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article
+from tldw_Server_API.app.core.Chat.Chat_Functions import chat_api_call
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
 #
 #######################################################################################################################
 #

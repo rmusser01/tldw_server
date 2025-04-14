@@ -20,7 +20,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import start_new_conversa
 from tldw_Server_API.app.core.DB_Management.RAG_QA_Chat_DB import get_db_connection, get_conversation_name
 from tldw_Server_API.app.core.LLM_Calls.LLM_API_Calls import chat_with_openai, chat_with_anthropic, chat_with_cohere, \
     chat_with_groq, chat_with_openrouter, chat_with_deepseek, chat_with_mistral, chat_with_huggingface, chat_with_google
-from PoC_Version.App_Function_Libraries.LLM_API_Calls_Local import chat_with_aphrodite, chat_with_local_llm, chat_with_ollama, \
+from tldw_Server_API.app.core.LLM_Calls.LLM_API_Calls_Local import chat_with_aphrodite, chat_with_local_llm, chat_with_ollama, \
     chat_with_kobold, chat_with_llama, chat_with_oobabooga, chat_with_tabbyapi, chat_with_vllm, chat_with_custom_openai
 from tldw_Server_API.app.core.DB_Management.SQLite_DB import load_media_content
 from tldw_Server_API.app.core.Utils.Utils import generate_unique_filename, load_and_log_configs, logging

@@ -282,7 +282,7 @@ def check_media_exists(*args, **kwargs):
 
 def get_full_media_details(*args, **kwargs):
     if db_type == 'sqlite':
-        return sqlite_fetch_item_details(*args, **kwargs)
+        return get_full_media_details(*args, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
@@ -1280,3 +1280,5 @@ def save_workflow_chat_to_db(*args, **kwargs):
 #
 # End of file
 ############################################################################################################
+class DatabaseError:
+    pass

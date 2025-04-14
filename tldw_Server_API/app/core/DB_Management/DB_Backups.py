@@ -7,11 +7,9 @@ import sqlite3
 from datetime import datetime
 #
 # Local Imports:
-from PoC_Version.App_Function_Libraries.DB.Character_Chat_DB import chat_DB_PATH
-from PoC_Version.App_Function_Libraries.DB.RAG_QA_Chat_DB import get_rag_qa_db_path
-from PoC_Version.App_Function_Libraries.Utils import get_project_relative_path, logging
-
-
+from tldw_Server_API.app.core.DB_Management.Character_Chat_DB import chat_DB_PATH
+from tldw_Server_API.app.core.DB_Management.RAG_QA_Chat_DB import get_rag_qa_db_path
+from tldw_Server_API.app.core.Utils.Utils import get_project_relative_path, logging
 #
 # End of Imports
 #######################################################################################################################
