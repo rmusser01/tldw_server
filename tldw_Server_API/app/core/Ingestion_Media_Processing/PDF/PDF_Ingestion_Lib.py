@@ -12,11 +12,14 @@
 #
 ####################
 # Import necessary libraries
+import time
 from datetime import datetime
 import os
 import re
 import shutil
 import tempfile
+from typing import Dict, Any, Optional, List, Coroutine
+
 #
 # Import External Libs
 import pymupdf
@@ -25,7 +28,9 @@ from docling.document_converter import DocumentConverter
 #
 # Import Local
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 from tldw_Server_API.app.core.Utils.Utils import logging
 #
 # Constants
@@ -243,6 +248,134 @@ def process_and_cleanup_pdf(file, title, author, keywords, parser='pymupdf4llm')
         logging.error(f"Error in processing and cleanup: {str(e)}")
         log_counter("pdf_processing_error", labels={"file_name": file.name, "error": str(e)})
         return f"Error: {str(e)}"
+
+
+async def process_pdf_task(
+    file_bytes: bytes,
+    filename: str,
+    parser: str = "pymupdf4llm",
+    custom_prompt: Optional[str] = None,
+    api_name: Optional[str] = None,
+    api_key: Optional[str] = None,
+    auto_summarize: bool = False,
+    keywords: Optional[List[str]] = None,
+    system_prompt: Optional[str] = None,
+    perform_chunking: bool = True,
+    chunk_method: str = "sentences",
+    max_chunk_size: int = 500,
+    chunk_overlap: int = 200
+) -> dict[str, Any] | None:
+    """
+    Process a single PDF (provided as file bytes) and return its text + optional summary.
+
+    :param file_bytes: The in-memory PDF file content.
+    :param filename:    A string filename for reference.
+    :param parser:      Which parser to use (e.g. 'pymupdf4llm', 'docling', 'pymupdf', etc.).
+    :param custom_prompt:  Optional custom prompt for summarization.
+    :param api_name:    Which LLM API to use for summarization (e.g. 'openai'). If not set, no summarization.
+    :param api_key:     API key for the LLM.
+    :param auto_summarize: If True, attempt to summarize the extracted text.
+    :param keywords:    Optional list of keywords.
+    :param system_prompt: Optional system-level prompt for the LLM.
+    :param perform_chunking: If True, chunk the text before summarizing.
+    :param chunk_method:  One of 'sentences', 'words', etc.
+    :param max_chunk_size: Max chunk size for chunking.
+    :param chunk_overlap: Overlap size for chunking.
+    :return: A dictionary with:
+             - text_content: the full extracted text
+             - summary: a summary if auto_summarize=True & api_name is set
+             - title: (from PDF metadata or inferred from filename)
+             - author: (from PDF metadata or 'Unknown')
+             - parser_used: the parser name used
+             - keywords: the input keywords (if any)
+    """
+
+    start_time = time.time()
+    log_counter("pdf_processing_attempt", labels={"file_name": filename})
+
+    # Prepare a result dict
+    result_data: Dict[str, Any] = {
+        "filename": filename,
+        "parser_used": parser,
+        "text_content": "",
+        "summary": "",
+        "title": None,   # will set below from metadata or user param
+        "author": None,  # same as above
+        "keywords": keywords or [],
+    }
+
+    try:
+        # 1) Write the file bytes to a temp file
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(file_bytes)
+            local_path = tmp.name
+
+        # 2) Extract text with chosen parser
+        try:
+            if parser == "pymupdf4llm":
+                text_content = pymupdf4llm_parse_pdf(local_path)
+            elif parser == "pymupdf":
+                from . import extract_text_and_format_from_pdf
+                text_content = extract_text_and_format_from_pdf(local_path)
+            else:
+                # If you have a docling fallback or something else
+                from docling.document_converter import DocumentConverter
+                converter = DocumentConverter()
+                parsed_obj = converter.convert(local_path)
+                text_content = parsed_obj.document.export_to_markdown()
+
+            result_data["text_content"] = text_content
+
+            # 3) Extract PDF metadata to guess a title/author
+            metadata = extract_metadata_from_pdf(local_path)
+            # If metadata has e.g. metadata["title"], set that:
+            result_data["title"] = metadata.get("title") or os.path.splitext(filename)[0]
+            result_data["author"] = metadata.get("author", "Unknown")
+
+            # 4) If auto_summarize + we have an LLM, do chunking & summarization
+            if auto_summarize and api_name and api_name.lower() != "none":
+                if perform_chunking:
+                    chunk_opts = {
+                        "method": chunk_method,
+                        "max_size": max_chunk_size,
+                        "overlap": chunk_overlap
+                    }
+                    chunked_texts = improved_chunking_process(text_content, chunk_opts)
+                    if not chunked_texts:
+                        # fallback to single pass
+                        sum_result = perform_summarization(api_name, text_content, custom_prompt, api_key, system_message=system_prompt)
+                        result_data["summary"] = sum_result or ""
+                    else:
+                        chunk_summaries = []
+                        for c in chunked_texts:
+                            sum_result = perform_summarization(api_name, c["text"], custom_prompt, api_key, system_message=system_prompt)
+                            if sum_result:
+                                chunk_summaries.append(sum_result)
+                        if chunk_summaries:
+                            combined_summary = "\n\n".join(chunk_summaries)
+                            result_data["summary"] = combined_summary
+                else:
+                    # Single pass summarization
+                    sum_result = perform_summarization(api_name, text_content, custom_prompt, api_key, system_message=system_prompt)
+                    result_data["summary"] = sum_result or ""
+
+        finally:
+            # Cleanup the temp file
+            if os.path.exists(local_path):
+                os.remove(local_path)
+
+        # Mark success in logs
+        end_time = time.time()
+        processing_time = end_time - start_time
+        log_histogram("pdf_processing_duration", processing_time, labels={"file_name": filename})
+        log_counter("pdf_processing_success", labels={"file_name": filename})
+
+        return result_data
+
+    except Exception as e:
+        log_counter("pdf_processing_error", labels={"file_name": filename, "error": str(e)})
+        logging.error(f"Error in process_pdf_task for file {filename}: {str(e)}", exc_info=True)
+        raise
 
 #
 # End of PDF_Ingestion_Lib.py

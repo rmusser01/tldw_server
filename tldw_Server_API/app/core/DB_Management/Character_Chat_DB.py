@@ -168,7 +168,7 @@ def initialize_database():
             sender           TEXT NOT NULL,                  -- e.g. 'user', 'system', or 'assistant'
             content          TEXT NOT NULL,                  -- The message text
             created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (chat_id) REFERENCES CharacterChats(id) ON DELETE CASCADE;
+            FOREIGN KEY (chat_id) REFERENCES CharacterChats(id) ON DELETE CASCADE);
         """)
 
         # Create ChatKeywords table

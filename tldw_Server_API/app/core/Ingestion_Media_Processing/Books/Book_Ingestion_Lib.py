@@ -26,13 +26,11 @@ from bs4 import BeautifulSoup
 from ebooklib import epub
 #
 # Import Local
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_with_keywords, add_media_to_database
-from PoC_Version.App_Function_Libraries.Summarization import perform_summarization
-from PoC_Version.App_Function_Libraries.Chunk_Lib import chunk_ebook_by_chapters
-from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
-from PoC_Version.App_Function_Libraries.Utils import logging
-
-
+from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords, add_media_to_database
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
+from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_ebook_by_chapters
+from tldw_Server_API.app.core.Metrics.metrics_logger import (log_counter, log_histogram)
+from tldw_Server_API.app.core.Utils.Utils import logging
 #
 #######################################################################################################################
 # Function Definitions
@@ -45,14 +43,14 @@ def import_epub(file_path,
                 custom_prompt=None,
                 system_prompt=None,
                 summary=None,
-                auto_summarize=False,
+                auto_analyze=False,
                 api_name=None,
                 api_key=None,
                 chunk_options=None,
                 custom_chapter_pattern=None
                 ):
     """
-    Imports an EPUB file, extracts its content, chunks it, optionally summarizes it, and adds it to the database.
+    Imports an EPUB file, extracts its content, chunks it, optionally analyzes it, and adds it to the database.
 
     Parameters:
         - file_path (str): Path to the EPUB file.
@@ -61,7 +59,7 @@ def import_epub(file_path,
         - keywords (str, optional): Comma-separated keywords for the book.
         - custom_prompt (str, optional): Custom user prompt for summarization.
         - summary (str, optional): Predefined summary of the book.
-        - auto_summarize (bool, optional): Whether to auto-summarize the chunks.
+        - auto_analyze (bool, optional): Whether to auto-analyze the chunks.
         - api_name (str, optional): API name for summarization.
         - api_key (str, optional): API key for summarization.
         - chunk_options (dict, optional): Options for chunking.

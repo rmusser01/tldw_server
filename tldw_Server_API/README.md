@@ -36,6 +36,7 @@ FastAPI has a bug, which is caused by starlette, caused by python.
 
 ### /media
 
+#### GET /media
 - `GET /media`
   - Returns a list of all media items in the database.
     - Example response:
@@ -64,20 +65,28 @@ FastAPI has a bug, which is caused by starlette, caused by python.
         }
       }
     ```
-  
+
+#### POST /media 
 - `POST /media`
 -  Adds a new media item to the database.
-  - Request body:
-    ```json
-    {
-    }
-    ```
-  - Example response:
-    ```json
-    {
-    }
-    ```
-    
+  - Takes in a JSON object with the following fields:
+    - Field 1
+    - Field 2 
+    - Etc
+  - Returns the created media item with its ID, so you can use it in subsequent requests.
+- Request body:
+  ```json
+  {
+  }
+  ```
+- Example response:
+  ```json
+  {
+  }
+  ```
+
+
+#### GET /media/{media_id}
 - `GET /media/{media_id}`
 -  Retrieves a specific media item by its ID.
   - Example response:
@@ -85,7 +94,8 @@ FastAPI has a bug, which is caused by starlette, caused by python.
     {
     }
     ```
-    
+
+#### PUT /media/{media_id}
 - `PUT /media/{media_id}`
 - Updates a specific media item by its ID.
   - Request body:
@@ -99,7 +109,7 @@ FastAPI has a bug, which is caused by starlette, caused by python.
     }
     ```
     
-
+#### DELETE /media/{media_id}
 - `DELETE /media/{media_id}`
 - Deletes a specific media item by its ID.
   - Example response:
@@ -108,6 +118,7 @@ FastAPI has a bug, which is caused by starlette, caused by python.
     }
     ```
 
+#### GET /media/search
 - `GET /media/search/{query}`
   - Searches for media items based on a query string.
   - Search Fields:

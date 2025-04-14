@@ -51,8 +51,8 @@ CREATE TABLE IF NOT EXISTS conversation_metadata (
     last_updated DATETIME NOT NULL,
     title TEXT NOT NULL,
     media_id INTEGER,
-    parent_conversation_id TEXT REFERENCES conversation_metadata(conversation_id);
-    forked_from_message_id INTEGER REFERENCES rag_qa_chats(id);
+    parent_conversation_id TEXT REFERENCES conversation_metadata(conversation_id),
+    forked_from_message_id INTEGER REFERENCES rag_qa_chats(id),
     rating INTEGER CHECK(rating BETWEEN 1 AND 3)
 );
 
@@ -146,13 +146,6 @@ CREATE VIRTUAL TABLE IF NOT EXISTS rag_qa_keyword_collections_fts USING fts5(
 );
 
 -- FTS table for notes
-CREATE VIRTUAL TABLE IF NOT EXISTS rag_qa_notes_fts USING fts5(
-    title,
-    content,
-    content='rag_qa_notes',
-    content_rowid='id'
-);
--- FTS table for notes (modified to include both title and content)
 CREATE VIRTUAL TABLE IF NOT EXISTS rag_qa_notes_fts USING fts5(
     title,
     content,

@@ -41,6 +41,15 @@ async def root():
 # Router for media endpoints/media file handling
 app.include_router(media_router, prefix="/api/v1/media", tags=["media"])
 
+
+# Router for RAG endpoints
+app.include_router(media_router, prefix="/api/v1/rag", tags=["rag"])
+
+# Router for chat endpoints/chat temp-file handling
+app.include_router(media_router, prefix="/api/v1/chat", tags=["chat"])
+
+
+
 # Router for trash endpoints - deletion of media items / trash file handling (FIXME: Secure delete vs lag on delete?)
 #app.include_router(trash_router, prefix="/api/v1/trash", tags=["trash"])
 

@@ -53,6 +53,7 @@ from tldw_Server_API.app.core.Utils.Utils import logging, load_and_log_configs
 # Function Definitions
 #
 
+# FIXME - Add a config file option/check for the user agent
 web_scraping_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 #################################################################

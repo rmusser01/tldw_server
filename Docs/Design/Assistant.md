@@ -8,6 +8,6 @@ https://github.com/deepbeepmeep/Hunyuan3D-2GP
 https://github.com/deepbeepmeep/mmgp
 https://github.com/fagenorn/handcrafted-persona-engine
 https://github.com/abdibrokhim/paper-ai-voice-assistant
-
+https://arxiv.org/abs/2504.02197
 
 

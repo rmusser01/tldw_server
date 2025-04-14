@@ -11,6 +11,7 @@
 # FIXME
 #
 # Imports
+import asyncio
 import hashlib
 import json
 import os
@@ -23,6 +24,7 @@ from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
 #
 # 3rd-party imports
 from fastapi import (
@@ -48,11 +50,12 @@ from fastapi import (
     HTTPException,
     UploadFile
 )
+import redis
+import requests
 # API Rate Limiter/Caching via Redis
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
-import redis
 #
 # Local Imports
 from tldw_Server_API.app.core.DB_Management.DB_Dependency import get_db_manager
@@ -70,14 +73,18 @@ from tldw_Server_API.app.core.DB_Management.SQLite_DB import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_db
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Processing import process_audio
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Ingestion_Lib import import_epub
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Media_Update_lib import process_media_update
+from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Ingestion_Lib import process_pdf_task
 from tldw_Server_API.app.core.Utils.Utils import format_transcript, truncate_content, logging
+from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article, scrape_from_sitemap, \
+    scrape_by_url_level, recursive_scrape
 from tldw_Server_API.app.schemas.media_models import VideoIngestRequest, AudioIngestRequest, MediaSearchResponse, \
-    MediaItemResponse, MediaUpdateRequest, VersionCreateRequest, VersionResponse, VersionRollbackRequest
+    MediaItemResponse, MediaUpdateRequest, VersionCreateRequest, VersionResponse, VersionRollbackRequest, \
+    IngestWebContentRequest, ScrapeMethod, AddMediaRequest
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
-from tldw_Server_API.app.services.document_processing_service import process_document_task
+from tldw_Server_API.app.services.document_processing_service import process_documents
 from tldw_Server_API.app.services.ebook_processing_service import process_ebook_task
-from tldw_Server_API.app.services.pdf_processing_service import process_pdf_task
 from tldw_Server_API.app.services.xml_processing_service import process_xml_task
 from tldw_Server_API.app.services.web_scraping_service import process_web_scraping_task
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
@@ -543,41 +550,17 @@ def extract_id_from_result(result: str) -> int:
 
 
 # Per-User Media Ingestion and Analysis
+# FIXME - Ensure that each function processes multiple files/URLs at once
 @router.post("/add")
 async def add_media(
-        url: str,
-        media_type: str,
-        background_tasks: BackgroundTasks,
-        file: Optional[UploadFile] = File(None),
-        title: Optional[str] = None,
-        author: Optional[str] = None,
-        keywords: str = "",
-        custom_prompt: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        whisper_model: str = "deepml/distil-large-v3",  # Default High-Quality model for audio/video transcription
-        transcription_language: str = "en",  # Language for Audio transcription
-        diarize: bool = False,
-        timestamp_option: bool = True,
-        keep_original_file: bool = False,
-        overwrite_existing: bool = False,
-        perform_analysis: bool = True,  # Whether to perform analysis on the media (default is True)
-        perform_rolling_summarization: bool = False,  # Whether to perform rolling summarization on the media
-        api_name: Optional[str] = None,
-        api_key: Optional[str] = None,
-        pdf_parsing_engine: Optional[str] = None,
-        perform_chunking: bool = True,
-        chunk_method: Optional[str] = None,
-        use_adaptive_chunking: bool = False,
-        use_multi_level_chunking: bool = False,
-        chunk_language: Optional[str] = None,
-        chunk_size: int = 500,
-        chunk_overlap: int = 200,
-        use_cookies=False,
-        cookies: Optional[str] = None,
-        perform_confabulation_check_of_analysis: bool = False,
-        token: str = Header(..., description="Authentication token"),
-        db=Depends(get_db_manager),
+    request_data: AddMediaRequest,  # JSON body
+    token: str = Header(..., description="Authentication token"),
+    file: Optional[UploadFile] = File(None),  # File uploads are handled separately
+    background_tasks: BackgroundTasks = Depends(...)
 ):
+    # FIXME - User-specific DB usage
+    #db = Depends(get_db_manager),
+
     """
     Add new media to the database with processing.
     Take in arguments + File(s), return media ID(s) for ingested items.
@@ -611,7 +594,7 @@ async def add_media(
     try:
         # Validate media type
         valid_types = ['video', 'audio', 'document', 'pdf', 'ebook', 'xml', 'web']
-        if media_type not in valid_types:
+        if AddMediaRequest.media_type not in valid_types:
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid media_type. Must be one of: {', '.join(valid_types)}"
@@ -634,25 +617,25 @@ async def add_media(
                 buffer.write(content)
 
             # Schedule cleanup for temp directory in background task
-            if not keep_original_file:
+            if not AddMediaRequest.keep_original_file:
                 background_tasks.add_task(shutil.rmtree, temp_dir, ignore_errors=True)
 
             # If no URL provided, use the filename (but not the path)
-            if not url or url == "":
+            if not AddMediaRequest.url or AddMediaRequest.url == "":
                 url = file.filename
 
         # Handle Chunking
-        if perform_chunking:
+        if AddMediaRequest.perform_chunking:
             # Set default chunking parameters
-            chunk_method = chunk_method or "sentences"
-            use_adaptive_chunking = use_adaptive_chunking or False
-            use_multi_level_chunking = use_multi_level_chunking or False
-            chunk_language = chunk_language or transcription_language
-            chunk_size = chunk_size or 500
-            chunk_overlap = chunk_overlap or 200
+            chunk_method = AddMediaRequest.chunk_method or "sentences"
+            use_adaptive_chunking = AddMediaRequest.use_adaptive_chunking or False
+            use_multi_level_chunking = AddMediaRequest.use_multi_level_chunking or False
+            chunk_language = AddMediaRequest.chunk_language or AddMediaRequest.transcription_language
+            chunk_size = AddMediaRequest.chunk_size or 500
+            chunk_overlap = AddMediaRequest.chunk_overlap or 200
 
         # Process based on media type
-        if media_type == 'video':
+        if AddMediaRequest.media_type == 'video':
             logging.info(f"Processing video: {url}")
             inputs = [local_file_path] if local_file_path else [url]
             result = process_videos(
@@ -664,25 +647,25 @@ async def add_media(
                 # end_time: Optional[str],
                 end_time=None,
                 # diarize: bool,
-                diarize=diarize,
+                diarize=AddMediaRequest.diarize,
                 # vad_use: bool,
                 vad_use=True,  # Default to True for video processing unless specified otherwise
                 # whisper_model: str,
-                whisper_model=whisper_model,
+                whisper_model=AddMediaRequest.whisper_model,
                 # use_custom_prompt: bool,
-                use_custom_prompt=(custom_prompt is not None),  # Use custom prompt if provided
+                use_custom_prompt=(AddMediaRequest.custom_prompt is not None),  # Use custom prompt if provided
                 # custom_prompt: Optional[str],
-                custom_prompt=custom_prompt,
+                custom_prompt=AddMediaRequest.custom_prompt,
                 # system_prompt: Optional[str],
-                system_prompt=system_prompt,
+                system_prompt=AddMediaRequest.system_prompt,
                 # perform_chunking: bool,
-                perform_chunking=perform_chunking,  # Allow chunking by default unless specified otherwise
+                perform_chunking=AddMediaRequest.perform_chunking,  # Allow chunking by default unless specified otherwise
                 # chunk_method: Optional[str],
-                chunk_method=chunk_method,
+                chunk_method=AddMediaRequest.chunk_method,
                 # max_chunk_size: int,
-                max_chunk_size=chunk_size,  # Default chunk size for video processing
+                max_chunk_size=AddMediaRequest.chunk_size,  # Default chunk size for video processing
                 # chunk_overlap: int,
-                chunk_overlap=chunk_overlap,  # Default overlap for video processing
+                chunk_overlap=AddMediaRequest.chunk_overlap,  # Default overlap for video processing
                 # use_adaptive_chunking: bool,
                 use_adaptive_chunking=False,  # Default to False unless specified otherwise
                 # use_multi_level_chunking: bool,
@@ -692,21 +675,21 @@ async def add_media(
                 # summarize_recursively: bool,
                 summarize_recursively=False,
                 # api_name: Optional[str],
-                api_name=api_name,
+                api_name=AddMediaRequest.api_name,
                 # api_key: Optional[str],
-                api_key=api_key,
+                api_key=AddMediaRequest.api_key,
                 # keywords: str,
-                keywords=keywords if keywords else "",  # Pass as string; split later in processing
+                keywords=AddMediaRequest.keywords if AddMediaRequest.keywords else "",  # Pass as string; split later in processing
                 # use_cookies: bool,
                 use_cookies=False,  # Default to False unless specified otherwise
                 # cookies: Optional[str],
-                cookies=cookies if use_cookies else None,  # Use cookies if specified
+                cookies=AddMediaRequest.cookies if AddMediaRequest.use_cookies else None,  # Use cookies if specified
                 # timestamp_option: bool,
-                timestamp_option=timestamp_option,
+                timestamp_option=AddMediaRequest.timestamp_option,
                 # confab_checkbox: bool,
-                confab_checkbox=perform_confabulation_check_of_analysis,  # Perform confabulation check if specified
+                confab_checkbox=AddMediaRequest.perform_confabulation_check_of_analysis,  # Perform confabulation check if specified
                 # overwrite_existing: bool,
-                overwrite_existing=overwrite_existing,  # Allow overwriting existing media
+                overwrite_existing=AddMediaRequest.overwrite_existing,  # Allow overwriting existing media
                 # store_in_db: bool = True,
                 store_in_db=True,
             )
@@ -730,7 +713,7 @@ async def add_media(
                 "results": result
             }
 
-        elif media_type == 'audio':
+        elif AddMediaRequest.media_type == 'audio':
             logging.info(f"Processing audio: {url}")
             # Convert single `url` to list if needed
             urls = [url] if (url and url.strip()) else []
@@ -739,25 +722,25 @@ async def add_media(
             result = process_audio_files(
                 audio_urls=urls,
                 audio_files=files,
-                whisper_model=whisper_model,
-                transcription_language=transcription_language,
-                api_name=api_name,
-                api_key=api_key,
-                use_cookies=use_cookies,
-                cookies=cookies,
-                keep_original=keep_original_file,
-                custom_keywords=(keywords.split(",") if keywords else []),
-                custom_prompt_input=custom_prompt,
-                system_prompt_input=system_prompt,
-                chunk_method=chunk_method,
-                max_chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-                use_adaptive_chunking=use_adaptive_chunking,
-                use_multi_level_chunking=use_multi_level_chunking,
-                chunk_language=chunk_language,
-                diarize=diarize,
-                keep_timestamps=timestamp_option,
-                custom_title=title
+                whisper_model=AddMediaRequest.whisper_model,
+                transcription_language=AddMediaRequest.transcription_language,
+                api_name=AddMediaRequest.api_name,
+                api_key=AddMediaRequest.api_key,
+                use_cookies=AddMediaRequest.use_cookies,
+                cookies=AddMediaRequest.cookies,
+                keep_original=AddMediaRequest.keep_original_file,
+                custom_keywords=(AddMediaRequest.keywords.split(",") if AddMediaRequest.keywords else []),
+                custom_prompt_input=AddMediaRequest.custom_prompt,
+                system_prompt_input=AddMediaRequest.system_prompt,
+                chunk_method=AddMediaRequest.chunk_method,
+                max_chunk_size=AddMediaRequest.chunk_size,
+                chunk_overlap=AddMediaRequest.chunk_overlap,
+                use_adaptive_chunking=AddMediaRequest.use_adaptive_chunking,
+                use_multi_level_chunking=AddMediaRequest.use_multi_level_chunking,
+                chunk_language=AddMediaRequest.chunk_language,
+                diarize=AddMediaRequest.diarize,
+                keep_timestamps=AddMediaRequest.timestamp_option,
+                custom_title=AddMediaRequest.title
             )
 
             # 'result' is now a dict you can return directly, or parse further:
@@ -768,7 +751,7 @@ async def add_media(
                 "results": result["results"],
             }
 
-        elif media_type == 'document':
+        elif AddMediaRequest.media_type == 'document':
             logging.info(f"Processing document: {url or local_file_path}")
 
             if local_file_path:
@@ -779,214 +762,246 @@ async def add_media(
                 # Download the file from URL
                 import requests
                 response = requests.get(url)
+                response.raise_for_status()
                 file_bytes = response.content
                 filename = url.split('/')[-1]
 
             # Process document
-            result_data = await process_document_task(
-                file_bytes=file_bytes,
-                filename=filename,
-                custom_prompt=custom_prompt,
-                api_name=api_name,
-                api_key=api_key,
-                keywords=keywords.split(',') if keywords else [],
-                system_prompt=None,
-                auto_summarize=False
+            doc_processing_result = await process_documents(
+                doc_urls= [url] if url else None,
+                doc_files= [local_file_path] if local_file_path else None,
+                api_name=AddMediaRequest.api_name,
+                api_key=AddMediaRequest.api_key,
+                custom_prompt_input=AddMediaRequest.custom_prompt,
+                system_prompt_input=AddMediaRequest.system_prompt,
+                # use_cookies: bool,
+                use_cookies=AddMediaRequest.use_cookies,
+                # cookies: Optional[str],
+                cookies=AddMediaRequest.cookies,
+                #keep_original: bool,
+                keep_original=False,
+                #custom_keywords: List[str],
+                custom_keywords=AddMediaRequest.keywords.split(",") if AddMediaRequest.keywords else [],
+                #chunk_method: Optional[str],
+                chunk_method=AddMediaRequest.chunk_method,
+                #max_chunk_size: int,
+                max_chunk_size= AddMediaRequest.chunk_size,
+                #chunk_overlap: int,
+                chunk_overlap=AddMediaRequest.chunk_overlap,
+                #use_adaptive_chunking: bool,
+                use_adaptive_chunking=AddMediaRequest.use_adaptive_chunking,
+                #use_multi_level_chunking: bool,
+                use_multi_level_chunking=AddMediaRequest.use_multi_level_chunking,
+                #chunk_language: Optional[str],
+                chunk_language=AddMediaRequest.chunk_language,
+                #custom_title: Optional[str] = None
+                custom_title=AddMediaRequest.title
             )
 
             # Store in DB
-            doc_text = result_data["text_content"]
-            summary = result_data.get("summary", "")
+            db_results = []
+            for item in doc_processing_result["results"]:
+                if item.get("success"):
+                    # item["text_content"] is the raw text
+                    # item["summary"] is your summarization result
 
-            # Create "info_dict" for DB
-            info_dict = {
-                "title": title or os.path.splitext(filename)[0],
-                "source_file": filename,
-                "author": author or "Unknown"
-            }
+                    new_id = add_media_to_database(
+                        url=item["input"] or item["filename"],
+                        title=AddMediaRequest.title or item["filename"],
+                        media_type="document",
+                        content=item["text_content"] or "",
+                        summary=item["summary"] or "",
+                        keywords=[k.strip() for k in AddMediaRequest.keywords.split(",") if k.strip()],
+                        prompt=AddMediaRequest.custom_prompt,
+                        system_prompt=AddMediaRequest.system_prompt,
+                        overwrite=AddMediaRequest.overwrite_existing
+                    )
+                    db_results.append(new_id)
 
-            segments = [{"Text": doc_text}]
-
-            # Insert into database
-            result = add_media_to_database(
-                url=url or filename,
-                info_dict=info_dict,
-                segments=segments,
-                summary=summary,
-                keywords=keywords,
-                custom_prompt_input=custom_prompt or "",
-                whisper_model="doc-import",
-                media_type=media_type,
-                overwrite=overwrite_existing
-            )
-
-            media_id = extract_id_from_result(result)
+            # Decide what to return
+            if not db_results:
+                return {
+                    "status": "partial" if doc_processing_result["results"] else "error",
+                    "message": "No successful documents ingested",
+                    "progress": doc_processing_result["progress"],
+                    "results": doc_processing_result["results"]
+                }
 
             return {
                 "status": "success",
-                "message": result,
-                "media_id": media_id,
-                "media_url": f"/api/v1/media/{media_id}"
+                "message": f"Ingested {len(db_results)} document(s).",
+                "media_ids": db_results,
+                "media_urls": [f"/api/v1/media/{mid}" for mid in db_results],
+                "progress": doc_processing_result["progress"],
+                "results": doc_processing_result["results"]
             }
 
-        elif media_type == 'pdf':
-            logging.info(f"Processing PDF: {url or local_file_path}")
+        elif AddMediaRequest.media_type == 'pdf':
+            logging.info(f"Processing PDF(s): {url or local_file_path}")
 
             if local_file_path:
                 with open(local_file_path, "rb") as f:
                     file_bytes = f.read()
                 filename = file.filename
             else:
-                # Download the file from URL
+                # Download the file
                 import requests
                 response = requests.get(url)
+                response.raise_for_status()
                 file_bytes = response.content
                 filename = url.split('/')[-1]
 
-            # Process PDF
+            # Call your new library function
+            # (Make sure you have imported it: from PDF_Ingestion_Lib import process_pdf_task)
             result_data = await process_pdf_task(
                 file_bytes=file_bytes,
                 filename=filename,
-                parser=pdf_parsing_engine,
-                custom_prompt=custom_prompt,
-                api_name=api_name,
-                api_key=api_key,
-                auto_summarize=True,
-                keywords=keywords.split(',') if keywords else [],
-                system_prompt=system_prompt
+                parser=AddMediaRequest.pdf_parsing_engine or "pymupdf4llm",
+                custom_prompt=AddMediaRequest.custom_prompt,
+                api_name=AddMediaRequest.api_name,
+                api_key=AddMediaRequest.api_key,
+                auto_summarize=AddMediaRequest.perform_analysis,   # or True if you want forced summarizing
+                keywords=AddMediaRequest.keywords.split(",") if AddMediaRequest.keywords else [],
+                system_prompt=AddMediaRequest.system_prompt,
+                perform_chunking=AddMediaRequest.perform_chunking,
+                chunk_method=AddMediaRequest.chunk_method or "sentences",
+                max_chunk_size=AddMediaRequest.chunk_size or 500,
+                chunk_overlap=AddMediaRequest.chunk_overlap or 200
             )
 
-            # Store in DB
+            # Build the segments from the text_content
             segments = [{"Text": result_data["text_content"]}]
             summary = result_data.get("summary", "")
 
+            # Construct info_dict, merging the PDF’s metadata with user inputs
+            pdf_title = AddMediaRequest.title or result_data.get("title", os.path.splitext(filename)[0])
+            pdf_author = AddMediaRequest.author or result_data.get("author", "Unknown")
+
             info_dict = {
-                "title": title or result_data.get("title", os.path.splitext(filename)[0]),
-                "author": author or result_data.get("author", "Unknown"),
-                "parser_used": result_data.get("parser_used", "pymupdf4llm")
+                "title": pdf_title,
+                "author": pdf_author,
+                "parser_used": result_data.get("parser_used", AddMediaRequest.pdf_parsing_engine or "pymupdf4llm")
             }
 
             # Insert into DB
-            result = add_media_to_database(
+            insert_res = add_media_to_database(
                 url=url or filename,
                 info_dict=info_dict,
                 segments=segments,
                 summary=summary,
-                keywords=keywords,
-                custom_prompt_input=custom_prompt or "",
+                keywords=AddMediaRequest.keywords,  # or result_data["keywords"] if you prefer
+                custom_prompt_input=AddMediaRequest.custom_prompt or "",
                 whisper_model="pdf-import",
-                media_type=media_type,
-                overwrite=overwrite_existing
+                media_type=AddMediaRequest.media_type,
+                overwrite=AddMediaRequest.overwrite_existing
             )
 
-            media_id = extract_id_from_result(result)
+            media_id = extract_id_from_result(insert_res)
 
             return {
                 "status": "success",
-                "message": result,
+                "message": insert_res,
                 "media_id": media_id,
                 "media_url": f"/api/v1/media/{media_id}"
             }
 
-        elif media_type == 'ebook':
+        elif AddMediaRequest.media_type == 'ebook':
             logging.info(f"Processing eBook: {url or local_file_path}")
 
-            if not local_file_path and url:
-                # Download the file from URL
-                import requests
-                response = requests.get(url)
-                local_file_path = f"/tmp/{url.split('/')[-1]}"
-                with open(local_file_path, "wb") as f:
-                    f.write(response.content)
+            # -------------------------------------------------------
+            # 1) Check if a file was actually uploaded (file != None).
+            #    If so, save it to a temp_dir.  Otherwise, if `url`
+            #    is given, download it there instead.
+            # -------------------------------------------------------
+            temp_dir = None
+            if file is not None:
+                # Create a secure temporary directory
+                temp_dir = tempfile.mkdtemp(prefix="ebook_upload_")
 
-            if not local_file_path:
-                raise HTTPException(status_code=400, detail="No file provided for ebook processing")
+                # Generate a secure filename with .epub extension
+                original_extension = Path(file.filename).suffix or ".epub"
+                secure_filename = f"{uuid.uuid4()}{original_extension}"
+                local_file_path = Path(temp_dir) / secure_filename
 
-            # Process eBook
-            result_data = await process_ebook_task(
-                file_path=local_file_path,
-                title=title,
-                author=author,
-                keywords=keywords.split(',') if keywords else [],
-                custom_prompt=custom_prompt,
-                api_name=api_name,
-                api_key=api_key,
-                chunk_size=500,
-                chunk_overlap=200
+                # Write the uploaded file bytes into that local_file_path
+                with open(local_file_path, "wb") as buffer:
+                    file_content = await file.read()
+                    buffer.write(file_content)
+
+                # If no URL is provided, treat `url` as the original filename for reference
+                if not url:
+                    url = file.filename
+            else:
+                # If no local file was uploaded, but we do have a URL:
+                if url:
+                    import requests
+                    response = requests.get(url)
+                    response.raise_for_status()
+
+                    temp_dir = tempfile.mkdtemp(prefix="ebook_dl_")
+                    downloaded_name = url.split('/')[-1] if '/' in url else 'temp_ebook.epub'
+                    local_file_path = Path(temp_dir) / downloaded_name
+                    with open(local_file_path, "wb") as f:
+                        f.write(response.content)
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No file or URL provided for ebook processing."
+                    )
+
+            # -------------------------------------------------------
+            # 2) If the user chose NOT to keep the original file, remove it
+            # -------------------------------------------------------
+            if temp_dir and not AddMediaRequest.keep_original_file:
+                background_tasks.add_task(shutil.rmtree, temp_dir, ignore_errors=True)
+
+            # -------------------------------------------------------
+            # 3) Build your chunk_options if needed
+            # -------------------------------------------------------
+            chunk_options = None
+            if AddMediaRequest.perform_chunking:
+                chunk_options = {
+                    'method': AddMediaRequest.chunk_method or "chapter",
+                    'max_size': AddMediaRequest.chunk_size or 500,
+                    'overlap': AddMediaRequest.chunk_overlap or 200,
+                    'custom_chapter_pattern': AddMediaRequest.custom_chapter_pattern or None,
+                }
+
+            # -------------------------------------------------------
+            # 4) Call your Book_Ingestion_Lib function
+            # -------------------------------------------------------
+            result_msg = import_epub(
+                file_path=str(local_file_path),
+                title=AddMediaRequest.title,
+                author=AddMediaRequest.author,
+                keywords=AddMediaRequest.keywords,
+                custom_prompt=AddMediaRequest.custom_prompt,
+                system_prompt=AddMediaRequest.system_prompt,
+                summary=None,
+                auto_analyze=AddMediaRequest.perform_analysis,
+                api_name=AddMediaRequest.api_name,
+                api_key=AddMediaRequest.api_key,
+                chunk_options=chunk_options,
+                custom_chapter_pattern=AddMediaRequest.custom_chapter_pattern
             )
 
-            # Store in DB
-            info_dict = {
-                "title": title or result_data.get("ebook_title", "Untitled eBook"),
-                "author": author or result_data.get("ebook_author", "Unknown")
-            }
+            # If desired, parse out media_id from the result string or
+            # just have `import_epub` return a dict with “media_id”:
+            media_id = extract_media_id_from_result_string(result_msg)
 
-            segments = [{"Text": result_data.get("text", "")}]
-            summary = result_data.get("summary", "")
-
-            # Insert into DB
-            result = add_media_to_database(
-                url=url or os.path.basename(local_file_path),
-                info_dict=info_dict,
-                segments=segments,
-                summary=summary,
-                keywords=keywords,
-                custom_prompt_input=custom_prompt or "",
-                whisper_model="ebook-import",
-                media_type=media_type,
-                overwrite=overwrite_existing
-            )
-
-            media_id = extract_id_from_result(result)
+            if not media_id:
+                return {
+                    "status": "error",
+                    "message": "Ebook was ingested but media_id could not be parsed from the result.",
+                    "details": result_msg
+                }
 
             return {
                 "status": "success",
-                "message": result,
+                "message": result_msg,
                 "media_id": media_id,
                 "media_url": f"/api/v1/media/{media_id}"
             }
-
-        elif media_type == 'web':
-            logging.info(f"Processing web content: {url}")
-
-            if not url:
-                raise HTTPException(status_code=400, detail="URL is required for web scraping")
-
-            # Call the web scraping service
-            result = await process_web_scraping_task(
-                scrape_method="Individual URLs",
-                url_input=url,
-                summarize_checkbox=True,
-                custom_prompt=custom_prompt,
-                api_name=api_name,
-                api_key=api_key,
-                keywords=keywords,
-                mode="persist"  # Always persist in this endpoint
-            )
-
-            # The web scraping task should return the media ID if successful
-            if 'media_id' in result:
-                media_id = result['media_id']
-                return {
-                    "status": "success",
-                    "message": "Web content processed and added",
-                    "media_id": media_id,
-                    "media_url": f"/api/v1/media/{media_id}"
-                }
-
-            # If no media ID, return the whole result
-            return {
-                "status": "success",
-                "message": "Web content processed, see details in results",
-                "results": result
-            }
-
-        else:
-            # This shouldn't happen due to validation, but just in case
-            raise HTTPException(
-                status_code=400,
-                detail=f"Processing for media type '{media_type}' not implemented"
-            )
 
     except Exception as e:
         # Clean up temp directory if an exception occurred and we're not keeping files
@@ -1005,6 +1020,279 @@ async def add_media(
                 os.remove(local_file_path)
             except Exception as e:
                 logging.warning(f"Failed to remove temp file {local_file_path}: {str(e)}")
+
+
+@router.post("/ingest-web-content")
+async def ingest_web_content(
+    request: IngestWebContentRequest,
+    background_tasks: BackgroundTasks,
+    token: str = Header(..., description="Authentication token"),
+    db=Depends(get_db_manager),
+):
+    """
+    A single endpoint that supports multiple advanced scraping methods:
+      - individual: Each item in 'urls' is scraped individually
+      - sitemap:    Interprets the first 'url' as a sitemap, scrapes it
+      - url_level:  Scrapes all pages up to 'url_level' path segments from the first 'url'
+      - recursive:  Scrapes up to 'max_pages' links, up to 'max_depth' from the base 'url'
+
+    Also supports content analysis, translation, chunking, DB ingestion, etc.
+    """
+
+    # 1) Basic checks
+    if not request.urls:
+        raise HTTPException(status_code=400, detail="At least one URL is required")
+
+    # If any array is shorter than # of URLs, pad it so we can zip them easily
+    num_urls = len(request.urls)
+    titles = request.titles or []
+    authors = request.authors or []
+    keywords = request.keywords or []
+
+    if len(titles) < num_urls:
+        titles += ["Untitled"] * (num_urls - len(titles))
+    if len(authors) < num_urls:
+        authors += ["Unknown"] * (num_urls - len(authors))
+    if len(keywords) < num_urls:
+        keywords += ["no_keyword_set"] * (num_urls - len(keywords))
+
+    # 2) Parse cookies if needed
+    custom_cookies_list = None
+    if request.use_cookies and request.cookies:
+        try:
+            parsed = json.loads(request.cookies)
+            # if it's a dict, wrap in a list
+            if isinstance(parsed, dict):
+                custom_cookies_list = [parsed]
+            elif isinstance(parsed, list):
+                custom_cookies_list = parsed
+            else:
+                raise ValueError("Cookies must be a dict or list of dicts.")
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON for cookies: {e}")
+
+    # 3) Choose the appropriate scraping method
+    scrape_method = request.scrape_method
+    logging.info(f"Selected scrape method: {scrape_method}")
+
+    # We'll accumulate all “raw” results (scraped data) in a list of dicts
+    raw_results = []
+
+    # Helper function to perform summarization (if needed)
+    async def maybe_summarize_one(article: dict) -> dict:
+        if not request.perform_analysis:
+            article["summary"] = None
+            return article
+
+        content = article.get("content", "")
+        if not content:
+            article["summary"] = "No content to summarize."
+            return article
+
+        # Summarize
+        summary = summarize(
+            input_data=content,
+            custom_prompt_arg=request.custom_prompt or "Summarize this article.",
+            api_name=request.api_name,
+            api_key=request.api_key,
+            temp=0.7,
+            system_message=request.system_prompt or "Act as a professional summarizer."
+        )
+        article["summary"] = summary
+
+        # Rolling summarization or confab check
+        if request.perform_rolling_summarization:
+            logging.info("Performing rolling summarization (placeholder).")
+            # Insert logic for multi-step summarization if needed
+        if request.perform_confabulation_check_of_analysis:
+            logging.info("Performing confabulation check of summary (placeholder).")
+
+        return article
+
+    #####################################################################
+    # INDIVIDUAL
+    #####################################################################
+    if scrape_method == ScrapeMethod.INDIVIDUAL:
+        # Possibly multiple URLs
+        # You already have a helper: scrape_and_summarize_multiple(...),
+        # but we can do it manually to show the synergy with your “titles/authors” approach:
+        # If you’d rather skip multiple loops, you can rely on your library.
+        # For example, your library already can handle “custom_article_titles” as strings.
+        # But here's a direct approach:
+
+        for i, url in enumerate(request.urls):
+            title_ = titles[i]
+            author_ = authors[i]
+            kw_ = keywords[i]
+
+            # Scrape one URL
+            article_data = await scrape_article(url, custom_cookies=custom_cookies_list)
+            if not article_data or not article_data.get("extraction_successful"):
+                logging.warning(f"Failed to scrape: {url}")
+                continue
+
+            # Overwrite metadata with user-supplied fields
+            article_data["title"] = title_ or article_data["title"]
+            article_data["author"] = author_ or article_data["author"]
+            article_data["keywords"] = kw_
+
+            # Summarize if requested
+            article_data = await maybe_summarize_one(article_data)
+            raw_results.append(article_data)
+
+    #####################################################################
+    # SITEMAP
+    #####################################################################
+    elif scrape_method == ScrapeMethod.SITEMAP:
+        # Typically the user will supply only 1 URL in request.urls[0]
+        sitemap_url = request.urls[0]
+        # Sync approach vs. async approach: your library’s `scrape_from_sitemap`
+        # is a synchronous function that returns a list of articles or partial results.
+
+        # You might want to run it in a thread if it’s truly blocking:
+        def scrape_in_thread():
+            return scrape_from_sitemap(sitemap_url)
+
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(None, scrape_in_thread)
+
+        # The “scrape_from_sitemap” function might return partial dictionaries
+        # that do not have the final summarization. Let’s handle summarization next:
+        # We unify everything to raw_results.
+        if not results:
+            logging.warning("No articles returned from sitemap scraping.")
+        else:
+            # Each item is presumably a dict with at least {url, title, content}
+            for r in results:
+                # Summarize if needed
+                r = await maybe_summarize_one(r)
+                raw_results.append(r)
+
+    #####################################################################
+    # URL LEVEL
+    #####################################################################
+    elif scrape_method == ScrapeMethod.URL_LEVEL:
+        # Typically the user will supply only 1 base URL
+        base_url = request.urls[0]
+        level = request.url_level or 2
+
+        # `scrape_by_url_level(base_url, level)` is presumably synchronous in your code.
+        def scrape_in_thread():
+            return scrape_by_url_level(base_url, level)
+
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(None, scrape_in_thread)
+
+        if not results:
+            logging.warning("No articles returned from URL-level scraping.")
+        else:
+            for r in results:
+                # Summarize if needed
+                r = await maybe_summarize_one(r)
+                raw_results.append(r)
+
+    #####################################################################
+    # RECURSIVE SCRAPING
+    #####################################################################
+    elif scrape_method == ScrapeMethod.RECURSIVE:
+        base_url = request.urls[0]
+        max_pages = request.max_pages or 10
+        max_depth = request.max_depth or 3
+
+        # The function is already async, so we can call it directly
+        # You also have `progress_callback` in your code.
+        # For an API scenario, we might skip progress callbacks or store them in logs.
+        results = await recursive_scrape(
+            base_url=base_url,
+            max_pages=max_pages,
+            max_depth=max_depth,
+            progress_callback=logging.info,  # or None if you want silent
+            custom_cookies=custom_cookies_list
+        )
+
+        if not results:
+            logging.warning("No articles returned from recursive scraping.")
+        else:
+            for r in results:
+                # Summarize if needed
+                r = await maybe_summarize_one(r)
+                raw_results.append(r)
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown scrape method: {scrape_method}"
+        )
+
+    # 4) If we have nothing so far, exit
+    if not raw_results:
+        return {
+            "status": "warning",
+            "message": "No articles were successfully scraped for this request.",
+            "results": []
+        }
+
+    # 5) Perform optional translation (if the user wants it *after* scraping)
+    if request.perform_translation:
+        logging.info(f"Translating to {request.translation_language} (placeholder).")
+        # Insert your real translation code here:
+        # for item in raw_results:
+        #   item["content"] = translator.translate(item["content"], to_lang=request.translation_language)
+        #   if item.get("summary"):
+        #       item["summary"] = translator.translate(item["summary"], to_lang=request.translation_language)
+
+    # 6) Perform optional chunking
+    if request.perform_chunking:
+        logging.info("Performing chunking on each article (placeholder).")
+        # Insert chunking logic here. For example:
+        # for item in raw_results:
+        #     chunks = chunk_text(
+        #         text=item["content"],
+        #         chunk_size=request.chunk_size,
+        #         overlap=request.chunk_overlap,
+        #         method=request.chunk_method,
+        #         ...
+        #     )
+        #     item["chunks"] = chunks
+
+    # 7) Timestamp or Overwrite
+    if request.timestamp_option:
+        timestamp_str = datetime.now().isoformat()
+        for item in raw_results:
+            item["ingested_at"] = timestamp_str
+
+    # If overwriting existing is set, you’d query the DB here to see if the article already exists, etc.
+
+    # 8) Optionally store results in DB
+    # For each article, do something like:
+    # media_ids = []
+    # for r in raw_results:
+    #     media_id = ingest_article_to_db(
+    #         url=r["url"],
+    #         title=r.get("title", "Untitled"),
+    #         author=r.get("author", "Unknown"),
+    #         content=r.get("content", ""),
+    #         keywords=r.get("keywords", ""),
+    #         ingestion_date=r.get("ingested_at", ""),
+    #         summary=r.get("summary", None),
+    #         chunking_data=r.get("chunks", [])
+    #     )
+    #     media_ids.append(media_id)
+    #
+    # return {
+    #     "status": "success",
+    #     "message": "Web content processed and added to DB",
+    #     "count": len(raw_results),
+    #     "media_ids": media_ids
+    # }
+
+    # If you prefer to just return everything as JSON:
+    return {
+        "status": "success",
+        "message": "Web content processed",
+        "count": len(raw_results),
+        "results": raw_results
+    }
 
 #
 # End of media ingestion and analysis

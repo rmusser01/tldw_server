@@ -135,6 +135,7 @@ https://uxdesign.cc/ai-and-cognitive-offloading-sharing-the-thinking-process-wit
 https://www.typingmind.com
 https://github.com/felladrin/MiniSearch
 https://uxdesign.cc/human-centered-ai-5-key-frameworks-for-ux-designers-6b1ad9e53d23
+https://realpython.com/python-textual/
 
 Style guide
   https://contentdesign.london/blog/create-a-great-style-guide-that-people-use

@@ -4,103 +4,277 @@
 
 import os
 import tempfile
+import time
 import zipfile
+
+import pypandoc
+import requests
 from fastapi import HTTPException
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from docx2txt import docx2txt
 from pypandoc import convert_file
 
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
+from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 from tldw_Server_API.app.core.logging import logger
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
 from tldw_Server_API.app.core.Utils.Utils import logging
-# If you have a summarization library:
-# from App_Function_Libraries.Summarization.Summarization_General_Lib import perform_summarization
 
-async def process_document_task(
-    file_bytes: bytes,
-    filename: str,
-    custom_prompt: Optional[str],
+async def process_documents(
+    doc_urls: Optional[List[str]],
+    doc_files: Optional[List[str]],
     api_name: Optional[str],
     api_key: Optional[str],
-    keywords: List[str],
-    system_prompt: Optional[str] = None,
-    auto_analyze: bool = False,
-    perform_chunking: bool,
+    custom_prompt_input: Optional[str],
+    system_prompt_input: Optional[str],
+    use_cookies: bool,
+    cookies: Optional[str],
+    keep_original: bool,
+    custom_keywords: List[str],
     chunk_method: Optional[str],
     max_chunk_size: int,
     chunk_overlap: int,
     use_adaptive_chunking: bool,
     use_multi_level_chunking: bool,
     chunk_language: Optional[str],
-    summarize_recursively: bool,
-    api_name: Optional[str],
-    api_key: Optional[str],
-    keywords: str,
-    use_cookies: bool,
-    cookies: Optional[str],
-    confab_checkbox: bool,
-    overwrite_existing: bool,
-) -> dict:
+    store_in_db: bool = False,
+    overwrite_existing: bool = False,
+    custom_title: Optional[str] = None
+) -> Dict[str, Any]:
     """
-    Takes in raw file bytes + filename, converts to plain text if necessary,
-    optionally runs summarization, and returns a dictionary with all final data.
+    Process a set of documents (URLs or local files).
+    1) Download/Read the files
+    2) Convert each to raw text
+    3) Optionally chunk & summarize
+    4) Return a structured dict describing results
     """
-    try:
-        # 1) Save the uploaded bytes to a tmp path
-        suffix = os.path.splitext(filename)[1]
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_file:
-            tmp_path = tmp_file.name
-            tmp_file.write(file_bytes)
 
-        # 2) Convert or read the file to text
-        text_content = ""
-        extension = suffix.lower()
+    start_time = time.time()
+    processed_count = 0
+    failed_count = 0
 
-        if extension in [".txt", ".md"]:
-            with open(tmp_path, "r", encoding="utf-8", errors="replace") as f:
-                text_content = f.read()
+    progress_log: List[str] = []
+    results: List[Dict[str, Any]] = []
 
-        elif extension == ".docx":
-            text_content = docx2txt.process(tmp_path)
+    # Track temporary files for cleanup if needed
+    temp_files: List[str] = []
 
-        elif extension == ".rtf":
-            # Convert to .md or .txt using pypandoc
-            # e.g., pypandoc:
-            out = convert_file(tmp_path, "plain")
-            text_content = out
+    def update_progress(message: str):
+        logging.info(message)
+        progress_log.append(message)
 
-        elif extension == ".zip":
-            # If you want to handle a zip of multiple docs, do so here
-            # Then combine them or handle them each separately. Example:
-            text_content = _extract_zip_and_combine(tmp_path)
+    def cleanup_temp_files():
+        """Remove any downloaded/temporary files if keep_original=False."""
+        for fp in temp_files:
+            if not fp:
+                continue
+            try:
+                if os.path.exists(fp):
+                    os.remove(fp)
+                    update_progress(f"Removed temp file: {fp}")
+            except Exception as e:
+                update_progress(f"Failed to remove {fp}: {str(e)}")
+
+    def download_document_file(url: str, use_cookies: bool, cookies: Optional[str]) -> str:
+        """
+        Downloads the document from a remote URL.
+        Returns a local file path if successful, or raises an exception.
+        """
+        try:
+            headers = {}
+            if use_cookies and cookies:
+                # You can parse cookies string if needed
+                headers['Cookie'] = cookies
+
+            r = requests.get(url, headers=headers, timeout=60)
+            r.raise_for_status()
+
+            # Create a temp file name with the same extension if possible
+            basename = os.path.basename(url).split("?")[0]  # strip query
+            ext = os.path.splitext(basename)[1] or ".bin"
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                tmp.write(r.content)
+                temp_files.append(tmp.name)
+                return tmp.name
+        except Exception as e:
+            raise RuntimeError(f"Download from '{url}' failed: {str(e)}")
+
+    def convert_to_text(file_path: str) -> str:
+        """
+        Given a local file path, attempts to read or convert it to plain text.
+        Example logic for .txt, .docx, .rtf, .md, etc.
+        """
+        _, ext = os.path.splitext(file_path)
+        ext = ext.lower()
+
+        if ext in [".txt", ".md"]:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                return f.read()
+
+        elif ext == ".docx":
+            return docx2txt.process(file_path)
+
+        elif ext == ".rtf":
+            # pypandoc can handle RTF -> plain
+            return pypandoc.convert_file(file_path, "plain", format="rtf")
+
+        elif ext == ".pdf":
+            # If you want partial PDF support here (rather than a separate pdf codepath):
+            # return pypandoc.convert_file(file_path, 'plain', format='pdf')
+            # or use your PDF parsing approach
+            return "[PDF format not handled here - use a separate PDF pipeline?]"
+
         else:
-            text_content = "[Unsupported extension or not recognized]"
+            return "[Unsupported file extension or not recognized]"
 
-        # 3) Summarize if requested
-        summary_text = "No summary available"
-        if auto_summarize and api_name and api_name.lower() != "none":
-            # summary_text = perform_summarization(
-            #     api_name=api_name,
-            #     input_data=text_content,
-            #     custom_prompt=(system_prompt or "") + "\n\n" + (custom_prompt or ""),
-            #     api_key=api_key
-            # )
-            summary_text = f"[Auto-summarized with {api_name}]"
-
-        return {
-            "filename": filename,
-            "text_content": text_content,
-            "summary": summary_text,
-            "keywords": keywords,
-            "prompts": {
-                "system_prompt": system_prompt,
-                "custom_prompt": custom_prompt
+    # Helper for chunking + summarization
+    def summarize_text_if_needed(full_text: str) -> str:
+        """
+        Runs chunking + summarization if `api_name` is set. Otherwise returns "No summary" or an empty string.
+        """
+        if not api_name or api_name.lower() == "none":
+            return ""  # no summarization
+        try:
+            # Prepare chunk options
+            chunk_opts = {
+                'method': chunk_method,
+                'max_size': max_chunk_size,
+                'overlap': chunk_overlap,
+                'adaptive': use_adaptive_chunking,
+                'multi_level': use_multi_level_chunking,
+                'language': chunk_language
             }
-        }
-    except Exception as e:
-        logger.error(f"Error processing document file {filename}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+            # Perform chunking
+            chunked_texts = improved_chunking_process(full_text, chunk_opts)
+            if not chunked_texts:
+                # Fallback if chunking returned empty
+                summary = perform_summarization(api_name, full_text, custom_prompt_input, api_key, system_prompt=system_prompt_input)
+                return summary or "No summary"
+            else:
+                # Summarize each chunk
+                chunk_summaries = []
+                for chunk_block in chunked_texts:
+                    s = perform_summarization(api_name, chunk_block["text"], custom_prompt_input, api_key, system_prompt=system_prompt_input)
+                    if s:
+                        chunk_summaries.append(s)
+                # Combine them in a single pass
+                combined_summary = "\n\n".join(chunk_summaries)
+                return combined_summary
+        except Exception as e:
+            update_progress(f"Summarization failed: {str(e)}")
+            return "Summary generation failed"
+
+    # Process doc URLs
+    if doc_urls:
+        for i, url in enumerate(doc_urls, start=1):
+            item_result = {
+                "input": url,
+                "filename": None,
+                "success": False,
+                "text_content": None,
+                "summary": None,
+                "error": None,
+                "db_id": None,
+            }
+            try:
+                update_progress(f"Downloading document from URL {i}/{len(doc_urls)}: {url}")
+                local_path = download_document_file(url, use_cookies, cookies)
+
+                text_content = convert_to_text(local_path)
+                item_result["filename"] = os.path.basename(local_path)
+                item_result["text_content"] = text_content
+
+                # Summarize
+                summary_text = summarize_text_if_needed(text_content)
+                item_result["summary"] = summary_text
+
+                # (Optionally) Store in DB
+                if store_in_db:
+                    # Use your own DB logic
+                    db_id = add_media_to_database(
+                        url=url,
+                        title=custom_title or os.path.basename(local_path),
+                        media_type="document",
+                        content=text_content,
+                        summary=summary_text,
+                        keywords=custom_keywords,
+                        prompt=custom_prompt_input,
+                        system_prompt=system_prompt_input,
+                        overwrite=overwrite_existing
+                    )
+                    item_result["db_id"] = db_id
+
+                processed_count += 1
+                item_result["success"] = True
+                update_progress(f"Processed URL {i} successfully.")
+            except Exception as exc:
+                failed_count += 1
+                item_result["error"] = str(exc)
+                update_progress(f"Failed to process URL {i}: {str(exc)}")
+
+            results.append(item_result)
+
+    # Process local doc files
+    if doc_files:
+        for i, file_path in enumerate(doc_files, start=1):
+            item_result = {
+                "input": file_path,
+                "filename": os.path.basename(file_path),
+                "success": False,
+                "text_content": None,
+                "summary": None,
+                "error": None,
+                "db_id": None,
+            }
+            try:
+                # Possibly check size if you want
+                # if os.path.getsize(file_path) > MAX_FILE_SIZE:
+                #     raise ValueError("File too large...")
+
+                text_content = convert_to_text(file_path)
+                item_result["text_content"] = text_content
+
+                summary_text = summarize_text_if_needed(text_content)
+                item_result["summary"] = summary_text
+
+                if store_in_db:
+                    db_id = add_media_to_database(
+                        url=file_path,
+                        title=custom_title or os.path.basename(file_path),
+                        media_type="document",
+                        content=text_content,
+                        summary=summary_text,
+                        keywords=custom_keywords,
+                        prompt=custom_prompt_input,
+                        system_prompt=system_prompt_input,
+                        overwrite=overwrite_existing
+                    )
+                    item_result["db_id"] = db_id
+
+                processed_count += 1
+                item_result["success"] = True
+                update_progress(f"Processed file {i}/{len(doc_files)}: {file_path}")
+            except Exception as exc:
+                failed_count += 1
+                item_result["error"] = str(exc)
+                update_progress(f"Failed to process file {i} ({file_path}): {str(exc)}")
+
+            results.append(item_result)
+
+    # Cleanup any temp files if not keeping originals
+    if not keep_original:
+        cleanup_temp_files()
+
+    total_time = time.time() - start_time
+    update_progress(f"Document processing complete. Success: {processed_count}, Failed: {failed_count}, Time: {total_time:.1f}s")
+
+    return {
+        "status": "success" if failed_count == 0 else "partial",
+        "message": f"Processed: {processed_count}, Failed: {failed_count}",
+        "progress": progress_log,
+        "results": results
+    }
 
 
 def _extract_zip_and_combine(zip_path: str) -> str:

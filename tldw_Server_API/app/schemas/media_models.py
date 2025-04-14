@@ -3,6 +3,7 @@
 #
 # Imports
 from datetime import datetime
+from enum import Enum
 from typing import Dict, List, Any, Optional
 #
 # 3rd-party imports
@@ -75,6 +76,45 @@ class VersionResponse(BaseModel):
 class VersionRollbackRequest(BaseModel):
     version_number: int
 
+######################## Multi-File Ingestion Model ###################################
+#
+# This is a schema for all media except web scraping ingestion and analysis.
+
+class AddMediaRequest(BaseModel):
+    url: str = Field(..., description="The URL of the media to add")
+    media_type: str = Field(..., description="Type of media (e.g., 'audio', 'video', 'pdf')")
+    title: Optional[str] = Field(None, description="Optional title of the media")
+    author: Optional[str] = Field(None, description="Optional author of the media")
+    keywords: str = Field("", description="Comma-separated keywords for the media")
+    custom_prompt: Optional[str] = Field(None, description="Optional custom prompt")
+    system_prompt: Optional[str] = Field(None, description="Optional system prompt")
+    whisper_model: str = Field("deepml/distil-large-v3", description="Model for audio/video transcription")
+    transcription_language: str = Field("en", description="Language for audio/video transcription")
+    diarize: bool = Field(False, description="Enable speaker diarization")
+    timestamp_option: bool = Field(True, description="Include timestamps in the transcription")
+    keep_original_file: bool = Field(False, description="Whether to retain original file after processing")
+    overwrite_existing: bool = Field(False, description="Overwrite any existing media with the same URL")
+    perform_analysis: bool = Field(True, description="Perform analysis on the media (default=True)")
+    perform_rolling_summarization: bool = Field(False, description="Perform rolling summarization on the media")
+    api_name: Optional[str] = Field(None, description="Optional API name for integration")
+    api_key: Optional[str] = Field(None, description="Optional API key for integration")
+    pdf_parsing_engine: Optional[str] = Field(None, description="Optional PDF parsing engine")
+    perform_chunking: bool = Field(True, description="Enable chunk-based processing of the media")
+    chunk_method: Optional[str] = Field(None, description="Method used to chunk the media content")
+    use_adaptive_chunking: bool = Field(False, description="Whether to enable adaptive chunking")
+    use_multi_level_chunking: bool = Field(False, description="Whether to enable multi-level chunking")
+    chunk_language: Optional[str] = Field(None, description="Optional language override for chunking")
+    chunk_size: int = Field(500, description="Size of each chunk for processing")
+    chunk_overlap: int = Field(200, description="Overlap size between chunks")
+    use_cookies: bool = Field(False, description="Whether to attach cookies to the request (scraping scenarios)")
+    cookies: Optional[str] = Field(None, description="Cookie string if `use_cookies` is set to True")
+    perform_confabulation_check_of_analysis: bool = Field(
+        False, description="Enable a confabulation check on analysis"
+    )
+    custom_chapter_pattern: Optional[str] = Field(
+        None, description="Optional regex pattern for custom chapter splitting"
+    )
+
 ######################## Video Ingestion Model ###################################
 #
 # This is a schema for video ingestion and analysis.
@@ -121,7 +161,7 @@ class VideoIngestRequest(BaseModel):
 ####################################################################################
 
 
-######################## Video Ingestion Model ###################################
+######################## Audio Ingestion Model ###################################
 #
 # This is a schema for audio ingestion and analysis.
 
@@ -153,8 +193,62 @@ class AudioIngestRequest(BaseModel):
     custom_title: Optional[str] = None
 
 #
-# End of Video ingestion and analysis model schema
+# End of Audio ingestion and analysis model schema
 ####################################################################################
+
+
+######################## Web-Scraping Ingestion Model ###################################
+#
+# This is a schema for Web-Scraping ingestion and analysis.
+
+class ScrapeMethod(str, Enum):
+    INDIVIDUAL = "individual"          # “Individual URLs”
+    SITEMAP = "sitemap"               # “Sitemap”
+    URL_LEVEL = "url_level"           # “URL Level”
+    RECURSIVE = "recursive_scraping"  # “Recursive Scraping”
+
+class IngestWebContentRequest(BaseModel):
+    # Core fields
+    urls: List[str]                      # Usually 1+ URLs.
+    titles: Optional[List[str]] = None
+    authors: Optional[List[str]] = None
+    keywords: Optional[List[str]] = None
+
+    # Advanced scraping selection
+    scrape_method: ScrapeMethod = ScrapeMethod.INDIVIDUAL
+    url_level: Optional[int] = 2
+    max_pages: Optional[int] = 10
+    max_depth: Optional[int] = 3
+
+    # Summarization / analysis fields
+    custom_prompt: Optional[str] = None
+    system_prompt: Optional[str] = None
+    perform_translation: bool = False
+    translation_language: str = "en"
+    timestamp_option: bool = True
+    overwrite_existing: bool = False
+    perform_analysis: bool = True
+    perform_rolling_summarization: bool = False
+    api_name: Optional[str] = None
+    api_key: Optional[str] = None
+    perform_chunking: bool = True
+    chunk_method: Optional[str] = None
+    use_adaptive_chunking: bool = False
+    use_multi_level_chunking: bool = False
+    chunk_language: Optional[str] = None
+    chunk_size: int = 500
+    chunk_overlap: int = 200
+    use_cookies: bool = False
+    cookies: Optional[str] = None
+    perform_confabulation_check_of_analysis: bool = False
+    custom_chapter_pattern: Optional[str] = None
+
+#
+# End of Web-Scraping ingestion and analysis model schema
+####################################################################################
+
+
+
 
 #
 # End of media_models.py

@@ -32,6 +32,8 @@ https://github.com/edwko/OuteTTS
 https://index-tts.github.io/#section2
 https://arxiv.org/abs/2504.03289
 https://github.com/yukiarimo/hanasu
+https://github.com/taresh18/conversify-speech
+
 https://huggingface.co/senstella/csm-expressiva-1b
 https://github.com/KartDriver/mira_converse/blob/main/server/src/server_audio_core.py
 https://github.com/zenforic/csm-multi
