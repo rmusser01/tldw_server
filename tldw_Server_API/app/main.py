@@ -45,7 +45,7 @@ class InterceptHandler(logging.Handler):
 logger.remove()
 
 # Add your desired Loguru sink (e.g., stderr)
-log_level = "INFO" # Or load from environment variable/config
+log_level = "INFO"
 logger.add(
     sys.stderr,
     level=log_level,
@@ -54,15 +54,16 @@ logger.add(
 )
 
 # Configure standard logging to use the InterceptHandler
-logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True) # level=0 captures everything for InterceptHandler to filter
-logging.getLogger("uvicorn").handlers = [InterceptHandler()]
-logging.getLogger("uvicorn.access").handlers = [InterceptHandler()]
-logging.getLogger("uvicorn.error").handlers = [InterceptHandler()]
-# Optionally configure other library loggers if needed
-# logging.getLogger("sqlalchemy.engine").handlers = [InterceptHandler()]
+loggers_to_intercept = ["uvicorn", "uvicorn.error", "uvicorn.access"] # Add other library names if needed
+for logger_name in loggers_to_intercept:
+    mod_logger = logging.getLogger(logger_name)
+    mod_logger.handlers = [InterceptHandler()]
+    mod_logger.propagate = False # Prevent messages from reaching the root logger
+    # Optionally set level if you only want certain levels from that lib
+    # mod_logger.setLevel(logging.DEBUG)
 
+logger.info("Loguru logger configured with SPECIFIC standard logging interception!")
 
-logger.info("Loguru logger configured with standard logging interception!")
 
 
 app = FastAPI(

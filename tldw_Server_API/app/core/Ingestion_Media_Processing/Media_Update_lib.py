@@ -2,23 +2,20 @@
 # Description: File contains functions relating to updating media items in the database.
 #
 # Imports
+import sqlite3
+from typing import Optional, List
 #
 # 3rd-party Libraries
+from fastapi import HTTPException, Depends
 #
 # Local Imports
+from tldw_Server_API.app.core.DB_Management.DB_Dependency import get_db_manager
+from tldw_Server_API.app.core.DB_Management.DB_Manager import get_full_media_details2, create_document_version, \
+    update_keywords_for_media
 #
 ########################################################################################################################
 #
 # Functions:
-import sqlite3
-from typing import Optional, List
-
-from fastapi import HTTPException, Depends
-
-from tldw_Server_API.app.core.DB_Management.DB_Dependency import get_db_manager
-from tldw_Server_API.app.core.DB_Management.DB_Manager import get_full_media_details, create_document_version, \
-    update_keywords_for_media
-
 
 def process_media_update(
     media_id: int,
@@ -31,7 +28,7 @@ def process_media_update(
     """Centralized media update processing"""
     try:
         # Verify media exists
-        existing = get_full_media_details(media_id)
+        existing = get_full_media_details2(media_id)
         if not existing:
             raise HTTPException(status_code=404, detail="Media not found")
 
@@ -65,7 +62,7 @@ def process_media_update(
         if keywords is not None:
             update_keywords_for_media(media_id, keywords, db=db)
 
-        return get_full_media_details(media_id)
+        return get_full_media_details2(media_id)
 
     except sqlite3.Error as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")

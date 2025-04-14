@@ -69,6 +69,7 @@ from tldw_Server_API.app.core.DB_Management.SQLite_DB import (
     mark_media_as_processed as sqlite_mark_media_as_processed,
     update_keywords_for_media as sqlite_update_keywords_for_media,
     delete_document_version as sqlite_delete_document_version, \
+    get_full_media_details2 as get_full_media_details
 )
 from tldw_Server_API.app.core.DB_Management.RAG_QA_Chat_DB import start_new_conversation as sqlite_start_new_conversation, \
     save_message as sqlite_save_message, load_chat_history as sqlite_load_chat_history, \
@@ -280,7 +281,7 @@ def check_media_exists(*args, **kwargs):
         # Implement Postgres version
         raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
 
-def get_full_media_details(*args, **kwargs):
+def get_full_media_details2(*args, **kwargs):
     if db_type == 'sqlite':
         return get_full_media_details(*args, **kwargs)
     elif db_type == 'elasticsearch':

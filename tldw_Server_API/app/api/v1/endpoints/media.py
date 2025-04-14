@@ -23,7 +23,6 @@ from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-
 #
 # 3rd-party imports
 from fastapi import (
@@ -55,6 +54,7 @@ import requests
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
+from loguru import logger
 #
 # Local Imports
 from tldw_Server_API.app.core.DB_Management.DB_Dependency import get_db_manager
@@ -64,7 +64,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     fetch_item_details_single,
     get_paginated_files,
     get_media_title,
-    fetch_keywords_for_media, get_full_media_details, create_document_version, update_keywords_for_media,
+    fetch_keywords_for_media, get_full_media_details2, create_document_version, update_keywords_for_media,
     get_all_document_versions, get_document_version, rollback_to_version, delete_document_version, db,
     fetch_item_details
 )
@@ -190,13 +190,16 @@ async def get_all_media(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Obtain details of a single media item using its ID
+#Obtain details of a single media item using its ID
 @router.get("/{media_id}", summary="Get details about a single media item")
-def get_media_item(media_id: int, db=Depends(get_db_manager)):
+def get_media_item(
+        media_id: int,
+        #db=Depends(get_db_manager)
+):
     try:
         # -- 1) Fetch the main record (includes title, type, content, author, etc.)
-        logging.info(f"Calling get_full_media_details for ID: {media_id}")
-        media_info = get_full_media_details(media_id)
+        logging.info(f"Calling get_full_media_details2 for ID: {media_id}")
+        media_info = get_full_media_details2(media_id)
         logging.info(f"Received media_info type: {type(media_info)}")
         logging.debug(f"Received media_info value: {media_info}")
         if not media_info:
@@ -280,10 +283,16 @@ def get_media_item(media_id: int, db=Depends(get_db_manager)):
         raise HTTPException(status_code=500, detail=f"Internal server error processing data: {e}")
     except HTTPException:
         raise
+    # except Exception as e:
+    #     logging.error(f"Generic exception in get_media_item: {e}", exc_info=True)
+    #     raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        logging.error(f"Generic exception in get_media_item: {e}", exc_info=True)
+        import traceback
+        print("------ TRACEBACK START ------")
+        traceback.print_exc() # Print traceback to stdout/stderr
+        print("------ TRACEBACK END ------")
+        logging.error(f"Generic exception in get_media_item: {e}", exc_info=True) # Keep your original logging too
         raise HTTPException(status_code=500, detail=str(e))
-
 
 ##############################################################################
 ############################## MEDIA Versioning ##############################

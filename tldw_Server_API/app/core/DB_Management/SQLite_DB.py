@@ -2420,7 +2420,7 @@ def get_paginated_files(page: int = 1, results_per_page: int = 50) -> Tuple[List
 #
 # Functions to manage document versions
 
-def get_full_media_details(media_id: int) -> Optional[Dict]:
+def get_full_media_details2(media_id: int) -> Optional[Dict]:
     """Get complete media details with versions and keywords"""
     logger.debug(f"Attempting to get full details for ID: {media_id}")
     try:
