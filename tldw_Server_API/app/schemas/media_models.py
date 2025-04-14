@@ -76,45 +76,6 @@ class VersionResponse(BaseModel):
 class VersionRollbackRequest(BaseModel):
     version_number: int
 
-######################## Multi-File Ingestion Model ###################################
-#
-# This is a schema for all media except web scraping ingestion and analysis.
-
-class AddMediaRequest(BaseModel):
-    url: Optional[str] = Field(None, description="The URL of the media to add") # Allow None if file is provided
-    media_type: str = Field(..., description="Type of media (e.g., 'audio', 'video', 'pdf')")
-    title: Optional[str] = Field(None, description="Optional title of the media")
-    author: Optional[str] = Field(None, description="Optional author of the media")
-    keywords: str = Field("", description="Comma-separated keywords for the media")
-    custom_prompt: Optional[str] = Field(None, description="Optional custom prompt")
-    system_prompt: Optional[str] = Field(None, description="Optional system prompt")
-    whisper_model: str = Field("deepml/distil-large-v3", description="Model for audio/video transcription")
-    transcription_language: str = Field("en", description="Language for audio/video transcription")
-    diarize: bool = Field(False, description="Enable speaker diarization")
-    timestamp_option: bool = Field(True, description="Include timestamps in the transcription")
-    keep_original_file: bool = Field(False, description="Whether to retain original file after processing")
-    overwrite_existing: bool = Field(False, description="Overwrite any existing media with the same URL")
-    perform_analysis: bool = Field(True, description="Perform analysis on the media (default=True)")
-    perform_rolling_summarization: bool = Field(False, description="Perform rolling summarization on the media")
-    api_name: Optional[str] = Field(None, description="Optional API name for integration")
-    api_key: Optional[str] = Field(None, description="Optional API key for integration")
-    pdf_parsing_engine: Optional[str] = Field(None, description="Optional PDF parsing engine")
-    perform_chunking: bool = Field(True, description="Enable chunk-based processing of the media")
-    chunk_method: Optional[str] = Field(None, description="Method used to chunk the media content")
-    use_adaptive_chunking: bool = Field(False, description="Whether to enable adaptive chunking")
-    use_multi_level_chunking: bool = Field(False, description="Whether to enable multi-level chunking")
-    chunk_language: Optional[str] = Field(None, description="Optional language override for chunking")
-    chunk_size: int = Field(500, description="Size of each chunk for processing")
-    chunk_overlap: int = Field(200, description="Overlap size between chunks")
-    use_cookies: bool = Field(False, description="Whether to attach cookies to the request (scraping scenarios)")
-    cookies: Optional[str] = Field(None, description="Cookie string if `use_cookies` is set to True")
-    perform_confabulation_check_of_analysis: bool = Field(
-        False, description="Enable a confabulation check on analysis"
-    )
-    custom_chapter_pattern: Optional[str] = Field(
-        None, description="Optional regex pattern for custom chapter splitting"
-    )
-
 ######################## Video Ingestion Model ###################################
 #
 # This is a schema for video ingestion and analysis.

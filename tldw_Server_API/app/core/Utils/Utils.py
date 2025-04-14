@@ -1872,3 +1872,56 @@ def format_transcript(raw_text: str) -> str:
 #
 # End of File Handling Functions
 #######################################################################################################################
+
+def extract_media_id_from_result_string(result_msg: Optional[str]) -> Optional[str]:
+    """
+    Extracts the Media ID from a string expected to contain 'Media ID: <id>'.
+
+    This function searches for the pattern "Media ID:" followed by optional
+    whitespace and captures the subsequent sequence of non-whitespace characters
+    as the ID.
+
+    Args:
+        result_msg: The input string potentially containing the Media ID message,
+                    typically returned by processing functions like import_epub.
+
+    Returns:
+        The extracted Media ID as a string if the pattern is found.
+        Returns None if the input string is None, empty, or the pattern
+        "Media ID: <id>" is not found.
+
+    Examples:
+        >>> extract_media_id_from_result_string("Ebook imported successfully. Media ID: ebook_789")
+        'ebook_789'
+        >>> extract_media_id_from_result_string("Success. Media ID: db_mock_id")
+        'db_mock_id'
+        >>> extract_media_id_from_result_string("Error during processing.")
+        None
+        >>> extract_media_id_from_result_string(None)
+        None
+        >>> extract_media_id_from_result_string("Media ID: id-with-hyphens123") # Test hyphens/numbers
+        'id-with-hyphens123'
+        >>> extract_media_id_from_result_string("Media ID:id_no_space") # Test no space
+        'id_no_space'
+    """
+    # Handle None or empty input string gracefully
+    if not result_msg:
+        return None
+
+    # Regular expression pattern:
+    # - Looks for the literal string "Media ID:" (case-sensitive).
+    # - Allows for zero or more whitespace characters (\s*) after the colon.
+    # - Captures (\(...\)) one or more non-whitespace characters (\S+).
+    #   Using \S+ is generally safer than \w+ as IDs might contain hyphens or other symbols.
+    #   If IDs are strictly alphanumeric + underscore, you could use (\w+) instead.
+    # - We use re.search to find the pattern anywhere in the string.
+    pattern = r"Media ID:\s*(\S+)"
+
+    match = re.search(pattern, result_msg)
+
+    # If a match is found, match.group(1) will contain the captured ID part
+    if match:
+        return match.group(1)
+    else:
+        # The pattern "Media ID: <id>" was not found in the string
+        return None

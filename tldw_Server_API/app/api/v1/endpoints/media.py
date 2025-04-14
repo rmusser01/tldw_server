@@ -22,7 +22,7 @@ import uuid
 from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 #
 # 3rd-party imports
 from fastapi import (
@@ -57,6 +57,9 @@ from slowapi.util import get_remote_address
 from loguru import logger
 #
 # Local Imports
+#
+# DB Mgmt
+from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
 from tldw_Server_API.app.core.DB_Management.DB_Dependency import get_db_manager
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     add_media_to_database,
@@ -71,25 +74,31 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
 from tldw_Server_API.app.core.DB_Management.SQLite_DB import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Sessions import get_current_db_manager
 from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_db
+#
+# Media Processing
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Processing import process_audio
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Ingestion_Lib import import_epub
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Media_Update_lib import process_media_update
 from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Ingestion_Lib import process_pdf_task
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
+#
+# Document Processing
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
-from tldw_Server_API.app.core.Utils.Utils import format_transcript, truncate_content, logging
+from tldw_Server_API.app.core.Utils.Utils import format_transcript, truncate_content, logging, \
+    extract_media_id_from_result_string, sanitize_filename
+from tldw_Server_API.app.services.document_processing_service import process_documents
+from tldw_Server_API.app.services.ebook_processing_service import process_ebook_task
+#
+# Web Scraping
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article, scrape_from_sitemap, \
     scrape_by_url_level, recursive_scrape
 from tldw_Server_API.app.schemas.media_models import VideoIngestRequest, AudioIngestRequest, MediaSearchResponse, \
     MediaItemResponse, MediaUpdateRequest, VersionCreateRequest, VersionResponse, VersionRollbackRequest, \
-    IngestWebContentRequest, ScrapeMethod, AddMediaRequest
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
-from tldw_Server_API.app.services.document_processing_service import process_documents
-from tldw_Server_API.app.services.ebook_processing_service import process_ebook_task
+    IngestWebContentRequest, ScrapeMethod
 from tldw_Server_API.app.services.xml_processing_service import process_xml_task
 from tldw_Server_API.app.services.web_scraping_service import process_web_scraping_task
-from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
-from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
+#
 #
 #######################################################################################################################
 #
@@ -570,540 +579,474 @@ def extract_id_from_result(result: str) -> int:
 
 # Per-User Media Ingestion and Analysis
 # FIXME - Ensure that each function processes multiple files/URLs at once
-@router.post("/add")
+class TempDirManager:
+    def __init__(self, prefix="media_processing_"):
+        self.temp_dir_path = None
+        self.prefix = prefix
+        self._created = False
+
+    def __enter__(self):
+        self.temp_dir_path = Path(tempfile.mkdtemp(prefix=self.prefix))
+        self._created = True
+        logging.info(f"Created temporary directory: {self.temp_dir_path}")
+        return self.temp_dir_path
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._created and self.temp_dir_path and self.temp_dir_path.exists():
+            try:
+                shutil.rmtree(self.temp_dir_path)
+                logging.info(f"Cleaned up temporary directory: {self.temp_dir_path}")
+            except Exception as e:
+                logging.error(f"Failed to cleanup temporary directory {self.temp_dir_path}: {e}", exc_info=True)
+        self.temp_dir_path = None
+        self._created = False
+
+    def get_path(self):
+         if not self._created:
+              raise RuntimeError("Temporary directory not created or already cleaned up.")
+         return self.temp_dir_path
+
+
+@router.post("/add", status_code=status.HTTP_207_MULTI_STATUS) # Default to Multi-Status
 async def add_media(
+    # FIXME make URL/File mandatory
     background_tasks: BackgroundTasks,
-    request_data: AddMediaRequest,  # JSON body
-#    db: UserSpecificDBManager = Depends(get_current_db_manager), # Added DB dependency
-    token: str = Header(..., description="Authentication token"), # Token is used by get_current_db_manager
-    file: Optional[UploadFile] = File(None),  # File uploads are handled separately
+    # --- Required Fields ---
+    media_type: str = Form(..., description="Type of media (e.g., 'audio', 'video', 'pdf')"),
+    token: str = Header(..., description="Authentication token"), # Keep Header required
+    # --- Input Sources (Mandatory: At least one URL or File) ---
+    urls: Optional[List[str]] = Form(None, description="List of URLs of the media items to add"),
+    files: Optional[List[UploadFile]] = File(None, description="List of files to upload and add"),
+    # --- Common Optional Fields ---
+    title: Optional[str] = Form(None, description="Optional title (applied if only one item processed, otherwise ignored or potentially used as prefix)"),
+    author: Optional[str] = Form(None, description="Optional author (applied similarly to title)"),
+    keywords: str = Form("", description="Comma-separated keywords (applied to all processed items)"),
+    custom_prompt: Optional[str] = Form(None, description="Optional custom prompt (applied to all)"),
+    system_prompt: Optional[str] = Form(None, description="Optional system prompt (applied to all)"),
+    overwrite_existing: bool = Form(False, description="Overwrite any existing media with the same identifier (URL/filename)"),
+    keep_original_file: bool = Form(False, description="Whether to retain original uploaded files after processing (temp dir not deleted)"),
+    perform_analysis: bool = Form(True, description="Perform analysis (e.g., summarization) if applicable (default=True)"),
+    api_name: Optional[str] = Form(None, description="Optional API name for integration"),
+    api_key: Optional[str] = Form(None, description="Optional API key for integration"),
+    use_cookies: bool = Form(False, description="Whether to attach cookies to URL download requests"),
+    cookies: Optional[str] = Form(None, description="Cookie string if `use_cookies` is set to True"),
+    # --- Audio/Video Specific ---
+    whisper_model: str = Form("deepml/distil-large-v3", description="Model for audio/video transcription"),
+    transcription_language: str = Form("en", description="Language for audio/video transcription"),
+    diarize: bool = Form(False, description="Enable speaker diarization (audio/video)"),
+    timestamp_option: bool = Form(True, description="Include timestamps in the transcription (audio/video)"),
+    vad_use: bool = Form(False, description="Enable Voice Activity Detection filter during transcription (audio/video)"),
+    perform_confabulation_check_of_analysis: bool = Form(False, description="Enable a confabulation check on analysis (if applicable)"),
+    # --- PDF Specific ---
+    pdf_parsing_engine: Optional[str] = Form("pymupdf4llm", description="Optional PDF parsing engine"), # Default changed
+    # --- Chunking Specific ---
+    perform_chunking: bool = Form(True, description="Enable chunk-based processing of the media content"),
+    chunk_method: Optional[str] = Form(None, description="Method used to chunk content (e.g., 'sentences', 'recursive', 'chapter')"),
+    use_adaptive_chunking: bool = Form(False, description="Whether to enable adaptive chunking"),
+    use_multi_level_chunking: bool = Form(False, description="Whether to enable multi-level chunking"),
+    chunk_language: Optional[str] = Form(None, description="Optional language override for chunking"),
+    chunk_size: int = Form(500, description="Target size of each chunk"),
+    chunk_overlap: int = Form(200, description="Overlap size between chunks"),
+    custom_chapter_pattern: Optional[str] = Form(None, description="Optional regex pattern for custom chapter splitting (ebook/docs)"),
+    # --- Deprecated/Less Common ---
+    perform_rolling_summarization: bool = Form(False, description="Perform rolling summarization (legacy?)"),
+    summarize_recursively: bool = Form(False, description="Perform recursive summarization on chunks (if chunking enabled)")
+
+    # FIXME - User-specific DB usage - Still needs proper implementation if required
+    # db = Depends(get_db_manager),
 ):
-    # FIXME - User-specific DB usage
-    #db = Depends(get_db_manager),
-
     """
-    Add new media to the database with processing.
-    Take in arguments + File(s), return media ID(s) for ingested items.
-
-    This endpoint processes a URL or uploaded file based on the media type, then adds the
-    processed content to the database. It handles different types of media with appropriate
-    processing functions.
-
-    Parameters:
-    - url: Source URL of the media (or identifier for uploaded file)
-    - media_type: Type of media (video, audio, document, pdf, ebook, xml)
-    - file: Optional file upload if not using a URL
-    - title: Optional title for the media
-    - author: Optional author name
-    - keywords: Optional comma-separated keywords
-    - custom_prompt: Optional custom prompt for processing
-    - whisper_model: Whisper model to use for audio/video transcription
-    - diarize: Whether to diarize audio/video content
-    - timestamp_option: Whether to include timestamps
-    - keep_original: Whether to keep the original file
-    - overwrite: Whether to overwrite existing media with the same URL/Title/Hash
-    - api_name: Optional API name for processing (e.g., "openai")
-    - api_key: Optional API key for processing
-    - token: Authentication token
-    -
+    Add multiple media items (from URLs and/or uploaded files) to the database with processing.
     """
-    # Create a temporary directory that will be automatically cleaned up
-    temp_dir = None
-    local_file_path = None
-    url = request_data.url # Use URL from request body
-    media_type = request_data.media_type
+    # --- 1. Initial Validation ---
+    valid_types = ['video', 'audio', 'document', 'pdf', 'ebook']
+    if media_type not in valid_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid media_type '{media_type}'. Must be one of: {', '.join(valid_types)}"
+        )
+
+    # Ensure at least one URL or file is provided
+    if not urls and not files:
+         raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided."
+        )
+
+    # Normalize inputs
+    url_list = urls or []
+    file_list = files or []
+    keyword_list = [k.strip() for k in keywords.split(",") if k.strip()]
+
+    # --- 2. Prepare Common Options ---
+    chunk_options = {}
+    if perform_chunking:
+        # Determine default chunk method if not provided
+        default_chunk_method = "sentences"
+        if media_type == 'ebook':
+            default_chunk_method = "chapter"
+        elif media_type == 'video' or media_type == 'audio':
+             default_chunk_method = "recursive" # Or whisper's native segmentation?
+
+        chunk_options = {
+            'method': chunk_method or default_chunk_method,
+            'max_size': chunk_size, # Use direct values
+            'overlap': chunk_overlap,
+            'adaptive': use_adaptive_chunking,
+            'multi_level': use_multi_level_chunking,
+            'language': chunk_language or transcription_language, # Sensible default?
+            'custom_chapter_pattern': custom_chapter_pattern,
+        }
+        logging.info(f"Chunking enabled with options: {chunk_options}")
+    else:
+        logging.info("Chunking disabled.")
+
+    common_processing_options = {
+        "keywords": keyword_list,
+        "custom_prompt": custom_prompt,
+        "system_prompt": system_prompt,
+        "overwrite_existing": overwrite_existing,
+        "perform_analysis": perform_analysis,
+        "chunk_options": chunk_options if perform_chunking else None,
+        "api_name": api_name,
+        "api_key": api_key,
+        "store_in_db": True, # Assume we always want to store for this endpoint
+        # Type specific args are added below
+    }
+
+    # --- 3. Process Items ---
+    results = []
+    temp_dir_manager = TempDirManager() # Manages the lifecycle of the temp dir
+    processed_successfully = False # Flag to track if any processing happened
 
     try:
-        # --- 1. Input Validation ---
-        valid_types = ['video', 'audio', 'document', 'pdf', 'ebook']
-        if AddMediaRequest.media_type not in valid_types:
-            # Specific, client-correctable error
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid media_type '{media_type}'. Must be one of: {', '.join(valid_types)}"
-            )
+        # Use context manager for temp dir creation and cleanup
+        with temp_dir_manager as temp_dir:
+            processed_files = [] # Keep track of files saved to temp dir
+            file_handling_errors = [] # Store errors during file saving
 
-        if not file and not url:
-             raise HTTPException(
-                status_code=400,
-                detail="Either a 'file' upload or a 'url' must be provided."
-            )
-        # FIXME - integrate file upload sink
+            # --- 3.1 Handle File Uploads ---
+            for file in file_list:
+                input_ref = file.filename or f"upload_{uuid.uuid4()}" # Reference for logging/results
+                local_file_path = None
+                try:
+                    if not file.filename: # Basic validation
+                         logging.warning("Received file upload with no filename. Skipping.")
+                         results.append({"input": "N/A", "status": "Failed", "error": "File uploaded without a filename."})
+                         continue
 
-        # --- 2. File Handling (if applicable) ---
-        if file:
-            try:
-                # Create a secure temporary directory
-                temp_dir = tempfile.mkdtemp(prefix="media_processing_")
-                logging.info(f"Created temporary directory: {temp_dir}")
+                    # Generate a secure filename within the temp dir
+                    original_extension = Path(file.filename).suffix
+                    # Use a more descriptive secure name if possible, else UUID
+                    secure_base = sanitize_filename(Path(file.filename).stem)
+                    if not secure_base: secure_base = str(uuid.uuid4())
+                    secure_filename = f"{secure_base}{original_extension}"
+                    local_file_path = temp_dir / secure_filename
 
-                # Generate a secure filename with the correct extension
-                original_extension = Path(file.filename).suffix if file.filename else ""
-                secure_filename = f"{uuid.uuid4()}{original_extension}"
-                local_file_path = Path(temp_dir) / secure_filename
+                    logging.info(f"Attempting to save uploaded file '{file.filename}' to: {local_file_path}")
+                    content = await file.read()
+                    with open(local_file_path, "wb") as buffer:
+                        buffer.write(content)
+                    logging.info(f"Successfully saved '{file.filename}' to {local_file_path}")
+                    processed_files.append({"path": local_file_path, "original_filename": file.filename})
 
-                # Save uploaded file to secure location
-                logging.info(f"Attempting to save uploaded file to: {local_file_path}")
-                with open(local_file_path, "wb") as buffer:
-                    content = await file.read() # This read could fail
-                    buffer.write(content) # This write could fail
-                logging.info(f"Successfully saved uploaded file: {local_file_path}")
+                except Exception as e:
+                    logging.error(f"Failed to save uploaded file '{input_ref}': {e}", exc_info=True)
+                    file_handling_errors.append({
+                        "input": input_ref,
+                        "status": "Failed",
+                        "error": f"Failed to save uploaded file: {type(e).__name__}"
+                    })
+                    # Clean up partially written file if it exists
+                    if local_file_path and local_file_path.exists():
+                         try: local_file_path.unlink()
+                         except OSError: pass
+                    continue # Skip processing this file
 
-                # Schedule cleanup *only if successful and keep_original is False*
-                if not request_data.keep_original_file:
-                    # This task runs *after* the response is sent
-                    background_tasks.add_task(shutil.rmtree, temp_dir, ignore_errors=True)
-                    logging.info(f"Scheduled background cleanup for temp directory: {temp_dir}")
-                else:
-                     logging.info(f"Keeping original file, cleanup skipped for: {temp_dir}")
+            # Add file handling errors to the main results list immediately
+            results.extend(file_handling_errors)
 
+            # --- 3.2 Determine Inputs to Process ---
+            # Combine URLs and successfully saved file paths (as strings)
+            inputs_to_process_paths_or_urls: List[str] = []
+            inputs_to_process_paths_or_urls.extend(url_list)
+            inputs_to_process_paths_or_urls.extend([str(pf["path"]) for pf in processed_files]) # Use string paths
 
-            except IOError as e:
-                logging.error(f"IOError saving uploaded file: {e}", exc_info=True)
-                # Server-side issue writing the file
-                raise HTTPException(status_code=500, detail=f"Failed to save uploaded file due to IO Error: {e}")
-            except OSError as e:
-                 logging.error(f"OSError creating temp dir or saving file: {e}", exc_info=True)
-                 # Server-side issue with filesystem/permissions
-                 raise HTTPException(status_code=500, detail=f"Failed to save uploaded file due to OS Error: {e}")
-            except Exception as e: # Catch any other upload/save related errors
-                logging.error(f"Unexpected error saving uploaded file: {e}", exc_info=True)
-                raise HTTPException(status_code=500, detail=f"An unexpected error occurred while saving the file: {type(e).__name__}")
-
-            # If no URL provided, use the original filename for reference (but not the path)
-            if not url:
-                url = file.filename # URL now acts as an identifier/original name
-
-        # --- 3. Prepare Chunking Options ---
-        chunk_options = {}
-        if request_data.perform_chunking:
-            chunk_options = {
-                'method': request_data.chunk_method or ("sentences" if media_type != 'ebook' else "chapter"), # Default based on type
-                'max_size': request_data.chunk_size or 500,
-                'overlap': request_data.chunk_overlap or 200,
-                'adaptive': request_data.use_adaptive_chunking or False,
-                'multi_level': request_data.use_multi_level_chunking or False,
-                'language': request_data.chunk_language or request_data.transcription_language,
-                'custom_chapter_pattern': request_data.custom_chapter_pattern or None # Specific to ebook
-            }
-            logging.info(f"Chunking enabled with options: {chunk_options}")
-        else:
-            logging.info("Chunking disabled.")
+            if not inputs_to_process_paths_or_urls:
+                 logging.warning("No valid inputs remaining after file handling.")
+                 # Return results collected so far (potentially just file saving errors)
+                 # Determine appropriate status code later based on results
+                 return {"results": results}
 
 
-        # --- 4. Media Type Specific Processing ---
-        processing_result = None
-        db_id = None
-        # Use a nested try...except for the specific processing call
-        try:
+            # --- 3.3 Process Based on Media Type ---
+            logging.info(f"Processing {len(inputs_to_process_paths_or_urls)} items of type '{media_type}'")
+
+            # =======================================
+            # === VIDEO PROCESSING (SPECIAL CASE) ===
+            # =======================================
             if media_type == 'video':
-                logging.info(f"Processing video: {url or local_file_path}")
-                inputs = [str(local_file_path)] if local_file_path else ([url] if url else [])
-                if not inputs:
-                     raise ValueError("No valid input (file or URL) found for video processing.")
-
-                # Call the video processing function
-                processing_result = await process_videos(
-                    inputs=inputs,
-                    start_time=None, # Assuming AddMediaRequest doesn't have start/end times? Add if needed.
-                    end_time=None,
-                    diarize=request_data.diarize,
-                    vad_use=True, # Example: Hardcoded, consider making configurable
-                    whisper_model=request_data.whisper_model,
-                    use_custom_prompt=(request_data.custom_prompt is not None),
-                    custom_prompt=request_data.custom_prompt,
-                    system_prompt=request_data.system_prompt,
-                    perform_chunking=request_data.perform_chunking,
-                    chunk_method=chunk_options.get('method'),
-                    max_chunk_size=chunk_options.get('max_size'),
-                    chunk_overlap=chunk_options.get('overlap'),
-                    use_adaptive_chunking=chunk_options.get('adaptive', False),
-                    use_multi_level_chunking=chunk_options.get('multi_level', False),
-                    chunk_language=chunk_options.get('language'),
-                    summarize_recursively=False, # Add to AddMediaRequest if needed
-                    api_name=request_data.api_name,
-                    api_key=request_data.api_key,
-                    keywords=request_data.keywords if AddMediaRequest.keywords else "",
-                    use_cookies=request_data.use_cookies,
-                    cookies=request_data.cookies if AddMediaRequest.use_cookies else None,
-                    timestamp_option=request_data.timestamp_option,
-                    confab_checkbox=request_data.perform_confabulation_check_of_analysis,
-                    overwrite_existing=request_data.overwrite_existing,
-                    store_in_db=True, # Assuming always store for this endpoint
-                )
-
-                # --- 4.1 Handle Video Result ---
-                if not processing_result or not isinstance(processing_result, dict):
-                     raise TypeError("Video processing function returned an invalid result type.")
-
-                processed_items = processing_result.get('results', [])
-                media_ids = [item.get('db_id') for item in processed_items if item.get('status') == 'Success' and item.get('db_id')]
-
-                if media_ids:
-                    return {
-                        "status": "success",
-                        "message": f"Processed {len(media_ids)} video(s).",
-                        "media_ids": media_ids,
-                        "media_urls": [f"/api/v1/media/{mid}" for mid in media_ids],
-                        "results": processing_result # Optionally include full results
+                logging.info("Detected media type 'video', preparing for batch processing.")
+                try:
+                    video_args = {
+                        "inputs": inputs_to_process_paths_or_urls,
+                        "start_time": None,  # Add Form parameter if needed
+                        "end_time": None,  # Add Form parameter if needed
+                        "diarize": diarize,
+                        "vad_use": vad_use,  # <-- Mapped from new parameter
+                        "whisper_model": whisper_model,
+                        "use_custom_prompt": bool(custom_prompt),  # Determine based on presence
+                        "custom_prompt": custom_prompt,
+                        "system_prompt": system_prompt,
+                        "perform_chunking": perform_chunking,
+                        "chunk_method": chunk_options.get('method') if perform_chunking else None,
+                        "max_chunk_size": chunk_options.get('max_size') if perform_chunking else 500,
+                        # Default if no chunking?
+                        "chunk_overlap": chunk_options.get('overlap') if perform_chunking else 200,
+                        # Default if no chunking?
+                        "use_adaptive_chunking": chunk_options.get('adaptive') if perform_chunking else False,
+                        "use_multi_level_chunking": chunk_options.get('multi_level') if perform_chunking else False,
+                        "chunk_language": chunk_options.get('language') if perform_chunking else None,
+                        "summarize_recursively": summarize_recursively,  # <-- Mapped from new parameter
+                        "api_name": api_name,
+                        "api_key": api_key,
+                        "keywords": keywords,  # Pass the raw string
+                        "use_cookies": use_cookies,
+                        "cookies": cookies,
+                        "timestamp_option": timestamp_option,
+                        "confab_checkbox": perform_confabulation_check_of_analysis,
+                        "overwrite_existing": overwrite_existing,
+                        "store_in_db": common_processing_options.get("store_in_db", True),
                     }
-                else:
-                    # Processing finished, but no items successfully stored or errors occurred
-                    error_messages = processing_result.get('errors', [])
-                    if not error_messages: # Check results for individual errors if 'errors' key is empty/missing
-                         error_messages = [item.get('error', 'Unknown processing error') for item in processed_items if item.get('status') != 'Success']
 
-                    logging.warning(f"Video processing completed but no DB IDs returned. Errors: {error_messages}. Full result: {processing_result}")
-                    # Return a 207 Multi-Status if the function might partially succeed, or 500 if it's all-or-nothing failure indication
-                    raise HTTPException(
-                        status_code=500, # Or 207 if partial success is possible and meaningful
-                        detail={
-                            "message": "Video processing completed, but failed to add items to database or encountered errors.",
-                            "errors": error_messages,
-                            "raw_result": processing_result # Be careful about leaking info here in production
-                        }
+                    logging.debug(f"Calling process_videos with args: {list(video_args.keys())}")
+                    # NOTE: process_videos is NOT async, so we don't await it directly.
+                    # If it becomes async, add 'await'. If it's CPU-bound, run in executor.
+                    # For now, assuming it's synchronous or manages its own async internally.
+                    # To avoid blocking the main FastAPI event loop for long tasks, run synchronous CPU-bound code
+                    # in a thread pool executor:
+                    loop = asyncio.get_running_loop()
+                    video_processing_result = await loop.run_in_executor(
+                        None,  # Use default executor (ThreadPoolExecutor)
+                        process_videos,
+                        **video_args
                     )
 
+                    # video_processing_result is expected to be like:
+                    # { "processed_count": int, "errors_count": int, "errors": [], "results": [...], "confabulation_results": "..." }
+                    if video_processing_result and isinstance(video_processing_result.get("results"), list):
+                        results.extend(video_processing_result["results"])  # Add individual item results
+                        processed_successfully = video_processing_result.get("processed_count", 0) > 0
+                        if video_processing_result.get("errors_count", 0) > 0:
+                            logging.warning(
+                                f"process_videos reported {video_processing_result['errors_count']} errors: {video_processing_result.get('errors')}")
+                        # You could potentially add confabulation_results to the overall response if desired
+                        # response_data["confabulation_results"] = video_processing_result.get("confabulation_results")
+                    else:
+                        logging.error(f"process_videos returned an unexpected result format: {video_processing_result}")
+                        # Add a generic error for all inputs in this batch
+                        for item_input in inputs_to_process_paths_or_urls:
+                            results.append({
+                                "input": str(item_input),
+                                "status": "Failed",
+                                "error": "Video processing function returned invalid data."
+                            })
 
+                except Exception as e:
+                    logging.error(f"Error calling process_videos: {e}", exc_info=True)
+                    # Add a generic error for all inputs in this batch
+                    for item_input in inputs_to_process_paths_or_urls:
+                        results.append({
+                            "input": str(item_input),
+                            "status": "Failed",
+                            "error": f"Internal server error during batch video processing: {type(e).__name__}"
+                        })
+
+            # =========================================
+            # === OTHER MEDIA TYPE PROCESSING (LOOP) ===
+            # =========================================
             elif media_type == 'audio':
-                logging.info(f"Processing audio: {url or local_file_path}")
-                urls = [url] if (url and url.strip()) else []
-                files = [str(local_file_path)] if local_file_path else []
-                if not urls and not files:
-                     raise ValueError("No valid input (file or URL) found for audio processing.")
-
-                processing_result = await process_audio_files( # Use await if process_audio_files is async
-                    audio_urls=urls,
-                    audio_files=files,
-                    whisper_model=request_data.whisper_model,
-                    transcription_language=request_data.transcription_language,
-                    api_name=request_data.api_name,
-                    api_key=request_data.api_key,
-                    use_cookies=request_data.use_cookies,
-                    cookies=request_data.cookies,
-                    keep_original=request_data.keep_original_file, # Note: This might conflict with temp dir cleanup logic
-                    custom_keywords=(request_data.keywords.split(",") if request_data.keywords else []),
-                    custom_prompt_input=request_data.custom_prompt,
-                    system_prompt_input=request_data.system_prompt,
-                    chunk_method=chunk_options.get('method'),
-                    max_chunk_size=chunk_options.get('max_size'),
-                    chunk_overlap=chunk_options.get('overlap'),
-                    use_adaptive_chunking=chunk_options.get('adaptive', False),
-                    use_multi_level_chunking=chunk_options.get('multi_level', False),
-                    chunk_language=chunk_options.get('language'),
-                    diarize=request_data.diarize,
-                    keep_timestamps=request_data.timestamp_option,
-                    custom_title=request_data.title
-                )
-                # Assuming process_audio_files returns a dict like: {"status": ..., "message": ..., "results": [...]}
-                if not processing_result or not isinstance(processing_result, dict):
-                    raise TypeError("Audio processing function returned an invalid result type.")
-
-                # Check the status provided by the processing function
-                if processing_result.get("status") != "success":
-                     logging.warning(f"Audio processing reported non-success status. Result: {processing_result}")
-                     raise HTTPException(
-                         status_code=500, # Or map status to HTTP codes if possible
-                         detail={
-                            "message": processing_result.get("message", "Audio processing failed."),
-                            "raw_result": processing_result
-                         }
-                     )
-
-                # Return the result directly if successful
-                return {
-                    "status": "success", # Or use status from result
-                    "message": processing_result.get("message", "Audio processed successfully."),
-                    "processed_items": len(processing_result.get("results", [])),
-                    "results": processing_result.get("results", []), # Contains DB IDs if added internally
-                }
-
-            elif media_type in ['document', 'pdf']: # Combine similar logic
-                logging.info(f"Processing {media_type}: {url or local_file_path}")
+                 processing_func = process_audio_item
+                 specific_options = {
+                    "diarize": diarize,
+                    "whisper_model": whisper_model,
+                    "language": transcription_language,
+                    "timestamp_option": timestamp_option,
+                    # custom_title only makes sense for single item, maybe derive from filename/url?
+                 }
+            elif media_type in ['document', 'pdf']:
+                # Determine filename/bytes based on input type
                 file_bytes = None
                 filename = None
+                input_url = None
 
-                if local_file_path:
+                if is_url:
+                    input_url = input_ref
+                    # Download URL content (consider moving download logic inside processors)
                     try:
-                        with open(local_file_path, "rb") as f:
-                            file_bytes = f.read()
-                        filename = Path(local_file_path).name # Use secure name first
-                        if file and file.filename:
-                            filename = file.filename # Prefer original filename for metadata if available
-                    except IOError as e:
-                        logging.error(f"IOError reading temporary {media_type} file {local_file_path}: {e}", exc_info=True)
-                        raise HTTPException(status_code=500, detail=f"Failed to read temporary file for {media_type} processing.")
-                elif url:
-                    try:
-                        import requests # Keep import local if only used here
-                        logging.info(f"Downloading {media_type} from URL: {url}")
-                        response = requests.get(url, timeout=30) # Add timeout
-                        response.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
+                        logging.info(f"Downloading {media_type} from URL: {input_url}")
+                        headers = {}
+                        req_cookies = None
+                        if use_cookies and cookies:
+                            # Simple cookie parsing, might need adjustment
+                            try: req_cookies = {c.split('=')[0].strip(): c.split('=')[1].strip() for c in cookies.split(';') if '=' in c}
+                            except IndexError: logging.warning("Could not parse cookie string properly.")
+                            # Alternatively, pass raw string if requests handles it:
+                            # headers['Cookie'] = cookies
+
+                        response = requests.get(input_url, timeout=60, headers=headers, cookies=req_cookies) # Increased timeout
+                        response.raise_for_status()
                         file_bytes = response.content
-                        filename = url.split('/')[-1] or f"downloaded_{media_type}" # Basic filename extraction
-                        logging.info(f"Successfully downloaded {media_type} from URL.")
+                        filename = Path(input_url).name or f"downloaded_{media_type}_{uuid.uuid4()}"
+                        logging.info(f"Successfully downloaded {media_type} from {input_url}")
                     except requests.exceptions.RequestException as e:
-                         logging.error(f"Failed to download {media_type} from {url}: {e}", exc_info=True)
-                         status_code = 502 # Bad Gateway if remote server failed
-                         if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
-                              if 400 <= e.response.status_code < 500:
-                                   status_code = 400 # Bad request if URL itself is invalid (e.g., 404)
-                         raise HTTPException(status_code=status_code, detail=f"Failed to download file from URL: {e}")
-                else:
-                     raise ValueError(f"No valid input (file or URL) found for {media_type} processing.")
+                        raise ValueError(f"Failed to download file from URL {input_url}: {e}") from e
+                else: # It's a Path object from upload
+                     filepath = item_input
+                     filename = next((pf["original_filename"] for pf in processed_files if pf["path"] == filepath), filepath.name)
+                     try:
+                         with open(filepath, "rb") as f:
+                             file_bytes = f.read()
+                     except IOError as e:
+                         raise ValueError(f"Failed to read temporary file {filepath}: {e}") from e
 
+                if file_bytes is None:
+                     raise ValueError("Could not get content for processing.")
 
-                # --- Call specific processor ---
+                # Choose processor based on type
                 if media_type == 'document':
-                     doc_processing_result = await process_documents( # Use await if async
-                         doc_urls= [url] if url and not local_file_path else None, # Pass URL only if not uploaded
-                         doc_files= [str(local_file_path)] if local_file_path else None, # Pass path if uploaded
-                         api_name=request_data.api_name,
-                         api_key=request_data.api_key,
-                         custom_prompt_input=request_data.custom_prompt,
-                         system_prompt_input=request_data.system_prompt,
-                         use_cookies=request_data.use_cookies,
-                         cookies=request_data.cookies,
-                         keep_original=False, # Assume temp processing
-                         custom_keywords=request_data.keywords.split(",") if request_data.keywords else [],
-                         chunk_method=chunk_options.get('method'),
-                         max_chunk_size= chunk_options.get('max_size'),
-                         chunk_overlap= chunk_options.get('overlap'),
-                         use_adaptive_chunking=chunk_options.get('adaptive', False),
-                         use_multi_level_chunking=chunk_options.get('multi_level', False),
-                         chunk_language=chunk_options.get('language'),
-                         custom_title=request_data.title
-                     )
-                     # Assuming process_documents handles internal errors and returns a dict
-                     if not doc_processing_result or not isinstance(doc_processing_result, dict):
-                         raise TypeError("Document processing function returned an invalid result type.")
-
-                     # --- Handle Document Result & DB Insertion ---
-                     db_results = []
-                     item_results = doc_processing_result.get("results", [])
-                     for item in item_results:
-                         if item.get("success"):
-                             try:
-                                 # Call DB function within this loop's try block
-                                 new_id_result = add_media_to_database( # Assume this is synchronous for now
-                                     url=item.get("input") or item.get("filename") or url or filename, # Best effort identifier
-                                     title=request_data.title or item.get("filename") or filename,
-                                     media_type="document",
-                                     content=item.get("text_content", ""),
-                                     summary=item.get("summary", ""),
-                                     keywords=[k.strip() for k in request_data.keywords.split(",") if k.strip()],
-                                     prompt=request_data.custom_prompt,
-                                     system_prompt=request_data.system_prompt,
-                                     overwrite=request_data.overwrite_existing
-                                 )
-                                 extracted_id = extract_id_from_result(new_id_result)
-                                 if extracted_id:
-                                     db_results.append(extracted_id)
-                                 else:
-                                     logging.warning(f"Document processed but failed to extract DB ID from result: {new_id_result}")
-                             except Exception as db_exc:
-                                 logging.error(f"Error adding processed document to database: {db_exc}", exc_info=True)
-                                 # Continue processing other items, but log the failure
-
-                     if not db_results:
-                         logging.warning(f"Document processing finished, but no items were successfully added to DB. Result: {doc_processing_result}")
-                         raise HTTPException(
-                             status_code=500, # Or 207 if partial success happened at processing stage
-                             detail={
-                                 "message": "Document processing succeeded but database insertion failed for all items.",
-                                 "processing_results": doc_processing_result
-                            }
-                         )
-
-                     return {
-                         "status": "success",
-                         "message": f"Ingested {len(db_results)} document(s).",
-                         "media_ids": db_results,
-                         "media_urls": [f"/api/v1/media/{mid}" for mid in db_results],
-                         "processing_results": doc_processing_result # Include processing details
-                     }
-
-
-                elif media_type == 'pdf':
-                    pdf_processing_result = await process_pdf_task( # Use await if async
-                        file_bytes=file_bytes,
-                        filename=filename,
-                        parser=request_data.pdf_parsing_engine or "pymupdf4llm", # Default parser
-                        custom_prompt=request_data.custom_prompt,
-                        api_name=request_data.api_name,
-                        api_key=request_data.api_key,
-                        auto_summarize=request_data.perform_analysis,
-                        keywords=request_data.keywords.split(",") if request_data.keywords else [],
-                        system_prompt=request_data.system_prompt,
-                        perform_chunking=request_data.perform_chunking,
-                        chunk_method=chunk_options.get('method', 'sentences'), # PDF specific default
-                        max_chunk_size=chunk_options.get('max_size'),
-                        chunk_overlap=chunk_options.get('overlap'),
-                    )
-                    if not pdf_processing_result or not isinstance(pdf_processing_result, dict):
-                        raise TypeError("PDF processing function returned an invalid result type.")
-
-                    # --- Handle PDF Result & DB Insertion ---
-                    try:
-                        # Construct necessary data for DB
-                        segments = [{"Text": pdf_processing_result.get("text_content", "")}] # Basic segment structure
-                        summary = pdf_processing_result.get("summary", "")
-                        pdf_title = request_data.title or pdf_processing_result.get("title") or (os.path.splitext(filename)[0] if filename else "Untitled PDF")
-                        pdf_author = request_data.author or pdf_processing_result.get("author", "Unknown")
-
-                        info_dict = {
-                            "title": pdf_title,
-                            "author": pdf_author,
-                            "parser_used": pdf_processing_result.get("parser_used", request_data.pdf_parsing_engine or "pymupdf")
-                            # Add other relevant metadata from pdf_processing_result if available
-                        }
-
-                        insert_res = add_media_to_database( # Assume synchronous
-                            url=url or filename, # Identifier
-                            info_dict=info_dict,
-                            segments=segments,
-                            summary=summary,
-                            keywords=request_data.keywords, # Pass raw string or split list? Check DB func
-                            custom_prompt_input=request_data.custom_prompt or "",
-                            whisper_model="pdf-import", # Special identifier
-                            media_type=media_type,
-                            overwrite=request_data.overwrite_existing
-                        )
-
-                        media_id = extract_id_from_result(insert_res)
-                        if not media_id:
-                            logging.warning(f"PDF processed ({filename}) but failed to extract DB ID from result: {insert_res}")
-                            raise HTTPException(status_code=500, detail={"message": "PDF processed but failed to get database ID.", "details": insert_res})
-
-                        return {
-                            "status": "success",
-                            "message": f"PDF '{filename}' processed and added.", # Use extracted message if available: insert_res
-                            "media_id": media_id,
-                            "media_url": f"/api/v1/media/{media_id}"
-                        }
-                    except Exception as db_exc:
-                        logging.error(f"Error during PDF database insertion: {db_exc}", exc_info=True)
-                        raise HTTPException(status_code=500, detail=f"PDF processing successful, but database insertion failed: {db_exc}")
-
+                    processing_func = process_document_item
+                    specific_options = {
+                        "filename": filename, # Pass filename for context
+                        "file_bytes": file_bytes, # Assuming processor takes bytes
+                        # If processor takes URL/path:
+                        # "doc_url": input_url if is_url else None,
+                        # "doc_path": str(item_input) if not is_url else None,
+                    }
+                else: # PDF
+                    processing_func = process_pdf_item
+                    specific_options = {
+                        "file_bytes": file_bytes,
+                        "filename": filename,
+                        "parser": pdf_parsing_engine,
+                    }
 
             elif media_type == 'ebook':
-                logging.info(f"Processing eBook: {url or local_file_path}")
-                # Ebook requires a local file path for its processing library
-                if not local_file_path:
-                     # Need to download if URL was provided instead of file upload
-                     if url:
-                         try:
-                             import requests
-                             response = requests.get(url, timeout=60) # Longer timeout for potentially large ebooks
-                             response.raise_for_status()
+                 processing_func = import_ebook_item
+                 ebook_path = None
+                 temp_download_dir = None # Manage temp dir for downloads *within* the loop
 
-                             # Create a temporary directory *just for this download*
-                             # Note: This dir won't be cleaned by the initial background task logic
-                             # unless we explicitly add it or refactor the cleanup.
-                             temp_download_dir = tempfile.mkdtemp(prefix="ebook_dl_")
-                             ebook_filename = url.split('/')[-1] if '/' in url else 'temp_ebook.epub'
-                             local_file_path = Path(temp_download_dir) / ebook_filename # Now it's a Path object
-                             with open(local_file_path, "wb") as f:
-                                 f.write(response.content)
-                             logging.info(f"Downloaded ebook to temporary path: {local_file_path}")
+                 if is_url:
+                     # Download ebook to a *specific* temp location for this item
+                     try:
+                         logging.info(f"Downloading ebook from URL: {input_ref}")
+                         response = requests.get(input_ref, timeout=120) # Longer timeout for ebooks
+                         response.raise_for_status()
 
-                             # Schedule cleanup for this specific download directory
-                             background_tasks.add_task(shutil.rmtree, temp_download_dir, ignore_errors=True)
+                         temp_download_dir = Path(tempfile.mkdtemp(prefix="ebook_dl_"))
+                         ebook_filename = Path(input_ref).name or f"temp_ebook_{uuid.uuid4()}.epub"
+                         ebook_path = temp_download_dir / ebook_filename
+                         with open(ebook_path, "wb") as f:
+                             f.write(response.content)
+                         logging.info(f"Downloaded ebook to temporary path: {ebook_path}")
+                     except requests.exceptions.RequestException as e:
+                         raise ValueError(f"Failed to download ebook from URL {input_ref}: {e}") from e
+                     except (IOError, OSError) as e:
+                         # Cleanup if download failed during save
+                         if temp_download_dir and temp_download_dir.exists():
+                              shutil.rmtree(temp_download_dir, ignore_errors=True)
+                         raise ValueError(f"Failed to save downloaded ebook {input_ref}: {e}") from e
+                 else:
+                      ebook_path = item_input # Use the Path object directly
 
-                         except requests.exceptions.RequestException as e:
-                             logging.error(f"Failed to download ebook from {url}: {e}", exc_info=True)
-                             # Determine status code similar to PDF/Document download
-                             status_code = 502
-                             if isinstance(e, requests.exceptions.HTTPError) and e.response is not None and 400 <= e.response.status_code < 500:
-                                 status_code = 400
-                             raise HTTPException(status_code=status_code, detail=f"Failed to download ebook from URL: {e}")
-                         except (IOError, OSError) as e:
-                             logging.error(f"Error saving downloaded ebook to {local_file_path}: {e}", exc_info=True)
-                             if 'temp_download_dir' in locals() and os.path.exists(temp_download_dir): # Clean up if dir was created
-                                shutil.rmtree(temp_download_dir, ignore_errors=True)
-                             raise HTTPException(status_code=500, detail=f"Failed to save downloaded ebook: {e}")
+                 if not ebook_path or not ebook_path.exists():
+                      raise FileNotFoundError(f"Ebook input file not found or could not be obtained: {input_ref}")
 
-                     else: # No file upload AND no URL
-                         raise ValueError("No valid input (file or URL) found for ebook processing.")
+                 specific_options = {
+                     "file_path": str(ebook_path), # Processor likely needs string path
+                     # Add title/author if needed, derived from filename?
+                 }
+                 # Schedule cleanup for the downloaded ebook's temp dir if created
+                 if temp_download_dir:
+                     background_tasks.add_task(shutil.rmtree, temp_download_dir, ignore_errors=True)
 
-                # Ensure local_file_path is set by now
-                if not local_file_path or not os.path.exists(local_file_path):
-                     raise FileNotFoundError("Ebook processing failed: Input file path could not be determined or does not exist.")
+            else: # Should be caught by initial validation, but safeguard
+                raise NotImplementedError(f"Processing for media type '{media_type}' is not implemented.")
 
-                # --- Call ebook processor ---
-                result_msg = await import_epub( # Use await if async
-                    file_path=str(local_file_path), # Pass as string
-                    title=request_data.title,
-                    author=request_data.author,
-                    keywords=request_data.keywords,
-                    custom_prompt=request_data.custom_prompt,
-                    system_prompt=request_data.system_prompt,
-                    summary=None, # Assuming auto-analyze handles this
-                    auto_analyze=request_data.perform_analysis,
-                    api_name=request_data.api_name,
-                    api_key=request_data.api_key,
-                    chunk_options=chunk_options if request_data.perform_chunking else None,
-                    custom_chapter_pattern=chunk_options.get('custom_chapter_pattern') # Pass separately if needed
-                )
+            # --- Execute Processing ---
+            if processing_func:
+                 combined_options = {**common_processing_options, **specific_options, "input_ref": input_ref}
+                 # Remove options the specific processor might not understand
+                 # e.g., pdf processor doesn't need whisper_model
+                 # This part needs careful management based on actual processor signatures
+                 # Example cleanup (adjust based on real function signatures):
+                 if media_type not in ['audio', 'video']:
+                      combined_options.pop('whisper_model', None)
+                      combined_options.pop('diarize', None)
+                      combined_options.pop('timestamp_option', None)
+                      combined_options.pop('language', None) # Keep 'chunk_language' in chunk_options
+                 if media_type != 'pdf':
+                      combined_options.pop('pdf_parsing_engine', None)
+                 # ... etc.
 
-                if not isinstance(result_msg, str): # Basic check, adjust if import_epub returns dict
-                     raise TypeError("Ebook processing function returned an invalid result type.")
+                 logging.debug(f"Calling {processing_func.__name__} for {input_ref} with options: {list(combined_options.keys())}") # Log keys only
+                 raw_result = await processing_func(**combined_options)
 
-                # --- Handle Ebook Result ---
-                # Assuming import_epub handles DB insertion and returns a message with ID
-                media_id = extract_media_id_from_result_string(result_msg)
-
-                if not media_id:
-                    logging.warning(f"Ebook processed but media_id could not be parsed from result: {result_msg}")
-                    # Return the raw message from the processor as detail
-                    raise HTTPException(
-                        status_code=500,
-                        detail={
-                            "message": "Ebook processing completed, but failed to confirm database ID.",
-                            "details": result_msg
-                        }
-                     )
-
-                return {
-                    "status": "success",
-                    "message": result_msg,
-                    "media_id": media_id,
-                    "media_url": f"/api/v1/media/{media_id}"
-                }
-
-            # --- Placeholder for other types ---
-            elif media_type in ['xml', 'web']:
-                 logging.warning(f"Processing for media_type '{media_type}' is not yet implemented.")
-                 raise HTTPException(status_code=501, detail=f"Processing for media type '{media_type}'"
-                                                             f" is not implemented.")
+                 # --- Standardize Result ---
+                 if isinstance(raw_result, dict):
+                     item_result = {**item_result, **raw_result} # Merge dict results
+                     if "status" not in item_result: item_result["status"] = "Success" # Assume success if status missing
+                     if item_result.get("status") != "Success" and "error" not in item_result:
+                         item_result["error"] = item_result.get("message", "Processing failed with unspecified error.")
+                 elif isinstance(raw_result, str) and media_type == 'ebook': # Handle ebook string result
+                     item_result["status"] = "Success"
+                     item_result["message"] = raw_result
+                     item_result["db_id"] = extract_media_id_from_result_string(raw_result) # Assumes helper exists
+                     if not item_result["db_id"]:
+                          item_result["status"] = "Warning"
+                          item_result["error"] = "Ebook processed but failed to extract DB ID from result string."
+                 else:
+                      item_result["status"] = "Failed"
+                      item_result["error"] = f"Processor returned unexpected result type: {type(raw_result).__name__}"
+                      logging.warning(f"Processor {processing_func.__name__} for {input_ref} returned unexpected result: {raw_result}")
 
             else:
-                # This case should technically be caught by the initial validation, but as a safeguard:
-                logging.error(f"Reached processing block with unexpected media_type: {media_type}")
-                raise HTTPException(status_code=400, detail=f"Internal error: Unexpected media type '{media_type}'"
-                                                            f" encountered during processing.")
+                 # This case should ideally not be reached if logic is correct
+                 item_result["status"] = "Failed"
+                 item_result["error"] = f"No processing function determined for media type '{media_type}'."
 
-
-        except (ValueError, FileNotFoundError, TypeError) as e:
-             # Catch specific errors raised during input validation or result checking within the processing block
-             logging.warning(f"Validation or Type error during {media_type} processing: {e}", exc_info=True)
-             raise HTTPException(status_code=400, detail=f"Input Error for {media_type}: {e}")
+        except NotImplementedError as e:
+            logging.warning(f"Not implemented error for item {input_ref}: {e}")
+            item_result["status"] = "Failed"
+            item_result["error"] = str(e)
+            # Re-raise as 501 if it's the *only* item failing this way? Complex.
+        except FileNotFoundError as e:
+            logging.warning(f"File not found error for item {input_ref}: {e}")
+            item_result["status"] = "Failed"
+            item_result["error"] = f"Input file not found or inaccessible: {e}"
+        except ValueError as e: # Catch download errors or other value issues
+            logging.warning(f"Input value error for item {input_ref}: {e}", exc_info=True)
+            item_result["status"] = "Failed"
+            item_result["error"] = f"Input error: {e}"
         except HTTPException:
-             # Re-raise HTTPExceptions raised deliberately by sub-logic (like download errors)
-             raise
+             raise # Re-raise HTTP exceptions immediately (e.g., from auth)
         except Exception as e:
-             # Catch unexpected errors *within* the specific processing function call
-             logging.error(f"Unexpected error during '{media_type}' processing call: "
-                           f"{type(e).__name__} - {e}", exc_info=True)
-             raise HTTPException(status_code=500, detail=f"An internal error occurred during {media_type} "
-                                                         f"processing: {type(e).__name__}")
+            logging.error(f"Unexpected error processing item {input_ref}: {e}", exc_info=True)
+            item_result["status"] = "Failed"
+            item_result["error"] = f"Internal server error during processing: {type(e).__name__}"
 
+        # Append the final result for this item
+        results.append(item_result)
+        logging.debug(f"Finished processing item {input_ref} with status: {item_result['status']}")
+
+        # --- End of 'with temp_dir_manager' ---
+        # Temp dir is now cleaned up unless keep_original_file is True
 
     except HTTPException as e:
         # Log and re-raise known HTTP exceptions (like validation errors)
         logging.warning(f"HTTP Exception encountered: Status={e.status_code}, Detail={e.detail}")
         # Ensure cleanup happens if temp_dir was created before the exception
-        if temp_dir and os.path.exists(temp_dir) and not request_data.keep_original_file:
+        if temp_dir and os.path.exists(temp_dir) and not keep_original_file:
              # Attempt immediate cleanup on error if not keeping file and background task wasn't scheduled/run
              try:
                   logging.info(f"Attempting immediate cleanup of temp dir due to error: {temp_dir}")
@@ -1112,19 +1055,61 @@ async def add_media(
                   logging.warning(f"Failed to clean up temp directory during HTTP exception handling: {cleanup_error}")
         raise e # Re-raise the original HTTPException
 
-    except Exception as e:
-        # Catch-all for any other unexpected errors (e.g., issues before processing starts)
-        logging.error(f"Unhandled exception in add_media endpoint: {type(e).__name__} - {e}", exc_info=True)
-        # Ensure cleanup happens if temp_dir was created before the exception
-        if temp_dir and os.path.exists(temp_dir) and not request_data.keep_original_file:
-             try:
-                  logging.info(f"Attempting immediate cleanup of temp dir due to unhandled exception: {temp_dir}")
-                  shutil.rmtree(temp_dir, ignore_errors=True)
-             except Exception as cleanup_error:
-                  logging.warning(f"Failed to clean up temp directory during general exception handling: {cleanup_error}")
+    except OSError as e:
+        # Error creating the main temporary directory
+        logging.error(f"OSError setting up processing environment: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create temporary directory: {e}")
 
-        # Return a generic 500 error
-        raise HTTPException(status_code=500, detail=f"An unexpected internal server error occurred: {type(e).__name__}")
+    except Exception as e:
+        # Catch-all for unexpected errors outside the main loop/context manager
+        logging.error(f"Unhandled exception in add_media endpoint setup: {type(e).__name__} - {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected internal server error occurred during setup: {type(e).__name__}")
+
+    finally:
+         # Double-check cleanup if keep_original_file is True (context manager handles False case)
+         if keep_original_file and temp_dir_manager.temp_dir_path:
+             logging.info(f"Keeping temporary directory due to keep_original_file=True: {temp_dir_manager.temp_dir_path}")
+         elif not keep_original_file and temp_dir_manager.temp_dir_path and temp_dir_manager.temp_dir_path.exists():
+             # This cleanup should ideally be handled by __exit__, but as a fallback:
+             logging.warning(f"Temporary directory {temp_dir_manager.temp_dir_path} might not have been cleaned up automatically. Attempting manual cleanup.")
+             background_tasks.add_task(shutil.rmtree, temp_dir_manager.temp_dir_path, ignore_errors=True)
+
+
+    # --- 4. Determine Final Status Code and Return ---
+    final_status_code = status.HTTP_207_MULTI_STATUS # Default
+
+    if not results: # Should not happen if validation works, but safeguard
+        final_status_code = status.HTTP_400_BAD_REQUEST
+        logging.warning("Processing finished with no results generated.")
+        # Might want a more specific error message in the response body
+        return JSONResponse(
+            status_code=final_status_code,
+            content={"detail": "No inputs were provided or processed.", "results": []}
+        )
+
+    # Check if all failed vs. all succeeded vs. mixed
+    all_failed = all(r.get("status", "").lower() != "success" for r in results)
+    all_succeeded = all(r.get("status", "").lower() == "success" for r in results)
+
+    if all_succeeded:
+        final_status_code = status.HTTP_200_OK
+        logging.info("All items processed successfully.")
+    elif all_failed:
+        # Consider if the failure was client-side (400) or server-side (500)
+        # If any error looks like an internal server error, maybe lean towards 500?
+        # For now, stick with 207 as it indicates partial success/failure is possible
+        # final_status_code = status.HTTP_500_INTERNAL_SERVER_ERROR # Or 400?
+        logging.warning("All items failed processing.")
+    else:
+        # Keep 207 for mixed results
+        logging.info("Processing complete with mixed success/failure.")
+
+
+    # Modify the response object based on the determined status code
+    return JSONResponse(
+            status_code=final_status_code,
+            content={"results": results}
+           )
 
 
 @router.post("/ingest-web-content")
