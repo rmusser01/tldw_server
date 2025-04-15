@@ -1,5 +1,5 @@
-# Server_API/app/api/v1/endpoints/prompts.py
-# Description: This code provides a FastAPI endpoint for all Prompt-related functionalities.
+# Server_API/app/api/v1/endpoints/chat.py
+# Description: This code provides a FastAPI endpoint for all Chat-related functionalities.
 # FIXME
 #
 # Imports

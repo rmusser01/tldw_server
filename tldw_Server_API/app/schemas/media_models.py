@@ -2,13 +2,14 @@
 # Description: This code provides schema models for usage with the /media endpoint.
 #
 # Imports
+import re
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Literal
 #
 # 3rd-party imports
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator, computed_field
 #
 # Local Imports
 from tldw_Server_API.app.core.DB_Management.DB_Manager import fetch_item_details_single
@@ -75,6 +76,109 @@ class VersionResponse(BaseModel):
 
 class VersionRollbackRequest(BaseModel):
     version_number: int
+
+
+# Define allowed media types using Literal for validation
+MediaType = Literal['video', 'audio', 'document', 'pdf', 'ebook']
+
+# Define allowed chunking methods (adjust as needed based on your library)
+ChunkMethod = Literal['sentences', 'recursive', 'chapter', 'token']
+
+# Define allowed PDF parsing engines
+PdfEngine = Literal['pymupdf4llm', 'pypdf', 'pdfminer'] # Add others if supported
+
+class ChunkingOptions(BaseModel):
+    """Pydantic model for chunking specific options"""
+    perform_chunking: bool = Field(True, description="Enable chunk-based processing of the media content")
+    chunk_method: Optional[ChunkMethod] = Field(None, description="Method used to chunk content (e.g., 'sentences', 'recursive', 'chapter')")
+    use_adaptive_chunking: bool = Field(False, description="Whether to enable adaptive chunking")
+    use_multi_level_chunking: bool = Field(False, description="Whether to enable multi-level chunking")
+    chunk_language: Optional[str] = Field(None, description="Optional language override for chunking (ISO 639-1 code, e.g., 'en')")
+    chunk_size: int = Field(500, gt=0, description="Target size of each chunk (positive integer)")
+    chunk_overlap: int = Field(200, ge=0, description="Overlap size between chunks (non-negative integer)")
+    custom_chapter_pattern: Optional[str] = Field(None, description="Optional regex pattern for custom chapter splitting (ebook/docs)")
+
+    @validator('chunk_overlap')
+    def overlap_less_than_size(cls, v, values):
+        if 'chunk_size' in values and v >= values['chunk_size']:
+            raise ValueError('chunk_overlap must be less than chunk_size')
+        return v
+
+    @validator('custom_chapter_pattern')
+    def validate_regex(cls, v):
+        if v is not None:
+            try:
+                re.compile(v)
+            except re.error:
+                raise ValueError(f"Invalid regex pattern provided for custom_chapter_pattern: {v}")
+        return v
+
+class AudioVideoOptions(BaseModel):
+    """Pydantic model for Audio/Video specific options"""
+    whisper_model: str = Field("deepml/distil-large-v3", description="Model ID for audio/video transcription (e.g., from Hugging Face)")
+    transcription_language: str = Field("en", description="Language for audio/video transcription (ISO 639-1 code)")
+    diarize: bool = Field(False, description="Enable speaker diarization (audio/video)")
+    timestamp_option: bool = Field(True, description="Include timestamps in the transcription (audio/video)")
+    vad_use: bool = Field(False, description="Enable Voice Activity Detection filter during transcription (audio/video)")
+    perform_confabulation_check_of_analysis: bool = Field(False, description="Enable a confabulation check on analysis (if applicable)")
+
+class PdfOptions(BaseModel):
+    """Pydantic model for PDF specific options"""
+    pdf_parsing_engine: Optional[PdfEngine] = Field("pymupdf4llm", description="PDF parsing engine to use")
+
+class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
+    """
+    Pydantic model representing the form data for the /add endpoint.
+    Excludes 'files' (handled via File(...)) and 'token' (handled via Header(...)).
+    """
+    # --- Required Fields ---
+    media_type: MediaType = Field(..., description="Type of media")
+
+    # --- Input Sources ---
+    # Note: 'files' is handled separately by FastAPI's File() parameter
+    urls: Optional[List[str]] = Field(None, description="List of URLs of the media items to add")
+
+    # --- Common Optional Fields ---
+    title: Optional[str] = Field(None, description="Optional title (applied if only one item processed)")
+    author: Optional[str] = Field(None, description="Optional author (applied similarly to title)")
+    keywords_str: str = Field("", alias="keywords", description="Comma-separated keywords (applied to all processed items)")
+    custom_prompt: Optional[str] = Field(None, description="Optional custom prompt (applied to all)")
+    system_prompt: Optional[str] = Field(None, description="Optional system prompt (applied to all)")
+    overwrite_existing: bool = Field(False, description="Overwrite any existing media with the same identifier (URL/filename)")
+    keep_original_file: bool = Field(False, description="Whether to retain original uploaded files after processing")
+    perform_analysis: bool = Field(True, description="Perform analysis (e.g., summarization) if applicable (default=True)")
+
+    # --- Integration Options ---
+    api_name: Optional[str] = Field(None, description="Optional API name for integration (e.g., OpenAI)")
+    api_key: Optional[str] = Field(None, description="Optional API key for integration") # Consider secure handling/storage
+    use_cookies: bool = Field(False, description="Whether to attach cookies to URL download requests")
+    cookies: Optional[str] = Field(None, description="Cookie string if `use_cookies` is set to True")
+
+    # --- Deprecated/Less Common ---
+    perform_rolling_summarization: bool = Field(False, description="Perform rolling summarization (legacy?)")
+    summarize_recursively: bool = Field(False, description="Perform recursive summarization on chunks (if chunking enabled)")
+
+    # --- Computed Fields / Validators ---
+    @computed_field
+    @property
+    def keywords(self) -> List[str]:
+        """Parses the comma-separated keywords string into a list."""
+        if not self.keywords_str:
+            return []
+        return [k.strip() for k in self.keywords_str.split(",") if k.strip()]
+
+    # Use alias for 'keywords' field to accept 'keywords' in the form data
+    # but internally work with 'keywords_str' before parsing.
+    model_config = {
+        "populate_by_name": True # Allows using 'alias' for fields
+    }
+
+    # Validator to ensure 'cookies' is provided if 'use_cookies' is True
+    @validator('cookies', always=True)
+    def check_cookies_provided(cls, v, values):
+        if values.get('use_cookies') and not v:
+            raise ValueError("Cookie string must be provided when 'use_cookies' is set to True.")
+        return v
 
 ######################## Video Ingestion Model ###################################
 #

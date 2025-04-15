@@ -12,7 +12,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 #
 # Local Imports
+# Media Endpoint
 from tldw_Server_API.app.api.v1.endpoints.media import router as media_router
+#
+# RAG Endpoint
+from tldw_Server_API.app.api.v1.endpoints.rag import router as rag_router
+#
+# Chat Endpoint
+from tldw_Server_API.app.api.v1.endpoints.chat import router as chat_router
+#
+# Prompt Management Endpoint
+from tldw_Server_API.app.api.v1.endpoints.prompts import router as prompt_router
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 #
 ########################################################################################################################
@@ -91,11 +101,15 @@ app.include_router(media_router, prefix="/api/v1/media", tags=["media"])
 
 
 # Router for RAG endpoints
-app.include_router(media_router, prefix="/api/v1/rag", tags=["rag"])
+app.include_router(rag_router, prefix="/api/v1/rag", tags=["rag"])
+
 
 # Router for chat endpoints/chat temp-file handling
-app.include_router(media_router, prefix="/api/v1/chat", tags=["chat"])
+app.include_router(chat_router, prefix="/api/v1/chat", tags=["chat"])
 
+
+# Router for Prompt Management endpoints
+app.include_router(prompt_router, prefix="/api/v1/prompts", tags=["prompts]"])
 
 
 # Router for trash endpoints - deletion of media items / trash file handling (FIXME: Secure delete vs lag on delete?)

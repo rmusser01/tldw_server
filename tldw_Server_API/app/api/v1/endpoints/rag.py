@@ -1,5 +1,5 @@
-# Server_API/app/api/v1/endpoints/prompts.py
-# Description: This code provides a FastAPI endpoint for all Prompt-related functionalities.
+# Server_API/app/api/v1/endpoints/rag.py
+# Description: This code provides a FastAPI endpoint for RAG interaction
 # FIXME
 #
 # Imports
@@ -31,10 +31,8 @@ from loguru import logger
 from starlette.responses import JSONResponse
 #
 # Local Imports
-from tldw_Server_API.app.core.Chat.Chat_Functions import (
-    get_character_names,
-    get_conversation_name,
-    alert_token_budget_exceeded,
+from tldw_Server_API.app.core.RAG.RAG_Library_2 import (
+    search_functions
 )
 #
 # DB Mgmt
