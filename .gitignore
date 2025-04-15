@@ -505,3 +505,5 @@ app.log
 /.gradio
 PoC_Version/Config_Files/config.txt
 /PoC_Version/Databases
+tldw_Server_API/app/Databases/server_media_summary.db
+tldw_Server_API/app/Databases/chatDB.db
