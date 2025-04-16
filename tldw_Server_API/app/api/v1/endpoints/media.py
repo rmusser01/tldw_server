@@ -12,6 +12,7 @@
 #
 # Imports
 import asyncio
+import functools
 import hashlib
 import json
 import os
@@ -50,6 +51,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from loguru import logger
+from loguru import logger as logging
 from starlette.responses import JSONResponse
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext_Files import import_plain_text_file
@@ -93,7 +95,7 @@ from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_a
     scrape_by_url_level, recursive_scrape
 from tldw_Server_API.app.schemas.media_models import VideoIngestRequest, AudioIngestRequest, MediaSearchResponse, \
     MediaItemResponse, MediaUpdateRequest, VersionCreateRequest, VersionResponse, VersionRollbackRequest, \
-    IngestWebContentRequest, ScrapeMethod, MediaType, AddMediaForm
+    IngestWebContentRequest, ScrapeMethod, MediaType, AddMediaForm, ChunkMethod, PdfEngine
 from tldw_Server_API.app.services.xml_processing_service import process_xml_task
 from tldw_Server_API.app.services.web_scraping_service import process_web_scraping_task
 #
@@ -723,7 +725,10 @@ async def _process_batch_media(
         if media_type == 'video':
             video_args = {
                 "inputs": all_inputs,
-                "diarize": form_data.diarize, "vad_use": form_data.vad_use,
+                "start_time": form_data.start_time,
+                "end_time": form_data.end_time,
+                "diarize": form_data.diarize,
+                "vad_use": form_data.vad_use,
                 "whisper_model": form_data.whisper_model,
                 "use_custom_prompt": bool(form_data.custom_prompt),
                 "custom_prompt": form_data.custom_prompt,
@@ -739,14 +744,22 @@ async def _process_batch_media(
                 "api_name": form_data.api_name if form_data.perform_analysis else None,
                 "api_key": form_data.api_key,
                 "keywords": form_data.keywords_str, # Pass raw string if needed by func
-                "use_cookies": form_data.use_cookies, "cookies": form_data.cookies,
+                "use_cookies": form_data.use_cookies,
+                "cookies": form_data.cookies,
                 "timestamp_option": form_data.timestamp_option,
                 "confab_checkbox": form_data.perform_confabulation_check_of_analysis,
-                "overwrite_existing": form_data.overwrite_existing, "store_in_db": True,
+                "overwrite_existing": form_data.overwrite_existing,
+                "store_in_db": True,
             }
             logging.debug(f"Calling process_videos with args: {list(video_args.keys())}")
-            # Run sync function in executor
-            batch_result = await loop.run_in_executor(None, process_videos, **video_args)
+            try:
+                # Create a partial function with arguments bound
+                func_to_run = functools.partial(process_videos, **video_args)
+                # Run the partial function in the executor (it now takes no arguments)
+                batch_result = await loop.run_in_executor(None, func_to_run)
+            except Exception as call_e:
+                logging.error(f"!!! EXCEPTION DURING run_in_executor call for process_videos !!!", exc_info=True)
+                raise call_e
 
         elif media_type == 'audio':
             audio_args = {
@@ -999,24 +1012,106 @@ def _determine_final_status(results: List[Dict[str, Any]]) -> int:
 
 
 # --- Main Endpoint ---
-
 @router.post("/add", status_code=status.HTTP_200_OK) # Default success code
 async def add_media(
     background_tasks: BackgroundTasks,
-    # Inject validated form data using Depends
-    form_data: AddMediaForm = Depends(),
-    # Keep Token and Files separate
-    token: str = Header(..., description="Authentication token"), # TODO: Implement actual authentication check
-    files: Optional[List[UploadFile]] = File(None, description="List of files to upload and add"),
-    # FIXME: Add DB dependency if needed per user/request
-    # db = Depends(get_db_manager),
+    # --- Required Fields ---
+    media_type: MediaType = Form(..., description="Type of media (e.g., 'audio', 'video', 'pdf')"),
+    # --- Input Sources (Validation needed in code) ---
+    urls: Optional[List[str]] = Form(None, description="List of URLs of the media items to add"),
+    # --- Common Optional Fields ---
+    title: Optional[str] = Form(None, description="Optional title (applied if only one item processed)"),
+    author: Optional[str] = Form(None, description="Optional author (applied similarly to title)"),
+    keywords: str = Form("", description="Comma-separated keywords (applied to all processed items)"), # Receive as string
+    custom_prompt: Optional[str] = Form(None, description="Optional custom prompt (applied to all)"),
+    system_prompt: Optional[str] = Form(None, description="Optional system prompt (applied to all)"),
+    overwrite_existing: bool = Form(False, description="Overwrite existing media"),
+    keep_original_file: bool = Form(False, description="Retain original uploaded files"),
+    perform_analysis: bool = Form(True, description="Perform analysis (default=True)"),
+    # --- Integration Options ---
+    api_name: Optional[str] = Form(None, description="Optional API name"),
+    api_key: Optional[str] = Form(None, description="Optional API key"), # Consider secure handling
+    use_cookies: bool = Form(False, description="Use cookies for URL download requests"),
+    cookies: Optional[str] = Form(None, description="Cookie string if `use_cookies` is True"),
+    # --- Audio/Video Specific ---
+    whisper_model: str = Form("deepml/distil-large-v3", description="Transcription model"),
+    transcription_language: str = Form("en", description="Transcription language"),
+    diarize: bool = Form(False, description="Enable speaker diarization"),
+    timestamp_option: bool = Form(True, description="Include timestamps in transcription"),
+    vad_use: bool = Form(False, description="Enable VAD filter"),
+    perform_confabulation_check_of_analysis: bool = Form(False, description="Enable confabulation check"),
+    start_time: Optional[str] = Form(None, description="Optional start time (HH:MM:SS or seconds)"),
+    end_time: Optional[str] = Form(None, description="Optional end time (HH:MM:SS or seconds)"),
+    # --- PDF Specific ---
+    pdf_parsing_engine: Optional[PdfEngine] = Form("pymupdf4llm", description="PDF parsing engine"),
+    # --- Chunking Specific ---
+    perform_chunking: bool = Form(True, description="Enable chunking"),
+    chunk_method: Optional[ChunkMethod] = Form(None, description="Chunking method"),
+    use_adaptive_chunking: bool = Form(False, description="Enable adaptive chunking"),
+    use_multi_level_chunking: bool = Form(False, description="Enable multi-level chunking"),
+    chunk_language: Optional[str] = Form(None, description="Chunking language override"),
+    chunk_size: int = Form(500, description="Target chunk size"),
+    chunk_overlap: int = Form(200, description="Chunk overlap size"),
+    custom_chapter_pattern: Optional[str] = Form(None, description="Regex pattern for custom chapter splitting"),
+    # --- Deprecated/Less Common ---
+    perform_rolling_summarization: bool = Form(False, description="Perform rolling summarization"),
+    summarize_recursively: bool = Form(False, description="Perform recursive summarization"),
+
+    # --- Keep Token and Files separate ---
+    token: str = Header(..., description="Authentication token"), # TODO: Implement auth check
+    files: Optional[List[UploadFile]] = File(None, description="List of files to upload"),
+    # db = Depends(...) # Add DB dependency if needed
 ):
     """
     Add multiple media items (from URLs and/or uploaded files) to the database with processing.
     """
-    # --- 1. Initial Validation ---
-    # Use the helper function
-    _validate_inputs(form_data.media_type, form_data.urls, files)
+    # --- 0. Manually Create Pydantic Model Instance for Validation & Access ---
+    # Create the 'form_data' object we expected from Depends() before
+    # Pass the received Form(...) parameters to the model constructor
+    try:
+        form_data = AddMediaForm(
+            media_type=media_type,
+            urls=urls,
+            title=title,
+            author=author,
+            keywords=keywords, # Pass the raw string alias field
+            custom_prompt=custom_prompt,
+            system_prompt=system_prompt,
+            overwrite_existing=overwrite_existing,
+            keep_original_file=keep_original_file,
+            perform_analysis=perform_analysis,
+            start_time=start_time,
+            end_time=end_time,
+            api_name=api_name,
+            api_key=api_key,
+            use_cookies=use_cookies,
+            cookies=cookies,
+            whisper_model=whisper_model,
+            transcription_language=transcription_language,
+            diarize=diarize,
+            timestamp_option=timestamp_option,
+            vad_use=vad_use,
+            perform_confabulation_check_of_analysis=perform_confabulation_check_of_analysis,
+            pdf_parsing_engine=pdf_parsing_engine,
+            perform_chunking=perform_chunking,
+            chunk_method=chunk_method,
+            use_adaptive_chunking=use_adaptive_chunking,
+            use_multi_level_chunking=use_multi_level_chunking,
+            chunk_language=chunk_language,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            custom_chapter_pattern=custom_chapter_pattern,
+            perform_rolling_summarization=perform_rolling_summarization,
+            summarize_recursively=summarize_recursively,
+        )
+    except Exception as e: # Catch Pydantic validation errors explicitly if needed
+        # Although FastAPI usually handles this before reaching the endpoint code
+        # if types are wrong. This catches validation logic within the model.
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Form data validation error: {e}")
+
+    # --- 1. Initial Validation (Using the Pydantic object 'form_data') ---
+    # Use the helper function with the validated form_data object
+    _validate_inputs(form_data.media_type, form_data.urls, files) # Pass files list separately
     logging.info(f"Received request to add {form_data.media_type} media.")
     # TODO: Add authentication logic using the 'token'
 
@@ -1046,13 +1141,14 @@ async def add_media(
                  status_code = status.HTTP_207_MULTI_STATUS if file_save_errors else status.HTTP_400_BAD_REQUEST
                  return JSONResponse(status_code=status_code, content={"results": results})
 
+            # Pass the instantiated 'form_data' object to helpers
             chunking_options_dict = _prepare_chunking_options_dict(form_data)
             common_processing_options = _prepare_common_options(form_data, chunking_options_dict)
 
             # Map input sources back to original refs (URL or original filename)
             # This helps in reporting results against the user's input identifier
             source_to_ref_map = {src: src for src in url_list} # URLs map to themselves
-            source_to_ref_map.update({str(pf["path"]): pf["input_ref"] for pf in saved_files_info})
+            source_to_ref_map.update({str(pf["path"]): pf["original_filename"] for pf in saved_files_info})
 
             # --- 5. Process Media based on Type ---
             logging.info(f"Processing {len(all_input_sources)} items of type '{form_data.media_type}'")
@@ -1112,10 +1208,11 @@ async def add_media(
 
     # --- 6. Determine Final Status Code and Return Response ---
     final_status_code = _determine_final_status(results)
-
-    log_level = logging.INFO if final_status_code == status.HTTP_200_OK else logging.WARNING
-    logging.log(log_level, f"Request finished with status {final_status_code}. Results count: {len(results)}")
-
+    log_message = f"Request finished with status {final_status_code}. Results count: {len(results)}"
+    if final_status_code == status.HTTP_200_OK:
+        logger.info(log_message)
+    else:
+        logger.warning(log_message)  # Use loguru's warning level directly
     return JSONResponse(status_code=final_status_code, content={"results": results})
 
 

@@ -148,6 +148,11 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
     keep_original_file: bool = Field(False, description="Whether to retain original uploaded files after processing")
     perform_analysis: bool = Field(True, description="Perform analysis (e.g., summarization) if applicable (default=True)")
 
+    # --- Video/Audio Specific Timing --- ADD THESE ---
+    start_time: Optional[str] = Field(None, description="Optional start time for processing (e.g., HH:MM:SS or seconds)")
+    end_time: Optional[str] = Field(None, description="Optional end time for processing (e.g., HH:MM:SS or seconds)")
+    # -----------------------------------------------
+
     # --- Integration Options ---
     api_name: Optional[str] = Field(None, description="Optional API name for integration (e.g., OpenAI)")
     api_key: Optional[str] = Field(None, description="Optional API key for integration") # Consider secure handling/storage
@@ -179,6 +184,16 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
         if values.get('use_cookies') and not v:
             raise ValueError("Cookie string must be provided when 'use_cookies' is set to True.")
         return v
+
+    # Add validator for start/end time format
+    @validator('start_time', 'end_time')
+    def check_time_format(cls, v):
+        if v is None:
+            return v
+        # Example basic check: Allow seconds or HH:MM:SS format
+        if re.fullmatch(r'\d+', v) or re.fullmatch(r'\d{1,2}:\d{2}:\d{2}', v):
+            return v
+        raise ValueError("Time format must be seconds or HH:MM:SS")
 
 ######################## Video Ingestion Model ###################################
 #
