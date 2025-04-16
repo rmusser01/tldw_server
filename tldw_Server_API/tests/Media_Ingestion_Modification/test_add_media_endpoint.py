@@ -111,7 +111,7 @@ def mock_dependencies(mocker, mock_temp_dir_manager):
             "results": [{
                 "status": "Success",
                 "db_id": "vid_batch_mock",
-                "input": "vid_mock_input_ref"
+                "input": "mock_video_input_ref"
             }],
             "processed_count": 1,
             "errors_count": 0
@@ -575,8 +575,10 @@ def test_add_media_mixed_url_file_success(client, create_upload_file, mock_depen
     """Test adding one video URL and one video file successfully."""
     video_url = "http://example.com/good_video.mp4"
     test_file = create_upload_file("another.mp4", content_type="video/mp4")
-    form_data = create_form_data(media_type="video", urls=[video_url]) # Add URL here
+    form_data = create_form_data(media_type="video", urls=[video_url])
     files_tuple = [("files", (test_file.filename, test_file.file, test_file.content_type))]
+
+    expected_file_input_path = str(mock_dependencies['fake_temp_path'] / 'sanitized_filename.mockext')
 
     # Mock the batch processor to return success for both
     # Assume process_videos returns a list where order might match input order,
@@ -584,7 +586,7 @@ def test_add_media_mixed_url_file_success(client, create_upload_file, mock_depen
     mock_dependencies["process_videos"].return_value = {
         "results": [
             {"status": "Success", "db_id": "vid_mock_url", "input": video_url},
-            {"status": "Success", "db_id": "vid_mock_file", "input": ANY} # Input for file is temp path
+            {"status": "Success", "db_id": "vid_mock_file", "input": expected_file_input_path} # Input for file is temp path
         ],
         "processed_count": 2, "errors_count": 0
     }
@@ -612,12 +614,14 @@ def test_add_media_mixed_url_file_success(client, create_upload_file, mock_depen
     assert file_result is not None
     assert file_result["status"] == "Success"
     # file_result["input"] will be the fake temp path like '/fake/temp/dir/sanitized_filename.mp4'
+    assert file_result["input"] == expected_file_input_path
 
     # Verify the batch processor was called once with combined inputs
     mock_dependencies["process_videos"].assert_called_once()
     call_args, call_kwargs = mock_dependencies["process_videos"].call_args
-    assert call_kwargs['inputs'] == [video_url, str(mock_dependencies['fake_temp_path'] / 'sanitized_filename.mp4')]
-    assert call_kwargs['whisper_model'] == 'tiny' # Check a specific option
+    # The path passed to the function should also match
+    assert call_kwargs['inputs'] == [video_url, expected_file_input_path]
+    assert call_kwargs['whisper_model'] == 'tiny'  # Check a specific option
 
 def test_add_media_multiple_failures_and_success(client, create_upload_file, mock_dependencies):
     """Test a mix of successful and failed items across URLs and files."""
