@@ -786,8 +786,10 @@ async def _process_batch_media(
                 # TODO: Add 'vad_use': form_data.vad_use to process_audio_files if supported
             }
             logging.debug(f"Calling process_audio_files with args: {list(audio_args.keys())}")
-            # Run sync function in executor
-            batch_result = await loop.run_in_executor(None, process_audio_files, **audio_args)
+            # Wrap the function and its args using partial
+            target_func_with_args = functools.partial(process_audio_files, **audio_args)
+             # Run the wrapped callable in the executor
+            batch_result = await loop.run_in_executor(None, target_func_with_args)
 
         else: # Should not happen if called correctly
              return [{"input": str(item), "status": "Failed", "error": "Invalid media type for batch processing"} for item in all_inputs]
@@ -879,8 +881,12 @@ async def _process_document_like_item(
                 "file_bytes": file_bytes,
                 "filename": processing_filename,
                 "parser": form_data.pdf_parsing_engine,
-                "keywords": form_data.keywords, # Pass parsed list
+                "custom_prompt": form_data.custom_prompt,
+                "api_name": form_data.api_name if form_data.perform_analysis else None,
+                "api_key": form_data.api_key,
                 "auto_summarize": form_data.perform_analysis,
+                "keywords": form_data.keywords, # Pass parsed list
+                "system_prompt": form_data.system_prompt,
                 # Only pass chunking options if analysis is enabled
                 "perform_chunking": common_options.get("chunk_options") is not None and form_data.perform_analysis,
                 "chunk_method": common_options.get("chunk_options", {}).get('method') if form_data.perform_analysis else None,
@@ -953,7 +959,8 @@ async def _process_document_like_item(
                             summary=item_result.get("summary", ""),
                             keywords=form_data.keywords, # Use parsed list
                             custom_prompt_input=form_data.custom_prompt,
-                            whisper_model="Imported", media_type=media_type,
+                            whisper_model="Imported",
+                            media_type=media_type,
                             overwrite=form_data.overwrite_existing
                         )
                         if isinstance(db_add_result, dict): item_result["db_id"] = db_add_result.get("id")

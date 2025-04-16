@@ -379,13 +379,22 @@ def final_ingest_handler(preview_data_json, updated_metadata_json):
 #
 # End of Plaintext/Markdown/RTF/Docx Import Functionality
 
-def import_plain_text_file(file_path, author, keywords, system_prompt, user_prompt, auto_summarize, api_name, api_key):
+def import_plain_text_file(
+    file_path,
+    title,
+    author,
+    keywords,
+    system_prompt,
+    user_prompt,
+    auto_summarize,
+    api_name,
+    api_key):
     """Import a single plain text file."""
     try:
         log_counter("file_processing_attempt", labels={"file_path": file_path})
 
         # Extract title from filename
-        title = os.path.splitext(os.path.basename(file_path))[0]
+        #title = os.path.splitext(os.path.basename(file_path))[0]
 
         # Determine the file type and convert if necessary
         file_extension = os.path.splitext(file_path)[1].lower()
