@@ -1793,7 +1793,7 @@ async def process_videos_endpoint(
             # --- Call process_videos ---
             chunk_options = _prepare_chunking_options_dict(form_data)
             video_args = {
-                "inputs": all_inputs_to_process, # Pass only valid inputs
+                "inputs": all_inputs_to_process,  # Pass only valid inputs
                 "start_time": form_data.start_time,
                 "end_time": form_data.end_time,
                 "diarize": form_data.diarize,
@@ -1801,10 +1801,20 @@ async def process_videos_endpoint(
                 "transcription_model": form_data.transcription_model,
                 "custom_prompt": form_data.custom_prompt,
                 "system_prompt": form_data.system_prompt,
-                "chunk_options": chunk_options,
+
+                # --- Pass Individual Chunking Args ---
+                "perform_chunking": form_data.perform_chunking,
+                "chunk_method": form_data.chunk_method,
+                "max_chunk_size": form_data.chunk_size,
+                "chunk_overlap": form_data.chunk_overlap,
+                "use_adaptive_chunking": form_data.use_adaptive_chunking,
+                "use_multi_level_chunking": form_data.use_multi_level_chunking,
+                "chunk_language": form_data.chunk_language,
+                # --- End Chunking Args ---
+
                 "summarize_recursively": form_data.summarize_recursively,
                 "api_name": form_data.api_name if form_data.perform_analysis else None,
-                "api_key": form_data.api_key,
+                "api_key": form_data.api_key,  # Consider loading from settings
                 "use_cookies": form_data.use_cookies,
                 "cookies": form_data.cookies,
                 "timestamp_option": form_data.timestamp_option,
