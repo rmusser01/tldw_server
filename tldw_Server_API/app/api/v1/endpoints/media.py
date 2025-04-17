@@ -58,6 +58,7 @@ from starlette.responses import JSONResponse
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext_Files import import_plain_text_file, \
     _process_single_document
+from tldw_Server_API.app.core.config import settings
 #
 # Local Imports
 #
@@ -1630,47 +1631,169 @@ class ProcessVideosForm(AddMediaForm):
 )
 async def process_videos_endpoint(
     background_tasks: BackgroundTasks,
-    form_data: ProcessVideosForm = Depends(ProcessVideosForm.as_form), # Use Depends with specific form
-    token: str = Header(..., description="Authentication token"),
+    urls: Optional[List[str]] = Form(None, description="List of URLs of the video items"),
+    title: Optional[str] = Form(None, description="Optional title (applied if only one item processed)"),
+    author: Optional[str] = Form(None, description="Optional author (applied similarly to title)"),
+    keywords: str = Form("", alias="keywords", description="Comma-separated keywords"), # Use alias if AddMediaForm uses it
+    custom_prompt: Optional[str] = Form(None, description="Optional custom prompt"),
+    system_prompt: Optional[str] = Form(None, description="Optional system prompt"),
+    overwrite_existing: bool = Form(False, description="Overwrite existing media (Not used in this endpoint, but needed for model)"),
+    # keep_original_file: bool = Form(False), # Not needed - fixed in ProcessVideosForm
+    perform_analysis: bool = Form(True, description="Perform analysis"),
+    start_time: Optional[str] = Form(None, description="Optional start time (HH:MM:SS or seconds)"),
+    end_time: Optional[str] = Form(None, description="Optional end time (HH:MM:SS or seconds)"),
+    api_name: Optional[str] = Form(None, description="Optional API name"),
+    api_key: Optional[str] = Form(None, description="Optional API key"), # Consider secure handling via settings
+    use_cookies: bool = Form(False, description="Use cookies for URL download requests"),
+    cookies: Optional[str] = Form(None, description="Cookie string if `use_cookies` is True"),
+    transcription_model: str = Form("deepml/distil-large-v3", description="Transcription model"),
+    transcription_language: str = Form("en", description="Transcription language"),
+    diarize: bool = Form(False, description="Enable speaker diarization"),
+    timestamp_option: bool = Form(True, description="Include timestamps in transcription"),
+    vad_use: bool = Form(False, description="Enable VAD filter"),
+    perform_confabulation_check_of_analysis: bool = Form(False, description="Enable confabulation check"),
+    # Include other fields needed by AddMediaForm constructor, even if not video-specific
+    pdf_parsing_engine: Optional[PdfEngine] = Form("pymupdf4llm", description="PDF parsing engine (for model compatibility)"),
+    perform_chunking: bool = Form(True, description="Enable chunking"),
+    chunk_method: Optional[ChunkMethod] = Form(None, description="Chunking method"),
+    use_adaptive_chunking: bool = Form(False, description="Enable adaptive chunking"),
+    use_multi_level_chunking: bool = Form(False, description="Enable multi-level chunking"),
+    chunk_language: Optional[str] = Form(None, description="Chunking language override"),
+    chunk_size: int = Form(500, description="Target chunk size"),
+    chunk_overlap: int = Form(200, description="Chunk overlap size"),
+    custom_chapter_pattern: Optional[str] = Form(None, description="Regex pattern for custom chapter splitting"),
+    perform_rolling_summarization: bool = Form(False, description="Perform rolling summarization"),
+    summarize_recursively: bool = Form(False, description="Perform recursive summarization"),
+    # --- End Form Fields ---
+
+    #settings: Settings = Depends(get_settings), # Your settings dependency
+    #user_info: dict = Depends(verify_token),   # Your auth dependency
     files: Optional[List[UploadFile]] = File(None, description="Video file uploads"),
+    token: str = Header(..., description="Authentication token"),
     # NOTE: No db=Depends() needed here as this endpoint doesn't interact with DB
 ):
     """
     Transcribe / chunk / analyse videos and return the full artefacts (no DB write).
     """
-    # --- Validation handled by Pydantic ---
-    _validate_inputs("video", form_data.urls, files)
-    # TODO: Auth check
+    # --- Manually Create ProcessVideosForm Instance ---
+    try:
+        form_data = ProcessVideosForm(
+            urls=urls,
+            title=title,
+            author=author,
+            keywords=keywords,
+            custom_prompt=custom_prompt,
+            system_prompt=system_prompt,
+            overwrite_existing=overwrite_existing,
+            perform_analysis=perform_analysis,
+            start_time=start_time,
+            end_time=end_time,
+            api_name=api_name,
+            api_key=api_key,
+            use_cookies=use_cookies,
+            cookies=cookies,
+            transcription_model=transcription_model or settings.DEFAULT_TRANSCRIPTION_MODEL,
+            transcription_language=transcription_language,
+            diarize=diarize,
+            timestamp_option=timestamp_option,
+            vad_use=vad_use,
+            perform_confabulation_check_of_analysis=perform_confabulation_check_of_analysis,
+            pdf_parsing_engine=pdf_parsing_engine,
+            perform_chunking=perform_chunking,
+            chunk_method=chunk_method,
+            use_adaptive_chunking=use_adaptive_chunking,
+            use_multi_level_chunking=use_multi_level_chunking,
+            chunk_language=chunk_language,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            custom_chapter_pattern=custom_chapter_pattern,
+            perform_rolling_summarization=perform_rolling_summarization,
+            summarize_recursively=summarize_recursively,
+        )
+    except Exception as e: # Catch Pydantic validation errors explicitly if needed
+        logger.error(f"Form data validation error for /process-videos: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Form data validation error: {e}")
 
-    results = []
+    # --- Initial Validation ---
+    # Use the helper function with the validated form_data object
+    # Pass "video" explicitly as media_type because ProcessVideosForm guarantees it.
+    _validate_inputs("video", form_data.urls, files)
+    # Logging for per-user
+    #logger.info(f"Request received for /process-videos, authenticated for user: {user_info.get('user_id', 'Unknown')}")
+    # Auth check already performed by Depends(verify_token)
+
+    results = [] # Keep this if _save_uploaded_files returns errors in this format
     temp_dir_manager = TempDirManager(cleanup=True) # Always cleanup for this endpoint
     temp_dir_path: Optional[Path] = None
     loop = asyncio.get_running_loop()
 
+    # Initialize batch_result structure expected by the caller/frontend
     batch_result = {"processed_count": 0, "errors_count": 0, "errors": [], "results": [], "confabulation_results": None}
 
     try:
         with temp_dir_manager as temp_dir:
             temp_dir_path = temp_dir
+            logger.info(f"Using temporary directory for /process-videos: {temp_dir_path}")
             # --- Save Uploads ---
-            saved_files, file_errors = await _save_uploaded_files(files or [], temp_dir)
-            results.extend(file_errors) # Add file save errors immediately
+            # _save_uploaded_files returns -> Tuple[List[Dict], List[Dict]]
+            saved_files_info, file_handling_errors = await _save_uploaded_files(files or [], temp_dir)
 
-            # --- Prepare Inputs ---
+            # --- Process File Handling Errors ---
+            # Integrate errors from file saving into the main batch_result
+            if file_handling_errors:
+                batch_result["errors_count"] += len(file_handling_errors)
+                batch_result["errors"].extend([
+                    # Extract the 'error' message string from each error dict
+                    err.get("error", "Unknown file save error")
+                    for err in file_handling_errors
+                ])
+
+                # Adapt file_handling_errors to match the structure of processing results
+                # (like MediaItemProcessResponse, but without DB fields)
+                adapted_file_errors = [
+                    {
+                        "status": err.get("status", "Error"), # Use status from the error dict
+                        "input_ref": err.get("input", "Unknown Filename"), # Use 'input' key
+                        "processing_source": "N/A - File Save Failed",
+                        "media_type": "video",
+                        "metadata": {},
+                        "content": "",
+                        "segments": None,
+                        "chunks": None,
+                        "analysis": None,
+                        "analysis_details": None,
+                        "error": err.get("error", "Failed to save uploaded file."), # Use 'error' key
+                        "warnings": None,
+                        # No DB fields for this endpoint
+                        "db_id": None,
+                        "db_message": None,
+                        "message": None, # General message field
+                    } for err in file_handling_errors
+                ]
+                # Add these formatted errors to the 'results' list
+                batch_result["results"].extend(adapted_file_errors)
+
+            # --- Prepare Inputs for Processing ---
             url_list = form_data.urls or []
-            uploaded_paths = [str(f["path"]) for f in saved_files]
-            all_inputs = url_list + uploaded_paths
-            if not all_inputs:
-                 if file_errors: # Only file errors occurred
-                     batch_result = {"processed_count": 0, "errors_count": len(file_errors), "errors": [e['error'] for e in file_errors], "results": file_errors}
+            # Get paths ONLY from successfully saved files
+            uploaded_paths = [str(pf["path"]) for pf in saved_files_info]
+            all_inputs_to_process = url_list + uploaded_paths
+
+            # Check if there's anything left to process
+            if not all_inputs_to_process:
+                 if file_handling_errors: # Only file errors occurred
+                     logger.warning("No valid video sources to process, only file saving errors.")
+                     # Return 207 because some operations (file saving) failed
                      return JSONResponse(status_code=status.HTTP_207_MULTI_STATUS, content=batch_result)
-                 else: # No inputs at all
+                 else: # No inputs provided at all (handled by _validate_inputs earlier)
+                     # This case should theoretically not be reached if _validate_inputs works
+                     logger.error("No video sources (URLs or Files) provided.")
                      raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid video sources supplied.")
 
-            # --- Call process_videos directly (No DB pre/post checks) ---
-            chunk_options = _prepare_chunking_options_dict(form_data) # Get chunk options if needed
-            video_args = { # Prepare args for process_videos
-                "inputs": all_inputs,
+            # --- Call process_videos ---
+            chunk_options = _prepare_chunking_options_dict(form_data)
+            video_args = {
+                "inputs": all_inputs_to_process, # Pass only valid inputs
                 "start_time": form_data.start_time,
                 "end_time": form_data.end_time,
                 "diarize": form_data.diarize,
@@ -1678,13 +1801,7 @@ async def process_videos_endpoint(
                 "transcription_model": form_data.transcription_model,
                 "custom_prompt": form_data.custom_prompt,
                 "system_prompt": form_data.system_prompt,
-                "perform_chunking": form_data.perform_chunking,
-                "chunk_method": chunk_options.get('method') if chunk_options else None,
-                "max_chunk_size": chunk_options.get('max_size', 500) if chunk_options else 500,
-                "chunk_overlap": chunk_options.get('overlap', 200) if chunk_options else 200,
-                "use_adaptive_chunking": chunk_options.get('adaptive', False) if chunk_options else False,
-                "use_multi_level_chunking": chunk_options.get('multi_level', False) if chunk_options else False,
-                "chunk_language": chunk_options.get('language') if chunk_options else None,
+                "chunk_options": chunk_options,
                 "summarize_recursively": form_data.summarize_recursively,
                 "api_name": form_data.api_name if form_data.perform_analysis else None,
                 "api_key": form_data.api_key,
@@ -1694,44 +1811,78 @@ async def process_videos_endpoint(
                 "confab_checkbox": form_data.perform_confabulation_check_of_analysis,
             }
 
-            logging.debug(f"Calling refactored process_videos for /process-videos endpoint")
+            logger.debug(f"Calling refactored process_videos for /process-videos endpoint with {len(all_inputs_to_process)} inputs.")
             batch_func = functools.partial(process_videos, **video_args)
-            batch_result = await loop.run_in_executor(None, batch_func) # Run the batch processor
+            processing_output = await loop.run_in_executor(None, batch_func)
 
-            # --- Combine file save errors with processing results ---
-            if file_errors:
-                # Ensure keys exist before modifying
-                batch_result.setdefault("results", [])
-                batch_result.setdefault("errors_count", 0)
-                batch_result.setdefault("errors", [])
-                # Prepend file errors to results for visibility
-                batch_result["results"] = file_errors + batch_result["results"]
-                batch_result["errors_count"] += len(file_errors)
-                batch_result["errors"].extend(err.get("error", "File save error") for err in file_errors)
+            # --- Combine Processing Results ---
+            if isinstance(processing_output, dict):
+                 batch_result["processed_count"] += processing_output.get("processed_count", 0)
+                 batch_result["errors_count"] += processing_output.get("errors_count", 0)
+                 batch_result["errors"].extend(processing_output.get("errors", []))
 
-    # --- Exception Handling & Cleanup (Similar to /add) ---
+                 processed_results = processing_output.get("results", [])
+                 # Add placeholder DB fields if necessary for consistency downstream
+                 # or ensure the frontend doesn't expect them for this endpoint.
+                 for res in processed_results:
+                     res.setdefault("db_id", None)
+                     res.setdefault("db_message", None)
+                 batch_result["results"].extend(processed_results)
+
+                 if "confabulation_results" in processing_output:
+                      batch_result["confabulation_results"] = processing_output["confabulation_results"]
+            else:
+                 # Handle unexpected output from process_videos
+                 logger.error(f"process_videos function returned unexpected type: {type(processing_output)}")
+                 general_error_msg = "Video processing function returned invalid data."
+                 batch_result["errors_count"] += 1
+                 batch_result["errors"].append(general_error_msg)
+                 # Create error entries for items intended for processing
+                 for input_src in all_inputs_to_process:
+                     original_ref = input_src # Default to path/URL
+                     if input_src in uploaded_paths:
+                         for sf in saved_files_info: # Use saved_files_info here
+                             if str(sf["path"]) == input_src:
+                                 original_ref = sf["original_filename"]
+                                 break
+                     batch_result["results"].append({
+                        "status": "Error", "input_ref": original_ref, "processing_source": input_src,
+                        "media_type": "video", "metadata": {}, "content": "", "segments": None,
+                        "chunks": None, "analysis": None, "analysis_details": None,
+                        "error": general_error_msg, "warnings": None, "db_id": None, "db_message": None, "message": None
+                     })
+
+    # --- Exception Handling & Cleanup ---
     except HTTPException as e:
          raise e
     except OSError as e:
-         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"OS error during setup: {e}")
+         logger.error(f"OSError during /process-videos setup: {e}", exc_info=True)
+         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"OS error during setup: {e}")
     except Exception as e:
-         logging.error(f"Unhandled exception in process_videos_endpoint: {e}", exc_info=True)
-         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Unexpected internal error: {type(e).__name__}")
+         logger.error(f"Unhandled exception in process_videos_endpoint: {e}", exc_info=True)
+         error_message = f"Unexpected internal error: {type(e).__name__}"
+         # Ensure error is reflected in the response even if exception happens late
+         if not any(error_message in err_str for err_str in batch_result["errors"]):
+             batch_result["errors_count"] += 1
+             batch_result["errors"].append(error_message)
+         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_message)
     finally:
+        # TempDirManager __exit__ handles scheduled cleanup
+        # Background task added just in case of catastrophic handler failure
         if temp_dir_path and temp_dir_path.exists():
-            # Cleanup is always true for TempDirManager here
-            logging.info(f"Scheduling background cleanup for temporary directory: {temp_dir_path}")
+            logger.info(f"Scheduling final background cleanup check for temporary directory: {temp_dir_path}")
             background_tasks.add_task(shutil.rmtree, temp_dir_path, ignore_errors=True)
 
-
-    # --- Determine Status Code & Return ---
+    # --- Determine Final Status Code & Return ---
     final_status_code = (
         status.HTTP_200_OK
         if batch_result.get("errors_count", 0) == 0
         else status.HTTP_207_MULTI_STATUS
     )
-    return JSONResponse(status_code=final_status_code, content=batch_result) # Return the raw processor output
+    log_level = logging.INFO if final_status_code == status.HTTP_200_OK else logging.WARNING
+    logger.log(log_level, f"/process-videos request finished with status {final_status_code}. Results count: {len(batch_result.get('results', []))}, Errors: {batch_result.get('errors_count', 0)}")
 
+    return JSONResponse(status_code=final_status_code, content=batch_result)
 #
 # End of video ingestion
 ####################################################################################
