@@ -23,7 +23,7 @@ import uuid
 from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Callable, Literal
 from urllib.parse import urlparse
 
 #
@@ -43,9 +43,10 @@ from fastapi import (
     UploadFile
 )
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 import redis
 import requests
+from pydantic.v1 import Field
 # API Rate Limiter/Caching via Redis
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
@@ -54,7 +55,8 @@ from loguru import logger
 from loguru import logger as logging
 from starlette.responses import JSONResponse
 
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext_Files import import_plain_text_file
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext_Files import import_plain_text_file, \
+    _process_single_document
 #
 # Local Imports
 #
@@ -78,7 +80,7 @@ from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_db
 # Media Processing
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Processing import process_audio
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Ingestion_Lib import import_epub
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Ingestion_Lib import import_epub, _process_single_ebook
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Media_Update_lib import process_media_update
 from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Ingestion_Lib import process_pdf_task
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
@@ -86,7 +88,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestio
 # Document Processing
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
 from tldw_Server_API.app.core.Utils.Utils import format_transcript, truncate_content, logging, \
-    extract_media_id_from_result_string, sanitize_filename
+    extract_media_id_from_result_string, sanitize_filename, safe_download, smart_download
 from tldw_Server_API.app.services.document_processing_service import process_documents
 from tldw_Server_API.app.services.ebook_processing_service import process_ebook_task
 #
@@ -106,6 +108,7 @@ from tldw_Server_API.app.services.web_scraping_service import process_web_scrapi
 
 # All functions below are endpoints callable via HTTP requests and the corresponding code executed as a result of it.
 #
+
 # The router is a FastAPI object that allows us to define multiple endpoints under a single prefix.
 # Create a new router instance
 router = APIRouter()
@@ -580,9 +583,10 @@ def extract_id_from_result(result: str) -> int:
 # Per-User Media Ingestion and Analysis
 # FIXME - Ensure that each function processes multiple files/URLs at once
 class TempDirManager:
-    def __init__(self, prefix="media_processing_"):
+    def __init__(self, prefix: str = "media_processing_", *, cleanup: bool = True):
         self.temp_dir_path = None
         self.prefix = prefix
+        self._cleanup = cleanup
         self._created = False
 
     def __enter__(self):
@@ -592,12 +596,14 @@ class TempDirManager:
         return self.temp_dir_path
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._created and self.temp_dir_path and self.temp_dir_path.exists():
+        if self._created and self.temp_dir_path and self._cleanup:
+            # remove the fragile exists‑check and always try to clean up
             try:
-                shutil.rmtree(self.temp_dir_path)
+                shutil.rmtree(self.temp_dir_path, ignore_errors=True)
                 logging.info(f"Cleaned up temporary directory: {self.temp_dir_path}")
             except Exception as e:
-                logging.error(f"Failed to cleanup temporary directory {self.temp_dir_path}: {e}", exc_info=True)
+                logging.error(f"Failed to cleanup temporary directory {self.temp_dir_path}: {e}",
+                exc_info=True)
         self.temp_dir_path = None
         self._created = False
 
@@ -623,6 +629,7 @@ async def _save_uploaded_files(
     """Saves uploaded files to a temporary directory."""
     processed_files = []
     file_handling_errors = []
+    used_names: set[str] = set()
     for file in files:
         input_ref = file.filename or f"upload_{uuid.uuid4()}"
         local_file_path = None
@@ -635,7 +642,15 @@ async def _save_uploaded_files(
             # Generate a secure filename
             original_extension = Path(file.filename).suffix
             secure_base = sanitize_filename(Path(file.filename).stem) or str(uuid.uuid4())
+
             secure_filename = f"{secure_base}{original_extension}"
+
+            while (
+                    secure_filename in used_names or (temp_dir / secure_filename).exists()
+                ):
+                secure_filename = f"{secure_base}_{uuid.uuid4().hex[:8]}{original_extension}"
+
+            used_names.add(secure_filename)
             local_file_path = temp_dir / secure_filename
 
             logging.info(f"Attempting to save uploaded file '{file.filename}' to: {local_file_path}")
@@ -821,11 +836,14 @@ async def _process_document_like_item(
     temp_dir: Path,
     loop: asyncio.AbstractEventLoop
 ) -> Dict[str, Any]:
-    """Handles processing for individual PDF, Document, or Ebook items."""
-    item_result = {"input": item_input_ref, "status": "Pending"}
+    """
+    Handles processing for individual PDF, Document, or Ebook items.
+    Returns a dict with at least: {"input": <original ref>, "status": <...>}
+    """
+    item_result: Dict[str, Any] = {"input": item_input_ref, "status": "Pending"}
     file_bytes: Optional[bytes] = None
     processing_filename: Optional[str] = None
-    processing_filepath: Optional[str] = None # Path used by the processing function
+    processing_filepath: Optional[str] = None  # Path used by the processing function
 
     try:
         # --- 1. Get File Content (Bytes) and Determine Processing Path/Filename ---
@@ -834,9 +852,11 @@ async def _process_document_like_item(
             # Add cookie handling if needed
             req_cookies = None
             if form_data.use_cookies and form_data.cookies:
-                 # Basic cookie string parsing, adjust if necessary
-                 try: req_cookies = dict(item.split("=") for item in form_data.cookies.split("; "))
-                 except ValueError: logging.warning(f"Could not parse cookie string: {form_data.cookies}")
+                # Basic cookie string parsing, adjust if necessary
+                try:
+                    req_cookies = dict(item.split("=") for item in form_data.cookies.split("; "))
+                except ValueError:
+                    logging.warning(f"Could not parse cookie string: {form_data.cookies}")
 
             response = requests.get(processing_source, timeout=120, allow_redirects=True, cookies=req_cookies)
             response.raise_for_status()
@@ -847,15 +867,19 @@ async def _process_document_like_item(
             base_name = sanitize_filename(url_path.stem) or f"download_{uuid.uuid4()}"
             extension = url_path.suffix.lower() or ''
             # Guess extension if missing
-            if media_type == 'pdf' and not extension: extension = '.pdf'
-            elif media_type == 'ebook' and not extension: extension = '.epub'
-            elif media_type == 'document' and not extension: extension = '.txt' # Default for unknown docs
+            if media_type == 'pdf' and not extension:
+                extension = '.pdf'
+            elif media_type == 'ebook' and not extension:
+                extension = '.epub'
+            elif media_type == 'document' and not extension:
+                extension = '.txt'  # Default for unknown docs
             processing_filename = f"{base_name}{extension}"
 
             # Save to temp dir ONLY if the processing function requires a path
-            if media_type in ['document', 'ebook']: # These functions seem to need file paths
+            if media_type in ['document', 'ebook']:  # These functions seem to need file paths
                 processing_filepath = str(temp_dir / processing_filename)
-                with open(processing_filepath, "wb") as f: f.write(file_bytes)
+                with open(processing_filepath, "wb") as f:
+                    f.write(file_bytes)
                 logging.info(f"Saved downloaded {media_type} to temp path: {processing_filepath}")
             # process_pdf_task uses bytes, no need to save
 
@@ -871,15 +895,20 @@ async def _process_document_like_item(
         # --- 2. Select Processing Function and Prepare Specific Options ---
         processing_func = None
         specific_options = {}
-        run_in_executor = True # Default to running sync functions in executor
+        run_in_executor = True  # Default to running sync functions in executor
 
         if media_type == 'pdf':
             if file_bytes is None: raise ValueError("PDF processing requires file bytes.")
             processing_func = process_pdf_task # This is async
             run_in_executor = False # Don't run async func in executor
+            chunk_opts_dict = common_options.get("chunk_options")
+            logging.debug(f"DEBUG: Retrieved chunk_options from common_options: {type(chunk_opts_dict)}")
+
+            forwarded_filename = processing_filename if is_url else item_input_ref  #  <<< changed
+
             specific_options = {
                 "file_bytes": file_bytes,
-                "filename": processing_filename,
+                "filename": forwarded_filename,
                 "parser": form_data.pdf_parsing_engine,
                 "custom_prompt": form_data.custom_prompt,
                 "api_name": form_data.api_name if form_data.perform_analysis else None,
@@ -888,15 +917,21 @@ async def _process_document_like_item(
                 "keywords": form_data.keywords, # Pass parsed list
                 "system_prompt": form_data.system_prompt,
                 # Only pass chunking options if analysis is enabled
-                "perform_chunking": common_options.get("chunk_options") is not None and form_data.perform_analysis,
-                "chunk_method": common_options.get("chunk_options", {}).get('method') if form_data.perform_analysis else None,
-                "max_chunk_size": common_options.get("chunk_options", {}).get('max_size') if form_data.perform_analysis else None,
-                "chunk_overlap": common_options.get("chunk_options", {}).get('overlap') if form_data.perform_analysis else None,
+                # Check if chunk_options exists before accessing keys
+                "perform_chunking": chunk_opts_dict is not None and form_data.perform_analysis,
+                "chunk_method": chunk_opts_dict.get('method') if chunk_opts_dict and form_data.perform_analysis else None,
+                "max_chunk_size": chunk_opts_dict.get(
+                'max_size') if chunk_opts_dict and form_data.perform_analysis else None,
+                "chunk_overlap": chunk_opts_dict.get('overlap') if chunk_opts_dict and form_data.perform_analysis else None,
                 # Common options like custom_prompt, system_prompt, api_name, api_key are passed via merged dict
             }
-        elif media_type == 'document':
-            if not processing_filepath: raise ValueError("Document processing requires a file path.")
-            processing_func = import_plain_text_file # Assumed sync
+            logging.debug(f"DEBUG: Prepared specific_options for PDF: {specific_options.keys()}")
+
+        elif media_type == "document":
+            if not processing_filepath:
+                raise ValueError("Document processing requires a file path")
+
+            processing_func = import_plain_text_file           # sync
             specific_options = {
                 "file_path": processing_filepath,
                 "keywords": form_data.keywords_str, # Function expects raw string? Adjust if needed.
@@ -904,9 +939,12 @@ async def _process_document_like_item(
                 "auto_summarize": form_data.perform_analysis,
                 # Common options (author, system_prompt, api_name, api_key, overwrite_existing etc.) passed via merged dict
             }
-        elif media_type == 'ebook':
-            if not processing_filepath: raise ValueError("Ebook processing requires a file path.")
-            processing_func = import_epub # Assumed sync
+
+        elif media_type == "ebook":
+            if not processing_filepath:
+                raise ValueError("Ebook processing requires a file path")
+
+            processing_func = import_epub                      # sync
             specific_options = {
                 "file_path": processing_filepath,
                 "title": form_data.title, # Pass title (func should handle logic for single/multiple items)
@@ -918,8 +956,9 @@ async def _process_document_like_item(
                 "custom_chapter_pattern": form_data.custom_chapter_pattern,
                  # Common options (api_name, api_key, overwrite_existing etc.) passed via merged dict
             }
+
         else:
-            raise NotImplementedError(f"Processing logic for '{media_type}' is missing.")
+            raise NotImplementedError(f"No processor for media_type='{media_type}'")
 
         # --- 3. Execute Processing ---
         if processing_func:
@@ -930,10 +969,13 @@ async def _process_document_like_item(
             # (Example: remove 'chunk_options' if function doesn't accept it)
             # if media_type != 'ebook': combined_options.pop('chunk_options', None) # If import_epub is the only one using it directly
 
-            logging.debug(f"Calling {processing_func.__name__} for {item_input_ref} with options: {list(combined_options.keys())}")
+            func_name = getattr(processing_func, "__name__", str(processing_func))
+            logging.debug(f"Calling {func_name} for {item_input_ref} "
+                          f"with options: {list(combined_options.keys())}")
 
             if run_in_executor:
-                raw_result = await loop.run_in_executor(None, processing_func, **combined_options)
+                func_with_args = functools.partial(processing_func, **combined_options)
+                raw_result = await loop.run_in_executor(None, func_with_args)
             else:
                 raw_result = await processing_func(**combined_options) # Call async func directly
 
@@ -950,19 +992,21 @@ async def _process_document_like_item(
                              'parser': item_result.get('parser_used'),
                              'filename': item_result.get('filename')
                         }
-                        # Run sync DB func in executor
-                        db_add_result = await loop.run_in_executor(None,
+                        # Create a partial function with keywords bound
+                        db_add_func = functools.partial(
                             add_media_to_database,
-                            url=item_input_ref, # Use original URL or filename as identifier
+                            url=item_input_ref,  # Use original URL or filename as identifier
                             info_dict=info_dict_db,
                             segments=[{"Text": item_result.get("text_content", "")}],
                             summary=item_result.get("summary", ""),
-                            keywords=form_data.keywords, # Use parsed list
+                            keywords=form_data.keywords,  # Use parsed list
                             custom_prompt_input=form_data.custom_prompt,
                             whisper_model="Imported",
                             media_type=media_type,
                             overwrite=form_data.overwrite_existing
                         )
+                        # Run the partial function in the executor
+                        db_add_result = await loop.run_in_executor(None, db_add_func)
                         if isinstance(db_add_result, dict): item_result["db_id"] = db_add_result.get("id")
                         item_result["db_message"] = db_add_result.get("message", "Added/Updated in DB") if isinstance(db_add_result, dict) else str(db_add_result)
                     except Exception as db_err:
@@ -971,32 +1015,55 @@ async def _process_document_like_item(
                         item_result["error"] = f"Processed successfully, but failed to add to database: {db_err}"
 
             elif isinstance(raw_result, str): # Handle string results (e.g., from import_epub/document)
-                 logging.info(f"{processing_func.__name__} for {item_input_ref} returned: {raw_result}")
+                 logging.info(f"{func_name} for {item_input_ref} returned: {raw_result}")
                  if "Error" in raw_result or "❌" in raw_result: item_result["status"] = "Failed"; item_result["error"] = raw_result
                  elif "imported successfully" in raw_result.lower() or "📄" in raw_result or "📚" in raw_result:
                      item_result["status"] = "Success"; item_result["message"] = raw_result
                      item_result["db_id"] = extract_media_id_from_result_string(raw_result) # Helper needed
                      if item_result["status"] == "Success" and not item_result["db_id"]:
                          logging.warning(f"Could not extract DB ID from {media_type} result: {raw_result}")
-                 else: item_result["status"] = "Warning"; item_result["message"] = raw_result; item_result["error"] = "Unrecognized status message."
+                         item_result["status"] = "Warning"  # Explicitly set status to Warning
+                         item_result[
+                             "error"] = f"Processing reported success ('{raw_result}'), but could not extract DB ID."
+                 else:
+                    # Treat any non‑error string as basically “success”, but check ID
+                    item_result["status"] = "Success"
+                    item_result["message"] = raw_result
+                    item_result["db_id"] = extract_media_id_from_result_string(raw_result)
+                    if not item_result["db_id"]:
+                        item_result["status"] = "Warning"
+                        item_result["error"] = "Could not extract DB ID from result string."
+                    # guarantee the original reference survives any string result
+                 item_result["input"] = item_input_ref
             else:
-                 item_result["status"] = "Failed"; item_result["error"] = f"Processor returned unexpected type: {type(raw_result).__name__}"
-                 logging.warning(f"Processor {processing_func.__name__} for {item_input_ref} returned unexpected: {raw_result}")
+                item_result["status"] = "Failed"
+                item_result["error"] = f"Processor returned unexpected type: {type(raw_result).__name__}"
+                logging.warning(f"Processor {func_name} for {item_input_ref} returned unexpected: {raw_result}")  #  <<< changed
 
         else: # Should be caught earlier
             item_result["status"] = "Failed"; item_result["error"] = "No processing function selected."
 
-    # --- Error Handling for Item ---
-    except requests.exceptions.RequestException as e: item_result = {"input": item_input_ref, "status": "Failed", "error": f"Download failed: {e}"}
-    except FileNotFoundError as e: item_result = {"input": item_input_ref, "status": "Failed", "error": f"File not found: {e}"}
-    except (IOError, OSError, ValueError) as e: item_result = {"input": item_input_ref, "status": "Failed", "error": f"File/Input error: {e}"}
-    except NotImplementedError as e: item_result = {"input": item_input_ref, "status": "Failed", "error": str(e)}
-    except HTTPException: raise # Re-raise HTTP exceptions
+    # ---------------------------------------------------------------------- #
+    # 5) Error handling                                                      #
+    # ---------------------------------------------------------------------- #
+    except requests.exceptions.RequestException as e:
+        item_result = {"input": item_input_ref, "status": "Failed", "error": f"Download failed: {e}"}
+    except FileNotFoundError as e:
+        item_result = {"input": item_input_ref, "status": "Failed", "error": f"File not found: {e}"}
+    except (IOError, OSError, ValueError) as e:
+        item_result = {"input": item_input_ref, "status": "Failed", "error": f"File/Input error: {e}"}
+    except NotImplementedError as e:
+        item_result = {"input": item_input_ref, "status": "Failed", "error": str(e)}
+    except HTTPException:
+        raise
     except Exception as e:
-        logging.error(f"Unexpected error processing item {item_input_ref}: {e}", exc_info=True)
+        logging.error(f"Unexpected error processing {item_input_ref}: {e}", exc_info=True)
         item_result = {"input": item_input_ref, "status": "Failed", "error": f"Internal error: {type(e).__name__}"}
 
+    # Ensure the caller always sees the exact reference they supplied
+    item_result["input"] = item_input_ref
     return item_result
+
 
 def _determine_final_status(results: List[Dict[str, Any]]) -> int:
     """Determines the overall HTTP status code based on individual results."""
@@ -1123,7 +1190,7 @@ async def add_media(
     # TODO: Add authentication logic using the 'token'
 
     results = []
-    temp_dir_manager = TempDirManager() # Manages the lifecycle of the temp dir
+    temp_dir_manager = TempDirManager(cleanup=not form_data.keep_original_file) # Manages the lifecycle of the temp dir
     temp_dir_path: Optional[Path] = None
     loop = asyncio.get_running_loop()
 
@@ -1222,6 +1289,887 @@ async def add_media(
         logger.warning(log_message)  # Use loguru's warning level directly
     return JSONResponse(status_code=final_status_code, content={"results": results})
 
+#
+# End of General media ingestion and analysis
+####################################################################################
+
+
+######################## Video Ingestion Endpoint ###################################
+#
+# Video Ingestion Endpoint
+# Endpoints:
+# POST /api/v1/process-video
+
+class ProcessVideosForm(AddMediaForm):
+    """
+    Same field‑surface as AddMediaForm, but:
+      • media_type forced to `"video"` (so client does not need to send it)
+      • keep_original_file defaults to False (tmp dir always wiped)
+      • perform_analysis stays default=True (caller may disable)
+    """
+    media_type: Literal["video"] = "video"
+    keep_original_file: bool = Field(False, const=True)
+
+
+###############################################################################
+# /api/v1/media/process‑videos  – “transcribe / analyse only” endpoint
+###############################################################################
+@router.post(
+    "/process‑videos",
+    status_code=status.HTTP_200_OK,
+    summary="Transcribe / chunk / analyse videos and return the full artefacts (no DB write)"
+)
+async def process_videos_endpoint(
+    background_tasks: BackgroundTasks,
+
+    # -------- inputs ----------
+    urls: Optional[List[str]] = Form(None, description="List of video URLs"),
+    files: Optional[List[UploadFile]] = File(None, description="Video file uploads"),
+
+    # -------- common  ----------
+    title: Optional[str] = Form(None),
+    author: Optional[str] = Form(None),
+    keywords: str = Form("", description="Comma‑separated keywords"),
+    custom_prompt: Optional[str] = Form(None),
+    system_prompt: Optional[str] = Form(None),
+    overwrite_existing: bool = Form(False),
+    perform_analysis: bool = Form(True),
+
+    # -------- A/V  -------------
+    transcription_model: str = Form("deepml/distil-large-v3"),
+    transcription_language: str = Form("en"),
+    diarize: bool = Form(False),
+    timestamp_option: bool = Form(True),
+    vad_use: bool = Form(False),
+    perform_confabulation_check_of_analysis: bool = Form(False),
+    start_time: Optional[str] = Form(None),
+    end_time: Optional[str] = Form(None),
+
+    # -------- chunking ----------
+    perform_chunking: bool = Form(True),
+    chunk_method: Optional[ChunkMethod] = Form(None),
+    use_adaptive_chunking: bool = Form(False),
+    use_multi_level_chunking: bool = Form(False),
+    chunk_language: Optional[str] = Form(None),
+    chunk_size: int = Form(500),
+    chunk_overlap: int = Form(200),
+
+    # -------- integration -------
+    api_name: Optional[str] = Form(None),
+    api_key: Optional[str] = Form(None),
+    use_cookies: bool = Form(False),
+    cookies: Optional[str] = Form(None),
+
+    summarize_recursively: bool = Form(False),
+
+    # --- auth ---
+    token: str = Header(...),
+):
+    """
+    Works exactly like `/media/add`, but:
+
+    • Accepts *only* video.
+    • Skips every DB write.
+    • Returns the raw `process_videos(...)` artefact directly.
+    """
+    # ── 0.  Assemble / validate form ──────────────────────────────────────────
+    form_data = ProcessVideosForm(
+        urls=urls,
+        title=title,
+        author=author,
+        keywords=keywords,
+        custom_prompt=custom_prompt,
+        system_prompt=system_prompt,
+        overwrite_existing=overwrite_existing,
+        perform_analysis=perform_analysis,
+        start_time=start_time,
+        end_time=end_time,
+        api_name=api_name,
+        api_key=api_key,
+        use_cookies=use_cookies,
+        cookies=cookies,
+        whisper_model=transcription_model,
+        transcription_language=transcription_language,
+        diarize=diarize,
+        timestamp_option=timestamp_option,
+        vad_use=vad_use,
+        perform_confabulation_check_of_analysis=perform_confabulation_check_of_analysis,
+        perform_chunking=perform_chunking,
+        chunk_method=chunk_method,
+        use_adaptive_chunking=use_adaptive_chunking,
+        use_multi_level_chunking=use_multi_level_chunking,
+        chunk_language=chunk_language,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        summarize_recursively=summarize_recursively,
+    )
+
+    _validate_inputs("video", form_data.urls, files)              # ensures you sent something
+
+    loop = asyncio.get_running_loop()
+    results: List[Dict[str, Any]] = []
+
+    # ── 1.  temp dir / uploads ────────────────────────────────────────────────
+    with TempDirManager(cleanup=True) as temp_dir:
+        saved_files, file_errors = await _save_uploaded_files(files or [], temp_dir)
+        results.extend(file_errors)
+
+        url_list = form_data.urls or []
+        uploaded_paths = [str(f["path"]) for f in saved_files]
+        all_inputs = url_list + uploaded_paths
+        if not all_inputs:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid video sources supplied.")
+
+        # ── 2.  call  process_videos()  directly (batch) ──────────────────────
+        video_args = {
+            "inputs": all_inputs,
+            "start_time": form_data.start_time,
+            "end_time": form_data.end_time,
+            "diarize": form_data.diarize,
+            "vad_use": form_data.vad_use,
+            "whisper_model": form_data.whisper_model,
+            "use_custom_prompt": bool(form_data.custom_prompt),
+            "custom_prompt": form_data.custom_prompt,
+            "system_prompt": form_data.system_prompt,
+            "perform_chunking": form_data.perform_chunking,
+            "chunk_method": form_data.chunk_method or "recursive",
+            "max_chunk_size": form_data.chunk_size,
+            "chunk_overlap": form_data.chunk_overlap,
+            "use_adaptive_chunking": form_data.use_adaptive_chunking,
+            "use_multi_level_chunking": form_data.use_multi_level_chunking,
+            "chunk_language": form_data.chunk_language,
+            "summarize_recursively": form_data.summarize_recursively,
+            "api_name": form_data.api_name if form_data.perform_analysis else None,
+            "api_key": form_data.api_key,
+            "keywords": form_data.keywords_str,
+            "use_cookies": form_data.use_cookies,
+            "cookies": form_data.cookies,
+            "timestamp_option": form_data.timestamp_option,
+            "confab_checkbox": form_data.perform_confabulation_check_of_analysis,
+            "overwrite_existing": form_data.overwrite_existing,
+            "store_in_db": False,                 # <<<<<<<<    NO DB WRITE
+        }
+
+        batch_func = functools.partial(process_videos, **video_args)
+        batch_result = await loop.run_in_executor(None, batch_func)
+
+        # Append any upload‑stage errors so the caller sees *all* outcomes
+        if "results" not in batch_result or not isinstance(batch_result["results"], list):
+            batch_result["results"] = []
+        if file_errors:
+            batch_result["results"].extend(file_errors)
+            batch_result["errors_count"] += len(file_errors)
+            batch_result["errors"].extend(err["error"] for err in file_errors)
+
+    # status code & response
+    status_code = (
+        status.HTTP_200_OK
+        if batch_result["errors_count"] == 0
+        else status.HTTP_207_MULTI_STATUS
+    )
+    return JSONResponse(status_code=status_code, content=batch_result)
+
+#
+# End of video ingestion
+####################################################################################
+
+
+######################## Audio Ingestion Endpoint ###################################
+# Endpoints:
+#   /process-audio
+
+
+class ProcessAudiosForm(AddMediaForm):
+    """Identical surface to AddMediaForm but restricted to 'audio'."""
+    media_type: Literal["audio"] = "audio"
+    keep_original_file: bool = Field(False, const=True)
+
+
+###############################################################################
+# /api/v1/media/process‑audios  – transcribe / analyse audio, no persistence
+###############################################################################
+@router.post(
+    "/process‑audios",
+    status_code=status.HTTP_200_OK,
+    summary="Transcribe / chunk / analyse audio and return full artefacts (no DB write)"
+)
+async def process_audios_endpoint(
+    background_tasks: BackgroundTasks,
+
+    # ---------- inputs ----------
+    urls:  Optional[List[str]] = Form(None, description="Audio URLs"),
+    files: Optional[List[UploadFile]] = File(None,  description="Audio file uploads"),
+
+    # ---------- common ----------
+    title:         Optional[str] = Form(None),
+    author:        Optional[str] = Form(None),
+    keywords:                 str = Form("", description="Comma‑separated keywords"),
+    custom_prompt: Optional[str] = Form(None),
+    system_prompt: Optional[str] = Form(None),
+    overwrite_existing: bool   = Form(False),
+    perform_analysis:   bool   = Form(True),
+
+    # ---------- A/V -------------
+    whisper_model:           str  = Form("deepml/distil-large-v3"),
+    transcription_language:  str  = Form("en"),
+    diarize:                 bool = Form(False),
+    timestamp_option:        bool = Form(True),
+    vad_use:                 bool = Form(False),
+    perform_confabulation_check_of_analysis: bool = Form(False),
+
+    # ---------- chunking --------
+    perform_chunking:          bool            = Form(True),
+    chunk_method:   Optional[ChunkMethod]      = Form(None),
+    use_adaptive_chunking:     bool            = Form(False),
+    use_multi_level_chunking:  bool            = Form(False),
+    chunk_language: Optional[str]              = Form(None),
+    chunk_size:               int             = Form(500),
+    chunk_overlap:            int             = Form(200),
+
+    # ---------- integration -----
+    api_name:   Optional[str] = Form(None),
+    api_key:    Optional[str] = Form(None),
+    use_cookies: bool         = Form(False),
+    cookies:    Optional[str] = Form(None),
+
+    summarize_recursively: bool = Form(False),
+
+    # ---------- auth ------------
+    token: str = Header(...),
+):
+    # ── 0) validate / assemble form ──────────────────────────────────────────
+    form_data = ProcessAudiosForm(
+        urls=urls, title=title, author=author, keywords=keywords,
+        custom_prompt=custom_prompt, system_prompt=system_prompt,
+        overwrite_existing=overwrite_existing, perform_analysis=perform_analysis,
+        api_name=api_name, api_key=api_key,
+        use_cookies=use_cookies, cookies=cookies,
+        whisper_model=whisper_model, transcription_language=transcription_language,
+        diarize=diarize, timestamp_option=timestamp_option, vad_use=vad_use,
+        perform_confabulation_check_of_analysis=perform_confabulation_check_of_analysis,
+        perform_chunking=perform_chunking, chunk_method=chunk_method,
+        use_adaptive_chunking=use_adaptive_chunking,
+        use_multi_level_chunking=use_multi_level_chunking,
+        chunk_language=chunk_language, chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap, summarize_recursively=summarize_recursively,
+    )
+
+    _validate_inputs("audio", form_data.urls, files)
+
+    loop = asyncio.get_running_loop()
+    file_errors: List[Dict[str, Any]] = []
+
+    # ── 1) temp dir + uploads ────────────────────────────────────────────────
+    with TempDirManager(cleanup=True) as temp_dir:
+        saved_files, file_errors = await _save_uploaded_files(files or [], temp_dir)
+
+        url_list       = form_data.urls or []
+        uploaded_paths = [str(f["path"]) for f in saved_files]
+        all_inputs     = url_list + uploaded_paths
+        if not all_inputs:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid audio sources supplied.")
+
+        # ── 2) invoke library batch processor ────────────────────────────────
+        audio_args = {
+            "audio_urls": url_list,
+            "audio_files": uploaded_paths,
+            "whisper_model": form_data.whisper_model,
+            "transcription_language": form_data.transcription_language,
+            "api_name": form_data.api_name if form_data.perform_analysis else None,
+            "api_key": form_data.api_key,
+            "use_cookies": form_data.use_cookies,
+            "cookies": form_data.cookies,
+            "keep_original": False,
+            "custom_keywords": form_data.keywords_str,
+            "custom_prompt_input": form_data.custom_prompt,
+            "system_prompt_input": form_data.system_prompt,
+            "chunk_method": form_data.chunk_method or "recursive",
+            "max_chunk_size": form_data.chunk_size,
+            "chunk_overlap": form_data.chunk_overlap,
+            "use_adaptive_chunking": form_data.use_adaptive_chunking,
+            "use_multi_level_chunking": form_data.use_multi_level_chunking,
+            "chunk_language": form_data.chunk_language,
+            "diarize": form_data.diarize,
+            "keep_timestamps": form_data.timestamp_option,
+            "custom_title": form_data.title,
+            "recursive_summarization": form_data.summarize_recursively,
+            "store_in_db": False,                       # <<<<<<<<  NO DB
+        }
+
+        batch_func   = functools.partial(process_audio_files, **audio_args)
+        batch_result = await loop.run_in_executor(None, batch_func)
+
+        # ── 3) merge any upload‑stage failures ───────────────────────────────
+        if "results" not in batch_result or not isinstance(batch_result["results"], list):
+            batch_result["results"] = []
+        if file_errors:
+            batch_result["results"].extend(file_errors)
+            batch_result["errors_count"] += len(file_errors)
+            batch_result["errors"].extend(err["error"] for err in file_errors)
+
+    # ── 4) status code ───────────────────────────────────────────────────────
+    status_code = (
+        status.HTTP_200_OK
+        if batch_result["errors_count"] == 0
+        else status.HTTP_207_MULTI_STATUS
+    )
+
+    # ── 5) return library output untouched ───────────────────────────────────
+    return JSONResponse(status_code=status_code, content=batch_result)
+
+#
+# End of Audio Ingestion
+##############################################################################################
+
+
+######################## Ebook Ingestion Endpoint ###################################
+# Endpoints:
+#
+# /process-ebooks
+
+
+class ProcessEbooksForm(AddMediaForm):
+    media_type: Literal["ebook"] = "ebook"
+    keep_original_file: bool = False    # always cleanup tmp dir
+
+@router.post(
+    "/process‑ebooks",
+    status_code=status.HTTP_200_OK,
+    summary="Extract, chunk, and analyse EPUB/ebook files – returns full artefacts, no DB write",
+)
+async def process_ebooks_endpoint(
+    background_tasks: BackgroundTasks,
+
+    # ---------- inputs ----------
+    urls:  Optional[List[str]] = Form(None, description="EPUB URLs"),
+    files: Optional[List[UploadFile]] = File(None,  description="EPUB file uploads"),
+
+    # ---------- common ----------
+    keywords:                 str  = Form("", description="Comma‑separated keywords (only used in prompts)"),
+    custom_prompt: Optional[str]   = Form(None),
+    system_prompt: Optional[str]   = Form(None),
+    perform_analysis:   bool       = Form(True),
+
+    # ---------- chunking --------
+    perform_chunking:          bool            = Form(True),
+    chunk_method:   Optional[ChunkMethod]      = Form("chapter"),
+    use_adaptive_chunking:     bool            = Form(False),
+    use_multi_level_chunking:  bool            = Form(False),
+    chunk_size:               int             = Form(500),
+    chunk_overlap:            int             = Form(200),
+    custom_chapter_pattern:   Optional[str]    = Form(None),
+
+    # ---------- integration -----
+    api_name:   Optional[str] = Form(None),
+    api_key:    Optional[str] = Form(None),
+
+    summarize_recursively: bool = Form(False),
+
+    # ---------- auth ------------
+    token: str = Header(...),
+):
+    # ── 0) validate ---------------------------------------------------------
+    form = ProcessEbooksForm(            # only the fields we actually use
+        urls=urls,
+        keywords=keywords,
+        custom_prompt=custom_prompt,
+        system_prompt=system_prompt,
+        perform_analysis=perform_analysis,
+        perform_chunking=perform_chunking,
+        chunk_method=chunk_method,
+        use_adaptive_chunking=use_adaptive_chunking,
+        use_multi_level_chunking=use_multi_level_chunking,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        custom_chapter_pattern=custom_chapter_pattern,
+        api_name=api_name,
+        api_key=api_key,
+        summarize_recursively=summarize_recursively,
+    )
+
+    _validate_inputs("ebook", form.urls, files)
+
+    loop = asyncio.get_running_loop()
+    file_errors: List[Dict[str, Any]] = []
+
+    results: List[Dict[str, Any]] = []
+
+    # ── 1) temp dir + uploads / downloads -----------------------------------
+    with TempDirManager(cleanup=True) as tmp:
+        # --- save uploaded ---------------------------------------------------
+        saved_files, file_errors = await _save_uploaded_files(files or [], tmp)
+        local_paths = [Path(info["path"]) for info in saved_files]
+
+        # --- download URLs ---------------------------------------------------
+        for url in form.urls or []:
+            try:
+                local_paths.append(safe_download(url, tmp, ".epub"))
+            except Exception as e:
+                logging.error(f"Download failure {url}: {e}", exc_info=True)
+                file_errors.append({"input": url, "status": "Failed", "error": str(e)})
+
+        if not local_paths:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid ebook sources supplied.")
+
+        # ── 2) per‑file processing (threadpool) ------------------------------
+        chunk_opts = {
+            "method": chunk_method or "chapter",
+            "max_size": chunk_size,
+            "overlap": chunk_overlap,
+            "adaptive": use_adaptive_chunking,
+            "multi_level": use_multi_level_chunking,
+            "custom_chapter_pattern": custom_chapter_pattern,
+        }
+
+        tasks = [
+            loop.run_in_executor(
+                None,
+                functools.partial(
+                    _process_single_ebook,
+                    p,
+                    perform_chunking,
+                    chunk_opts,
+                    perform_analysis,
+                    summarize_recursively,
+                    api_name,
+                    api_key,
+                    custom_prompt,
+                    system_prompt,
+                ),
+            )
+            for p in local_paths
+        ]
+
+        results.extend(await asyncio.gather(*tasks))
+
+    # ── 3) merge upload / download errors -----------------------------------
+    results.extend(file_errors)
+
+    errors = [r.get("error") for r in results if r.get("status") != "Success"]
+
+    batch_result = {
+        "processed_count": len(results) - len(errors),
+        "errors_count": len(errors),
+        "errors": errors,
+        "results": results,
+    }
+
+    # ── 4) HTTP status -------------------------------------------------------
+    status_code = status.HTTP_200_OK if batch_result["errors_count"] == 0 else status.HTTP_207_MULTI_STATUS
+
+    return JSONResponse(status_code=status_code, content=batch_result)
+
+#
+# End of Ebook Ingestion
+#################################################################################################
+
+
+######################## Document Ingestion Endpoint ###################################
+# Endpoints:
+#
+
+# ─────────────────────────────  form model  ──────────────────────────────────
+class ProcessDocumentsForm(AddMediaForm):
+    """Validated payload for /process‑documents."""
+    # ─────────── invariants ───────────
+    media_type: Literal["document"] = "document"
+    keep_original_file: bool = False      # do not persist uploads by default
+    # ─────────── inputs ───────────
+    urls: Optional[List[str]] = Field(default_factory=list,
+                                      description="Document URLs (.txt, .md, etc.)")
+    # ─────────── prompts / analysis ───────────
+    custom_prompt: Optional[str] = None
+    system_prompt: Optional[str] = None
+    perform_analysis: bool = True
+    # ─────────── chunking ───────────
+    perform_chunking: bool = True
+    chunk_method: Optional[ChunkMethod] = "sentences"
+    use_adaptive_chunking: bool = False
+    use_multi_level_chunking: bool = False
+    chunk_size: int = Field(500, ge=1)
+    chunk_overlap: int = Field(200, ge=0)
+    # ─────────── downstream API integration ───────────
+    api_name: Optional[str] = None
+    api_key: Optional[str] = None
+    summarize_recursively: bool = False
+    # ─────────── validators ───────────
+    @validator("urls", pre=True, always=True)
+    def _clean_urls(cls, v: Optional[List[str]]) -> List[str]:
+        """Strip empties and dupes—endpoint already checks file/URL mix."""
+        if not v:
+            return []
+        return list(dict.fromkeys(u.strip() for u in v if u))  # preserves order
+
+    class Config:  # forbid unknown keys so bad client payloads fail early
+        extra = "forbid"
+
+# ─────────────────────────────  endpoint  ────────────────────────────────────
+@router.post(
+    "/process‑documents",
+    status_code=status.HTTP_200_OK,
+    summary="Read, chunk, and analyse text / markdown documents – returns full artefacts, no DB write",
+)
+async def process_documents_endpoint(
+    background_tasks: BackgroundTasks,
+
+    # ---------- inputs ----------
+    urls:  Optional[List[str]] = Form(None, description="Document URLs (.txt / .md / etc.)"),
+    files: Optional[List[UploadFile]] = File(None,  description="Document file uploads"),
+
+    # ---------- common ----------
+    keywords:                 str  = Form("", description="Comma‑separated keywords (used only in prompts)"),
+    custom_prompt: Optional[str]   = Form(None),
+    system_prompt: Optional[str]   = Form(None),
+    perform_analysis:   bool       = Form(True),
+
+    # ---------- chunking --------
+    perform_chunking:          bool            = Form(True),
+    chunk_method:   Optional[ChunkMethod]      = Form("sentences"),
+    use_adaptive_chunking:     bool            = Form(False),
+    use_multi_level_chunking:  bool            = Form(False),
+    chunk_size:               int             = Form(500),
+    chunk_overlap:            int             = Form(200),
+
+    # ---------- integration -----
+    api_name:   Optional[str] = Form(None),
+    api_key:    Optional[str] = Form(None),
+    summarize_recursively: bool = Form(False),
+
+    # ---------- auth ------------
+    token: str = Header(...),
+):
+    # ── 0) validate ---------------------------------------------------------
+    form = ProcessDocumentsForm(
+        urls=urls,
+        keywords=keywords,
+        custom_prompt=custom_prompt,
+        system_prompt=system_prompt,
+        perform_analysis=perform_analysis,
+        perform_chunking=perform_chunking,
+        chunk_method=chunk_method,
+        use_adaptive_chunking=use_adaptive_chunking,
+        use_multi_level_chunking=use_multi_level_chunking,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        api_name=api_name,
+        api_key=api_key,
+        summarize_recursively=summarize_recursively,
+    )
+
+    _validate_inputs("document", form.urls, files)
+
+    loop = asyncio.get_running_loop()
+    results: List[Dict[str, Any]] = []
+    file_errors: List[Dict[str, Any]] = []
+
+    with TempDirManager(cleanup=True) as tmp:
+        # --- save uploads ----------------------------------------------------
+        saved, file_errors = await _save_uploaded_files(files or [], tmp)
+        local_paths = [Path(i["path"]) for i in saved]
+
+        # --- download URLs ---------------------------------------------------
+        for url in form.urls or []:
+            try:
+                # FIXME - make download_file agnostic
+                local_paths.append(smart_download(url, tmp))
+            except Exception as e:
+                logging.error(f"Download failure {url}: {e}", exc_info=True)
+                file_errors.append({"input": url, "status": "Failed", "error": str(e)})
+
+        if not local_paths:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid document sources supplied.")
+
+        # --- per‑file processing --------------------------------------------
+        chunk_opts = {
+            "method": chunk_method or "sentences",
+            "max_size": chunk_size,
+            "overlap": chunk_overlap,
+            "adaptive": use_adaptive_chunking,
+            "multi_level": use_multi_level_chunking,
+            "language": None,
+        }
+
+        tasks = [
+            loop.run_in_executor(
+                None,
+                functools.partial(
+                    _process_single_document,
+                    p,
+                    perform_chunking,
+                    chunk_opts,
+                    perform_analysis,
+                    summarize_recursively,
+                    api_name,
+                    api_key,
+                    custom_prompt,
+                    system_prompt,
+                ),
+            )
+            for p in local_paths
+        ]
+        results.extend(await asyncio.gather(*tasks))
+
+    # --- merge early errors --------------------------------------------------
+    results.extend(file_errors)
+    errors = [r.get("error") for r in results if r.get("status") != "Success"]
+
+    batch_result = {
+        "processed_count": len(results) - len(errors),
+        "errors_count": len(errors),
+        "errors": errors,
+        "results": results,
+    }
+
+    # --- HTTP status ---------------------------------------------------------
+    status_code = status.HTTP_200_OK if batch_result["errors_count"] == 0 else status.HTTP_207_MULTI_STATUS
+    return JSONResponse(status_code=status_code, content=batch_result)
+
+#
+# End of Document Ingestion
+############################################################################################
+
+
+######################## PDF Ingestion Endpoint ###################################
+# Endpoints:
+#
+
+async def _single_pdf_worker(
+    pdf_path: Path,
+    form,                      # ProcessPDFsForm instance
+    chunk_opts: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    1) Read file bytes, 2) call process_pdf_task(), 3) normalise the result dict.
+    """
+    try:
+        file_bytes = pdf_path.read_bytes()
+
+        pdf_kwargs = {
+            "file_bytes": file_bytes,
+            "filename": pdf_path.name,
+            "parser": form.pdf_parsing_engine,
+            "custom_prompt": form.custom_prompt,
+            "system_prompt": form.system_prompt,
+            "api_name": form.api_name if form.perform_analysis else None,
+            "api_key": form.api_key,
+            "auto_summarize": form.perform_analysis,
+            "keywords": form.keywords,
+            "perform_chunking": form.perform_chunking and form.perform_analysis,
+            "chunk_method":  chunk_opts["method"]      if form.perform_analysis else None,
+            "max_chunk_size": chunk_opts["max_size"]   if form.perform_analysis else None,
+            "chunk_overlap":  chunk_opts["overlap"]    if form.perform_analysis else None,
+        }
+
+        # process_pdf_task is async
+        raw = await process_pdf_task(**pdf_kwargs)
+
+        # Ensure minimal envelope consistency
+        if isinstance(raw, dict):
+            raw.setdefault("status", "Success")
+            raw.setdefault("input", str(pdf_path))
+            return raw
+        else:
+            return {"input": str(pdf_path), "status": "Error",
+                    "error": f"Unexpected return type: {type(raw).__name__}"}
+
+    except Exception as e:
+        logging.error(f"PDF worker failed for {pdf_path}: {e}", exc_info=True)
+        return {"input": str(pdf_path), "status": "Error", "error": str(e)}
+
+# ─────────────────────── form model (subset of AddMediaForm) ─────────────────
+class ProcessPDFsForm(AddMediaForm):
+    media_type: Literal["pdf"] = "pdf"
+    keep_original_file: bool = False
+
+
+# ───────────────────────────── endpoint ──────────────────────────────────────
+@router.post(
+    "/process‑pdfs",
+    status_code=status.HTTP_200_OK,
+    summary="Extract, chunk, and analyse PDFs – returns full artefacts, no DB write",
+)
+async def process_pdfs_endpoint(
+    background_tasks: BackgroundTasks,
+
+    # ---------- inputs ----------
+    urls:  Optional[List[str]] = Form(None, description="PDF URLs"),
+    files: Optional[List[UploadFile]] = File(None,  description="PDF uploads"),
+
+    # ---------- common ----------
+    custom_prompt: Optional[str] = Form(None),
+    system_prompt: Optional[str] = Form(None),
+    perform_analysis: bool = Form(True),
+
+    # ---------- chunking --------
+    perform_chunking: bool = Form(True),
+    chunk_method:   Optional[ChunkMethod] = Form("recursive"),
+    chunk_size:     int = Form(500),
+    chunk_overlap:  int = Form(200),
+
+    # ---------- PDF specific ----
+    pdf_parsing_engine: Optional[PdfEngine] = Form("pymupdf4llm"),
+
+    # ---------- integration -----
+    api_name: Optional[str] = Form(None),
+    api_key:  Optional[str] = Form(None),
+
+    # ---------- auth ------------
+    token: str = Header(...),
+):
+    # ── 0) validate / hydrate form -----------------------------------------
+    form = ProcessPDFsForm(
+        urls=urls,
+        custom_prompt=custom_prompt,
+        system_prompt=system_prompt,
+        perform_analysis=perform_analysis,
+        perform_chunking=perform_chunking,
+        chunk_method=chunk_method,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        pdf_parsing_engine=pdf_parsing_engine,
+        api_name=api_name,
+        api_key=api_key,
+    )
+
+    _validate_inputs("pdf", form.urls, files)
+
+    loop = asyncio.get_running_loop()
+    results: list = []
+    file_errors = []
+
+    with TempDirManager(cleanup=True) as tmp:
+        # ---------- uploads -------------------------------------------------
+        saved, file_errors = await _save_uploaded_files(files or [], tmp)
+        paths = [Path(x["path"]) for x in saved]
+
+        # ---------- downloads ----------------------------------------------
+        for u in form.urls or []:
+            try:
+                paths.append(safe_download(u, tmp, ".pdf"))
+            except Exception as e:
+                file_errors.append({"input": u, "status": "Failed", "error": str(e)})
+                logging.error(f"Download failed {u}: {e}", exc_info=True)
+
+        if not paths:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid PDFs supplied.")
+
+        # ---------- chunk options ------------------------------------------
+        chunk_opts = {"method": chunk_method or "recursive",
+                      "max_size": chunk_size,
+                      "overlap": chunk_overlap}
+
+        # ---------- fan‑out processing -------------------------------------
+        tasks = [ _single_pdf_worker(p, form, chunk_opts) for p in paths ]
+        results.extend(await asyncio.gather(*tasks))
+
+    # ---------- merge early errors -----------------------------------------
+    results.extend(file_errors)
+    errors = [r.get("error") for r in results if r.get("status") != "Success"]
+
+    batch_result = {
+        "processed_count": len(results) - len(errors),
+        "errors_count":    len(errors),
+        "errors":          errors,
+        "results":         results,
+    }
+
+    status_code = status.HTTP_200_OK if not errors else status.HTTP_207_MULTI_STATUS
+    return JSONResponse(status_code=status_code, content=batch_result)
+#
+# End of PDF Ingestion
+############################################################################################
+
+
+######################## XML Ingestion Endpoint ###################################
+# Endpoints:
+# FIXME
+
+#XML File handling
+# /Server_API/app/api/v1/endpoints/media.py
+
+class XMLIngestRequest(BaseModel):
+    title: Optional[str] = None
+    author: Optional[str] = None
+    keywords: Optional[List[str]] = []
+    system_prompt: Optional[str] = None
+    custom_prompt: Optional[str] = None
+    auto_summarize: bool = False
+    api_name: Optional[str] = None
+    api_key: Optional[str] = None
+    mode: str = "persist"  # or "ephemeral"
+
+# @router.post("/process-xml")
+# async def process_xml_endpoint(
+#     payload: XMLIngestRequest = Form(...),
+#     file: UploadFile = File(...)
+# ):
+#     """
+#     Ingest an XML file, optionally summarize it,
+#     then either store ephemeral or persist in DB.
+#     """
+#     try:
+#         file_bytes = await file.read()
+#         filename = file.filename
+#
+#         # 1) call the service
+#         result_data = await process_xml_task(
+#             file_bytes=file_bytes,
+#             filename=filename,
+#             title=payload.title,
+#             author=payload.author,
+#             keywords=payload.keywords or [],
+#             system_prompt=payload.system_prompt,
+#             custom_prompt=payload.custom_prompt,
+#             auto_summarize=payload.auto_summarize,
+#             api_name=payload.api_name,
+#             api_key=payload.api_key
+#         )
+#
+#         # 2) ephemeral vs. persist
+#         if payload.mode == "ephemeral":
+#             ephemeral_id = ephemeral_storage.store_data(result_data)
+#             return {
+#                 "status": "ephemeral-ok",
+#                 "media_id": ephemeral_id,
+#                 "title": result_data["info_dict"]["title"]
+#             }
+#         else:
+#             # store in DB
+#             info_dict = result_data["info_dict"]
+#             summary = result_data["summary"]
+#             segments = result_data["segments"]
+#             combined_prompt = (payload.system_prompt or "") + "\n\n" + (payload.custom_prompt or "")
+#
+#             media_id = add_media_to_database(
+#                 url=filename,
+#                 info_dict=info_dict,
+#                 segments=segments,
+#                 summary=summary,
+#                 keywords=",".join(payload.keywords or []),
+#                 custom_prompt_input=combined_prompt,
+#                 whisper_model="xml-import",
+#                 media_type="xml_document",
+#                 overwrite=False
+#             )
+#
+#             return {
+#                 "status": "persist-ok",
+#                 "media_id": str(media_id),
+#                 "title": info_dict["title"]
+#             }
+#
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+# Your gradio_xml_ingestion_tab.py is already set up to call import_xml_handler(...) directly. If you’d prefer to unify it with the new approach, you can simply have your Gradio UI call the new POST /process-xml route, sending the file as UploadFile plus all your form fields. The existing code is fine for a local approach, but if you want your new single endpoint approach, you might adapt the code in the click() callback to do an HTTP request to /process-xml with the “mode” param, etc.
+#
+# End of XML Ingestion
+############################################################################################################
+
+
+######################## Web Scraping & URL Ingestion Endpoint ###################################
+# Endpoints:
+#
 
 @router.post("/ingest-web-content")
 async def ingest_web_content(
@@ -1494,710 +2442,6 @@ async def ingest_web_content(
         "count": len(raw_results),
         "results": raw_results
     }
-
-#
-# End of media ingestion and analysis
-####################################################################################
-
-
-######################## Video Ingestion Endpoint ###################################
-#
-# Video Ingestion Endpoint
-# Endpoints:
-# POST /api/v1/process-video
-
-@router.post("/process-video")
-async def process_video_endpoint(
-    metadata: str = Form(...),
-    files: List[UploadFile] = File([]),  # zero or more local video uploads
-) -> Dict[str, Any]:
-    try:
-        # 1) Parse JSON
-        try:
-            req_data = json.loads(metadata)
-            req_model = VideoIngestRequest(**req_data)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid JSON in metadata: {e}")
-
-        # 2) Convert any uploaded files -> local temp paths
-        local_paths = []
-        for f in files:
-            tmp_path = f"/tmp/{f.filename}"
-            with open(tmp_path, "wb") as out_f:
-                out_f.write(await f.read())
-            local_paths.append(tmp_path)
-
-        # 3) Combine the user’s `urls` from the JSON + the newly saved local paths
-        all_inputs = (req_model.urls or []) + local_paths
-        if not all_inputs:
-            raise HTTPException(status_code=400, detail="No inputs (no URLs, no files)")
-
-        # 4) ephemeral vs. persist
-        ephemeral = (req_model.mode.lower() == "ephemeral")
-
-        # 5) Call your new process_videos function
-        results_dict = process_videos(
-            inputs=all_inputs,
-            start_time=req_model.start_time,
-            end_time=req_model.end_time,
-            diarize=req_model.diarize,
-            vad_use=req_model.vad,
-            whisper_model=req_model.whisper_model,
-            use_custom_prompt=req_model.use_custom_prompt,
-            custom_prompt=req_model.custom_prompt,
-            perform_chunking=req_model.perform_chunking,
-            chunk_method=req_model.chunk_method,
-            max_chunk_size=req_model.max_chunk_size,
-            chunk_overlap=req_model.chunk_overlap,
-            use_adaptive_chunking=req_model.use_adaptive_chunking,
-            use_multi_level_chunking=req_model.use_multi_level_chunking,
-            chunk_language=req_model.chunk_language,
-            summarize_recursively=req_model.summarize_recursively,
-            api_name=req_model.api_name,
-            api_key=req_model.api_key,
-            keywords=req_model.keywords,
-            use_cookies=req_model.use_cookies,
-            cookies=req_model.cookies,
-            timestamp_option=req_model.timestamp_option,
-            keep_original_video=req_model.keep_original_video,
-            confab_checkbox=req_model.confab_checkbox,
-            overwrite_existing=req_model.overwrite_existing,
-            store_in_db=(not ephemeral),
-        )
-
-        # 6) Return a final JSON
-        return {
-            "mode": req_model.mode,
-            **results_dict  # merges processed_count, errors, results, etc.
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-#
-# End of video ingestion
-####################################################################################
-
-
-######################## Audio Ingestion Endpoint ###################################
-# Endpoints:
-#   /process-audio
-
-@router.post("/process-audio")
-async def process_audio_endpoint(
-    metadata: str = Form(...),
-    files: List[UploadFile] = File([]),  # zero or more local file uploads
-) -> Dict[str, Any]:
-    """
-    Single endpoint that:
-      - Reads JSON from `metadata` (Pydantic model).
-      - Accepts multiple uploaded audio files in `files`.
-      - Merges them with any provided `urls` in the JSON.
-      - Processes each (transcribe, optionally summarize).
-      - Returns the results inline.
-    If mode == "ephemeral", skip DB storing.
-    If mode == "persist", do store in DB.
-    If is_podcast == True, attempt extra "podcast" metadata extraction.
-    """
-    try:
-        # 1) Parse the JSON from the `metadata` field:
-        try:
-            req_data = json.loads(metadata)
-            req_model = AudioIngestRequest(**req_data)  # validate with Pydantic
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid JSON in `metadata`: {e}")
-
-        # 2) Convert any uploaded files -> local temp paths
-        local_paths: List[str] = []
-        for f in files:
-            tmp_path = f"/tmp/{f.filename}"
-            with open(tmp_path, "wb") as out_f:
-                out_f.write(await f.read())
-            local_paths.append(tmp_path)
-
-        # Combine the user’s `urls` from the JSON + the newly saved local paths
-        ephemeral = (req_model.mode.lower() == "ephemeral")
-
-        # 3) Call your new process_audio(...) function
-        results_dict = process_audio(
-            urls=req_model.urls,
-            local_files=local_paths,
-            is_podcast=req_model.is_podcast,
-            whisper_model=req_model.whisper_model,
-            diarize=req_model.diarize,
-            keep_timestamps=req_model.keep_timestamps,
-            api_name=req_model.api_name,
-            api_key=req_model.api_key,
-            custom_prompt=req_model.custom_prompt,
-            chunk_method=req_model.chunk_method,
-            max_chunk_size=req_model.max_chunk_size,
-            chunk_overlap=req_model.chunk_overlap,
-            use_adaptive_chunking=req_model.use_adaptive_chunking,
-            use_multi_level_chunking=req_model.use_multi_level_chunking,
-            chunk_language=req_model.chunk_language,
-            keywords=req_model.keywords,
-            keep_original_audio=req_model.keep_original_audio,
-            use_cookies=req_model.use_cookies,
-            cookies=req_model.cookies,
-            store_in_db=(not ephemeral),
-            custom_title=req_model.custom_title,
-        )
-
-        # 4) If ephemeral, optionally remove the local temp files (already done in keep_original_audio check if you want).
-        # or do nothing special
-
-        # 5) Return final JSON
-        return {
-            "mode": req_model.mode,
-            **results_dict
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Example Client request:
-#         POST /api/v1/media/process-audio
-#         Content-Type: multipart/form-data
-#
-#         --boundary
-#         Content-Disposition: form-data; name="metadata"
-#
-#         {
-#           "mode": "ephemeral",
-#           "is_podcast": true,
-#           "urls": ["https://feeds.megaphone.fm/XYZ12345"],
-#           "whisper_model": "distil-large-v3",
-#           "api_name": "openai",
-#           "api_key": "sk-XXXXXXXX",
-#           "custom_prompt": "Please summarize this podcast in bullet form.",
-#           "keywords": "podcast,audio",c
-#           "keep_original_audio": false
-#         }
-#         --boundary
-#         Content-Disposition: form-data; name="files"; filename="mysong.mp3"
-#         Content-Type: audio/mpeg
-#
-#         (Binary MP3 data here)
-#         --boundary--
-
-# Example Server Response
-#         {
-#           "mode": "ephemeral",
-#           "processed_count": 2,
-#           "errors_count": 0,
-#           "errors": [],
-#           "results": [
-#             {
-#               "input_item": "https://feeds.megaphone.fm/XYZ12345",
-#               "status": "Success",
-#               "transcript": "Full transcript here...",
-#               "summary": "...",
-#               "db_id": null
-#             },
-#             {
-#               "input_item": "/tmp/mysong.mp3",
-#               "status": "Success",
-#               "transcript": "Transcribed text",
-#               "summary": "...",
-#               "db_id": null
-#             }
-#           ]
-#         }
-
-
-#
-# End of Audio Ingestion
-##############################################################################################
-
-
-######################## URL Ingestion Endpoint ###################################
-# Endpoints:
-# FIXME - This is a dummy implementation. Replace with actual logic
-
-#
-# @router.post("/process-url", summary="Process a remote media file by URL")
-# async def process_media_url_endpoint(
-#     payload: MediaProcessUrlRequest
-# ):
-#     """
-#     Ingest/transcribe a remote file. Depending on 'media_type', use audio or video logic.
-#     Depending on 'mode', store ephemeral or in DB.
-#     """
-#     try:
-#         # Step 1) Distinguish audio vs. video ingestion
-#         if payload.media_type.lower() == "audio":
-#             # Call your audio ingestion logic
-#             result = process_audio_url(
-#                 url=payload.url,
-#                 whisper_model=payload.whisper_model,
-#                 api_name=payload.api_name,
-#                 api_key=payload.api_key,
-#                 keywords=payload.keywords,
-#                 diarize=payload.diarize,
-#                 include_timestamps=payload.include_timestamps,
-#                 keep_original=payload.keep_original,
-#                 start_time=payload.start_time,
-#                 end_time=payload.end_time,
-#             )
-#         else:
-#             # Default to video
-#             result = process_video_url(
-#                 url=payload.url,
-#                 whisper_model=payload.whisper_model,
-#                 api_name=payload.api_name,
-#                 api_key=payload.api_key,
-#                 keywords=payload.keywords,
-#                 diarize=payload.diarize,
-#                 include_timestamps=payload.include_timestamps,
-#                 keep_original_video=payload.keep_original,
-#                 start_time=payload.start_time,
-#                 end_time=payload.end_time,
-#             )
-#
-#         # result is presumably a dict containing transcript, some metadata, etc.
-#         if not result:
-#             raise HTTPException(status_code=500, detail="Processing failed or returned no result")
-#
-#         # Step 2) ephemeral vs. persist
-#         if payload.mode == "ephemeral":
-#             ephemeral_id = ephemeral_storage.store_data(result)
-#             return {
-#                 "status": "ephemeral-ok",
-#                 "media_id": ephemeral_id,
-#                 "media_type": payload.media_type
-#             }
-#         else:
-#             # If you want to store in your main DB, do so:
-#             media_id = store_in_db(result)  # or add_media_to_database(...) from DB_Manager
-#             return {
-#                 "status": "persist-ok",
-#                 "media_id": str(media_id),
-#                 "media_type": payload.media_type
-#             }
-#
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-#
-# End of URL Ingestion Endpoint
-#######################################################################################
-
-
-######################## Ebook Ingestion Endpoint ###################################
-# Endpoints:
-# FIXME
-
-# Ebook Ingestion Endpoint
-# /Server_API/app/api/v1/endpoints/media.py
-
-class EbookIngestRequest(BaseModel):
-    # If you want to handle only file uploads, skip URL
-    # or if you do both, you can add a union
-    title: Optional[str] = None
-    author: Optional[str] = None
-    keywords: Optional[List[str]] = []
-    custom_prompt: Optional[str] = None
-    api_name: Optional[str] = None
-    api_key: Optional[str] = None
-    mode: str = "persist"
-    chunk_size: int = 500
-    chunk_overlap: int = 200
-
-@router.post("/process-ebook", summary="Ingest & process an e-book file")
-async def process_ebook_endpoint(
-    background_tasks: BackgroundTasks,
-    payload: EbookIngestRequest = Form(...),
-    file: UploadFile = File(...)
-):
-    """
-    Ingests an eBook (e.g. .epub).
-    You can pass all your custom fields in the form data plus the file itself.
-    """
-    try:
-        # 1) Save file to a tmp path
-        tmp_path = f"/tmp/{file.filename}"
-        with open(tmp_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-
-        # 2) Process eBook
-        result_data = await process_ebook_task(
-            file_path=tmp_path,
-            title=payload.title,
-            author=payload.author,
-            keywords=payload.keywords,
-            custom_prompt=payload.custom_prompt,
-            api_name=payload.api_name,
-            api_key=payload.api_key,
-            chunk_size=payload.chunk_size,
-            chunk_overlap=payload.chunk_overlap
-        )
-
-        # 3) ephemeral vs. persist
-        if payload.mode == "ephemeral":
-            ephemeral_id = ephemeral_storage.store_data(result_data)
-            return {
-                "status": "ephemeral-ok",
-                "media_id": ephemeral_id,
-                "ebook_title": result_data.get("ebook_title")
-            }
-        else:
-            # If persisting to DB:
-            info_dict = {
-                "title": result_data.get("ebook_title"),
-                "author": result_data.get("ebook_author"),
-            }
-            # Possibly you chunk the text into segments—just an example:
-            segments = [{"Text": result_data["text"]}]
-            media_id = add_media_to_database(
-                url=file.filename,
-                info_dict=info_dict,
-                segments=segments,
-                summary=result_data["summary"],
-                keywords=",".join(payload.keywords),
-                custom_prompt_input=payload.custom_prompt or "",
-                whisper_model="ebook-imported",  # or something else
-                overwrite=False
-            )
-            return {
-                "status": "persist-ok",
-                "media_id": str(media_id),
-                "ebook_title": result_data.get("ebook_title")
-            }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# If you want to also accept an eBook by URL (for direct download) instead of a file-upload, you can adapt the request model and your service function accordingly.
-# If you want chunk-by-chapter logic or more advanced processing, integrate your existing import_epub(...) from Book_Ingestion_Lib.py.
-
-#
-# End of Ebook Ingestion
-#################################################################################################
-
-
-######################## Document Ingestion Endpoint ###################################
-# Endpoints:
-# FIXME
-
-class DocumentIngestRequest(BaseModel):
-    api_name: Optional[str] = None
-    api_key: Optional[str] = None
-    custom_prompt: Optional[str] = None
-    system_prompt: Optional[str] = None
-    keywords: Optional[List[str]] = []
-    auto_summarize: bool = False
-    mode: str = "persist"  # or "ephemeral"
-
-@router.post("/process-document")
-async def process_document_endpoint(
-    payload: DocumentIngestRequest = Form(...),
-    file: UploadFile = File(...),
-    doc_urls: Optional[List[str]] = None,
-    api_name: Optional[str] = None,
-    api_key: Optional[str] = None,
-    custom_prompt_input: Optional[str] = None,
-    system_prompt_input: Optional[str] = None,
-    use_cookies: bool = False,
-    cookies: Optional[str] = None,
-    keep_original: bool = False,
-    custom_keywords: List[str] = None,
-    chunk_method: Optional[str] = 'chunk_by_sentence',
-    max_chunk_size: int = 500,
-    chunk_overlap: int = 200,
-    use_adaptive_chunking: bool = False,
-    use_multi_level_chunking: bool = False,
-    chunk_language: Optional[str] = None,
-    store_in_db: bool = False,
-    overwrite_existing: bool = False,
-    custom_title: Optional[str] = None
-):
-    """
-    Ingest a docx/txt/rtf (or .zip of them), optionally summarize,
-    then either store ephemeral or persist in DB.
-    """
-    try:
-        # 1) Read file bytes + filename
-        file_bytes = await file.read()
-        filename = file.filename
-
-        # 2) Document processing service
-        result_data = await process_documents(
-            #doc_urls: Optional[List[str]],
-            doc_urls=None,
-            #doc_files: Optional[List[str]],
-            doc_files=file,
-            #api_name: Optional[str],
-            api_name=api_name,
-            #api_key: Optional[str],
-            api_key=api_key,
-            #custom_prompt_input: Optional[str],
-            custom_prompt_input=custom_prompt_input,
-            #system_prompt_input: Optional[str],
-            system_prompt_input=system_prompt_input,
-            #use_cookies: bool,
-            use_cookies=use_cookies,
-            #cookies: Optional[str],
-            cookies=cookies,
-            #keep_original: bool,
-            keep_original=keep_original,
-            #custom_keywords: List[str],
-            custom_keywords=custom_keywords,
-            #chunk_method: Optional[str],
-            chunk_method=chunk_method,
-            #max_chunk_size: int,
-            max_chunk_size=max_chunk_size,
-            #chunk_overlap: int,
-            chunk_overlap=chunk_overlap,
-            #use_adaptive_chunking: bool,
-            use_adaptive_chunking=use_adaptive_chunking,
-            #use_multi_level_chunking: bool,
-            use_multi_level_chunking=use_multi_level_chunking,
-            #chunk_language: Optional[str],
-            chunk_language=chunk_language,
-            #store_in_db: bool = False,
-            store_in_db=store_in_db,
-            #overwrite_existing: bool = False,
-            overwrite_existing=overwrite_existing,
-            #custom_title: Optional[str] = None
-            custom_title=custom_title,
-    )
-
-        # 3) ephemeral vs. persist
-        if payload.mode == "ephemeral":
-            ephemeral_id = ephemeral_storage.store_data(result_data)
-            return {
-                "status": "ephemeral-ok",
-                "media_id": ephemeral_id,
-                "filename": filename
-            }
-        else:
-            # Store in DB
-            doc_text = result_data["text_content"]
-            summary = result_data["summary"]
-            prompts_joined = (payload.system_prompt or "") + "\n\n" + (payload.custom_prompt or "")
-
-            # Create “info_dict” for DB
-            info_dict = {
-                "title": os.path.splitext(filename)[0],  # or user-supplied
-                "source_file": filename
-            }
-
-            segments = [{"Text": doc_text}]
-
-            # Insert:
-            media_id = add_media_to_database(
-                url=filename,
-                info_dict=info_dict,
-                segments=segments,
-                summary=summary,
-                keywords=",".join(payload.keywords),
-                custom_prompt_input=prompts_joined,
-                whisper_model="doc-import",
-                media_type="document",
-                overwrite=False
-            )
-
-            return {
-                "status": "persist-ok",
-                "media_id": str(media_id),
-                "filename": filename
-            }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-#
-# End of Document Ingestion
-############################################################################################
-
-
-######################## PDF Ingestion Endpoint ###################################
-# Endpoints:
-# FIXME
-
-# PDF Parsing endpoint
-# /Server_API/app/api/v1/endpoints/media.py
-
-class PDFIngestRequest(BaseModel):
-    parser: Optional[str] = "pymupdf4llm"  # or "pymupdf", "docling"
-    custom_prompt: Optional[str] = None
-    system_prompt: Optional[str] = None
-    api_name: Optional[str] = None
-    api_key: Optional[str] = None
-    auto_summarize: bool = False
-    keywords: Optional[List[str]] = []
-    mode: str = "persist"  # "ephemeral" or "persist"
-
-
-@router.post("/process-pdf")
-async def process_pdf_endpoint(
-    payload: PDFIngestRequest = Form(...),
-    file: UploadFile = File(...)
-):
-    """
-    Ingest a PDF file, optionally summarize, and either ephemeral or persist to DB.
-    """
-    try:
-        # 1) read the file bytes
-        file_bytes = await file.read()
-        filename = file.filename
-
-        # 2) call the service
-        result_data = await process_pdf_task(
-            file_bytes=file_bytes,
-            filename=filename,
-            parser=payload.parser,
-            custom_prompt=payload.custom_prompt,
-            api_name=payload.api_name,
-            api_key=payload.api_key,
-            auto_summarize=payload.auto_summarize,
-            keywords=payload.keywords,
-            system_prompt=payload.system_prompt
-        )
-
-        # 3) ephemeral vs. persist
-        if payload.mode == "ephemeral":
-            ephemeral_id = ephemeral_storage.store_data(result_data)
-            return {
-                "status": "ephemeral-ok",
-                "media_id": ephemeral_id,
-                "title": result_data["title"]
-            }
-        else:
-            # persist in DB
-            segments = [{"Text": result_data["text_content"]}]
-            summary = result_data["summary"]
-            # combine prompts for storing
-            combined_prompt = (payload.system_prompt or "") + "\n\n" + (payload.custom_prompt or "")
-
-            info_dict = {
-                "title": result_data["title"],
-                "author": result_data["author"],
-                "parser_used": result_data["parser_used"]
-            }
-
-            # Insert into DB
-            media_id = add_media_to_database(
-                url=filename,
-                info_dict=info_dict,
-                segments=segments,
-                summary=summary,
-                keywords=",".join(payload.keywords or []),
-                custom_prompt_input=combined_prompt,
-                whisper_model="pdf-ingest",
-                media_type="document",
-                overwrite=False
-            )
-
-            return {
-                "status": "persist-ok",
-                "media_id": str(media_id),
-                "title": result_data["title"]
-            }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-#
-# End of PDF Ingestion
-############################################################################################
-
-
-######################## XML Ingestion Endpoint ###################################
-# Endpoints:
-# FIXME
-
-#XML File handling
-# /Server_API/app/api/v1/endpoints/media.py
-
-class XMLIngestRequest(BaseModel):
-    title: Optional[str] = None
-    author: Optional[str] = None
-    keywords: Optional[List[str]] = []
-    system_prompt: Optional[str] = None
-    custom_prompt: Optional[str] = None
-    auto_summarize: bool = False
-    api_name: Optional[str] = None
-    api_key: Optional[str] = None
-    mode: str = "persist"  # or "ephemeral"
-
-# @router.post("/process-xml")
-# async def process_xml_endpoint(
-#     payload: XMLIngestRequest = Form(...),
-#     file: UploadFile = File(...)
-# ):
-#     """
-#     Ingest an XML file, optionally summarize it,
-#     then either store ephemeral or persist in DB.
-#     """
-#     try:
-#         file_bytes = await file.read()
-#         filename = file.filename
-#
-#         # 1) call the service
-#         result_data = await process_xml_task(
-#             file_bytes=file_bytes,
-#             filename=filename,
-#             title=payload.title,
-#             author=payload.author,
-#             keywords=payload.keywords or [],
-#             system_prompt=payload.system_prompt,
-#             custom_prompt=payload.custom_prompt,
-#             auto_summarize=payload.auto_summarize,
-#             api_name=payload.api_name,
-#             api_key=payload.api_key
-#         )
-#
-#         # 2) ephemeral vs. persist
-#         if payload.mode == "ephemeral":
-#             ephemeral_id = ephemeral_storage.store_data(result_data)
-#             return {
-#                 "status": "ephemeral-ok",
-#                 "media_id": ephemeral_id,
-#                 "title": result_data["info_dict"]["title"]
-#             }
-#         else:
-#             # store in DB
-#             info_dict = result_data["info_dict"]
-#             summary = result_data["summary"]
-#             segments = result_data["segments"]
-#             combined_prompt = (payload.system_prompt or "") + "\n\n" + (payload.custom_prompt or "")
-#
-#             media_id = add_media_to_database(
-#                 url=filename,
-#                 info_dict=info_dict,
-#                 segments=segments,
-#                 summary=summary,
-#                 keywords=",".join(payload.keywords or []),
-#                 custom_prompt_input=combined_prompt,
-#                 whisper_model="xml-import",
-#                 media_type="xml_document",
-#                 overwrite=False
-#             )
-#
-#             return {
-#                 "status": "persist-ok",
-#                 "media_id": str(media_id),
-#                 "title": info_dict["title"]
-#             }
-#
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# Your gradio_xml_ingestion_tab.py is already set up to call import_xml_handler(...) directly. If you’d prefer to unify it with the new approach, you can simply have your Gradio UI call the new POST /process-xml route, sending the file as UploadFile plus all your form fields. The existing code is fine for a local approach, but if you want your new single endpoint approach, you might adapt the code in the click() callback to do an HTTP request to /process-xml with the “mode” param, etc.
-#
-# End of XML Ingestion
-############################################################################################################
-
-
-######################## Web Scraping Ingestion Endpoint ###################################
-# Endpoints:
 
 # Web Scraping
 #     Accepts JSON body describing the scraping method, URL(s), etc.

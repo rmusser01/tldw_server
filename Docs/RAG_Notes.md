@@ -22,6 +22,10 @@ https://ai.plainenglish.io/part-2-chatting-with-my-companys-brain-how-i-built-my
 https://medium.com/data-science-collective/ai-engineering-3-3-dataset-engineering-inference-optimization-and-architecture-and-user-aac4ddf43c23
 
 
+Models
+	https://huggingface.co/THUDM/GLM-Z1-32B-0414
+	https://huggingface.co/collections/THUDM/glm-4-0414-67f3cbcb34dd9d252707cb2e
+
 Agentic RAG
 	https://arxiv.org/pdf/2501.09136
 	https://github.com/asinghcsu/AgenticRAG-Survey

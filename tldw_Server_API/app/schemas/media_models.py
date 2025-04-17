@@ -195,6 +195,26 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
             return v
         raise ValueError("Time format must be seconds or HH:MM:SS")
 
+class MediaItemProcessResponse(BaseModel):
+    """
+    Pydantic model for media item details after processing. Details returned from a processing request
+    """
+    status: Literal['Success', 'Error', 'Warning']
+    input_ref: str # The original URL or filename provided by the user
+    processing_source: str # The actual path or URL used by the processor, e.g., temp file path
+    media_type: (Literal['video', 'audio', 'document', 'pdf', 'ebook']) # 'video', 'pdf', 'audio', etc.
+    metadata: Dict[str, Any] # Extracted info like title, author, duration, etc.
+    content: str # The main extracted text or full transcript
+    segments: Optional[List[Dict[str, Any]]] # For timestamped transcripts, if applicable
+    chunks: Optional[List[Dict[str, Any]]] # If chunking happened within the processor
+    analysis: Optional[str] # The generated summary, if analysis was performed
+    analysis_details: Optional[Dict[str, Any]] # e.g., whisper model used, summarization prompt
+    error: Optional[str] # Detailed error message if status != 'Success'
+    warnings: Optional[List[str]] # For non-critical issues
+    model_config = {
+        "extra": "forbid",  # Disallow extra fields not defined in the model
+    }
+
 ######################## Video Ingestion Model ###################################
 #
 # This is a schema for video ingestion and analysis.

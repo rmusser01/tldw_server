@@ -10,6 +10,9 @@ from pathlib import Path
 from loguru import logger
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import FileResponse
+from starlette.staticfiles import StaticFiles
+
 #
 # Local Imports
 # Media Endpoint
@@ -75,12 +78,23 @@ for logger_name in loggers_to_intercept:
 logger.info("Loguru logger configured with SPECIFIC standard logging interception!")
 
 
-
+BASE_DIR     = Path(__file__).resolve().parent
+FAVICON_PATH = BASE_DIR / "static" / "favicon.ico"
 app = FastAPI(
     title="tldw API",
     version="0.0.1",
     description="Version 0.0.1: Smooth Slide | FastAPI Backend for the tldw project"
 )
+
+# Static files serving
+app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+
+# Favicon serving
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(FAVICON_PATH, media_type="image/x-icon")
+
+
 
 # FIXME - CORS
 # # -- If you have any global middleware, add it here --

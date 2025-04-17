@@ -6,6 +6,9 @@ import json
 import os
 import tempfile
 import zipfile
+from pathlib import Path
+from typing import Dict, Any, Optional, List
+
 #
 # External Imports
 from docx2txt import docx2txt
@@ -16,11 +19,75 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_datab
 # Local Imports
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
+from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 from tldw_Server_API.app.core.Utils.Utils import logging
 #
 #######################################################################################################################
 #
 # Function Definitions
+
+
+def _read_text(path: Path) -> str:
+    """Read file content as UTF‑8, fallback to latin‑1 if needed."""
+    try:
+        return path.read_text(encoding="utf‑8")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="latin‑1")
+
+def _process_single_document(
+    doc_path: Path,
+    perform_chunking: bool,
+    chunk_opts: Dict[str, Any],
+    summarize: bool,
+    summarize_recursively: bool,
+    api_name: Optional[str],
+    api_key: Optional[str],
+    custom_prompt: Optional[str],
+    system_prompt: Optional[str],
+) -> Dict[str, Any]:
+    """CPU‑bound worker."""
+    try:
+        text = _read_text(doc_path)
+        if not text.strip():
+            return {"input": str(doc_path), "status": "Error", "error": "Empty file"}
+
+        # ── chunk ------------------------------------------------------------
+        chunks = [{"text": text}]
+        if perform_chunking:
+            chunks = improved_chunking_process(text, chunk_opts) or [{"text": text}]
+
+        # ── summarise --------------------------------------------------------
+        summary = None
+        if summarize and api_name and api_key:
+            chunk_summaries: List[str] = []
+            for c in chunks:
+                s = perform_summarization(
+                    api_name, c["text"], custom_prompt, api_key,
+                    recursive_summarization=False, temp=None, system_message=system_prompt
+                )
+                if s:
+                    chunk_summaries.append(s)
+
+            if summarize_recursively and len(chunk_summaries) > 1:
+                summary = perform_summarization(
+                    api_name, "\n\n".join(chunk_summaries), custom_prompt, api_key,
+                    recursive_summarization=False, temp=None, system_message=system_prompt
+                )
+            else:
+                summary = "\n\n".join(chunk_summaries) if chunk_summaries else None
+
+        return {
+            "input": str(doc_path),
+            "status": "Success",
+            "text": text,
+            "chunks": chunks,
+            "summary": summary,
+        }
+
+    except Exception as e:
+        logging.error(f"process_single_document error for {doc_path}: {e}", exc_info=True)
+        return {"input": str(doc_path), "status": "Error", "error": str(e)}
+
 
 def import_data(file, title, author, keywords, custom_prompt, summary, auto_summarize, api_name, api_key, system_prompt):
     logging.debug(f"Starting import_data with file: {file} / Title: {title} / Author: {author} / Keywords: {keywords}")

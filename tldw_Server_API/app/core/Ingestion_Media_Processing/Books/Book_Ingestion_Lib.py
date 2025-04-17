@@ -15,13 +15,18 @@
 import os
 import re
 import tempfile
+import uuid
 import zipfile
 from datetime import datetime
 import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Dict, Any, Optional, List
+
 import html2text
 #
 # External Imports
 import ebooklib
+import requests
 from bs4 import BeautifulSoup
 from ebooklib import epub
 #
@@ -111,7 +116,7 @@ def import_epub(file_path,
             logging.debug(f"Structure of first chunk: {chunks[0].keys()}")
 
         # Handle summarization if enabled
-        if auto_summarize and api_name and api_key:
+        if auto_analyze and api_name and api_key:
             logging.info("Auto-summarization is enabled.")
             summarized_chunks = []
             for chunk in chunks:
@@ -826,6 +831,64 @@ def slugify(text):
         - str: Slugified text.
     """
     return re.sub(r'[\W_]+', '-', text.lower()).strip('-')
+
+
+def _process_single_ebook(
+    ebook_path: Path,
+    perform_chunking: bool,
+    chunk_options: Dict[str, Any],
+    summarize: bool,
+    summarize_recursively: bool,
+    api_name: Optional[str],
+    api_key: Optional[str],
+    custom_prompt: Optional[str],
+    system_prompt: Optional[str],
+) -> Dict[str, Any]:
+    """
+    CPU‑bound worker: read EPUB, chunk (optional), summarise (optional).
+    Returns a dict shaped like the video processor’s per‑item result.
+    """
+    try:
+        text = read_epub_filtered(str(ebook_path))
+        if not text.strip():
+            return {"input": str(ebook_path), "status": "Error", "error": "Empty or unreadable EPUB"}
+
+        # ----- chunking ------------------------------------------------------
+        chunks = [{"text": text}]  # default single chunk
+        if perform_chunking:
+            chunks = chunk_ebook_by_chapters(text, chunk_options) or [{"text": text}]
+
+        # ----- summarisation -------------------------------------------------
+        summary = None
+        if summarize and api_name and api_key:
+            chunk_summaries: List[str] = []
+            for c in chunks:
+                s = perform_summarization(
+                    api_name, c["text"], custom_prompt, api_key,
+                    recursive_summarization=False, temp=None, system_message=system_prompt
+                )
+                if s:
+                    chunk_summaries.append(s)
+
+            if summarize_recursively and len(chunk_summaries) > 1:
+                summary = perform_summarization(
+                    api_name, "\n\n".join(chunk_summaries), custom_prompt, api_key,
+                    recursive_summarization=False, temp=None, system_message=system_prompt
+                )
+            else:
+                summary = "\n\n".join(chunk_summaries) if chunk_summaries else None
+
+        return {
+            "input": str(ebook_path),
+            "status": "Success",
+            "text": text,
+            "chunks": chunks,          # raw chunk objects from chunk_ebook_by_chapters
+            "summary": summary,
+        }
+
+    except Exception as e:
+        logging.error(f"process_single_ebook error for {ebook_path}: {e}", exc_info=True)
+        return {"input": str(ebook_path), "status": "Error", "error": str(e)}
 
 #
 # End of Function Definitions

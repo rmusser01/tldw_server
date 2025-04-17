@@ -22,6 +22,8 @@ https://github.com/mbzuai-oryx/LLMVoX
 https://github.com/abus-aikorea/voice-pro
 https://github.com/rmusser01/LiveBench/tree/llamacpp-api
 https://github.com/santinic/audiblez
+https://github.com/Lex-au/Vocalis
+    https://www.reddit.com/r/LocalLLaMA/comments/1jy1x1b/comment/mmvm73e/
 https://github.com/davidbrowne17/csm-streaming
 https://github.com/yukiarimo/hanasu
 https://codingwithcody.com/2025/04/02/containerized-voice-identification/

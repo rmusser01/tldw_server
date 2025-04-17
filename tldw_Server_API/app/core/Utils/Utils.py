@@ -29,8 +29,10 @@
 ####################
 #
 # Import necessary libraries
+import mimetypes
 import sys
 import zipfile
+from pathlib import Path
 
 import chardet
 import configparser
@@ -1364,6 +1366,54 @@ def save_segments_to_json(segments, file_name="transcription_segments.json"):
         json.dump(segments, json_file, ensure_ascii=False, indent=4)
 
     return json_file_path
+
+
+def safe_download(url: str, tmp_dir: Path, ext: str) -> Path:
+    """
+    Wrapper around download_file() that:
+      1) builds a random filename inside tmp_dir
+      2) returns the Path on success
+    """
+    dst = tmp_dir / (f"{uuid.uuid4().hex}{ext}")
+    # checksum=None, max_retries=3, delay=5 keep the defaults
+    download_file(url, str(dst))          # raises on failure
+    return dst
+
+
+def smart_download(url: str, tmp_dir: Path) -> Path:
+    """
+    • Chooses a filename & extension automatically
+    • Calls download_file(url, dest_path)
+    • Returns Path to downloaded file
+
+    Order of extension preference:
+      1. The URL path (e.g. “.md”, “.rst”, “.txt” …)
+      2. The HTTP Content‑Type header
+      3. Fallback: “.bin”
+    """
+    # ---------- 1) try URL  -------------------------------------------------
+    parsed = urlparse(url)
+    guessed_ext = Path(parsed.path).suffix.lower()
+
+    # ---------- 2) if no ext, probe HEAD  -----------------------------------
+    if not guessed_ext:
+        try:
+            head = requests.head(url, allow_redirects=True, timeout=10)
+            ctype = head.headers.get("content-type", "")
+            guessed_ext = mimetypes.guess_extension(ctype.split(";")[0].strip()) or ""
+        except Exception:
+            guessed_ext = ""
+
+    # ---------- 3) final fallback  ------------------------------------------
+    if not guessed_ext:
+        guessed_ext = ".bin"
+
+    # ---------- 4) build dest path  -----------------------------------------
+    dest = tmp_dir / f"{uuid.uuid4().hex}{guessed_ext}"
+
+    # ---------- 5) download  ------------------------------------------------
+    download_file(url, str(dest))          # inherits retries / resume
+    return dest
 
 
 def download_file(url, dest_path, expected_checksum=None, max_retries=3, delay=5):
