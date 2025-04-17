@@ -115,7 +115,7 @@ class ChunkingOptions(BaseModel):
 
 class AudioVideoOptions(BaseModel):
     """Pydantic model for Audio/Video specific options"""
-    whisper_model: str = Field("deepml/distil-large-v3", description="Model ID for audio/video transcription (e.g., from Hugging Face)")
+    transcription_model: str = Field("deepml/distil-large-v3", description="Model ID for audio/video transcription (e.g., from Hugging Face)")
     transcription_language: str = Field("en", description="Language for audio/video transcription (ISO 639-1 code)")
     diarize: bool = Field(False, description="Enable speaker diarization (audio/video)")
     timestamp_option: bool = Field(True, description="Include timestamps in the transcription (audio/video)")
@@ -225,10 +225,9 @@ class VideoIngestRequest(BaseModel):
 
     urls: Optional[List[str]] = None  # e.g., YouTube, Vimeo, local-file references
 
-    whisper_model: str = "distil-large-v3"
+    transcription_model: str = "distil-large-v3"
     diarize: bool = False
     vad: bool = True
-    use_custom_prompt: bool = False
     custom_prompt: Optional[str] = None
     system_prompt: Optional[str] = None
 
@@ -249,9 +248,7 @@ class VideoIngestRequest(BaseModel):
     cookies: Optional[str] = None
 
     timestamp_option: bool = True
-    keep_original_video: bool = False
     confab_checkbox: bool = False
-    overwrite_existing: bool = False
 
     start_time: Optional[str] = None
     end_time: Optional[str] = None
@@ -272,7 +269,7 @@ class AudioIngestRequest(BaseModel):
     is_podcast: bool = False
 
     urls: Optional[List[str]] = None
-    whisper_model: str = "distil-large-v3"
+    transcription_model: str = "distil-large-v3"
     diarize: bool = False
     keep_timestamps: bool = True
 

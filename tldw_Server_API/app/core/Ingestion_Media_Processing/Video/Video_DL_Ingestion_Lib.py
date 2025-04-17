@@ -34,12 +34,6 @@ from urllib.parse import urlparse, parse_qs
 import yt_dlp
 import unicodedata
 # Import Local
-from tldw_Server_API.app.core.DB_Management.DB_Manager import (
-    add_media_to_database,
-    check_media_and_whisper_model,
-    check_existing_media,
-    update_media_content_with_version
-)
 from tldw_Server_API.app.core.Evaluations.ms_g_eval import run_geval
 from tldw_Server_API.app.core.Utils.Utils import (
     convert_to_seconds,
@@ -123,21 +117,6 @@ def download_video(video_url, download_path, info_dict, download_video_flag, cur
         return None
 
     normalized_video_title = normalize_title(info_dict['title'])
-
-    # FIXME - make sure this works/checks against hte current model
-    # Check if media already exists in the database and compare whisper models
-    should_download, reason = check_media_and_whisper_model(
-        title=normalized_video_title,
-        url=video_url,
-        current_whisper_model=current_whisper_model
-    )
-
-    if not should_download:
-        logging.info(f"Skipping download: {reason}")
-        return None
-
-    logging.info(f"Proceeding with download: {reason}")
-
     video_file_path = os.path.join(download_path, f"{normalized_video_title}.{info_dict['ext']}")
 
     # Check for existence of video file
@@ -349,8 +328,7 @@ def process_videos(
     end_time: Optional[str],
     diarize: bool,
     vad_use: bool,
-    whisper_model: str,
-    use_custom_prompt: bool,
+    transcription_model: str,
     custom_prompt: Optional[str],
     system_prompt: Optional[str],
     perform_chunking: bool,
@@ -363,13 +341,10 @@ def process_videos(
     summarize_recursively: bool,
     api_name: Optional[str],
     api_key: Optional[str],
-    keywords: str,
     use_cookies: bool,
     cookies: Optional[str],
     timestamp_option: bool,
     confab_checkbox: bool,
-    overwrite_existing: bool,
-    store_in_db: bool,
 ) -> Dict[str, Any]:
     """
     Processes multiple videos or local file paths, transcribes, summarizes,
@@ -383,8 +358,7 @@ def process_videos(
     :param end_time: End time for partial transcription.
     :param diarize: Enable speaker diarization.
     :param vad_use: Enable Voice Activity Detection.
-    :param whisper_model: Name of the Whisper model to use.
-    :param use_custom_prompt: If True, we use the user’s custom prompt.
+    :param transcription_model: Name of the transcription model to use.
     :param custom_prompt: The user’s custom text prompt for summarization.
     :param system_prompt: The system prompt for the LLM.
     :param perform_chunking: If True, break transcripts into chunks before summarizing.
@@ -397,13 +371,10 @@ def process_videos(
     :param summarize_recursively: If True, do multi-pass summarization of chunk summaries.
     :param api_name: The LLM API name (e.g., "openai").
     :param api_key: The user’s (or system) API key for the LLM.
-    :param keywords: A comma-separated list of keywords.
     :param use_cookies: If True, use cookies for authenticated video downloads.
     :param cookies: The user-supplied cookies in JSON or Netscape format.
     :param timestamp_option: If True, keep timestamps in final transcript.
     :param confab_checkbox: If True, run confabulation check on the summary.
-    :param overwrite_existing: If True, re-process media even if a matching item is in DB.
-    :param store_in_db: If False, skip writing to DB (ephemeral mode).
     :return: A dict with the overall results, e.g.:
              {
                "processed_count": int,
@@ -444,11 +415,9 @@ def process_videos(
             single_result = process_single_video(
                 video_input=video_input,
                 start_seconds=start_seconds,
-                end_seconds=end_seconds,
                 diarize=diarize,
                 vad_use=vad_use,
-                whisper_model=whisper_model,
-                use_custom_prompt=use_custom_prompt,
+                transcription_model=transcription_model,
                 custom_prompt=custom_prompt,
                 system_prompt=system_prompt,
                 perform_chunking=perform_chunking,
@@ -461,13 +430,9 @@ def process_videos(
                 summarize_recursively=summarize_recursively,
                 api_name=api_name,
                 api_key=api_key,
-                keywords=keywords,
                 use_cookies=use_cookies,
                 cookies=cookies,
                 timestamp_option=timestamp_option,
-                keep_original_video=False,
-                overwrite_existing=overwrite_existing,
-                store_in_db=store_in_db,
             )
             if single_result["status"] == "Success":
                 # Append to results list
@@ -476,7 +441,7 @@ def process_videos(
                 # Log success metric
                 log_counter(
                     metric_name="videos_processed_total",
-                    labels={"whisper_model": whisper_model, "api_name": (api_name or "none")},
+                    labels={"whisper_model": transcription_model, "api_name": (api_name or "none")},
                     value=1
                 )
 
@@ -500,7 +465,7 @@ def process_videos(
                 log_histogram(
                     metric_name="video_processing_time_seconds",
                     value=processing_time,
-                    labels={"whisper_model": whisper_model, "api_name": (api_name or "none")}
+                    labels={"whisper_model": transcription_model, "api_name": (api_name or "none")}
                 )
             else:
                 # If status is "Error"
@@ -510,7 +475,7 @@ def process_videos(
                 # Log failure metric
                 log_counter(
                     metric_name="videos_failed_total",
-                    labels={"whisper_model": whisper_model, "api_name": (api_name or "none")},
+                    labels={"whisper_model": transcription_model, "api_name": (api_name or "none")},
                     value=1
                 )
         except Exception as exc:
@@ -521,7 +486,7 @@ def process_videos(
             # Log failure metric
             log_counter(
                 metric_name="videos_failed_total",
-                labels={"whisper_model": whisper_model, "api_name": (api_name or 'none')},
+                labels={"whisper_model": transcription_model, "api_name": (api_name or 'none')},
                 value=1
             )
 
@@ -571,11 +536,9 @@ def process_videos(
 def process_single_video(
     video_input: str,
     start_seconds: int,
-    end_seconds: Optional[int],
     diarize: bool,
     vad_use: bool,
-    whisper_model: str,
-    use_custom_prompt: bool,
+    transcription_model: str,
     custom_prompt: Optional[str],
     system_prompt: Optional[str],
     perform_chunking: bool,
@@ -588,90 +551,96 @@ def process_single_video(
     summarize_recursively: bool,
     api_name: Optional[str],
     api_key: Optional[str],
-    keywords: str,
     use_cookies: bool,
     cookies: Optional[str],
     timestamp_option: bool,
-    keep_original_video: bool,
-    overwrite_existing: bool,
-    store_in_db: bool
-) -> Dict[str, Any]:
+    # --- Parameters used only for processing itself ---
+) -> Dict[str, Any]: # Returning a dict matching MediaItemProcessResponse structure
     """
-    Processes a single video or local file path, returning transcription + summary
-    (plus DB insertion if store_in_db=True).
+    Processes a single video/file: Extracts metadata, transcribes, optionally summarizes.
+    DOES NOT interact with the database.
+    """
+    processing_result = { # Initialize with defaults matching MediaItemProcessResponse
+        "status": "Error", # Default to error
+        "input_ref": video_input,
+        "processing_source": video_input, # Will be updated if downloaded/temp file used
+        "media_type": "video",
+        "metadata": {},
+        "content": "",
+        "segments": None,
+        "chunks": None,
+        "analysis": None,
+        "analysis_details": {},
+        "error": None,
+        "warnings": None
+    }
 
-    This is adapted from your `process_url_with_metadata()` function, with all
-    Gradio references removed.
-    """
     try:
-        logging.info(f"Processing single video input: {video_input}")
+        logging.info(f"Processing single video input (DB-agnostic): {video_input}")
 
         # Distinguish remote vs. local
         is_remote = video_input.startswith(("http://", "https://"))
 
         # If is_remote, get metadata from extract_metadata
         info_dict: Dict[str, Any] = {}
+
+        # 1. Get Metadata & Determine Processing Source
         if is_remote:
-            # Attempt to gather metadata
-            info_dict = extract_metadata(video_input, use_cookies, cookies)
+            # Use your existing extract_metadata or yt-dlp directly here
+            # Assume info_dict = extract_metadata(video_input, use_cookies, cookies)
+            # Assume download_path = download_video_if_needed(video_input, ...) # Needs refactoring too
+            # Let's simplify for now: Assume transcription handles download/path
+            processing_source = video_input # Placeholder - transcription needs the actual path
+            info_dict = extract_metadata(video_input, use_cookies, cookies) # Keep metadata extraction
             if not info_dict:
-                return {
-                    "video_input": video_input,
-                    "status": "Error",
-                    "error": f"Failed to extract metadata for {video_input}"
-                }
+                 processing_result["error"] = f"Failed to extract metadata for {video_input}"
+                 return processing_result
+            processing_result["metadata"] = info_dict
+            processing_result["analysis_details"]["source_metadata"] = info_dict # Store raw metadata if needed
         else:
-            # local file
+            # Local file
             if not os.path.exists(video_input):
-                return {
-                    "video_input": video_input,
-                    "status": "Error",
-                    "error": f"Local file not found: {video_input}"
-                }
-            # Build a minimal info_dict
-            info_dict = {
-                "webpage_url": generate_unique_identifier(video_input),
+                processing_result["error"] = f"Local file not found: {video_input}"
+                return processing_result
+            processing_source = video_input
+            info_dict = { # Create minimal metadata
+                "webpage_url": generate_unique_identifier(video_input), # Generate a unique ID if needed later
                 "title": os.path.basename(video_input),
                 "description": "Local file",
             }
-
-        # If store_in_db is True, check DB:
-        if store_in_db:
-            media_exists, reason = check_media_and_whisper_model(
-                title=info_dict.get("title"),
-                url=info_dict.get("webpage_url", ""),
-                current_whisper_model=whisper_model
-            )
-            if media_exists and "same whisper model" in reason and not overwrite_existing:
-                # skip
-                return {
-                    "video_input": video_input,
-                    "status": "Error",
-                    "error": f"Already processed with same model: {reason}"
-                }
+            processing_result["metadata"] = info_dict
 
         video_path = video_input
 
         # Perform transcription
         from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_transcription, \
             perform_summarization
+
         audio_file_path, segments = perform_transcription(
-            video_path, start_seconds, whisper_model, vad_use,
-            diarize, overwrite_existing
+            video_path, start_seconds, transcription_model, vad_use,
+            diarize,
         )
         if audio_file_path is None or segments is None:
-            return {
+            processing_result = {
                 "video_input": video_input,
                 "status": "Error",
                 "error": "Transcription failed or segments is None"
             }
+            return processing_result
 
-        # Clean up the audio file
-        if audio_file_path and os.path.exists(audio_file_path):
-            try:
-                os.remove(audio_file_path)
-            except Exception as e:
-                logging.warning(f"Failed to remove audio file: {e}")
+        # Store segments and analysis details
+        processing_result["segments"] = segments
+        processing_result["analysis_details"]["whisper_model"] = transcription_model
+        # FIXME - add other details
+
+        # Clean up intermediate audio file (if applicable and not requested to keep)
+        if audio_file_path and os.path.exists(audio_file_path):# and not keep_intermediate_audio:
+             try:
+                 os.remove(audio_file_path)
+             except Exception as e:
+                 logging.warning(f"Failed to remove intermediate audio file: {e}")
+                 # Optionally add to warnings list
+                 # processing_result["warnings"] = processing_result.get("warnings", []) + [f"Failed cleanup: {e}"]
 
         # Possibly strip timestamps
         if not timestamp_option:
@@ -680,14 +649,22 @@ def process_single_video(
                 seg.pop("Start", None)
                 seg.pop("End", None)
 
-        # Build a combined text
-        transcription_text = extract_text_from_segments(segments)
-        full_text_with_metadata = f"{json.dumps(info_dict, indent=2)}\n\n{transcription_text}"
+        # Prepare content string
+        transcription_text = extract_text_from_segments(segments, include_timestamps=timestamp_option)
+        processing_result["content"] = transcription_text # Store the main content
 
         # Analyze video transcript if API is set
         analysis_text = None
         if api_name and api_name.lower() != "none":
-            # If chunking is requested
+            processing_result["analysis_details"]["llm_api"] = api_name
+            processing_result["analysis_details"]["custom_prompt"] = custom_prompt
+            processing_result["analysis_details"]["system_prompt"] = system_prompt
+
+            text_to_analyze = processing_result["content"] # Use the generated transcript
+            # Add metadata to analysis input
+            text_to_analyze = f"{json.dumps(info_dict, indent=2)}\n\n{transcription_text}"
+
+            # Apply chunking if needed before summarization
             if perform_chunking:
                 chunk_opts = {
                     'method': chunk_method,
@@ -697,78 +674,43 @@ def process_single_video(
                     'multi_level': use_multi_level_chunking,
                     'language': chunk_language
                 }
-                chunked_texts = improved_chunking_process(full_text_with_metadata, chunk_opts)
-                if not chunked_texts:
-                    # Fallback to one-shot summarization
-                    analysis_text = perform_summarization(api_name, full_text_with_metadata, custom_prompt, api_key, recursive_summarization=None, temp=None, system_message=system_prompt)
-                else:
+                # Assuming improved_chunking_process returns list of dicts like [{"text": "...", "metadata": ...}]
+                chunked_texts_list = improved_chunking_process(text_to_analyze, chunk_opts)
+                processing_result["chunks"] = chunked_texts_list # Store the chunks
+
+                if chunked_texts_list:
                     chunk_summaries = []
-                    for chunk_block in chunked_texts:
-                        csum = perform_summarization(api_name, chunk_block["text"], custom_prompt, api_key)
+                    # FIXME - Possibly setup async analysis ot analyze chunks as they become available instead of all at once
+                    for chunk_block in chunked_texts_list:
+                        csum = perform_summarization(api_name, chunk_block["text"], custom_prompt, api_key, system_message=system_prompt)
                         if csum:
                             chunk_summaries.append(csum)
                     if chunk_summaries:
+                        # Combine chunk summaries (recursive or simple join)
                         if summarize_recursively and len(chunk_summaries) > 1:
-                            combined_text = "\n\n".join(chunk_summaries)
-                            analysis_text = perform_summarization(api_name, combined_text, custom_prompt, api_key)
+                            combined_chunk_summaries = "\n\n".join(chunk_summaries)
+                            analysis_text = perform_summarization(api_name, combined_chunk_summaries, custom_prompt, api_key, system_message=system_prompt)
                         else:
-                            analysis_text = "\n\n".join(chunk_summaries)
+                            analysis_text = "\n\n---\n\n".join(chunk_summaries) # Simple join
+                else:
+                     # Chunking selected but produced no chunks? Summarize original.
+                     analysis_text = perform_summarization(api_name, text_to_analyze, custom_prompt, api_key, system_message=system_prompt)
             else:
-                # Single pass analysis
-                analysis_text = perform_summarization(api_name, full_text_with_metadata, custom_prompt, api_key, recursive_summarization=None, temp=None, system_message=system_prompt)
+                 # Single pass summarization
+                 analysis_text = perform_summarization(api_name, text_to_analyze, custom_prompt, api_key, system_message=system_prompt)
 
-        # Possibly store in DB
-        media_id = None
-        if store_in_db:
-            # Determine keywords list
-            if isinstance(keywords, str):
-                keywords_list = [k.strip() for k in keywords.split(",") if k.strip()]
-            else:
-                keywords_list = []
+            processing_result["analysis"] = analysis_text
 
-            # Check if we need to update vs. add
-            existing_media = check_existing_media(info_dict['webpage_url'])
-            if existing_media:
-                media_id = existing_media["id"]
-                update_media_content_with_version(
-                    media_id,
-                    info_dict,
-                    full_text_with_metadata,
-                    custom_prompt,
-                    analysis_text,
-                    whisper_model
-                )
-            else:
-                # Add new
-                add_result = add_media_to_database(
-                    url=info_dict['webpage_url'],
-                    info_dict=info_dict,
-                    segments=segments,
-                    summary=analysis_text,
-                    keywords=keywords_list,
-                    custom_prompt_input=custom_prompt or "",
-                    whisper_model=whisper_model,
-                    overwrite=overwrite_existing
-                )
-                # You can optionally get the new ID from `add_result`.
-                # Suppose add_result returned a dict with 'id'
-                media_id = add_result.get("id") if isinstance(add_result, dict) else None
+        # 4. Final Success State
+        processing_result["status"] = "Success"
+        return processing_result
 
-        # Return success
-        return {
-            "video_input": video_input,
-            "status": "Success",
-            "transcript": transcription_text,
-            "summary": analysis_text,
-            "db_id": media_id,
-        }
     except Exception as e:
-        logging.error(f"Exception in process_single_video({video_input}): {e}", exc_info=True)
-        return {
-            "video_input": video_input,
-            "status": "Error",
-            "error": str(e)
-        }
+        logging.error(f"Exception in DB-agnostic process_single_video({video_input}): {e}", exc_info=True)
+        processing_result["status"] = "Error"
+        processing_result["error"] = f"{type(e).__name__}: {str(e)}"
+        return processing_result
+
 
 #
 # End of Video_DL_Ingestion_Lib.py

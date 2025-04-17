@@ -71,7 +71,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     get_media_title,
     fetch_keywords_for_media, get_full_media_details2, create_document_version, update_keywords_for_media,
     get_all_document_versions, get_document_version, rollback_to_version, delete_document_version, db,
-    fetch_item_details
+    fetch_item_details,
 )
 from tldw_Server_API.app.core.DB_Management.SQLite_DB import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Sessions import get_current_db_manager
@@ -261,10 +261,10 @@ def get_media_item(
         clean_prompt = prompt.strip() if prompt else ""
 
         # Attempt to find a "whisper model" from the first few lines
-        whisper_model = "unknown"
+        transcription_model = "unknown"
         for line in transcript[:3]:
             if "whisper model:" in line.lower():
-                whisper_model = line.split(":")[-1].strip()
+                transcription_model = line.split(":")[-1].strip()
                 break
 
         return {
@@ -278,7 +278,7 @@ def get_media_item(
             "processing": {
                 "prompt": clean_prompt,
                 "summary": summary,
-                "model": whisper_model,
+                "model": transcription_model,
                 "timestamp_option": True
             },
             "content": {
@@ -744,8 +744,7 @@ async def _process_batch_media(
                 "end_time": form_data.end_time,
                 "diarize": form_data.diarize,
                 "vad_use": form_data.vad_use,
-                "whisper_model": form_data.whisper_model,
-                "use_custom_prompt": bool(form_data.custom_prompt),
+                "transcription_model": form_data.transcription_model,
                 "custom_prompt": form_data.custom_prompt,
                 "system_prompt": form_data.system_prompt,
                 "perform_chunking": form_data.perform_chunking,
@@ -763,8 +762,6 @@ async def _process_batch_media(
                 "cookies": form_data.cookies,
                 "timestamp_option": form_data.timestamp_option,
                 "confab_checkbox": form_data.perform_confabulation_check_of_analysis,
-                "overwrite_existing": form_data.overwrite_existing,
-                "store_in_db": True,
             }
             logging.debug(f"Calling process_videos with args: {list(video_args.keys())}")
             try:
@@ -779,7 +776,7 @@ async def _process_batch_media(
         elif media_type == 'audio':
             audio_args = {
                 "audio_urls": urls, "audio_files": uploaded_file_paths,
-                "whisper_model": form_data.whisper_model,
+                "transcription_model": form_data.transcription_model,
                 "transcription_language": form_data.transcription_language,
                 "api_name": form_data.api_name if form_data.perform_analysis else None,
                 "api_key": form_data.api_key,
@@ -1001,7 +998,7 @@ async def _process_document_like_item(
                             summary=item_result.get("summary", ""),
                             keywords=form_data.keywords,  # Use parsed list
                             custom_prompt_input=form_data.custom_prompt,
-                            whisper_model="Imported",
+                            transcription_model="Imported",
                             media_type=media_type,
                             overwrite=form_data.overwrite_existing
                         )
@@ -1108,7 +1105,7 @@ async def add_media(
     use_cookies: bool = Form(False, description="Use cookies for URL download requests"),
     cookies: Optional[str] = Form(None, description="Cookie string if `use_cookies` is True"),
     # --- Audio/Video Specific ---
-    whisper_model: str = Form("deepml/distil-large-v3", description="Transcription model"),
+    transcription_model: str = Form("deepml/distil-large-v3", description="Transcription model"),
     transcription_language: str = Form("en", description="Transcription language"),
     diarize: bool = Form(False, description="Enable speaker diarization"),
     timestamp_option: bool = Form(True, description="Include timestamps in transcription"),
@@ -1160,7 +1157,7 @@ async def add_media(
             api_key=api_key,
             use_cookies=use_cookies,
             cookies=cookies,
-            whisper_model=whisper_model,
+            transcription_model=transcription_model,
             transcription_language=transcription_language,
             diarize=diarize,
             timestamp_option=timestamp_option,
@@ -1193,6 +1190,71 @@ async def add_media(
     temp_dir_manager = TempDirManager(cleanup=not form_data.keep_original_file) # Manages the lifecycle of the temp dir
     temp_dir_path: Optional[Path] = None
     loop = asyncio.get_running_loop()
+
+    # FIXME - make sure this works/checks against hte current model
+    # Check if media already exists in the database and compare whisper models
+        # Video
+        # should_download, reason = check_media_and_whisper_model(
+        #     title=normalized_video_title,
+        #     url=video_url,
+        #     current_whisper_model=current_whisper_model
+        # )
+        # if not should_download:
+        #     logging.info(f"Skipping download: {reason}")
+        #     return None
+        # logging.info(f"Proceeding with download: {reason}")
+        # # If store_in_db is True, check DB:
+        # if store_in_db:
+        #     media_exists, reason = check_media_and_whisper_model(
+        #         title=info_dict.get("title"),
+        #         url=info_dict.get("webpage_url", ""),
+        #         current_whisper_model=whisper_model
+        #     )
+        #     if media_exists and "same whisper model" in reason and not overwrite_existing:
+        #         # skip
+        #         return {
+        #             "video_input": video_input,
+        #             "status": "Error",
+        #             "error": f"Already processed with same model: {reason}"
+        #         }
+
+        #Store in DB: Video
+        # # Possibly store in DB
+        # media_id = None
+        # if store_in_db:
+        #     # Determine keywords list
+        #     if isinstance(keywords, str):
+        #         keywords_list = [k.strip() for k in keywords.split(",") if k.strip()]
+        #     else:
+        #         keywords_list = []
+        #
+        #     # Check if we need to update vs. add
+        #     existing_media = check_existing_media(info_dict['webpage_url'])
+        #     if existing_media:
+        #         media_id = existing_media["id"]
+        #         update_media_content_with_version(
+        #             media_id,
+        #             info_dict,
+        #             full_text_with_metadata,
+        #             custom_prompt,
+        #             analysis_text,
+        #             transcription_model
+        #         )
+        #     else:
+        #         # Add new
+        #         add_result = add_media_to_database(
+        #             url=info_dict['webpage_url'],
+        #             info_dict=info_dict,
+        #             segments=segments,
+        #             summary=analysis_text,
+        #             keywords=keywords_list,
+        #             custom_prompt_input=custom_prompt or "",
+        #             transcription_model=transcription_model,
+        #             overwrite=overwrite_existing
+        #         )
+        #         # You can optionally get the new ID from `add_result`.
+        #         # Suppose add_result returned a dict with 'id'
+        #         media_id = add_result.get("id") if isinstance(add_result, dict) else None
 
     try:
         # --- 2. Setup Temporary Directory ---
@@ -1329,10 +1391,8 @@ async def process_videos_endpoint(
     # -------- common  ----------
     title: Optional[str] = Form(None),
     author: Optional[str] = Form(None),
-    keywords: str = Form("", description="Comma‑separated keywords"),
     custom_prompt: Optional[str] = Form(None),
     system_prompt: Optional[str] = Form(None),
-    overwrite_existing: bool = Form(False),
     perform_analysis: bool = Form(True),
 
     # -------- A/V  -------------
@@ -1377,10 +1437,8 @@ async def process_videos_endpoint(
         urls=urls,
         title=title,
         author=author,
-        keywords=keywords,
         custom_prompt=custom_prompt,
         system_prompt=system_prompt,
-        overwrite_existing=overwrite_existing,
         perform_analysis=perform_analysis,
         start_time=start_time,
         end_time=end_time,
@@ -1388,7 +1446,7 @@ async def process_videos_endpoint(
         api_key=api_key,
         use_cookies=use_cookies,
         cookies=cookies,
-        whisper_model=transcription_model,
+        transcription_model=transcription_model,
         transcription_language=transcription_language,
         diarize=diarize,
         timestamp_option=timestamp_option,
@@ -1427,8 +1485,7 @@ async def process_videos_endpoint(
             "end_time": form_data.end_time,
             "diarize": form_data.diarize,
             "vad_use": form_data.vad_use,
-            "whisper_model": form_data.whisper_model,
-            "use_custom_prompt": bool(form_data.custom_prompt),
+            "transcription_model": form_data.transcription_model,
             "custom_prompt": form_data.custom_prompt,
             "system_prompt": form_data.system_prompt,
             "perform_chunking": form_data.perform_chunking,
@@ -1446,8 +1503,6 @@ async def process_videos_endpoint(
             "cookies": form_data.cookies,
             "timestamp_option": form_data.timestamp_option,
             "confab_checkbox": form_data.perform_confabulation_check_of_analysis,
-            "overwrite_existing": form_data.overwrite_existing,
-            "store_in_db": False,                 # <<<<<<<<    NO DB WRITE
         }
 
         batch_func = functools.partial(process_videos, **video_args)
@@ -1510,7 +1565,7 @@ async def process_audios_endpoint(
     perform_analysis:   bool   = Form(True),
 
     # ---------- A/V -------------
-    whisper_model:           str  = Form("deepml/distil-large-v3"),
+    transcription_model:           str  = Form("deepml/distil-large-v3"),
     transcription_language:  str  = Form("en"),
     diarize:                 bool = Form(False),
     timestamp_option:        bool = Form(True),
@@ -1544,7 +1599,7 @@ async def process_audios_endpoint(
         overwrite_existing=overwrite_existing, perform_analysis=perform_analysis,
         api_name=api_name, api_key=api_key,
         use_cookies=use_cookies, cookies=cookies,
-        whisper_model=whisper_model, transcription_language=transcription_language,
+        transcription_model=transcription_model, transcription_language=transcription_language,
         diarize=diarize, timestamp_option=timestamp_option, vad_use=vad_use,
         perform_confabulation_check_of_analysis=perform_confabulation_check_of_analysis,
         perform_chunking=perform_chunking, chunk_method=chunk_method,
@@ -1573,7 +1628,7 @@ async def process_audios_endpoint(
         audio_args = {
             "audio_urls": url_list,
             "audio_files": uploaded_paths,
-            "whisper_model": form_data.whisper_model,
+            "transcription_model": form_data.transcription_model,
             "transcription_language": form_data.transcription_language,
             "api_name": form_data.api_name if form_data.perform_analysis else None,
             "api_key": form_data.api_key,
