@@ -45,11 +45,11 @@ from tldw_Server_API.app.core.DB_Management.SQLite_DB import (
     get_media_transcripts as sqlite_get_media_transcripts,
     get_specific_transcript as sqlite_get_specific_transcript, \
     get_media_summaries as sqlite_get_media_summaries,
-    get_specific_summary as sqlite_get_specific_summary, \
+    get_specific_analysis as sqlite_get_specific_summary, \
     get_media_prompts as sqlite_get_media_prompts,
     get_specific_prompt as sqlite_get_specific_prompt, \
     delete_specific_transcript as sqlite_delete_specific_transcript,
-    delete_specific_summary as sqlite_delete_specific_summary, \
+    delete_specific_analysis as sqlite_delete_specific_summary, \
     delete_specific_prompt as sqlite_delete_specific_prompt,
     fetch_keywords_for_media as sqlite_fetch_keywords_for_media, \
     check_media_exists as sqlite_check_media_exists, \
@@ -69,7 +69,8 @@ from tldw_Server_API.app.core.DB_Management.SQLite_DB import (
     mark_media_as_processed as sqlite_mark_media_as_processed,
     update_keywords_for_media as sqlite_update_keywords_for_media,
     delete_document_version as sqlite_delete_document_version, \
-    get_full_media_details2 as get_full_media_details
+    get_full_media_details2 as get_full_media_details, \
+    check_should_process_by_url as sqlite_check_should_process_by_url
 )
 from tldw_Server_API.app.core.DB_Management.RAG_QA_Chat_DB import start_new_conversation as sqlite_start_new_conversation, \
     save_message as sqlite_save_message, load_chat_history as sqlite_load_chat_history, \
@@ -314,6 +315,17 @@ def get_media_title(*args, **kwargs):
 def get_next_media_id():
     if db_type == 'sqlite':
         return sqlite_get_next_media_id()
+    elif db_type == 'elasticsearch':
+        # Implement Elasticsearch version
+        raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
+    elif db_type == 'postgres':
+        # Implement Postgres version
+        raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
+
+
+def check_should_process_by_url(*args, **kwargs):
+    if db_type == 'sqlite':
+        return sqlite_check_should_process_by_url(*args, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")

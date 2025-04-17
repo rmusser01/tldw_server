@@ -299,7 +299,7 @@ def create_tables(db) -> None:
             author TEXT,
             ingestion_date TEXT,
             prompt TEXT,
-            summary TEXT,
+            analysis_content TEXT,
             transcription_model TEXT,
             is_trash BOOLEAN DEFAULT 0,
             trash_date DATETIME,
@@ -329,7 +329,7 @@ def create_tables(db) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             media_id INTEGER NOT NULL UNIQUE,
             prompt TEXT,
-            summary TEXT,
+            analysis_content TEXT,
             keywords TEXT,
             modification_date TEXT,
             FOREIGN KEY (media_id) REFERENCES Media(id)
@@ -379,7 +379,7 @@ def create_tables(db) -> None:
             media_id INTEGER NOT NULL,
             version_number INTEGER NOT NULL,
             prompt TEXT,
-            summary TEXT,
+            analysis_content TEXT,
             content TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (media_id) REFERENCES Media(id),
@@ -593,6 +593,68 @@ def check_media_exists(title: str, url: str) -> Optional[int]:
         return None
 
 
+def check_should_process_by_url(
+    url: str,
+    current_transcription_model: str,
+    db=None # Pass db instance or use global
+) -> Tuple[bool, Optional[int], str]:
+    """
+    Checks if media exists by URL and if processing should proceed based on
+    the transcription model stored in the Media table.
+
+    Args:
+        url: The URL identifier of the media.
+        current_transcription_model: The model intended for the current processing request.
+        db: Database connection/manager instance.
+
+    Returns:
+        Tuple (should_process, existing_media_id, reason)
+        - should_process (bool): True if processing should proceed, False otherwise.
+        - existing_media_id (Optional[int]): The ID if media exists, None otherwise.
+        - reason (str): Explanation for the decision.
+    """
+    with db.transaction() as conn:
+        cursor = conn.cursor()
+
+    try:
+        cursor = conn.cursor()
+        logging.debug(f"Pre-checking media by URL: {url}")
+        cursor.execute(
+            'SELECT id, transcription_model FROM Media WHERE url = ?',
+            (url,)
+        )
+        existing_media = cursor.fetchone()
+
+        if not existing_media:
+            logging.debug(f"Media not found for URL: {url}. Proceeding.")
+            return True, None, "Media not found in database"
+
+        existing_media_id, db_transcription_model = existing_media
+        logging.debug(f"Found existing media ID: {existing_media_id}, DB model: '{db_transcription_model}'")
+
+        # Handle cases where the stored model might be None or empty
+        if not db_transcription_model:
+             logging.warning(f"Existing media (ID: {existing_media_id}) has no transcription model recorded. Allowing processing.")
+             return True, existing_media_id, "Existing media lacks transcription model info"
+
+        if not current_transcription_model:
+             # This case is less likely if the request mandates a model, but handle defensively
+             logging.warning(f"No current transcription model provided for comparison. Skipping processing for existing media (ID: {existing_media_id}).")
+             return False, existing_media_id, "No current transcription model provided for comparison"
+
+        if db_transcription_model == current_transcription_model:
+            logging.info(f"Media {existing_media_id} found with same transcription model ('{current_transcription_model}'). Skipping advised.")
+            return False, existing_media_id, f"Media found with same transcription model (ID: {existing_media_id})"
+        else:
+            logging.info(f"Media {existing_media_id} found with different transcription model (DB: '{db_transcription_model}', Current: '{current_transcription_model}'). Processing allowed.")
+            return True, existing_media_id, f"Different transcription model (DB: {db_transcription_model}, Current: {current_transcription_model})"
+
+    except sqlite3.Error as e:
+        logging.error(f"SQLite error during pre-check for URL {url}: {e}", exc_info=True)
+        # Fail safe - allow processing if check fails, but log error
+        return True, None, f"Database error during pre-check: {e}"
+
+
 def check_media_and_whisper_model(title=None, url=None, current_whisper_model=None):
     """
     Check if media exists in the database and compare the whisper model used.
@@ -717,7 +779,7 @@ def mark_media_as_processed(database, media_id):
 #
 
 # Wrapper function for legacy support
-def add_media_to_database(url, info_dict, segments, summary, keywords, custom_prompt_input, whisper_model,
+def add_media_to_database(url, info_dict, segments, analysis_content, keywords, custom_prompt_input, whisper_model,
                           media_type='video', overwrite=False, db=None):
     """Legacy wrapper for add_media_with_keywords"""
     # Extract content from segments
@@ -736,7 +798,7 @@ def add_media_to_database(url, info_dict, segments, summary, keywords, custom_pr
         content=content,
         keywords=keywords,
         prompt=custom_prompt_input,
-        summary=summary,
+        analysis_content=analysis_content,
         transcription_model=whisper_model,
         author=info_dict.get('uploader', 'Unknown'),
         ingestion_date=datetime.now().strftime('%Y-%m-%d'),
@@ -746,27 +808,9 @@ def add_media_to_database(url, info_dict, segments, summary, keywords, custom_pr
 
     return message  # Return just the message to maintain backward compatibility
 
-# Old call:
-#result = add_media_to_database(url, info_dict, segments, summary, keywords, custom_prompt_input, whisper_model)
-#
-# New call:
-# media_id, result = add_media_with_keywords(
-#     url=url,
-#     title=info_dict.get('title', 'Untitled'),
-#     media_type=media_type,  # from parameter or info_dict
-#     content=extract_text_from_segments(segments),  # You'll need this helper function
-#     keywords=keywords,
-#     prompt=custom_prompt_input,
-#     summary=summary,
-#     transcription_model=whisper_model,
-#     author=info_dict.get('uploader', 'Unknown'),
-#     ingestion_date=datetime.now().strftime('%Y-%m-%d'),
-#     overwrite=overwrite
-# )
-
 
 # Function to add media with keywords
-def add_media_with_keywords(url, title, media_type, content, keywords, prompt, summary, transcription_model, author,
+def add_media_with_keywords(url, title, media_type, content, keywords, prompt, analysis_content, transcription_model, author,
                            ingestion_date, overwrite=False, db=None, chunk_options=None):
     log_counter("add_media_with_keywords_attempt")
     start_time = time.time()
@@ -783,7 +827,7 @@ def add_media_with_keywords(url, title, media_type, content, keywords, prompt, s
     content = content or 'No content available'
     keywords = keywords or 'default'
     prompt = prompt or 'No prompt available'
-    summary = summary or 'No summary available'
+    analysis_content = analysis_content or 'No analysis content available'
     transcription_model = transcription_model or 'Unknown'
     author = author or 'Unknown'
     ingestion_date = ingestion_date or datetime.now().strftime('%Y-%m-%d')
@@ -820,7 +864,7 @@ def add_media_with_keywords(url, title, media_type, content, keywords, prompt, s
     logging.debug(f"Content (first 500 chars): {content[:500]}...")
     logging.debug(f"Keywords: {keyword_list}")
     logging.info(f"Prompt: {prompt}")
-    logging.info(f"Summary: {summary}")
+    logging.info(f"analysis_content: {analysis_content}")
     logging.info(f"Author: {author}")
     logging.info(f"Ingestion Date: {ingestion_date}")
     logging.info(f"Transcription Model: {transcription_model}")
@@ -878,9 +922,9 @@ def add_media_with_keywords(url, title, media_type, content, keywords, prompt, s
             # Only proceed with modifications if the media was added or updated
             if action in ["updated", "added"]:
                 cursor.execute('''
-                INSERT INTO MediaModifications (media_id, prompt, summary, modification_date)
+                INSERT INTO MediaModifications (media_id, prompt, analysis_content, modification_date)
                 VALUES (?, ?, ?, ?)
-                ''', (media_id, prompt, summary, ingestion_date))
+                ''', (media_id, prompt, analysis_content, ingestion_date))
 
                 # Batch insert keywords
                 keyword_params = [(keyword.strip().lower(),) for keyword in keyword_list]
@@ -904,7 +948,7 @@ def add_media_with_keywords(url, title, media_type, content, keywords, prompt, s
                     media_id=media_id,
                     content=content,
                     prompt=prompt,
-                    summary=summary
+                    analysis_content=analysis_content
                 )
 
             conn.commit()
@@ -939,7 +983,7 @@ def add_media_with_keywords(url, title, media_type, content, keywords, prompt, s
         raise DatabaseError(f"Unexpected error: {e}")
 
 
-def ingest_article_to_db(url, title, author, content, keywords, summary, ingestion_date, custom_prompt):
+def ingest_article_to_db(url, title, author, content, keywords, analysis_content, ingestion_date, custom_prompt):
     try:
         # Check if content is not empty or whitespace
         if not content.strip():
@@ -953,7 +997,7 @@ def ingest_article_to_db(url, title, author, content, keywords, summary, ingesti
         title = title or 'Unknown'
         author = author or 'Unknown'
         keywords = keywords or 'default'
-        summary = summary or 'No summary available'
+        analysis_content = analysis_content or 'No analysis_content available'
         ingestion_date = ingestion_date or datetime.now().strftime('%Y-%m-%d')
 
         # Log the values of all fields before calling add_media_with_keywords
@@ -962,7 +1006,7 @@ def ingest_article_to_db(url, title, author, content, keywords, summary, ingesti
         logging.debug(f"Author: {author}")
         logging.debug(f"Content: {content[:50]}... (length: {len(content)})")  # Log first 50 characters of content
         logging.debug(f"Keywords: {keywords}")
-        logging.debug(f"Summary: {summary}")
+        logging.debug(f"analysis_content: {analysis_content}")
         logging.debug(f"Ingestion Date: {ingestion_date}")
         logging.debug(f"Custom Prompt: {custom_prompt}")
 
@@ -979,9 +1023,9 @@ def ingest_article_to_db(url, title, author, content, keywords, summary, ingesti
         if not keywords:
             logging.error("Keywords are missing.")
             raise ValueError("Keywords are missing.")
-        if not summary:
-            logging.error("Summary is missing.")
-            raise ValueError("Summary is missing.")
+        if not analysis_content:
+            logging.error("analysis_content is missing.")
+            raise ValueError("analysis_content is missing.")
         if not ingestion_date:
             logging.error("Ingestion date is missing.")
             raise ValueError("Ingestion date is missing.")
@@ -997,7 +1041,7 @@ def ingest_article_to_db(url, title, author, content, keywords, summary, ingesti
             content=content,
             keywords=keyword_str or "article_default",
             prompt=custom_prompt or None,
-            summary=summary or "No summary generated",
+            analysis_content=analysis_content or "No analysis_content generated",
             transcription_model=None,  # or some default value if applicable
             author=author or 'Unknown',
             ingestion_date=ingestion_date
@@ -1258,28 +1302,28 @@ def fetch_item_details(media_id: int):
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
-            # Fetch the latest prompt and summary from MediaModifications
+            # Fetch the latest prompt and analysis_content from MediaModifications
             cursor.execute("""
-                SELECT prompt, summary 
+                SELECT prompt, analysis_content 
                 FROM MediaModifications 
                 WHERE media_id = ? 
                 ORDER BY modification_date DESC 
                 LIMIT 1
             """, (media_id,))
-            prompt_summary_result = cursor.fetchone()
+            prompt_analysis_result = cursor.fetchone()
 
             # Fetch the latest transcription
             cursor.execute("SELECT content FROM Media WHERE id = ?", (media_id,))
             content_result = cursor.fetchone()
 
-            prompt = prompt_summary_result[0] if prompt_summary_result else "No prompt available."
-            summary = prompt_summary_result[1] if prompt_summary_result else "No summary available."
+            prompt = prompt_analysis_result[0] if prompt_analysis_result else "No prompt available."
+            analysis_content = prompt_analysis_result[1] if prompt_analysis_result else "No analysis content available."
             content = content_result[0] if content_result else "No content available."
 
-            return prompt, summary, content
+            return prompt, analysis_content, content
     except sqlite3.Error as e:
         logging.error(f"Error fetching item details: {e}")
-        return "Error fetching prompt.", "Error fetching summary.", "Error fetching media."
+        return "Error fetching prompt.", "Error fetching analysis_content.", "Error fetching media."
 
 #
 #  End of Media-related Functions
@@ -1291,8 +1335,8 @@ def fetch_item_details(media_id: int):
 # Media-related Functions
 
 
-# Function to add a version of a prompt and summary
-def add_media_version(media_id: int, prompt: str, summary: str) -> Dict[str, Any]:
+# Function to add a version of a prompt and analysis_content
+def add_media_version(media_id: int, prompt: str, analysis_content: str) -> Dict[str, Any]:
     """
     Legacy wrapper for create_document_version.
     Use create_document_version directly for new code.
@@ -1315,7 +1359,7 @@ def add_media_version(media_id: int, prompt: str, summary: str) -> Dict[str, Any
             media_id=media_id,
             content=content,
             prompt=prompt,
-            summary=summary
+            analysis_content=analysis_content
         )
     except Exception as e:
         logging.error(f"Error in add_media_version: {str(e)}")
@@ -1457,7 +1501,7 @@ def display_details(index, results):
     <p><strong>Author:</strong> {selected_row.get('Author', 'No Author')}</p>
     <p><strong>Ingestion Date:</strong> {selected_row.get('Ingestion Date', 'No Date')}</p>
     <p><strong>Prompt:</strong> {selected_row.get('Prompt', 'No Prompt')}</p>
-    <p><strong>Summary:</strong> {selected_row.get('Summary', 'No Summary')}</p>
+    <p><strong>analysis_content:</strong> {selected_row.get('analysis_content', 'No analysis_content')}</p>
     <p><strong>Content:</strong> {selected_row.get('Content', 'No Content')}</p>
     """
     return details_html
@@ -1474,7 +1518,7 @@ def get_details(index, dataframe):
     <p><strong>Author:</strong> {row['Author']}</p>
     <p><strong>Ingestion Date:</strong> {row['Ingestion Date']}</p>
     <p><strong>Prompt:</strong> {row['Prompt']}</p>
-    <p><strong>Summary:</strong> {row['Summary']}</p>
+    <p><strong>analysis_content:</strong> {row['analysis_content']}</p>
     <p><strong>Content:</strong></p>
     <pre>{row['Content']}</pre>
     """
@@ -1483,9 +1527,9 @@ def get_details(index, dataframe):
 
 def format_results(results):
     if not results:
-        return pd.DataFrame(columns=['URL', 'Title', 'Type', 'Content', 'Author', 'Ingestion Date', 'Prompt', 'Summary'])
+        return pd.DataFrame(columns=['URL', 'Title', 'Type', 'Content', 'Author', 'Ingestion Date', 'Prompt', 'analysis_content'])
 
-    df = pd.DataFrame(results, columns=['URL', 'Title', 'Type', 'Content', 'Author', 'Ingestion Date', 'Prompt', 'Summary'])
+    df = pd.DataFrame(results, columns=['URL', 'Title', 'Type', 'Content', 'Author', 'Ingestion Date', 'Prompt', 'analysis_content'])
     logging.debug(f"Formatted DataFrame: {df}")
 
     return df
@@ -1506,7 +1550,7 @@ def export_to_file(search_query: str, search_fields: List[str], keyword: str, pa
             filename = f'exports/search_results_page_{page}.csv'
             with open(filename, 'w', newline='', encoding='utf-8') as file:
                 writer = csv.writer(file)
-                writer.writerow(['URL', 'Title', 'Type', 'Content', 'Author', 'Ingestion Date', 'Prompt', 'Summary'])
+                writer.writerow(['URL', 'Title', 'Type', 'Content', 'Author', 'Ingestion Date', 'Prompt', 'analysis_content'])
                 for row in results:
                     writer.writerow(row)
         elif export_format == 'markdown':
@@ -1520,7 +1564,7 @@ def export_to_file(search_query: str, search_fields: List[str], keyword: str, pa
                         'content': item[3],
                         'author': item[4],
                         'ingestion_date': item[5],
-                        'summary': item[7],
+                        'analysis_content': item[7],
                         'keywords': item[8].split(',') if item[8] else []
                     })
                     file.write(markdown_content)
@@ -1556,7 +1600,7 @@ def check_existing_media(url):
 
 
 # Modified update_media_content function to create a new version
-def update_media_content_with_version(media_id, info_dict, content_input, prompt_input, summary_input, whisper_model):
+def update_media_content_with_version(media_id, info_dict, content_input, prompt_input, analysis_content, whisper_model):
     db = Database()
     try:
         with db.get_connection() as conn:
@@ -1567,7 +1611,7 @@ def update_media_content_with_version(media_id, info_dict, content_input, prompt
                 media_id=media_id,
                 content=content_input,
                 prompt=prompt_input,
-                summary=summary_input
+                analysis_content=analysis_content
             )
             new_version = version_result['version_number']
 
@@ -1581,9 +1625,9 @@ def update_media_content_with_version(media_id, info_dict, content_input, prompt
 
             # Update or insert into MediaModifications
             cursor.execute('''
-            INSERT OR REPLACE INTO MediaModifications (media_id, prompt, summary, modification_date)
+            INSERT OR REPLACE INTO MediaModifications (media_id, prompt, analysis_content, modification_date)
             VALUES (?, ?, ?, ?)
-            ''', (media_id, prompt_input, summary_input, datetime.now().strftime('%Y-%m-%d')))
+            ''', (media_id, prompt_input, analysis_content, datetime.now().strftime('%Y-%m-%d')))
 
             # Update full-text search index
             cursor.execute('INSERT OR REPLACE INTO media_fts (rowid, title, content) VALUES (?, ?, ?)',
@@ -1655,7 +1699,7 @@ def schedule_chunking(media_id: int, content: str, media_name: str, media_type: 
 #
 # Function to fetch/update media content
 
-def update_media_content(selected_item, item_mapping, content_input, prompt_input, summary_input):
+def update_media_content(selected_item, item_mapping, content_input, prompt_input, analysis_content):
     try:
         if selected_item and item_mapping and selected_item in item_mapping:
             media_id = item_mapping[selected_item]
@@ -1674,15 +1718,15 @@ def update_media_content(selected_item, item_mapping, content_input, prompt_inpu
                     # Update existing row
                     cursor.execute("""
                         UPDATE MediaModifications
-                        SET prompt = ?, summary = ?, modification_date = CURRENT_TIMESTAMP
+                        SET prompt = ?, analysis_content = ?, modification_date = CURRENT_TIMESTAMP
                         WHERE media_id = ?
-                    """, (prompt_input, summary_input, media_id))
+                    """, (prompt_input, analysis_content, media_id))
                 else:
                     # Insert new row
                     cursor.execute("""
-                        INSERT INTO MediaModifications (media_id, prompt, summary, modification_date)
+                        INSERT INTO MediaModifications (media_id, prompt, analysis_content, modification_date)
                         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (media_id, prompt_input, summary_input))
+                    """, (media_id, prompt_input, analysis_content))
 
                 # Create new document version
                 new_version = create_document_version(media_id, content_input)
@@ -1717,15 +1761,15 @@ def load_media_content(media_id: int) -> dict:
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT content, prompt, summary FROM Media WHERE id = ?", (media_id,))
+            cursor.execute("SELECT content, prompt, analysis_content FROM Media WHERE id = ?", (media_id,))
             result = cursor.fetchone()
             if result:
                 return {
                     "content": result[0],
                     "prompt": result[1],
-                    "summary": result[2]
+                    "analysis_content": result[2]
                 }
-            return {"content": "", "prompt": "", "summary": ""}
+            return {"content": "", "prompt": "", "analysis_content": ""}
     except sqlite3.Error as e:
         raise Exception(f"Error loading media content: {e}")
 
@@ -1777,24 +1821,24 @@ def fetch_item_details_single(media_id: int):
         with db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT prompt, summary 
+                SELECT prompt, analysis_content 
                 FROM MediaModifications 
                 WHERE media_id = ? 
                 ORDER BY modification_date DESC 
                 LIMIT 1
             """, (media_id,))
-            prompt_summary_result = cursor.fetchone()
+            prompt_analysis_result = cursor.fetchone()
             cursor.execute("SELECT content FROM Media WHERE id = ?", (media_id,))
             content_result = cursor.fetchone()
 
-            prompt = prompt_summary_result[0] if prompt_summary_result else "No prompt available."
-            summary = prompt_summary_result[1] if prompt_summary_result else "No summary available."
+            prompt = prompt_analysis_result[0] if prompt_analysis_result else "No prompt available."
+            analysis_content = prompt_analysis_result[1] if prompt_analysis_result else "No analysis_content available."
             content = content_result[0] if content_result else "No content available."
 
-            return prompt, summary, content
+            return prompt, analysis_content, content
     except sqlite3.Error as e:
         logging.error(f"Error fetching item details: {e}")
-        return "Error fetching prompt.", "Error fetching summary.", "Error fetching content."
+        return "Error fetching prompt.", "Error fetching analysis_content.", "Error fetching content."
 
 
 def convert_to_markdown(item):
@@ -1804,8 +1848,8 @@ def convert_to_markdown(item):
     markdown += f"**Ingestion Date:** {item['ingestion_date']}\n\n"
     markdown += f"**Type:** {item['type']}\n\n"
     markdown += f"**Keywords:** {', '.join(item['keywords'])}\n\n"
-    markdown += "## Summary\n\n"
-    markdown += f"{item['summary']}\n\n"
+    markdown += "## analysis_content\n\n"
+    markdown += f"{item['analysis_content']}\n\n"
     markdown += "## Content\n\n"
     markdown += f"{item['content']}\n\n"
     return markdown
@@ -1862,7 +1906,7 @@ def search_and_display_items(query, search_type, page, entries_per_page,char_cou
                 raise ValueError("Invalid search type")
 
             cursor.execute(f'''
-                SELECT m.id, m.title, m.url, m.content, mm.summary, GROUP_CONCAT(k.keyword, ', ') as keywords
+                SELECT m.id, m.title, m.url, m.content, mm.analysis_content, GROUP_CONCAT(k.keyword, ', ') as keywords
                 FROM Media m
                 LEFT JOIN MediaModifications mm ON m.id = mm.media_id
                 LEFT JOIN MediaKeywords mk ON m.id = mk.media_id
@@ -1889,7 +1933,7 @@ def search_and_display_items(query, search_type, page, entries_per_page,char_cou
             url = html.escape(item[2]).replace('\n', '<br>')
             # First X amount of characters of the content
             content = html.escape(item[3] or '')[:char_count] + '...'
-            summary = html.escape(item[4] or '').replace('\n', '<br>')
+            analysis_content = html.escape(item[4] or '').replace('\n', '<br>')
             keywords = html.escape(item[5] or '').replace('\n', '<br>')
 
             results += f"""
@@ -1903,8 +1947,8 @@ def search_and_display_items(query, search_type, page, entries_per_page,char_cou
                     <pre style="white-space: pre-wrap; word-wrap: break-word;">{content}</pre>
                 </div>
                 <div style="margin-top: 10px;">
-                    <strong>Summary:</strong>
-                    <pre style="white-space: pre-wrap; word-wrap: break-word;">{summary}</pre>
+                    <strong>analysis_content:</strong>
+                    <pre style="white-space: pre-wrap; word-wrap: break-word;">{analysis_content}</pre>
                 </div>
                 <div style="margin-top: 10px;">
                     <strong>Keywords:</strong> {keywords}
@@ -1967,7 +2011,7 @@ def import_obsidian_note_to_db(note_data):
 
             frontmatter_str = yaml.dump(note_data['frontmatter'])
             cursor.execute("""
-                INSERT INTO MediaModifications (media_id, prompt, summary, modification_date)
+                INSERT INTO MediaModifications (media_id, prompt, analysis_content, modification_date)
                 VALUES (?, 'Obsidian Frontmatter', ?, CURRENT_TIMESTAMP)
             """, (media_id, frontmatter_str))
 
@@ -2257,9 +2301,9 @@ def get_media_summaries(media_id: int) -> List[Dict]:
         with db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-            SELECT id, summary, modification_date
+            SELECT id, analysis_content, modification_date
             FROM MediaModifications
-            WHERE media_id = ? AND summary IS NOT NULL
+            WHERE media_id = ? AND analysis_content IS NOT NULL
             ORDER BY modification_date DESC
             ''', (media_id,))
             results = cursor.fetchall()
@@ -2274,15 +2318,15 @@ def get_media_summaries(media_id: int) -> List[Dict]:
     except Exception as e:
         logging.error(f"Error in get_media_summaries: {str(e)}")
 
-def get_specific_summary(summary_id: int) -> Dict:
+def get_specific_analysis(analysis_id: int) -> Dict:
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-            SELECT id, summary, modification_date
+            SELECT id, analysis_content, modification_date
             FROM MediaModifications
             WHERE id = ?
-            ''', (summary_id,))
+            ''', (analysis_id,))
             result = cursor.fetchone()
             if result:
                 return {
@@ -2290,10 +2334,10 @@ def get_specific_summary(summary_id: int) -> Dict:
                     'content': result[1],
                     'created_at': result[2]
                 }
-            return {'error': f"No summary found with ID {summary_id}"}
+            return {'error': f"No analysis_content found with ID {analysis_id}"}
     except Exception as e:
-        logging.error(f"Error in get_specific_summary: {str(e)}")
-        return {'error': f"Error retrieving summary: {str(e)}"}
+        logging.error(f"Error in get_specific_analysis: {str(e)}")
+        return {'error': f"Error retrieving analysis_content: {str(e)}"}
 
 def get_media_prompts(media_id: int) -> List[Dict]:
     try:
@@ -2354,19 +2398,19 @@ def delete_specific_transcript(transcript_id: int) -> str:
         logging.error(f"Error in delete_specific_transcript: {str(e)}")
         return f"Error deleting transcript: {str(e)}"
 
-def delete_specific_summary(summary_id: int) -> str:
+def delete_specific_analysis(analysis_id: int) -> str:
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('UPDATE MediaModifications SET summary = NULL WHERE id = ?', (summary_id,))
+            cursor.execute('UPDATE MediaModifications SET analysis_content = NULL WHERE id = ?', (analysis_id,))
             conn.commit()
             if cursor.rowcount > 0:
-                return f"Summary with ID {summary_id} has been deleted successfully."
+                return f"analysis_content with ID {analysis_id} has been deleted successfully."
             else:
-                return f"No summary found with ID {summary_id}."
+                return f"No analysis_content found with ID {analysis_id}."
     except Exception as e:
-        logging.error(f"Error in delete_specific_summary: {str(e)}")
-        return f"Error deleting summary: {str(e)}"
+        logging.error(f"Error in delete_specific_analysis: {str(e)}")
+        return f"Error deleting analysis_content: {str(e)}"
 
 def delete_specific_prompt(prompt_id: int) -> str:
     try:
@@ -2432,7 +2476,7 @@ def get_full_media_details2(media_id: int) -> Optional[Dict]:
             cursor.execute('''
                 SELECT 
                     id, url, title, type, content,
-                    author, ingestion_date, prompt, summary,
+                    author, ingestion_date, prompt, analysis_content,
                     transcription_model, is_trash, trash_date,
                     vector_embedding, chunking_status, vector_processing,
                     content_hash
@@ -2457,7 +2501,7 @@ def get_full_media_details2(media_id: int) -> Optional[Dict]:
                 "author": media[5],
                 "ingestion_date": media[6],
                 "prompt": media[7],
-                "summary": media[8],
+                "analysis_content": media[8],
                 "transcription_model": media[9],
                 "is_trash": bool(media[10]),
                 "trash_date": media[11],
@@ -2497,18 +2541,18 @@ def create_document_version(
         media_id: int,
         content: str,
         prompt: Optional[str] = None,
-        summary: Optional[str] = None,
+        analysis_content: Optional[str] = None,
         conn: Optional[sqlite3.Connection] = None
 ) -> Dict[str, Any]:
     """
-    Creates a new document version with optional prompt and summary.
+    Creates a new document version with optional prompt and analysis_content.
     Returns the created version info.
     """
     try:
-        # Combine content with prompt/summary if provided
+        # Combine content with prompt/analysis_content if provided
         full_content = content
-        if prompt or summary:
-            full_content = f"Prompt: {prompt or ''}\n\nSummary: {summary or ''}\n\nContent:\n{content}"
+        if prompt or analysis_content:
+            full_content = f"Prompt: {prompt or ''}\n\nanalysis_content: {analysis_content or ''}\n\nContent:\n{content}"
 
         def _create(connection):
             cursor = connection.cursor()
@@ -2528,17 +2572,17 @@ def create_document_version(
                 VALUES (?, ?, ?)
             ''', (media_id, version_number, full_content))
 
-            # Also update MediaModifications if prompt/summary provided
-            if prompt or summary:
+            # Also update MediaModifications if prompt/analysis_content provided
+            if prompt or analysis_content:
                 cursor.execute('''
                     INSERT INTO MediaModifications 
-                    (media_id, prompt, summary, modification_date)
+                    (media_id, prompt, analysis_content, modification_date)
                     VALUES (?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(media_id) DO UPDATE SET
                         prompt = excluded.prompt,
-                        summary = excluded.summary,
+                        analysis_content = excluded.analysis_content,
                         modification_date = excluded.modification_date
-                ''', (media_id, prompt, summary))
+                ''', (media_id, prompt, analysis_content))
 
             return {
                 'media_id': media_id,
