@@ -15,15 +15,13 @@ import asyncio
 import functools
 import hashlib
 import json
-import os
 import shutil
-import sqlite3
 import tempfile
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from math import ceil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union, Callable, Literal
+from typing import Any, Dict, List, Optional, Tuple, Callable, Literal, Union
 from urllib.parse import urlparse
 
 import httpx
@@ -39,18 +37,14 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
-    Response,
     status,
     UploadFile
 )
-from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, validator, ValidationError
 import redis
-import requests
 from pydantic.v1 import Field
 # API Rate Limiter/Caching via Redis
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.middleware import SlowAPIMiddleware
+from slowapi import Limiter
 from slowapi.util import get_remote_address
 from loguru import logger
 from loguru import logger as logging
@@ -58,49 +52,36 @@ from starlette.responses import JSONResponse
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext_Files import import_plain_text_file, \
     _process_single_document
-from tldw_Server_API.app.core.config import settings
 #
 # Local Imports
 #
 # DB Mgmt
-from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
 from tldw_Server_API.app.core.DB_Management.DB_Dependency import get_db_manager
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
-    add_media_to_database,
     search_media_db,
-    fetch_item_details_single,
     get_paginated_files,
-    get_media_title,
-    fetch_keywords_for_media, get_full_media_details2, create_document_version, update_keywords_for_media,
-    get_all_document_versions, get_document_version, rollback_to_version, delete_document_version, db,
+    fetch_keywords_for_media, get_full_media_details2, create_document_version, get_all_document_versions, get_document_version, rollback_to_version, delete_document_version, db,
     fetch_item_details, add_media_with_keywords, check_should_process_by_url,
 )
 from tldw_Server_API.app.core.DB_Management.SQLite_DB import DatabaseError
-from tldw_Server_API.app.core.DB_Management.Sessions import get_current_db_manager
-from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_db
 #
 # Media Processing
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Processing import process_audio
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Ingestion_Lib import import_epub, _process_single_ebook
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Media_Update_lib import process_media_update
 from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Ingestion_Lib import process_pdf_task
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
 #
 # Document Processing
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
-from tldw_Server_API.app.core.Utils.Utils import format_transcript, truncate_content, logging, \
-    extract_media_id_from_result_string, sanitize_filename, safe_download, smart_download
-from tldw_Server_API.app.services.document_processing_service import process_documents
-from tldw_Server_API.app.services.ebook_processing_service import process_ebook_task
+from tldw_Server_API.app.core.Utils.Utils import truncate_content, logging, \
+    sanitize_filename, safe_download, smart_download
 #
 # Web Scraping
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article, scrape_from_sitemap, \
     scrape_by_url_level, recursive_scrape
-from tldw_Server_API.app.schemas.media_models import VideoIngestRequest, AudioIngestRequest, MediaSearchResponse, \
-    MediaItemResponse, MediaUpdateRequest, VersionCreateRequest, VersionResponse, VersionRollbackRequest, \
-    IngestWebContentRequest, ScrapeMethod, MediaType, AddMediaForm, ChunkMethod, PdfEngine
-from tldw_Server_API.app.services.xml_processing_service import process_xml_task
+from tldw_Server_API.app.api.v1.schemas.media_models import MediaUpdateRequest, VersionCreateRequest, \
+    VersionRollbackRequest, \
+    IngestWebContentRequest, ScrapeMethod, MediaType, AddMediaForm, ChunkMethod, PdfEngine, ProcessVideosForm, \
+    ProcessAudiosForm
 from tldw_Server_API.app.services.web_scraping_service import process_web_scraping_task
 #
 #
@@ -138,15 +119,49 @@ def cache_response(key: str, response: Dict) -> None:
     etag = hashlib.md5(content.encode()).hexdigest()
     cache.setex(key, CACHE_TTL, f"{etag}|{content}")
 
-def get_cached_response(key: str) -> Optional[tuple]:
-    """Retrieve cached response with ETag"""
-    cached = cache.get(key)
-    if cached:
-        # FIXME - confab
-        etag, content = cached.decode().split('|', 1)
-        return (etag, json.loads(content))
-    return None
+async def get_cached_response(key: str) -> Optional[tuple]: # Changed to async def
+    """Retrieve cached response with ETag (Async Version)"""
+    # Await the asynchronous cache retrieval operation
+    cached_value = await cache.get(key) # Added await
 
+    if cached_value:
+        # Now cached_value should be the actual data (likely bytes)
+        try:
+            # Decode assuming UTF-8, handle potential errors
+            decoded_string = cached_value.decode('utf-8')
+            # Split carefully, ensure it splits correctly
+            parts = decoded_string.split('|', 1)
+            if len(parts) == 2:
+                etag, content_str = parts
+                # Parse JSON, handle potential errors
+                content = json.loads(content_str)
+                return (etag, content)
+            else:
+                # Log or handle cases where the format is unexpected
+                # logging.warning(f"Cached value for key '{key}' has unexpected format: {decoded_string}")
+                print(f"Warning: Cached value for key '{key}' has unexpected format: {decoded_string}")
+                return None
+        except (UnicodeDecodeError, json.JSONDecodeError, AttributeError, ValueError) as e:
+            # Log or handle errors during decoding/parsing
+            # logging.error(f"Error processing cached value for key '{key}': {e}")
+            print(f"Error processing cached value for key '{key}': {e}")
+            return None # Or raise an exception if appropriate
+
+    return None # Cache miss
+# --- How to call this function ---
+# You would now need to call it from within another async function:
+#
+# async def some_other_async_function():
+#     result = await get_cached_response("some_cache_key")
+#     if result:
+#         etag, data = result
+#         print(f"Got from cache: ETag={etag}, Data={data}")
+#     else:
+#         print("Cache miss or error processing cache.")
+#
+# # To run it:
+# # import asyncio
+# # asyncio.run(some_other_async_function())
 
 # ---------------------------
 # Cache Invalidation
@@ -168,7 +183,13 @@ def invalidate_cache(media_id: int):
 
 
 # Retrieve a listing of all media, returning a list of media items. Limited by paging and rate limiting.
-@router.get("/", summary="Get all media")
+@router.get(
+    "/", # Base endpoint for listing/searching media
+    status_code=status.HTTP_200_OK,
+    summary="Search/List All Media Items",
+    tags=["Media Management"], # Assign another different tag
+    # response_model=MediaSearchResponse # Example response model
+)
 @limiter.limit("50/minute")
 async def get_all_media(
     request: Request,
@@ -205,11 +226,23 @@ async def get_all_media(
 
 
 #Obtain details of a single media item using its ID
-@router.get("/{media_id}", summary="Get details about a single media item")
+@router.get(
+    "/{media_id}", # Endpoint for retrieving a specific item
+    status_code=status.HTTP_200_OK,
+    summary="Get Media Item Details",
+    tags=["Media Management"], # SAME tag as the search endpoint
+    # response_model=MediaItemResponse # Example response model
+)
 def get_media_item(
         media_id: int,
         #db=Depends(get_db_manager)
 ):
+    """
+    **Retrieve Media Item by ID**
+
+    Fetches the full details, content, and analysis for a specific media item
+    identified by its unique database ID.
+    """
     try:
         # -- 1) Fetch the main record (includes title, type, content, author, etc.)
         logging.info(f"Calling get_full_media_details2 for ID: {media_id}")
@@ -319,13 +352,24 @@ def get_media_item(
 #   POST /api/v1/media/{media_id}/versions/rollback
 #   PUT /api/v1/media/{media_id}
 
-@router.post("/{media_id}/versions", )
+@router.post(
+    "/{media_id}/versions",
+    tags=["Media Versioning"], # Assign tag
+    summary="Create Media Version", # Add summary
+    status_code=status.HTTP_201_CREATED, # Explicitly set status code for creation
+    # response_model=YourVersionResponseModel # Define response model if available
+)
 async def create_version(
     media_id: int,
     request: VersionCreateRequest,
     db=Depends(get_db_manager)
 ):
-    """Create a new document version"""
+    """
+    **Create a New Document Version**
+
+    Creates a new version record for an existing media item based on the provided
+    content, prompt, and analysis.
+    """
     # Check if the media exists:
     exists = db.execute_query("SELECT id FROM Media WHERE id=?", (media_id,))
     if not exists:
@@ -346,7 +390,12 @@ async def create_version(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/{media_id}/versions")
+@router.get(
+    "/{media_id}/versions",
+    tags=["Media Versioning"], # Assign tag
+    summary="List Media Versions", # Add summary
+    # response_model=List[YourVersionListResponseModel] # Define response model
+)
 async def list_versions(
     media_id: int,
     include_content: bool = False,
@@ -354,7 +403,12 @@ async def list_versions(
     offset: int = 0,
     db=Depends(get_db_manager)
 ):
-    """List all versions for a media item"""
+    """
+    **List Versions for a Media Item**
+
+    Retrieves a list of available versions for a specific media item.
+    Optionally includes the full content for each version. Supports pagination.
+    """
     versions = get_all_document_versions(
         media_id=media_id,
         include_content=include_content,
@@ -366,14 +420,24 @@ async def list_versions(
     return versions
 
 
-@router.get("/{media_id}/versions/{version_number}")
+@router.get(
+    "/{media_id}/versions/{version_number}",
+    tags=["Media Versioning"], # Assign tag
+    summary="Get Specific Media Version", # Add summary
+    # response_model=YourVersionDetailResponseModel # Define response model
+)
 async def get_version(
     media_id: int,
     version_number: int,
     include_content: bool = True,
     db=Depends(get_db_manager)
 ):
-    """Get specific version"""
+    """
+    **Get Specific Version Details**
+
+    Retrieves the details of a single, specific version for a media item.
+    By default, includes the full content.
+    """
     version = get_document_version(
         media_id=media_id,
         version_number=version_number,
@@ -384,26 +448,46 @@ async def get_version(
     return version
 
 
-@router.delete("/{media_id}/versions/{version_number}")
+@router.delete(
+    "/{media_id}/versions/{version_number}",
+    tags=["Media Versioning"], # Assign tag
+    summary="Delete Media Version", # Add summary
+    status_code=status.HTTP_204_NO_CONTENT, # Standard for successful DELETE with no body
+)
 async def delete_version(
     media_id: int,
     version_number: int,
     db=Depends(get_db_manager)
 ):
-    """Delete a specific version"""
+    """
+    **Delete a Specific Version**
+
+    Permanently removes a specific version of a media item.
+    *Caution: This action cannot be undone.*
+    """
     result = delete_document_version(media_id, version_number)
     if 'error' in result:
         raise HTTPException(status_code=404, detail=result['error'])
     return result
 
 
-@router.post("/{media_id}/versions/rollback")
+@router.post(
+    "/{media_id}/versions/rollback",
+    tags=["Media Versioning"], # Assign tag
+    summary="Rollback to Media Version", # Add summary
+    # response_model=YourRollbackResponseModel # Define response model
+)
 async def rollback_version(
         media_id: int,
         request: VersionRollbackRequest,
         db=Depends(get_db_manager)
 ):
-    """Rollback to a previous version"""
+    """
+    **Rollback to a Previous Version**
+
+    Restores the main content of a media item to the state of a specified previous version.
+    This typically creates a *new* version reflecting the rolled-back content.
+    """
     result = rollback_to_version(media_id, request.version_number)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -427,8 +511,21 @@ async def rollback_version(
 
     return response
 
-@router.put("/{media_id}")
+
+@router.put(
+    "/{media_id}",
+    tags=["Media Management"], # Assign tag
+    summary="Update Media Item", # Add summary
+    status_code=status.HTTP_200_OK, # Or 204 if no body is returned
+    # response_model=YourUpdatedMediaResponseModel # Define response model if applicable
+)
 async def update_media_item(media_id: int, payload: MediaUpdateRequest, db=Depends(get_db_manager)):
+    """
+    **Update Media Item Details**
+
+    Modifies attributes of the main media item record, such as title, author,
+    or potentially flags/status. Does not modify version history directly.
+    """
     # 1) check if media exists
     row = db.execute_query("SELECT id FROM Media WHERE id=?", (media_id,))
     if not row:
@@ -481,16 +578,16 @@ async def search_media(
     if not search_query and not keywords:
         raise HTTPException(status_code=400, detail="Either search_query or keywords must be provided")
 
-    # Process keywords if provided
-    if keywords:
-        keyword_list = [k.strip().lower() for k in keywords.split(",") if k.strip()]
+    # # Process keywords if provided
+    # if keywords:
+    #     keyword_list = [k.strip().lower() for k in keywords.split(",") if k.strip()]
 
     # Perform search
     try:
         results, total_matches = search_media_db(
             search_query=search_query.strip() if search_query else "",
             search_fields=["title", "content"],
-            keywords=keyword_list,
+            keywords=keywords,
             page=page,
             results_per_page=results_per_page
         )
@@ -588,7 +685,7 @@ class TempDirManager:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self._created and self.temp_dir_path and self._cleanup:
-            # remove the fragile exists‑check and always try to clean up
+            # remove the fragile exists-check and always try to clean up
             try:
                 shutil.rmtree(self.temp_dir_path, ignore_errors=True)
                 logging.info(f"Cleaned up temporary directory: {self.temp_dir_path}")
@@ -614,13 +711,17 @@ def _validate_inputs(media_type: MediaType, urls: Optional[List[str]], files: Op
             detail="At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided."
         )
 
+
 async def _save_uploaded_files(
     files: List[UploadFile], temp_dir: Path
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Saves uploaded files to a temporary directory."""
-    processed_files = []
-    file_handling_errors = []
+    # Explicitly type the list to match the function's return signature
+    processed_files: List[Dict[str, Any]] = []
+    # explicitly type file_handling_errors too for consistency
+    file_handling_errors: List[Dict[str, Any]] = []
     used_names: set[str] = set()
+
     for file in files:
         input_ref = file.filename or f"upload_{uuid.uuid4()}"
         local_file_path = None
@@ -665,6 +766,7 @@ async def _save_uploaded_files(
                 try: local_file_path.unlink()
                 except OSError: pass
     return processed_files, file_handling_errors
+
 
 def _prepare_chunking_options_dict(form_data: AddMediaForm) -> Optional[Dict[str, Any]]:
     """Prepares the dictionary of chunking options based on form data."""
@@ -719,7 +821,7 @@ async def _process_batch_media(
     media_type: MediaType,
     urls: List[str],
     uploaded_file_paths: List[str], # These should be the *keys* in source_to_ref_map
-    source_to_ref_map: Dict[str, str], # Map from processing source (URL/path) to original input ref (URL/filename)
+    source_to_ref_map: Dict[str, Union[str, Tuple[str, str]]], # Map from processing source (URL/path) to original input ref (URL/filename)
     form_data: AddMediaForm, # Pass the full form_data object
     chunk_options: Optional[Dict],
     loop: asyncio.AbstractEventLoop,
@@ -750,18 +852,30 @@ async def _process_batch_media(
         pre_check_warning = None
 
         # Perform DB pre-check only if applicable (e.g., has transcription model)
-        if media_type in ['video', 'audio']: # Add other types if they use model checks
+        if media_type in ['video', 'audio', 'pdf', 'document', 'image']: # Add other types if they use model checks
             try:
-                should_process, existing_id, reason = check_should_process_by_url(
-                    url=identifier_for_check,
-                    current_transcription_model=form_data.transcription_model, # Use correct field name
-                    db=db # Pass the db manager instance
+                # Use the correct form_data field for the model
+                model_for_check = form_data.transcription_model
+                # Note: check_should_process_by_url expects 'url', model, db
+                existing_id = check_should_process_by_url(
+                    url=identifier_for_check,  # Use original URL/filename
+                    current_transcription_model=model_for_check,
+                    db=db
                 )
+                if existing_id:
+                    should_process = False
+                    reason = f"Media exists (ID: {existing_id}) with the same transcription model."
+                else:
+                    # check_should_process_by_url returns ID if exists, None otherwise.
+                    # If it returns None, we should process.
+                    should_process = True
+                    reason = "Media not found or has different transcription model."
+
+
             except Exception as check_err:
-                 logging.error(f"DB pre-check failed for {input_ref}: {check_err}", exc_info=True)
-                 # Fail safe: If check fails, assume we should process but log error and add warning
-                 should_process, existing_id, reason = True, None, f"DB pre-check failed: {check_err}"
-                 pre_check_warning = f"Database pre-check failed: {check_err}"
+                logging.error(f"DB pre-check failed for {identifier_for_check}: {check_err}", exc_info=True)
+                should_process, existing_id, reason = True, None, f"DB pre-check failed: {check_err}"
+                pre_check_warning = f"Database pre-check failed: {check_err}"
 
         # --- Skip Logic ---
         if not should_process and not form_data.overwrite_existing:
@@ -827,41 +941,47 @@ async def _process_batch_media(
                 }
                 logging.debug(f"Calling refactored process_videos with args: {list(video_args.keys())}")
                 target_func = functools.partial(process_videos, **video_args)
-                batch_processor_output = await loop.run_in_executor(None, target_func)
+                batch_processor_output = await loop.run_in_executor(None, target_func, video_args)
             except Exception as call_e:
                 logging.error(f"!!! EXCEPTION DURING run_in_executor call for process_videos !!!", exc_info=True)
                 raise call_e
 
         elif media_type == 'audio':
             try:
+                # Prepare args for the refactored function
                 audio_args = {
-                     "inputs": items_to_process, # Assuming process_audio_files takes 'inputs' list
-                     "start_time": form_data.start_time, # Add if applicable to audio
-                     "end_time": form_data.end_time, # Add if applicable to audio
-                     "diarize": form_data.diarize,
-                     "vad_use": form_data.vad_use, # Add if applicable to audio
-                     "transcription_model": form_data.transcription_model,
-                     "transcription_language": form_data.transcription_language, # Keep if needed
-                     "custom_prompt": form_data.custom_prompt,
-                     "system_prompt": form_data.system_prompt,
-                     "perform_chunking": form_data.perform_chunking,
+                    "inputs": items_to_process,  # Pass only items to process
+                    "transcription_model": form_data.transcription_model,
+                    "transcription_language": form_data.transcription_language,
+                    "perform_chunking": form_data.perform_chunking,
                     "chunk_method": chunk_options.get('method') if chunk_options else None,
                     "max_chunk_size": chunk_options.get('max_size', 500) if chunk_options else 500,
                     "chunk_overlap": chunk_options.get('overlap', 200) if chunk_options else 200,
                     "use_adaptive_chunking": chunk_options.get('adaptive', False) if chunk_options else False,
                     "use_multi_level_chunking": chunk_options.get('multi_level', False) if chunk_options else False,
                     "chunk_language": chunk_options.get('language') if chunk_options else None,
-                     "summarize_recursively": form_data.summarize_recursively,
-                     "api_name": form_data.api_name if form_data.perform_analysis else None,
-                     "api_key": form_data.api_key,
-                     "use_cookies": form_data.use_cookies,
-                     "cookies": form_data.cookies,
-                     "timestamp_option": form_data.timestamp_option,
+                    "diarize": form_data.diarize,
+                    "vad_use": form_data.vad_use,
+                    "timestamp_option": form_data.timestamp_option,
+                    "perform_analysis": form_data.perform_analysis,
+                    "api_name": form_data.api_name if form_data.perform_analysis else None,
+                    "api_key": form_data.api_key,
+                    "custom_prompt_input": form_data.custom_prompt,
+                    "system_prompt_input": form_data.system_prompt,
+                    "summarize_recursively": form_data.summarize_recursively,
+                    "use_cookies": form_data.use_cookies,
+                    "cookies": form_data.cookies,
+                    "keep_original": form_data.keep_original_file,  # Pass keep flag
+                    # Optional: pass title/author if process_audio_files uses them
+                    "custom_title": form_data.title,
+                    "author": form_data.author,
+                    # temp_dir: Managed by the caller endpoint
                 }
-                logging.debug(f"Calling process_audio_files with args: {list(audio_args.keys())}")
-                # Wrap the function and its args using partial
-                target_func = functools.partial(process_audio_files, **audio_args) # Adjust function name if needed
-                batch_processor_output = await loop.run_in_executor(None, target_func)
+                logging.debug(f"Calling refactored process_audio_files with args: {list(audio_args.keys())}")
+                # Import the specific function
+                from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
+                target_func = functools.partial(process_audio_files, **audio_args)
+                batch_processor_output = await loop.run_in_executor(None, target_func, audio_args)
 
             except Exception as call_e:
                 logging.error(f"!!! EXCEPTION DURING run_in_executor call for process_audio_files !!!", exc_info=True)
@@ -884,89 +1004,132 @@ async def _process_batch_media(
 
         # --- Post-Processing DB Logic for successfully processed items ---
         final_batch_results = []
+        # Extract results correctly
+        if batch_processor_output and isinstance(batch_processor_output.get("results"), list):
+             processing_results_list = batch_processor_output["results"]
+        else:
+             logging.error(f"Batch {media_type} processor returned unexpected output: {batch_processor_output}")
+             # Create error results for all items that were supposed to be processed
+             processing_results_list = [
+                  {"status": "Error", "input_ref": source_to_ref_map.get(item, item),
+                   "processing_source": item, "media_type": media_type,
+                   "error": f"Batch processor returned invalid data."}
+                   for item in items_to_process
+             ]
+
         for process_result in processing_results_list:
-            # Standardize: Ensure result is a dict
+            # Standardize: Ensure result is a dict and has input_ref
             if not isinstance(process_result, dict):
+                # Handle malformed result from processor
                 logging.error(f"Processor returned non-dict item: {process_result}")
-                input_ref_for_error = "Unknown Input" # Cannot determine input reliably
-                final_batch_results.append({
-                    "status": "Error", "input_ref": input_ref_for_error,
-                    "error": "Processor returned invalid result format.",
-                    "processing_source": "Unknown", "media_type": media_type,
-                    "metadata": None, "content": None, "segments": None, "chunks": None,
-                    "analysis": None, "analysis_details": None, "warnings": None,
-                    "db_id": None, "db_message": None
-                })
+                # Try to find original ref if possible, otherwise mark unknown
+                input_ref_for_error = "Unknown Input"
+                proc_source = getattr(process_result, 'processing_source', None)  # Example guess
+                if proc_source and proc_source in source_to_ref_map:
+                    input_ref_for_error = source_to_ref_map.get(proc_source, proc_source)
+
+                malformed_result = {
+                    "status": "Error", "input_ref": input_ref_for_error, "processing_source": proc_source or "Unknown",
+                    "media_type": media_type, "metadata": None, "content": None, "segments": None, "chunks": None,
+                    "analysis": None, "analysis_details": None, "error": "Processor returned invalid result format.",
+                    "warnings": None, "db_id": None, "db_message": None, "message": None
+                }
+                final_batch_results.append(malformed_result)
                 continue
 
-            # Standardize: Ensure input_ref exists
+            # Determine input_ref (original URL/filename)
             input_ref = process_result.get("input_ref")
-            processing_source = process_result.get("processing_source")
+            processing_source = process_result.get("processing_source")  # Actual path/URL used
             if not input_ref:
-                 input_ref = source_to_ref_map.get(processing_source, processing_source) # Fallback
-                 logging.warning(f"Processor result missing 'input_ref', inferred as '{input_ref}' from source '{processing_source}'")
-                 process_result["input_ref"] = input_ref # Add it back
+                # Try to map back from processing_source if input_ref is missing
+                ref_info = source_to_ref_map.get(processing_source)
+                if isinstance(ref_info, tuple):  # If warning was stored
+                    input_ref = ref_info[0]
+                elif isinstance(ref_info, str):
+                    input_ref = ref_info
+                else:  # Fallback
+                    input_ref = processing_source or "Unknown Input"
+                logging.warning(
+                    f"Processor result missing 'input_ref', inferred as '{input_ref}' from source '{processing_source}'")
+                process_result["input_ref"] = input_ref  # Add it back
 
             # Check for pre-check warnings associated with this item
             pre_check_info = source_to_ref_map.get(processing_source)
             pre_check_warning_msg = None
-            if isinstance(pre_check_info, tuple): # We stored (input_ref, warning)
+            if isinstance(pre_check_info, tuple):  # We stored (input_ref, warning)
                 pre_check_warning_msg = pre_check_info[1]
                 process_result.setdefault("warnings", [])
-                if pre_check_warning_msg not in process_result["warnings"]:
+                if pre_check_warning_msg and pre_check_warning_msg not in process_result["warnings"]:
                     process_result["warnings"].append(pre_check_warning_msg)
 
-
-            if process_result.get("status") == "Success":
-                # Call the DB add/update function
+            if process_result.get("status") in ["Success", "Warning"]:  # Persist even on warning if data exists
                 db_id = None
-                db_message = "DB operation not attempted."
-                try:
-                    logging.info(f"Attempting DB persistence for successful item: {input_ref}")
-                    metadata = process_result.get('metadata', {})
-                    analysis_details = process_result.get('analysis_details', {})
+                db_message = "DB operation skipped (processing status not Success/Warning or data missing)."
+                # Extract necessary data for DB persistence
+                content_for_db = process_result.get('transcript', '')  # Use transcript as content
+                summary_for_db = process_result.get('summary')
+                metadata_for_db = process_result.get('metadata', {})
+                analysis_details_for_db = process_result.get('analysis_details', {})
+                # Determine transcription model used (check analysis details, fallback to form)
+                transcription_model_used = analysis_details_for_db.get('transcription_model',
+                                                                       form_data.transcription_model)
 
-                    db_args = {
-                        "url": input_ref,
-                        "title": metadata.get('title', form_data.title or Path(input_ref).stem),
-                        "media_type": process_result.get('media_type', media_type),
-                        "content": process_result.get('content', ''),
-                        "keywords": form_data.keywords, # Use parsed list from form_data
-                        "prompt": form_data.custom_prompt,
-                        "analysis_content": process_result.get('analysis'),
-                        "transcription_model": analysis_details.get('whisper_model', form_data.transcription_model),
-                        "author": metadata.get('uploader', form_data.author),
-                        "ingestion_date": datetime.now().strftime('%Y-%m-%d'),
-                        "overwrite": form_data.overwrite_existing, # Pass the overwrite flag
-                        "db": db, # Pass the db instance
-                        "chunk_options": chunk_options # Pass chunk options if needed by scheduling
-                    }
-                    # Run add_media_with_keywords in executor as it might be sync
-                    db_add_update_func = functools.partial(add_media_with_keywords, **db_args)
-                    db_id, db_message = await loop.run_in_executor(None, db_add_update_func)
+                if content_for_db:  # Only persist if there's content
+                    try:
+                        logging.info(f"Attempting DB persistence for item: {input_ref}")
+                        # Prepare arguments for add_media_with_keywords
+                        db_args = {
+                            "url": input_ref,  # Use the original URL/filename as the primary key/identifier
+                            "title": metadata_for_db.get('title', form_data.title or Path(input_ref).stem),
+                            "media_type": media_type,
+                            "content": content_for_db,
+                            # Keywords: handle list or fallback to empty list
+                            "keywords": metadata_for_db.get('keywords') if isinstance(metadata_for_db.get('keywords'),
+                                                                                      list) else [],
+                            "prompt": form_data.custom_prompt,
+                            "analysis_content": summary_for_db,
+                            "transcription_model": transcription_model_used,
+                            "author": metadata_for_db.get('author', form_data.author),
+                            "ingestion_date": datetime.now().strftime('%Y-%m-%d'),
+                            "overwrite": form_data.overwrite_existing,
+                            "db": db,  # Pass the db instance
+                            # Add chunk_options if add_media_with_keywords needs it
+                            "chunk_options": chunk_options,
+                            # Add segments if needed by add_media_with_keywords
+                            "segments": process_result.get('segments'),
+                        }
 
-                    process_result["db_id"] = db_id
-                    process_result["db_message"] = db_message
+                        db_add_update_func = functools.partial(add_media_with_keywords, **db_args)
+                        db_id, db_message = await loop.run_in_executor(None, db_add_update_func, db_args)
 
-                except DatabaseError as db_err:
-                    logging.error(f"Database operation failed for {input_ref}: {db_err}", exc_info=True)
-                    process_result['status'] = 'Warning' # Processing OK, DB failed
-                    process_result['error'] = (process_result.get('error') or "") + f" | DB Error: {db_err}"
-                    process_result.setdefault("warnings", [])
-                    if f"Database operation failed: {db_err}" not in process_result["warnings"]:
-                         process_result["warnings"].append(f"Database operation failed: {db_err}")
-                except Exception as e:
-                     logging.error(f"Unexpected error during DB persistence for {input_ref}: {e}", exc_info=True)
-                     process_result['status'] = 'Warning'
-                     process_result['error'] = (process_result.get('error') or "") + f" | Persistence Error: {e}"
-                     process_result.setdefault("warnings", [])
-                     if f"Unexpected persistence error: {e}" not in process_result["warnings"]:
-                          process_result["warnings"].append(f"Unexpected persistence error: {e}")
+                        process_result["db_id"] = db_id
+                        process_result["db_message"] = db_message
+                        logging.info(f"DB persistence result for {input_ref}: ID={db_id}, Msg='{db_message}'")
+
+                    except DatabaseError as db_err:
+                        logging.error(f"Database operation failed for {input_ref}: {db_err}", exc_info=True)
+                        process_result['status'] = 'Warning'  # Maintain Warning status
+                        process_result['error'] = (process_result.get('error') or "") + f" | DB Error: {db_err}"
+                        process_result.setdefault("warnings", [])
+                        if f"Database operation failed: {db_err}" not in process_result["warnings"]:
+                            process_result["warnings"].append(f"Database operation failed: {db_err}")
+                        process_result["db_message"] = f"DB Error: {db_err}"
+                    except Exception as e:
+                        logging.error(f"Unexpected error during DB persistence for {input_ref}: {e}", exc_info=True)
+                        process_result['status'] = 'Warning'  # Maintain Warning status
+                        process_result['error'] = (process_result.get('error') or "") + f" | Persistence Error: {e}"
+                        process_result.setdefault("warnings", [])
+                        if f"Unexpected persistence error: {e}" not in process_result["warnings"]:
+                            process_result["warnings"].append(f"Unexpected persistence error: {e}")
+                        process_result["db_message"] = f"Persistence Error: {e}"
+                else:
+                    logging.warning(f"Skipping DB persistence for {input_ref} due to missing content.")
+                    process_result["db_message"] = "DB persistence skipped (no content)."
 
             # Add the (potentially updated) result to the final list
             final_batch_results.append(process_result)
 
-        # Combine skipped results with processed results
+            # Combine skipped results with processed results
         combined_results.extend(final_batch_results)
 
     except Exception as e:
@@ -990,30 +1153,38 @@ async def _process_batch_media(
     final_standardized_results = []
     processed_input_refs = set() # Track input refs to avoid duplicates if errors happened at multiple stages
 
+    final_standardized_results = []
+    processed_input_refs = set()  # Track input refs to avoid duplicates
+
     for res in combined_results:
         input_ref = res.get("input_ref", "Unknown")
         if input_ref in processed_input_refs and input_ref != "Unknown":
-            continue # Skip if we already have a result for this original input
+            continue  # Skip duplicate entry for the same original input
         processed_input_refs.add(input_ref)
 
-        # Ensure all expected keys are present, defaulting to None or empty structures
         standardized = {
             "status": res.get("status", "Error"),
             "input_ref": input_ref,
             "processing_source": res.get("processing_source", "Unknown"),
             "media_type": res.get("media_type", media_type),
             "metadata": res.get("metadata") if res.get("metadata") is not None else {},
-            "content": res.get("content") if res.get("content") is not None else "",
-            "segments": res.get("segments"), # Keep None if missing
-            "chunks": res.get("chunks"),     # Keep None if missing
-            "analysis": res.get("analysis"),    # Keep None if missing (use summary field name)
-            "analysis_details": res.get("analysis_details"), # Keep None if missing
-            "error": res.get("error"),       # Keep None if missing
-            "warnings": res.get("warnings"), # Keep None if missing
-            "db_id": res.get("db_id"),       # Keep None if missing
-            "db_message": res.get("db_message"), # Keep None if missing
-            "message": res.get("message") # Include message from Skipped items
+            "transcript": res.get("transcript") if res.get("transcript") is not None else None,  # Use transcript field
+            "segments": res.get("segments"),
+            "chunks": res.get("chunks"),
+            "summary": res.get("summary"),  # Use summary field
+            "analysis_details": res.get("analysis_details"),
+            "error": res.get("error"),
+            "warnings": res.get("warnings"),
+            "db_id": res.get("db_id"),
+            "db_message": res.get("db_message"),
+            "message": res.get("message")  # For Skipped items etc.
         }
+        # Ensure content key exists, map from transcript if necessary
+        if "content" not in standardized and "transcript" in standardized:
+            standardized["content"] = standardized["transcript"]
+        elif "content" not in standardized:
+            standardized["content"] = None
+
         final_standardized_results.append(standardized)
 
     return final_standardized_results
@@ -1220,7 +1391,7 @@ async def _process_document_like_item(
             logging.info(f"Calling refactored '{func_name}' for '{item_input_ref}'")
             if run_in_executor:
                 target_func = functools.partial(processing_func, **specific_options)
-                process_result_dict = await loop.run_in_executor(None, target_func)
+                process_result_dict = await loop.run_in_executor(None, target_func, specific_options)
             else:
                 process_result_dict = await processing_func(**specific_options)
 
@@ -1274,7 +1445,7 @@ async def _process_document_like_item(
             }
 
             db_add_update_func = functools.partial(add_media_with_keywords, **db_args)
-            db_id, db_message = await loop.run_in_executor(None, db_add_update_func)
+            db_id, db_message = await loop.run_in_executor(None, db_add_update_func, db_args)
 
             final_result["db_id"] = db_id
             final_result["db_message"] = db_message
@@ -1331,7 +1502,10 @@ def _determine_final_status(results: List[Dict[str, Any]]) -> int:
 
 
 # --- Main Endpoint ---
-@router.post("/add", status_code=status.HTTP_200_OK) # Default success code
+@router.post("/add",
+             status_code=status.HTTP_200_OK,
+             tags=["Media Ingestion"],
+)
 async def add_media(
     background_tasks: BackgroundTasks,
     # --- Required Fields ---
@@ -1382,7 +1556,14 @@ async def add_media(
     # db = Depends(...) # Add DB dependency if needed
 ):
     """
+    **Add Media Endpoint**
+
     Add multiple media items (from URLs and/or uploaded files) to the database with processing.
+
+    Ingests media from URLs or uploads, processes it (transcription, analysis, etc.),
+    and **persists** the results and metadata to the database.
+
+    Use this endpoint for adding new content to the system permanently.
     """
     # --- 0. Manually Create Pydantic Model Instance for Validation & Access ---
     # Create the 'form_data' object we expected from Depends() before
@@ -1434,87 +1615,26 @@ async def add_media(
     logging.info(f"Received request to add {form_data.media_type} media.")
     # TODO: Add authentication logic using the 'token'
 
+    # --- 2. Database Dependency ---
+    # TODO / FIXME: Add DB dependency based on current user
+    # db = Depends(get_db)
+
     results = []
     temp_dir_manager = TempDirManager(cleanup=not form_data.keep_original_file) # Manages the lifecycle of the temp dir
     temp_dir_path: Optional[Path] = None
     loop = asyncio.get_running_loop()
 
-    # FIXME - make sure this works/checks against hte current model
-    # Check if media already exists in the database and compare whisper models
-        # Video
-        # should_download, reason = check_media_and_whisper_model(
-        #     title=normalized_video_title,
-        #     url=video_url,
-        #     current_whisper_model=current_whisper_model
-        # )
-        # if not should_download:
-        #     logging.info(f"Skipping download: {reason}")
-        #     return None
-        # logging.info(f"Proceeding with download: {reason}")
-        # # If store_in_db is True, check DB:
-        # if store_in_db:
-        #     media_exists, reason = check_media_and_whisper_model(
-        #         title=info_dict.get("title"),
-        #         url=info_dict.get("webpage_url", ""),
-        #         current_whisper_model=whisper_model
-        #     )
-        #     if media_exists and "same whisper model" in reason and not overwrite_existing:
-        #         # skip
-        #         return {
-        #             "video_input": video_input,
-        #             "status": "Error",
-        #             "error": f"Already processed with same model: {reason}"
-        #         }
-
-        #Store in DB: Video
-        # # Possibly store in DB
-        # media_id = None
-        # if store_in_db:
-        #     # Determine keywords list
-        #     if isinstance(keywords, str):
-        #         keywords_list = [k.strip() for k in keywords.split(",") if k.strip()]
-        #     else:
-        #         keywords_list = []
-        #
-        #     # Check if we need to update vs. add
-        #     existing_media = check_existing_media(info_dict['webpage_url'])
-        #     if existing_media:
-        #         media_id = existing_media["id"]
-        #         update_media_content_with_version(
-        #             media_id,
-        #             info_dict,
-        #             full_text_with_metadata,
-        #             custom_prompt,
-        #             analysis_text,
-        #             transcription_model
-        #         )
-        #     else:
-        #         # Add new
-        #         add_result = add_media_to_database(
-        #             url=info_dict['webpage_url'],
-        #             info_dict=info_dict,
-        #             segments=segments,
-        #             summary=analysis_text,
-        #             keywords=keywords_list,
-        #             custom_prompt_input=custom_prompt or "",
-        #             transcription_model=transcription_model,
-        #             overwrite=overwrite_existing
-        #         )
-        #         # You can optionally get the new ID from `add_result`.
-        #         # Suppose add_result returned a dict with 'id'
-        #         media_id = add_result.get("id") if isinstance(add_result, dict) else None
-
     try:
-        # --- 2. Setup Temporary Directory ---
+        # --- 3. Setup Temporary Directory ---
         with temp_dir_manager as temp_dir:
             temp_dir_path = temp_dir
             logging.info(f"Using temporary directory: {temp_dir_path}")
 
-            # --- 3. Save Uploaded Files ---
+            # --- 4. Save Uploaded Files ---
             saved_files_info, file_save_errors = await _save_uploaded_files(files or [], temp_dir_path)
             results.extend(file_save_errors) # Add file saving errors to results immediately
 
-            # --- 4. Prepare Inputs and Options ---
+            # --- 5. Prepare Inputs and Options ---
             uploaded_file_paths = [str(pf["path"]) for pf in saved_files_info]
             url_list = form_data.urls or []
             all_input_sources = url_list + uploaded_file_paths
@@ -1534,21 +1654,29 @@ async def add_media(
             source_to_ref_map = {src: src for src in url_list} # URLs map to themselves
             source_to_ref_map.update({str(pf["path"]): pf["original_filename"] for pf in saved_files_info})
 
-            # --- 5. Process Media based on Type ---
+            # --- 6. Process Media based on Type ---
             logging.info(f"Processing {len(all_input_sources)} items of type '{form_data.media_type}'")
 
             if form_data.media_type in ['video', 'audio']:
-                # Use batch processing helper
+                # Pass DB to batch processor
                 batch_results = await _process_batch_media(
-                    form_data.media_type, url_list, uploaded_file_paths, form_data, chunking_options_dict, loop
+                    media_type=form_data.media_type, # Use keyword arg for clarity
+                    urls=url_list,
+                    uploaded_file_paths=uploaded_file_paths,
+                    source_to_ref_map=source_to_ref_map,
+                    form_data=form_data,
+                    chunk_options=chunking_options_dict,
+                    loop=loop,
+                    db=db
                 )
                 results.extend(batch_results)
+
             else:
                 # Process PDF/Document/Ebook individually
                 tasks = []
                 for source in all_input_sources:
                     is_url = source in url_list
-                    input_ref = source_to_ref_map[source] # Get original reference
+                    input_ref = source_to_ref_map[source]  # Get original reference
                     tasks.append(
                         _process_document_like_item(
                             item_input_ref=input_ref,
@@ -1556,9 +1684,10 @@ async def add_media(
                             media_type=form_data.media_type,
                             is_url=is_url,
                             form_data=form_data,
-                            common_options=common_processing_options,
+                            chunk_options=chunking_options_dict,
                             temp_dir=temp_dir_path,
-                            loop=loop
+                            loop=loop,
+                            db=db  # Pass the db instance
                         )
                     )
                 # Run individual processing tasks concurrently
@@ -1569,7 +1698,7 @@ async def add_media(
         # Log and re-raise HTTP exceptions, ensure cleanup is scheduled if needed
         logging.warning(f"HTTP Exception encountered: Status={e.status_code}, Detail={e.detail}")
         if temp_dir_path and not form_data.keep_original_file and temp_dir_path.exists():
-            background_tasks.add_task(shutil.rmtree, temp_dir_path, ignore_errors=True)
+            background_tasks.add_task(shutil.rmtree, temp_dir_path, ignore_errors=True, )
         raise e
     except OSError as e:
         # Handle potential errors during temp dir creation/management
@@ -1590,7 +1719,7 @@ async def add_media(
                 logging.info(f"Scheduling background cleanup for temporary directory: {temp_dir_path}")
                 background_tasks.add_task(shutil.rmtree, temp_dir_path, ignore_errors=True)
 
-    # --- 6. Determine Final Status Code and Return Response ---
+    # --- 7. Determine Final Status Code and Return Response ---
     final_status_code = _determine_final_status(results)
     log_message = f"Request finished with status {final_status_code}. Results count: {len(results)}"
     if final_status_code == status.HTTP_200_OK:
@@ -1610,35 +1739,18 @@ async def add_media(
 # Endpoints:
 # POST /api/v1/process-video
 
-class ProcessVideosForm(AddMediaForm):
-    """
-    Same field‑surface as AddMediaForm, but:
-      • media_type forced to `"video"` (so client does not need to send it)
-      • keep_original_file defaults to False (tmp dir always wiped)
-      • perform_analysis stays default=True (caller may disable)
-    """
-    media_type: Literal["video"] = "video"
-    keep_original_file: bool = Field(False, const=True)
-
-
-###############################################################################
-# /api/v1/media/process‑videos  – “transcribe / analyse only” endpoint
-###############################################################################
-@router.post(
-    "/process‑videos",
-    status_code=status.HTTP_200_OK,
-    summary="Transcribe / chunk / analyse videos and return the full artefacts (no DB write)"
-)
-async def process_videos_endpoint(
-    background_tasks: BackgroundTasks,
+def get_process_videos_form(
+    # Replicate Form(...) definitions from the original endpoint signature.
+    # Use the field names from the Pydantic model where possible.
+    # The 'alias' in Form(...) helps map incoming form keys.
     urls: Optional[List[str]] = Form(None, description="List of URLs of the video items"),
     title: Optional[str] = Form(None, description="Optional title (applied if only one item processed)"),
     author: Optional[str] = Form(None, description="Optional author (applied similarly to title)"),
-    keywords: str = Form("", alias="keywords", description="Comma-separated keywords"), # Use alias if AddMediaForm uses it
+    # Use the alias 'keywords' for the form field, matching AddMediaForm's alias for 'keywords_str'
+    keywords: str = Form("", alias="keywords", description="Comma-separated keywords"),
     custom_prompt: Optional[str] = Form(None, description="Optional custom prompt"),
     system_prompt: Optional[str] = Form(None, description="Optional system prompt"),
     overwrite_existing: bool = Form(False, description="Overwrite existing media (Not used in this endpoint, but needed for model)"),
-    # keep_original_file: bool = Form(False), # Not needed - fixed in ProcessVideosForm
     perform_analysis: bool = Form(True, description="Perform analysis"),
     start_time: Optional[str] = Form(None, description="Optional start time (HH:MM:SS or seconds)"),
     end_time: Optional[str] = Form(None, description="Optional end time (HH:MM:SS or seconds)"),
@@ -1652,9 +1764,8 @@ async def process_videos_endpoint(
     timestamp_option: bool = Form(True, description="Include timestamps in transcription"),
     vad_use: bool = Form(False, description="Enable VAD filter"),
     perform_confabulation_check_of_analysis: bool = Form(False, description="Enable confabulation check"),
-    # Include other fields needed by AddMediaForm constructor, even if not video-specific
     pdf_parsing_engine: Optional[PdfEngine] = Form("pymupdf4llm", description="PDF parsing engine (for model compatibility)"),
-    perform_chunking: bool = Form(True, description="Enable chunking"),
+    perform_chunking: bool = Form(True, description="Enable chunking"), # Default from ChunkingOptions
     chunk_method: Optional[ChunkMethod] = Form(None, description="Chunking method"),
     use_adaptive_chunking: bool = Form(False, description="Enable adaptive chunking"),
     use_multi_level_chunking: bool = Form(False, description="Enable multi-level chunking"),
@@ -1664,27 +1775,26 @@ async def process_videos_endpoint(
     custom_chapter_pattern: Optional[str] = Form(None, description="Regex pattern for custom chapter splitting"),
     perform_rolling_summarization: bool = Form(False, description="Perform rolling summarization"),
     summarize_recursively: bool = Form(False, description="Perform recursive summarization"),
-    # --- End Form Fields ---
-
-    #settings: Settings = Depends(get_settings), # Your settings dependency
-    #user_info: dict = Depends(verify_token),   # Your auth dependency
-    files: Optional[List[UploadFile]] = File(None, description="Video file uploads"),
-    token: str = Header(..., description="Authentication token"),
-    # NOTE: No db=Depends() needed here as this endpoint doesn't interact with DB
-):
+) -> ProcessVideosForm:
     """
-    Transcribe / chunk / analyse videos and return the full artefacts (no DB write).
+    Dependency function to parse form data and validate it
+    against the ProcessVideosForm model.
     """
-    # --- Manually Create ProcessVideosForm Instance ---
     try:
-        form_data = ProcessVideosForm(
+        # Create the Pydantic model instance using the parsed form data.
+        # Pydantic will validate during initialization.
+        # Pass the 'keywords' value received from the form (via alias)
+        # to the 'keywords' field name which AddMediaForm expects due to the alias config.
+        form_instance = ProcessVideosForm(
+            media_type="video", # Fixed by ProcessVideosForm
             urls=urls,
             title=title,
             author=author,
-            keywords=keywords,
+            keywords=keywords, # Pydantic handles mapping this to keywords_str via alias
             custom_prompt=custom_prompt,
             system_prompt=system_prompt,
             overwrite_existing=overwrite_existing,
+            keep_original_file=False, # Fixed by ProcessVideosForm
             perform_analysis=perform_analysis,
             start_time=start_time,
             end_time=end_time,
@@ -1692,7 +1802,7 @@ async def process_videos_endpoint(
             api_key=api_key,
             use_cookies=use_cookies,
             cookies=cookies,
-            transcription_model=transcription_model or settings.DEFAULT_TRANSCRIPTION_MODEL,
+            transcription_model=transcription_model,
             transcription_language=transcription_language,
             diarize=diarize,
             timestamp_option=timestamp_option,
@@ -1710,24 +1820,75 @@ async def process_videos_endpoint(
             perform_rolling_summarization=perform_rolling_summarization,
             summarize_recursively=summarize_recursively,
         )
-    except Exception as e: # Catch Pydantic validation errors explicitly if needed
-        logger.error(f"Form data validation error for /process-videos: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Form data validation error: {e}")
+        return form_instance
+    except ValidationError as e:
+        # Raise HTTPException with Pydantic's validation errors
+        # FastAPI automatically handles this for dependencies
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=e.errors(), # Provide structured error details
+        ) from e
+    except Exception as e: # Catch other potential errors during instantiation
+        logger.error(f"Unexpected error creating ProcessVideosForm: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error during form processing: {type(e).__name__}"
+        )
 
-    # --- Initial Validation ---
+###############################################################################
+# /api/v1/media/process-videos  – “transcribe / analyse only” endpoint
+###############################################################################
+@router.post(
+    "/process-videos",
+    status_code=status.HTTP_200_OK,
+    summary="Transcribe / chunk / analyse videos and return the full artefacts (no DB write)",
+    tags=["Media Processing"],
+)
+async def process_videos_endpoint(
+    # --- Dependencies ---
+    background_tasks: BackgroundTasks,
+    # Use the dependency function to get validated form data
+    form_data: ProcessVideosForm = Depends(get_process_videos_form),
+    # Optional: Uncomment if auth is needed
+    # user_info: dict = Depends(verify_token),
+    # Keep File parameter separate
+    files: Optional[List[UploadFile]] = File(None, description="Video file uploads"),
+    # --- Removed all individual Form(...) parameters ---
+):
+    """
+    **Process Videos Endpoint**
+
+    Transcribe / chunk / analyse videos and return the full artefacts (no DB write).
+
+    This endpoint handles video processing based on provided URLs or uploaded files.
+
+    - Transcribes audio content.
+    - Optionally chunks the transcript.
+    - Optionally performs analysis (e.g., summarization).
+    - Returns processing artifacts without saving to the main database.
+
+    Use this for quick processing or testing pipelines.
+    """
+    # --- Validation and Logging ---
+    # Validation based on ProcessVideosForm already happened in the dependency.
+    # Log the successful validation or handle the HTTPException raised by the dependency.
+    logger.info("Form data validated successfully via dependency.")
+
     # Use the helper function with the validated form_data object
     # Pass "video" explicitly as media_type because ProcessVideosForm guarantees it.
-    _validate_inputs("video", form_data.urls, files)
-    # Logging for per-user
-    #logger.info(f"Request received for /process-videos, authenticated for user: {user_info.get('user_id', 'Unknown')}")
-    # Auth check already performed by Depends(verify_token)
+    _validate_inputs("video", form_data.urls, files) # Keep this check for presence of URL or file
 
-    results = [] # Keep this if _save_uploaded_files returns errors in this format
-    temp_dir_manager = TempDirManager(cleanup=True) # Always cleanup for this endpoint
+    # Optional: Logging for per-user
+    # logger.info(f"Request received for /process-videos, authenticated for user: {user_info.get('user_id', 'Unknown')}")
+
+    # --- Rest of the endpoint logic remains largely the same ---
+    # Use `form_data.field_name` directly instead of individual variables.
+
+    results = []
+    temp_dir_manager = TempDirManager(cleanup=True)
     temp_dir_path: Optional[Path] = None
     loop = asyncio.get_running_loop()
 
-    # Initialize batch_result structure expected by the caller/frontend
     batch_result = {"processed_count": 0, "errors_count": 0, "errors": [], "results": [], "confabulation_results": None}
 
     try:
@@ -1735,47 +1896,29 @@ async def process_videos_endpoint(
             temp_dir_path = temp_dir
             logger.info(f"Using temporary directory for /process-videos: {temp_dir_path}")
             # --- Save Uploads ---
-            # _save_uploaded_files returns -> Tuple[List[Dict], List[Dict]]
             saved_files_info, file_handling_errors = await _save_uploaded_files(files or [], temp_dir)
 
             # --- Process File Handling Errors ---
-            # Integrate errors from file saving into the main batch_result
             if file_handling_errors:
                 batch_result["errors_count"] += len(file_handling_errors)
-                batch_result["errors"].extend([
-                    # Extract the 'error' message string from each error dict
-                    err.get("error", "Unknown file save error")
-                    for err in file_handling_errors
-                ])
-
-                # Adapt file_handling_errors to match the structure of processing results
-                # (like MediaItemProcessResponse, but without DB fields)
+                batch_result["errors"].extend([err.get("error", "Unknown file save error") for err in file_handling_errors])
+                # Adapt errors (code seems okay here)
                 adapted_file_errors = [
-                    {
-                        "status": err.get("status", "Error"), # Use status from the error dict
-                        "input_ref": err.get("input", "Unknown Filename"), # Use 'input' key
-                        "processing_source": "N/A - File Save Failed",
-                        "media_type": "video",
-                        "metadata": {},
-                        "content": "",
-                        "segments": None,
-                        "chunks": None,
-                        "analysis": None,
-                        "analysis_details": None,
-                        "error": err.get("error", "Failed to save uploaded file."), # Use 'error' key
-                        "warnings": None,
-                        # No DB fields for this endpoint
-                        "db_id": None,
-                        "db_message": None,
-                        "message": None, # General message field
-                    } for err in file_handling_errors
-                ]
-                # Add these formatted errors to the 'results' list
+                     {
+                         "status": err.get("status", "Error"),
+                         "input_ref": err.get("input", "Unknown Filename"),
+                         "processing_source": "N/A - File Save Failed", "media_type": "video",
+                         "metadata": {}, "content": "", "segments": None, "chunks": None,
+                         "analysis": None, "analysis_details": None,
+                         "error": err.get("error", "Failed to save uploaded file."), "warnings": None,
+                         "db_id": None, "db_message": None, "message": None,
+                     } for err in file_handling_errors
+                 ]
                 batch_result["results"].extend(adapted_file_errors)
+
 
             # --- Prepare Inputs for Processing ---
             url_list = form_data.urls or []
-            # Get paths ONLY from successfully saved files
             uploaded_paths = [str(pf["path"]) for pf in saved_files_info]
             all_inputs_to_process = url_list + uploaded_paths
 
@@ -1783,17 +1926,17 @@ async def process_videos_endpoint(
             if not all_inputs_to_process:
                  if file_handling_errors: # Only file errors occurred
                      logger.warning("No valid video sources to process, only file saving errors.")
-                     # Return 207 because some operations (file saving) failed
                      return JSONResponse(status_code=status.HTTP_207_MULTI_STATUS, content=batch_result)
-                 else: # No inputs provided at all (handled by _validate_inputs earlier)
-                     # This case should theoretically not be reached if _validate_inputs works
-                     logger.error("No video sources (URLs or Files) provided.")
-                     raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid video sources supplied.")
+                 else: # No inputs provided at all (handled by _validate_inputs earlier, should be caught there)
+                     # This case should ideally be caught by _validate_inputs raising 400
+                     logger.error("Edge case: No video sources after potential file errors, but _validate_inputs passed.")
+                     raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid video sources supplied (or file saving failed).")
 
             # --- Call process_videos ---
-            chunk_options = _prepare_chunking_options_dict(form_data)
+            # Removed _prepare_chunking_options_dict as we use form_data directly
             video_args = {
-                "inputs": all_inputs_to_process,  # Pass only valid inputs
+                "inputs": all_inputs_to_process,
+                # Use form_data directly
                 "start_time": form_data.start_time,
                 "end_time": form_data.end_time,
                 "diarize": form_data.diarize,
@@ -1801,96 +1944,92 @@ async def process_videos_endpoint(
                 "transcription_model": form_data.transcription_model,
                 "custom_prompt": form_data.custom_prompt,
                 "system_prompt": form_data.system_prompt,
-
-                # --- Pass Individual Chunking Args ---
                 "perform_chunking": form_data.perform_chunking,
                 "chunk_method": form_data.chunk_method,
-                "max_chunk_size": form_data.chunk_size,
+                "max_chunk_size": form_data.chunk_size, # Note: Pydantic model uses chunk_size
                 "chunk_overlap": form_data.chunk_overlap,
                 "use_adaptive_chunking": form_data.use_adaptive_chunking,
                 "use_multi_level_chunking": form_data.use_multi_level_chunking,
                 "chunk_language": form_data.chunk_language,
-                # --- End Chunking Args ---
-
                 "summarize_recursively": form_data.summarize_recursively,
                 "api_name": form_data.api_name if form_data.perform_analysis else None,
-                "api_key": form_data.api_key,  # Consider loading from settings
+                "api_key": form_data.api_key,
                 "use_cookies": form_data.use_cookies,
                 "cookies": form_data.cookies,
                 "timestamp_option": form_data.timestamp_option,
-                "confab_checkbox": form_data.perform_confabulation_check_of_analysis,
+                "confab_checkbox": form_data.perform_confabulation_check_of_analysis, # Check name consistency
             }
 
             logger.debug(f"Calling refactored process_videos for /process-videos endpoint with {len(all_inputs_to_process)} inputs.")
             batch_func = functools.partial(process_videos, **video_args)
-            processing_output = await loop.run_in_executor(None, batch_func)
+            processing_output = await loop.run_in_executor(None, batch_func, video_args)
 
-            # --- Combine Processing Results ---
+            # --- Combine Processing Results --- (Code seems okay here)
             if isinstance(processing_output, dict):
                  batch_result["processed_count"] += processing_output.get("processed_count", 0)
                  batch_result["errors_count"] += processing_output.get("errors_count", 0)
                  batch_result["errors"].extend(processing_output.get("errors", []))
-
                  processed_results = processing_output.get("results", [])
-                 # Add placeholder DB fields if necessary for consistency downstream
-                 # or ensure the frontend doesn't expect them for this endpoint.
                  for res in processed_results:
                      res.setdefault("db_id", None)
                      res.setdefault("db_message", None)
                  batch_result["results"].extend(processed_results)
-
                  if "confabulation_results" in processing_output:
                       batch_result["confabulation_results"] = processing_output["confabulation_results"]
             else:
-                 # Handle unexpected output from process_videos
+                 # Handle unexpected output (code seems okay here)
                  logger.error(f"process_videos function returned unexpected type: {type(processing_output)}")
                  general_error_msg = "Video processing function returned invalid data."
                  batch_result["errors_count"] += 1
                  batch_result["errors"].append(general_error_msg)
-                 # Create error entries for items intended for processing
                  for input_src in all_inputs_to_process:
-                     original_ref = input_src # Default to path/URL
+                     original_ref = input_src
                      if input_src in uploaded_paths:
-                         for sf in saved_files_info: # Use saved_files_info here
+                         for sf in saved_files_info:
                              if str(sf["path"]) == input_src:
                                  original_ref = sf["original_filename"]
                                  break
                      batch_result["results"].append({
-                        "status": "Error", "input_ref": original_ref, "processing_source": input_src,
-                        "media_type": "video", "metadata": {}, "content": "", "segments": None,
-                        "chunks": None, "analysis": None, "analysis_details": None,
-                        "error": general_error_msg, "warnings": None, "db_id": None, "db_message": None, "message": None
+                         "status": "Error", "input_ref": original_ref, "processing_source": input_src,
+                         "media_type": "video", "metadata": {}, "content": "", "segments": None,
+                         "chunks": None, "analysis": None, "analysis_details": None,
+                         "error": general_error_msg, "warnings": None, "db_id": None, "db_message": None, "message": None
                      })
 
-    # --- Exception Handling & Cleanup ---
+
+    # --- Exception Handling & Cleanup --- (Code seems okay here)
     except HTTPException as e:
-         raise e
+         # Log FastAPI/our own validation errors passed up
+         logger.warning(f"HTTPException caught in /process-videos: Status={e.status_code}, Detail={e.detail}", exc_info=False) # Don't need full trace for expected exceptions
+         raise e # Re-raise to let FastAPI handle it
     except OSError as e:
          logger.error(f"OSError during /process-videos setup: {e}", exc_info=True)
          raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"OS error during setup: {e}")
     except Exception as e:
          logger.error(f"Unhandled exception in process_videos_endpoint: {e}", exc_info=True)
          error_message = f"Unexpected internal error: {type(e).__name__}"
-         # Ensure error is reflected in the response even if exception happens late
          if not any(error_message in err_str for err_str in batch_result["errors"]):
              batch_result["errors_count"] += 1
              batch_result["errors"].append(error_message)
+         # Ensure we return 500 for unhandled errors
          raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_message)
-    finally:
-        # TempDirManager __exit__ handles scheduled cleanup
-        # Background task added just in case of catastrophic handler failure
-        if temp_dir_path and temp_dir_path.exists():
-            logger.info(f"Scheduling final background cleanup check for temporary directory: {temp_dir_path}")
-            background_tasks.add_task(shutil.rmtree, temp_dir_path, ignore_errors=True)
 
-    # --- Determine Final Status Code & Return ---
+    finally:
+        # if temp_dir_path and temp_dir_path.exists():
+        #     logger.info(f"Scheduling final background cleanup check for temporary directory: {temp_dir_path}")
+        #     background_tasks.add_task(shutil.rmtree, temp_dir_path, ignore_errors=True)
+        # Cleanup handled by `__exit__` in TempDirManager
+        pass
+
+    # --- Determine Final Status Code & Return --- (Code seems okay here)
     final_status_code = (
         status.HTTP_200_OK
         if batch_result.get("errors_count", 0) == 0
         else status.HTTP_207_MULTI_STATUS
     )
-    log_level = logging.INFO if final_status_code == status.HTTP_200_OK else logging.WARNING
-    logger.log(log_level, f"/process-videos request finished with status {final_status_code}. Results count: {len(batch_result.get('results', []))}, Errors: {batch_result.get('errors_count', 0)}")
+    log_level_str = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
+    # logger.log() expects the level name as the first argument if it's a string
+    logger.log(log_level_str, f"/process-videos request finished with status {final_status_code}. Results count: {len(batch_result.get('results', []))}, Errors: {batch_result.get('errors_count', 0)}")
 
     return JSONResponse(status_code=final_status_code, content=batch_result)
 #
@@ -1902,20 +2041,14 @@ async def process_videos_endpoint(
 # Endpoints:
 #   /process-audio
 
-
-class ProcessAudiosForm(AddMediaForm):
-    """Identical surface to AddMediaForm but restricted to 'audio'."""
-    media_type: Literal["audio"] = "audio"
-    keep_original_file: bool = Field(False, const=True)
-
-
 ###############################################################################
-# /api/v1/media/process‑audios  – transcribe / analyse audio, no persistence
+# /api/v1/media/process-audios  – transcribe / analyse audio, no persistence
 ###############################################################################
 @router.post(
-    "/process‑audios",
+    "/process-audios",
     status_code=status.HTTP_200_OK,
-    summary="Transcribe / chunk / analyse audio and return full artefacts (no DB write)"
+    summary="Transcribe / chunk / analyse audio and return full artefacts (no DB write)",
+    tags=["Media Processing"],
 )
 async def process_audios_endpoint(
     background_tasks: BackgroundTasks,
@@ -1927,7 +2060,7 @@ async def process_audios_endpoint(
     # ---------- common ----------
     title:         Optional[str] = Form(None),
     author:        Optional[str] = Form(None),
-    keywords:                 str = Form("", description="Comma‑separated keywords"),
+    keywords:                 str = Form("", description="Comma-separated keywords"),
     custom_prompt: Optional[str] = Form(None),
     system_prompt: Optional[str] = Form(None),
     overwrite_existing: bool   = Form(False),
@@ -1959,87 +2092,183 @@ async def process_audios_endpoint(
     summarize_recursively: bool = Form(False),
 
     # ---------- auth ------------
-    token: str = Header(...),
+    #token: str = Header(...),
 ):
+    """
+    **Process Audio Endpoint**
+
+    Similar to process-videos, but specifically for audio files/URLs.
+    Returns transcription, chunks, analysis etc.
+    """
     # ── 0) validate / assemble form ──────────────────────────────────────────
     form_data = ProcessAudiosForm(
-        urls=urls, title=title, author=author, keywords=keywords,
-        custom_prompt=custom_prompt, system_prompt=system_prompt,
-        overwrite_existing=overwrite_existing, perform_analysis=perform_analysis,
-        api_name=api_name, api_key=api_key,
-        use_cookies=use_cookies, cookies=cookies,
-        transcription_model=transcription_model, transcription_language=transcription_language,
-        diarize=diarize, timestamp_option=timestamp_option, vad_use=vad_use,
+        urls=urls,
+        title=title,
+        author=author,
+        keywords=keywords,
+        custom_prompt=custom_prompt,
+        system_prompt=system_prompt,
+        overwrite_existing=overwrite_existing,
+        perform_analysis=perform_analysis,
+        api_name=api_name,
+        api_key=api_key,
+        use_cookies=use_cookies,
+        cookies=cookies,
+        transcription_model=transcription_model,
+        transcription_language=transcription_language,
+        diarize=diarize,
+        timestamp_option=timestamp_option,
+        vad_use=vad_use,
         perform_confabulation_check_of_analysis=perform_confabulation_check_of_analysis,
-        perform_chunking=perform_chunking, chunk_method=chunk_method,
+        perform_chunking=perform_chunking,
+        chunk_method=chunk_method,
         use_adaptive_chunking=use_adaptive_chunking,
         use_multi_level_chunking=use_multi_level_chunking,
-        chunk_language=chunk_language, chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap, summarize_recursively=summarize_recursively,
+        chunk_language=chunk_language,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        summarize_recursively=summarize_recursively,
+        # Ignore the 'X param unfilled', values are already set
     )
 
-    _validate_inputs("audio", form_data.urls, files)
+    _validate_inputs("audio", form_data.urls, files) # Basic check for inputs
 
     loop = asyncio.get_running_loop()
     file_errors: List[Dict[str, Any]] = []
+    batch_result: Dict[str, Any] = {"processed_count": 0, "errors_count": 0, "errors": [], "results": []} # Initialize
 
     # ── 1) temp dir + uploads ────────────────────────────────────────────────
-    with TempDirManager(cleanup=True) as temp_dir:
+    # Use TempDirManager for automatic cleanup
+    with TempDirManager(cleanup=True, prefix="process_audio_") as temp_dir:  # Always cleanup for this endpoint
         saved_files, file_errors = await _save_uploaded_files(files or [], temp_dir)
 
-        url_list       = form_data.urls or []
+        # Add file saving errors to the result immediately
+        if file_errors:
+            batch_result["results"].extend(file_errors)
+            batch_result["errors_count"] = len(file_errors)
+            batch_result["errors"].extend([err.get("error", "File save error") for err in file_errors])
+
+        url_list = form_data.urls or []
         uploaded_paths = [str(f["path"]) for f in saved_files]
-        all_inputs     = url_list + uploaded_paths
+        all_inputs = url_list + uploaded_paths
+
         if not all_inputs:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid audio sources supplied.")
+            # If only file errors occurred, return 207, otherwise 400
+            status_code = status.HTTP_207_MULTI_STATUS if file_errors else status.HTTP_400_BAD_REQUEST
+            detail = "No valid audio sources supplied." if not file_errors else "File saving failed for all uploads."
+            # Need to return JSONResponse directly if raising within the endpoint after starting processing
+            if status_code == 400:
+                raise HTTPException(status_code, detail)
+            else:
+                return JSONResponse(status_code=status_code, content=batch_result)
 
         # ── 2) invoke library batch processor ────────────────────────────────
+        # *** CALL REFRACTORED process_audio_files ***
+        # Prepare args using the validated form_data
         audio_args = {
-            "audio_urls": url_list,
-            "audio_files": uploaded_paths,
+            "inputs": all_inputs,
             "transcription_model": form_data.transcription_model,
             "transcription_language": form_data.transcription_language,
-            "api_name": form_data.api_name if form_data.perform_analysis else None,
-            "api_key": form_data.api_key,
-            "use_cookies": form_data.use_cookies,
-            "cookies": form_data.cookies,
-            "keep_original": False,
-            "custom_keywords": form_data.keywords_str,
-            "custom_prompt_input": form_data.custom_prompt,
-            "system_prompt_input": form_data.system_prompt,
-            "chunk_method": form_data.chunk_method or "recursive",
+            "perform_chunking": form_data.perform_chunking,
+            "chunk_method": form_data.chunk_method,  # Pass directly, defaults handled in library
             "max_chunk_size": form_data.chunk_size,
             "chunk_overlap": form_data.chunk_overlap,
             "use_adaptive_chunking": form_data.use_adaptive_chunking,
             "use_multi_level_chunking": form_data.use_multi_level_chunking,
             "chunk_language": form_data.chunk_language,
             "diarize": form_data.diarize,
-            "keep_timestamps": form_data.timestamp_option,
-            "custom_title": form_data.title,
-            "recursive_summarization": form_data.summarize_recursively,
-            "store_in_db": False,                       # <<<<<<<<  NO DB
+            "vad_use": form_data.vad_use,
+            "timestamp_option": form_data.timestamp_option,
+            "perform_analysis": form_data.perform_analysis,
+            "api_name": form_data.api_name if form_data.perform_analysis else None,
+            "api_key": form_data.api_key,
+            "custom_prompt_input": form_data.custom_prompt,
+            "system_prompt_input": form_data.system_prompt,
+            "summarize_recursively": form_data.summarize_recursively,
+            "use_cookies": form_data.use_cookies,
+            "cookies": form_data.cookies,
+            "keep_original": False,  # Explicitly false for this endpoint
+            "custom_title": form_data.title,  # Pass optional overrides
+            "author": form_data.author,
+            "temp_dir": str(temp_dir),  # Pass the managed temp dir path
         }
 
-        batch_func   = functools.partial(process_audio_files, **audio_args)
-        batch_result = await loop.run_in_executor(None, batch_func)
+        try:
+            # Import the function
+            from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
+            batch_func = functools.partial(process_audio_files, **audio_args)
+            # Run the synchronous library function in an executor thread
+            processing_output = await loop.run_in_executor(None, batch_func)
 
-        # ── 3) merge any upload‑stage failures ───────────────────────────────
-        if "results" not in batch_result or not isinstance(batch_result["results"], list):
-            batch_result["results"] = []
-        if file_errors:
-            batch_result["results"].extend(file_errors)
-            batch_result["errors_count"] += len(file_errors)
-            batch_result["errors"].extend(err["error"] for err in file_errors)
+            # Merge results
+            if isinstance(processing_output, dict) and "results" in processing_output:
+                batch_result["processed_count"] += processing_output.get("processed_count", 0)
+                batch_result["errors_count"] += processing_output.get("errors_count", 0)
+                batch_result["errors"].extend(processing_output.get("errors", []))
+                # Ensure DB fields are None for results from this endpoint
+                processed_items = processing_output.get("results", [])
+                for item in processed_items:
+                    item["db_id"] = None
+                    item["db_message"] = None
+                batch_result["results"].extend(processed_items)
+            else:
+                # Handle unexpected output format from the library function
+                logging.error(f"process_audio_files returned unexpected format: {processing_output}")
+                error_msg = "Audio processing library returned invalid data."
+                batch_result["errors_count"] += 1
+                batch_result["errors"].append(error_msg)
+                # Create error entries for all inputs that were attempted
+                for input_src in all_inputs:
+                    original_ref = input_src  # Default to source
+                    if input_src in uploaded_paths:  # Try to find original filename
+                        for sf in saved_files:
+                            if str(sf["path"]) == input_src:
+                                original_ref = sf["original_filename"]
+                                break
+                    batch_result["results"].append({
+                        "status": "Error", "input_ref": original_ref, "processing_source": input_src,
+                        "media_type": "audio", "error": error_msg, "db_id": None, "db_message": None,
+                        # Add other keys as None/empty
+                        "metadata": {}, "transcript": None, "segments": None, "chunks": None, "summary": None,
+                        "analysis_details": None, "warnings": None, "message": None
+                    })
+
+        except Exception as exec_err:
+            # Catch errors during the execution of the library function
+            logging.error(f"Error executing process_audio_files: {exec_err}", exc_info=True)
+            error_msg = f"Error during audio processing execution: {type(exec_err).__name__}"
+            batch_result["errors_count"] += 1
+            batch_result["errors"].append(error_msg)
+            # Add error entries for all inputs attempted in this batch
+            for input_src in all_inputs:
+                original_ref = input_src
+                if input_src in uploaded_paths:
+                    for sf in saved_files:
+                        if str(sf["path"]) == input_src: original_ref = sf["original_filename"]; break
+                batch_result["results"].append({
+                    "status": "Error", "input_ref": original_ref, "processing_source": input_src,
+                    "media_type": "audio", "error": error_msg, "db_id": None, "db_message": None,
+                    "metadata": {}, "transcript": None, "segments": None, "chunks": None, "summary": None,
+                    "analysis_details": None, "warnings": None, "message": None
+                })
 
     # ── 4) status code ───────────────────────────────────────────────────────
-    status_code = (
-        status.HTTP_200_OK
-        if batch_result["errors_count"] == 0
+    # Determine final status based ONLY on processing errors (file errors already handled)
+    processing_errors = batch_result.get("errors_count", 0) - len(file_errors)
+    final_status_code = (
+        status.HTTP_200_OK if processing_errors == 0
         else status.HTTP_207_MULTI_STATUS
     )
+    # Override to 207 if there were file errors, even if processing was ok for others
+    if file_errors and final_status_code == status.HTTP_200_OK:
+        final_status_code = status.HTTP_207_MULTI_STATUS
 
-    # ── 5) return library output untouched ───────────────────────────────────
-    return JSONResponse(status_code=status_code, content=batch_result)
+    # ── 5) return library output merged with file errors ───────────────────
+    log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
+    logger.log(log_level,
+               f"/process-audios request finished with status {final_status_code}. Results count: {len(batch_result.get('results', []))}, Total Errors: {batch_result.get('errors_count', 0)}")
+
+    return JSONResponse(status_code=final_status_code, content=batch_result)
 
 #
 # End of Audio Ingestion
@@ -2057,7 +2286,7 @@ class ProcessEbooksForm(AddMediaForm):
     keep_original_file: bool = False    # always cleanup tmp dir
 
 @router.post(
-    "/process‑ebooks",
+    "/process-ebooks",
     status_code=status.HTTP_200_OK,
     summary="Extract, chunk, and analyse EPUB/ebook files – returns full artefacts, no DB write",
 )
@@ -2069,7 +2298,7 @@ async def process_ebooks_endpoint(
     files: Optional[List[UploadFile]] = File(None,  description="EPUB file uploads"),
 
     # ---------- common ----------
-    keywords:                 str  = Form("", description="Comma‑separated keywords (only used in prompts)"),
+    keywords:                 str  = Form("", description="Comma-separated keywords (only used in prompts)"),
     custom_prompt: Optional[str]   = Form(None),
     system_prompt: Optional[str]   = Form(None),
     perform_analysis:   bool       = Form(True),
@@ -2135,7 +2364,7 @@ async def process_ebooks_endpoint(
         if not local_paths:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid ebook sources supplied.")
 
-        # ── 2) per‑file processing (threadpool) ------------------------------
+        # ── 2) per-file processing (threadpool) ------------------------------
         chunk_opts = {
             "method": chunk_method or "chapter",
             "max_size": chunk_size,
@@ -2194,7 +2423,7 @@ async def process_ebooks_endpoint(
 
 # ─────────────────────────────  form model  ──────────────────────────────────
 class ProcessDocumentsForm(AddMediaForm):
-    """Validated payload for /process‑documents."""
+    """Validated payload for /process-documents."""
     # ─────────── invariants ───────────
     media_type: Literal["document"] = "document"
     keep_original_file: bool = False      # do not persist uploads by default
@@ -2229,7 +2458,7 @@ class ProcessDocumentsForm(AddMediaForm):
 
 # ─────────────────────────────  endpoint  ────────────────────────────────────
 @router.post(
-    "/process‑documents",
+    "/process-documents",
     status_code=status.HTTP_200_OK,
     summary="Read, chunk, and analyse text / markdown documents – returns full artefacts, no DB write",
 )
@@ -2241,7 +2470,7 @@ async def process_documents_endpoint(
     files: Optional[List[UploadFile]] = File(None,  description="Document file uploads"),
 
     # ---------- common ----------
-    keywords:                 str  = Form("", description="Comma‑separated keywords (used only in prompts)"),
+    keywords:                 str  = Form("", description="Comma-separated keywords (used only in prompts)"),
     custom_prompt: Optional[str]   = Form(None),
     system_prompt: Optional[str]   = Form(None),
     perform_analysis:   bool       = Form(True),
@@ -2303,7 +2532,7 @@ async def process_documents_endpoint(
         if not local_paths:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid document sources supplied.")
 
-        # --- per‑file processing --------------------------------------------
+        # --- per-file processing --------------------------------------------
         chunk_opts = {
             "method": chunk_method or "sentences",
             "max_size": chunk_size,
@@ -2408,7 +2637,7 @@ class ProcessPDFsForm(AddMediaForm):
 
 # ───────────────────────────── endpoint ──────────────────────────────────────
 @router.post(
-    "/process‑pdfs",
+    "/process-pdfs",
     status_code=status.HTTP_200_OK,
     summary="Extract, chunk, and analyse PDFs – returns full artefacts, no DB write",
 )
@@ -2482,7 +2711,7 @@ async def process_pdfs_endpoint(
                       "max_size": chunk_size,
                       "overlap": chunk_overlap}
 
-        # ---------- fan‑out processing -------------------------------------
+        # ---------- fan-out processing -------------------------------------
         tasks = [ _single_pdf_worker(p, form, chunk_opts) for p in paths ]
         results.extend(await asyncio.gather(*tasks))
 

@@ -219,6 +219,16 @@ class MediaItemProcessResponse(BaseModel):
 #
 # This is a schema for video ingestion and analysis.
 
+class ProcessVideosForm(AddMediaForm):
+    """
+    Same field-surface as AddMediaForm, but:
+      • media_type forced to `"video"` (so client does not need to send it)
+      • keep_original_file defaults to False (tmp dir always wiped)
+      • perform_analysis stays default=True (caller may disable)
+    """
+    media_type: Literal["video"] = "video"
+    keep_original_file: bool = Field(False)
+
 class VideoIngestRequest(BaseModel):
     # You can rename / remove / add fields as you prefer:
     mode: str = "persist"  # "ephemeral" or "persist"
@@ -261,6 +271,11 @@ class VideoIngestRequest(BaseModel):
 ######################## Audio Ingestion Model ###################################
 #
 # This is a schema for audio ingestion and analysis.
+
+class ProcessAudiosForm(AddMediaForm):
+    """Identical surface to AddMediaForm but restricted to 'audio'."""
+    media_type: Literal["audio"] = "audio"
+    keep_original_file: bool = Field(False)
 
 class AudioIngestRequest(BaseModel):
     mode: str = "persist"  # "ephemeral" or "persist"

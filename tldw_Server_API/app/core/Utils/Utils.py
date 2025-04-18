@@ -1379,7 +1379,6 @@ def safe_download(url: str, tmp_dir: Path, ext: str) -> Path:
     download_file(url, str(dst))          # raises on failure
     return dst
 
-
 def smart_download(url: str, tmp_dir: Path) -> Path:
     """
     • Chooses a filename & extension automatically
