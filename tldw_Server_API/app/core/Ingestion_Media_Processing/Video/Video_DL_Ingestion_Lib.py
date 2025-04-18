@@ -26,7 +26,10 @@ import json
 import os
 import re
 import sys
+import tempfile
+import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse, parse_qs
 
@@ -319,8 +322,6 @@ def generate_timestamped_url(url, hours, minutes, seconds):
     return new_url
 
 
-
-# FIXME - Validate
 # New FastAPI ingestion functions
 def process_videos(
     inputs: List[str],
@@ -329,6 +330,7 @@ def process_videos(
     diarize: bool,
     vad_use: bool,
     transcription_model: str,
+    transcription_language: Optional[str],
     custom_prompt: Optional[str],
     system_prompt: Optional[str],
     perform_chunking: bool,
@@ -344,7 +346,9 @@ def process_videos(
     use_cookies: bool,
     cookies: Optional[str],
     timestamp_option: bool,
-    confab_checkbox: bool,
+    perform_confabulation_check: bool, # Renamed from confab_checkbox
+    temp_dir: Optional[str] = None, # Added temp_dir argument
+    # keep_original: bool = False, # Add if needed for intermediate files
 ) -> Dict[str, Any]:
     """
     Processes multiple videos or local file paths, transcribes, summarizes,
@@ -384,11 +388,11 @@ def process_videos(
                "confabulation_results": "..."
              }
     """
-    logging.info("Starting process_videos()")
-
-    # For error collection:
+    logging.info(f"Starting process_videos (DB-agnostic) for {len(inputs)} inputs.")
     errors = []
     results = []
+    all_transcripts_for_confab = {} # Renamed for clarity
+    all_summaries_for_confab = {} # Renamed for clarity
 
     # Save all transcriptions and summaries to these dict/strings:
     all_transcriptions = {}
@@ -408,16 +412,24 @@ def process_videos(
             "results": []
         }
 
-    # Actually process each item
+    processing_temp_dir = Path(temp_dir) if temp_dir else Path(tempfile.gettempdir()) / f"video_proc_{uuid.uuid4().hex[:8]}"
+    if not temp_dir: # If API didn't provide one, create it (less ideal)
+        processing_temp_dir.mkdir(parents=True, exist_ok=True)
+        # Note: If created here, cleanup responsibility is less clear. Better to rely on API layer's TempDirManager.
+        logging.warning(f"process_videos created its own temp dir: {processing_temp_dir}. Cleanup may not be guaranteed.")
+
     for video_input in inputs:
         video_start_time = datetime.now()
         try:
+            # Pass necessary parameters down, including temp_dir
             single_result = process_single_video(
                 video_input=video_input,
                 start_seconds=start_seconds,
+                end_seconds=end_seconds, # Pass end_seconds down
                 diarize=diarize,
                 vad_use=vad_use,
                 transcription_model=transcription_model,
+                transcription_language=transcription_language,
                 custom_prompt=custom_prompt,
                 system_prompt=system_prompt,
                 perform_chunking=perform_chunking,
@@ -433,31 +445,24 @@ def process_videos(
                 use_cookies=use_cookies,
                 cookies=cookies,
                 timestamp_option=timestamp_option,
+                temp_dir=str(processing_temp_dir), # Pass temp dir path
+                # keep_intermediate_audio=keep_original, # Pass if needed
             )
             if single_result["status"] == "Success":
                 # Append to results list
                 results.append(single_result)
 
-                # Log success metric
-                log_counter(
-                    metric_name="videos_processed_total",
-                    labels={"whisper_model": transcription_model, "api_name": (api_name or "none")},
-                    value=1
-                )
+            results.append(single_result) # Append regardless of status
 
-                # Track transcripts and summaries for “all_transcriptions.json” or “all_summaries.txt”
-                url = single_result["video_input"]
-                transcription_text = single_result["transcript"]
-                summary_text = single_result["summary"]
+            if single_result.get("status") == "Success":
+                log_counter(...) # Metrics are fine if DB-free
 
-                # For unified saving
-                all_transcriptions[url] = transcription_text
-                if isinstance(summary_text, str):
-                    all_summaries += (
-                        f"Video Input: {url}\n"
-                        f"Transcription:\n{transcription_text}\n\n"
-                        f"Summary:\n{summary_text}\n\n---\n\n"
-                    )
+                # Prepare for potential confabulation check
+                transcript_text = single_result.get("transcript", "") # Use 'transcript' key returned by single
+                summary_text = single_result.get("summary", "") # Use 'summary' key returned by single
+                if transcript_text and summary_text:
+                     all_transcripts_for_confab[video_input] = transcript_text
+                     all_summaries_for_confab[video_input] = summary_text
 
                 # Logging the timing
                 video_end_time = datetime.now()
@@ -482,6 +487,18 @@ def process_videos(
             msg = f"Exception processing '{video_input}': {exc}"
             logging.error(msg, exc_info=True)
             errors.append(msg)
+            # Append an error result structure
+            results.append({
+                "status": "Error",
+                "input_ref": video_input,
+                "processing_source": video_input,
+                "media_type": "video",
+                "error": msg,
+                # Fill other fields with None/defaults
+                "metadata": {}, "transcript": None, "segments": None, "chunks": None, "summary": None,
+                "analysis_details": None, "warnings": None
+            })
+            log_counter("videos_failed_total", ...)
 
             # Log failure metric
             log_counter(
@@ -492,7 +509,7 @@ def process_videos(
 
     # Optionally, run a confabulation check on the entire set of summaries
     confabulation_results = None
-    if confab_checkbox and all_transcriptions:
+    if confabulation_results and all_transcriptions:
         confab_results = []
         # Process each transcript-summary pair individually for g_eval check
         for url, transcript in all_transcriptions.items():
@@ -515,20 +532,17 @@ def process_videos(
 
         confabulation_results = f"Confabulation checks completed:\n" + "\n".join(confab_results)
 
-    # Save them to disk in the local dir
-    # try:
-    #     with open("all_transcriptions.json", "w", encoding="utf-8") as f:
-    #         json.dump(all_transcriptions, f, indent=2, ensure_ascii=False)
-    #     with open("all_summaries.txt", "w", encoding="utf-8") as f:
-    #         f.write(all_summaries)
-    # except Exception as e:
-    #     logging.warning(f"Could not save aggregated transcripts or summaries: {e}")
+    # Remove temp dir ONLY if it was created here (less ideal)
+    # if not temp_dir and processing_temp_dir.exists():
+    #     try: shutil.rmtree(processing_temp_dir)
+    #     except Exception as e: logging.warning(f"Failed to clean up self-created temp dir {processing_temp_dir}: {e}")
 
     return {
-        "processed_count": len(results),
-        "errors_count": len(errors),
-        "errors": errors,
-        "results": results,
+        "processed_count": sum(1 for r in results if r.get("status") == "Success"), # Count only success
+        "errors_count": sum(1 for r in results if r.get("status") == "Error"),
+        "warnings_count": sum(1 for r in results if r.get("status") == "Warning"), # Optional: track warnings
+        "errors": errors, # Collect specific error messages
+        "results": results, # Return the list of individual result dicts
         "confabulation_results": confabulation_results
     }
 
@@ -536,9 +550,11 @@ def process_videos(
 def process_single_video(
     video_input: str,
     start_seconds: int,
+    end_seconds: Optional[int], # Added end_seconds
     diarize: bool,
     vad_use: bool,
     transcription_model: str,
+        transcription_language: Optional[str],
     custom_prompt: Optional[str],
     system_prompt: Optional[str],
     perform_chunking: bool,
@@ -554,16 +570,19 @@ def process_single_video(
     use_cookies: bool,
     cookies: Optional[str],
     timestamp_option: bool,
-    # --- Parameters used only for processing itself ---
-) -> Dict[str, Any]: # Returning a dict matching MediaItemProcessResponse structure
+    temp_dir: str, # Expect temp_dir path
+    keep_intermediate_audio: bool = False # Add flag if needed
+) -> Dict[str, Any]:
     """
     Processes a single video/file: Extracts metadata, transcribes, optionally summarizes.
-    DOES NOT interact with the database.
+    **DOES NOT interact with the database.**
+    Returns a dict matching MediaItemProcessResponse structure (using 'transcript' and 'summary' keys).
     """
-    processing_result = { # Initialize with defaults matching MediaItemProcessResponse
-        "status": "Error", # Default to error
-        "input_ref": video_input,
-        "processing_source": video_input, # Will be updated if downloaded/temp file used
+    # Initialize result structure (closer to MediaItemProcessResponse)
+    processing_result = {
+        "status": "Pending",
+        "input_ref": video_input, # Use 'input_ref' for consistency
+        "processing_source": video_input,
         "media_type": "video",
         "metadata": {},
         "content": "",
@@ -572,14 +591,16 @@ def process_single_video(
         "analysis": None,
         "analysis_details": {},
         "error": None,
-        "warnings": None
+        "warnings": [], # Initialize as list
     }
+    audio_file_path_to_clean = None # Track intermediate file
 
     try:
         logging.info(f"Processing single video input (DB-agnostic): {video_input}")
 
         # Distinguish remote vs. local
         is_remote = video_input.startswith(("http://", "https://"))
+        processing_temp_dir = Path(temp_dir) # Use the provided temp dir
 
         # If is_remote, get metadata from extract_metadata
         info_dict: Dict[str, Any] = {}
@@ -593,20 +614,22 @@ def process_single_video(
             processing_source = video_input # Placeholder - transcription needs the actual path
             info_dict = extract_metadata(video_input, use_cookies, cookies) # Keep metadata extraction
             if not info_dict:
-                 processing_result["error"] = f"Failed to extract metadata for {video_input}"
-                 return processing_result
+                raise ValueError(f"Failed to extract metadata for URL: {video_input}")
             processing_result["metadata"] = info_dict
-            processing_result["analysis_details"]["source_metadata"] = info_dict # Store raw metadata if needed
+            # Note: The actual download/file access happens in transcription library
+            processing_source_for_transcription = video_input # Pass URL or path
         else:
             # Local file
             if not os.path.exists(video_input):
-                processing_result["error"] = f"Local file not found: {video_input}"
-                return processing_result
-            processing_source = video_input
-            info_dict = { # Create minimal metadata
-                "webpage_url": generate_unique_identifier(video_input), # Generate a unique ID if needed later
-                "title": os.path.basename(video_input),
+                raise FileNotFoundError(f"Local file not found: {video_input}")
+            processing_source_for_transcription = video_input
+            # Create minimal metadata for local files
+            info_dict = {
+                "id": generate_unique_identifier(video_input), # Or hash?
+                "title": Path(video_input).stem,
                 "description": "Local file",
+                "webpage_url": f"local://{Path(video_input).resolve()}", # Example local identifier
+                "uploader": None, "upload_date": None, "duration": None, # Add more if extractable locally
             }
             processing_result["metadata"] = info_dict
 

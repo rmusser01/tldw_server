@@ -2,11 +2,7 @@
 # Description: This file contains functions for reading and writing plaintext files.
 #
 # Import necessary libraries
-import json
-import os
-import tempfile
 import time
-import zipfile
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
@@ -14,8 +10,6 @@ from typing import Dict, Any, Optional, List
 # External Imports
 from docx2txt import docx2txt
 from pypandoc import convert_file
-
-from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
 #
 # Local Imports
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
@@ -51,7 +45,7 @@ def convert_to_plain_text(file_path: Path) -> str:
         if extension == '.docx':
             content = docx2txt.process(str(file_path))
             log_counter("docx_conversion_success", labels={"file_path": str(file_path)})
-        elif extension == '.rtf':
+        elif extension == '.rtccf':
             # Use pandoc via pypandoc for RTF
             # Requires pandoc binary to be installed on the system
             content = convert_file(str(file_path), 'plain', format='rtf')

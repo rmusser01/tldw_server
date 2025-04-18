@@ -261,45 +261,40 @@ def process_pdf(
     log_counter("pdf_processing_attempt", labels={"file_name": filename, "parser": parser})
 
     temp_pdf_path: Optional[str] = None
-    input_for_processing: Union[str, bytes] = file_input
-    input_for_metadata: Union[str, bytes] = file_input
+    input_for_processing: Union[str, bytes]
+    input_for_metadata: Union[str, bytes]
 
     try:
         # --- Step 0: Handle Input Type and Temporary File ---
-        # Decide if a temporary file is needed based on input type and parser requirements
         if isinstance(file_input, bytes):
-            needs_path = parser in ['pymupdf', 'docling'] # Parsers requiring a file path
+            result["processing_source"] = f"bytes_input_({len(file_input)})"  # Indicate bytes source
+            needs_path = parser in ['pymupdf', 'docling']
             if write_to_temp_file or needs_path:
-                # Create a temporary file ONLY if needed
-                # Use a try-finally block or context manager for robust cleanup
                 try:
-                    # Create tempfile.NamedTemporaryFile within the main try block
-                    # to ensure its lifecycle is managed correctly.
-                    # delete=False is crucial here so the file persists after the 'with' block
-                    # if we need the path later. Cleanup happens in the finally block.
                     _temp_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
                     _temp_file.write(file_input)
-                    temp_pdf_path = _temp_file.name # Store the path
-                    _temp_file.close() # Close the file handle immediately after writing
+                    temp_pdf_path = _temp_file.name
+                    _temp_file.close()
                     logging.debug(f"Input bytes written to temporary file: {temp_pdf_path}")
                     input_for_processing = temp_pdf_path
-                    input_for_metadata = temp_pdf_path # Metadata extraction also uses path now
+                    input_for_metadata = temp_pdf_path
+                    result["processing_source"] = temp_pdf_path  # Update with actual path used
                 except Exception as temp_err:
-                    logging.error(f"Failed to create or write temporary file: {temp_err}", exc_info=True)
                     raise IOError(f"Failed to handle temporary file: {temp_err}") from temp_err
             else:
-                # Parser can handle bytes (e.g., pymupdf4llm)
                 input_for_processing = file_input
-                input_for_metadata = file_input # Metadata can also handle bytes
+                input_for_metadata = file_input
         elif isinstance(file_input, Path):
-             input_for_processing = str(file_input)
-             input_for_metadata = str(file_input)
+            input_path_str = str(file_input)
+            if not file_input.exists(): raise FileNotFoundError(f"Input file path does not exist: {input_path_str}")
+            input_for_processing = input_path_str
+            input_for_metadata = input_path_str
+            result["processing_source"] = input_path_str
         elif isinstance(file_input, str):
-             # Ensure the file exists if a path string is provided
-             if not os.path.exists(file_input):
-                 raise FileNotFoundError(f"Input file path does not exist: {file_input}")
-             input_for_processing = file_input
-             input_for_metadata = file_input
+            if not os.path.exists(file_input): raise FileNotFoundError(f"Input file path does not exist: {file_input}")
+            input_for_processing = file_input
+            input_for_metadata = file_input
+            result["processing_source"] = file_input
         else:
             raise TypeError(f"Unsupported file_input type: {type(file_input)}")
 
@@ -664,11 +659,12 @@ async def process_pdf_task(
     parser: str = "pymupdf4llm",
     title_override: Optional[str] = None,
     author_override: Optional[str] = None,
-    keywords: Optional[List[str]] = None,
+    keywords: Optional[List[str]] = None, # Expect list
     perform_chunking: bool = True,
-    chunk_method: str = "sentences",
-    max_chunk_size: int = 500,
-    chunk_overlap: int = 100,
+    # Receive individual chunk params from endpoint model
+    chunk_method: Optional[str] = "recursive",
+    max_chunk_size: Optional[int] = 500,
+    chunk_overlap: Optional[int] = 100,
     perform_analysis: bool = False,
     api_name: Optional[str] = None,
     api_key: Optional[str] = None,
@@ -691,37 +687,43 @@ async def process_pdf_task(
                 'method': chunk_method,
                 'max_size': max_chunk_size,
                 'overlap': chunk_overlap
+                # Add other chunk params if needed by process_pdf's chunk_options
             }
 
-        # Call the synchronous core processing function (no executor needed here)
+        # Call the synchronous core processing function
+        # Note: If process_pdf itself becomes significantly CPU/IO bound AND this
+        # task needs to be highly concurrent without blocking the main loop,
+        # you might wrap the call to process_pdf in loop.run_in_executor.
+        # However, if the calling endpoint already uses run_in_executor for the
+        # *entire* per-item processing (_process_document_like_item), this is likely redundant.
         result_dict = process_pdf(
             file_input=file_bytes,
             filename=filename,
             parser=parser,
             title_override=title_override,
             author_override=author_override,
-            keywords=keywords,
+            keywords=keywords, # Pass list
             perform_chunking=perform_chunking,
-            chunk_options=chunk_options_dict,
+            chunk_options=chunk_options_dict, # Pass the dict
             perform_analysis=perform_analysis,
             api_name=api_name,
             api_key=api_key,
             custom_prompt=custom_prompt,
             system_prompt=system_prompt,
             summarize_recursively=summarize_recursively,
-            write_to_temp_file=True # Assume bytes always need potential temp file write
+            # process_pdf decides whether to write temp file
         )
 
         logging.info(f"process_pdf_task completed for {filename} with status: {result_dict.get('status')}")
         return result_dict
 
     except Exception as e:
-        # Catch errors specifically from the task wrapper itself (e.g., setup)
         logging.error(f"Error within process_pdf_task for {filename}: {str(e)}", exc_info=True)
-        # Return a standard error dictionary
+        # Return a standard error dictionary matching process_pdf's structure
         return {
             "status": "Error",
             "input_ref": filename,
+            "processing_source": f"bytes_input_task_error",
             "media_type": "pdf",
             "parser_used": parser,
             "error": f"Task-level error: {str(e)}",
