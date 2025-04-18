@@ -197,7 +197,7 @@ def process_pdf(
     system_prompt: Optional[str] = None,
     summarize_recursively: bool = False,
     write_to_temp_file: bool = False # Control if bytes should be written to disk
-) -> dict[str, Any] | None:
+) -> Dict[str, Any]:
     """
     Processes a single PDF (from path or bytes): extracts text & metadata, chunks, summarizes.
     Returns a dictionary with processed data, status, and errors. *No DB interaction.*
@@ -233,7 +233,8 @@ def process_pdf(
                 "summary": Optional[str],
                 "keywords": Optional[List[str]],
                 "error": Optional[str],
-                "warnings": Optional[List[str]]
+                "warnings": Optional[List[str]],
+                "analysis_details": Optional[Dict] # Added
             }
     """
     start_time = time.time()
@@ -247,9 +248,15 @@ def process_pdf(
         "metadata": None,
         "chunks": None,
         "summary": None,
-        "keywords": keywords or [],
+        "keywords": keywords or [], # Store keywords passed in
         "error": None,
         "warnings": None,
+        "analysis_details": { # Initialize analysis details
+            "summarization_model": api_name if perform_analysis else None,
+            "custom_prompt_used": custom_prompt if perform_analysis else None,
+            "system_prompt_used": system_prompt if perform_analysis else None,
+            "summarized_recursively": summarize_recursively if perform_analysis else False,
+        }
     }
     log_counter("pdf_processing_attempt", labels={"file_name": filename, "parser": parser})
 
@@ -338,8 +345,18 @@ def process_pdf(
         # Metadata extraction should work even if text extraction failed.
         try:
             logging.info(f"Attempting metadata extraction for {filename}.")
-            raw_metadata = extract_metadata_from_pdf(input_for_metadata)
-            logging.info(f"Metadata extracted for {filename}.")
+            # Use pymupdf directly for metadata, as it's generally robust
+            raw_metadata = {}
+            page_count = 0
+            try:
+                import pymupdf
+                with pymupdf.open(stream=input_for_metadata if isinstance(input_for_metadata, bytes) else None, filename=input_for_metadata if isinstance(input_for_metadata, str) else None) as doc:
+                    raw_metadata = doc.metadata
+                    page_count = doc.page_count
+                logging.info(f"Metadata extracted for {filename}.")
+            except:
+                logging.error(f"Failed to extract metadata using pymupdf for {filename}.", exc_info=True)
+                raise RuntimeError("Metadata extraction failed using pymupdf.")
 
             # Add subject and keywords from metadata to the provided keywords list
             pdf_keywords_str = raw_metadata.get('keywords', '')
@@ -358,12 +375,12 @@ def process_pdf(
             result["metadata"] = {
                 "title": final_title,
                 "author": final_author,
-                "creationDate": raw_metadata.get('creationDate'), # Include other useful metadata
+                "page_count": page_count, # Add page count
+                "creationDate": raw_metadata.get('creationDate'),
                 "modDate": raw_metadata.get('modDate'),
                 "producer": raw_metadata.get('producer'),
                 "creator": raw_metadata.get('creator'),
-                "page_count": raw_metadata.get('page_count', 0), # Get page count if available from PyMuPDF
-                "raw": raw_metadata # Store the raw extracted metadata dictionary
+                "raw": raw_metadata
             }
             logging.debug(f"Final metadata for {filename} - Title: {final_title}, Author: {final_author}")
 
@@ -374,6 +391,7 @@ def process_pdf(
              result["metadata"] = {
                  "title": title_override or Path(filename).stem,
                  "author": author_override or "Unknown",
+                 "page_count": 0,
                  "raw": {"error": f"Metadata extraction failed: {str(meta_err)}"}
              }
 
@@ -390,7 +408,7 @@ def process_pdf(
 
             logging.info(f"Attempting chunking for {filename} with options: {chunk_options}")
             try:
-                # Call the chunking function (ensure it handles potential errors)
+                from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
                 processed_chunks = improved_chunking_process(text_content, chunk_options)
 
                 if not processed_chunks:
@@ -644,20 +662,19 @@ async def process_pdf_task(
     file_bytes: bytes,
     filename: str,
     parser: str = "pymupdf4llm",
-    title_override: Optional[str] = None, # Added
-    author_override: Optional[str] = None, # Added
+    title_override: Optional[str] = None,
+    author_override: Optional[str] = None,
     keywords: Optional[List[str]] = None,
     perform_chunking: bool = True,
-    chunk_method: str = "recursive", # Changed default to recursive for consistency
+    chunk_method: str = "sentences",
     max_chunk_size: int = 500,
-    chunk_overlap: int = 100, # Reduced default overlap
-    perform_analysis: bool = False, # Renamed
+    chunk_overlap: int = 100,
+    perform_analysis: bool = False,
     api_name: Optional[str] = None,
     api_key: Optional[str] = None,
     custom_prompt: Optional[str] = None,
     system_prompt: Optional[str] = None,
-    summarize_recursively: bool = False # Added
-    # Removed chunk_options dict param, pass individual params now
+    summarize_recursively: bool = False
 ) -> Dict[str, Any]:
     """
     Async wrapper task to process a single PDF (provided as bytes)
@@ -676,10 +693,7 @@ async def process_pdf_task(
                 'overlap': chunk_overlap
             }
 
-        # Call the synchronous core processing function
-        # We don't need run_in_executor here as the caller endpoint already handles it.
-        # If this task itself were long-running IO/CPU, it would need it.
-        # The internal process_pdf handles logging and timing.
+        # Call the synchronous core processing function (no executor needed here)
         result_dict = process_pdf(
             file_input=file_bytes,
             filename=filename,
@@ -695,7 +709,7 @@ async def process_pdf_task(
             custom_prompt=custom_prompt,
             system_prompt=system_prompt,
             summarize_recursively=summarize_recursively,
-            # process_pdf decides whether to write temp file based on parser
+            write_to_temp_file=True # Assume bytes always need potential temp file write
         )
 
         logging.info(f"process_pdf_task completed for {filename} with status: {result_dict.get('status')}")

@@ -66,8 +66,8 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
 from tldw_Server_API.app.core.DB_Management.SQLite_DB import DatabaseError
 #
 # Media Processing
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Ingestion_Lib import import_epub, _process_single_ebook
-from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Ingestion_Lib import process_pdf_task
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib import import_epub, _process_single_ebook
+from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib import process_pdf_task
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
 #
 # Document Processing
@@ -2287,130 +2287,153 @@ class ProcessEbooksForm(AddMediaForm):
 
 @router.post(
     "/process-ebooks",
-    status_code=status.HTTP_200_OK,
-    summary="Extract, chunk, and analyse EPUB/ebook files – returns full artefacts, no DB write",
+    # status_code=status.HTTP_200_OK, # Determined dynamically
+    summary="Extract, chunk, analyse EPUBs (NO DB Persistence)",
+    tags=["Media Processing"],
 )
 async def process_ebooks_endpoint(
     background_tasks: BackgroundTasks,
-
-    # ---------- inputs ----------
-    urls:  Optional[List[str]] = Form(None, description="EPUB URLs"),
+    # Use Pydantic model via Depends for validation
+    form_data: ProcessEbooksForm = Depends(), # Switched to Depends
     files: Optional[List[UploadFile]] = File(None,  description="EPUB file uploads"),
-
-    # ---------- common ----------
-    keywords:                 str  = Form("", description="Comma-separated keywords (only used in prompts)"),
-    custom_prompt: Optional[str]   = Form(None),
-    system_prompt: Optional[str]   = Form(None),
-    perform_analysis:   bool       = Form(True),
-
-    # ---------- chunking --------
-    perform_chunking:          bool            = Form(True),
-    chunk_method:   Optional[ChunkMethod]      = Form("chapter"),
-    use_adaptive_chunking:     bool            = Form(False),
-    use_multi_level_chunking:  bool            = Form(False),
-    chunk_size:               int             = Form(500),
-    chunk_overlap:            int             = Form(200),
-    custom_chapter_pattern:   Optional[str]    = Form(None),
-
-    # ---------- integration -----
-    api_name:   Optional[str] = Form(None),
-    api_key:    Optional[str] = Form(None),
-
-    summarize_recursively: bool = Form(False),
-
-    # ---------- auth ------------
-    token: str = Header(...),
+    token: str = Header(...), # Auth
 ):
-    # ── 0) validate ---------------------------------------------------------
-    form = ProcessEbooksForm(            # only the fields we actually use
-        urls=urls,
-        keywords=keywords,
-        custom_prompt=custom_prompt,
-        system_prompt=system_prompt,
-        perform_analysis=perform_analysis,
-        perform_chunking=perform_chunking,
-        chunk_method=chunk_method,
-        use_adaptive_chunking=use_adaptive_chunking,
-        use_multi_level_chunking=use_multi_level_chunking,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        custom_chapter_pattern=custom_chapter_pattern,
-        api_name=api_name,
-        api_key=api_key,
-        summarize_recursively=summarize_recursively,
-    )
+    """
+    **Process Ebooks Endpoint (No Persistence)**
 
-    _validate_inputs("ebook", form.urls, files)
+    Processes EPUB files/URLs (extracts, chunks, analyses) and returns
+    the processing artifacts directly without saving to the database.
+    """
+    logger.info("Request received for /process-ebooks (no persistence).")
+    logger.debug(f"Form data: {form_data.dict(exclude={'api_key'})}") # Exclude sensitive fields
+
+    _validate_inputs("ebook", form_data.urls, files)
+
+    results: List[Dict[str, Any]] = [] # Store results from file handling and processing
+    file_errors: List[Dict[str, Any]] = [] # Specifically for file download/save errors
+    processing_results: List[Dict[str, Any]] = [] # Store results from _process_single_ebook
 
     loop = asyncio.get_running_loop()
-    file_errors: List[Dict[str, Any]] = []
+    temp_dir_manager = TempDirManager(cleanup=True) # Always cleanup
 
-    results: List[Dict[str, Any]] = []
+    with temp_dir_manager as tmp:
+        # --- Handle Uploads & Downloads ---
+        local_paths_to_process: List[Tuple[str, Path]] = [] # Store (original_ref, local_path)
+        source_to_ref_map = {} # input_ref -> local_path mapping might be useful
 
-    # ── 1) temp dir + uploads / downloads -----------------------------------
-    with TempDirManager(cleanup=True) as tmp:
-        # --- save uploaded ---------------------------------------------------
-        saved_files, file_errors = await _save_uploaded_files(files or [], tmp)
-        local_paths = [Path(info["path"]) for info in saved_files]
+        # Save uploaded files
+        saved_files, upload_errors = await _save_uploaded_files(files or [], tmp)
+        file_errors.extend(upload_errors) # Add upload errors to file_errors list
+        for info in saved_files:
+            local_paths_to_process.append((info["original_filename"], Path(info["path"])))
+            source_to_ref_map[info["original_filename"]] = Path(info["path"])
 
-        # --- download URLs ---------------------------------------------------
-        for url in form.urls or []:
-            try:
-                local_paths.append(safe_download(url, tmp, ".epub"))
-            except Exception as e:
-                logging.error(f"Download failure {url}: {e}", exc_info=True)
-                file_errors.append({"input": url, "status": "Failed", "error": str(e)})
+        # Download URLs
+        if form_data.urls:
+             download_tasks = [smart_download(url, tmp, ".epub") for url in form_data.urls] # Assuming smart_download is async or use safe_download sync
+             # Need to run downloads concurrently and handle errors
+             # Using safe_download (sync) within the loop for simplicity here
+             for url in form_data.urls:
+                 try:
+                     # Assuming safe_download returns Path object on success
+                     downloaded_path = safe_download(url, tmp, ".epub") # Use safe_download (sync)
+                     if downloaded_path:
+                         local_paths_to_process.append((url, downloaded_path))
+                         source_to_ref_map[url] = downloaded_path
+                     else: # Handle case where safe_download might return None on failure
+                         raise Exception("Download failed, path not returned.")
+                 except Exception as e:
+                     logger.error(f"Download failure for {url}: {e}", exc_info=True)
+                     file_errors.append({"input": url, "status": "Failed", "error": f"Download failed: {e}"})
 
-        if not local_paths:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid ebook sources supplied.")
+        if not local_paths_to_process:
+            logger.warning("No valid ebook sources found or prepared.")
+            # Return based on whether only file errors occurred
+            status_code = status.HTTP_207_MULTI_STATUS if file_errors else status.HTTP_400_BAD_REQUEST
+            # Format file errors for response
+            results.extend([{
+                 "status": fe.get("status", "Failed"), "input_ref": fe.get("input"),
+                 "error": fe.get("error"), "media_type": "ebook",
+                 # Add other standard fields
+                 "processing_source": None, "metadata": {}, "content": None, "chunks": None,
+                 "summary": None, "analysis_details": None, "warnings": None, "db_id": None, "db_message": None
+            } for fe in file_errors])
+            return JSONResponse(status_code=status_code, content={"results": results})
 
-        # ── 2) per-file processing (threadpool) ------------------------------
-        chunk_opts = {
-            "method": chunk_method or "chapter",
-            "max_size": chunk_size,
-            "overlap": chunk_overlap,
-            "adaptive": use_adaptive_chunking,
-            "multi_level": use_multi_level_chunking,
-            "custom_chapter_pattern": custom_chapter_pattern,
-        }
-
-        tasks = [
-            loop.run_in_executor(
-                None,
-                functools.partial(
-                    _process_single_ebook,
-                    p,
-                    perform_chunking,
-                    chunk_opts,
-                    perform_analysis,
-                    summarize_recursively,
-                    api_name,
-                    api_key,
-                    custom_prompt,
-                    system_prompt,
-                ),
+        # --- Per-file processing using _process_single_ebook ---
+        chunk_options = _prepare_chunking_options_dict(form_data) # Prepare chunk options dict
+        tasks = []
+        for original_ref, ebook_path in local_paths_to_process:
+            tasks.append(
+                loop.run_in_executor(
+                    None, # Use default executor
+                    functools.partial(
+                        _process_single_ebook, # Call the helper worker
+                        ebook_path=ebook_path,
+                        # Pass necessary options from form_data
+                        perform_chunking=form_data.perform_chunking,
+                        chunk_options=chunk_options, # Pass the dict
+                        perform_analysis=form_data.perform_analysis,
+                        summarize_recursively=form_data.summarize_recursively,
+                        api_name=form_data.api_name,
+                        api_key=form_data.api_key,
+                        custom_prompt=form_data.custom_prompt,
+                        system_prompt=form_data.system_prompt,
+                        # Pass title/author from form if needed for overrides
+                        title_override=form_data.title,
+                        author_override=form_data.author,
+                    )
+                )
             )
-            for p in local_paths
-        ]
 
-        results.extend(await asyncio.gather(*tasks))
+        # Gather results from processing tasks
+        processing_results = await asyncio.gather(*tasks)
 
-    # ── 3) merge upload / download errors -----------------------------------
-    results.extend(file_errors)
+    # --- Combine Results ---
+    # Start with file handling errors, formatted correctly
+    for fe in file_errors:
+         results.append({
+             "status": fe.get("status", "Failed"), "input_ref": fe.get("input"),
+             "error": fe.get("error"), "media_type": "ebook",
+             "processing_source": None, "metadata": {}, "content": None, "chunks": None,
+             "summary": None, "analysis_details": None, "warnings": None, "db_id": None, "db_message": None
+         })
 
-    errors = [r.get("error") for r in results if r.get("status") != "Success"]
+    # Add processing results, ensuring DB fields are None
+    for res in processing_results:
+        if isinstance(res, dict):
+            res["db_id"] = None
+            res["db_message"] = None
+            # Try to map path back to original ref if process_single_ebook doesn't return it
+            if "input_ref" not in res or not res["input_ref"]:
+                 proc_path_str = str(res.get("processing_source")) # Assuming worker sets this
+                 # Find original ref from map (this mapping needs refinement)
+                 found_ref = "Unknown Ebook"
+                 for ref, path_obj in source_to_ref_map.items():
+                      if str(path_obj) == proc_path_str:
+                           found_ref = ref
+                           break
+                 res["input_ref"] = found_ref
+            results.append(res)
+        else:
+             logger.error(f"Received non-dict result from ebook worker: {res}")
+             results.append({"status": "Error", "input_ref": "Unknown", "error": "Invalid result from worker.", "media_type": "ebook"})
 
-    batch_result = {
-        "processed_count": len(results) - len(errors),
-        "errors_count": len(errors),
-        "errors": errors,
+
+    # --- Determine Final Status Code & Prepare Batch Result ---
+    errors_count = sum(1 for r in results if r.get("status") in ["Error", "Failed"])
+    batch_result_final = {
+        "processed_count": len(results) - errors_count, # Count non-errors
+        "errors_count": errors_count,
+        "errors": [r.get("error", "Unknown error") for r in results if r.get("status") in ["Error", "Failed"]],
         "results": results,
     }
+    status_code = status.HTTP_200_OK if errors_count == 0 else status.HTTP_207_MULTI_STATUS
 
-    # ── 4) HTTP status -------------------------------------------------------
-    status_code = status.HTTP_200_OK if batch_result["errors_count"] == 0 else status.HTTP_207_MULTI_STATUS
+    log_level = "INFO" if status_code == status.HTTP_200_OK else "WARNING"
+    logger.log(log_level, f"/process-ebooks request finished with status {status_code}. Results: {len(results)}, Errors: {errors_count}")
 
-    return JSONResponse(status_code=status_code, content=batch_result)
+    return JSONResponse(status_code=status_code, content=batch_result_final)
 
 #
 # End of Ebook Ingestion
@@ -2459,123 +2482,163 @@ class ProcessDocumentsForm(AddMediaForm):
 # ─────────────────────────────  endpoint  ────────────────────────────────────
 @router.post(
     "/process-documents",
-    status_code=status.HTTP_200_OK,
-    summary="Read, chunk, and analyse text / markdown documents – returns full artefacts, no DB write",
+    # status_code=status.HTTP_200_OK, # Determined dynamically
+    summary="Read, chunk, analyse documents (NO DB Persistence)",
+    tags=["Media Processing"],
 )
 async def process_documents_endpoint(
     background_tasks: BackgroundTasks,
-
-    # ---------- inputs ----------
-    urls:  Optional[List[str]] = Form(None, description="Document URLs (.txt / .md / etc.)"),
+    # Use Pydantic model via Depends
+    form_data: ProcessDocumentsForm = Depends(),
     files: Optional[List[UploadFile]] = File(None,  description="Document file uploads"),
-
-    # ---------- common ----------
-    keywords:                 str  = Form("", description="Comma-separated keywords (used only in prompts)"),
-    custom_prompt: Optional[str]   = Form(None),
-    system_prompt: Optional[str]   = Form(None),
-    perform_analysis:   bool       = Form(True),
-
-    # ---------- chunking --------
-    perform_chunking:          bool            = Form(True),
-    chunk_method:   Optional[ChunkMethod]      = Form("sentences"),
-    use_adaptive_chunking:     bool            = Form(False),
-    use_multi_level_chunking:  bool            = Form(False),
-    chunk_size:               int             = Form(500),
-    chunk_overlap:            int             = Form(200),
-
-    # ---------- integration -----
-    api_name:   Optional[str] = Form(None),
-    api_key:    Optional[str] = Form(None),
-    summarize_recursively: bool = Form(False),
-
-    # ---------- auth ------------
-    token: str = Header(...),
+    token: str = Header(...), # Auth
 ):
-    # ── 0) validate ---------------------------------------------------------
-    form = ProcessDocumentsForm(
-        urls=urls,
-        keywords=keywords,
-        custom_prompt=custom_prompt,
-        system_prompt=system_prompt,
-        perform_analysis=perform_analysis,
-        perform_chunking=perform_chunking,
-        chunk_method=chunk_method,
-        use_adaptive_chunking=use_adaptive_chunking,
-        use_multi_level_chunking=use_multi_level_chunking,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        api_name=api_name,
-        api_key=api_key,
-        summarize_recursively=summarize_recursively,
-    )
+    """
+    **Process Documents Endpoint (No Persistence)**
 
-    _validate_inputs("document", form.urls, files)
+    Processes document files/URLs (.txt, .md, etc. - potentially others via refactored library)
+    and returns the processing artifacts directly without saving to the database.
+    """
+    logger.info("Request received for /process-documents (no persistence).")
+    logger.debug(f"Form data: {form_data.dict(exclude={'api_key'})}")
 
-    loop = asyncio.get_running_loop()
+    _validate_inputs("document", form_data.urls, files)
+
     results: List[Dict[str, Any]] = []
     file_errors: List[Dict[str, Any]] = []
+    processing_results: List[Dict[str, Any]] = []
 
-    with TempDirManager(cleanup=True) as tmp:
-        # --- save uploads ----------------------------------------------------
-        saved, file_errors = await _save_uploaded_files(files or [], tmp)
-        local_paths = [Path(i["path"]) for i in saved]
+    loop = asyncio.get_running_loop()
+    temp_dir_manager = TempDirManager(cleanup=True)
 
-        # --- download URLs ---------------------------------------------------
-        for url in form.urls or []:
-            try:
-                # FIXME - make download_file agnostic
-                local_paths.append(smart_download(url, tmp))
-            except Exception as e:
-                logging.error(f"Download failure {url}: {e}", exc_info=True)
-                file_errors.append({"input": url, "status": "Failed", "error": str(e)})
+    with temp_dir_manager as tmp:
+        # --- Handle Uploads & Downloads ---
+        local_paths_to_process: List[Tuple[str, Path]] = []
+        source_to_ref_map = {}
 
-        if not local_paths:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid document sources supplied.")
+        # Save uploads
+        saved_files, upload_errors = await _save_uploaded_files(files or [], tmp)
+        file_errors.extend(upload_errors)
+        for info in saved_files:
+            local_paths_to_process.append((info["original_filename"], Path(info["path"])))
+            source_to_ref_map[info["original_filename"]] = Path(info["path"])
 
-        # --- per-file processing --------------------------------------------
-        chunk_opts = {
-            "method": chunk_method or "sentences",
-            "max_size": chunk_size,
-            "overlap": chunk_overlap,
-            "adaptive": use_adaptive_chunking,
-            "multi_level": use_multi_level_chunking,
-            "language": None,
-        }
+        # Download URLs (using smart_download, assuming it's sync or appropriately handled)
+        if form_data.urls:
+             # Assuming smart_download returns Path or raises error
+             for url in form_data.urls:
+                 try:
+                     # Use smart_download which should handle various text types
+                     downloaded_path = smart_download(url, tmp) # Returns Path object
+                     if downloaded_path:
+                         local_paths_to_process.append((url, downloaded_path))
+                         source_to_ref_map[url] = downloaded_path
+                     else:
+                         raise Exception("Download failed or returned None.")
+                 except Exception as e:
+                     logger.error(f"Download failure for {url}: {e}", exc_info=True)
+                     file_errors.append({"input": url, "status": "Failed", "error": f"Download failed: {e}"})
 
-        tasks = [
-            loop.run_in_executor(
-                None,
-                functools.partial(
-                    _process_single_document,
-                    p,
-                    perform_chunking,
-                    chunk_opts,
-                    perform_analysis,
-                    summarize_recursively,
-                    api_name,
-                    api_key,
-                    custom_prompt,
-                    system_prompt,
-                ),
+        if not local_paths_to_process:
+            logger.warning("No valid document sources found or prepared.")
+            status_code = status.HTTP_207_MULTI_STATUS if file_errors else status.HTTP_400_BAD_REQUEST
+            results.extend([{ # Format errors
+                 "status": fe.get("status", "Failed"), "input_ref": fe.get("input"),
+                 "error": fe.get("error"), "media_type": "document",
+                 "processing_source": None, "metadata": {}, "content": None, "chunks": None,
+                 "summary": None, "analysis_details": None, "warnings": None, "db_id": None, "db_message": None
+            } for fe in file_errors])
+            return JSONResponse(status_code=status_code, content={"results": results})
+
+        # --- Per-file processing ---
+        # Use _process_single_document (or relevant refactored func from Plaintext_Files)
+        # Need to ensure _process_single_document exists and has the correct signature.
+        # Assuming it takes path and options similar to _process_single_ebook.
+        chunk_options = _prepare_chunking_options_dict(form_data)
+        tasks = []
+        for original_ref, doc_path in local_paths_to_process:
+            # --- Determine actual file type for _process_markup_or_plain_text ---
+            # This logic might belong inside the processing library, but doing it here for now
+            file_suffix = doc_path.suffix.lower().lstrip('.')
+            doc_type = 'text' # Default
+            if file_suffix in ['html', 'htm']: doc_type = 'html'
+            elif file_suffix == 'xml': doc_type = 'xml'
+            elif file_suffix == 'opml': doc_type = 'opml'
+            # Add other document types if supported by the library
+
+            # Use the appropriate processing function based on type
+            # For now, assume _process_single_document handles text-like,
+            # and _process_markup_or_plain_text handles structured markup.
+            # Let's use _process_markup_or_plain_text from Book lib as it handles multiple types.
+            from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib import _process_markup_or_plain_text
+
+            tasks.append(
+                loop.run_in_executor(
+                    None,
+                    functools.partial(
+                        _process_markup_or_plain_text, # Using this generic processor
+                        file_path=str(doc_path),
+                        file_type=doc_type, # Pass determined type
+                        # Pass options from form
+                        perform_chunking=form_data.perform_chunking,
+                        chunk_options=chunk_options, # Pass dict
+                        perform_analysis=form_data.perform_analysis,
+                        summarize_recursively=form_data.summarize_recursively,
+                        api_name=form_data.api_name,
+                        api_key=form_data.api_key,
+                        custom_prompt=form_data.custom_prompt,
+                        system_prompt=form_data.system_prompt,
+                        title_override=form_data.title,
+                        author_override=form_data.author,
+                        keywords=form_data.keywords, # Pass list
+                    )
+                )
             )
-            for p in local_paths
-        ]
-        results.extend(await asyncio.gather(*tasks))
 
-    # --- merge early errors --------------------------------------------------
-    results.extend(file_errors)
-    errors = [r.get("error") for r in results if r.get("status") != "Success"]
+        processing_results = await asyncio.gather(*tasks)
 
-    batch_result = {
-        "processed_count": len(results) - len(errors),
-        "errors_count": len(errors),
-        "errors": errors,
+    # --- Combine Results ---
+    for fe in file_errors: # Add file errors first
+         results.append({
+             "status": fe.get("status", "Failed"), "input_ref": fe.get("input"),
+             "error": fe.get("error"), "media_type": "document",
+             "processing_source": None, "metadata": {}, "content": None, "chunks": None,
+             "summary": None, "analysis_details": None, "warnings": None, "db_id": None, "db_message": None
+         })
+
+    # Add processing results
+    for res in processing_results:
+        if isinstance(res, dict):
+            res["db_id"] = None # Ensure no DB info
+            res["db_message"] = None
+            # Map input path back to original ref if needed
+            proc_path_str = res.get("input_ref") # Assume worker returns path as input_ref
+            if proc_path_str:
+                 found_ref = "Unknown Document"
+                 for ref, path_obj in source_to_ref_map.items():
+                      if str(path_obj) == proc_path_str:
+                           found_ref = ref; break
+                 res["input_ref"] = found_ref # Overwrite with original ref
+
+            results.append(res)
+        else:
+             logger.error(f"Received non-dict result from document worker: {res}")
+             results.append({"status": "Error", "input_ref": "Unknown", "error": "Invalid result from worker.", "media_type": "document"})
+
+    # --- Determine Final Status Code & Prepare Batch Result ---
+    errors_count = sum(1 for r in results if r.get("status") in ["Error", "Failed"])
+    batch_result_final = {
+        "processed_count": len(results) - errors_count,
+        "errors_count": errors_count,
+        "errors": [r.get("error", "Unknown error") for r in results if r.get("status") in ["Error", "Failed"]],
         "results": results,
     }
+    status_code = status.HTTP_200_OK if errors_count == 0 else status.HTTP_207_MULTI_STATUS
 
-    # --- HTTP status ---------------------------------------------------------
-    status_code = status.HTTP_200_OK if batch_result["errors_count"] == 0 else status.HTTP_207_MULTI_STATUS
-    return JSONResponse(status_code=status_code, content=batch_result)
+    log_level = "INFO" if status_code == status.HTTP_200_OK else "WARNING"
+    logger.log(log_level, f"/process-documents request finished with status {status_code}. Results: {len(results)}, Errors: {errors_count}")
+
+    return JSONResponse(status_code=status_code, content=batch_result_final)
 
 #
 # End of Document Ingestion
@@ -2638,96 +2701,169 @@ class ProcessPDFsForm(AddMediaForm):
 # ───────────────────────────── endpoint ──────────────────────────────────────
 @router.post(
     "/process-pdfs",
-    status_code=status.HTTP_200_OK,
-    summary="Extract, chunk, and analyse PDFs – returns full artefacts, no DB write",
+    # status_code=status.HTTP_200_OK, # Determined dynamically
+    summary="Extract, chunk, analyse PDFs (NO DB Persistence)",
+    tags=["Media Processing"],
 )
 async def process_pdfs_endpoint(
     background_tasks: BackgroundTasks,
-
-    # ---------- inputs ----------
-    urls:  Optional[List[str]] = Form(None, description="PDF URLs"),
+    # Use Pydantic model via Depends
+    form_data: ProcessPDFsForm = Depends(),
     files: Optional[List[UploadFile]] = File(None,  description="PDF uploads"),
-
-    # ---------- common ----------
-    custom_prompt: Optional[str] = Form(None),
-    system_prompt: Optional[str] = Form(None),
-    perform_analysis: bool = Form(True),
-
-    # ---------- chunking --------
-    perform_chunking: bool = Form(True),
-    chunk_method:   Optional[ChunkMethod] = Form("recursive"),
-    chunk_size:     int = Form(500),
-    chunk_overlap:  int = Form(200),
-
-    # ---------- PDF specific ----
-    pdf_parsing_engine: Optional[PdfEngine] = Form("pymupdf4llm"),
-
-    # ---------- integration -----
-    api_name: Optional[str] = Form(None),
-    api_key:  Optional[str] = Form(None),
-
-    # ---------- auth ------------
-    token: str = Header(...),
+    token: str = Header(...), # Auth
 ):
-    # ── 0) validate / hydrate form -----------------------------------------
-    form = ProcessPDFsForm(
-        urls=urls,
-        custom_prompt=custom_prompt,
-        system_prompt=system_prompt,
-        perform_analysis=perform_analysis,
-        perform_chunking=perform_chunking,
-        chunk_method=chunk_method,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        pdf_parsing_engine=pdf_parsing_engine,
-        api_name=api_name,
-        api_key=api_key,
-    )
+    """
+    **Process PDFs Endpoint (No Persistence)**
 
-    _validate_inputs("pdf", form.urls, files)
+    Processes PDF files/URLs (extracts, chunks, analyses) and returns
+    the processing artifacts directly without saving to the database.
+    """
+    logger.info("Request received for /process-pdfs (no persistence).")
+    logger.debug(f"Form data: {form_data.dict(exclude={'api_key'})}")
+
+    _validate_inputs("pdf", form_data.urls, files)
+
+    results: List[Dict[str, Any]] = []
+    file_errors: List[Dict[str, Any]] = []
+    processing_results: List[Dict[str, Any]] = []
 
     loop = asyncio.get_running_loop()
-    results: list = []
-    file_errors = []
+    temp_dir_manager = TempDirManager(cleanup=True) # Always cleanup
 
-    with TempDirManager(cleanup=True) as tmp:
-        # ---------- uploads -------------------------------------------------
-        saved, file_errors = await _save_uploaded_files(files or [], tmp)
-        paths = [Path(x["path"]) for x in saved]
+    with temp_dir_manager as tmp:
+        # --- Handle Uploads & Downloads ---
+        local_paths_to_process: List[Tuple[str, Path]] = [] # (original_ref, local_path)
+        source_to_ref_map = {}
 
-        # ---------- downloads ----------------------------------------------
-        for u in form.urls or []:
-            try:
-                paths.append(safe_download(u, tmp, ".pdf"))
-            except Exception as e:
-                file_errors.append({"input": u, "status": "Failed", "error": str(e)})
-                logging.error(f"Download failed {u}: {e}", exc_info=True)
+        # Save uploads
+        saved_files, upload_errors = await _save_uploaded_files(files or [], tmp)
+        file_errors.extend(upload_errors)
+        for info in saved_files:
+            local_paths_to_process.append((info["original_filename"], Path(info["path"])))
+            source_to_ref_map[info["original_filename"]] = Path(info["path"])
 
-        if not paths:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid PDFs supplied.")
+        # Download URLs (using safe_download)
+        if form_data.urls:
+            for url in form_data.urls:
+                try:
+                    downloaded_path = safe_download(url, tmp, ".pdf")
+                    if downloaded_path:
+                        local_paths_to_process.append((url, downloaded_path))
+                        source_to_ref_map[url] = downloaded_path
+                    else:
+                         raise Exception("Download failed, path not returned.")
+                except Exception as e:
+                    logger.error(f"Download failure for {url}: {e}", exc_info=True)
+                    file_errors.append({"input": url, "status": "Failed", "error": f"Download failed: {e}"})
 
-        # ---------- chunk options ------------------------------------------
-        chunk_opts = {"method": chunk_method or "recursive",
-                      "max_size": chunk_size,
-                      "overlap": chunk_overlap}
+        if not local_paths_to_process:
+            logger.warning("No valid PDF sources found or prepared.")
+            status_code = status.HTTP_207_MULTI_STATUS if file_errors else status.HTTP_400_BAD_REQUEST
+            results.extend([{ # Format errors
+                 "status": fe.get("status", "Failed"), "input_ref": fe.get("input"),
+                 "error": fe.get("error"), "media_type": "pdf",
+                 "processing_source": None, "metadata": {}, "content": None, "chunks": None,
+                 "summary": None, "analysis_details": None, "warnings": None, "db_id": None, "db_message": None
+            } for fe in file_errors])
+            return JSONResponse(status_code=status_code, content={"results": results})
 
-        # ---------- fan-out processing -------------------------------------
-        tasks = [ _single_pdf_worker(p, form, chunk_opts) for p in paths ]
-        results.extend(await asyncio.gather(*tasks))
+        # --- Prepare chunk options ---
+        # Note: process_pdf_task takes individual chunk params, not a dict
+        chunk_opts_for_task = {
+            "perform_chunking": form_data.perform_chunking,
+            "chunk_method": form_data.chunk_method or "recursive", # Default in model/here
+            "max_chunk_size": form_data.chunk_size,
+            "chunk_overlap": form_data.chunk_overlap,
+        }
 
-    # ---------- merge early errors -----------------------------------------
-    results.extend(file_errors)
-    errors = [r.get("error") for r in results if r.get("status") != "Success"]
+        # --- Fan-out processing using process_pdf_task ---
+        # process_pdf_task is async, so we can gather them directly
+        tasks = []
+        for original_ref, pdf_path in local_paths_to_process:
+             try:
+                 # Read file bytes needed by process_pdf_task
+                 pdf_bytes = pdf_path.read_bytes()
+                 tasks.append(
+                     process_pdf_task( # Call the async task directly
+                         file_bytes=pdf_bytes,
+                         filename=pdf_path.name, # Use the actual filename from temp dir
+                         parser=form_data.pdf_parsing_engine or "pymupdf4llm", # Default
+                         # Pass options from form
+                         title_override=form_data.title,
+                         author_override=form_data.author,
+                         keywords=form_data.keywords, # Pass list
+                         **chunk_opts_for_task, # Pass chunking params
+                         perform_analysis=form_data.perform_analysis,
+                         api_name=form_data.api_name,
+                         api_key=form_data.api_key,
+                         custom_prompt=form_data.custom_prompt,
+                         system_prompt=form_data.system_prompt,
+                         summarize_recursively=form_data.summarize_recursively,
+                     )
+                 )
+             except IOError as read_err:
+                  logger.error(f"Could not read PDF file {pdf_path} for processing: {read_err}")
+                  # Add error immediately to file_errors or a separate processing_errors list
+                  processing_results.append({ # Add error result directly
+                      "status": "Error", "input_ref": original_ref,
+                      "error": f"Failed to read file: {read_err}", "media_type": "pdf",
+                      "processing_source": str(pdf_path)
+                  })
 
-    batch_result = {
-        "processed_count": len(results) - len(errors),
-        "errors_count":    len(errors),
-        "errors":          errors,
-        "results":         results,
+        # Gather results from processing tasks
+        if tasks:
+             gathered_results = await asyncio.gather(*tasks, return_exceptions=True)
+             processing_results.extend(gathered_results) # Add results (or exceptions)
+
+    # --- Combine Results ---
+    for fe in file_errors: # Add file errors first
+         results.append({
+             "status": fe.get("status", "Failed"), "input_ref": fe.get("input"),
+             "error": fe.get("error"), "media_type": "pdf",
+             "processing_source": None, "metadata": {}, "content": None, "chunks": None,
+             "summary": None, "analysis_details": None, "warnings": None, "db_id": None, "db_message": None
+         })
+
+    # Add processing results (handle potential exceptions from gather)
+    for res in processing_results:
+        if isinstance(res, Exception):
+             logger.error(f"PDF processing task failed with exception: {res}", exc_info=res)
+             # Try to find original ref based on exception args if possible, otherwise unknown
+             input_ref_from_exc = "Unknown PDF" # TODO: Improve mapping from exception back to input
+             results.append({"status": "Error", "input_ref": input_ref_from_exc, "error": f"Task execution failed: {res}", "media_type": "pdf"})
+        elif isinstance(res, dict):
+            res["db_id"] = None # Ensure no DB info
+            res["db_message"] = None
+            # Map filename back to original ref
+            filename_from_res = res.get("input_ref") # process_pdf_task uses filename
+            found_ref = "Unknown PDF"
+            if filename_from_res:
+                 # Find original ref matching this filename (less reliable if names clash)
+                 for ref, path_obj in source_to_ref_map.items():
+                      if path_obj.name == filename_from_res:
+                           found_ref = ref; break
+            res["input_ref"] = found_ref # Overwrite with original ref
+
+            results.append(res)
+        else:
+             logger.error(f"Received unexpected result type from PDF worker: {type(res)}")
+             results.append({"status": "Error", "input_ref": "Unknown", "error": "Invalid result from PDF worker.", "media_type": "pdf"})
+
+
+    # --- Determine Final Status Code & Prepare Batch Result ---
+    errors_count = sum(1 for r in results if r.get("status") in ["Error", "Failed"])
+    batch_result_final = {
+        "processed_count": len(results) - errors_count,
+        "errors_count": errors_count,
+        "errors": [r.get("error", "Unknown error") for r in results if r.get("status") in ["Error", "Failed"]],
+        "results": results,
     }
+    status_code = status.HTTP_200_OK if errors_count == 0 else status.HTTP_207_MULTI_STATUS
 
-    status_code = status.HTTP_200_OK if not errors else status.HTTP_207_MULTI_STATUS
-    return JSONResponse(status_code=status_code, content=batch_result)
+    log_level = "INFO" if status_code == status.HTTP_200_OK else "WARNING"
+    logger.log(log_level, f"/process-pdfs request finished with status {status_code}. Results: {len(results)}, Errors: {errors_count}")
+
+    return JSONResponse(status_code=status_code, content=batch_result_final)
 #
 # End of PDF Ingestion
 ############################################################################################
