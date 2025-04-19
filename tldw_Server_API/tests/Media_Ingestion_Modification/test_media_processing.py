@@ -277,7 +277,7 @@ class TestProcessAudios:
         """Test sending request with no URLs or files."""
         response = client.post(self.ENDPOINT, data={}, headers=auth_headers)
         assert response.status_code == 400
-        assert "No valid audio sources supplied" in response.json()["detail"]
+        assert "No valid media suources supplied. At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided." in response.json()["detail"]
 
     def test_process_audio_upload_invalid_format(self, client, auth_headers):
         """Test uploading a non-audio file (e.g., PDF)."""
@@ -360,7 +360,7 @@ class TestProcessPdfs:
         """Test sending request with no URLs or files."""
         response = client.post(self.ENDPOINT, data={}, headers=auth_headers)
         assert response.status_code == 400
-        assert "No valid PDF sources supplied" in response.json()["detail"]
+        assert "No valid media suources supplied. At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided." in response.json()["detail"]
 
     def test_process_pdf_upload_not_a_pdf(self, client, auth_headers):
         """Test uploading a non-PDF file (e.g., audio)."""

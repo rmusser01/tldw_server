@@ -23,8 +23,6 @@ from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Callable, Literal, Union
 from urllib.parse import urlparse
-
-import httpx
 #
 # 3rd-party imports
 from fastapi import (
@@ -40,14 +38,13 @@ from fastapi import (
     status,
     UploadFile
 )
+import httpx
 from pydantic import BaseModel, validator, ValidationError
 import redis
 from pydantic.v1 import Field
 # API Rate Limiter/Caching via Redis
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from loguru import logger
-from loguru import logger as logging
 from starlette.responses import JSONResponse
 #
 # Local Imports
@@ -73,6 +70,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestio
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
 from tldw_Server_API.app.core.Utils.Utils import truncate_content, logging, \
     sanitize_filename, safe_download, smart_download
+from tldw_Server_API.app.core.Utils.Utils import logging as logger
 #
 # Web Scraping
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article, scrape_from_sitemap, \
@@ -707,7 +705,7 @@ def _validate_inputs(media_type: MediaType, urls: Optional[List[str]], files: Op
     if not urls and not files:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided."
+            detail="No valid media suources supplied. At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided."
         )
 
 
@@ -2099,8 +2097,8 @@ def get_process_audios_form(
     against the ProcessAudiosForm model.
     """
     try:
+        # Map form fields to ProcessAudiosForm fields
         form_instance = ProcessAudiosForm(
-            # media_type is fixed by ProcessAudiosForm
             urls=urls,
             title=title,
             author=author,
@@ -2137,6 +2135,8 @@ def get_process_audios_form(
         )
         return form_instance
     except ValidationError as e:
+        # Log the validation error details for debugging
+        logger.warning(f"Form validation failed for /process-audios: {e.errors()}")
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=e.errors(),
@@ -2157,6 +2157,15 @@ def get_process_audios_form(
     # status_code=status.HTTP_200_OK, # Status determined dynamically
     summary="Transcribe / chunk / analyse audio and return full artefacts (no DB write)",
     tags=["Media Processing"],
+    # Consider adding response models for better documentation and validation
+    # response_model=YourBatchResponseModel,
+    # responses={ # Example explicit responses
+    #     200: {"description": "All items processed successfully."},
+    #     207: {"description": "Partial success with some errors."},
+    #     400: {"description": "Bad request (e.g., no input)."},
+    #     422: {"description": "Validation error in form data."},
+    #     500: {"description": "Internal server error."},
+    # }
 )
 async def process_audios_endpoint(
     background_tasks: BackgroundTasks,
@@ -2164,8 +2173,7 @@ async def process_audios_endpoint(
     form_data: ProcessAudiosForm = Depends(get_process_audios_form),
     # --- File uploads remain separate ---
     files: Optional[List[UploadFile]] = File(None, description="Audio file uploads"),
-    # --- Optional Auth ---
-    # token: str = Header(...),
+    # Optional Auth: token: str = Header(None), # Use Header(None) for optional
 ):
     """
     **Process Audio Endpoint (Refactored)**
@@ -2177,7 +2185,13 @@ async def process_audios_endpoint(
     # --- 0) Validation and Logging ---
     # Validation happened in the dependency. Log success or handle HTTPException.
     logger.info(f"Request received for /process-audios. Form data validated via dependency.")
-    _validate_inputs("audio", form_data.urls, files) # Basic check for inputs
+    # Use the helper function from media_endpoints_utils
+    try:
+        _validate_inputs("audio", form_data.urls, files)
+    except HTTPException as e:
+         logger.warning(f"Input validation failed: {e.detail}")
+         # Re-raise the HTTPException from _validate_inputs
+         raise e
 
     # --- Rest of the logic using form_data ---
     loop = asyncio.get_running_loop()
@@ -2187,50 +2201,61 @@ async def process_audios_endpoint(
 
     # ── 1) temp dir + uploads ────────────────────────────────────────────────
     with TempDirManager(cleanup=True, prefix="process_audio_") as temp_dir:
-        saved_files, file_errors = await _save_uploaded_files(files or [], temp_dir)
+        temp_dir_path = Path(temp_dir)
+        saved_files, file_errors = await _save_uploaded_files(files or [], temp_dir_path)
 
+        # --- Adapt File Errors to Response Structure ---
         if file_errors:
-            batch_result["results"].extend(file_errors) # Add raw file errors for now
+            adapted_file_errors = []
+            for err in file_errors:
+                 # Ensure all necessary keys are present for consistency
+                 adapted_file_errors.append({
+                     "status": "Error",
+                     "input_ref": err.get("original_filename", "Unknown Upload"),
+                     "processing_source": err.get("input", "Unknown Filename"),
+                     "media_type": "audio",
+                     "metadata": {},
+                     "content": "",
+                     "segments": None,
+                     "chunks": None,      # Add chunks field
+                     "analysis": None,    # Add analysis field
+                     "analysis_details": {},
+                     "error": err.get("error", "Failed to save uploaded file."),
+                     "warnings": None,
+                     "db_id": None,       # Explicitly None
+                     "db_message": "Processing only endpoint.", # Explicit message
+                     "message": "File saving failed.", # Optional general message
+                 })
+            batch_result["results"].extend(adapted_file_errors)
             batch_result["errors_count"] = len(file_errors)
-            batch_result["errors"].extend([err.get("error", "File save error") for err in file_errors])
-            # Adapt file errors to the expected MediaItemProcessResponse structure later if needed
+            batch_result["errors"].extend([err["error"] for err in adapted_file_errors])
 
         url_list = form_data.urls or []
         uploaded_paths = [str(f["path"]) for f in saved_files]
         all_inputs = url_list + uploaded_paths
 
+        # Check if there are any valid inputs *after* attempting saves
         if not all_inputs:
+            # If only file errors occurred, return 207, otherwise 400
             status_code = status.HTTP_207_MULTI_STATUS if file_errors else status.HTTP_400_BAD_REQUEST
-            detail = "No valid audio sources supplied." if not file_errors else "File saving failed for all uploads."
-            logger.warning(f"Bad request or only file errors: {detail}")
-            # Return JSONResponse directly for 207, raise HTTPException for 400
-            if status_code == 400:
-                 raise HTTPException(status_code, detail)
+            detail = "No valid audio sources supplied (or all uploads failed)."
+            logger.warning(f"Request processing stopped: {detail}")
+            if status_code == status.HTTP_400_BAD_REQUEST:
+                 raise HTTPException(status_code=status_code, detail=detail)
             else:
-                 # Adapt file errors to MediaItemProcessResponse structure before returning 207
-                 adapted_file_errors = [
-                     {
-                         "status": "Error", "input_ref": err.get("input", "Unknown Filename"),
-                         "processing_source": "N/A - File Save Failed", "media_type": "audio",
-                         "metadata": {}, "content": "", "segments": None, "chunks": None,
-                         "analysis": None, "analysis_details": None,
-                         "error": err.get("error", "Failed to save uploaded file."), "warnings": None,
-                         "db_id": None, "db_message": None, "message": None,
-                     } for err in file_errors
-                 ]
-                 batch_result["results"] = adapted_file_errors # Replace raw errors with structured ones
+                 # We already added adapted file errors to batch_result['results']
                  return JSONResponse(status_code=status_code, content=batch_result)
 
 
         # ── 2) invoke library batch processor ────────────────────────────────
-        # Prepare args using the validated form_data
+        # Use validated form_data directly
         audio_args = {
             "inputs": all_inputs,
             "transcription_model": form_data.transcription_model,
             "transcription_language": form_data.transcription_language,
             "perform_chunking": form_data.perform_chunking,
-            "chunk_method": form_data.chunk_method,
-            "max_chunk_size": form_data.chunk_size,
+            "chunk_method": form_data.chunk_method.value if form_data.chunk_method else None, # Pass enum value
+            "max_chunk_size": form_data.chunk_size, # Correct mapping
             "chunk_overlap": form_data.chunk_overlap,
             "use_adaptive_chunking": form_data.use_adaptive_chunking,
             "use_multi_level_chunking": form_data.use_multi_level_chunking,
@@ -2246,81 +2271,25 @@ async def process_audios_endpoint(
             "summarize_recursively": form_data.summarize_recursively,
             "use_cookies": form_data.use_cookies,
             "cookies": form_data.cookies,
-            "keep_original": False, # Explicitly false for this endpoint (temp dir is cleaned)
+            "keep_original": False, # Explicitly false for this endpoint
             "custom_title": form_data.title,
             "author": form_data.author,
-            "temp_dir": str(temp_dir), # Pass the managed temp dir path
+            "temp_dir": str(temp_dir_path), # Pass the managed temp dir path
         }
 
+        processing_output = None
         try:
-            # Removed import from inside function - ensure it's imported at module level
-            # from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
             logger.debug(f"Calling process_audio_files for /process-audios with {len(all_inputs)} inputs.")
+            # Use functools.partial to pass arguments cleanly
             batch_func = functools.partial(process_audio_files, **audio_args)
             # Run the synchronous library function in an executor thread
             processing_output = await loop.run_in_executor(None, batch_func)
 
-            # Merge results (Combine file errors and processing results)
-            current_results = batch_result["results"] # Get existing file errors
-            batch_result["results"] = [] # Reset results to merge correctly
-
-            if isinstance(processing_output, dict) and "results" in processing_output:
-                batch_result["processed_count"] = processing_output.get("processed_count", 0)
-                # Adjust error count based on *new* processing errors
-                new_errors_count = processing_output.get("errors_count", 0)
-                batch_result["errors_count"] += new_errors_count
-                batch_result["errors"].extend(processing_output.get("errors", []))
-
-                processed_items = processing_output.get("results", [])
-                for item in processed_items:
-                    # Ensure DB fields are None for results from this endpoint
-                    item["db_id"] = None
-                    item["db_message"] = "Processing only endpoint."
-                    # Ensure all keys from MediaItemProcessResponse are present
-                    item.setdefault("status", "Error") # Default if missing
-                    item.setdefault("input_ref", "Unknown")
-                    item.setdefault("processing_source", "Unknown")
-                    item.setdefault("media_type", "audio")
-                    item.setdefault("metadata", {})
-                    item.setdefault("content", "")
-                    item.setdefault("segments", None)
-                    item.setdefault("chunks", None)
-                    item.setdefault("analysis", None)
-                    item.setdefault("analysis_details", {})
-                    item.setdefault("error", None)
-                    item.setdefault("warnings", None)
-                    item.setdefault("message", None) # Add message if used by library
-                # Combine processing results with any previous file errors
-                batch_result["results"] = current_results + processed_items
-            else:
-                # Handle unexpected output format from the library function
-                logging.error(f"process_audio_files returned unexpected format: {processing_output}")
-                error_msg = "Audio processing library returned invalid data."
-                batch_result["errors_count"] += 1 # Increment general error count
-                batch_result["errors"].append(error_msg)
-                # Create error entries for all inputs that were *attempted* in processing
-                error_results = []
-                for input_src in all_inputs:
-                    original_ref = input_src # Default to source
-                    if input_src in uploaded_paths: # Try to find original filename for uploads
-                        for sf in saved_files:
-                            if str(sf["path"]) == input_src:
-                                original_ref = sf.get("original_filename", input_src)
-                                break
-                    error_results.append({
-                        "status": "Error", "input_ref": original_ref, "processing_source": input_src,
-                        "media_type": "audio", "error": error_msg, "db_id": None, "db_message": None,
-                        "metadata": {}, "content": "", "segments": None, "chunks": None, "analysis": None,
-                        "analysis_details": {}, "warnings": None, "message": None
-                    })
-                # Combine errors with any previous file errors
-                batch_result["results"] = current_results + error_results
-
         except Exception as exec_err:
-            # Catch errors during the execution of the library function itself
+            # Catch errors during the execution setup or within the library if it raises unexpectedly
             logging.error(f"Error executing process_audio_files: {exec_err}", exc_info=True)
             error_msg = f"Error during audio processing execution: {type(exec_err).__name__}"
-            batch_result["errors_count"] += 1
+            batch_result["errors_count"] += len(all_inputs) # Assume all failed if executor errored
             batch_result["errors"].append(error_msg)
             # Create error entries for all inputs attempted in this batch
             error_results = []
@@ -2328,29 +2297,96 @@ async def process_audios_endpoint(
                 original_ref = input_src
                 if input_src in uploaded_paths:
                     for sf in saved_files:
-                        if str(sf["path"]) == input_src:
-                             original_ref = sf.get("original_filename", input_src)
-                             break
+                         if str(sf["path"]) == input_src:
+                              original_ref = sf.get("original_filename", input_src)
+                              break
                 error_results.append({
                     "status": "Error", "input_ref": original_ref, "processing_source": input_src,
-                    "media_type": "audio", "error": error_msg, "db_id": None, "db_message": None,
+                    "media_type": "audio", "error": error_msg, "db_id": None, "db_message": "Processing only endpoint.",
                     "metadata": {}, "content": "", "segments": None, "chunks": None, "analysis": None,
-                    "analysis_details": {}, "warnings": None, "message": None
+                    "analysis_details": {}, "warnings": None, "message": "Processing execution failed."
                 })
-            # Combine errors with any previous file errors
-            batch_result["results"] = batch_result["results"] + error_results # Append to potentially existing file errors
+            # Combine these errors with any previous file errors
+            batch_result["results"].extend(error_results)
+            # Fall through to return section
 
+        # --- Merge Processing Results ---
+        if processing_output and isinstance(processing_output, dict) and "results" in processing_output:
+            # Update counts based on library's report
+            batch_result["processed_count"] += processing_output.get("processed_count", 0)
+            new_errors_count = processing_output.get("errors_count", 0)
+            batch_result["errors_count"] += new_errors_count
+            batch_result["errors"].extend(processing_output.get("errors", []))
+
+            processed_items = processing_output.get("results", [])
+            adapted_processed_items = []
+            for item in processed_items:
+                 # Ensure DB fields are set correctly and all expected fields exist
+                 item["db_id"] = None
+                 item["db_message"] = "Processing only endpoint."
+                 item.setdefault("status", "Error") # Default status if missing
+                 item.setdefault("input_ref", "Unknown")
+                 item.setdefault("processing_source", "Unknown")
+                 item.setdefault("media_type", "audio") # Ensure media type
+                 item.setdefault("metadata", {})
+                 item.setdefault("content", None) # Default content to None
+                 item.setdefault("segments", None)
+                 item.setdefault("chunks", None) # Add default for chunks
+                 item.setdefault("analysis", None) # Add default for analysis
+                 item.setdefault("analysis_details", {})
+                 item.setdefault("error", None)
+                 item.setdefault("warnings", None)
+                 item.setdefault("message", None) # Optional message from library
+                 adapted_processed_items.append(item)
+
+            # Combine processing results with any previous file errors
+            batch_result["results"].extend(adapted_processed_items)
+
+        elif processing_output is None and not batch_result["results"]: # Handle case where executor failed AND no file errors
+             # This case is now handled by the try/except around run_in_executor
+             pass
+        elif processing_output is not None:
+            # Handle unexpected output format from the library function more gracefully
+            logging.error(f"process_audio_files returned unexpected format: Type={type(processing_output)}")
+            error_msg = "Audio processing library returned invalid data."
+            batch_result["errors_count"] += len(all_inputs) # Assume all failed
+            batch_result["errors"].append(error_msg)
+            # Create error results for inputs if not already present
+            existing_refs = {res.get("input_ref") for res in batch_result["results"]}
+            error_results = []
+            for input_src in all_inputs:
+                original_ref = input_src
+                if input_src in uploaded_paths:
+                    for sf in saved_files:
+                         if str(sf["path"]) == input_src:
+                              original_ref = sf.get("original_filename", input_src)
+                              break
+                if original_ref not in existing_refs: # Only add errors for inputs not already covered (e.g., by file errors)
+                    error_results.append({
+                        "status": "Error", "input_ref": original_ref, "processing_source": input_src,
+                        "media_type": "audio", "error": error_msg, "db_id": None, "db_message": "Processing only endpoint.",
+                        "metadata": {}, "content": "", "segments": None, "chunks": None, "analysis": None,
+                        "analysis_details": {}, "warnings": None, "message": "Invalid processing result."
+                    })
+            batch_result["results"].extend(error_results)
+
+    # TempDirManager cleans up the directory automatically here (unless keep_original=True passed to it)
     # ── 4) Determine Final Status Code ───────────────────────────────────────
     # Base final status on whether *any* errors occurred (file saving or processing)
+    # Check the final errors_count AFTER merging results
     final_status_code = (
         status.HTTP_200_OK if batch_result.get("errors_count", 0) == 0
         else status.HTTP_207_MULTI_STATUS
     )
 
-    # ── 5) Return Combined Results ───────────────────────────────────────────
-    log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
-    logger.log(log_level,
-               f"/process-audios request finished with status {final_status_code}. Results count: {len(batch_result.get('results', []))}, Total Errors: {batch_result.get('errors_count', 0)}")
+    # --- Return Combined Results ---
+    if final_status_code == status.HTTP_200_OK:
+        logging.info("Congrats, all successful!")
+        logger.info(
+            f"/process-audios request finished with status {final_status_code}. Results count: {len(batch_result.get('results', []))}, Total Errors: {batch_result.get('errors_count', 0)}")
+    else:
+        logging.warning("Not all submissions were processed succesfully! Please Try Again!")
+        logger.warning(f"/process-audios request finished with status {final_status_code}. Results count: {len(batch_result.get('results', []))}, Total Errors: {batch_result.get('errors_count', 0)}")
 
     return JSONResponse(status_code=final_status_code, content=batch_result)
 
@@ -2732,7 +2768,6 @@ async def process_documents_endpoint(
 ######################## PDF Ingestion Endpoint ###################################
 # Endpoints:
 #
-
 async def _single_pdf_worker(
     pdf_path: Path,
     form,                      # ProcessPDFsForm instance
