@@ -38,6 +38,7 @@ TEST_MEDIA_DIR = Path(__file__).parent / "test_media"
 SAMPLE_VIDEO_PATH = TEST_MEDIA_DIR / "sample.mp4"
 SAMPLE_AUDIO_PATH = TEST_MEDIA_DIR / "sample.mp3"
 SAMPLE_PDF_PATH = TEST_MEDIA_DIR / "sample.pdf"
+SAMPLE_EPUB_PATH = TEST_MEDIA_DIR / "sample.epub"
 INVALID_FILE_PATH = TEST_MEDIA_DIR / "not_a_real_file.xyz"
 
 # Use stable, short, publicly accessible URLs for testing
@@ -45,7 +46,7 @@ INVALID_FILE_PATH = TEST_MEDIA_DIR / "not_a_real_file.xyz"
 VALID_VIDEO_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Example: Rick Astley (short duration helps)
 VALID_AUDIO_URL = "https://cdn.pixabay.com/download/audio/2023/12/02/audio_2f291f569a.mp3?filename=about-anger-179423.mp3"  # Example public domain audio
 VALID_PDF_URL = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"  # Example public PDF
-
+VALID_EPUB_URL = "https://filesamples.com/samples/ebook/epub/Alices%20Adventures%20in%20Wonderland.epub"  # Example public EPUB
 INVALID_URL = "http://this.url.does.not.exist/resource.mp4"
 URL_404 = "https://httpbin.org/status/404"  # URL that returns 404
 
@@ -62,6 +63,8 @@ def client():
         pytest.skip(f"Test audio file not found: {SAMPLE_AUDIO_PATH}")
     if not SAMPLE_PDF_PATH.exists():
         pytest.skip(f"Test PDF file not found: {SAMPLE_PDF_PATH}")
+    if not SAMPLE_EPUB_PATH.exists():
+        pytest.skip(f"Test EPUB file not found: {SAMPLE_EPUB_PATH}")
 
     with TestClient(fastapi_app_instance) as c:
         yield c
@@ -489,4 +492,224 @@ class TestProcessPdfs:
 
         # Check that the mock was called (optional but good practice)
         mock_summarize.assert_called()
+
+
+
+# =============================================================================
+# Ebook Processing Tests
+# =============================================================================
+class TestProcessEbooks:
+    ENDPOINT = "/api/v1/media/process-ebooks" # Make sure this path matches your router prefix + endpoint path
+
+    # --- Happy Path Tests ---
+
+    def test_process_ebook_url_success_defaults(self, client, auth_headers):
+        """Test processing a single valid EPUB URL with default settings."""
+        # Defaults: analysis=True, chunking=True, extraction='filtered'
+        # Skip analysis for speed if not mocking/configured
+        pytest.skip("Skipping analysis test until LLM mock/config confirmed.")
+        form_data = {
+            "urls": [VALID_EPUB_URL],
+            "api_name": "mock_api", # Needed if analysis=True default
+            "api_key": "mock_key"   # Needed if analysis=True default
+        }
+        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
+        result = data["results"][0]
+        check_media_item_result(result, "Success")
+        assert result["media_type"] == "ebook"
+        assert result["input_ref"] == VALID_EPUB_URL
+        assert result["content"] is not None and len(result["content"]) > 0
+        assert result["chunks"] is not None and len(result["chunks"]) > 0 # Expect chunks due to default
+        assert result["analysis"] is not None and len(result["analysis"]) > 0 # Expect analysis due to default
+
+    def test_process_ebook_url_success_no_analysis_no_chunking(self, client, auth_headers):
+        """Test processing EPUB URL, disabling analysis and chunking."""
+        form_data = {
+            "urls": [VALID_EPUB_URL],
+            "perform_analysis": "false",
+            "perform_chunking": "false",
+            "extraction_method": "basic" # Test another extraction method
+        }
+        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
+        result = data["results"][0]
+        check_media_item_result(result, "Success")
+        assert result["media_type"] == "ebook"
+        assert result["input_ref"] == VALID_EPUB_URL
+        assert result["content"] is not None and len(result["content"]) > 0
+        # Library creates one chunk if chunking is off
+        assert result["chunks"] is not None and len(result["chunks"]) == 1
+        assert result["analysis"] is None # Analysis was disabled
+
+    def test_process_ebook_upload_success_defaults(self, client, auth_headers):
+        """Test processing a single valid EPUB file upload with defaults."""
+        # Skip analysis for speed if not mocking/configured
+        form_data = {"perform_analysis": "false"}
+        with open(SAMPLE_EPUB_PATH, "rb") as f:
+            # Common EPUB MIME type, though server might not strictly check it
+            files = {"files": (SAMPLE_EPUB_PATH.name, f, "application/epub+zip")}
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+
+        data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
+        result = data["results"][0]
+        check_media_item_result(result, "Success")
+        assert result["media_type"] == "ebook"
+        assert result["input_ref"] == SAMPLE_EPUB_PATH.name
+        assert result["content"] is not None and len(result["content"]) > 0
+        assert result["chunks"] is not None and len(result["chunks"]) > 0 # Default chunking=True
+
+    def test_process_ebook_multiple_success(self, client, auth_headers):
+        """Test processing multiple valid inputs (URL and Upload)."""
+        form_data = {"urls": [VALID_EPUB_URL], "perform_analysis": "false"}
+        with open(SAMPLE_EPUB_PATH, "rb") as f:
+            files = {"files": (SAMPLE_EPUB_PATH.name, f, "application/epub+zip")}
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+
+        data = check_batch_response(response, 200, expected_processed=2, expected_errors=0, check_results_len=2)
+        results = data["results"]
+        assert len(results) == 2
+        # Check both results individually
+        found_url = False
+        found_file = False
+        for res in results:
+            check_media_item_result(res, "Success")
+            assert res["media_type"] == "ebook"
+            if res["input_ref"] == VALID_EPUB_URL:
+                found_url = True
+            elif res["input_ref"] == SAMPLE_EPUB_PATH.name:
+                found_file = True
+        assert found_url and found_file, "Did not find results for both URL and file"
+
+    def test_process_ebook_overrides(self, client, auth_headers):
+        """Test applying title, author, and keyword overrides."""
+        test_title = "My Custom Ebook Title"
+        test_author = "Testy McTestface"
+        test_keywords_str = "test,ebook,override"
+        test_keywords_list = ["test", "ebook", "override"]
+
+        form_data = {
+            "urls": [VALID_EPUB_URL],
+            "title": test_title,
+            "author": test_author,
+            "keywords_str": test_keywords_str, # Use keywords_str for form data
+            "perform_analysis": "false"
+        }
+        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
+        result = data["results"][0]
+        check_media_item_result(result, "Success")
+        assert result["metadata"]["title"] == test_title
+        assert result["metadata"]["author"] == test_author
+        assert result["keywords"] == test_keywords_list # Check the parsed list
+
+    # --- Error Handling Tests ---
+
+    def test_process_ebook_multi_status_mixed(self, client, auth_headers):
+        """Test processing one valid URL and one invalid URL -> 207."""
+        form_data = {"urls": [VALID_EPUB_URL, INVALID_URL], "perform_analysis": "false"}
+        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+
+        # Give potentially slow download/timeout a moment
+        time.sleep(5)
+
+        data = check_batch_response(response, 207, expected_processed=1, expected_errors=1, check_results_len=2)
+
+        success_result = next((r for r in data["results"] if r["status"] == "Success"), None)
+        error_result = next((r for r in data["results"] if r["status"] == "Error"), None)
+
+        assert success_result is not None, "Success result not found"
+        assert error_result is not None, "Error result not found"
+        check_media_item_result(success_result, "Success")
+        check_media_item_result(error_result, "Error")
+        assert success_result["input_ref"] == VALID_EPUB_URL
+        assert error_result["input_ref"] == INVALID_URL
+        assert error_result["error"] is not None
+        assert "Download/preparation failed" in error_result["error"] # Check download helper error
+
+    def test_process_ebook_no_input(self, client, auth_headers):
+        """Test sending request with no URLs or files."""
+        response = client.post(self.ENDPOINT, data={}, headers=auth_headers)
+        # Expect 400 based on _validate_inputs logic
+        assert response.status_code == 400, f"Expected 400, got {response.status_code}. Body: {response.text}"
+        assert "At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided." in response.json()["detail"]
+
+    def test_process_ebook_upload_invalid_format(self, client, auth_headers):
+        """Test uploading a non-EPUB file (e.g., PDF), expecting upload helper rejection."""
+        form_data = {}
+        with open(SAMPLE_PDF_PATH, "rb") as f:
+            files = {"files": (SAMPLE_PDF_PATH.name, f, "application/pdf")}
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+
+        # _save_uploaded_files should reject based on extension ".epub"
+        data = check_batch_response(response, 207, expected_processed=0, expected_errors=1, check_results_len=1)
+        result = data["results"][0]
+        check_media_item_result(result, "Error")
+        assert result["input_ref"] == SAMPLE_PDF_PATH.name
+        assert "Upload error: Invalid file extension" in result["error"]
+
+    def test_process_ebook_validation_error_bad_method(self, client, auth_headers):
+        """Test sending invalid form data (invalid extraction_method)."""
+        form_data = {
+            "urls": [VALID_EPUB_URL],
+            "extraction_method": "invalid_method" # Not in Literal[...]
+        }
+        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        assert response.status_code == 422  # Unprocessable Entity
+        detail = response.json()["detail"]
+        assert isinstance(detail, list) and len(detail) > 0
+        # Check for the specific validation error message
+        assert any("Input should be 'filtered', 'markdown' or 'basic'" in err.get("msg", "") for err in detail)
+        assert any(err.get("loc") == ["body", "extraction_method"] for err in detail) # Check location
+
+
+    # --- Option Variation Tests ---
+
+    @pytest.mark.parametrize("method", ['filtered', 'markdown', 'basic'])
+    def test_process_ebook_options_extraction_method(self, method, client, auth_headers):
+        """Test different valid extraction methods."""
+        form_data = {
+            "urls": [VALID_EPUB_URL],
+            "extraction_method": method,
+            "perform_analysis": "false"
+        }
+        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
+        result = data["results"][0]
+        check_media_item_result(result, "Success")
+        assert result["content"] is not None # Content should exist, might differ based on method
+
+    # --- Mocked Analysis Test ---
+
+    # IMPORTANT: Replace "path.to.your_ebook_processing_module.summarize" with the correct path
+    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib.summarize")
+    def test_process_ebook_with_analysis_mocked(self, mock_summarize, client, auth_headers):
+        """Test enabling analysis with mocking."""
+        mock_analysis_text = "This is the mocked ebook analysis."
+        mock_summarize.return_value = mock_analysis_text
+
+        form_data = {
+            "urls": [VALID_EPUB_URL],
+            "perform_analysis": "true",
+            "perform_chunking": "true", # Analysis often depends on chunks
+            "api_name": "mock_api",     # Need to provide these even if mocking summarize directly
+            "api_key": "mock_key"       # Depending on process_epub implementation checks
+        }
+        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
+        result = data["results"][0]
+        check_media_item_result(result, "Success")
+
+        # Check mock was called (at least once, maybe more if chunked)
+        mock_summarize.assert_called()
+        # Check the *final* analysis result
+        assert result["analysis"] is not None
+        # The final result might be the mocked text joined, or a recursive summary
+        # For simplicity here, we check if the mocked text is *in* the final result
+        assert mock_analysis_text in result["analysis"]
+        assert result["chunks"] is not None and len(result["chunks"]) > 0
+        # Check if analysis was added to chunk metadata
+        assert all('analysis' in chunk.get('metadata', {}) for chunk in result["chunks"])
+
+
 

@@ -1368,7 +1368,7 @@ def save_segments_to_json(segments, file_name="transcription_segments.json"):
     return json_file_path
 
 
-async def safe_download(url: str, tmp_dir: Path, ext: str) -> Path:
+def safe_download(url: str, tmp_dir: Path, ext: str) -> Path:
     """
     Wrapper around download_file() that:
       1) builds a random filename inside tmp_dir
@@ -1376,7 +1376,7 @@ async def safe_download(url: str, tmp_dir: Path, ext: str) -> Path:
     """
     dst = tmp_dir / (f"{uuid.uuid4().hex}{ext}")
     # checksum=None, max_retries=3, delay=5 keep the defaults
-    await download_file(url, str(dst))          # raises on failure
+    download_file(url, str(dst))          # raises on failure
     return dst
 
 def smart_download(url: str, tmp_dir: Path) -> Path:

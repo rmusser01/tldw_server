@@ -1083,65 +1083,6 @@ def _process_markup_or_plain_text(
     return result
 
 
-def _process_single_ebook(
-    ebook_path: Path,
-    original_ref: str, # Pass the original URL or filename
-    # Pass necessary options from form_data
-    title_override: Optional[str],
-    author_override: Optional[str],
-    keywords: Optional[List[str]],
-    perform_chunking: bool,
-    chunk_options: Optional[Dict[str, Any]],
-    perform_analysis: bool,
-    summarize_recursively: bool,
-    api_name: Optional[str],
-    api_key: Optional[str],
-    custom_prompt: Optional[str],
-    system_prompt: Optional[str],
-    extraction_method: str, # Pass selected method
-) -> Dict[str, Any]:
-    """
-    Synchronous helper function to process one EPUB file using the library.
-    Designed to be run in a thread executor.
-    *No DB interaction.*
-    """
-    try:
-        logger.info(f"Worker processing ebook: {original_ref} from path {ebook_path}")
-        # Call the main library processing function
-        result_dict = process_epub(
-            file_path=str(ebook_path),
-            title_override=title_override,
-            author_override=author_override,
-            keywords=keywords,
-            perform_chunking=perform_chunking,
-            chunk_options=chunk_options,
-            perform_analysis=perform_analysis,
-            api_name=api_name,
-            api_key=api_key,
-            custom_prompt=custom_prompt,
-            system_prompt=system_prompt,
-            summarize_recursively=summarize_recursively,
-            extraction_method=extraction_method
-        )
-        # Ensure input_ref is set to the original URL/filename for consistency
-        result_dict["input_ref"] = original_ref
-        # processing_source is already set by process_epub to the actual path
-        return result_dict
-
-    except Exception as e:
-        logger.error(f"_process_single_ebook error for {original_ref} ({ebook_path}): {e}", exc_info=True)
-        # Return a standardized error dictionary consistent with process_epub
-        return {
-            "status": "Error",
-            "input_ref": original_ref, # Use original ref for error reporting
-            "processing_source": str(ebook_path),
-            "media_type": "ebook",
-            "error": f"Worker processing failed: {str(e)}",
-            "content": None, "metadata": None, "chunks": None, "analysis": None,
-            "keywords": keywords or [], "warnings": None, "analysis_details": None # Add analysis_details
-        }
-
-
 # Ingest a text file into the database with Title/Author/Keywords
 def extract_epub_metadata(content):
     title_match = re.search(r'Title:\s*(.*?)\n', content)

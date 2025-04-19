@@ -24,7 +24,7 @@ https://medium.com/data-science-collective/ai-engineering-3-3-dataset-engineerin
 https://engineeringblog.yelp.com/2025/02/search-query-understanding-with-LLMs.html
 https://github.com/ibm-granite/granite-io/blob/main/docs/design.md
 https://www.jeremykun.com/2015/04/06/markov-chain-monte-carlo-without-all-the-bullshit/
-
+https://mode-rag.readthedocs.io/en/latest/
 
 
 
