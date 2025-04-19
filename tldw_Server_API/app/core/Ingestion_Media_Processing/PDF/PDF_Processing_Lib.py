@@ -12,14 +12,17 @@
 #
 ####################
 # Import necessary libraries
+import gc
+import shutil
 import time
+import uuid
 from datetime import datetime
 import os
 import re
 import tempfile
+import time
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union
-
 #
 # Import External Libs
 import pymupdf
@@ -182,6 +185,18 @@ def extract_metadata_from_pdf(pdf_path):
         return {}
 
 
+# PDF_Ingestion_Lib.py
+# Add these imports at the top if not already present
+import tempfile
+import shutil
+import uuid
+import platform
+import time
+import os
+from pathlib import Path
+
+# ... other imports ...
+
 def process_pdf(
     file_input: Union[str, bytes, Path], # Can be path, bytes, or Path object
     filename: str, # Original filename for reference and metadata fallback
@@ -197,7 +212,7 @@ def process_pdf(
     custom_prompt: Optional[str] = None,
     system_prompt: Optional[str] = None,
     summarize_recursively: bool = False,
-    write_to_temp_file: bool = False # Control if bytes should be written to disk
+    # write_to_temp_file: bool = False # This param seems unused/obsolete now
 ) -> dict[str, Any] | None:
     """
     Processes a single PDF (from path or bytes): extracts text & metadata, chunks, summarizes.
@@ -238,7 +253,7 @@ def process_pdf(
                 "analysis_details": Optional[Dict] # Added
             }
     """
-    start_time = time.time()
+    start_time = datetime.now()
     # Initialize the result dictionary structure
 
     result: Dict[str, Any] = {
@@ -252,8 +267,8 @@ def process_pdf(
         "analysis": None,
         "keywords": keywords or [], # Store keywords passed in
         "error": None,
-        "warnings": None,
-        "analysis_details": { # Initialize analysis details
+        "warnings": [], # Initialize as list for easier appending
+        "analysis_details": {
             "summarization_model": api_name if perform_analysis else None,
             "custom_prompt_used": custom_prompt if perform_analysis else None,
             "system_prompt_used": system_prompt if perform_analysis else None,
@@ -262,9 +277,9 @@ def process_pdf(
     }
     log_counter("pdf_processing_attempt", labels={"file_name": filename, "parser": parser})
 
-    temp_pdf_path: Optional[str] = None # Path to the temp file if created
-    input_path_for_processing: Optional[str] = None # Always use a path for parsers now
-    input_source_for_metadata: Union[str, bytes] # pymupdf.open can use bytes or path for metadata
+    temp_dir_for_pdf: Optional[str] = None
+    path_for_processing: Optional[str] = None
+    content: Optional[str] = None
 
     try:
         # --- Step 0: Handle Input Type and Ensure File Path for Processing ---
@@ -272,42 +287,50 @@ def process_pdf(
             result["processing_source"] = f"bytes_input_({len(file_input)})"
             # ALWAYS write bytes to a temp file for consistent parser input
             try:
-                # Use context manager for safer handling (optional, but good practice)
-                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as _temp_file:
-                    _temp_file.write(file_input)
-                    temp_pdf_path = _temp_file.name # Store the path
-                logging.debug(f"Input bytes written to temporary file: {temp_pdf_path}")
-                input_path_for_processing = temp_pdf_path # Use the path for all parsers
-                input_source_for_metadata = temp_pdf_path # Use path for metadata too for simplicity
-                result["processing_source"] = temp_pdf_path # Update source info to show the temp path used
+                # Create a unique temporary directory
+                temp_dir_for_pdf = tempfile.mkdtemp(prefix="pdf_process_")
+                # Create a filename inside (use UUID for uniqueness)
+                temp_pdf_path_obj = Path(temp_dir_for_pdf) / f"{uuid.uuid4()}.pdf"
+                path_for_processing = str(temp_pdf_path_obj)
+
+                # Write bytes to the file
+                with open(path_for_processing, "wb") as f_out:
+                    f_out.write(file_input)
+
+                logging.debug(f"Input bytes written to temporary file: {path_for_processing} in dir {temp_dir_for_pdf}")
+                result["processing_source"] = path_for_processing # Update source info
+
             except Exception as temp_err:
-                # Raise a specific error type if temp file fails
-                raise IOError(f"Failed to create or write temporary file: {temp_err}") from temp_err
+                # Cleanup directory if creation failed partially
+                if temp_dir_for_pdf and os.path.isdir(temp_dir_for_pdf):
+                    try: shutil.rmtree(temp_dir_for_pdf)
+                    except Exception: logger.error(f"Failed secondary cleanup of {temp_dir_for_pdf}")
+                raise IOError(f"Failed to create or write temporary file/dir: {temp_err}") from temp_err
 
         elif isinstance(file_input, Path):
-            input_path_str = str(file_input)
-            if not file_input.exists(): raise FileNotFoundError(f"Input file path does not exist: {input_path_str}")
-            input_path_for_processing = input_path_str
-            input_source_for_metadata = input_path_str # Path for metadata
-            result["processing_source"] = input_path_str
-
+            path_str = str(file_input)
+            if not file_input.exists(): raise FileNotFoundError(f"Input file path does not exist: {path_str}")
+            path_for_processing = path_str # Use original path
+            result["processing_source"] = path_str
         elif isinstance(file_input, str):
             if not os.path.exists(file_input): raise FileNotFoundError(f"Input file path does not exist: {file_input}")
-            input_path_for_processing = file_input
-            input_source_for_metadata = file_input # Path for metadata
+            path_for_processing = file_input # Use original path
             result["processing_source"] = file_input
         else:
             raise TypeError(f"Unsupported file_input type: {type(file_input)}")
 
-        # --- Step 1: Extract Text (Now always uses a path) ---
-        content = None
+        # --- Step 1: Extract Text (Now always uses path_for_processing) ---
+        text_content = None
+        if not path_for_processing: # Should not happen, but defensive check
+             raise RuntimeError("Internal logic error: path_for_processing not set")
+
         try:
-            logging.info(f"Attempting text extraction for {filename} using parser: {parser} on path: {input_path_for_processing}")
+            logging.info(f"Attempting text extraction for {filename} using parser: {parser} on path: {path_for_processing}")
             if parser == "pymupdf4llm":
                 # Now correctly called with a path
-                content = pymupdf4llm_parse_pdf(input_path_for_processing)
+                content = pymupdf4llm_parse_pdf(path_for_processing)
             elif parser == "pymupdf":
-                 content = extract_text_and_format_from_pdf(input_path_for_processing)
+                 content = extract_text_and_format_from_pdf(path_for_processing)
             elif parser == "docling":
                 DOCLING_AVAILABLE = False
                 try:
@@ -317,13 +340,13 @@ def process_pdf(
                     DOCLING_AVAILABLE = False
                 if not DOCLING_AVAILABLE:
                     raise ImportError("Docling parser selected, but library is not installed.")
-                content = docling_parse_pdf(input_path_for_processing)
+                content = docling_parse_pdf(path_for_processing)
             else:
                 # This case should ideally be caught by Pydantic validation in the endpoint
                 logging.warning(f"Unsupported PDF parser specified: {parser}. Attempting fallback to pymupdf4llm.")
-                result["warnings"] = (result["warnings"] or []) + [f"Unsupported parser '{parser}', fallback to 'pymupdf4llm'"]
+                result["warnings"].append(f"Unsupported parser '{parser}', fallback to 'pymupdf4llm'")
                 result["parser_used"] = "pymupdf4llm"
-                content = pymupdf4llm_parse_pdf(input_path_for_processing) # Fallback also uses path
+                content = pymupdf4llm_parse_pdf(path_for_processing) # Fallback also uses path
 
             result["content"] = content
             if content is not None: # Check if extraction actually yielded content
@@ -331,13 +354,26 @@ def process_pdf(
             else:
                  # Handle cases where parsing succeeded but returned nothing (e.g., empty PDF)
                  logging.warning(f"Text extraction using {result['parser_used']} for {filename} yielded no content.")
-                 result["warnings"] = (result["warnings"] or []) + [f"Text extraction yielded no content ({result['parser_used']})."]
+                 result["warnings"].append(f"Text extraction yielded no content ({result['parser_used']}).")
+
+        except (RuntimeError, pymupdf.FileDataError, pymupdf.EmptyFileError) as parse_lib_err:
+             # --- CATCH PDF library errors during parsing specifically ---
+             err_msg = str(parse_lib_err)
+             if "password" in err_msg.lower(): log_msg = f"PDF password error during text extraction for {filename}: {err_msg}"
+             elif isinstance(parse_lib_err, pymupdf.EmptyFileError): log_msg = f"PDF empty file error during text extraction for {filename}: {err_msg}"
+             elif isinstance(parse_lib_err, pymupdf.FileDataError): log_msg = f"PDF file data error during text extraction for {filename}: {err_msg}"
+             else: log_msg = f"PDF library runtime error during text extraction for {filename}: {err_msg}"
+
+             logging.error(log_msg, exc_info=True) # Log specifics
+             result["warnings"].append(f"Text extraction failed ({parser}): {err_msg}")
+             # Don't raise here, allow metadata extraction attempt
 
         except Exception as parse_err:
-             # If parsing fails, log the error and add a warning. Continue to metadata extraction.
-             logging.error(f"Text extraction failed for {filename} using {parser}: {parse_err}", exc_info=True)
-             result["warnings"] = (result["warnings"] or []) + [f"Text extraction failed ({parser}): {str(parse_err)}"]
-             # Do not set status to Error yet, metadata might still work.
+             # Catch other potential errors during parsing
+             logging.error(f"Unexpected error during text extraction for {filename} using {parser}: {parse_err}", exc_info=True)
+             result["warnings"].append(f"Unexpected text extraction error ({parser}): {str(parse_err)}")
+             # Don't raise here
+
 
         # --- Step 2: Extract Metadata ---
         # Metadata extraction should work even if text extraction failed.
@@ -348,7 +384,7 @@ def process_pdf(
             page_count = 0
             # No need for internal try/except around import pymupdf if it's at top level
             # Use filename argument directly with pymupdf.open
-            with pymupdf.open(filename=input_source_for_metadata) as doc: # Use filename= for path
+            with pymupdf.open(filename=path_for_processing) as doc: # Use filename= for path
                 raw_metadata = doc.metadata
                 page_count = doc.page_count
             logging.info(f"Metadata extracted for {filename}.")
@@ -379,14 +415,29 @@ def process_pdf(
             }
             logging.debug(f"Final metadata for {filename} - Title: {final_title}, Author: {final_author}")
 
+        except (RuntimeError, pymupdf.FileDataError, pymupdf.EmptyFileError) as meta_lib_err:
+             # --- CATCH PDF library errors during metadata specifically ---
+             err_msg = str(meta_lib_err)
+             # Create user-friendly error message for metadata failure
+             if "password" in err_msg.lower(): meta_fail_reason = f"PDF Error: Password required or invalid."
+             elif isinstance(meta_lib_err, pymupdf.EmptyFileError): meta_fail_reason = f"PDF Error: Input file is empty."
+             elif isinstance(meta_lib_err, pymupdf.FileDataError): meta_fail_reason = f"PDF Error: Corrupted or invalid file data."
+             else: meta_fail_reason = f"PDF Library Error: {err_msg}" # General PDF error
+
+             logging.error(f"Metadata extraction failed for {filename}: {meta_fail_reason}", exc_info=True)
+             result["warnings"].append(f"Metadata extraction failed: {meta_fail_reason}")
+             result["metadata"] = { # Provide default structure on failure
+                 "title": title_override or Path(filename).stem, "author": author_override or "Unknown",
+                 "page_count": 0, "raw": {"error": f"Metadata extraction failed: {meta_fail_reason}"}
+             }
+
         except Exception as meta_err:
-             logging.error(f"Metadata extraction failed for {filename}: {meta_err}", exc_info=True)
-             result["warnings"] = (result["warnings"] or []) + [f"Metadata extraction failed: {str(meta_err)}"]
-             result["metadata"] = { # Still provide default structure
-                 "title": title_override or Path(filename).stem,
-                 "author": author_override or "Unknown",
-                 "page_count": 0,
-                 "raw": {"error": f"Metadata extraction failed: {str(meta_err)}"}
+             logging.error(f"Unexpected metadata extraction error for {filename}: {meta_err}", exc_info=True)
+             meta_fail_reason = f"Unexpected error: {str(meta_err)}"
+             result["warnings"].append(f"Metadata extraction failed: {meta_fail_reason}")
+             result["metadata"] = { # Provide default structure
+                 "title": title_override or Path(filename).stem, "author": author_override or "Unknown",
+                 "page_count": 0, "raw": {"error": f"Metadata extraction failed: {meta_fail_reason}"}
              }
 
 
@@ -409,7 +460,7 @@ def process_pdf(
                      logging.warning(f"Chunking produced no chunks for {filename}. Using full text as one chunk.")
                      # Create a single chunk containing the entire text
                      processed_chunks = [{'text': content, 'metadata': {'chunk_num': 0, 'start_index': 0, 'end_index': len(content)}}]
-                     result["warnings"] = (result["warnings"] or []) + ["Chunking yielded no results; using full text."]
+                     result["warnings"].append("Chunking yielded no results; using full text.")
                 else:
                      logging.info(f"Chunking successful for {filename}. Total chunks created: {len(processed_chunks)}")
                      log_histogram("pdf_chunks_created", len(processed_chunks), labels={"file_name": filename})
@@ -418,9 +469,7 @@ def process_pdf(
 
             except Exception as chunk_err:
                  logging.error(f"Chunking failed for {filename}: {chunk_err}", exc_info=True)
-                 result["warnings"] = (result["warnings"] or []) + [f"Chunking failed: {str(chunk_err)}"]
-                 # If chunking fails, we might still want to proceed with summarization on the full text
-                 # Create a single chunk containing the whole text to allow summarization attempt
+                 result["warnings"].append(f"Chunking failed: {str(chunk_err)}")
                  processed_chunks = [{'text': content, 'metadata': {'chunk_num': 0, 'error': f"Chunking failed: {chunk_err}"}}]
                  result["chunks"] = processed_chunks # Store the single chunk with error info
 
@@ -435,8 +484,9 @@ def process_pdf(
 
 
         # --- Step 4: Summarization / Analysis ---
-        final_summary = None
-        # Check if summarization should be performed: analysis enabled, API configured, and chunks exist
+        final_analysis = None # Or final_summary
+        # Use path_for_processing for logging context if needed
+        logging.debug(f"PROCESS_PDF: Checking condition -> perform_analysis={perform_analysis}, api_name='{api_name}', api_key='{api_key}', chunks_exist={bool(processed_chunks)}") # Keep this log
         if perform_analysis and api_name and api_key and processed_chunks:
             logging.info(f"Summarization enabled for {len(processed_chunks)} chunks of {filename} using API: {api_name}.")
             log_counter("pdf_summarization_attempt", value=len(processed_chunks), labels={"file_name": filename, "api_name": api_name})
@@ -452,8 +502,6 @@ def process_pdf(
                 # Only summarize if the chunk has actual text content
                 if chunk_text:
                     try:
-                        logger.info(
-                            f"PROCESS_PDF: Checking condition -> perform_analysis={perform_analysis}, api_name='{api_name}', api_key='{api_key}', chunks_exist={bool(processed_chunks)}")
                         # Call the external summarization library function
                         analysis_text = summarize(
                             api_name=api_name,
@@ -552,24 +600,37 @@ def process_pdf(
              logging.warning(f"Summarization skipped for {filename}: API name or key not provided.")
         elif not processed_chunks:
              # This case covers both chunking disabled and chunking failed/yielded no results
-             logging.warning(f"Summarization skipped for {filename}: No processable chunks available.")
+             logging.warning(f"Summarization skipped for {filename}: No processable chunks available (text extraction failed or chunking failed/disabled).")
         else:
-             # Fallback case, should ideally not be reached
-             logging.warning(f"Summarization skipped for {filename} due to an unknown condition.")
+            logging.warning(f"Summarization skipped for {filename} due to an unknown condition.")
 
 
-        # --- Step 5: Determine Final Status ---
-        # Check if any errors occurred during the critical steps (parsing, file handling)
-        # If text extraction failed, it's likely an Error, otherwise Warning for lesser issues.
-        if not content and any("Text extraction failed" in w for w in (result["warnings"] or [])):
+        # --- Step 5: Determine Final Status (Based on content and warnings) ---
+        # Check if critical step (text extraction) failed. Check warnings for specific errors.
+        extraction_failed = not content and any("Text extraction failed" in w for w in result["warnings"])
+        # Also consider specific metadata errors as potential critical failures
+        metadata_failed_critically = any("PDF Error:" in w for w in result["warnings"] if "Metadata extraction failed" in w)
+
+        if extraction_failed or metadata_failed_critically:
             result["status"] = "Error"
-            result["error"] = result["error"] or "PDF Extraction Error." # Assign primary error
+            # Set a primary error message if not already set by a later exception
+            primary_error_msg = "PDF Extraction Error."
+            if metadata_failed_critically and not extraction_failed:
+                # Find the specific PDF Error from metadata warnings
+                 for w in result["warnings"]:
+                     if "Metadata extraction failed: PDF Error:" in w:
+                         primary_error_msg = w.split("Metadata extraction failed: ")[1]
+                         break
+            result["error"] = result["error"] or primary_error_msg
+            logging.warning(f"Setting status to Error for {filename} due to critical extraction/metadata failure.")
         elif result["warnings"]:
              # If there were warnings but text was extracted, status is Warning
              result["status"] = "Warning"
+             logging.info(f"Setting status to Warning for {filename} due to non-critical warnings.")
         else:
              # No errors or warnings encountered
              result["status"] = "Success"
+             logging.info(f"Setting status to Success for {filename}.")
 
     # --- Main Exception Handler ---
     except FileNotFoundError as fnf_err:
@@ -577,11 +638,12 @@ def process_pdf(
         result["status"] = "Error"
         result["error"] = str(fnf_err)
         log_counter("pdf_processing_error", labels={"file_name": filename, "parser": parser, "error": "FileNotFoundError"})
-        # --- MODIFICATION START ---
-        # Catch RuntimeError for password issues and other load problems,
-        # FileDataError for specific corruption types.
-        # Added EmptyFileError for robustness.
-
+    except IOError as io_err: # Catch temp file creation errors
+        logging.error(f"IO error during temp file handling for {filename}: {io_err}", exc_info=True)
+        result["status"] = "Error"
+        result["error"] = f"Temporary file error: {io_err}"
+        log_counter("pdf_processing_error", labels={"file_name": filename, "parser": parser, "error": "IOError"})
+    # --- Catch PDF library errors that indicate fundamental file issues (but weren't caught during specific steps) ---
     except (RuntimeError, pymupdf.FileDataError, pymupdf.EmptyFileError) as pdf_lib_err:
         # --- MODIFICATION END ---
         # Check the message specifically for password errors if needed for logging differentiation
@@ -602,49 +664,114 @@ def process_pdf(
         else:  # General RuntimeError or other caught types
             log_msg = f"PDF library runtime error for {filename}: {err_msg}"
             err_type_label = type(pdf_lib_err).__name__  # Use 'RuntimeError' usually
-            result["error"] = f"PDF Error: {err_msg}"  # General PDF error
+            logging.error(f"PDF library error processing {filename}: {result['error']}", exc_info=True)
+
 
         logging.error(log_msg, exc_info=True)
         result["status"] = "Error"
         # Use the determined err_type_label for consistent metrics
         log_counter("pdf_processing_error", labels={"file_name": filename, "parser": parser, "error": err_type_label})
+        current_status_before_cleanup = result["status"] # Store status before cleanup attempt
 
     except Exception as e:
-        # Catch any other unexpected exceptions during the process
+        # Catch any other unexpected exceptions
         logging.error(f"Unexpected error processing PDF {filename}: {str(e)}", exc_info=True)
         result["status"] = "Error"
-        # Ensure error field is populated, even if warnings occurred before the fatal error
+        # Ensure error field is populated
         result["error"] = result["error"] or f"Unexpected error: {str(e)}"
+        current_status_before_cleanup = "Error" # Ensure this reflects the error
         log_counter("pdf_processing_error", labels={"file_name": filename, "parser": parser, "error": type(e).__name__})
 
     # --- Finally Block: Cleanup ---
     finally:
-        # Cleanup the temporary file ONLY if it was created
-        if temp_pdf_path and os.path.exists(temp_pdf_path):
-            try:
-                os.remove(temp_pdf_path)
-                logging.debug(f"Removed temporary PDF file: {temp_pdf_path}")
-            except OSError as rm_err:
-                # Log a warning if cleanup fails, but don't let it prevent returning results
-                logging.warning(f"Could not remove temporary PDF file {temp_pdf_path}: {rm_err}")
-                # Ensure status reflects the cleanup issue if processing was otherwise successful
-                if result.get("status") == "Success":
-                    result["status"] = "Warning"
-                result["warnings"] = (result["warnings"] or []) + [f"Failed to cleanup temp file: {rm_err}"]
+        current_status_before_cleanup = result["status"]
+        temp_file_removed = False
 
+        if path_for_processing and temp_dir_for_pdf and os.path.exists(path_for_processing):
+            try:
+                # --- Optional: Explicitly close handles via garbage collection ---
+                # This can sometimes help if objects holding handles are lingering.
+                logging.debug(f"Triggering garbage collection before file removal for {path_for_processing}")
+                gc.collect()
+                time.sleep(0.1) # Short delay after GC
+
+                logging.debug(f"Attempting to remove temporary file: {path_for_processing}")
+                os.remove(path_for_processing)
+                logging.debug(f"Successfully removed temporary file: {path_for_processing}")
+                temp_file_removed = True
+                time.sleep(0.1) # Small delay AFTER file removal before dir removal
+
+            except OSError as file_rm_err:
+                 logging.warning(f"OSError removing temporary file {path_for_processing}: {file_rm_err}")
+                 result["warnings"].append(f"Failed to cleanup temp file: {file_rm_err}")
+            except Exception as file_rm_exc:
+                 logging.error(f"Unexpected error removing temporary file {path_for_processing}: {file_rm_exc}", exc_info=True)
+                 result["warnings"].append(f"Unexpected error cleaning up temp file: {file_rm_exc}")
+
+        # --- Now attempt to remove the directory ---
+        if temp_dir_for_pdf and os.path.isdir(temp_dir_for_pdf):
+             max_retries = 4
+             retry_delay = 0.5 # Slightly increase delay
+
+             for attempt in range(max_retries):
+                 try:
+                     logger.debug(f"Attempting to remove temporary directory (Attempt {attempt + 1}/{max_retries}): {temp_dir_for_pdf}")
+                     shutil.rmtree(temp_dir_for_pdf)
+                     logger.debug(f"Successfully removed temporary directory: {temp_dir_for_pdf}")
+                     break # Exit loop if successful
+
+                 except OSError as rm_err:
+                     logger.warning(f"OSError removing temporary directory (Attempt {attempt + 1}/{max_retries}) {temp_dir_for_pdf}: {rm_err}")
+                     if attempt == max_retries - 1:
+                         logger.error(f"Final attempt failed to remove {temp_dir_for_pdf}: {rm_err}", exc_info=False)
+                         # --- Modify status handling ---
+                         warning_msg = f"Failed to cleanup temp dir after {max_retries} attempts: {rm_err}"
+                         result["warnings"].append(warning_msg)
+                         # Use the correctly initialized variable here
+                         if current_status_before_cleanup == "Success":
+                            logger.warning(f"Downgrading status to Warning due to failed temp dir cleanup for {temp_dir_for_pdf}")
+                            result["status"] = "Warning"
+                         else:
+                            logger.warning(f"Temp dir cleanup failed, but original status was already {current_status_before_cleanup}. Keeping status.")
+                         # --- End modify status handling ---
+                     else:
+                         logger.info(f"Retrying temp dir removal after delay...")
+                         time.sleep(retry_delay * (attempt + 1))
+
+                 except Exception as rm_exc:
+                      logger.error(f"Unexpected error removing temporary directory {temp_dir_for_pdf} (Attempt {attempt + 1}): {rm_exc}", exc_info=True)
+                      warning_msg = f"Unexpected error cleaning up temp dir: {rm_exc}"
+                      result["warnings"] = (result["warnings"] or []) + [warning_msg]
+                      # Only downgrade if original status was Success
+                      if current_status_before_cleanup == "Success":
+                         logger.warning(f"Downgrading status to Warning due to unexpected cleanup error for {temp_dir_for_pdf}")
+                         result["status"] = "Warning"
+                      else:
+                         logger.warning(f"Temp dir cleanup failed unexpectedly, but original status was already {current_status_before_cleanup}. Keeping status.")
+                      break # Don't retry on unexpected errors
+        elif temp_dir_for_pdf:
+             # Log if dir path exists but isn't a dir (shouldn't happen often)
+             if not os.path.exists(temp_dir_for_pdf):
+                 logging.debug(f"Temporary directory {temp_dir_for_pdf} did not exist for cleanup.")
+             else:
+                 logging.warning(f"Temporary directory path {temp_dir_for_pdf} exists but is not a directory.")
+        else:
+             logger.debug("No specific temporary directory was created by process_pdf, no cleanup needed by process_pdf.")
 
     # --- Final Logging and Return ---
-    end_time = time.time()
-    processing_time = end_time - start_time
+    end_time = datetime.now()
+    processing_time = (end_time - start_time).total_seconds() # Calculate duration as seconds
     log_histogram("pdf_processing_duration", processing_time, labels={"file_name": filename, "parser": result['parser_used'], "status": result["status"]})
     # Log success or final error/warning status
     if result["status"] == "Success":
         log_counter("pdf_processing_success", labels={"file_name": filename, "parser": result['parser_used']})
-        logging.info(f"Successfully processed PDF: {filename} (Parser: {result['parser_used']})")
+        logging.info(f"Successfully processed PDF: {filename} (Parser: {result['parser_used']}) in {processing_time:.2f}s")
     elif result["status"] == "Warning":
-        logging.warning(f"Processed PDF with warnings: {filename} (Parser: {result['parser_used']}). Warnings: {result['warnings']}")
+        log_counter("pdf_processing_warning", labels={"file_name": filename, "parser": result['parser_used']}) # Add warning counter
+        logging.warning(f"Processed PDF with warnings: {filename} (Parser: {result['parser_used']}) in {processing_time:.2f}s. Warnings: {result['warnings']}")
     else: # Error status
-        logging.error(f"Failed to process PDF: {filename} (Parser: {result['parser_used']}). Error: {result['error']}")
+        # Error counter is logged within the except blocks where the error type is known
+        logging.error(f"Failed to process PDF: {filename} (Parser: {result['parser_used']}) in {processing_time:.2f}s. Error: {result.get('error', 'Unknown')}")
 
 
     # Ensure warnings list is None if empty
@@ -692,7 +819,6 @@ async def process_pdf_task(
 
         # Call the synchronous core processing function
         # process_pdf now handles the byte input correctly by creating a temp file
-        logger.debug(f"TASK: Passing to process_pdf -> api_name='{api_name}', api_key='{api_key}'")
         result_dict = process_pdf(
             file_input=file_bytes, # Pass bytes directly
             filename=filename,

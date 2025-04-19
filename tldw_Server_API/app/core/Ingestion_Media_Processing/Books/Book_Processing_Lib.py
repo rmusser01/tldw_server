@@ -26,6 +26,8 @@ from bs4 import BeautifulSoup
 import ebooklib
 from ebooklib import epub
 import html2text
+from loguru import logger
+
 #
 # Import Local
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords, add_media_to_database
@@ -335,12 +337,16 @@ def read_epub(file_path) -> Tuple[str, Optional[epub.EpubBook]]:
         text = re.sub(r'\n\s*\n+', '\n\n', text)
 
         logging.debug("EPUB content extraction completed (cleaned).")
-        return text, book # Return book object
-
+        return text, book
+    except ebooklib.epub.EpubException as epub_err: # Catch specific epub errors
+         logging.error(f"Ebooklib error reading EPUB {file_path}: {epub_err}", exc_info=True)
+         # Reraise as ValueError for process_epub to catch nicely
+         raise ValueError(f"Invalid or corrupted EPUB file: {epub_err}") from epub_err
     except Exception as e:
         logging.exception(f"Error reading EPUB file: {str(e)}")
         # Re-raise or return error indication
-        raise # Or return "", book
+        # Reraise as a generic error
+        raise RuntimeError(f"Unexpected error reading EPUB: {e}") from e
 
 #
 # End of epub parsing Functions
@@ -425,12 +431,12 @@ def process_epub(
     system_prompt: Optional[str] = None,
     perform_chunking: bool = True,
     chunk_options: Optional[Dict[str, Any]] = None,
-    custom_chapter_pattern: Optional[str] = None, # Kept separate for clarity
-    perform_analysis: bool = False, # Renamed from auto_analyze
+    # Removed custom_chapter_pattern - should be inside chunk_options if needed
+    perform_analysis: bool = False,
     api_name: Optional[str] = None,
     api_key: Optional[str] = None,
-    summarize_recursively: bool = False, # Added for consistency
-    extraction_method: str = 'markdown' # 'markdown' or 'filtered'
+    summarize_recursively: bool = False,
+    extraction_method: str = 'filtered' # 'markdown', 'filtered', 'basic'
 ) -> Dict[str, Any]:
     """
     Processes an EPUB file: extracts content & metadata, chunks, and optionally summarizes.
@@ -444,46 +450,59 @@ def process_epub(
         - custom_prompt (str, optional): Custom user prompt for summarization.
         - system_prompt (str, optional): System prompt for summarization.
         - perform_chunking (bool): Whether to chunk the content.
-        - chunk_options (dict, optional): Options for chunking.
+        - chunk_options (dict, optional): Options for chunking e.g., {'method': 'chapter', 'max_size': ..., 'custom_chapter_pattern': ...}).
         - custom_chapter_pattern (str, optional): Custom regex pattern for chapter detection.
         - perform_analysis (bool): Whether to perform summarization.
         - api_name (str, optional): API name for summarization.
         - api_key (str, optional): API key for summarization.
         - summarize_recursively (bool): Whether to perform recursive summarization.
-        - extraction_method (str): 'markdown' or 'filtered'.
+        - extraction_method (str): 'markdown', 'filtered' or 'basic'.
 
     Returns:
         - Dict[str, Any]: Dictionary containing processing results:
             {
-                "status": "Success" | "Error",
+                "status": "Success" | "Warning" | "Error", # Added Warning
                 "input_ref": str (file_path),
+                "processing_source": str (file_path),
                 "media_type": "ebook",
                 "content": Optional[str],
                 "metadata": Optional[Dict], # {'title': str, 'author': str, 'raw': dict}
                 "chunks": Optional[List[Dict]], # [{'text': str, 'metadata': {...}}]
-                "summary": Optional[str],
-                "keywords": Optional[List[str]], # Keywords PASSED IN, not added by DB
+                "summary": Optional[str], # Renamed from 'analysis' for clarity? Or keep 'analysis'? Let's keep analysis for consistency.
+                "analysis": Optional[str],
+                "keywords": Optional[List[str]], # Keywords PASSED IN
                 "error": Optional[str],
-                "analysis_details": Optional[Dict], # Add details about analysis if performed
+                "warnings": Optional[List[str]], # Changed to list
+                "analysis_details": Optional[Dict], # Added
             }
     """
     start_time = datetime.now()
     result: Dict[str, Any] = {
         "status": "Pending",
-        "input_ref": file_path, # Use input file path as reference
-        "processing_source": file_path, # Same for now, might differ if copied
+        "input_ref": file_path,
+        "processing_source": file_path,
         "media_type": "ebook",
         "content": None,
-        "metadata": {"title": None, "author": None, "raw": None}, # Init structure
+        "metadata": {"title": None, "author": None, "raw": None},
         "chunks": None,
-        "summary": None,
+        "analysis": None, # Renamed from summary for consistency
         "keywords": keywords or [],
         "error": None,
-        "warnings": None
+        "warnings": [], # Initialize as list
+        "analysis_details": { # Initialize
+            "summarization_model": api_name if perform_analysis else None,
+            "custom_prompt_used": custom_prompt if perform_analysis else None,
+            "system_prompt_used": system_prompt if perform_analysis else None,
+            "summarized_recursively": summarize_recursively if perform_analysis else False,
+        }
     }
+    log_counter("epub_processing_attempt", labels={"file_path": file_path, "extractor": extraction_method})
+
+    extracted_text: Optional[str] = None
+    ebook_obj: Optional[epub.EpubBook] = None
 
     try:
-        logging.info(f"Processing EPUB file from {file_path}")
+        logging.info(f"Processing EPUB file from {file_path} using extractor '{extraction_method}'")
         log_counter("epub_processing_attempt", labels={"file_path": file_path})
 
         # 1. Extract Content and Metadata
@@ -496,24 +515,32 @@ def process_epub(
         else: extractor_func = read_epub # Default fallback
 
         try:
-             extracted_text, ebook_obj = extractor_func(file_path)
-        except Exception as extract_err:
-             # If main extractor fails, try the basic one as fallback
-             logging.warning(f"Extractor '{extraction_method}' failed: {extract_err}. Falling back to basic read_epub.")
-             result["warnings"] = (result["warnings"] or []) + [f"Extraction method '{extraction_method}' failed, used fallback."]
-             try:
-                  extracted_text, ebook_obj = read_epub(file_path)
-             except Exception as fallback_err:
-                  # If fallback also fails, raise the error to stop processing
-                  raise ValueError(f"Failed to extract text from EPUB even with fallback: {fallback_err}") from fallback_err
+            extracted_text, ebook_obj = extractor_func(file_path)
+        except ValueError as primary_extract_err: # Catch specific errors raised by readers
+            logging.warning(f"Extractor '{extraction_method}' failed for {file_path}: {primary_extract_err}. Trying basic read_epub.")
+            result["warnings"].append(f"Extraction method '{extraction_method}' failed, used basic fallback.")
+            result["parser_used"] = "read_epub (fallback)" # Indicate fallback
+            try:
+                extracted_text, ebook_obj = read_epub(file_path) # Fallback attempt
+            except (ValueError, RuntimeError) as fallback_err:
+                 # If fallback also fails, it's a critical error
+                 raise ValueError(f"Failed to extract text from EPUB '{Path(file_path).name}' even with fallback: {fallback_err}") from fallback_err
+        except Exception as primary_extract_err: # Catch unexpected errors
+            logging.warning(f"Unexpected error with extractor '{extraction_method}' for {file_path}: {primary_extract_err}. Trying basic read_epub.", exc_info=True)
+            result["warnings"].append(f"Extraction method '{extraction_method}' failed (unexpected), used basic fallback.")
+            result["parser_used"] = "read_epub (fallback)"
+            try:
+                 extracted_text, ebook_obj = read_epub(file_path) # Fallback attempt
+            except (ValueError, RuntimeError) as fallback_err:
+                 raise ValueError(f"Failed to extract text from EPUB '{Path(file_path).name}' even with fallback: {fallback_err}") from fallback_err
 
 
         if not extracted_text or ebook_obj is None:
-            # This case should be caught by the exceptions above now
-            raise ValueError("Failed to extract text or book object from EPUB.")
+            # This should ideally be caught by exceptions above, but double-check
+            raise ValueError(f"EPUB extraction yielded no text or book object for '{Path(file_path).name}'.")
 
         result["content"] = extracted_text
-        logging.debug(f"Extracted EPUB content using '{extraction_method}' (or fallback). Length: {len(extracted_text)}")
+        logging.debug(f"Extracted EPUB content. Length: {len(extracted_text)}")
 
         # Extract metadata from ebooklib object
         meta_title, meta_author = extract_epub_metadata_from_epub_obj(ebook_obj)
@@ -529,8 +556,7 @@ def process_epub(
         result["metadata"] = {
             "title": final_title,
             "author": final_author,
-            "raw": ebook_obj.metadata, # Store raw metadata
-            # Add source filename for potential use later
+            "raw": ebook_obj.metadata,
             "source_filename": file_path_obj.name
         }
         logging.debug(f"Final metadata - Title: {final_title}, Author: {final_author}")
@@ -538,22 +564,23 @@ def process_epub(
         # 2. Chunking
         processed_chunks = None
         if perform_chunking:
-            # Ensure default chunk options if needed
             effective_chunk_options = chunk_options or {}
-            # Override/ensure chapter method for ebooks unless specified otherwise
-            effective_chunk_options['method'] = effective_chunk_options.get('method', 'chapter')
-            # Make sure custom pattern is passed if provided separately
-            if custom_chapter_pattern:
-                effective_chunk_options['custom_chapter_pattern'] = custom_chapter_pattern
+            # Default to chapter unless specified otherwise
+            effective_chunk_options.setdefault('method', 'chapter')
+            # Default size/overlap relevant for non-chapter methods if used
+            effective_chunk_options.setdefault('max_size', 1500)
+            effective_chunk_options.setdefault('overlap', 200)
 
             logging.info(f"Chunking ebook content with options: {effective_chunk_options}")
             try:
+                # Use chunk_ebook_by_chapters or adapt improved_chunking_process if needed
+                # Assuming chunk_ebook_by_chapters exists and works similarly
                 processed_chunks = chunk_ebook_by_chapters(extracted_text, effective_chunk_options)
 
                 if not processed_chunks:
                      logging.warning(f"Chunking produced no chunks for {file_path}. Using full text as one chunk.")
                      processed_chunks = [{'text': extracted_text, 'metadata': {'chunk_num': 0}}]
-                     result["warnings"] = (result["warnings"] or []) + ["Chunking yielded no results; using full text."]
+                     result["warnings"].append("Chunking yielded no results; using full text.")
                 else:
                      logging.info(f"Total chunks created: {len(processed_chunks)}")
                      log_histogram("epub_chunks_created", len(processed_chunks), labels={"file_path": file_path})
@@ -562,8 +589,8 @@ def process_epub(
 
             except Exception as chunk_err:
                 logging.error(f"Chunking failed for {file_path}: {chunk_err}", exc_info=True)
-                result["warnings"] = (result["warnings"] or []) + [f"Chunking failed: {chunk_err}"]
-                # Fallback: use full text as one chunk so analysis can potentially proceed
+                result["warnings"].append(f"Chunking failed: {chunk_err}")
+                # Fallback: use full text as one chunk
                 processed_chunks = [{'text': extracted_text, 'metadata': {'chunk_num': 0, 'error': f"Chunking failed: {chunk_err}"}}]
                 result["chunks"] = processed_chunks
 
@@ -575,9 +602,9 @@ def process_epub(
 
 
         # 3. Summarization / Analysis
-        final_summary = None
+        final_analysis = None # Renamed for consistency
         if perform_analysis and api_name and api_key and processed_chunks:
-            logging.info(f"Summarization enabled for {len(processed_chunks)} chunks.")
+            logging.info(f"Summarization enabled for {len(processed_chunks)} chunks of EPUB '{final_title}'.")
             log_counter("epub_summarization_attempt", value=len(processed_chunks), labels={"file_path": file_path, "api_name": api_name})
             chunk_summaries = []
             summarized_chunks_for_result = [] # Keep track of chunks with summaries added
@@ -587,28 +614,29 @@ def process_epub(
                 chunk_metadata = chunk.get('metadata', {}) # Get existing metadata
                 if chunk_text:
                     try:
-                        summary_text = summarize(
+                        # Match expected args for summarize function
+                        analysis_text = summarize(
                             api_name=api_name,
-                            input_data=chunk_text, # Pass input_data instead of text_to_summarize
-                            custom_prompt_arg=custom_prompt, # Pass custom_prompt_input
+                            input_data=chunk_text,
+                            custom_prompt_arg=custom_prompt, # Use this name
                             api_key=api_key,
-                            recursive_summarization=False, # Summarize each chunk individually first
-                            temp=None, # Optional temp
-                            system_message=system_prompt
+                            system_message=system_prompt, # Use this name
+                            temp=None,
+                            recursive_summarization=False, # Summarize chunk first
                         )
-                        if summary_text and summary_text.strip():
-                            chunk_summaries.append(summary_text)
-                            chunk_metadata['summary'] = summary_text # Add summary to the chunk's metadata
+                        if analysis_text and analysis_text.strip():
+                            chunk_summaries.append(analysis_text)
+                            chunk_metadata['analysis'] = analysis_text # Add analysis to chunk metadata
                         else:
-                            chunk_metadata['summary'] = None # Indicate summarization was attempted but failed/empty
-                            logging.debug(f"Summarization yielded empty result for chunk {i} of {file_path}.")
+                            chunk_metadata['analysis'] = None
+                            logging.debug(f"Summarization yielded empty result for chunk {i+1}/{len(processed_chunks)} of {file_path}.")
                     except Exception as summ_err:
-                        logging.warning(f"Summarization failed for chunk {i} of {file_path}: {summ_err}")
-                        chunk_metadata['summary'] = f"[Summarization Error: {summ_err}]"
-                        result["warnings"] = (result["warnings"] or []) + [f"Summarization failed for chunk {i}: {summ_err}"]
+                        logging.warning(f"Summarization failed for chunk {i+1}/{len(processed_chunks)} of {file_path}: {summ_err}", exc_info=True)
+                        chunk_metadata['analysis'] = f"[Summarization Error: {str(summ_err)}]"
+                        result["warnings"].append(f"Summarization failed for chunk {i+1}: {str(summ_err)}")
 
-                chunk['metadata'] = chunk_metadata # Update metadata in the original chunk dict
-                summarized_chunks_for_result.append(chunk) # Add chunk regardless of summary success
+                chunk['metadata'] = chunk_metadata
+                summarized_chunks_for_result.append(chunk)
 
 
             result["chunks"] = summarized_chunks_for_result # Update chunks in result
@@ -616,74 +644,96 @@ def process_epub(
             # Combine chunk summaries (potentially recursively)
             if chunk_summaries:
                 if summarize_recursively and len(chunk_summaries) > 1:
-                    logging.info("Performing recursive summarization on chunk summaries.")
+                    logging.info(f"Performing recursive summarization on {len(chunk_summaries)} chunk summaries for EPUB '{final_title}'.")
                     try:
-                        final_summary = summarize(
+                        final_analysis = summarize(
                             api_name=api_name,
                             input_data="\n\n---\n\n".join(chunk_summaries), # Join summaries clearly
                             custom_prompt_arg=custom_prompt or "Provide a concise overall summary of the following chapter summaries.", # Recursive prompt
                             api_key=api_key,
-                            recursive_summarization=False, # Final pass
+                            system_message=system_prompt,
                             temp=None,
-                            system_message=system_prompt
+                            recursive_summarization=False, # Final pass
                         )
-                        if not final_summary or not final_summary.strip():
-                            logging.warning(f"Recursive summarization for {file_path} yielded empty result. Falling back.")
-                            final_summary = "\n\n---\n\n".join(chunk_summaries) # Fallback
-                            result["warnings"] = (result["warnings"] or []) + ["Recursive summarization yielded empty result."]
+                        if not final_analysis or not final_analysis.strip():
+                            logging.warning(f"Recursive summarization for {file_path} yielded empty result. Falling back to joined summaries.")
+                            final_analysis = "\n\n---\n\n".join(chunk_summaries) # Fallback
+                            result["warnings"].append("Recursive summarization yielded empty result.")
                         else:
                              log_counter("epub_recursive_summarization_success", labels={"file_path": file_path})
 
                     except Exception as rec_summ_err:
-                         logging.error(f"Recursive summarization failed for {file_path}: {rec_summ_err}")
-                         final_summary = f"[Recursive Summarization Error: {rec_summ_err}]\n\n" + "\n\n---\n\n".join(chunk_summaries)
-                         result["warnings"] = (result["warnings"] or []) + [f"Recursive summarization failed: {rec_summ_err}"]
+                         logging.error(f"Recursive summarization failed for {file_path}: {rec_summ_err}", exc_info=True)
+                         final_analysis = f"[Recursive Summarization Error: {str(rec_summ_err)}]\n\n" + "\n\n---\n\n".join(chunk_summaries)
+                         result["warnings"].append(f"Recursive summarization failed: {str(rec_summ_err)}")
                          log_counter("epub_recursive_summarization_error", labels={"file_path": file_path, "error": str(rec_summ_err)})
                 else:
                     # Simple join if not recursive or only one summary
-                    final_summary = "\n\n---\n\n".join(chunk_summaries)
+                    final_analysis = "\n\n---\n\n".join(chunk_summaries)
+                    if len(chunk_summaries) > 1 : logging.info(f"Combined {len(chunk_summaries)} chunk summaries (non-recursive).")
+                    else: logging.info(f"Using single chunk analysis as final analysis.")
 
-            result["summary"] = final_summary
+            result["analysis"] = final_analysis # Store final combined analysis
             log_counter("epub_chunks_summarized", value=len(chunk_summaries), labels={"file_path": file_path})
-            logging.info("Summarization processing completed.")
+            logging.info(f"Summarization processing completed for EPUB '{final_title}'.")
 
-        # --- Log reasons if summarization was skipped ---
-        elif not perform_analysis: logging.info("Summarization disabled.")
-        elif not api_name or not api_key: logging.warning("Summarization skipped: API name or key not provided.")
-        elif not processed_chunks: logging.warning("Summarization skipped: No chunks were generated/available.")
-        else: logging.warning("Summarization skipped due to unknown condition.")
+        elif not perform_analysis: logging.info(f"Summarization disabled for EPUB '{final_title}'.")
+        elif not api_name or not api_key: logging.warning(f"Summarization skipped for EPUB '{final_title}': API name or key not provided.")
+        elif not processed_chunks: logging.warning(f"Summarization skipped for EPUB '{final_title}': No processable chunks available.")
+        else: logging.warning(f"Summarization skipped for EPUB '{final_title}' due to unknown condition.")
+
 
         # Final status determination
         if result["warnings"]:
             result["status"] = "Warning"
         else:
-             logging.warning("Summarization skipped: API name or key not provided.")
+            result["status"] = "Success"
 
-        result["status"] = "Success"
-        end_time = datetime.now()
-        processing_time = (end_time - start_time).total_seconds()
-        log_histogram("epub_processing_duration", processing_time, labels={"file_path": file_path})
-        logging.info(f"Ebook '{final_title}' by {final_author} processed with status: {result['status']}.")
         log_counter(f"epub_processing_{result['status'].lower()}", labels={"file_path": file_path})
 
-    except Exception as e:
-        logging.exception(f"Error processing ebook {file_path}: {str(e)}")
+    except FileNotFoundError:
+        logging.error(f"EPUB file not found: {file_path}")
         result["status"] = "Error"
-        result["error"] = str(e)
-        log_counter("epub_processing_error", labels={"file_path": file_path, "error": str(e)})
+        result["error"] = "File not found"
+        log_counter("epub_processing_error", labels={"file_path": file_path, "error": "FileNotFoundError"})
+    except ValueError as ve: # Catch errors from extraction/parsing
+         logging.error(f"Value error processing EPUB {file_path}: {str(ve)}", exc_info=False) # Don't need full trace for expected parse errors
+         result["status"] = "Error"
+         result["error"] = str(ve)
+         log_counter("epub_processing_error", labels={"file_path": file_path, "error": "ValueError"})
+    except Exception as e:
+        logging.exception(f"Unexpected error processing EPUB {file_path}: {str(e)}")
+        result["status"] = "Error"
+        result["error"] = f"Unexpected processing error: {str(e)}"
+        log_counter("epub_processing_error", labels={"file_path": file_path, "error": type(e).__name__})
 
-    # Ensure warnings list is None if empty
-    if isinstance(result.get("warnings"), list) and not result["warnings"]:
+
+    end_time = datetime.now()
+    processing_time = (end_time - start_time).total_seconds()
+    log_histogram("epub_processing_duration", processing_time, labels={"file_path": file_path, "status": result["status"]})
+
+    # Final logging
+    if result["status"] == "Success":
+        logging.info(f"Successfully processed EPUB: {result.get('metadata',{}).get('title', file_path)} in {processing_time:.2f}s")
+    elif result["status"] == "Warning":
+        logging.warning(f"Processed EPUB with warnings: {result.get('metadata',{}).get('title', file_path)} in {processing_time:.2f}s. Warnings: {result['warnings']}")
+    else: # Error status
+        logging.error(f"Failed to process EPUB: {file_path} in {processing_time:.2f}s. Error: {result.get('error', 'Unknown')}")
+
+    # Ensure warnings list is None if empty for cleaner JSON output
+    if not result["warnings"]:
         result["warnings"] = None
 
     return result
 
+############################################################
+# ZIP Processing Function (DB-Free)
 
 def process_zip_of_epubs(
     zip_file_path: str,
     keywords: Optional[List[str]] = None,
     # Pass all other relevant options down to process_epub
-    **epub_options
+    **epub_options # Collects title_override, author_override, perform_chunking, chunk_options etc.
     ) -> List[Dict[str, Any]]:
     """
     Processes a ZIP file containing multiple EPUB files, extracts each one,
@@ -701,16 +751,17 @@ def process_zip_of_epubs(
                                 from processing a single EPUB file.
     """
     results = []
-    temp_dir_path = None # Keep track of temp dir path
+    temp_dir_path_obj = None
     try:
+        # Use context manager for reliable cleanup
         with tempfile.TemporaryDirectory(prefix="epub_zip_") as temp_dir:
-            temp_dir_path = temp_dir # Store path for logging
-            logging.info(f"Extracting ZIP file {zip_file_path} to temporary directory {temp_dir_path}")
+            temp_dir_path_obj = Path(temp_dir)
+            logging.info(f"Extracting ZIP file {zip_file_path} to temporary directory {temp_dir_path_obj}")
             log_counter("zip_processing_attempt", labels={"zip_path": zip_file_path})
 
             try:
                 with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-                    zip_ref.extractall(temp_dir_path)
+                    zip_ref.extractall(temp_dir_path_obj)
             except zipfile.BadZipFile as zip_err:
                  logging.error(f"Invalid ZIP file: {zip_file_path} - {zip_err}")
                  # Return a single error result for the whole zip
@@ -725,48 +776,53 @@ def process_zip_of_epubs(
                      "error": f"Failed to extract ZIP file: {extract_err}"
                  }]
 
-            epub_files = list(Path(temp_dir_path).rglob('*.epub')) # Recursive search
+            epub_files = list(temp_dir_path_obj.rglob('*.epub'))
             log_histogram("epub_files_in_zip", len(epub_files), labels={"zip_path": zip_file_path})
             logging.info(f"Found {len(epub_files)} EPUB files in ZIP.")
 
             if not epub_files:
                  results.append({
                      "status": "Warning", "input_ref": zip_file_path, "media_type": "zip",
-                     "error": "No .epub files found within the ZIP archive.", "message": "No EPUBs found."
+                     "warnings": ["No .epub files found within the ZIP archive."], "error": None
                  })
 
             for epub_path in epub_files:
                 epub_filename = epub_path.name
-                logging.info(f"Processing EPUB file '{epub_filename}' from ZIP.")
+                logging.info(f"Processing EPUB file '{epub_filename}' extracted from ZIP.")
                 try:
                     # Call the refactored process_epub
+                    # Pass keywords and unpack other options collected in epub_options
                     result = process_epub(
                         file_path=str(epub_path),
-                        keywords=keywords, # Pass the base keywords
-                        **epub_options # Pass other options like analysis settings
+                        keywords=keywords,
+                        **epub_options # Pass title_override, perform_analysis etc.
                     )
-                    # Add zip source info for clarity/traceability
+                    # Add zip source info for clarity
                     result["source_zip"] = zip_file_path
                     result["original_filename_in_zip"] = epub_filename
-                    # Ensure processing_source reflects the temp path
-                    result["processing_source"] = str(epub_path)
+                    # processing_source is already set to epub_path by process_epub
                     results.append(result)
                 except Exception as single_epub_err:
+                     # Catch errors during the processing of a single epub from the zip
                      logging.exception(f"Error processing '{epub_filename}' from zip {zip_file_path}: {single_epub_err}")
                      results.append({
                          "status": "Error",
                          "input_ref": epub_filename, # Use filename within zip as ref
-                         "processing_source": str(epub_path), # Path within temp dir
+                         "processing_source": str(epub_path),
                          "media_type": "ebook",
                          "error": f"Failed processing from ZIP: {single_epub_err}",
                          "source_zip": zip_file_path,
-                         "original_filename_in_zip": epub_filename
+                         "original_filename_in_zip": epub_filename,
+                         # Add other default fields for consistency
+                         "content": None, "metadata": None, "chunks": None, "analysis": None,
+                         "keywords": keywords or [], "warnings": None, "analysis_details": None,
                      })
 
             logging.info(f"Completed processing all EPUB files in the ZIP: {zip_file_path}")
             log_counter("zip_processing_success", labels={"zip_path": zip_file_path})
 
     except Exception as e:
+        # Catch errors related to Temp dir creation or other unexpected issues
         logging.exception(f"Error processing ZIP file {zip_file_path}: {str(e)}")
         log_counter("zip_processing_error", labels={"zip_path": zip_file_path, "error": str(e)})
         # Return a single error result for the whole zip if setup fails
@@ -778,12 +834,15 @@ def process_zip_of_epubs(
     return results
 
 
+############################################################
+# Markup / Plain Text Processing Function (DB-Free - for next step)
+
 def _process_markup_or_plain_text(
     file_path: str,
     file_type: str, # 'html', 'xml', 'opml', 'text'
     title_override: Optional[str] = None,
     author_override: Optional[str] = None,
-    keywords: Optional[List[str]] = None, # Expect list
+    keywords: Optional[List[str]] = None,
     perform_chunking: bool = True,
     chunk_options: Optional[Dict[str, Any]] = None,
     perform_analysis: bool = False,
@@ -799,35 +858,28 @@ def _process_markup_or_plain_text(
     Returns a result dictionary. *No DB interaction.*
     """
     start_time = datetime.now()
-    # Determine media type based on input file_type
-    media_type = "document" # Default
-    if file_type in ['html', 'xml', 'opml', 'text']:
-        media_type = file_type # Be more specific
-
+    media_type = file_type if file_type in ['html', 'xml', 'opml', 'text'] else "document"
     result: Dict[str, Any] = {
-        "status": "Pending",
-        "input_ref": file_path, # Use input path as reference
-        "processing_source": file_path, # Actual processed path
-        "media_type": media_type,
-        "source_format": file_type,
-        "content": None,
-        "metadata": {"title": None, "author": None, "raw": None}, # Init structure
-        "chunks": None,
-        "summary": None,
-        "keywords": keywords or [],
-        "error": None,
-        "warnings": None
+        "status": "Pending", "input_ref": file_path, "processing_source": file_path,
+        "media_type": media_type, "source_format": file_type, "content": None,
+        "metadata": {"title": None, "author": None, "raw": None}, "chunks": None,
+        "analysis": None, "keywords": keywords or [], "error": None, "warnings": [],
+        "analysis_details": { # Initialize
+            "summarization_model": api_name if perform_analysis else None,
+            "custom_prompt_used": custom_prompt if perform_analysis else None,
+            "system_prompt_used": system_prompt if perform_analysis else None,
+            "summarized_recursively": summarize_recursively if perform_analysis else False,
+        }
     }
+    log_counter(f"{file_type}_processing_attempt", labels={"file_path": file_path})
+
+    markdown_content: Optional[str] = None
+    extracted_title: Optional[str] = None
+    extracted_author: str = "Unknown"
+    raw_metadata: Dict[str, Any] = {}
 
     try:
         logging.info(f"Processing {file_type} file from {file_path}")
-        log_counter(f"{file_type}_processing_attempt", labels={"file_path": file_path})
-
-        markdown_content = ""
-        extracted_title = None
-        extracted_author = "Unknown" # Author extraction is less common for these types
-        raw_metadata = {} # Store raw extracted info
-
         file_path_obj = Path(file_path)
         filename_stem = file_path_obj.stem
 
@@ -892,13 +944,12 @@ def _process_markup_or_plain_text(
         # Clean up common issues like excessive newlines
         markdown_content = re.sub(r'\n{3,}', '\n\n', markdown_content).strip()
         if not markdown_content:
-            # Handle empty content after potential conversion
-            raise ValueError("Content became empty after processing.")
+            raise ValueError(f"Content extraction failed or resulted in empty content for {file_path}.")
         result["content"] = markdown_content
 
         # Finalize metadata
         final_title = title_override or extracted_title or filename_stem
-        final_author = author_override or extracted_author # Keep 'Unknown' if not found/overridden
+        final_author = author_override or extracted_author
         result["metadata"] = {
             "title": final_title,
             "author": final_author,
@@ -943,7 +994,7 @@ def _process_markup_or_plain_text(
              logging.info("Chunking disabled. Using full text as one chunk.")
 
         # 3. Summarization / Analysis (Identical logic to process_epub)
-        final_summary = None
+        final_analysis = None
         if perform_analysis and api_name and api_key and processed_chunks:
             # --- (Copy the summarization loop from process_epub here) ---
             logging.info(f"Summarization enabled for {len(processed_chunks)} chunks of {file_type}.")
@@ -977,22 +1028,22 @@ def _process_markup_or_plain_text(
                 if summarize_recursively and len(chunk_summaries) > 1:
                     logging.info("Performing recursive summarization on chunk summaries.")
                     try:
-                        final_summary = summarize(api_name, "\n\n---\n\n".join(chunk_summaries), custom_prompt or "Provide an overall summary.", api_key, system_prompt, None, False,)
-                        if not final_summary or not final_summary.strip():
+                        final_analysis = summarize(api_name, "\n\n---\n\n".join(chunk_summaries), custom_prompt or "Provide an overall summary.", api_key, system_prompt, None, False,)
+                        if not final_analysis or not final_analysis.strip():
                             logging.warning(f"Recursive summarization for {file_path} yielded empty result. Falling back.")
-                            final_summary = "\n\n---\n\n".join(chunk_summaries)
+                            final_analysis = "\n\n---\n\n".join(chunk_summaries)
                             result["warnings"] = (result["warnings"] or []) + ["Recursive summarization yielded empty result."]
                         else:
                              log_counter(f"{file_type}_recursive_summarization_success", labels={"file_path": file_path})
                     except Exception as rec_summ_err:
                          logging.error(f"Recursive summarization failed for {file_path}: {rec_summ_err}")
-                         final_summary = f"[Recursive Summarization Error: {rec_summ_err}]\n\n" + "\n\n---\n\n".join(chunk_summaries)
+                         final_analysis = f"[Recursive Summarization Error: {rec_summ_err}]\n\n" + "\n\n---\n\n".join(chunk_summaries)
                          result["warnings"] = (result["warnings"] or []) + [f"Recursive summarization failed: {rec_summ_err}"]
                          log_counter(f"{file_type}_recursive_summarization_error", labels={"file_path": file_path, "error": str(rec_summ_err)})
                 else:
-                    final_summary = "\n\n---\n\n".join(chunk_summaries)
+                    final_analysis = "\n\n---\n\n".join(chunk_summaries)
 
-            result["summary"] = final_summary
+            result["analysis"] = final_analysis
             log_counter(f"{file_type}_chunks_summarized", value=len(chunk_summaries), labels={"file_path": file_path})
             logging.info("Summarization processing completed.")
         # --- (Log summarization skipped reasons) ---
@@ -1002,15 +1053,8 @@ def _process_markup_or_plain_text(
         else: logging.warning("Summarization skipped due to unknown condition.")
 
         # Final status determination
-        if result["warnings"]:
-            result["status"] = "Warning"
-        else:
-            result["status"] = "Success"
-
-        end_time = datetime.now()
-        processing_time = (end_time - start_time).total_seconds()
-        log_histogram(f"{file_type}_processing_duration", processing_time, labels={"file_path": file_path})
-        logging.info(f"{file_type.capitalize()} file '{final_title}' processed with status: {result['status']}.")
+        if result["warnings"]: result["status"] = "Warning"
+        else: result["status"] = "Success"
         log_counter(f"{file_type}_processing_{result['status'].lower()}", labels={"file_path": file_path})
 
     except FileNotFoundError:
@@ -1029,70 +1073,72 @@ def _process_markup_or_plain_text(
         result["error"] = str(e)
         log_counter(f"{file_type}_processing_error", labels={"file_path": file_path, "error": type(e).__name__})
 
-    # Ensure warnings list is None if empty
-    if isinstance(result.get("warnings"), list) and not result["warnings"]:
-        result["warnings"] = None
+    end_time = datetime.now()
+    processing_time = (end_time - start_time).total_seconds()
+    log_histogram(f"{file_type}_processing_duration", processing_time, labels={"file_path": file_path})
+    logging.info(f"{file_type.capitalize()} file '{final_title}' processed with status: {result['status']}.")
+    log_counter(f"{file_type}_processing_{result['status'].lower()}", labels={"file_path": file_path})
 
+    if not result["warnings"]: result["warnings"] = None
     return result
-
 
 
 def _process_single_ebook(
     ebook_path: Path,
+    original_ref: str, # Pass the original URL or filename
+    # Pass necessary options from form_data
+    title_override: Optional[str],
+    author_override: Optional[str],
+    keywords: Optional[List[str]],
     perform_chunking: bool,
-    chunk_options: Optional[Dict[str, Any]], # Accept optional dict
-    summarize: bool, # Changed from perform_analysis for clarity
+    chunk_options: Optional[Dict[str, Any]],
+    perform_analysis: bool,
     summarize_recursively: bool,
     api_name: Optional[str],
     api_key: Optional[str],
     custom_prompt: Optional[str],
     system_prompt: Optional[str],
-    # Add title/author overrides if needed by caller
-    title_override: Optional[str] = None,
-    author_override: Optional[str] = None,
-    # Add keywords if they should be passed *during* processing (rare)
-    keywords: Optional[List[str]] = None,
-    # Add custom chapter pattern if passed separately
-    custom_chapter_pattern: Optional[str] = None
+    extraction_method: str, # Pass selected method
 ) -> Dict[str, Any]:
     """
-    CPU‑bound worker: read EPUB, chunk (optional), summarise (optional).
-    Calls refactored process_epub. Returns its result dictionary.
+    Synchronous helper function to process one EPUB file using the library.
+    Designed to be run in a thread executor.
     *No DB interaction.*
     """
     try:
-        # Call the main processing function
+        logger.info(f"Worker processing ebook: {original_ref} from path {ebook_path}")
+        # Call the main library processing function
         result_dict = process_epub(
             file_path=str(ebook_path),
             title_override=title_override,
             author_override=author_override,
-            keywords=keywords, # Pass keywords list
-            custom_prompt=custom_prompt,
-            system_prompt=system_prompt,
+            keywords=keywords,
             perform_chunking=perform_chunking,
-            chunk_options=chunk_options, # Pass the dict
-            custom_chapter_pattern=custom_chapter_pattern, # Pass separately
-            perform_analysis=summarize, # Map parameter name
+            chunk_options=chunk_options,
+            perform_analysis=perform_analysis,
             api_name=api_name,
             api_key=api_key,
+            custom_prompt=custom_prompt,
+            system_prompt=system_prompt,
             summarize_recursively=summarize_recursively,
-            extraction_method='filtered' # Or choose based on parameter
+            extraction_method=extraction_method
         )
-        # Ensure the input ref matches the path object expected by caller
-        # The called process_epub already sets input_ref and processing_source
+        # Ensure input_ref is set to the original URL/filename for consistency
+        result_dict["input_ref"] = original_ref
+        # processing_source is already set by process_epub to the actual path
         return result_dict
 
     except Exception as e:
-        logging.error(f"_process_single_ebook error for {ebook_path}: {e}", exc_info=True)
+        logger.error(f"_process_single_ebook error for {original_ref} ({ebook_path}): {e}", exc_info=True)
+        # Return a standardized error dictionary consistent with process_epub
         return {
             "status": "Error",
-            "input_ref": str(ebook_path), # Use path as input ref for error
+            "input_ref": original_ref, # Use original ref for error reporting
             "processing_source": str(ebook_path),
             "media_type": "ebook",
             "error": f"Worker processing failed: {str(e)}",
-            # Ensure other keys are present if needed by consuming code
-            "content": None, "metadata": None, "chunks": None, "summary": None,
-            "keywords": keywords or [], "warnings": None
+            "content": None, "metadata": None, "chunks": None, "analysis": None,
+            "keywords": keywords or [], "warnings": None, "analysis_details": None # Add analysis_details
         }
 
 

@@ -21,7 +21,7 @@ import uuid
 from datetime import datetime
 from math import ceil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Callable, Literal, Union
+from typing import Any, Dict, List, Optional, Tuple, Callable, Literal, Union, Set, Coroutine
 from urllib.parse import urlparse
 #
 # 3rd-party imports
@@ -61,7 +61,8 @@ from tldw_Server_API.app.core.DB_Management.SQLite_DB import DatabaseError, Inpu
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
 #
 # Media Processing
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib import _process_single_ebook
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib import _process_single_ebook, \
+    process_epub
 from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib import process_pdf_task
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext_Files import _process_single_document
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
@@ -710,58 +711,134 @@ def _validate_inputs(media_type: MediaType, urls: Optional[List[str]], files: Op
 
 
 async def _save_uploaded_files(
-    files: List[UploadFile], temp_dir: Path
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Saves uploaded files to a temporary directory."""
-    # Explicitly type the list to match the function's return signature
+    files: List[UploadFile],
+    temp_dir: Path,
+    allowed_extensions: Optional[List[str]] = None # <-- Added optional argument
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
+    """
+    Saves uploaded files to a temporary directory, optionally filtering by extension.
+
+    Args:
+        files: List of UploadFile objects from FastAPI.
+        temp_dir: The Path object representing the temporary directory to save files in.
+        allowed_extensions: An optional list of allowed file extensions (e.g., ['.epub', '.pdf']).
+                           Comparison is case-insensitive. If None, all files are attempted.
+
+    Returns:
+        A tuple containing:
+        - processed_files: List of dicts for successfully saved files [{'path': Path, 'original_filename': str, 'input_ref': str}].
+        - file_handling_errors: List of dicts for files that failed validation or saving [{'original_filename': str, 'input_ref': str, 'status': str, 'error': str}].
+    """
     processed_files: List[Dict[str, Any]] = []
-    # explicitly type file_handling_errors too for consistency
     file_handling_errors: List[Dict[str, Any]] = []
-    used_names: set[str] = set()
+    # Keep track of filenames used within this batch in the temp dir to avoid collisions
+    used_secure_names: Set[str] = set()
+
+    # Normalize allowed extensions for case-insensitive comparison (if provided)
+    normalized_allowed_extensions = {ext.lower().strip() for ext in allowed_extensions} if allowed_extensions else None
+    logger.debug(f"Allowed extensions for upload: {normalized_allowed_extensions}")
 
     for file in files:
-        input_ref = file.filename or f"upload_{uuid.uuid4()}"
-        local_file_path = None
+        # Use original filename if available, otherwise generate a ref
+        # input_ref is primarily for logging/error correlation if filename is missing
+        original_filename = file.filename
+        input_ref = original_filename or f"upload_{uuid.uuid4()}"
+        local_file_path: Optional[Path] = None # Track path for potential cleanup on error
+
         try:
-            if not file.filename:
-                logging.warning("Received file upload with no filename. Skipping.")
-                file_handling_errors.append({"input": "N/A", "status": "Failed", "error": "File uploaded without a filename."})
-                continue
+            if not original_filename:
+                logger.warning("Received file upload with no filename. Skipping.")
+                file_handling_errors.append({
+                    "original_filename": "N/A", # Indicate filename was missing
+                    "input_ref": input_ref,
+                    "status": "Error", # Use "Error" for consistency with other failures
+                    "error": "File uploaded without a filename."
+                })
+                continue # Skip to the next file in the loop
 
-            # Generate a secure filename
-            original_extension = Path(file.filename).suffix
-            secure_base = sanitize_filename(Path(file.filename).stem) or str(uuid.uuid4())
+            # --- Extension Validation ---
+            file_extension = Path(original_filename).suffix.lower()
+            if normalized_allowed_extensions and file_extension not in normalized_allowed_extensions:
+                logger.warning(f"Skipping file '{original_filename}' due to disallowed extension '{file_extension}'. Allowed: {allowed_extensions}")
+                file_handling_errors.append({
+                    "original_filename": original_filename,
+                    "input_ref": input_ref,
+                    "status": "Error",
+                    "error": f"Invalid file type ('{file_extension}'). Allowed extensions: {', '.join(allowed_extensions or [])}"
+                })
+                continue # Skip to the next file
 
-            secure_filename = f"{secure_base}{original_extension}"
+            # --- Sanitize and Create Unique Filename ---
+            original_stem = Path(original_filename).stem
+            secure_base = sanitize_filename(original_stem) # Sanitize the base name
 
-            while (
-                    secure_filename in used_names or (temp_dir / secure_filename).exists()
-                ):
-                secure_filename = f"{secure_base}_{uuid.uuid4().hex[:8]}{original_extension}"
+            # Construct filename and ensure uniqueness within the temp dir for this batch
+            secure_filename = f"{secure_base}{file_extension}"
+            counter = 0
+            temp_path_to_check = temp_dir / secure_filename
+            # Check against names already used *in this batch* and existing files (less likely but possible)
+            while secure_filename in used_secure_names or temp_path_to_check.exists():
+                counter += 1
+                secure_filename = f"{secure_base}_{counter}{file_extension}"
+                temp_path_to_check = temp_dir / secure_filename
+                if counter > 100: # Safety break for edge cases
+                    raise OSError(f"Could not generate unique filename for {original_filename} after {counter} attempts.")
 
-            used_names.add(secure_filename)
+            used_secure_names.add(secure_filename)
             local_file_path = temp_dir / secure_filename
 
-            logging.info(f"Attempting to save uploaded file '{file.filename}' to: {local_file_path}")
-            content = await file.read() # Read async
+            # --- Save File ---
+            logger.info(f"Attempting to save uploaded file '{original_filename}' securely as: {local_file_path}")
+            content = await file.read() # Read file content asynchronously
+
+            # Check for empty file content after reading
+            if not content:
+                 logger.warning(f"Uploaded file '{original_filename}' is empty. Skipping save.")
+                 file_handling_errors.append({
+                     "original_filename": original_filename,
+                     "input_ref": input_ref,
+                     "status": "Error",
+                     "error": "Uploaded file content is empty."
+                 })
+                 # Clean up zero-byte file if created by mistake (though 'wb' should handle it)
+                 if local_file_path.exists(): local_file_path.unlink(missing_ok=True)
+                 continue # Skip to the next file
+
+            # Write content to the secure path
             with open(local_file_path, "wb") as buffer:
                 buffer.write(content)
-            logging.info(f"Successfully saved '{file.filename}' to {local_file_path}")
+
+            file_size = local_file_path.stat().st_size
+            logger.info(f"Successfully saved '{original_filename}' ({file_size} bytes) to {local_file_path}")
+
+            # Add the necessary info for the endpoint to process the file
             processed_files.append({
-                "path": local_file_path,
-                "original_filename": file.filename,
-                "input_ref": input_ref # Store reference
+                "path": local_file_path, # Return Path object
+                "original_filename": original_filename, # Keep original name for reference
+                "input_ref": input_ref # Consistent reference
             })
+
         except Exception as e:
-            logging.error(f"Failed to save uploaded file '{input_ref}': {e}", exc_info=True)
+            logger.error(f"Failed to save or validate uploaded file '{original_filename or input_ref}': {e}", exc_info=True)
             file_handling_errors.append({
-                "input": input_ref,
-                "status": "Failed",
-                "error": f"Failed to save uploaded file: {type(e).__name__}"
+                "original_filename": original_filename or "N/A",
+                "input_ref": input_ref,
+                "status": "Error",
+                "error": f"Failed during upload processing: {type(e).__name__} - {e}"
             })
+            # Attempt cleanup if file was partially created before the error
             if local_file_path and local_file_path.exists():
-                try: local_file_path.unlink()
-                except OSError: pass
+                try:
+                    local_file_path.unlink(missing_ok=True) # missing_ok=True handles race conditions
+                    logger.debug(f"Cleaned up partially saved/failed file: {local_file_path}")
+                except OSError as unlink_err:
+                    logger.warning(f"Failed to clean up partially saved/failed file {local_file_path}: {unlink_err}")
+        finally:
+            # Ensure the UploadFile is closed, releasing resources
+            # FastAPI typically handles this, but explicit close is safer in manual processing loops
+            await file.close()
+
+
     return processed_files, file_handling_errors
 
 
@@ -2391,172 +2468,377 @@ async def process_audios_endpoint(
     return JSONResponse(status_code=final_status_code, content=batch_result)
 
 #
-# End of Audio Ingestion
+# End of Audio Processing
 ##############################################################################################
 
 
 ######################## Ebook Ingestion Endpoint ###################################
-# Endpoints:
-#
-# /process-ebooks
 
-
+# ─────────────────────── Form Model ─────────────────────────
 class ProcessEbooksForm(AddMediaForm):
     media_type: Literal["ebook"] = "ebook"
-    keep_original_file: bool = False    # always cleanup tmp dir
+    keep_original_file: bool = False    # always cleanup tmp dir for this endpoint
+    # Add any ebook specific options if needed, otherwise inherit from AddMediaForm
 
+# ────────────────────── Dependency Function ───────────────────
+def get_process_ebooks_form(
+    # --- Inherited Fields from AddMediaForm ---
+    urls: Optional[List[str]] = Form(None, description="List of URLs of the EPUB items"),
+    title: Optional[str] = Form(None, description="Optional title override"),
+    author: Optional[str] = Form(None, description="Optional author override"),
+    keywords: str = Form("", alias="keywords_str", description="Comma-separated keywords"), # Use alias if model expects list
+    custom_prompt: Optional[str] = Form(None, description="Optional custom prompt for analysis"),
+    system_prompt: Optional[str] = Form(None, description="Optional system prompt for analysis"),
+    overwrite_existing: bool = Form(False, description="Overwrite existing media (Not used, for model validation)"),
+    # keep_original_file: bool = Form(False, description="Retain original files (fixed in model)"), # Fixed by ProcessEbooksForm
+    perform_analysis: bool = Form(True, description="Perform analysis (summarization)"),
+    api_name: Optional[str] = Form(None, description="Optional API name for analysis"),
+    api_key: Optional[str] = Form(None, description="Optional API key for analysis"),
+    use_cookies: bool = Form(False, description="Use cookies for URL download requests (Not implemented for ebooks)"),
+    cookies: Optional[str] = Form(None, description="Cookie string (Not implemented for ebooks)"),
+    summarize_recursively: bool = Form(False, description="Perform recursive summarization"),
+    perform_rolling_summarization: bool = Form(False, description="Perform rolling summarization (Not applicable to ebooks)"),
+
+    # --- Fields from ChunkingOptions ---
+    perform_chunking: bool = Form(True, description="Enable chunking (default: by chapter)"),
+    chunk_method: Optional[ChunkMethod] = Form('chapter', description="Chunking method (chapter, recursive, sentences etc.)"), # Default 'chapter' for ebooks
+    # use_adaptive_chunking: bool = Form(False, description="Enable adaptive chunking (Not applicable)"), # Remove if not used
+    # use_multi_level_chunking: bool = Form(False, description="Enable multi-level chunking (Not applicable)"), # Remove if not used
+    chunk_language: Optional[str] = Form(None, description="Chunking language override (rarely needed for chapter)"),
+    chunk_size: int = Form(1500, description="Target chunk size (used by non-chapter methods)"), # Keep default
+    chunk_overlap: int = Form(200, description="Chunk overlap size (used by non-chapter methods)"), # Keep default
+    custom_chapter_pattern: Optional[str] = Form(None, description="Regex pattern for custom chapter splitting (overrides method default)"),
+
+    # --- Ebook Specific Options (Add if needed) ---
+    # extraction_method: Literal['filtered', 'markdown', 'basic'] = Form('filtered', description="EPUB text extraction method"), # Example
+
+    # --- Fields from other options (like AudioVideo) if needed for model validation ---
+    # Include placeholders if AddMediaForm requires them, even if not used by ebooks
+    start_time: Optional[str] = Form(None), end_time: Optional[str] = Form(None),
+    transcription_model: Optional[str] = Form(None), transcription_language: Optional[str] = Form(None),
+    diarize: Optional[bool] = Form(None), timestamp_option: Optional[bool] = Form(None),
+    vad_use: Optional[bool] = Form(None), perform_confabulation_check_of_analysis: Optional[bool] = Form(None),
+    # Include PDF options placeholder if AddMediaForm requires
+    pdf_parsing_engine: Optional[PdfEngine] = Form(None),
+
+) -> ProcessEbooksForm:
+    """
+    Dependency function to parse form data and validate it
+    against the ProcessEbooksForm model.
+    """
+    try:
+        form_instance = ProcessEbooksForm(
+            media_type="ebook", # Fixed
+            keep_original_file=False, # Fixed for this endpoint
+            urls=urls,
+            title=title,
+            author=author,
+            keywords=keywords, # Map to alias if needed
+            custom_prompt=custom_prompt,
+            system_prompt=system_prompt,
+            overwrite_existing=overwrite_existing,
+            perform_analysis=perform_analysis,
+            api_name=api_name,
+            api_key=api_key,
+            use_cookies=use_cookies,
+            cookies=cookies,
+            summarize_recursively=summarize_recursively,
+            perform_rolling_summarization=perform_rolling_summarization, # Keep for model validation
+            # Chunking
+            perform_chunking=perform_chunking,
+            chunk_method=chunk_method,
+            # use_adaptive_chunking=use_adaptive_chunking, # Remove if not in model/used
+            # use_multi_level_chunking=use_multi_level_chunking, # Remove if not in model/used
+            chunk_language=chunk_language,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            custom_chapter_pattern=custom_chapter_pattern,
+            # Ebook specific
+            # extraction_method=extraction_method, # Map if added
+            # Placeholders for other options required by AddMediaForm
+            start_time=start_time, end_time=end_time,
+            transcription_model=transcription_model, transcription_language=transcription_language,
+            diarize=diarize, timestamp_option=timestamp_option, vad_use=vad_use,
+            perform_confabulation_check_of_analysis=perform_confabulation_check_of_analysis,
+            pdf_parsing_engine=pdf_parsing_engine,
+        )
+        return form_instance
+    except ValidationError as e:
+        # Use the same detailed error handling as get_process_pdfs_form
+        serializable_errors = []
+        for error in e.errors():
+             serializable_error = error.copy()
+             if 'ctx' in serializable_error and isinstance(serializable_error.get('ctx'), dict):
+                 new_ctx = {}
+                 for k, v in serializable_error['ctx'].items():
+                     if isinstance(v, Exception): new_ctx[k] = str(v)
+                     else: new_ctx[k] = v
+                 serializable_error['ctx'] = new_ctx
+             # Ensure 'input' exists for clarity, fallback to loc if missing
+             serializable_error['input'] = serializable_error.get('input', serializable_error.get('loc'))
+             serializable_errors.append(serializable_error)
+        logger.warning(f"Pydantic validation failed for Ebook processing: {json.dumps(serializable_errors)}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=serializable_errors,
+        ) from e
+    except Exception as e:
+        logger.error(f"Unexpected error creating ProcessEbooksForm: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error during form processing: {type(e).__name__}"
+        )
+
+
+# ─────────────────────── Endpoint Implementation ────────────────
 @router.post(
     "/process-ebooks",
     # status_code=status.HTTP_200_OK, # Determined dynamically
     summary="Extract, chunk, analyse EPUBs (NO DB Persistence)",
-    tags=["Media Processing"],
+    tags=["Media Processing (No DB)"], # Separate tag maybe?
 )
 async def process_ebooks_endpoint(
     background_tasks: BackgroundTasks,
-    # Use Pydantic model via Depends for validation
-    form_data: ProcessEbooksForm = Depends(), # Switched to Depends
-    files: Optional[List[UploadFile]] = File(None,  description="EPUB file uploads"),
-    token: str = Header(...), # Auth
+    form_data: ProcessEbooksForm = Depends(get_process_ebooks_form), # Use the dependency
+    files: Optional[List[UploadFile]] = File(None, description="EPUB file uploads (.epub)"),
+    token: str = Header(...), # Auth placeholder
+    # db_manager=Depends(get_db_manager) # No DB needed
 ):
     """
     **Process Ebooks Endpoint (No Persistence)**
 
-    Processes EPUB files/URLs (extracts, chunks, analyses) and returns
-    the processing artifacts directly without saving to the database.
+    Processes EPUB files (from uploaded files or URLs) by extracting content
+    and metadata, optionally chunking, and optionally performing analysis
+    (summarization). Returns the processing artifacts directly without saving
+    to the database.
+
+    Supports `.epub` files.
     """
     logger.info("Request received for /process-ebooks (no persistence).")
-    logger.debug(f"Form data: {form_data.dict(exclude={'api_key'})}") # Exclude sensitive fields
+    # Log form data safely (exclude sensitive fields if necessary)
+    logger.debug(f"Form data received: {form_data.dict(exclude={'api_key'})}")
 
     _validate_inputs("ebook", form_data.urls, files)
 
-    results: List[Dict[str, Any]] = [] # Store results from file handling and processing
-    file_errors: List[Dict[str, Any]] = [] # Specifically for file download/save errors
-    processing_results: List[Dict[str, Any]] = [] # Store results from _process_single_ebook
+    # --- Prepare result structure ---
+    batch_result: Dict[str, Any] = {
+        "processed_count": 0,
+        "errors_count": 0,
+        "errors": [],
+        "results": []
+    }
+    # Map to track original ref -> temp path for error reporting if worker fails badly
+    source_map: Dict[str, str] = {}
 
     loop = asyncio.get_running_loop()
-    temp_dir_manager = TempDirManager(cleanup=True) # Always cleanup
+    # TempDirManager should handle cleanup=True by default if setup that way
+    temp_dir_manager = TempDirManager(cleanup=True)
 
-    with temp_dir_manager as tmp:
-        # --- Handle Uploads & Downloads ---
-        local_paths_to_process: List[Tuple[str, Path]] = [] # Store (original_ref, local_path)
-        source_to_ref_map = {} # input_ref -> local_path mapping might be useful
+    local_paths_to_process: List[Tuple[str, Path]] = [] # (original_ref, local_path)
 
-        # Save uploaded files
-        saved_files, upload_errors = await _save_uploaded_files(files or [], tmp)
-        file_errors.extend(upload_errors) # Add upload errors to file_errors list
-        for info in saved_files:
-            local_paths_to_process.append((info["original_filename"], Path(info["path"])))
-            source_to_ref_map[info["original_filename"]] = Path(info["path"])
+    with temp_dir_manager as tmp_dir_path:
+        temp_dir = Path(tmp_dir_path) # Ensure we have a Path object
+        logger.info(f"Using temporary directory: {temp_dir}")
 
-        # Download URLs
+        # --- Handle Uploads ---
+        if files:
+            # Assuming _save_uploaded_files saves to temp_dir and returns needed info
+            # It should handle non-epub uploads gracefully (e.g., return in errors)
+            saved_files, upload_errors = await _save_uploaded_files(
+                files,
+                temp_dir,
+                allowed_extensions=[".epub"] # Explicitly allow only .epub
+            )
+            # Add file saving/validation errors to batch_result
+            for err_info in upload_errors:
+                err_detail = f"Upload error: {err_info['error']}"
+                batch_result["results"].append({
+                    "status": "Error", "input_ref": err_info["original_filename"],
+                    "error": err_detail, "media_type": "ebook",
+                    # Add default fields for consistency
+                    "processing_source": None, "metadata": {}, "content": None, "chunks": None,
+                    "analysis": None, "keywords": None, "warnings": None, "analysis_details": {},
+                    "db_id": None, "db_message": "Processing only endpoint."
+                })
+                batch_result["errors_count"] += 1
+                batch_result["errors"].append(f"{err_info['original_filename']}: {err_detail}")
+
+            # Add successfully saved files to the list to be processed
+            for info in saved_files:
+                original_ref = info["original_filename"]
+                local_path = Path(info["path"])
+                local_paths_to_process.append((original_ref, local_path))
+                source_map[original_ref] = str(local_path)
+                logger.debug(f"Prepared uploaded file for processing: {original_ref} -> {local_path}")
+
+        # --- Handle URLs ---
         if form_data.urls:
-             download_tasks = [smart_download(url, tmp) for url in form_data.urls] # Assuming smart_download is async or use safe_download sync
-             # Need to run downloads concurrently and handle errors
-             # Using safe_download (sync) within the loop for simplicity here
-             for url in form_data.urls:
+            # Using safe_download synchronously for simplicity here.
+            # For higher concurrency, use httpx.AsyncClient and asyncio.gather like in PDF endpoint.
+            logger.info(f"Attempting to download {len(form_data.urls)} URLs...")
+            for url in form_data.urls:
                  try:
-                     # Assuming safe_download returns Path object on success
-                     downloaded_path = safe_download(url, tmp, ".epub") # Use safe_download (sync)
+                     # safe_download(url, target_dir, expected_extension)
+                     downloaded_path = safe_download(url, temp_dir, ".epub") # Check for .epub extension (optional)
+
                      if downloaded_path:
                          local_paths_to_process.append((url, downloaded_path))
-                         source_to_ref_map[url] = downloaded_path
-                     else: # Handle case where safe_download might return None on failure
-                         raise Exception("Download failed, path not returned.")
+                         source_map[url] = str(downloaded_path)
+                         logger.debug(f"Prepared downloaded URL for processing: {url} -> {downloaded_path}")
+                     else:
+                         # This case might happen if safe_download has internal error handling returning None
+                         raise Exception("Download failed or produced no valid path.")
+
                  except Exception as e:
-                     logger.error(f"Download failure for {url}: {e}", exc_info=True)
-                     file_errors.append({"input": url, "status": "Failed", "error": f"Download failed: {e}"})
+                     logger.error(f"Download or preparation failed for URL {url}: {e}", exc_info=True)
+                     err_detail = f"Download/preparation failed: {e}"
+                     batch_result["results"].append({
+                         "status": "Error", "input_ref": url, "error": err_detail,
+                         "media_type": "ebook",
+                         # Add default fields
+                         "processing_source": None, "metadata": {}, "content": None, "chunks": None,
+                         "analysis": None, "keywords": None, "warnings": None, "analysis_details": {},
+                         "db_id": None, "db_message": "Processing only endpoint."
+                     })
+                     batch_result["errors_count"] += 1
+                     batch_result["errors"].append(f"{url}: {err_detail}")
 
+        # --- Check if any files are ready for processing ---
         if not local_paths_to_process:
-            logger.warning("No valid ebook sources found or prepared.")
-            # Return based on whether only file errors occurred
-            status_code = status.HTTP_207_MULTI_STATUS if file_errors else status.HTTP_400_BAD_REQUEST
-            # Format file errors for response
-            results.extend([{
-                 "status": fe.get("status", "Failed"), "input_ref": fe.get("input"),
-                 "error": fe.get("error"), "media_type": "ebook",
-                 # Add other standard fields
-                 "processing_source": None, "metadata": {}, "content": None, "chunks": None,
-                 "summary": None, "analysis_details": None, "warnings": None, "db_id": None, "db_message": None
-            } for fe in file_errors])
-            return JSONResponse(status_code=status_code, content={"results": results})
+            logger.warning("No valid EPUB sources found or prepared after handling uploads/URLs.")
+            # Determine status code based on whether *any* errors occurred during input handling
+            status_code = status.HTTP_207_MULTI_STATUS if batch_result["errors_count"] > 0 else status.HTTP_400_BAD_REQUEST
+            return JSONResponse(status_code=status_code, content=batch_result)
 
-        # --- Per-file processing using _process_single_ebook ---
-        chunk_options = _prepare_chunking_options_dict(form_data) # Prepare chunk options dict
+        logger.info(f"Starting processing for {len(local_paths_to_process)} ebook(s).")
+
+        # --- Prepare options for the worker ---
+        chunk_options_dict = None
+        if form_data.perform_chunking:
+             chunk_options_dict = {
+                 'method': form_data.chunk_method if form_data.chunk_method else 'chapter', # Use enum value
+                 'max_size': form_data.chunk_size,
+                 'overlap': form_data.chunk_overlap,
+                 'language': form_data.chunk_language, # Pass language if provided
+                 'custom_chapter_pattern': form_data.custom_chapter_pattern # Pass custom pattern
+             }
+             # Remove None values to avoid overriding defaults in library unnecessarily
+             chunk_options_dict = {k: v for k, v in chunk_options_dict.items() if v is not None}
+
+
+        # --- Create and run processing tasks ---
         tasks = []
         for original_ref, ebook_path in local_paths_to_process:
-            tasks.append(
-                loop.run_in_executor(
-                    None, # Use default executor
-                    functools.partial(
-                        _process_single_ebook, # Call the helper worker
-                        ebook_path=ebook_path,
-                        # Pass necessary options from form_data
-                        perform_chunking=form_data.perform_chunking,
-                        chunk_options=chunk_options, # Pass the dict
-                        perform_analysis=form_data.perform_analysis,
-                        summarize_recursively=form_data.summarize_recursively,
-                        api_name=form_data.api_name,
-                        api_key=form_data.api_key,
-                        custom_prompt=form_data.custom_prompt,
-                        system_prompt=form_data.system_prompt,
-                        # Pass title/author from form if needed for overrides
-                        title_override=form_data.title,
-                        author_override=form_data.author,
-                    )
-                )
+            # Use functools.partial to pass arguments to the synchronous worker
+            # executed in the thread pool
+            partial_func = functools.partial(
+                _process_single_ebook, # Our sync helper calling the library
+                ebook_path=ebook_path,
+                original_ref=original_ref,
+                # Pass relevant options from form_data
+                title_override=form_data.title,
+                author_override=form_data.author,
+                keywords=form_data.keywords, # Pass the list parsed by Pydantic
+                perform_chunking=form_data.perform_chunking,
+                chunk_options=chunk_options_dict,
+                perform_analysis=form_data.perform_analysis,
+                summarize_recursively=form_data.summarize_recursively,
+                api_name=form_data.api_name,
+                api_key=form_data.api_key,
+                custom_prompt=form_data.custom_prompt,
+                system_prompt=form_data.system_prompt,
+                # Pass extraction method if it was added to the form
+                extraction_method='filtered' # Or form_data.extraction_method if added
             )
+            tasks.append(loop.run_in_executor(None, partial_func)) # Run in default executor
 
         # Gather results from processing tasks
-        processing_results = await asyncio.gather(*tasks)
+        processing_results = await asyncio.gather(*tasks, return_exceptions=True) # Catch exceptions from gather
 
-    # --- Combine Results ---
-    # Start with file handling errors, formatted correctly
-    for fe in file_errors:
-         results.append({
-             "status": fe.get("status", "Failed"), "input_ref": fe.get("input"),
-             "error": fe.get("error"), "media_type": "ebook",
-             "processing_source": None, "metadata": {}, "content": None, "chunks": None,
-             "summary": None, "analysis_details": None, "warnings": None, "db_id": None, "db_message": None
-         })
-
-    # Add processing results, ensuring DB fields are None
+    # --- Combine and Finalize Results (Outside temp dir context) ---
     for res in processing_results:
         if isinstance(res, dict):
+            # Ensure mandatory fields and DB fields are null
             res["db_id"] = None
-            res["db_message"] = None
-            # Try to map path back to original ref if process_single_ebook doesn't return it
-            if "input_ref" not in res or not res["input_ref"]:
-                 proc_path_str = str(res.get("processing_source")) # Assuming worker sets this
-                 # Find original ref from map (this mapping needs refinement)
-                 found_ref = "Unknown Ebook"
-                 for ref, path_obj in source_to_ref_map.items():
-                      if str(path_obj) == proc_path_str:
-                           found_ref = ref
-                           break
-                 res["input_ref"] = found_ref
-            results.append(res)
-        else:
-             logger.error(f"Received non-dict result from ebook worker: {res}")
-             results.append({"status": "Error", "input_ref": "Unknown", "error": "Invalid result from worker.", "media_type": "ebook"})
+            res["db_message"] = "Processing only endpoint."
+            res.setdefault("status", "Error") # Default if worker crashed badly
+            res.setdefault("input_ref", "Unknown") # Should be set by worker
+            res.setdefault("media_type", "ebook")
+            res.setdefault("error", None)
+            res.setdefault("warnings", None)
+            res.setdefault("metadata", {})
+            res.setdefault("content", None)
+            res.setdefault("chunks", None)
+            res.setdefault("analysis", None)
+            res.setdefault("keywords", [])
+            res.setdefault("analysis_details", {})
 
+            batch_result["results"].append(res) # Add the processed/error dict
 
-    # --- Determine Final Status Code & Prepare Batch Result ---
-    errors_count = sum(1 for r in results if r.get("status") in ["Error", "Failed"])
-    batch_result_final = {
-        "processed_count": len(results) - errors_count, # Count non-errors
-        "errors_count": errors_count,
-        "errors": [r.get("error", "Unknown error") for r in results if r.get("status") in ["Error", "Failed"]],
-        "results": results,
-    }
-    status_code = status.HTTP_200_OK if errors_count == 0 else status.HTTP_207_MULTI_STATUS
+            # Update counts based on status
+            if res["status"] == "Success" or res["status"] == "Warning":
+                 batch_result["processed_count"] += 1
+                 # Optionally add warnings to the main errors list or handle separately
+                 if res["status"] == "Warning" and res.get("warnings"):
+                     # Add warnings to the main list, prefixed by input ref?
+                     for warn in res["warnings"]:
+                          batch_result["errors"].append(f"{res.get('input_ref', 'Unknown')}: [Warning] {warn}")
+                     # Don't increment errors_count for warnings
+            else: # Status is Error
+                 batch_result["errors_count"] += 1
+                 error_msg = f"{res.get('input_ref', 'Unknown')}: {res.get('error', 'Unknown processing error')}"
+                 if error_msg not in batch_result["errors"]: # Avoid duplicates if already added
+                    batch_result["errors"].append(error_msg)
 
-    log_level = "INFO" if status_code == status.HTTP_200_OK else "WARNING"
-    logger.log(log_level, f"/process-ebooks request finished with status {status_code}. Results: {len(results)}, Errors: {errors_count}")
+        elif isinstance(res, Exception): # Handle exceptions returned by asyncio.gather
+             # Try to find original ref based on the exception context if possible (difficult)
+             # For now, log and add a generic error
+             logger.error(f"Task execution failed with exception: {res}", exc_info=res)
+             error_detail = f"Task execution failed: {type(res).__name__}"
+             batch_result["results"].append({
+                 "status": "Error", "input_ref": "Unknown Task", "error": error_detail,
+                 "media_type": "ebook", "db_id": None, "db_message": "Processing only endpoint.",
+                 "metadata": {}, "content": None, "chunks": None, "analysis": None,
+                 "keywords": [], "warnings": None, "analysis_details": {},
+             })
+             batch_result["errors_count"] += 1
+             if error_detail not in batch_result["errors"]:
+                batch_result["errors"].append(error_detail)
+        else: # Should not happen
+             logger.error(f"Received unexpected result type from ebook worker task: {type(res)}")
+             error_detail = "Invalid result type from ebook worker."
+             batch_result["results"].append({
+                 "status": "Error", "input_ref": "Unknown Task Type", "error": error_detail,
+                 "media_type": "ebook", "db_id": None, "db_message": "Processing only endpoint.",
+                 "metadata": {}, "content": None, "chunks": None, "analysis": None,
+                 "keywords": [], "warnings": None, "analysis_details": {},
+             })
+             batch_result["errors_count"] += 1
+             if error_detail not in batch_result["errors"]:
+                 batch_result["errors"].append(error_detail)
 
-    return JSONResponse(status_code=status_code, content=batch_result_final)
+    # --- Determine Final Status Code ---
+    if batch_result["errors_count"] == 0 and batch_result["processed_count"] > 0:
+        final_status_code = status.HTTP_200_OK
+    elif batch_result["errors_count"] > 0 and batch_result["processed_count"] >= 0: # Allow 0 processed if all inputs failed
+        # Includes cases: only input errors, only processing errors, mixed errors
+        final_status_code = status.HTTP_207_MULTI_STATUS
+    # elif batch_result["errors_count"] > 0 and batch_result["processed_count"] == 0:
+        # Covered by the case above
+        # final_status_code = status.HTTP_207_MULTI_STATUS
+    else: # No inputs processed, no errors reported (e.g., initial empty request)
+        final_status_code = status.HTTP_400_BAD_REQUEST # Or potentially 200 if empty input is ok?
+
+    log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
+    logger.log(log_level,
+               f"/process-ebooks request finished with status {final_status_code}. "
+               f"Processed: {batch_result['processed_count']}, Errors: {batch_result['errors_count']}")
+
+    # --- Return Final Response ---
+    return JSONResponse(status_code=final_status_code, content=batch_result)
 
 #
-# End of Ebook Ingestion
+# End of Ebook Processing Endpoint
 #################################################################################################
 
 
@@ -2768,6 +3050,125 @@ async def process_documents_endpoint(
 ######################## PDF Ingestion Endpoint ###################################
 # Endpoints:
 #
+
+# ─────────────────────── form model (subset of AddMediaForm) ─────────────────
+class ProcessPDFsForm(AddMediaForm):
+    media_type: Literal["pdf"] = "pdf"
+    keep_original_file: bool = False
+
+
+def get_process_pdfs_form(
+    # Include ALL fields defined in AddMediaForm and its parents
+    # Use Form(...) for each
+    urls: Optional[List[str]] = Form(None, description="List of URLs of the PDF items"),
+    title: Optional[str] = Form(None, description="Optional title (applied if only one item processed)"),
+    author: Optional[str] = Form(None, description="Optional author (applied similarly to title)"),
+    keywords: str = Form("", alias="keywords", description="Comma-separated keywords"), # Use alias
+    custom_prompt: Optional[str] = Form(None, description="Optional custom prompt"),
+    system_prompt: Optional[str] = Form(None, description="Optional system prompt"),
+    overwrite_existing: bool = Form(False, description="Overwrite existing media (Not used, for model)"),
+    keep_original_file: bool = Form(False, description="Retain original files (fixed in model)"), # Fixed by ProcessPDFsForm
+    perform_analysis: bool = Form(True, description="Perform analysis"),
+    api_name: Optional[str] = Form(None, description="Optional API name"), # Keep this
+    api_key: Optional[str] = Form(None, description="Optional API key"),    # Keep this
+    use_cookies: bool = Form(False, description="Use cookies for URL download requests"),
+    cookies: Optional[str] = Form(None, description="Cookie string if `use_cookies` is True"),
+    summarize_recursively: bool = Form(False, description="Perform recursive summarization"),
+    perform_rolling_summarization: bool = Form(False, description="Perform rolling summarization"), # From AddMediaForm
+
+    # --- Fields from PdfOptions ---
+    pdf_parsing_engine: Optional[PdfEngine] = Form("pymupdf4llm", description="PDF parsing engine"),
+    custom_chapter_pattern: Optional[str] = Form(None, description="Regex pattern for custom chapter splitting"),
+
+    # --- Fields from ChunkingOptions ---
+    perform_chunking: bool = Form(True, description="Enable chunking"),
+    chunk_method: Optional[ChunkMethod] = Form(None, description="Chunking method"),
+    use_adaptive_chunking: bool = Form(False, description="Enable adaptive chunking"),
+    use_multi_level_chunking: bool = Form(False, description="Enable multi-level chunking"),
+    chunk_language: Optional[str] = Form(None, description="Chunking language override"),
+    chunk_size: int = Form(500, description="Target chunk size"),
+    chunk_overlap: int = Form(200, description="Chunk overlap size"),
+
+    # --- Fields from AudioVideoOptions (might be needed for AddMediaForm validation/defaults) ---
+    start_time: Optional[str] = Form(None, description="Optional start time (HH:MM:SS or seconds)"),
+    end_time: Optional[str] = Form(None, description="Optional end time (HH:MM:SS or seconds)"),
+    transcription_model: str = Form("deepdml/faster-distil-whisper-large-v3.5", description="Transcription model"), # Get default from AddMediaForm if possible
+    transcription_language: str = Form("en", description="Transcription language"),
+    diarize: bool = Form(False, description="Enable speaker diarization"),
+    timestamp_option: bool = Form(True, description="Include timestamps in transcription"),
+    vad_use: bool = Form(False, description="Enable VAD filter"),
+    perform_confabulation_check_of_analysis: bool = Form(False, description="Enable confabulation check"),
+
+) -> ProcessPDFsForm:
+    """
+    Dependency function to parse form data and validate it
+    against the ProcessPDFsForm model.
+    """
+    try:
+        # Create the Pydantic model instance using the parsed form data.
+        form_instance = ProcessPDFsForm(
+            # --- Map all the parameters received by this function ---
+            media_type="pdf", # Fixed by ProcessPDFsForm
+            urls=urls,
+            title=title,
+            author=author,
+            keywords=keywords, # Pydantic handles mapping this to keywords_str via alias
+            custom_prompt=custom_prompt,
+            system_prompt=system_prompt,
+            overwrite_existing=overwrite_existing,
+            keep_original_file=keep_original_file, # Use arg
+            perform_analysis=perform_analysis,
+            api_name=api_name,   # Pass received arg
+            api_key=api_key,     # Pass received arg
+            use_cookies=use_cookies,
+            cookies=cookies,
+            summarize_recursively=summarize_recursively,
+            perform_rolling_summarization=perform_rolling_summarization,
+            pdf_parsing_engine=pdf_parsing_engine,
+            custom_chapter_pattern=custom_chapter_pattern,
+            perform_chunking=perform_chunking,
+            chunk_method=chunk_method,
+            use_adaptive_chunking=use_adaptive_chunking,
+            use_multi_level_chunking=use_multi_level_chunking,
+            chunk_language=chunk_language,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            start_time=start_time,
+            end_time=end_time,
+            transcription_model=transcription_model,
+            transcription_language=transcription_language,
+            diarize=diarize,
+            timestamp_option=timestamp_option,
+            vad_use=vad_use,
+            perform_confabulation_check_of_analysis=perform_confabulation_check_of_analysis,
+        )
+        return form_instance
+    # --- Keep the exact same error handling as get_process_videos_form ---
+    except ValidationError as e:
+        serializable_errors = []
+        for error in e.errors():
+             serializable_error = error.copy()
+             if 'ctx' in serializable_error and isinstance(serializable_error.get('ctx'), dict):
+                 new_ctx = {}
+                 for k, v in serializable_error['ctx'].items():
+                     if isinstance(v, Exception):
+                         new_ctx[k] = str(v)
+                     else:
+                         new_ctx[k] = v
+                 serializable_error['ctx'] = new_ctx
+             serializable_errors.append(serializable_error)
+        logger.warning(f"Pydantic validation failed for PDF processing: {json.dumps(serializable_errors)}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=serializable_errors,
+        ) from e
+    except Exception as e:
+        logger.error(f"Unexpected error creating ProcessPDFsForm: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error during form processing: {type(e).__name__}"
+        )
+
 async def _single_pdf_worker(
     pdf_path: Path,
     form,                      # ProcessPDFsForm instance
@@ -2796,8 +3197,6 @@ async def _single_pdf_worker(
         }
 
         # process_pdf_task is async
-        logger.debug(
-            f"ENDPOINT: Passing to task -> api_name='{form.api_name}', api_key='{form.api_key}'")  # Add this line
         raw = await process_pdf_task(**pdf_kwargs)
 
         # Ensure minimal envelope consistency
@@ -2835,12 +3234,6 @@ def normalise_pdf_result(item: dict, original_ref: str) -> dict:
     item["db_message"] = "Processing only endpoint."
     return item
 
-# ─────────────────────── form model (subset of AddMediaForm) ─────────────────
-class ProcessPDFsForm(AddMediaForm):
-    media_type: Literal["pdf"] = "pdf"
-    keep_original_file: bool = False
-
-
 # ───────────────────────────── endpoint ──────────────────────────────────────
 @router.post(
     "/process-pdfs",
@@ -2850,7 +3243,7 @@ class ProcessPDFsForm(AddMediaForm):
 )
 async def process_pdfs_endpoint(
     background_tasks: BackgroundTasks,
-    form_data: ProcessPDFsForm = Depends(), # Use specific model
+    form_data: ProcessPDFsForm = Depends(get_process_pdfs_form),
     files: Optional[List[UploadFile]] = File(None,  description="PDF uploads"),
     token: str = Header(...), # Auth
     # db_manager=Depends(get_db_manager) # No DB needed

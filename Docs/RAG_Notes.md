@@ -21,6 +21,12 @@ https://arxiv.org/pdf/2501.11551v4
 https://aiexpjourney.substack.com/p/the-mystery-of-rag-optimization-insights
 https://ai.plainenglish.io/part-2-chatting-with-my-companys-brain-how-i-built-my-ai-knowledge-buddy-16a38b59792b
 https://medium.com/data-science-collective/ai-engineering-3-3-dataset-engineering-inference-optimization-and-architecture-and-user-aac4ddf43c23
+https://engineeringblog.yelp.com/2025/02/search-query-understanding-with-LLMs.html
+https://github.com/ibm-granite/granite-io/blob/main/docs/design.md
+https://www.jeremykun.com/2015/04/06/markov-chain-monte-carlo-without-all-the-bullshit/
+
+
+
 
 
 Models
