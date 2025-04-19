@@ -191,7 +191,7 @@ def process_pdf(
     keywords: Optional[List[str]] = None,
     perform_chunking: bool = True,
     chunk_options: Optional[Dict[str, Any]] = None,
-    perform_analysis: bool = False, # Renamed from auto_summarize
+    perform_analysis: bool = False,
     api_name: Optional[str] = None,
     api_key: Optional[str] = None,
     custom_prompt: Optional[str] = None,

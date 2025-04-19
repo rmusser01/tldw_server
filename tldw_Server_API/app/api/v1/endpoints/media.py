@@ -2787,7 +2787,7 @@ async def _single_pdf_worker(
             "system_prompt": form.system_prompt,
             "api_name": form.api_name if form.perform_analysis else None,
             "api_key": form.api_key,
-            "auto_summarize": form.perform_analysis,
+            "perform_analysis": form.perform_analysis,
             "keywords": form.keywords,
             "perform_chunking": form.perform_chunking and form.perform_analysis,
             "chunk_method":  chunk_opts["method"]      if form.perform_analysis else None,
@@ -2812,6 +2812,28 @@ async def _single_pdf_worker(
     except Exception as e:
         logging.error(f"PDF worker failed for {pdf_path}: {e}", exc_info=True)
         return {"input": str(pdf_path), "status": "Error", "error": str(e)}
+
+def normalise_pdf_result(item: dict, original_ref: str) -> dict:
+    """Ensure every required key is present and correctly typed."""
+    item.setdefault("status", "Error")
+    item.setdefault("input_ref", original_ref)
+    item.setdefault("processing_source", original_ref)        # <‑‑ NEW
+    item.setdefault("media_type", "pdf")
+
+    # Always give the test a dict, even when there is no real metadata
+    item["metadata"] = item.get("metadata") or {}
+
+    # Keys that may legitimately be empty
+    for key in ("content", "chunks", "analysis", "warnings", "error"):
+        item.setdefault(key, None)
+
+    # Always a dict
+    item["analysis_details"] = item.get("analysis_details") or {}
+
+    # No persistence on this endpoint
+    item["db_id"] = None
+    item["db_message"] = "Processing only endpoint."
+    return item
 
 # ─────────────────────── form model (subset of AddMediaForm) ─────────────────
 class ProcessPDFsForm(AddMediaForm):
@@ -3005,7 +3027,9 @@ async def process_pdfs_endpoint(
                 res.setdefault("keywords", None)
                 res.setdefault("analysis_details", {})
 
-                batch_result["results"].append(res) # Add to results list
+                batch_result["results"].append(
+                    normalise_pdf_result(res, original_ref=res.get("input_ref", "Unknown"))
+                ) # Add to results list
 
                 # Update counts based on status
                 if res["status"] == "Success" or res["status"] == "Warning":
@@ -3028,7 +3052,8 @@ async def process_pdfs_endpoint(
                      "media_type": "pdf", "db_id": None, "db_message": "Processing only endpoint.",
                      "metadata": None, "content": None, "chunks": None,
                      "summary": None, "keywords": None, "warnings": None,
-                     "analysis_details": {}
+                     "analysis_details": {},
+                     "processing_source": original_ref,
                  })
                  batch_result["errors_count"] += 1
                  batch_result["errors"].append(error_detail)
@@ -3052,7 +3077,6 @@ async def process_pdfs_endpoint(
                f"Processed: {batch_result['processed_count']}, Errors: {batch_result['errors_count']}")
 
     return JSONResponse(status_code=final_status_code, content=batch_result)
-
 
 #
 # End of PDF Ingestion

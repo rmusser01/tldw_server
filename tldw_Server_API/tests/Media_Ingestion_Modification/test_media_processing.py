@@ -452,7 +452,10 @@ class TestProcessPdfs:
         assert "Invalid file format" in data["results"][0]["error"] or "PDF Extraction Error." in data["results"][0][
             "error"]  # Check error type
 
-    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib.summarize")
+    @patch(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.PDF."
+        "PDF_Processing_Lib.summarize"  # ← patch the local copy
+    )
     def test_process_pdf_with_analysis_and_chunking(self, mock_summarize, client, auth_headers):
         """Test PDF analysis and chunking."""
         mock_analysis_text = "This is the mocked analysis result."
@@ -467,12 +470,13 @@ class TestProcessPdfs:
             "api_name": "mock_api",
             "api_key": "mock_key"
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, json=form_data, headers=auth_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
 
         # Check that analysis was performed (mocked)
+        mock_summarize.assert_called_once()
         assert result["analysis"] is not None
         assert result["analysis"] == mock_analysis_text # Check content
         assert len(result["analysis"]) > 0
