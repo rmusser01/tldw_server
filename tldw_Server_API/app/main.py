@@ -58,7 +58,7 @@ class InterceptHandler(logging.Handler):
 logger.remove()
 
 # Add your desired Loguru sink (e.g., stderr)
-log_level = "INFO"
+log_level = "DEBUG"
 logger.add(
     sys.stderr,
     level=log_level,

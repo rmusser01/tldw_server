@@ -1773,7 +1773,7 @@ def get_process_videos_form(
         )
 
 # =============================================================================
-# Video Processing Endpoint (FIXED)
+# Video Processing Endpoint
 # =============================================================================
 @router.post(
     "/process-videos",
@@ -2972,6 +2972,7 @@ async def process_pdfs_endpoint(
             status_code = status.HTTP_207_MULTI_STATUS if batch_result["errors_count"] > 0 else status.HTTP_400_BAD_REQUEST
             return JSONResponse(status_code=status_code, content=batch_result)
 
+        logger.debug(f"ENDPOINT: #1 Passing to task -> api_name='{form_data.api_name}', api_key='{form_data.api_key}'")
         # --- Call process_pdf_task for each input ---
         tasks = []
         for original_ref, file_bytes in pdf_inputs_to_process:
@@ -2982,7 +2983,7 @@ async def process_pdfs_endpoint(
                  'overlap': form_data.chunk_overlap
              }
              logger.debug(
-                 f"ENDPOINT: Passing to task -> api_name='{form_data.api_name}', api_key='{form_data.api_key}'")
+                 f"ENDPOINT: #2 Passing to task -> api_name='{form_data.api_name}', api_key='{form_data.api_key}'")
              tasks.append(
                  process_pdf_task( # Call the async task directly
                      file_bytes=file_bytes,

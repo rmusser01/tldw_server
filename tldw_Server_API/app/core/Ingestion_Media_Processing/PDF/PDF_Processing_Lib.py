@@ -452,6 +452,8 @@ def process_pdf(
                 # Only summarize if the chunk has actual text content
                 if chunk_text:
                     try:
+                        logger.info(
+                            f"PROCESS_PDF: Checking condition -> perform_analysis={perform_analysis}, api_name='{api_name}', api_key='{api_key}', chunks_exist={bool(processed_chunks)}")
                         # Call the external summarization library function
                         analysis_text = summarize(
                             api_name=api_name,

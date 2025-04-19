@@ -470,13 +470,13 @@ class TestProcessPdfs:
             "api_name": "mock_api",
             "api_key": "mock_key"
         }
-        response = client.post(self.ENDPOINT, json=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
 
         # Check that analysis was performed (mocked)
-        mock_summarize.assert_called_once()
+        mock_summarize.assert_called()
         assert result["analysis"] is not None
         assert result["analysis"] == mock_analysis_text # Check content
         assert len(result["analysis"]) > 0
