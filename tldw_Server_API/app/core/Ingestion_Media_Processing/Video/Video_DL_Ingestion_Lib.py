@@ -588,8 +588,8 @@ def process_videos(
                 log_counter(...) # Metrics are fine if DB-free
 
                 # Prepare for potential confabulation check
-                transcript_text = single_result.get("transcript", "") # Use 'transcript' key returned by single
-                summary_text = single_result.get("summary", "") # Use 'summary' key returned by single
+                transcript_text = single_result.get("content", "") # Use 'transcript' key returned by single
+                summary_text = single_result.get("analysis", "") # Use 'summary' key returned by single
                 if transcript_text and summary_text:
                      all_transcripts_for_confab[video_input] = transcript_text
                      all_summaries_for_confab[video_input] = summary_text

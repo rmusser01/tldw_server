@@ -1040,87 +1040,124 @@ def _find_ffmpeg() -> str:
 #DEBUG
 #@profile
 @timeit
-def convert_to_wav(video_file_path, offset=0, overwrite=False):
+def convert_to_wav(video_file_path: str, offset: int = 0, overwrite: bool = False) -> str:
+    """
+    Converts a video or audio file to a standardized WAV format (16kHz, mono, PCM s16le)
+    suitable for Whisper transcription.
+
+    Args:
+        video_file_path: Path to the input media file.
+        offset: Start offset (currently unused by ffmpeg command).
+        overwrite: If True, overwrite the output WAV file if it exists.
+
+    Returns:
+        The path to the generated WAV file.
+
+    Raises:
+        FileNotFoundError: If the input file doesn't exist.
+        ConversionError: If the ffmpeg conversion process fails.
+        RuntimeError: If ffmpeg executable cannot be found.
+    """
     log_counter("convert_to_wav_attempt", labels={"file_path": video_file_path})
     start_time = time.time()
 
-    out_path = os.path.splitext(video_file_path)[0] + ".wav"
+    input_path = Path(video_file_path)
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input file not found: {video_file_path}")
 
-    if os.path.exists(out_path) and not overwrite:
-        print(f"File '{out_path}' already exists. Skipping conversion.")
-        logging.info(f"Skipping conversion as file already exists: {out_path}")
+    # Output path in the same directory as input
+    out_path = input_path.with_suffix(".wav")
+
+    if out_path.exists() and not overwrite:
+        logging.info(f"Skipping conversion as WAV file already exists and overwrite=False: {out_path}")
         log_counter("convert_to_wav_skipped", labels={"file_path": video_file_path})
-        return out_path
+        return str(out_path)
 
-    # Get the directory containing the 'app' folder (assuming main.py is one level up)
-    APP_DIR = Path(__file__).resolve().parent.parent.parent  # Goes up 3 levels: Audio -> Ingestion -> core -> app
-    BIN_DIR = APP_DIR / "Bin"
-    FFMPEG_WIN_PATH = BIN_DIR / "ffmpeg.exe"
+    # Determine ffmpeg executable path
+    ffmpeg_cmd = "ffmpeg" # Default for non-Windows or if specific path fails
+    if sys.platform.startswith('win'):
+        # Look for ffmpeg relative to this file's location structure
+        # Assumes: .../app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Lib.py
+        # Goal: .../app/Bin/ffmpeg.exe
+        try:
+            APP_DIR = Path(__file__).resolve().parents[3] # .../app
+            BIN_DIR = APP_DIR / "Bin"
+            FFMPEG_WIN_PATH = BIN_DIR / "ffmpeg.exe"
+            if FFMPEG_WIN_PATH.exists():
+                ffmpeg_cmd = str(FFMPEG_WIN_PATH)
+                logging.debug(f"Using specific ffmpeg path: {ffmpeg_cmd}")
+            else:
+                logging.warning(f"ffmpeg.exe not found at {FFMPEG_WIN_PATH}. Falling back to 'ffmpeg' in PATH.")
+        except IndexError:
+             logging.warning("Could not determine app directory structure. Falling back to 'ffmpeg' in PATH.")
 
-    if os.name == "nt":
-        logging.debug("ffmpeg being ran on windows")
-        # Use the calculated absolute path
-        ffmpeg_cmd = str(FFMPEG_WIN_PATH)
-        if not FFMPEG_WIN_PATH.exists():
-             # Fallback to PATH if the specific one isn't found
-             logging.warning(f"ffmpeg not found at {ffmpeg_cmd}. Trying 'ffmpeg' from PATH.")
-             ffmpeg_cmd = "ffmpeg"
-        logging.debug(f"ffmpeg_cmd: {ffmpeg_cmd}")
-    else:
-        ffmpeg_cmd = 'ffmpeg'
-    print("Starting conversion process of .m4a to .WAV")
-    out_path = os.path.splitext(video_file_path)[0] + ".wav"
+    # Verify ffmpeg command works
+    try:
+        subprocess.run([ffmpeg_cmd, "-version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
+        logging.debug(f"Confirmed ffmpeg command '{ffmpeg_cmd}' is available.")
+    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+        error_msg = f"ffmpeg command '{ffmpeg_cmd}' not found or failed execution. Please ensure ffmpeg is installed and in the system PATH or in the expected ./Bin directory. Error: {e}"
+        logging.error(error_msg)
+        raise RuntimeError(error_msg) from e
+
+
+    logging.info(f"Starting conversion to WAV: '{input_path.name}' -> '{out_path.name}'")
+
+    command = [
+        ffmpeg_cmd,
+        "-i", str(input_path),
+        "-ss", str(offset),           # Use offset if needed (e.g., "00:00:10" or 10)
+        "-ar", "16000",               # Audio sample rate (good for Whisper)
+        "-ac", "1",                   # Mono audio channel (good for Whisper)
+        "-c:a", "pcm_s16le",          # Standard WAV audio codec
+        "-y",                         # Overwrite output file without asking
+        str(out_path)
+    ]
 
     try:
-        if os.name == "nt":
-            logging.debug("ffmpeg being ran on windows")
+        # Execute ffmpeg command
+        result = subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL, # Prevent ffmpeg from waiting for stdin
+            capture_output=True,      # Capture stdout and stderr
+            text=True,                # Decode output as text
+            check=False               # Don't raise exception on non-zero exit code automatically
+        )
 
-            if sys.platform.startswith('win'):
-                ffmpeg_cmd = ".\\Bin\\ffmpeg.exe"
-                logging.debug(f"ffmpeg_cmd: {ffmpeg_cmd}")
-            else:
-                ffmpeg_cmd = 'ffmpeg'  # Assume 'ffmpeg' is in PATH for non-Windows systems
-
-            command = [
-                ffmpeg_cmd,  # Assuming the working directory is correctly set where .\Bin exists
-                "-ss", "00:00:00",  # Start at the beginning of the video
-                "-i", video_file_path,
-                "-ar", "16000",  # Audio sample rate
-                "-ac", "1",  # Number of audio channels
-                "-c:a", "pcm_s16le",  # Audio codec
-                out_path
-            ]
-            try:
-                # Redirect stdin from null device to prevent ffmpeg from waiting for input
-                with open(os.devnull, 'rb') as null_file:
-                    result = subprocess.run(command, stdin=null_file, text=True, capture_output=True)
-                if result.returncode == 0:
-                    logging.info("FFmpeg executed successfully")
-                    logging.debug(f"FFmpeg output: {result.stdout}")
-                else:
-                    logging.error("Error in running FFmpeg")
-                    logging.error(f"FFmpeg stderr: {result.stderr}")
-                    raise RuntimeError(f"FFmpeg error: {result.stderr}")
-            except Exception as e:
-                logging.error("Error occurred - ffmpeg doesn't like windows")
-                raise RuntimeError("ffmpeg failed")
-        elif os.name == "posix":
-            os.system(f'ffmpeg -ss 00:00:00 -i "{video_file_path}" -ar 16000 -ac 1 -c:a pcm_s16le "{out_path}"')
+        # Check result
+        if result.returncode != 0:
+            error_details = result.stderr or result.stdout or "No output captured"
+            # Clean up potentially corrupted output file
+            if out_path.exists():
+                try: out_path.unlink()
+                except OSError: pass
+            raise ConversionError(f"FFmpeg conversion failed (code {result.returncode}) for '{input_path.name}'. Error: {error_details.strip()}")
         else:
-            raise RuntimeError("Unsupported operating system")
-        logging.info(f"Conversion to WAV completed: {out_path}")
-        log_counter("convert_to_wav_success", labels={"file_path": video_file_path})
+            logging.info(f"Conversion to WAV completed successfully: {out_path}")
+            if result.stderr: # Log warnings even on success
+                logging.warning(f"FFmpeg potential warnings for '{input_path.name}': {result.stderr.strip()}")
+            log_counter("convert_to_wav_success", labels={"file_path": video_file_path})
+
+    except ConversionError:
+         # Re-raise ConversionError explicitly to ensure it's caught
+         log_counter("convert_to_wav_error", labels={"file_path": video_file_path, "error": "ffmpeg_failed"})
+         raise
     except Exception as e:
-        logging.error(f"speech-to-text: Error transcribing audio: {str(e)}")
+        # Catch other potential errors like permissions, etc.
+        error_msg = f"Unexpected error during ffmpeg execution for '{input_path.name}': {e}"
+        logging.error(error_msg, exc_info=True)
         log_counter("convert_to_wav_error", labels={"file_path": video_file_path, "error": str(e)})
-        return {"error": str(e)}
+        # Clean up potentially corrupted output file
+        if out_path.exists():
+             try: out_path.unlink()
+             except OSError: pass
+        raise ConversionError(error_msg) from e # Wrap other errors in ConversionError
 
     conversion_time = time.time() - start_time
     log_histogram("convert_to_wav_duration", conversion_time, labels={"file_path": video_file_path})
 
     gc.collect()
-    return out_path
-
+    return str(out_path)
 #
 # End of Audio Conversion Functions
 ##########################################################
@@ -1370,40 +1407,48 @@ def record_system_audio(duration: float, device_id: int, sample_rate: int = 4410
 def format_transcription_with_timestamps(segments, keep_timestamps=True):
     """
     Formats the transcription segments with or without timestamps.
+    Handles numeric seconds or pre-formatted HH:MM:SS strings.
 
     Parameters:
-        segments (list): List of transcription segments.
+        segments (list): List of transcription segments (dicts with 'Time_Start', 'Time_End', 'Text').
         keep_timestamps (bool): Whether to include timestamps.
 
     Returns:
         str: Formatted transcription.
     """
+    if not segments:
+        return ""
+
+    formatted_lines = []
     if keep_timestamps:
-        formatted_segments = []
         for segment in segments:
             start = segment.get('Time_Start', 0)
             end = segment.get('Time_End', 0)
             text = segment.get('Text', '').strip()
 
-            # Check if start and end are already formatted strings
-            if isinstance(start, str) and ':' in start:
-                # Already in HH:MM:SS format, use directly
-                formatted_segments.append(f"[{start}-{end}] {text}")
-            else:
-                # Numeric seconds, convert to time format
+            start_str = start
+            end_str = end
+
+            # Convert numeric seconds to HH:MM:SS if needed
+            if isinstance(start, (int, float)):
                 try:
-                    start_time = time.strftime('%H:%M:%S', time.gmtime(float(start)))
-                    end_time = time.strftime('%H:%M:%S', time.gmtime(float(end)))
-                    formatted_segments.append(f"[{start_time}-{end_time}] {text}")
-                except (ValueError, TypeError):
-                    # Fallback if conversion fails
-                    formatted_segments.append(f"[{start}-{end}] {text}")
-            # Join the segments with a newline to ensure proper formatting
-            formatted_segments.append(f"[{start:.2f}-{end:.2f}] {text}")
-        return "\n".join(formatted_segments)
+                    start_str = time.strftime('%H:%M:%S', time.gmtime(float(start)))
+                except (ValueError, TypeError, OSError): # Handle potential errors like large floats
+                    start_str = f"{start:.2f}s" # Fallback to seconds
+            if isinstance(end, (int, float)):
+                try:
+                    end_str = time.strftime('%H:%M:%S', time.gmtime(float(end)))
+                except (ValueError, TypeError, OSError):
+                    end_str = f"{end:.2f}s" # Fallback to seconds
+
+            formatted_lines.append(f"[{start_str}-{end_str}] {text}")
     else:
-        # Join the text without timestamps
-        return "\n".join([segment.get('Text', '').strip() for segment in segments])
+        for segment in segments:
+            text = segment.get('Text', '').strip()
+            if text: # Avoid adding empty lines if a segment has no text
+                formatted_lines.append(text)
+
+    return "\n".join(formatted_lines)
 #
 # End of Transcript Handling/Processing
 ##########################################################

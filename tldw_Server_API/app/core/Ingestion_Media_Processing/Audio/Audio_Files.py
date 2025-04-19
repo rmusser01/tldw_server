@@ -33,7 +33,8 @@ from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summari
 from tldw_Server_API.app.core.Utils.Utils import downloaded_files, \
     sanitize_filename, logging
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import extract_metadata
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import speech_to_text
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import speech_to_text, \
+    convert_to_wav, ConversionError
 from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 #
 #######################################################################################################################
@@ -113,13 +114,17 @@ def download_audio_file(url: str, use_cookies: bool = False, cookies: Optional[s
              extension = Path(original_filename).suffix or ".mp3" # Default to mp3 if no ext
              # Limit length
              base_name = base_name[:50]
-             file_name = f"{base_name}_{uuid.uuid4().hex[:6]}{extension}"
+             # Use a more robust unique ID section in filename
+             unique_id = uuid.uuid4().hex[:8]
+             file_name = f"{base_name}_{unique_id}{extension}"
         else:
-             file_name = f"audio_{uuid.uuid4().hex[:8]}.mp3" # Fallback
+             unique_id = uuid.uuid4().hex[:8]
+             file_name = f"audio_{unique_id}.mp3"
 
-
-        save_dir = Path('downloads')
-        save_dir.mkdir(parents=True, exist_ok=True) # Ensure the downloads directory exists
+        # Use a dedicated, potentially configurable, download directory
+        # For temporary processing, might want to use the provided temp_dir later
+        save_dir = Path(tempfile.gettempdir()) / "tldw_audio_downloads"
+        save_dir.mkdir(parents=True, exist_ok=True)
         save_path = save_dir / file_name
 
         # Download the file efficiently
@@ -186,13 +191,12 @@ def process_audio_files(
     # Optional metadata overrides (less common here, usually handled by API layer)
     custom_title: Optional[str] = None,
     author: Optional[str] = None,
-    # Added parameter for explicit temp dir management
-    temp_dir: Optional[str] = None
-) -> dict[str, int | list[dict[str, Any]] | list[Any | None]] | None:
+    temp_dir: Optional[str] = None # Explicit temp dir passed from API
+) -> Dict[str, Any]:
     """
-    Processes a list of audio inputs (URLs or local file paths).
-    Handles download (for URLs), conversion, transcription, chunking, and summarization.
-    Returns structured results suitable for an API response, without DB interaction.
+    Processes a list of audio inputs (URLs or local file paths). Handles download,
+    conversion, transcription, chunking, and analysis (summarization). Returns
+    structured results suitable for API response, without DB interaction.
 
     Args:
         inputs: List of strings, where each string is either a URL or a local file path.
@@ -231,13 +235,19 @@ def process_audio_files(
             - 'input_ref': The original URL or filename provided.
             * 'processing_source': The actual file path used after download/upload.
             - 'status': 'Success', 'Error', or 'Warning'.
-            - 'transcript': The full transcribed text (string or None).
-            - 'segments': List of transcribed segments with time info (or None).
-            - 'summary': The generated summary (string or None).
-            - 'metadata': Dictionary of extracted metadata (title, author etc.) if available.
+            - 'input_ref': Original URL or filename.
+            - 'processing_source': Final path used for processing (e.g., WAV file).
+            - 'media_type': 'audio'.
+            - 'metadata': Dict with title, author etc.
+            - 'content': Full transcribed text (string or None).
+            - 'segments': List of transcribed segments (or None).
+            - 'chunks': List of text chunks if chunking performed (or None).
+            - 'analysis': Generated summary/analysis (string or None).
+            - 'analysis_details': Dict with details (e.g., detected language).
             - 'error': Error message if processing failed (string or None).
-            - 'warnings': List of non-fatal warnings encountered.
-            - 'analysis_details': Dict with details about analysis (model used, etc.)
+            - 'warnings': List of non-fatal warnings.
+            - 'db_id': Always None for this function.
+            - 'db_message': Always None for this function.
     """
     results: List[Dict[str, Any]] = []
     progress_log: List[str] = []
@@ -245,140 +255,87 @@ def process_audio_files(
     start_time_all = time.time()
 
     # --- Setup Temporary Directory ---
-    # Use provided temp_dir or create one if needed and keep_original is False
-    # If keep_original is True, we might still need a place for conversions.
-    # Let's use a consistent temp location.
-    temp_directory_manager = tempfile.TemporaryDirectory(prefix="audio_proc_", dir=temp_dir)
+    # Use TemporaryDirectory which cleans up automatically unless keep_original=True
+    # Note: If keep_original=True, the caller needs to manage the lifecycle of temp_dir
+    temp_directory_manager = None
+    processing_temp_dir_path = None
+
+    if temp_dir:
+        processing_temp_dir_path = Path(temp_dir)
+        processing_temp_dir_path.mkdir(parents=True, exist_ok=True)
+        logging.info(f"Using provided temporary directory: {processing_temp_dir_path}")
+    else:
+        # Create a managed temporary directory if none provided
+        # It will be cleaned up automatically unless keep_original is True
+        temp_directory_manager = tempfile.TemporaryDirectory(prefix="audio_proc_")
+        processing_temp_dir_path = Path(temp_directory_manager.name)
+        logging.info(f"Created managed temporary directory: {processing_temp_dir_path}")
+
+    # Helper to track progress messages
+    def update_progress(message: str):
+        logging.info(message)
+        progress_log.append(message)
+
+    # Define chunk options dictionary
+    chunk_options = {
+        'method': chunk_method or ('sentences' if (chunk_language or transcription_language or 'en') == 'en' else 'recursive'),
+        'max_size': max_chunk_size,
+        'overlap': chunk_overlap,
+        'adaptive': use_adaptive_chunking,
+        'multi_level': use_multi_level_chunking,
+        'language': chunk_language or transcription_language or 'en',
+    } if perform_chunking else None
+
     try:
-        processing_temp_dir = Path(temp_directory_manager.name)
-        logging.info(f"Using temporary directory for processing: {processing_temp_dir}")
-
-        # Helper to track progress messages
-        def update_progress(message: str):
-            logging.info(message) # Log progress
-            progress_log.append(message)
-
-        # Choose ffmpeg command logic
-        ffmpeg_cmd = os.path.join(os.getcwd(), "Bin", "ffmpeg.exe") if os.name == "nt" else "ffmpeg"
-        if os.name == "nt" and not Path(ffmpeg_cmd).exists():
-             # Try finding ffmpeg in PATH if the specific one doesn't exist
-             try:
-                 subprocess.run(["ffmpeg", "-version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                 ffmpeg_cmd = "ffmpeg"
-                 logging.info("Found ffmpeg in system PATH.")
-             except (FileNotFoundError, subprocess.CalledProcessError):
-                 raise FileNotFoundError(f"ffmpeg executable not found at expected path: {ffmpeg_cmd} or in system PATH.")
-        elif os.name != "nt":
-             # On non-Windows, check if ffmpeg is in PATH
-             try:
-                 subprocess.run([ffmpeg_cmd, "-version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-             except (FileNotFoundError, subprocess.CalledProcessError):
-                  raise FileNotFoundError(f"ffmpeg command '{ffmpeg_cmd}' not found in system PATH.")
-
-
-        # Define chunk options
-        chunk_options = {
-            'method': chunk_method or ('sentences' if transcription_language == 'en' else 'recursive'), # Example default
-            'max_size': max_chunk_size,
-            'overlap': chunk_overlap,
-            'adaptive': use_adaptive_chunking,
-            'multi_level': use_multi_level_chunking,
-            'language': chunk_language or transcription_language or 'en',
-        } if perform_chunking else None
-
-        # --- Reusable Processing Steps ---
-        def _reencode_to_mp3(input_path: str, output_dir: Path) -> str:
-            """Re-encodes to a standard MP3 format."""
-            try:
-                input_p = Path(input_path)
-                reencoded_mp3_path = output_dir / f"{input_p.stem}_reencoded.mp3"
-                command = [
-                    ffmpeg_cmd, '-y', # Overwrite output files without asking
-                    '-i', str(input_p),
-                    '-codec:a', 'libmp3lame', # Standard MP3 codec
-                    '-b:a', '192k',          # Reasonable bitrate
-                    '-ar', '44100',          # Standard sample rate
-                    '-ac', '2',              # Stereo channels
-                    str(reencoded_mp3_path)
-                ]
-                logging.debug(f"Running ffmpeg re-encode: {' '.join(command)}")
-                result = subprocess.run(command, check=True, capture_output=True, text=True)
-                update_progress(f"Re-encoded '{input_p.name}' to '{reencoded_mp3_path.name}'.")
-                return str(reencoded_mp3_path)
-            except subprocess.CalledProcessError as exc:
-                err_msg = f"Error re-encoding '{Path(input_path).name}': {exc.stderr or exc.stdout or str(exc)}"
-                update_progress(err_msg)
-                raise RuntimeError(err_msg) from exc
-            except Exception as exc:
-                 err_msg = f"Unexpected error during re-encoding '{Path(input_path).name}': {exc}"
-                 update_progress(err_msg)
-                 raise RuntimeError(err_msg) from exc
-
-        def _convert_to_wav(input_path: str, output_dir: Path) -> str:
-            """Converts audio (likely MP3) to WAV for transcription."""
-            try:
-                input_p = Path(input_path)
-                wav_file_path = output_dir / f"{input_p.stem}.wav"
-                command = [
-                    ffmpeg_cmd, '-y',
-                    '-i', str(input_p),
-                    '-ar', '16000',          # Sample rate often preferred by Whisper
-                    '-ac', '1',              # Mono channel often preferred
-                    '-c:a', 'pcm_s16le',     # Standard WAV codec
-                    str(wav_file_path)
-                ]
-                logging.debug(f"Running ffmpeg convert to WAV: {' '.join(command)}")
-                result = subprocess.run(command, check=True, capture_output=True, text=True)
-                update_progress(f"Converted '{input_p.name}' to '{wav_file_path.name}'.")
-                return str(wav_file_path)
-            except subprocess.CalledProcessError as exc:
-                err_msg = f"Error converting '{Path(input_path).name}' to WAV: {exc.stderr or exc.stdout or str(exc)}"
-                update_progress(err_msg)
-                raise RuntimeError(err_msg) from exc
-            except Exception as exc:
-                 err_msg = f"Unexpected error converting '{Path(input_path).name}' to WAV: {exc}"
-                 update_progress(err_msg)
-                 raise RuntimeError(err_msg) from exc
-
         # --- Process Each Input ---
         for i, input_item in enumerate(inputs, start=1):
             item_start_time = time.time()
-            # Determine original reference (URL or filename)
-            is_url = input_item.startswith(("http://", "https://"))
+            is_url = isinstance(input_item, str) and input_item.startswith(("http://", "https://"))
             input_ref = input_item if is_url else Path(input_item).name
             update_progress(f"--- Processing item {i}/{len(inputs)}: {input_ref} ---")
 
-            # Initialize result for this item
-            item_result = {
+            item_result: Dict[str, Any] = { # Explicit typing
+                "status": "Pending",
                 "input_ref": input_ref,
                 "processing_source": input_item, # Initial source
-                "status": "Pending",
-                "transcript": None,
+                "media_type": "audio",
+                "metadata": {"title": custom_title, "author": author},
+                "content": None,
                 "segments": None,
-                "summary": None,
-                "metadata": {"title": custom_title, "author": author}, # Start with overrides
+                "chunks": None, # Added field
+                "analysis": None, # Renamed from summary
+                "analysis_details": {},
                 "error": None,
                 "warnings": [],
-                "analysis_details": {},
+                "db_id": None, # Standard fields for response consistency
+                "db_message": None,
             }
             current_audio_path = None
             downloaded_path = None
+            wav_file_path = None
+            item_temp_files = [] # Files specific to this item
 
             try:
-                # 1. Get Local Audio Path (Download if URL)
+                # 1. Get Local Audio Path (Download if URL, Copy if local?)
                 if is_url:
                     update_progress(f"Downloading audio from URL: {input_item}")
                     try:
+                        # Download to the processing temp dir
                         downloaded_path = download_audio_file(input_item, use_cookies, cookies)
-                        current_audio_path = downloaded_path
-                        item_result["processing_source"] = downloaded_path # Update source
-                        if downloaded_path:
-                             temp_files_to_clean.append(downloaded_path) # Mark for potential cleanup
-                             # Simple metadata extraction from downloaded file if possible
-                             item_result["metadata"]["title"] = item_result["metadata"].get("title") or Path(downloaded_path).stem.replace("_reencoded","").replace("_"+downloaded_path.split("_")[-1].split(".")[0],"") # Basic title from filename
+                        # Move or copy to our managed temp dir if different
+                        target_path = processing_temp_dir_path / Path(downloaded_path).name
+                        if Path(downloaded_path).parent != processing_temp_dir_path:
+                            Path(downloaded_path).rename(target_path)
+                            current_audio_path = str(target_path)
+                            # Clean up original download dir if empty? Maybe too complex.
+                        else:
+                            current_audio_path = downloaded_path
+
+                        item_result["processing_source"] = current_audio_path
+                        item_temp_files.append(current_audio_path) # Mark for potential cleanup
+                        item_result["metadata"]["title"] = item_result["metadata"].get("title") or Path(current_audio_path).stem.replace("_"+uuid.uuid4().hex[:8],"") # Basic title
                     except Exception as download_err:
-                         # If download fails, create an error result and continue to next item
-                         err_msg = f"Failed to download: {download_err}"
+                         err_msg = f"Failed to download/prepare URL: {download_err}"
                          update_progress(err_msg)
                          item_result.update({"status": "Error", "error": err_msg})
                          results.append(item_result)
@@ -390,180 +347,257 @@ def process_audio_files(
                         raise FileNotFoundError(f"Local file not found: {input_item}")
                     if local_path.stat().st_size > MAX_FILE_SIZE:
                          raise ValueError(f"Local file '{input_ref}' size exceeds {MAX_FILE_SIZE / (1024*1024):.0f}MB limit.")
-                    current_audio_path = str(local_path)
+
+                    # Copy the file to the temporary directory to avoid modifying originals
+                    # and ensure cleanup works correctly
+                    try:
+                        target_path = processing_temp_dir_path / local_path.name
+                        import shutil
+                        shutil.copy2(local_path, target_path) # copy2 preserves metadata
+                        current_audio_path = str(target_path)
+                        item_temp_files.append(current_audio_path) # Mark copied file for cleanup
+                        update_progress(f"Copied local file '{local_path.name}' to temporary directory.")
+                    except Exception as copy_err:
+                         raise RuntimeError(f"Failed to copy local file to temp directory: {copy_err}") from copy_err
+
+                    item_result["processing_source"] = current_audio_path # Source is now the copied file
                     item_result["metadata"]["title"] = item_result["metadata"].get("title") or local_path.stem
 
                 if not current_audio_path or not Path(current_audio_path).exists():
-                     raise RuntimeError("Audio file path is missing or invalid after download/check.")
+                     raise RuntimeError("Audio file path is missing or invalid after download/copy.")
 
+                # 2. Convert to WAV using the library function
+                update_progress(f"Converting '{Path(current_audio_path).name}' to WAV...")
+                try:
+                    # Always overwrite in temp dir context
+                    wav_file_path = convert_to_wav(current_audio_path, overwrite=True)
+                    # Check if conversion output path is *inside* our processing dir
+                    if Path(wav_file_path).parent != processing_temp_dir_path:
+                         # This shouldn't happen if convert_to_wav saves in the same dir
+                         logging.warning(f"Converted WAV '{wav_file_path}' is outside temp dir '{processing_temp_dir_path}'. Moving it.")
+                         target_wav_path = processing_temp_dir_path / Path(wav_file_path).name
+                         Path(wav_file_path).rename(target_wav_path)
+                         wav_file_path = str(target_wav_path)
 
-                # 2. Re-encode & Convert to WAV
-                update_progress(f"Preparing '{Path(current_audio_path).name}' for transcription...")
-                # Re-encoding might not always be necessary, but can help with compatibility
-                # Consider making this optional based on a flag if performance is critical
-                reencoded_mp3_path = _reencode_to_mp3(current_audio_path, processing_temp_dir)
-                temp_files_to_clean.append(reencoded_mp3_path)
-
-                wav_file_path = _convert_to_wav(reencoded_mp3_path, processing_temp_dir)
-                temp_files_to_clean.append(wav_file_path)
-                item_result["processing_source"] = wav_file_path # WAV is the final source for transcription
-
-                # 3. Transcribe
-                update_progress(f"Starting transcription (Model: {transcription_model}, Lang: {transcription_language or 'auto'})")
-                # Call the transcription library function
-                transcription_output = speech_to_text(
-                    audio_file_path=wav_file_path,
-                    whisper_model=transcription_model,
-                    selected_source_lang=transcription_language, # Pass language hint
-                    vad_filter=vad_use, # Pass VAD flag
-                    diarize=diarize, # Pass diarize flag
-                )
-
-                # Process transcription output (handle potential errors/formats)
-                raw_segments = None
-                if isinstance(transcription_output, dict) and 'segments' in transcription_output:
-                    raw_segments = transcription_output['segments']
-                    detected_lang = transcription_output.get('language', 'unknown')
-                    item_result["analysis_details"]["transcription_language_detected"] = detected_lang
-                    update_progress(f"Transcription detected language: {detected_lang}")
-                elif isinstance(transcription_output, list):
-                    raw_segments = transcription_output # Assume it's the list of segments directly
-                else:
-                    # Handle unexpected output from speech_to_text
-                    err_msg = f"Unexpected output format from transcription: {type(transcription_output)}"
+                    item_temp_files.append(wav_file_path) # Mark WAV for cleanup
+                    item_result["processing_source"] = wav_file_path # WAV is the final source for transcription
+                    update_progress(f"Conversion to WAV successful: {Path(wav_file_path).name}")
+                except (ConversionError, FileNotFoundError, RuntimeError) as conv_err:
+                    err_msg = f"Audio conversion failed: {conv_err}"
                     update_progress(err_msg)
-                    # Check if it's an error dict
-                    if isinstance(transcription_output, dict) and 'error' in transcription_output:
-                         raise RuntimeError(f"Transcription failed: {transcription_output['error']}")
-                    else:
-                         raise RuntimeError(err_msg)
+                    item_result.update({"status": "Error", "error": err_msg})
+                    results.append(item_result)
+                    continue # Skip to next item
 
-                if not raw_segments:
-                    item_result.setdefault("warnings", [])
-                    item_result["warnings"].append("Transcription produced no segments.")
-                    update_progress("Warning: Transcription generated no segments.")
-                    # Decide if this should be an error or just a warning with empty results
-                    item_result["transcript"] = ""
-                    item_result["segments"] = []
-                else:
-                    item_result["segments"] = raw_segments
-                    # Format the full transcript string based on timestamp_option
-                    item_result["transcript"] = format_transcription_with_timestamps(raw_segments, keep_timestamps=timestamp_option)
-                    if not item_result["transcript"].strip():
-                        item_result.setdefault("warnings", [])
-                        item_result["warnings"].append("Transcription resulted in empty text.")
-                        update_progress("Warning: Transcription text is empty.")
-
-                update_progress("Transcription completed.")
-
-                # 4. Summarize / Analysis (if requested and transcript exists)
-                if perform_analysis and api_name and api_name.lower() != "none" and item_result["transcript"] and item_result["transcript"].strip():
-                    update_progress(f"Starting analysis using API: {api_name}")
+                    # 3. Transcribe
+                    update_progress(
+                        f"Starting transcription (Model: {transcription_model}, Lang: {transcription_language or 'auto'}, VAD: {vad_use}, Diarize: {diarize})")
+                    raw_segments = None  # Initialize before try
                     try:
-                        text_to_summarize = item_result["transcript"]
-                        chunked_text = [text_to_summarize] # Default: no chunking if chunk_options is None
+                        transcription_output = speech_to_text(
+                            audio_file_path=wav_file_path,
+                            whisper_model=transcription_model,
+                            selected_source_lang=transcription_language,
+                            vad_filter=vad_use,
+                            diarize=diarize,
+                        )
+                        raw_segments = transcription_output  # Assign if successful
 
-                        # Perform chunking if enabled
-                        if chunk_options:
-                             update_progress(f"Chunking text with options: {chunk_options}")
-                             chunked_text = improved_chunking_process(text_to_summarize, chunk_options)
-                             if not chunked_text:
-                                  update_progress("Warning: Chunking resulted in no text chunks.")
-                                  item_result.setdefault("warnings", [])
-                                  item_result["warnings"].append("Chunking process yielded no chunks.")
-                             else:
-                                  update_progress(f"Chunking produced {len(chunked_text)} chunk(s).")
+                        if not raw_segments:
+                            # Use item_result['warnings'].append instead of setdefault if you want multiple warnings
+                            if "warnings" not in item_result: item_result["warnings"] = []
+                            item_result["warnings"].append("Transcription produced no segments.")
+                            update_progress("Warning: Transcription generated no segments.")
+                            item_result["content"] = ""
+                            item_result["segments"] = []
+                        else:
+                            item_result["segments"] = raw_segments
+                            item_result["content"] = format_transcription_with_timestamps(
+                                raw_segments, keep_timestamps=timestamp_option
+                            )
+                            if not item_result["content"].strip():
+                                if "warnings" not in item_result: item_result["warnings"] = []
+                                item_result["warnings"].append("Transcription resulted in empty text.")
+                                update_progress("Warning: Transcription text is empty.")
 
+                        update_progress("Transcription completed.")
 
-                        # Call summarization only if chunking produced results or wasn't needed
-                        if chunked_text:
-                            summary_result = summarize(
+                    except (RuntimeError, ValueError) as trans_err:
+                        # --- THIS IS THE END OF THE TRANSCRIPTION try...except ---
+                        err_msg = f"Transcription failed: {trans_err}"
+                        update_progress(err_msg)
+                        # Update status and error directly here
+                        item_result["status"] = "Error"
+                        item_result["error"] = err_msg
+                        # Append result and continue to next item in the outer loop
+                        results.append(item_result)
+                        continue  # Skip chunking/analysis for this failed item
+
+                    # --- DEDENTED BLOCK STARTS HERE ---
+                    # This code now runs ONLY IF transcription succeeded (no exception was caught above)
+
+                    # 4. Chunking (if requested and transcript exists)
+                    text_to_process = item_result["content"]
+                    generated_chunks = None  # Initialize
+                    text_to_process_for_analysis = []  # Initialize
+
+                    if chunk_options and text_to_process and text_to_process.strip():
+                        update_progress(f"Chunking text with options: {chunk_options}")
+                        try:
+                            generated_chunks = improved_chunking_process(text_to_process, chunk_options)
+                            if not generated_chunks:
+                                update_progress("Warning: Chunking resulted in no text chunks.")
+                                if "warnings" not in item_result: item_result["warnings"] = []
+                                item_result["warnings"].append("Chunking process yielded no chunks.")
+                                text_to_process_for_analysis = [text_to_process]  # Fallback for analysis
+                            else:
+                                update_progress(f"Chunking produced {len(generated_chunks)} chunk(s).")
+                                item_result["chunks"] = generated_chunks
+                                # Prepare for analysis - assuming summarize takes list of strings or handles dicts
+                                if isinstance(generated_chunks, list) and generated_chunks and isinstance(
+                                        generated_chunks[0], dict) and 'text' in generated_chunks[0]:
+                                    text_to_process_for_analysis = [chunk.get('text', '') for chunk in generated_chunks]
+                                else:
+                                    text_to_process_for_analysis = generated_chunks  # Pass as is
+
+                        except Exception as chunk_err:
+                            err_msg = f"Chunking failed: {chunk_err}"
+                            update_progress(err_msg)
+                            if "warnings" not in item_result: item_result["warnings"] = []
+                            item_result["warnings"].append(f"Chunking error: {chunk_err}")
+                            text_to_process_for_analysis = [text_to_process]  # Fallback to full text
+                            item_result["chunks"] = None
+                    elif chunk_options:
+                        update_progress("Chunking skipped (empty transcript).")
+                        text_to_process_for_analysis = []
+                    else:  # No chunking requested
+                        update_progress("Chunking not requested.")
+                        if text_to_process and text_to_process.strip():
+                            text_to_process_for_analysis = [text_to_process]
+                        else:
+                            text_to_process_for_analysis = []
+
+                    # 5. Analysis (Summarization) (if requested and text exists)
+                    if perform_analysis and api_name and api_name.lower() != "none" and text_to_process_for_analysis:
+                        update_progress(f"Starting analysis using API: {api_name}")
+                        try:
+                            analysis_result = summarize(
                                 api_name=api_name,
-                                input_data=chunked_text, # Pass the list of chunks
+                                input_data=text_to_process_for_analysis,
                                 custom_prompt_arg=custom_prompt_input,
                                 api_key=api_key,
                                 recursive_summarization=summarize_recursively,
-                                temp=None, # Adjust if temperature control is needed
+                                chunked_summarization=(generated_chunks is not None and len(
+                                    generated_chunks) > 1 and not summarize_recursively),
+                                temp=None,
                                 system_message=system_prompt_input
                             )
-                            item_result["summary"] = summary_result or "Analysis API returned no summary."
+                            if isinstance(analysis_result, str) and analysis_result.startswith("Error:"):
+                                raise RuntimeError(analysis_result)
+
+                            item_result["analysis"] = analysis_result or "Analysis API returned no result."
                             update_progress("Analysis completed.")
-                        else:
-                             item_result["summary"] = "Analysis skipped: No text after chunking."
-                             update_progress("Analysis skipped due to empty chunking result.")
 
+                        except Exception as exc:
+                            err_msg = f"Analysis failed: {exc}"
+                            update_progress(err_msg)
+                            item_result["analysis"] = "[Analysis Failed]"
+                            if "warnings" not in item_result: item_result["warnings"] = []
+                            item_result["warnings"].append(f"Analysis error: {exc}")
+                    elif perform_analysis and (not api_name or api_name.lower() == "none"):
+                        item_result["analysis"] = "[Analysis Skipped: No API specified]"
+                        update_progress("Analysis skipped (no API name provided).")
+                    elif perform_analysis and not text_to_process_for_analysis:
+                        item_result["analysis"] = "[Analysis Skipped: No text content]"
+                        update_progress("Analysis skipped (no text found after transcription/chunking).")
+                    else:  # Analysis not requested
+                        item_result["analysis"] = "[Analysis Not Requested]"
 
-                    except Exception as exc:
-                        err_msg = f"Analysis failed: {exc}"
-                        update_progress(err_msg)
-                        item_result["summary"] = "[Analysis Failed]"
-                        item_result.setdefault("warnings", [])
-                        item_result["warnings"].append(f"Analysis error: {exc}") # Add as warning
-                elif perform_analysis and (not api_name or api_name.lower() == "none"):
-                     item_result["summary"] = "[Analysis Skipped: No API specified]"
-                     update_progress("Analysis skipped (no API name provided).")
-                elif perform_analysis and (not item_result["transcript"] or not item_result["transcript"].strip()):
-                     item_result["summary"] = "[Analysis Skipped: Empty transcript]"
-                     update_progress("Analysis skipped (transcript was empty).")
-                else: # Analysis not requested
-                    item_result["summary"] = "[Analysis Not Requested]"
+                    # 6. Finalize Status for item (Only if we got this far without 'continue')
+                    # Determine final status based on whether any warnings occurred during successful processing
+                    item_result["status"] = "Warning" if item_result.get("warnings") else "Success"
+                    item_processing_time = time.time() - item_start_time
+                    update_progress(
+                        f"Item {i} ({input_ref}) finished processing. Status: {item_result['status']}. Time: {item_processing_time:.2f}s")
 
+                    # --- END OF DEDENTED BLOCK ---
 
-                # 5. Finalize Status
-                item_result["status"] = "Warning" if item_result.get("warnings") else "Success"
-                item_processing_time = time.time() - item_start_time
-                update_progress(f"Item {i} ({input_ref}) finished processing. Status: {item_result['status']}. Time: {item_processing_time:.2f}s")
+                except Exception as main_exc:
+                    # Catch any error during the processing steps FOR THIS ITEM (e.g., download, copy, convert)
+                    # Note: Transcription errors are caught separately above
+                    error_message = f"Failed to process item {i} ({input_ref}): {type(main_exc).__name__} - {main_exc}"
+                    update_progress(error_message)
+                    logging.error(error_message, exc_info=True)
+                    item_result["status"] = "Error"
+                    item_result["error"] = str(main_exc)
 
-
-            except Exception as main_exc:
-                # Catch any error during the processing steps for this item
-                error_message = f"Failed to process item {i} ({input_ref}): {type(main_exc).__name__} - {main_exc}"
-                update_progress(error_message)
-                logging.error(error_message, exc_info=True) # Log full traceback
-                item_result["status"] = "Error"
-                item_result["error"] = str(main_exc) # Store simplified error message
-
-            # Append the result for this item
-            results.append(item_result)
+            finally:
+                # This finally block is associated with the inner try (steps 1-6)
+                temp_files_to_clean.extend(item_temp_files)
+                # Append the result *unless* it was already appended in a 'continue' block
+                if item_result["status"] != "Pending":  # Check if status was set (error or success/warning)
+                    # Avoid double-adding if 'continue' was hit in transcription error block
+                    # A simple check if the last result added has the same input_ref might be safer
+                    if not results or results[-1].get("input_ref") != item_result["input_ref"]:
+                        results.append(item_result)
 
         # --- End of Loop ---
 
     except Exception as outer_exc:
-         # Catch errors occurring outside the loop (e.g., ffmpeg setup, temp dir)
-         logging.error(f"Fatal error during audio processing setup: {outer_exc}", exc_info=True)
-         # Return a general error structure if setup fails
+         logging.error(f"Fatal error during audio processing setup or loop: {outer_exc}", exc_info=True)
+         # Return a general error structure
          return {
             "processed_count": 0, "errors_count": len(inputs),
-            "errors": [f"Fatal setup error: {outer_exc}"],
-            "results": [{"input_ref": item, "status": "Error", "error": f"Fatal setup error: {outer_exc}"} for item in inputs]
+            "errors": [f"Fatal processing error: {outer_exc}"],
+            "results": [
+                {"input_ref": item, "status": "Error", "error": f"Fatal processing error: {outer_exc}", "media_type": "audio"}
+                for item in inputs
+             ]
          }
     finally:
         # --- Cleanup Temporary Files ---
         if not keep_original:
             update_progress("Cleaning up temporary files...")
+            # Use set to avoid trying to delete the same file multiple times
+            unique_files_to_clean = set(temp_files_to_clean)
             cleaned_count = 0
-            for file_path in temp_files_to_clean:
-                if file_path and Path(file_path).exists():
-                    try:
-                        Path(file_path).unlink()
-                        cleaned_count += 1
-                    except OSError as e:
-                        update_progress(f"Warning: Failed to remove temporary file {file_path}: {e}")
-            update_progress(f"Removed {cleaned_count} temporary files.")
+            for file_path_str in unique_files_to_clean:
+                if file_path_str: # Ensure not None or empty
+                    file_path = Path(file_path_str)
+                    if file_path.exists() and file_path.is_file(): # Check if it's a file
+                         # Security check: Ensure it's within the temp directory
+                         try:
+                              is_safe = file_path.resolve().is_relative_to(processing_temp_dir_path.resolve())
+                         except ValueError: # Python < 3.9
+                              is_safe = str(file_path.resolve()).startswith(str(processing_temp_dir_path.resolve()))
 
-        # --- Cleanup Temporary Directory ---
-        try:
-             temp_directory_manager.cleanup()
-             update_progress(f"Removed temporary directory: {processing_temp_dir}")
-        except Exception as e:
-             logging.warning(f"Could not remove temporary directory {processing_temp_dir}: {e}")
+                         if is_safe:
+                              try:
+                                   file_path.unlink()
+                                   cleaned_count += 1
+                                   logging.debug(f"Removed temp file: {file_path}")
+                              except OSError as e:
+                                   update_progress(f"Warning: Failed to remove temporary file {file_path}: {e}")
+                         else:
+                              logging.warning(f"Skipping deletion of file outside temp dir: {file_path}")
+            update_progress(f"Attempted removal of {cleaned_count} temporary files.")
+        else:
+            update_progress("Skipping temporary file cleanup (keep_original=True).")
+
+        # --- Cleanup Temporary Directory (if managed) ---
+        if temp_directory_manager:
+            try:
+                 temp_directory_manager.cleanup()
+                 update_progress(f"Removed managed temporary directory: {processing_temp_dir_path}")
+            except Exception as e:
+                 logging.warning(f"Could not remove managed temporary directory {processing_temp_dir_path}: {e}")
 
 
     # --- Calculate Final Counts and Return ---
     processed_count = sum(1 for r in results if r.get("status") in ["Success", "Warning"])
     failed_count = len(results) - processed_count
     total_time = time.time() - start_time_all
-    update_progress(f"Processing complete. Success/Warning: {processed_count}, Failed: {failed_count}. Total Time: {total_time:.2f}s")
+    update_progress(f"Processing batch complete. Success/Warning: {processed_count}, Failed: {failed_count}. Total Time: {total_time:.2f}s")
 
     # Structure the final output
     final_output = {
@@ -571,8 +605,7 @@ def process_audio_files(
         "errors_count": failed_count,
         "errors": [r.get("error") for r in results if r.get("status") == "Error" and r.get("error")],
         "results": results,
-        # Optionally include progress log:
-        # "progress_log": progress_log
+        # "progress_log": progress_log # Optionally include detailed logs
     }
 
     return final_output
