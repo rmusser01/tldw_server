@@ -13,7 +13,7 @@ from pypandoc import convert_file
 #
 # Local Imports
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
 from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 from tldw_Server_API.app.core.Utils.Utils import logging
 #
@@ -177,7 +177,7 @@ def _process_single_document(
                 chunk_metadata = chunk.get('metadata', {})
                 if chunk_text:
                     try:
-                        summary_text = perform_summarization(
+                        summary_text = summarize(
                             api_name, chunk_text, custom_prompt, api_key,
                             recursive_summarization=False, temp=None, system_message=system_prompt
                         )
@@ -200,7 +200,7 @@ def _process_single_document(
                 if summarize_recursively and len(chunk_summaries) > 1:
                     logging.info(f"Performing recursive summarization on {len(chunk_summaries)} chunk summaries.")
                     try:
-                         final_summary = perform_summarization(
+                         final_summary = summarize(
                              api_name, "\n\n---\n\n".join(chunk_summaries), custom_prompt or "Overall summary:", api_key,
                              recursive_summarization=False, temp=None, system_message=system_prompt
                          )

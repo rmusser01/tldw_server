@@ -17,6 +17,7 @@ import gc
 import json
 import multiprocessing
 import os
+import shutil
 from pathlib import Path
 import queue
 import subprocess
@@ -74,6 +75,184 @@ from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_his
 # 3. Use subprocess instead of os.system for ffmpeg
 # 4. Adjust CPU threads properly
 # 5. Use quantized models - compute_type="int8"
+
+
+def perform_transcription(
+    video_path: str,
+    offset: int, # Note: Offset is passed to convert_to_wav but not used there currently
+    transcription_model: str,
+    vad_use: bool,
+    diarize: bool = False,
+    overwrite: bool = False,
+    transcription_language: str = 'en',
+    temp_dir: Optional[str] = None,
+    ):
+    """
+    Converts video/audio to WAV, performs transcription (optionally with diarization),
+    handles existing files, and manages errors.
+
+    Returns:
+        Tuple[Optional[str], Optional[list]]: (audio_file_path, segments_list) on success,
+                                             (None, None) on critical failure (like conversion).
+                                             (audio_file_path, None) if transcription fails but conversion succeeded.
+    """
+    local_media_path_to_convert = None
+    temp_dir_manager = None
+    downloaded_file_path = None  # Track the specific downloaded file
+    try:
+        logging.info(f"Initiating transcription process for: {video_path}")
+        # 1. Convert to WAV - Catch ConversionError specifically
+        try:
+            audio_file_path = convert_to_wav(video_path, offset=offset, overwrite=overwrite) # Pass overwrite flag?
+            if not audio_file_path or not os.path.exists(audio_file_path):
+                 # This case might occur if convert_to_wav returns None/empty path without raising error
+                 logging.error(f"Conversion to WAV failed or produced no file for {video_path}")
+                 return None, None # Critical failure
+            logging.debug(f"Converted audio file path: {audio_file_path}")
+        except ConversionError as e:
+            logging.error(f"Audio conversion failed for {video_path}: {e}")
+            return None, None # Critical failure, stop processing
+
+        # 2. Define paths
+        base_path = os.path.splitext(audio_file_path)[0]
+        # Sanitize model name for filename
+        transcription_model_sanitized = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in transcription_model)
+        segments_json_path = f"{base_path}-transcription_model-{transcription_model_sanitized}.segments.json"
+        diarized_json_path = f"{base_path}-transcription_model-{transcription_model_sanitized}.diarized.json"
+
+        # 3. Handle Diarization Path
+        if diarize:
+            pass
+            # logging.info(f"Processing with diarization enabled for {audio_file_path}")
+            # # Check if diarized JSON already exists
+            # if os.path.exists(diarized_json_path) and not overwrite:
+            #     logging.info(f"Diarized file already exists (overwrite=False): {diarized_json_path}")
+            #     try:
+            #         with open(diarized_json_path, 'r', encoding='utf-8') as file:
+            #             diarized_segments = json.load(file)
+            #         # Basic validation
+            #         if isinstance(diarized_segments, list) and all('Text' in segment for segment in diarized_segments):
+            #             logging.debug(f"Loaded valid diarized segments from existing file.")
+            #             return audio_file_path, diarized_segments
+            #         else:
+            #             logging.warning(f"Existing diarized file {diarized_json_path} is invalid, but overwrite=False.")
+            #             # Treat as transcription failure for this run if file is invalid and cannot overwrite
+            #             return audio_file_path, None
+            #     except (json.JSONDecodeError, TypeError) as e:
+            #         logging.warning(f"Failed to read/parse existing diarized file {diarized_json_path}: {e}. Overwrite=False.")
+            #         return audio_file_path, None # Treat as transcription failure
+            #
+            # # Generate new diarized transcription (or overwrite existing)
+            # logging.info(f"Generating/Overwriting diarized transcription for {audio_file_path}")
+            # # This function needs access to the audio file and models
+            # # It should handle internal errors (like transcription errors)
+            # diarized_segments = combine_transcription_and_diarization(audio_file_path) # Ensure this function exists and works
+            #
+            # if diarized_segments is None: # Check if generation failed
+            #     logging.error(f"Diarization failed for {audio_file_path}")
+            #     return audio_file_path, None # Return path, but None segments
+            #
+            # # Save generated/overwritten diarized segments
+            # try:
+            #     with open(diarized_json_path, 'w', encoding='utf-8') as f:
+            #         json.dump(diarized_segments, f, indent=2) # Save prettified
+            #     logging.info(f"Saved generated diarized segments to {diarized_json_path}")
+            # except Exception as e:
+            #      logging.error(f"Failed to save diarized segments to {diarized_json_path}: {e}")
+            #      # Continue, but log the error. The segments are in memory.
+            #
+            # return audio_file_path, diarized_segments
+
+        # 4. Handle Non-Diarized Path
+        else:
+            logging.info(f"Processing without diarization for {audio_file_path}")
+            # Check if non-diarized JSON exists
+            if os.path.exists(segments_json_path) and not overwrite:
+                logging.info(f"Segments file already exists (overwrite=False): {segments_json_path}")
+                try:
+                    with open(segments_json_path, 'r', encoding='utf-8') as file:
+                        loaded_data = json.load(file)
+                    # Handle potential structures: {'segments': [...]} or just [...]
+                    if isinstance(loaded_data, dict) and "segments" in loaded_data:
+                        segments = loaded_data["segments"]
+                    elif isinstance(loaded_data, list):
+                        segments = loaded_data
+                    else:
+                        raise ValueError("JSON structure is not a list or {'segments': list}")
+
+                    # Basic validation
+                    if isinstance(segments, list) and all(isinstance(s, dict) and 'Text' in s for s in segments):
+                        logging.debug(f"Loaded valid segments from existing file.")
+                        return audio_file_path, segments
+                    else:
+                        logging.warning(f"Existing segments file {segments_json_path} has invalid format, but overwrite=False.")
+                        return audio_file_path, None # Treat as transcription failure
+                except (json.JSONDecodeError, ValueError, TypeError, KeyError) as e:
+                    logging.warning(f"Failed to read/parse existing segments file {segments_json_path}: {e}. Overwrite=False.")
+                    return audio_file_path, None # Treat as transcription failure
+
+            # Generate new transcription (or overwrite existing)
+            logging.info(f"Generating/Overwriting transcription for {audio_file_path}")
+            # Ensure re_generate_transcription handles errors from speech_to_text
+            _ , segments = re_generate_transcription(
+                audio_file_path,
+                transcription_model,
+                vad_use,
+                selected_source_lang=transcription_language # Pass language
+            )
+
+            if segments is None: # Check if generation failed
+                 logging.error(f"Transcription generation failed for {audio_file_path}")
+                 return audio_file_path, None # Return path, None segments
+
+            # Saving is handled within speech_to_text called by re_generate_transcription
+            # but we already checked for overwrite flag above. If overwrite=True,
+            # speech_to_text should ideally handle the overwrite when saving.
+            # If speech_to_text doesn't handle overwrite, you might need to explicitly delete
+            # the old file here before calling re_generate_transcription if overwrite is True.
+
+            logging.info(f"Successfully generated/loaded transcription for {audio_file_path}")
+            return audio_file_path, segments
+
+    except Exception as e:
+        # Catch-all for unexpected errors during the process
+        logging.error(f"Unexpected error in perform_transcription for {video_path}: {e}", exc_info=True)
+        # If conversion succeeded, return path, else None. Always return None for segments on error.
+        return (audio_file_path, None) if audio_file_path else (None, None)
+
+
+def re_generate_transcription(audio_file_path, whisper_model, vad_filter, selected_source_lang='en'):
+    """Placeholder: Assumed to call speech_to_text and handle errors."""
+    logging.info(f"Regenerating transcription for {audio_file_path} using model {whisper_model}")
+    try:
+        # IMPORTANT: Pass all necessary parameters to speech_to_text
+        segments = speech_to_text(
+            audio_file_path=audio_file_path,
+            whisper_model=whisper_model,
+            selected_source_lang=selected_source_lang,  # Ensure language is passed
+            vad_filter=vad_filter,
+            diarize=False  # Explicitly false for non-diarized regeneration
+        )
+        # speech_to_text now returns the segments list directly on success (or raises error)
+        # It might return {'segments': [...]} if loading from an existing file structure. Adapt if necessary.
+        if isinstance(segments, dict) and 'segments' in segments:
+            actual_segments = segments['segments']
+        else:
+            actual_segments = segments  # Assuming it returns the list directly now or handles errors by raising
+
+        if not actual_segments:
+            logging.warning(f"Re-generation yielded no segments for {audio_file_path}")
+            return audio_file_path, None  # Return path but None segments on empty result
+
+        logging.info(f"Successfully re-generated transcription for {audio_file_path}")
+        return audio_file_path, actual_segments
+    except RuntimeError as e:
+        logging.error(f"RuntimeError during re_generate_transcription for {audio_file_path}: {e}")
+        return audio_file_path, None  # Return path but None segments on error
+    except Exception as e:
+        logging.error(f"Unexpected error during re_generate_transcription for {audio_file_path}: {e}", exc_info=True)
+        return audio_file_path, None  # Return path but None segments on error
+
 
 #####################################
 # Memory-Saving Indefinite Recording
@@ -580,39 +759,76 @@ class WhisperModel(OriginalWhisperModel):
         **model_kwargs: Any
     ):
         if download_root is None:
-            download_root = self.default_download_root
+            download_root = self.default_download_root # Use your default path
 
-        os.makedirs(download_root, exist_ok=True)
+        os.makedirs(download_root, exist_ok=True) # Ensure your target directory exists
+        resolved_identifier = model_size_or_path # Start with the original input
 
-        # FIXME - validate....
-        # Also write an integration test...
-        # Check if model_size_or_path is a valid model size
-        if model_size_or_path in self.valid_model_sizes:
-            # It's a model size, so we'll use the download_root
-            model_path = os.path.join(download_root, model_size_or_path)
-            if not os.path.isdir(model_path):
-                # If it doesn't exist, we'll let the parent class download it
-                model_size_or_path = model_size_or_path  # Keep the original model size
-            else:
-                # If it exists, use the full path
-                model_size_or_path = model_path
+        # Check 1: Does it contain '/' and is NOT an existing local directory/file?
+        # This is likely a Hugging Face Hub ID.
+        is_potential_hub_id = '/' in model_size_or_path and not os.path.exists(model_size_or_path)
+
+        # Check 2: Is it an existing local directory or file?
+        is_existing_local_path = os.path.exists(model_size_or_path)
+
+        if is_potential_hub_id:
+            # Assume it's a Hub ID - pass it directly to faster-whisper.
+            # faster-whisper will handle downloading it (potentially respecting download_root if configured).
+            logging.info(f"Treating '{model_size_or_path}' as a Hugging Face Hub ID.")
+            resolved_identifier = model_size_or_path # Pass the Hub ID string as is
+        elif is_existing_local_path:
+            # It's a local path that exists - pass the absolute path.
+             logging.info(f"Treating '{model_size_or_path}' as an existing local path.")
+             resolved_identifier = os.path.abspath(model_size_or_path)
         else:
-            # It's not a valid model size, so assume it's a path
-            model_size_or_path = os.path.abspath(model_size_or_path)
+            # Assume it's a standard model size name (e.g., "large-v3").
+            # Let faster-whisper handle finding/downloading this standard model.
+            # It will likely use the provided `download_root` or its internal default cache.
+            logging.info(f"Treating '{model_size_or_path}' as a standard model size name.")
+            resolved_identifier = model_size_or_path # Pass the name
 
-        super().__init__(
-            model_size_or_path,
-            device=device,
-            device_index=device_index,
-            compute_type=compute_type,
-            cpu_threads=cpu_threads,
-            num_workers=num_workers,
-            download_root=download_root,
-            local_files_only=local_files_only,
-# Maybe? idk, FIXME
-#            files=files,
-#            **model_kwargs
+            custom_path_check = os.path.join(download_root, model_size_or_path)
+            if os.path.isdir(custom_path_check):
+                logging.info(f"Found standard model '{model_size_or_path}' in custom download root: {custom_path_check}")
+                resolved_identifier = custom_path_check # Use the local path
+            else:
+                logging.info(f"Standard model '{model_size_or_path}' not in custom root. Passing name to faster-whisper.")
+                # resolved_identifier remains the model size name
+
+        # --- Pass the determined identifier and other args to the parent ---
+        logging.info(
+             f"Initializing faster-whisper with: model='{resolved_identifier}', "
+             f"device='{device}', compute_type='{compute_type}', "
+             f"download_root='{download_root}', local_files_only={local_files_only}"
         )
+
+        try:
+            super().__init__(
+                model_size_or_path=resolved_identifier, # Use the corrected identifier
+                device=device,
+                device_index=device_index,
+                compute_type=compute_type,
+                cpu_threads=cpu_threads,
+                num_workers=num_workers,
+                download_root=download_root, # Pass your custom root
+                local_files_only=local_files_only,
+                **model_kwargs
+            )
+            self.model_identifier = resolved_identifier # Store for reference if needed
+            logging.info(f"Successfully initialized WhisperModel: {resolved_identifier}")
+
+        except ValueError as e:
+            # Error during faster-whisper init (e.g., invalid model, download failed)
+            logging.error(f"Failed to initialize faster_whisper.WhisperModel with '{resolved_identifier}': {e}", exc_info=True)
+            # Provide a more specific error message based on the likely cause
+            if "Invalid model size" in str(e) or "could not be found" in str(e):
+                 raise ValueError(f"The model identifier '{resolved_identifier}' is invalid or could not be loaded/downloaded. Check the name/path and ensure it's accessible.") from e
+            else:
+                 raise ValueError(f"Error initializing model '{resolved_identifier}': {e}") from e
+        except Exception as e:
+             # Catch other unexpected errors
+             logging.error(f"An unexpected error occurred during faster_whisper.WhisperModel initialization with '{resolved_identifier}': {e}", exc_info=True)
+             raise RuntimeError(f"Unexpected error loading model: {resolved_identifier} - {e}") from e
 
 # Implement FIXME
 def unload_whisper_model():
@@ -622,15 +838,31 @@ def unload_whisper_model():
         whisper_model_instance = None
         gc.collect()
 
+whisper_model_cache = {}
 
-def get_whisper_model(model_name, device, ):
-    #FIXME - remove call to huggingface if whisper model exists on device
-    global whisper_model_instance
-    if whisper_model_instance is None:
-        logging.info(f"Initializing new WhisperModel with size {model_name} on device {device}")
-        # FIXME - add compute_type="int8"
-        whisper_model_instance = WhisperModel(model_name, device=device, compute_type="default")
-    return whisper_model_instance
+def get_whisper_model(model_name, device):
+    compute_type = "float16" if "cuda" in device else "int8" # Example compute type logic
+    cache_key = (model_name, device, compute_type)
+
+    if cache_key not in whisper_model_cache:
+        logging.info(f"Cache miss. Initializing WhisperModel for key: {cache_key}")
+        try:
+            # This now calls the *corrected* WhisperModel.__init__
+            instance = WhisperModel(
+                model_size_or_path=model_name,
+                device=device,
+                compute_type=compute_type
+                # Pass download_root explicitly here if it's NOT handled by the class default
+                # download_root=WhisperModel.default_download_root
+            )
+            whisper_model_cache[cache_key] = instance
+        except (ValueError, RuntimeError) as e:
+            logging.error(f"Fatal error creating whisper model instance for key {cache_key}: {e}")
+            raise # Re-raise the exception
+    else:
+        logging.debug(f"Cache hit. Reusing existing WhisperModel instance for key: {cache_key}")
+
+    return whisper_model_cache[cache_key]
 
 
 # Transcribe .wav into .segments.json
@@ -656,8 +888,24 @@ def speech_to_text(
     diarize: bool = False
 ):
     """
-    Transcribe audio to text using a Whisper model and optionally handle diarization.
-    Saves JSON output to {filename}-whisper_model-{model}.segments.json in the same directory.
+    Transcribe audio to text using a Whisper model.
+    Returns a list of segment dictionaries or raises RuntimeError on failure.
+
+    Args:
+        audio_file_path: Path to the WAV audio file.
+        whisper_model: Name or path of the faster-whisper model.
+        selected_source_lang: Language code (e.g., 'en', 'es') or None for auto-detect.
+        vad_filter: Apply Voice Activity Detection filter.
+        diarize: Placeholder for diarization flag (not implemented in this function).
+
+    Returns:
+        List[Dict]: A list of segments, where each segment is a dict containing
+                   'start_seconds', 'end_seconds', and 'Text'.
+
+    Raises:
+        ValueError: If no audio file path is provided.
+        RuntimeError: If transcription fails or produces no segments.
+        FileNotFoundError: If the audio file does not exist.
     """
 
     log_counter("speech_to_text_attempt", labels={"file_path": audio_file_path, "model": whisper_model})
@@ -669,53 +917,58 @@ def speech_to_text(
 
     # Convert the string to a Path object and ensure it's resolved (absolute path)
     file_path = Path(audio_file_path).resolve()
-    logging.info("speech-to-text: Audio file path: {file_path}")
+    if not file_path.exists():
+        log_counter("speech_to_text_error", labels={"error": "Audio file not found", "file_path": str(file_path)})
+        raise FileNotFoundError(f"speech-to-text: Audio file not found at {file_path}")
+
+    logging.info(f"speech-to-text: Starting transcription for: {file_path}")
+    logging.info(f"speech-to-text: Model={whisper_model}, Lang={selected_source_lang or 'auto'}, VAD={vad_filter}")
 
     try:
-        # Get file extension and base name
-        file_ending = file_path.suffix
-
         # Construct output filenames in the same directory as the input file
         sanitized_whisper_model_name = sanitize_filename(whisper_model)
         out_file = file_path.with_name(f"{file_path.stem}-whisper_model-{sanitized_whisper_model_name}.segments.json")
         prettified_out_file = file_path.with_name(f"{file_path.stem}-whisper_model-{sanitized_whisper_model_name}.segments_pretty.json")
 
-        if out_file.exists():
-            logging.info(f"speech-to-text: Segments file already exists: {out_file}")
-            with out_file.open() as f:
-                segments = json.load(f)
-            return segments
+        options = dict(beam_size=5, best_of=5, vad_filter=vad_filter) # Simplified beam options
+        # FIXME - was 10? Evaluate...
+        if selected_source_lang:
+            options["language"] = selected_source_lang
+        # Add word_timestamps=True if needed later for more granular data
+        # options["word_timestamps"] = True
 
-        logging.info('speech-to-text: Starting transcription...')
-        # FIXME - revisit this
-        options = dict(language=selected_source_lang, beam_size=10, best_of=10, vad_filter=vad_filter)
         transcribe_options = dict(task="transcribe", **options)
-        # use function and config at top of file
-        logging.debug(f"speech-to-text: Using whisper model: {whisper_model}", )
 
+        # Get model instance (cached)
         whisper_model_instance = get_whisper_model(whisper_model, processing_choice)
+
+        # Perform transcription
         segments_raw, info = whisper_model_instance.transcribe(str(file_path), **transcribe_options)
+
+        detected_lang = info.language
+        lang_prob = info.language_probability
+        logging.info(f"speech-to-text: Detected language: {detected_lang} (Confidence: {lang_prob:.2f})")
+        # You might want to store detected_lang somewhere if using auto-detect
 
         segments = []
         for segment_chunk in segments_raw:
-            # Format time from seconds to HH:MM:SS
-            start_str = format_time(segment_chunk.start)
-            end_str = format_time(segment_chunk.end)
-
+            # Store raw float seconds
             chunk = {
-                "Time_Start": start_str,
-                "Time_End": end_str,
-                "Text": segment_chunk.text
+                "start_seconds": segment_chunk.start,
+                "end_seconds": segment_chunk.end,
+                "Text": segment_chunk.text.strip() # Strip whitespace from text
             }
             logging.debug(f"Segment: {chunk}")
             segments.append(chunk)
-            logging.info(f"{start_str} - {end_str} | {segment_chunk.text}")  # Use HH:MM:SS in logs
+            # Log with limited precision for readability
+            logging.debug(f"Segment: [{chunk['start_seconds']:.2f}-{chunk['end_seconds']:.2f}] {chunk['Text'][:100]}...")
 
         if segments:
             # Insert metadata at the start of the first segment if desired
             segments[0]["Text"] = (
-                f"This text was transcribed using whisper model: {whisper_model}\n\n"
-                + segments[0]["Text"]
+                f"This text was transcribed using whisper model: {whisper_model}\n"
+                f"Detected language: {detected_lang}\n\n"
+                f"{segments[0]['Text']}"
             )
 
         if not segments:
@@ -723,44 +976,25 @@ def speech_to_text(
             raise RuntimeError("No transcription produced. The audio file may be invalid or empty.")
 
         transcription_time = time.time() - time_start
-        logging.info(f"speech-to-text: Transcription completed in {transcription_time} seconds")
+        logging.info(f"speech-to-text: Transcription completed in {transcription_time:.2f} seconds. Segments: {len(segments)}")
         log_histogram(
             "speech_to_text_duration",
             transcription_time,
             labels={"file_path": str(file_path), "model": whisper_model}
         )
-        log_counter("speech_to_text_success", labels={"file_path": str(file_path), "model": whisper_model})
+        log_counter("speech_to_text_success", labels={"file_path": str(file_path), "model": whisper_model, "segments": len(segments)})
 
-        # Save the segments to a JSON file - prettified and non-prettified
-        # FIXME refactor so this is an optional flag to save either the prettified json file or the normal one
-        save_json = True
-        if save_json:
-            logging.info("speech-to-text: Saving segments to JSON file")
-            output_data = {'segments': segments}
-
-            logging.info(f"speech-to-text: Saving JSON to {out_file}",)
-            with out_file.open('w', encoding='utf-8') as f:
-                json.dump(output_data, f)
-
-            # free up memory
-            del output_data
-            gc.collect()
-
-            logging.info(f"speech-to-text: Saving prettified JSON to {prettified_out_file}")
-            with prettified_out_file.open('w', encoding='utf-8') as f:
-                json.dump({'segments': segments}, f, indent=2)
-
-        logging.debug(f"speech-to-text: returning {segments[:500]}")
-        gc.collect()
-        return segments
+        gc.collect() # Suggest garbage collection
+        return segments # Return the list of segment dictionaries
 
     except Exception as e:
-        logging.error(f"speech-to-text: Error transcribing audio: {e}")
+        logging.error(f"speech-to-text: Error transcribing audio file {file_path}: {e}", exc_info=True)
         log_counter(
             "speech_to_text_error",
-            labels={"file_path": str(file_path), "model": whisper_model, "error": str(e)}
+            labels={"file_path": str(file_path), "model": whisper_model, "error": type(e).__name__}
         )
-        raise RuntimeError("speech-to-text: Error transcribing audio") from e
+        # Re-raise as a runtime error for the caller to handle
+        raise RuntimeError(f"speech-to-text: Error during transcription of {file_path.name}") from e
 
 #
 # End of Faster Whisper related functions
@@ -769,6 +1003,38 @@ def speech_to_text(
 ##########################################################
 #
 # Audio Conversion
+
+class ConversionError(Exception):
+    """Custom exception for errors during audio/video conversion."""
+    pass
+
+def _find_ffmpeg() -> str:
+    """Finds the ffmpeg executable."""
+    # 1. Check specific relative path (if applicable to your structure)
+    if os.name == 'nt':
+        # Adjust this path based on your project structure relative to this file
+        # Example: Assuming 'Bin' is two levels up from this script's dir
+        script_dir = Path(__file__).parent
+        bin_dir = script_dir.parent.parent / "Bin" # Adjust depth as needed
+        ffmpeg_exe = bin_dir / "ffmpeg.exe"
+        if ffmpeg_exe.exists():
+            logging.debug(f"Found ffmpeg at specific Windows path: {ffmpeg_exe}")
+            return str(ffmpeg_exe)
+
+    # 2. Check environment variable (useful for Docker/server setups)
+    ffmpeg_env = os.environ.get("FFMPEG_PATH")
+    if ffmpeg_env and Path(ffmpeg_env).exists():
+        logging.debug(f"Found ffmpeg via FFMPEG_PATH env var: {ffmpeg_env}")
+        return ffmpeg_env
+
+    # 3. Check PATH using shutil.which (cross-platform)
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path:
+        logging.debug(f"Found ffmpeg in system PATH: {ffmpeg_path}")
+        return ffmpeg_path
+
+    # 4. If not found, raise error
+    raise FileNotFoundError("ffmpeg executable not found in Bin directory, FFMPEG_PATH, or system PATH.")
 
 # os.system(r'.\Bin\ffmpeg.exe -ss 00:00:00 -i "{video_file_path}" -ar 16000 -ac 1 -c:a pcm_s16le "{out_path}"')
 #DEBUG
@@ -786,6 +1052,22 @@ def convert_to_wav(video_file_path, offset=0, overwrite=False):
         log_counter("convert_to_wav_skipped", labels={"file_path": video_file_path})
         return out_path
 
+    # Get the directory containing the 'app' folder (assuming main.py is one level up)
+    APP_DIR = Path(__file__).resolve().parent.parent.parent  # Goes up 3 levels: Audio -> Ingestion -> core -> app
+    BIN_DIR = APP_DIR / "Bin"
+    FFMPEG_WIN_PATH = BIN_DIR / "ffmpeg.exe"
+
+    if os.name == "nt":
+        logging.debug("ffmpeg being ran on windows")
+        # Use the calculated absolute path
+        ffmpeg_cmd = str(FFMPEG_WIN_PATH)
+        if not FFMPEG_WIN_PATH.exists():
+             # Fallback to PATH if the specific one isn't found
+             logging.warning(f"ffmpeg not found at {ffmpeg_cmd}. Trying 'ffmpeg' from PATH.")
+             ffmpeg_cmd = "ffmpeg"
+        logging.debug(f"ffmpeg_cmd: {ffmpeg_cmd}")
+    else:
+        ffmpeg_cmd = 'ffmpeg'
     print("Starting conversion process of .m4a to .WAV")
     out_path = os.path.splitext(video_file_path)[0] + ".wav"
 

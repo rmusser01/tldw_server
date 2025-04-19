@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 # External Imports
 #
 # Local Imports
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
 from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_xml
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
 from tldw_Server_API.app.core.Utils.Utils import logging
@@ -75,7 +75,7 @@ def import_xml_handler(import_file, title, author, keywords, system_prompt,
         if auto_summarize and api_name and api_key:
             # Combine all chunks for summarization
             full_text = '\n'.join(chunk['text'] for chunk in chunks)
-            summary = perform_summarization(api_name, full_text, custom_prompt, api_key)
+            summary = summarize(api_name, full_text, custom_prompt, api_key)
         else:
             summary = "No summary provided"
 

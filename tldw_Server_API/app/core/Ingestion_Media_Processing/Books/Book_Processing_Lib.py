@@ -29,7 +29,7 @@ import html2text
 #
 # Import Local
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords, add_media_to_database
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
 from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_ebook_by_chapters, improved_chunking_process
 from tldw_Server_API.app.core.Metrics.metrics_logger import (log_counter, log_histogram)
 from tldw_Server_API.app.core.Utils.Utils import logging
@@ -587,10 +587,10 @@ def process_epub(
                 chunk_metadata = chunk.get('metadata', {}) # Get existing metadata
                 if chunk_text:
                     try:
-                        summary_text = perform_summarization(
+                        summary_text = summarize(
                             api_name=api_name,
                             input_data=chunk_text, # Pass input_data instead of text_to_summarize
-                            custom_prompt_input=custom_prompt, # Pass custom_prompt_input
+                            custom_prompt_arg=custom_prompt, # Pass custom_prompt_input
                             api_key=api_key,
                             recursive_summarization=False, # Summarize each chunk individually first
                             temp=None, # Optional temp
@@ -618,10 +618,10 @@ def process_epub(
                 if summarize_recursively and len(chunk_summaries) > 1:
                     logging.info("Performing recursive summarization on chunk summaries.")
                     try:
-                        final_summary = perform_summarization(
+                        final_summary = summarize(
                             api_name=api_name,
                             input_data="\n\n---\n\n".join(chunk_summaries), # Join summaries clearly
-                            custom_prompt_input=custom_prompt or "Provide a concise overall summary of the following chapter summaries.", # Recursive prompt
+                            custom_prompt_arg=custom_prompt or "Provide a concise overall summary of the following chapter summaries.", # Recursive prompt
                             api_key=api_key,
                             recursive_summarization=False, # Final pass
                             temp=None,
@@ -956,7 +956,7 @@ def _process_markup_or_plain_text(
                 chunk_metadata = chunk.get('metadata', {})
                 if chunk_text:
                     try:
-                        summary_text = perform_summarization(api_name, chunk_text, custom_prompt, api_key, False, None, system_prompt)
+                        summary_text = summarize(api_name, chunk_text, custom_prompt, api_key, system_prompt, None, False, )
                         if summary_text and summary_text.strip():
                             chunk_summaries.append(summary_text)
                             chunk_metadata['summary'] = summary_text
@@ -977,7 +977,7 @@ def _process_markup_or_plain_text(
                 if summarize_recursively and len(chunk_summaries) > 1:
                     logging.info("Performing recursive summarization on chunk summaries.")
                     try:
-                        final_summary = perform_summarization(api_name, "\n\n---\n\n".join(chunk_summaries), custom_prompt or "Provide an overall summary.", api_key, False, None, system_prompt)
+                        final_summary = summarize(api_name, "\n\n---\n\n".join(chunk_summaries), custom_prompt or "Provide an overall summary.", api_key, system_prompt, None, False,)
                         if not final_summary or not final_summary.strip():
                             logging.warning(f"Recursive summarization for {file_path} yielded empty result. Falling back.")
                             final_summary = "\n\n---\n\n".join(chunk_summaries)

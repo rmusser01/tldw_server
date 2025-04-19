@@ -26,7 +26,7 @@ import pymupdf
 import pymupdf4llm
 #
 # Import Local
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 from tldw_Server_API.app.core.Utils.Utils import logging
@@ -454,10 +454,10 @@ def process_pdf(
                 if chunk_text:
                     try:
                         # Call the external summarization library function
-                        summary_text = perform_summarization(
+                        summary_text = summarize(
                             api_name=api_name,
                             input_data=chunk_text,
-                            custom_prompt_input=custom_prompt, # User's custom prompt, if any
+                            custom_prompt_arg=custom_prompt, # User's custom prompt, if any
                             api_key=api_key,
                             recursive_summarization=False, # Summarize this single chunk first
                             temp=None, # Optional temperature parameter
@@ -505,11 +505,11 @@ def process_pdf(
 
                     try:
                         # Call perform_summarization again on the combined text
-                        final_summary = perform_summarization(
+                        final_summary = summarize(
                             api_name=api_name,
                             input_data=combined_summaries_text,
                             # Use the original custom prompt, or a default recursive prompt if none provided
-                            custom_prompt_input=custom_prompt or "Provide a concise overall summary of the preceding text sections.",
+                            custom_prompt_arg=custom_prompt or "Provide a concise overall summary of the preceding text sections.",
                             api_key=api_key,
                             recursive_summarization=False, # This is the final summarization pass
                             temp=None,

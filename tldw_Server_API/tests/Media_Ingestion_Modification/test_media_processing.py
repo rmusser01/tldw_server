@@ -3,16 +3,18 @@
 #
 # Imports
 import os
-import pytest
-from fastapi.testclient import TestClient
+import sys
 from pathlib import Path
 import time
+#
+import pytest
+from fastapi.testclient import TestClient
+from loguru import logger
 #
 ######################################################################################################################
 #
 # Functions:
 # --- Test Setup ---
-
 
 # Assuming your FastAPI app instance is created in 'app.main'
 # Adjust the import path according to your project structure
@@ -191,7 +193,7 @@ class TestProcessVideos:
         response = client.post(self.ENDPOINT, data={}, headers=auth_headers)
         # Expect 400 based on _validate_inputs logic
         assert response.status_code == 400
-        assert "No valid video sources supplied" in response.json()["detail"]
+        assert "At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided." in response.json()["detail"]
 
     def test_process_video_validation_error(self, client, auth_headers):
         """Test sending invalid form data (e.g., bad chunk overlap)."""
@@ -211,10 +213,10 @@ class TestProcessVideos:
             "perform_analysis": "true",
             "perform_chunking": "true",
             "chunk_size": "500",  # Adjust if needed for your test video
-            "chunk_overlap": "100"
+            "chunk_overlap": "100",
             # Add api_name/api_key if required by your analysis library and not configured globally
-            # "api_name": "your_api",
-            # "api_key": "your_key"
+            "api_name": "openai",
+            "api_key": "lol-yea-right"
         }
         response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)

@@ -20,22 +20,20 @@ import inspect
 import json
 import os
 import time
-from typing import Optional
+from typing import Optional, Union, Generator, Any, Dict, List, Callable
 #
+# 3rd-Party Imports
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
-
 #
 # Import Local
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import convert_to_wav, speech_to_text
 from tldw_Server_API.app.core.Utils.Chunk_Lib import (
     semantic_chunking,
     rolling_summarize,
     recursive_summarize_chunks,
     improved_chunking_process
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Diarization_Lib import combine_transcription_and_diarization
 from tldw_Server_API.app.core.LLM_Calls.Local_Summarization_Lib import (
     summarize_with_llama,
     summarize_with_kobold,
@@ -50,10 +48,6 @@ from tldw_Server_API.app.core.LLM_Calls.Local_Summarization_Lib import (
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
 from tldw_Server_API.app.core.Utils.Utils import (
     load_and_log_configs,
-    sanitize_filename,
-    clean_youtube_url,
-    create_download_directory,
-    is_valid_url,
     logging
 )
 #
@@ -64,83 +58,491 @@ from tldw_Server_API.app.core.Utils.Utils import (
 loaded_config_data = load_and_log_configs()
 openai_api_key = loaded_config_data.get('openai_api', {}).get('api_key', None)
 
-def summarize(
-    input_data: str,
+#######################################################################################################################
+# Helper Function Definitions
+#
+
+# --- Keep existing helper functions ---
+def extract_text_from_segments(segments: List[Dict]) -> str:
+    # (Keep existing implementation)
+    logging.debug(f"Segments received: {segments}")
+    logging.debug(f"Type of segments: {type(segments)}")
+    text = ""
+    if isinstance(segments, list):
+        for segment in segments:
+            # logging.debug(f"Current segment: {segment}") # Can be verbose
+            # logging.debug(f"Type of segment: {type(segment)}")
+            if isinstance(segment, dict) and 'Text' in segment:
+                text += segment['Text'] + " "
+            elif isinstance(segment, dict) and 'text' in segment: # Adding flexibility for key case
+                 text += segment['text'] + " "
+            else:
+                logging.warning(f"Skipping segment due to missing 'Text' key or wrong type: {segment}")
+    elif isinstance(segments, str): # Allow passing a pre-joined string
+        logging.debug("Segments received as a single string.")
+        text = segments
+    else:
+        logging.warning(f"Unexpected type of 'segments': {type(segments)}. Trying to convert to string.")
+        text = str(segments) # Attempt conversion
+
+    return text.strip()
+
+
+def recursive_summarize_chunks(
+    chunks: List[str],
+    summarize_func: Callable[[str], str] # Function now only needs to accept the text
+) -> str:
+    """
+    Recursively processes chunks by combining the result of the previous step
+    with the next chunk and applying the summarize_func.
+
+    This is suitable for tasks like recursive summarization where context
+    from the previous summary is needed for the next chunk.
+
+    Args:
+        chunks: A list of text chunks to process.
+        summarize_func: A function that takes a single string argument (the text
+                        to process) and returns a single string result (the summary
+                        or analysis). This function should handle its own configuration
+                        (like API keys, prompts, temperature) internally or via closure.
+                        It should also handle potential errors and return an error string
+                        (e.g., starting with "Error:") if processing fails.
+
+    Returns:
+        A single string representing the final result after processing all chunks,
+        or an error string if any step failed. Returns an empty string if
+        the input chunks list is empty.
+    """
+    if not chunks:
+        logging.warning("recursive_summarize_chunks called with empty chunk list.")
+        return ""
+
+    logging.info(f"Starting recursive processing of {len(chunks)} chunks.")
+    current_summary = ""
+
+    for i, chunk in enumerate(chunks):
+        logging.debug(f"Processing chunk {i+1}/{len(chunks)} recursively.")
+        text_to_process: str
+
+        if i == 0:
+            # Process the first chunk directly
+            text_to_process = chunk
+            logging.debug(f"Processing first chunk (length {len(text_to_process)}).")
+        else:
+            # Combine the previous summary with the current chunk
+            # Add a separator for clarity for the LLM
+            combined_text = f"{current_summary}\n\n---\n\n{chunk}"
+            text_to_process = combined_text
+            logging.debug(f"Processing combination of previous summary and chunk {i+1} (total length {len(text_to_process)}).")
+
+        # Apply the processing function
+        try:
+            step_result = summarize_func(text_to_process)
+
+            # Check if the processing function indicated an error
+            if isinstance(step_result, str) and step_result.startswith("Error:"):
+                logging.error(f"Error during recursive step {i+1}: {step_result}")
+                return step_result # Propagate the error immediately
+
+            if not isinstance(step_result, str):
+                 # This shouldn't happen if summarize_func adheres to the contract, but good to check
+                 logging.error(f"Recursive step {i+1} did not return a string. Got: {type(step_result)}")
+                 return f"Error: Processing step {i+1} returned unexpected type {type(step_result)}"
+
+            current_summary = step_result
+            logging.debug(f"Chunk {i+1} processed. Current summary length: {len(current_summary)}")
+
+        except Exception as e:
+            logging.exception(f"Unexpected error calling summarize_func during recursive step {i+1}: {e}", exc_info=True)
+            return f"Error: Unexpected failure during recursive step {i+1}: {e}"
+
+    logging.info("Recursive processing completed successfully.")
+    return current_summary
+
+
+def extract_text_from_input(input_data: Any) -> str:
+    """Extracts usable text content from various input types."""
+    logging.debug(f"Extracting text from input of type: {type(input_data)}")
+    if isinstance(input_data, str):
+        # Check if it's a file path
+        if os.path.isfile(input_data):
+            logging.debug(f"Input is a file path: {input_data}")
+            try:
+                with open(input_data, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                # Attempt to parse as JSON, otherwise return raw content
+                try:
+                    data = json.loads(content)
+                    logging.debug("File content parsed as JSON.")
+                    return extract_text_from_input(data) # Recurse with parsed data
+                except json.JSONDecodeError:
+                    logging.debug("File content is not JSON, returning raw text.")
+                    return content.strip()
+            except Exception as e:
+                logging.error(f"Error reading file {input_data}: {e}")
+                return ""
+        # Check if it's a JSON string
+        elif input_data.strip().startswith('{') or input_data.strip().startswith('['):
+             logging.debug("Input is potentially a JSON string.")
+             try:
+                 data = json.loads(input_data)
+                 logging.debug("Input string parsed as JSON.")
+                 return extract_text_from_input(data) # Recurse with parsed data
+             except json.JSONDecodeError:
+                 logging.debug("Input string is not JSON, treating as plain text.")
+                 return input_data.strip()
+        # Otherwise, treat as plain text
+        else:
+            logging.debug("Input is a plain text string.")
+            return input_data.strip()
+
+    elif isinstance(input_data, dict):
+        logging.debug("Input is a dictionary.")
+        # Prioritize known structures
+        if 'transcription' in input_data:
+            logging.debug("Extracting text from 'transcription' field.")
+            return extract_text_from_segments(input_data['transcription'])
+        elif 'segments' in input_data:
+            logging.debug("Extracting text from 'segments' field.")
+            return extract_text_from_segments(input_data['segments'])
+        elif 'text' in input_data:
+             logging.debug("Extracting text from 'text' field.")
+             return str(input_data['text']).strip()
+        elif 'content' in input_data:
+             logging.debug("Extracting text from 'content' field.")
+             return str(input_data['content']).strip()
+        else:
+            # Fallback: try to convert the whole dict to string (might be noisy)
+            logging.warning("No specific text field found in dict, converting entire dict to string.")
+            try:
+                return json.dumps(input_data, indent=2)
+            except Exception:
+                 return str(input_data) # Final fallback
+
+    elif isinstance(input_data, list):
+        logging.debug("Input is a list, assuming list of segments.")
+        # Assume it's a list of segments like {'Text': '...'} or {'text': '...'}
+        return extract_text_from_segments(input_data)
+
+    else:
+        logging.warning(f"Unhandled input type: {type(input_data)}. Attempting string conversion.")
+        return str(input_data).strip()
+
+
+# --- Internal API Dispatcher ---
+def _dispatch_to_api(
+    text_to_summarize: str,
     custom_prompt_arg: Optional[str],
     api_name: str,
     api_key: Optional[str],
     temp: Optional[float],
     system_message: Optional[str],
-    streaming: Optional[bool] = False
-):
+    streaming: bool
+) -> Union[str, Generator[str, None, None], None]:
+    """
+    Internal function to call the appropriate API-specific summarization function.
+    Handles the mapping from api_name to the actual function call.
+    """
     try:
-        logging.debug(f"api_name type: {type(api_name)}, value: {api_name}")
-        if api_name.lower() == "openai":
-            return summarize_with_openai(api_key, input_data, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "anthropic":
-            return summarize_with_anthropic(api_key, input_data, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "cohere":
-            return summarize_with_cohere(api_key, input_data, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "google":
-            return summarize_with_google(api_key, input_data, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "groq":
-            return summarize_with_groq(api_key, input_data, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "huggingface":
-            return summarize_with_huggingface(api_key, input_data, custom_prompt_arg, temp, streaming)
-        elif api_name.lower() == "openrouter":
-            return summarize_with_openrouter(api_key, input_data, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "deepseek":
-            return summarize_with_deepseek(api_key, input_data, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "mistral":
-            return summarize_with_mistral(api_key, input_data, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "llama.cpp":
-            return summarize_with_llama(input_data, custom_prompt_arg, api_key, temp, system_message, streaming)
-        elif api_name.lower() == "kobold":
-            return summarize_with_kobold(input_data, api_key, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "ooba":
-            return summarize_with_oobabooga(input_data, api_key, custom_prompt_arg, system_message,
-                                                                      temp=None, api_url=None, streaming=False)
-        elif api_name.lower() == "tabbyapi":
-            return summarize_with_tabbyapi(input_data, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "vllm":
-            return summarize_with_vllm(api_key, input_data, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "local-llm":
-            return summarize_with_local_llm(input_data, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "huggingface":
-            return summarize_with_huggingface(api_key, input_data, custom_prompt_arg, temp, streaming)#system_message)
-        elif api_name.lower() == "custom-openai-api":
-            return summarize_with_custom_openai(api_key, input_data, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "custom-openai-api-2":
-            return summarize_with_custom_openai(api_key, input_data, custom_prompt_arg, temp, system_message, streaming)
-        elif api_name.lower() == "ollama":
-            return summarize_with_ollama(input_data, custom_prompt_arg, None, api_key, temp, system_message, streaming)
+        api_name_lower = api_name.lower()
+        logging.debug(f"Dispatching to API: {api_name_lower}")
+
+        # Ensure required args for specific functions are handled if needed
+        # (e.g., model might be loaded from config inside specific funcs)
+
+        # NOTE: The specific functions (summarize_with_openai, etc.) should
+        # handle their own internal logic for loading API keys from config if
+        # the provided api_key is None. They also handle loading models, etc.
+        # We just pass the parameters along.
+
+        if api_name_lower == "openai":
+            return summarize_with_openai(api_key, text_to_summarize, custom_prompt_arg, temp, system_message, streaming)
+        elif api_name_lower == "anthropic":
+            # Anthropic might need model passed explicitly or loaded in its func
+            return summarize_with_anthropic(api_key, text_to_summarize, custom_prompt_arg, temp, system_message, streaming)
+        elif api_name_lower == "cohere":
+            return summarize_with_cohere(api_key, text_to_summarize, custom_prompt_arg, temp, system_message, streaming)
+        elif api_name_lower == "google":
+            return summarize_with_google(api_key, text_to_summarize, custom_prompt_arg, temp, system_message, streaming)
+        elif api_name_lower == "groq":
+            return summarize_with_groq(api_key, text_to_summarize, custom_prompt_arg, temp, system_message, streaming)
+        elif api_name_lower == "huggingface":
+             # HuggingFace might need specific handling for system_message if not directly supported
+            return summarize_with_huggingface(api_key, text_to_summarize, custom_prompt_arg, temp, streaming) # system_message not directly passed? Check func def.
+        elif api_name_lower == "openrouter":
+            return summarize_with_openrouter(api_key, text_to_summarize, custom_prompt_arg, temp, system_message, streaming)
+        elif api_name_lower == "deepseek":
+            return summarize_with_deepseek(api_key, text_to_summarize, custom_prompt_arg, temp, system_message, streaming)
+        elif api_name_lower == "mistral":
+            return summarize_with_mistral(api_key, text_to_summarize, custom_prompt_arg, temp, system_message, streaming)
+        # --- Local LLM Calls ---
+        elif api_name_lower == "llama.cpp":
+            return summarize_with_llama(text_to_summarize, custom_prompt_arg, api_key, temp, system_message, streaming)
+        elif api_name_lower == "kobold":
+            return summarize_with_kobold(text_to_summarize, api_key, custom_prompt_arg, temp, system_message, streaming)
+        elif api_name_lower == "ooba":
+            # Ooba might need api_url from config inside its function
+            return summarize_with_oobabooga(text_to_summarize, api_key, custom_prompt_arg, system_message, temp=temp, streaming=streaming)
+        elif api_name_lower == "tabbyapi":
+            return summarize_with_tabbyapi(text_to_summarize, custom_prompt_arg, temp, system_message, streaming)
+        elif api_name_lower == "vllm":
+            return summarize_with_vllm(api_key, text_to_summarize, custom_prompt_arg, temp, system_message, streaming)
+        elif api_name_lower == "local-llm":
+            return summarize_with_local_llm(text_to_summarize, custom_prompt_arg, temp, system_message, streaming)
+        elif api_name_lower == "custom-openai-api":
+            # Custom OpenAI likely needs base_url from config inside its function
+            return summarize_with_custom_openai(api_key, text_to_summarize, custom_prompt_arg, temp, system_message, streaming)
+        elif api_name_lower == "custom-openai-api-2":
+             # Custom OpenAI likely needs base_url from config inside its function
+            return summarize_with_custom_openai_2(api_key, text_to_summarize, custom_prompt_arg, temp, system_message, streaming) # Assuming this exists
+        elif api_name_lower == "ollama":
+            # Ollama might need model param or load from config
+            return summarize_with_ollama(text_to_summarize, custom_prompt_arg, None, api_key, temp, system_message, streaming) # Passing None for model, assuming func handles it
         else:
-            return f"Error: Invalid API Name {api_name}"
+            error_msg = f"Error: Invalid API Name '{api_name}'"
+            logging.error(error_msg)
+            return error_msg
 
     except Exception as e:
-        logging.error(f"Error in summarize function: {str(e)}", exc_info=True)
-        return f"Error: {str(e)}"
+        logging.error(f"Error during dispatch to API '{api_name}': {str(e)}", exc_info=True)
+        return f"Error calling API {api_name}: {str(e)}"
 
+# --- Main Summarization Function ---
+def summarize(
+    api_name: str,
+    input_data: Any,
+    custom_prompt_arg: Optional[str],
+    api_key: Optional[str] = None,
+    system_message: Optional[str] = None,
+    temp: Optional[float] = None,
+    streaming: bool = False,
+    recursive_summarization: bool = False,
+    chunked_summarization: bool = False, # Summarize chunks separately & combine
+    chunk_options: Optional[dict] = None
+) -> Union[str, Generator[str, None, None]]:
+    """
+    Performs summarization using a specified API, with optional chunking strategies.
 
-def extract_text_from_segments(segments):
-    logging.debug(f"Segments received: {segments}")
-    logging.debug(f"Type of segments: {type(segments)}")
+    Args:
+        input_data: Data to summarize (text string, file path to JSON, dict, list of dicts).
+        custom_prompt_arg: Custom prompt instructions for the LLM.
+        api_name: Name of the API service to use (e.g., 'openai', 'anthropic', 'ollama').
+        api_key: Optional API key. If None, the specific API function will attempt to load from config.
+        temp: Optional temperature setting for the LLM (default varies by API).
+        system_message: Optional system message/persona for the LLM. If None, a default is used.
+        streaming: If True, attempts to return a generator for streaming output.
+                   NOTE: Streaming output is only supported when NO chunking strategy is used.
+                   If chunking is enabled, the function will process internally and return a final string.
+        recursive_summarization: If True, uses a recursive summarization strategy:
+                                 Summarize chunk 1 -> Combine summary 1 + chunk 2 -> Summarize -> ...
+        chunked_summarization: If True, summarizes each chunk individually and concatenates the results.
+                               Mutually exclusive with recursive_summarization.
+        chunk_options: Dictionary of options for the chunking process (passed to improved_chunking_process).
+                       Defaults: {'method': 'words', 'max_size': 1000, 'overlap': 100}.
 
-    text = ""
+    Returns:
+        - A string containing the final summary.
+        - A generator yielding summary tokens if streaming=True AND no chunking is used.
+        - An error string (starting with "Error:") if summarization fails.
+    """
+    # Load config here if needed for top-level decisions, otherwise let specific funcs handle it
+    # loaded_config_data = load_and_log_configs() # Load once if needed globally
+    logging.info(f"Starting summarization process. API: {api_name}, Recursive: {recursive_summarization}, Chunked: {chunked_summarization}, Streaming: {streaming}")
 
-    if isinstance(segments, list):
-        for segment in segments:
-            logging.debug(f"Current segment: {segment}")
-            logging.debug(f"Type of segment: {type(segment)}")
-            if 'Text' in segment:
-                text += segment['Text'] + " "
+    if recursive_summarization and chunked_summarization:
+        error_msg = "Error: Cannot perform both recursive and chunked summarization simultaneously."
+        logging.error(error_msg)
+        return error_msg
+
+    # Set default system message if not provided
+    if system_message is None:
+        logging.debug("Using default system message.")
+        system_message = (
+            "You are a bulleted notes specialist. ```When creating comprehensive bulleted notes, "
+            "you should follow these guidelines: Use multiple headings based on the referenced topics, "
+            "not categories like quotes or terms. Headings should be surrounded by bold formatting and not be "
+            "listed as bullet points themselves. Leave no space between headings and their corresponding list items "
+            "underneath. Important terms within the content should be emphasized by setting them in bold font. "
+            "Any text that ends with a colon should also be bolded. Before submitting your response, review the "
+            "instructions, and make any corrections necessary to adhered to the specified format. Do not reference "
+            "these instructions within the notes.``` \nBased on the content between backticks create comprehensive "
+            "bulleted notes.\n"
+            "**Bulleted Note Creation Guidelines**\n\n"
+            "**Headings**:\n"
+            "- Based on referenced topics, not categories like quotes or terms\n"
+            "- Surrounded by **bold** formatting\n"
+            "- Not listed as bullet points\n"
+            "- No space between headings and list items underneath\n\n"
+            "**Emphasis**:\n"
+            "- **Important terms** set in bold font\n"
+            "- **Text ending in a colon**: also bolded\n\n"
+            "**Review**:\n"
+            "- Ensure adherence to specified format\n"
+            "- Do not reference these instructions in your response."
+        )
+
+    try:
+        # 1. Extract text content from input_data
+        text_content = extract_text_from_input(input_data)
+        if not text_content:
+            logging.error("Could not extract text content from input data.")
+            return "Error: Could not extract text content."
+        logging.info(f"Extracted text content length: {len(text_content)} characters.")
+        logging.debug(f"Extracted text content (first 500 chars): {text_content[:500]}...")
+
+        # --- Define helper to consume potential generators ---
+        def consume_generator(gen):
+            if inspect.isgenerator(gen):
+                logging.debug("Consuming generator stream...")
+                result_list = []
+                try:
+                    for chunk in gen:
+                        if isinstance(chunk, str):
+                             result_list.append(chunk)
+                        else:
+                             logging.warning(f"Generator yielded non-string chunk: {type(chunk)}")
+                    final_string = "".join(result_list)
+                    logging.debug("Generator consumed.")
+                    return final_string
+                except Exception as e:
+                     logging.error(f"Error consuming generator: {e}", exc_info=True)
+                     return f"Error consuming stream: {e}"
+            return gen # Return as is if not a generator
+
+        # --- Chunking and Summarization Logic ---
+        final_result: Union[str, Generator[str, None, None], None] = None
+        effective_streaming_for_api_call = False # Default for chunking modes
+
+        # Default chunk options
+        default_chunk_opts = {'method': 'sentences', 'max_size': 500, 'overlap': 200}
+        current_chunk_options = chunk_options if isinstance(chunk_options, dict) else default_chunk_opts
+
+        if recursive_summarization:
+            logging.info("Performing recursive summarization.")
+            chunks_data = improved_chunking_process(text_content, current_chunk_options) # Renamed variable for clarity
+            if not chunks_data:
+                logging.warning("Recursive summarization: Chunking produced no chunks.")
+                return "Error: Recursive summarization failed - no chunks generated."
+
+            # Extract just the text from the chunk data
+            text_chunks = [chunk['text'] for chunk in chunks_data]
+            logging.debug(f"Generated {len(text_chunks)} text chunks for recursive summarization.")
+
+            # Define the summarizer function for recursive_summarize_chunks
+            # It must accept ONE argument (the text) and return the summary string.
+            # It captures necessary variables (api_name, key, temp, prompts, etc.) from the outer scope (closure).
+            # It must handle potential errors from the API call and return an error string if needed.
+            def recursive_step_processor(text_to_summarize: str) -> str:
+                logging.debug(f"recursive_step_processor called with text length: {len(text_to_summarize)}")
+                # Force non-streaming for internal steps and consume immediately
+                api_result = _dispatch_to_api(
+                    text_to_summarize,
+                    custom_prompt_arg,  # Custom prompt is handled by _dispatch_to_api
+                    api_name,
+                    api_key,
+                    temp,
+                    system_message,  # System message is handled by _dispatch_to_api
+                    streaming=False  # IMPORTANT: Force non-streaming for internal recursive steps
+                )
+                # consume_generator handles both strings and generators, returning a string
+                processed_result = consume_generator(api_result)
+
+                # Ensure the result is a string (consume_generator should do this)
+                if not isinstance(processed_result, str):
+                    logging.error(f"API dispatch/consumption did not return a string. Got: {type(processed_result)}")
+                    # Return an error string that recursive_summarize_chunks can detect
+                    return f"Error: Internal summarization step failed to produce string output (got {type(processed_result)})"
+
+                logging.debug(f"recursive_step_processor finished. Result length: {len(processed_result)}")
+                # Return the result string (which could be a summary or an error message from consume_generator)
+                return processed_result
+
+            # Call the simplified recursive_summarize_chunks utility
+            # It now only needs the list of text chunks and the processing function
+            final_result = recursive_summarize_chunks(
+                chunks=text_chunks,
+                summarize_func=recursive_step_processor
+            )
+            # The result of recursive_summarize_chunks is now the final string summary or an error string
+
+        elif chunked_summarization:
+            logging.info("Performing chunked summarization (summarize each, then combine).")
+            chunks = improved_chunking_process(text_content, current_chunk_options)
+            if not chunks:
+                logging.warning("Chunked summarization: Chunking produced no chunks.")
+                return "Error: Chunked summarization failed - no chunks generated."
+            logging.debug(f"Generated {len(chunks)} chunks for chunked summarization.")
+
+            chunk_summaries = []
+            for i, chunk in enumerate(chunks):
+                logging.debug(f"Summarizing chunk {i+1}/{len(chunks)}")
+                # Summarize each chunk - force non-streaming for API call
+                chunk_summary_result = _dispatch_to_api(
+                    chunk['text'], custom_prompt_arg, api_name, api_key,
+                    temp, system_message, streaming=False # Force non-streaming
+                )
+                # Consume generator immediately
+                processed_chunk_summary = consume_generator(chunk_summary_result)
+
+                if isinstance(processed_chunk_summary, str) and not processed_chunk_summary.startswith("Error:"):
+                    chunk_summaries.append(processed_chunk_summary)
+                else:
+                    error_detail = processed_chunk_summary if isinstance(processed_chunk_summary, str) else "Unknown error"
+                    logging.warning(f"Failed to summarize chunk {i+1}: {error_detail}")
+                    chunk_summaries.append(f"[Error summarizing chunk {i+1}: {error_detail}]") # Add error placeholder
+
+            # Combine the summaries
+            final_result = "\n\n---\n\n".join(chunk_summaries) # Join with a separator
+
+        else:
+            # No chunking - direct summarization
+            logging.info("Performing direct summarization (no chunking).")
+            # Use the user's requested streaming setting for the API call
+            effective_streaming_for_api_call = streaming
+            final_result = _dispatch_to_api(
+                 text_content, custom_prompt_arg, api_name, api_key,
+                 temp, system_message, streaming=effective_streaming_for_api_call
+            )
+
+        # --- Post-processing and Return ---
+
+        # If streaming was requested AND no chunking was done AND result is a generator, return it directly
+        if streaming and not recursive_summarization and not chunked_summarization and inspect.isgenerator(final_result):
+            logging.info("Returning generator for streaming output.")
+            return final_result
+        else:
+            # Otherwise, consume any potential generator to get the final string
+            logging.debug("Consuming final result (if generator) as streaming=False or chunking was used.")
+            final_string_summary = consume_generator(final_result)
+
+            # Final check and return
+            if final_string_summary is None:
+                logging.error("Summarization resulted in None after processing.")
+                return "Error: Summarization failed unexpectedly."
+            elif isinstance(final_string_summary, str) and final_string_summary.startswith("Error:"):
+                logging.error(f"Summarization failed: {final_string_summary}")
+                return final_string_summary
+            elif isinstance(final_string_summary, str):
+                logging.info(f"Summarization completed successfully. Final Length: {len(final_string_summary)}")
+                logging.debug(f"Final Summary (first 500 chars): {final_string_summary[:500]}...")
+                return final_string_summary
             else:
-                logging.warning(f"Skipping segment due to missing 'Text' key: {segment}")
-    else:
-        logging.warning(f"Unexpected type of 'segments': {type(segments)}")
+                # This case should ideally not be reached if consume_generator works correctly
+                logging.error(f"Unexpected final result type after processing: {type(final_string_summary)}")
+                return f"Error: Unexpected result type {type(final_string_summary)}"
 
-    return text.strip()
+    except Exception as e:
+        logging.error(f"Critical error in summarize function: {str(e)}", exc_info=True)
+        return f"Error: An unexpected error occurred during summarization: {str(e)}"
 
+#
+# End of Summarization Function
+###################################################################################
+
+
+###################################################################################
+#
+# API Calls
 
 def summarize_with_openai(api_key, input_data, custom_prompt_arg, temp=None, system_message=None, streaming=False):
     try:
@@ -156,60 +558,31 @@ def summarize_with_openai(api_key, input_data, custom_prompt_arg, temp=None, sys
             logging.error("OpenAI: #2 API key not found or is empty")
             return "OpenAI: API Key Not Provided/Found in Config file or is empty"
 
-        openai_api_key = api_key
-        logging.debug(f"OpenAI: Using API Key: {api_key[:5]}...{api_key[-5:]}")
+        # API key handling: prioritize parameter, then config
+        effective_api_key = api_key
+        if not effective_api_key or not effective_api_key.strip():
+            logging.info("OpenAI Summarize: API key not provided or empty, using config.")
+            effective_api_key = loaded_config_data.get('openai_api', {}).get('api_key', "")
 
-        # Input data handling
-        logging.debug(f"OpenAI: Raw input data type: {type(input_data)}")
-        logging.debug(f"OpenAI: Raw input data (first 500 chars): {str(input_data)[:500]}...")
+        if not effective_api_key or not effective_api_key.strip():
+            logging.error("OpenAI: API key not found or is empty (checked param and config).")
+            return "Error: OpenAI API Key Not Provided/Found or is empty."
 
-        if isinstance(input_data, str):
-            if input_data.strip().startswith('{'):
-                # It's likely a JSON string
-                logging.debug("OpenAI: Parsing provided JSON string data for summarization")
-                try:
-                    data = json.loads(input_data)
-                except json.JSONDecodeError as e:
-                    logging.error(f"OpenAI: Error parsing JSON string: {str(e)}")
-                    return f"OpenAI: Error parsing JSON input: {str(e)}"
-            elif os.path.isfile(input_data):
-                logging.debug("OpenAI: Loading JSON data from file for summarization")
-                with open(input_data, 'r') as file:
-                    data = json.load(file)
-            else:
-                logging.debug("OpenAI: Using provided string data for summarization")
-                data = input_data
-        else:
-            data = input_data
-
-        logging.debug(f"OpenAI: Processed data type: {type(data)}")
-        logging.debug(f"OpenAI: Processed data (first 500 chars): {str(data)[:500]}...")
-
-        # Text extraction
-        if isinstance(data, dict):
-            if 'summary' in data:
-                logging.debug("OpenAI: Summary already exists in the loaded data")
-                return data['summary']
-            elif 'segments' in data:
-                text = extract_text_from_segments(data['segments'])
-            else:
-                text = json.dumps(data)  # Convert dict to string if no specific format
-        elif isinstance(data, list):
-            text = extract_text_from_segments(data)
-        elif isinstance(data, str):
-            text = data
-        else:
-            raise ValueError(f"OpenAI: Invalid input data format: {type(data)}")
-
-        logging.debug(f"OpenAI: Extracted text (first 500 chars): {text[:500]}...")
-        logging.debug(f"OpenAI: Custom prompt: {custom_prompt_arg}")
-
-        config_settings = load_and_log_configs()
-        openai_model = config_settings['openai_api']['model'] or "gpt-4o"
+        # Model handling: load from config
+        openai_model = loaded_config_data.get('openai_api', {}).get('model') or "gpt-4o" # Default model
         logging.debug(f"OpenAI: Using model: {openai_model}")
 
+        # NOTE: input_data passed to this function should *already be the extracted text*
+        # by the time the main `summarize` function calls `_dispatch_to_api`.
+        # So, the complex input parsing logic previously here is removed.
+        text = str(input_data) # Ensure it's a string
+
+        logging.debug(f"OpenAI: Received text length: {len(text)}")
+        logging.debug(f"OpenAI: Custom prompt: {custom_prompt_arg}")
+        logging.debug(f"OpenAI: Temperature: {temp}, System Message: {system_message}, Streaming: {streaming}")
+
         headers = {
-            'Authorization': f'Bearer {openai_api_key}',
+            'Authorization': f'Bearer {effective_api_key}',
             'Content-Type': 'application/json'
         }
 
@@ -217,12 +590,16 @@ def summarize_with_openai(api_key, input_data, custom_prompt_arg, temp=None, sys
             f"OpenAI API Key: {openai_api_key[:5]}...{openai_api_key[-5:] if openai_api_key else None}")
         logging.debug("openai: Preparing data + prompt for submittal")
         openai_prompt = f"{text} \n\n\n\n{custom_prompt_arg}"
-        if temp is None:
+        if temp is None: temp = 0.7
+        if system_message is None: system_message = "You are a helpful AI assistant."
+        try:
+            temp = float(temp)
+        except (ValueError, TypeError):
+            logging.warning(f"Invalid temperature value '{temp}', using default 0.7")
             temp = 0.7
-        if system_message is None:
-            system_message = "You are a helpful AI assistant who does whatever the user requests."
-        temp = float(temp)
-        data = {
+
+
+        payload = {
             "model": openai_model,
             "messages": [
                 {"role": "system", "content": system_message},
@@ -234,106 +611,75 @@ def summarize_with_openai(api_key, input_data, custom_prompt_arg, temp=None, sys
             "stream": streaming
         }
 
+        # --- Retry Logic --- (Copied from original, seems reasonable)
+        session = requests.Session()
+        retry_count = loaded_config_data.get('openai_api', {}).get('api_retries', 3)
+        retry_delay = loaded_config_data.get('openai_api', {}).get('api_retry_delay', 1) # Using 1s default backoff factor
+        retry_strategy = Retry(
+            total=retry_count,
+            backoff_factor=retry_delay,
+            status_forcelist=[429, 500, 502, 503, 504], # Added 500
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter) # Mount for http too if needed
+
+        api_url = loaded_config_data.get('openai_api', {}).get('api_base_url', 'https://api.openai.com/v1') + '/chat/completions'
+
+
+        logging.debug(f"OpenAI: Posting request to {api_url}")
+        response = session.post(
+            api_url,
+            headers=headers,
+            json=payload,
+            stream=streaming,
+            timeout=loaded_config_data.get('openai_api', {}).get('api_timeout', 120) # Add timeout
+        )
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+
         if streaming:
-            # Create a session
-            session = requests.Session()
-
-            # Load config values
-            retry_count = loaded_config_data['openai_api']['api_retries']
-            retry_delay = loaded_config_data['openai_api']['api_retry_delay']
-
-            # Configure the retry strategy
-            retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-            )
-
-            # Create the adapter
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            logging.debug("Custom OpenAI API-2: Posting request")
-            logging.debug("OpenAI: Posting streaming request")
-            response = session.post(
-                'https://api.openai.com/v1/chat/completions',
-                headers=headers,
-                json=data,
-                stream=True
-            )
-            response.raise_for_status()
-
+            logging.debug("OpenAI: Processing streaming response.")
             def stream_generator():
-                collected_messages = ""
-                for line in response.iter_lines():
-                    line = line.decode("utf-8").strip()
-
-                    if line == "":
-                        continue
-
-                    if line.startswith("data: "):
-                        data_str = line[len("data: "):]
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            data_json = json.loads(data_str)
-                            chunk = data_json["choices"][0]["delta"].get("content", "")
-                            collected_messages += chunk
-                            yield chunk
-                        except json.JSONDecodeError:
-                            logging.error(f"OpenAI: Error decoding JSON from line: {line}")
-                            continue
-
+                try:
+                    for line in response.iter_lines():
+                        line = line.decode("utf-8").strip()
+                        if not line: continue
+                        if line.startswith("data: "):
+                            data_str = line[len("data: "):]
+                            if data_str == "[DONE]": break
+                            try:
+                                data_json = json.loads(data_str)
+                                chunk = data_json["choices"][0]["delta"].get("content", "")
+                                yield chunk
+                            except json.JSONDecodeError:
+                                logging.error(f"OpenAI Stream: Error decoding JSON: {data_str}")
+                                continue
+                            except (KeyError, IndexError) as e:
+                                logging.error(f"OpenAI Stream: Unexpected structure: {data_str} - Error: {e}")
+                                continue
+                except Exception as stream_error:
+                     logging.error(f"OpenAI Stream: Error during streaming: {stream_error}", exc_info=True)
+                     yield f"Error during streaming: {stream_error}" # Yield error in stream
+                finally:
+                     response.close() # Ensure connection is closed
             return stream_generator()
         else:
-            # Create a session
-            session = requests.Session()
-
-            # Load config values
-            retry_count = loaded_config_data['openai_api']['api_retries']
-            retry_delay = loaded_config_data['openai_api']['api_retry_delay']
-
-            # Configure the retry strategy
-            retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-            )
-
-            # Create the adapter
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            logging.debug("OpenAI: Posting request")
-            response = session.post('https://api.openai.com/v1/chat/completions', headers=headers, json=data)
-
-            if response.status_code == 200:
-                response_data = response.json()
-                if 'choices' in response_data and len(response_data['choices']) > 0:
-                    summary = response_data['choices'][0]['message']['content'].strip()
-                    logging.debug("OpenAI: Summarization successful")
-                    logging.debug(f"OpenAI: Summary (first 500 chars): {summary[:500]}...")
-                    return summary
-                else:
-                    logging.warning("OpenAI: Summary not found in the response data")
-                    return "OpenAI: Summary not available"
+            logging.debug("OpenAI: Processing non-streaming response.")
+            response_data = response.json()
+            if 'choices' in response_data and len(response_data['choices']) > 0 and 'message' in response_data['choices'][0] and 'content' in response_data['choices'][0]['message']:
+                summary = response_data['choices'][0]['message']['content'].strip()
+                logging.debug("OpenAI: Summarization successful (non-streaming).")
+                return summary
             else:
-                logging.error(f"OpenAI: Summarization failed with status code {response.status_code}")
-                logging.error(f"OpenAI: Error response: {response.text}")
-                return f"OpenAI: Failed to process summary. Status code: {response.status_code}"
-    except json.JSONDecodeError as e:
-        logging.error(f"OpenAI: Error decoding JSON: {str(e)}", exc_info=True)
-        return f"OpenAI: Error decoding JSON input: {str(e)}"
-    except requests.RequestException as e:
-        logging.error(f"OpenAI: Error making API request: {str(e)}", exc_info=True)
-        return f"OpenAI: Error making API request: {str(e)}"
+                logging.warning(f"OpenAI: Summary not found in response: {response_data}")
+                return "Error: OpenAI Summary not found in response."
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"OpenAI: API request failed: {str(e)}", exc_info=True)
+        return f"Error: OpenAI API request failed: {str(e)}"
     except Exception as e:
         logging.error(f"OpenAI: Unexpected error: {str(e)}", exc_info=True)
-        return f"OpenAI: Unexpected error occurred: {str(e)}"
+        return f"Error: OpenAI unexpected error: {str(e)}"
 
 
 def summarize_with_anthropic(api_key, input_data, custom_prompt_arg, temp=None, system_message=None, streaming=False, max_retries=3, retry_delay=5):
@@ -1856,297 +2202,6 @@ def summarize_with_google(api_key, input_data, custom_prompt_arg, temp=None, sys
 
 #
 #
-#######################################################################################################################
-#
-#
-# Gradio File Processing
-
-# Handle multiple videos as input
-def process_video_urls(url_list, num_speakers, whisper_model, custom_prompt_input, offset, api_name, api_key, vad_filter,
-                       download_video_flag, download_audio, rolling_summarization, detail_level, question_box,
-                       keywords, chunk_text_by_words, max_words, chunk_text_by_sentences, max_sentences,
-                       chunk_text_by_paragraphs, max_paragraphs, chunk_text_by_tokens, max_tokens,  chunk_by_semantic,
-                       semantic_chunk_size, semantic_chunk_overlap, recursive_summarization, full_text_with_metadata):
-    global current_progress
-    progress = []  # This must always be a list
-    status = []  # This must always be a list
-
-    if custom_prompt_input is None:
-        custom_prompt_input = """
-            You are a bulleted notes specialist. ```When creating comprehensive bulleted notes, you should follow these guidelines: Use multiple headings based on the referenced topics, not categories like quotes or terms. Headings should be surrounded by bold formatting and not be listed as bullet points themselves. Leave no space between headings and their corresponding list items underneath. Important terms within the content should be emphasized by setting them in bold font. Any text that ends with a colon should also be bolded. Before submitting your response, review the instructions, and make any corrections necessary to adhered to the specified format. Do not reference these instructions within the notes.``` \nBased on the content between backticks create comprehensive bulleted notes.
-    **Bulleted Note Creation Guidelines**
-
-    **Headings**:
-    - Based on referenced topics, not categories like quotes or terms
-    - Surrounded by **bold** formatting 
-    - Not listed as bullet points
-    - No space between headings and list items underneath
-
-    **Emphasis**:
-    - **Important terms** set in bold font
-    - **Text ending in a colon**: also bolded
-
-    **Review**:
-    - Ensure adherence to specified format
-    - Do not reference these instructions in your response.</s> {{ .Prompt }} """
-
-    def update_progress(index, url, message):
-        progress.append(f"Processing {index + 1}/{len(url_list)}: {url}")  # Append to list
-        status.append(message)  # Append to list
-        return "\n".join(progress), "\n".join(status)  # Return strings for display
-
-
-    for index, url in enumerate(url_list):
-        try:
-            logging.info(f"Starting to process video {index + 1}/{len(url_list)}: {url}")
-            transcription, summary, json_file_path, summary_file_path, _, _ = process_url(url=url,
-                                                                                          num_speakers=num_speakers,
-                                                                                          whisper_model=whisper_model,
-                                                                                          custom_prompt_input=custom_prompt_input,
-                                                                                          offset=offset,
-                                                                                          api_name=api_name,
-                                                                                          api_key=api_key,
-                                                                                          vad_filter=vad_filter,
-                                                                                          download_video_flag=download_video_flag,
-                                                                                          download_audio=download_audio,
-                                                                                          rolling_summarization=rolling_summarization,
-                                                                                          detail_level=detail_level,
-                                                                                          question_box=question_box,
-                                                                                          keywords=keywords,
-                                                                                          chunk_text_by_words=chunk_text_by_words,
-                                                                                          max_words=max_words,
-                                                                                          chunk_text_by_sentences=chunk_text_by_sentences,
-                                                                                          max_sentences=max_sentences,
-                                                                                          chunk_text_by_paragraphs=chunk_text_by_paragraphs,
-                                                                                          max_paragraphs=max_paragraphs,
-                                                                                          chunk_text_by_tokens=chunk_text_by_tokens,
-                                                                                          max_tokens=max_tokens,
-                                                                                          chunk_by_semantic=chunk_by_semantic,
-                                                                                          semantic_chunk_size=semantic_chunk_size,
-                                                                                          semantic_chunk_overlap=semantic_chunk_overlap,
-                                                                                          recursive_summarization=recursive_summarization,
-                                                                                          full_text_with_metadata=full_text_with_metadata)
-            # Update progress and transcription properly
-
-            current_progress, current_status = update_progress(index, url, "Video processed and ingested into the database.")
-            logging.info(f"Successfully processed video {index + 1}/{len(url_list)}: {url}")
-
-            time.sleep(1)
-        except Exception as e:
-            logging.error(f"Error processing video {index + 1}/{len(url_list)}: {url}")
-            logging.error(f"Error details: {str(e)}")
-            current_progress, current_status = update_progress(index, url, f"Error: {str(e)}")
-
-        yield current_progress, current_status, None, None, None, None
-
-    success_message = "All videos have been transcribed, summarized, and ingested into the database successfully."
-    return current_progress, success_message, None, None, None, None
-    #return current_progress, success_message, summary, json_file_path, summary_file_path, None
-
-def perform_transcription(video_path, offset, whisper_model, vad_filter, diarize=False, overwrite=False):
-    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import convert_to_wav, speech_to_text
-    temp_files = []
-    logging.info(f"Processing media: {video_path}")
-    global segments_json_path
-    audio_file_path = convert_to_wav(video_path, offset)
-    logging.debug(f"Converted audio file: {audio_file_path}")
-    temp_files.append(audio_file_path)
-    logging.debug("Setting up segments JSON path")
-
-    # Update path to include whisper model in filename
-    base_path = audio_file_path.replace('.wav', '')
-
-    whisper_model_sanitized = whisper_model.replace("/", "_").replace("\\", "_")
-    segments_json_path = f"{base_path}-whisper_model-{whisper_model_sanitized}.segments.json"
-    temp_files.append(segments_json_path)
-
-    if diarize:
-        diarized_json_path = f"{base_path}-whisper_model-{whisper_model}.diarized.json"
-
-        # Check if diarized JSON already exists and is valid
-        if os.path.exists(diarized_json_path):
-            logging.info(f"Diarized file already exists: {diarized_json_path}")
-            try:
-                with open(diarized_json_path, 'r', encoding='utf-8') as file:
-                    diarized_segments = json.load(file)
-                # Check if segments are empty or invalid
-                if not diarized_segments or not isinstance(diarized_segments, list):
-                    if not overwrite:
-                        logging.info("Overwrite flag not set. Existing file not overwritten.")
-                        return None, "Overwrite flag not set. Existing file not overwritten."
-                    logging.warning(f"Diarized JSON file is empty or invalid, re-generating: {diarized_json_path}")
-                    raise ValueError("Invalid diarized JSON file")
-                # Check if segments contain expected content
-                if not all('Text' in segment for segment in diarized_segments):
-                    if not overwrite:
-                        logging.info("Overwrite flag not set. Existing file not overwritten.")
-                        return None, "Overwrite flag not set. Existing file not overwritten."
-                    logging.warning(f"Diarized segments missing required fields, re-generating: {diarized_json_path}")
-                    raise ValueError("Invalid segment format")
-                logging.debug(f"Loaded valid diarized segments from {diarized_json_path}")
-                return audio_file_path, diarized_segments
-            except (json.JSONDecodeError, ValueError) as e:
-                if not overwrite:
-                    logging.info("Overwrite flag not set. Existing file not overwritten.")
-                    return None, "Overwrite flag not set. Existing file not overwritten."
-                logging.error(f"Failed to read or parse the diarized JSON file: {e}")
-                if os.path.exists(diarized_json_path):
-                    os.remove(diarized_json_path)
-
-        # Generate new diarized transcription
-        logging.info(f"Generating diarized transcription for {audio_file_path}")
-        diarized_segments = combine_transcription_and_diarization(audio_file_path)
-
-        # Validate diarized segments before saving
-        if not diarized_segments or not isinstance(diarized_segments, list):
-            logging.error("Generated diarized segments are empty or invalid")
-            return None, None
-
-        # Save diarized segments
-        json_str = json.dumps(diarized_segments, indent=2)
-        with open(diarized_json_path, 'w', encoding='utf-8') as f:
-            f.write(json_str)
-
-        return audio_file_path, diarized_segments
-
-    # Non-diarized transcription
-    try:
-        # If segments file exists, try to load it
-        if os.path.exists(segments_json_path):
-            logging.info(f"Segments file already exists: {segments_json_path}")
-            try:
-                with open(segments_json_path, 'r', encoding='utf-8') as file:
-                    loaded_data = json.load(file)
-
-                # If it’s a dictionary with a 'segments' key, extract that list
-                if isinstance(loaded_data, dict) and "segments" in loaded_data:
-                    segments = loaded_data["segments"]
-                else:
-                    # If for some reason it's already a list, or invalid,
-                    # handle that here — e.g.:
-                    segments = loaded_data
-
-                logging.debug(f"First few segments from speech_to_text: {segments[:2]}")
-
-                # Check if segments are empty or invalid
-                if not segments or not isinstance(segments, list):
-                    if not overwrite:
-                        logging.info("Overwrite flag not set. Existing file not overwritten.")
-                        return None, "Overwrite flag not set. Existing file not overwritten."
-                    raise ValueError("Invalid segments JSON file")
-                # Check if segments contain expected content
-                if not all(
-                        isinstance(segment, dict) and all(key in segment for key in ['Text', 'Time_Start', 'Time_End'])
-                        for segment in segments):
-                    if not overwrite:
-                        logging.info("Overwrite flag not set. Existing file not overwritten.")
-                        return None, "Overwrite flag not set. Existing file not overwritten."
-                    raise ValueError("Invalid segment format")
-                logging.debug(f"Loaded valid segments from {segments_json_path}")
-                return audio_file_path, segments
-            except (json.JSONDecodeError, ValueError, KeyError) as e:
-                if not overwrite:
-                    logging.info("Overwrite flag not set. Existing file not overwritten.")
-                    return None, "Overwrite flag not set. Existing file not overwritten."
-                logging.error(f"Failed to read or parse the segments JSON file: {str(e)}")
-                if os.path.exists(segments_json_path):
-                    os.remove(segments_json_path)
-        else:
-            # Generate new transcription if file doesn't exist
-
-            audio_file, segments = re_generate_transcription(audio_file_path, whisper_model, vad_filter)
-            if segments is None:
-                logging.error("Failed to generate new transcription")
-                return None, None
-
-            return audio_file_path, segments
-    except Exception as e:
-        logging.error(f"Error in perform_transcription: {str(e)}")
-        return None, None
-
-
-def re_generate_transcription(audio_file_path, whisper_model, vad_filter):
-    """
-    Re-generate the transcription by calling speech_to_text.
-    """
-    global segments_json_path
-    try:
-        logging.info(f"Generating new transcription for {audio_file_path}")
-        segments = speech_to_text(audio_file_path, whisper_model=whisper_model, vad_filter=vad_filter)
-
-        # Print the first few segments for debugging
-        logging.debug(f"First few segments from speech_to_text: {segments[:2] if segments else 'None'}")
-
-        # Validate segments before saving
-        if not segments or not isinstance(segments, list):
-            logging.error("Generated segments are empty or invalid")
-            return None, None
-
-        if not all(
-                isinstance(segment, dict)
-                and all(key in segment for key in ['Text', 'Time_Start', 'Time_End'])
-                for segment in segments
-        ):
-            logging.error("Generated segments are missing required fields or have invalid format")
-            logging.debug(f"Segments structure: {segments[:2]}")  # Log first two segments for debugging
-            return None, None
-
-        # Save segments to JSON
-        json_str = json.dumps(segments, indent=2)
-        with open(segments_json_path, 'w', encoding='utf-8') as f:
-            f.write(json_str)
-
-        logging.debug(f"Valid transcription segments saved to {segments_json_path}")
-        return audio_file_path, segments
-    except Exception as e:
-        logging.error(f"Error in re_generate_transcription: {str(e)}")
-        return None, None
-
-
-def save_transcription_and_summary(transcription_text, summary_text, download_path, info_dict):
-    try:
-        video_title = sanitize_filename(info_dict.get('title', 'Untitled'))
-
-        # Handle different transcription_text formats
-        if isinstance(transcription_text, dict):
-            if 'transcription' in transcription_text:
-                # Handle the case where it's a dict with 'transcription' key
-                text_to_save = '\n'.join(segment['Text'] for segment in transcription_text['transcription'])
-            else:
-                # Handle other dictionary formats
-                text_to_save = str(transcription_text)
-        elif isinstance(transcription_text, list):
-            # Handle list of segments
-            text_to_save = '\n'.join(segment['Text'] for segment in transcription_text)
-        else:
-            # Handle string input
-            text_to_save = str(transcription_text)
-
-        # Validate the extracted text
-        if not text_to_save or not text_to_save.strip():
-            logging.error("Transcription text is empty or contains only whitespace")
-            return None, None
-
-        # Save transcription
-        transcription_file_path = os.path.join(download_path, f"{video_title}_transcription.txt")
-        with open(transcription_file_path, 'w', encoding='utf-8') as f:
-            f.write(text_to_save)
-
-        # Save summary if available
-        summary_file_path = None
-        if summary_text:
-            if isinstance(summary_text, str) and summary_text.strip():
-                summary_file_path = os.path.join(download_path, f"{video_title}_summary.txt")
-                with open(summary_file_path, 'w', encoding='utf-8') as f:
-                    f.write(summary_text)
-            else:
-                logging.warning("Summary text is not a string or contains only whitespace")
-
-        return transcription_file_path, summary_file_path
-    except Exception as e:
-        logging.error(f"Error in save_transcription_and_summary: {str(e)}", exc_info=True)
-        return None, None
-
 
 # FIXME
 def summarize_chunk(api_name, text, custom_prompt_input, api_key, temp=None, system_message=None):
@@ -2232,111 +2287,6 @@ def format_input_with_metadata(metadata, content):
     return formatted_input
 
 
-def perform_summarization(api_name, input_data, custom_prompt_input, api_key,
-                          recursive_summarization=False, temp=None, system_message=None,
-                          chunked_summarization=False):
-    """
-    Perform summarization on the given input data using the specified API and optional chunking/recursive strategy.
-    This function ensures that if the underlying call produces a generator (e.g. from streaming),
-    we fully consume it here so that only a final string is returned.
-    """
-    loaded_config_data = load_and_log_configs()
-    logging.info("Starting summarization process...")
-
-    if system_message is None:
-        system_message = (
-            "You are a bulleted notes specialist. ```When creating comprehensive bulleted notes, "
-            "you should follow these guidelines: Use multiple headings based on the referenced topics, "
-            "not categories like quotes or terms. Headings should be surrounded by bold formatting and not be "
-            "listed as bullet points themselves. Leave no space between headings and their corresponding list items "
-            "underneath. Important terms within the content should be emphasized by setting them in bold font. "
-            "Any text that ends with a colon should also be bolded. Before submitting your response, review the "
-            "instructions, and make any corrections necessary to adhered to the specified format. Do not reference "
-            "these instructions within the notes.``` \nBased on the content between backticks create comprehensive "
-            "bulleted notes.\n"
-            "**Bulleted Note Creation Guidelines**\n\n"
-            "**Headings**:\n"
-            "- Based on referenced topics, not categories like quotes or terms\n"
-            "- Surrounded by **bold** formatting\n"
-            "- Not listed as bullet points\n"
-            "- No space between headings and list items underneath\n\n"
-            "**Emphasis**:\n"
-            "- **Important terms** set in bold font\n"
-            "- **Text ending in a colon**: also bolded\n\n"
-            "**Review**:\n"
-            "- Ensure adherence to specified format\n"
-            "- Do not reference these instructions in your response."
-        )
-
-    try:
-        logging.debug(f"Input data type: {type(input_data)}")
-        logging.debug(f"Input data (first 500 chars): {str(input_data)[:500]}...")
-
-        # Extract metadata and content from the incoming data.
-        metadata, content = extract_metadata_and_content(input_data)
-        logging.debug(f"Extracted metadata: {metadata}")
-        logging.debug(f"Extracted content (first 500 chars): {content[:500]}...")
-
-        # Prepare a combined "structured" input (e.g. with title/author + content).
-        structured_input = format_input_with_metadata(metadata, content)
-
-        # Decide whether to do chunked or recursive summarization vs. direct summarization.
-        if recursive_summarization:
-            chunk_options = {
-                'method': 'words',     # Could also be 'sentences', 'paragraphs', or 'tokens'
-                'max_size': 1000,      # Adjust chunk size as needed
-                'overlap': 100,        # Overlap between chunks (in words/sentences/etc.)
-                'adaptive': False,
-                'multi_level': False,
-                'language': 'english'
-            }
-            chunks = improved_chunking_process(structured_input, chunk_options)
-            logging.debug(f"Chunking process completed. Number of chunks: {len(chunks)}")
-            logging.debug("Performing recursive summarization on each chunk...")
-
-            summary = recursive_summarize_chunks(
-                [chunk['text'] for chunk in chunks],
-                lambda x: summarize_chunk(api_name, x, custom_prompt_input, api_key),
-                custom_prompt_input, temp, system_message
-            )
-
-        elif chunked_summarization:
-            logging.debug("Using summarize_chunk for chunked summarization.")
-            summary = summarize_chunk(api_name, structured_input, custom_prompt_input, api_key, temp, system_message)
-        else:
-            logging.debug("Using direct summarize (no chunking/recursive).")
-            summary = summarize(structured_input, custom_prompt_input, api_name, api_key, temp, system_message)
-
-        # If the summary is a generator, consume it here
-        if inspect.isgenerator(summary):
-            logging.debug(f"{api_name} returned a generator; consuming it now.")
-            collected = []
-            for token in summary:
-                collected.append(token)
-            summary = "".join(collected)
-
-        # Optional: if summary is valid, write to a file for debugging (only if input_data is a file path).
-        if summary is not None:
-            logging.info(f"Summary generated using {api_name} API")
-            if isinstance(input_data, str) and os.path.exists(input_data):
-                summary_file_path = input_data.replace('.json', '_summary.txt')
-                with open(summary_file_path, 'w', encoding='utf-8') as file:
-                    file.write(summary)
-        else:
-            logging.warning(f"Failed to generate summary using {api_name} API")
-
-        logging.info("Summarization completed successfully.")
-        return summary
-
-    except requests.exceptions.ConnectionError:
-        logging.error("Connection error while summarizing")
-    except Exception as e:
-        logging.error(f"Error summarizing with {api_name}: {str(e)}", exc_info=True)
-        return f"An error occurred during summarization: {str(e)}"
-
-    # Fallback if something unexpected happens.
-    return None
-
 
 def extract_text_from_input(input_data):
     if isinstance(input_data, str):
@@ -2371,245 +2321,6 @@ def extract_text_from_input(input_data):
 
     return '\n\n'.join(text_parts)
 
-
-def process_url(
-        url,
-        num_speakers,
-        whisper_model,
-        custom_prompt_input,
-        offset,
-        api_name,
-        api_key,
-        vad_filter,
-        download_video_flag,
-        download_audio,
-        rolling_summarization,
-        detail_level,
-        # It's for the asking a question about a returned prompt - needs to be removed #FIXME
-        question_box,
-        keywords,
-        chunk_text_by_words,
-        max_words,
-        chunk_text_by_sentences,
-        max_sentences,
-        chunk_text_by_paragraphs,
-        max_paragraphs,
-        chunk_text_by_tokens,
-        max_tokens,
-        chunk_by_semantic,
-        semantic_chunk_size,
-        semantic_chunk_overlap,
-        local_file_path=None,
-        diarize=False,
-        recursive_summarization=False,
-        temp=None,
-        system_message=None,
-        streaming=False,
-        full_text_with_metadata=None):
-    # Handle the chunk summarization options
-    set_chunk_txt_by_words = chunk_text_by_words
-    set_max_txt_chunk_words = max_words
-    set_chunk_txt_by_sentences = chunk_text_by_sentences
-    set_max_txt_chunk_sentences = max_sentences
-    set_chunk_txt_by_paragraphs = chunk_text_by_paragraphs
-    set_max_txt_chunk_paragraphs = max_paragraphs
-    set_chunk_txt_by_tokens = chunk_text_by_tokens
-    set_max_txt_chunk_tokens = max_tokens
-    set_chunk_txt_by_semantic = chunk_by_semantic
-    set_semantic_chunk_size = semantic_chunk_size
-    set_semantic_chunk_overlap = semantic_chunk_overlap
-
-    progress = []
-    success_message = "All videos processed successfully. Transcriptions and summaries have been ingested into the database."
-
-    # Validate input
-    if not url and not local_file_path:
-        return "Process_URL: No URL provided.", "No URL provided.", None, None, None, None, None, None
-
-    if isinstance(url, str):
-        urls = url.strip().split('\n')
-        if len(urls) > 1:
-            return process_video_urls(urls, num_speakers, whisper_model, custom_prompt_input, offset, api_name, api_key, vad_filter,
-                                      download_video_flag, download_audio, rolling_summarization, detail_level, question_box,
-                                      keywords, chunk_text_by_words, max_words, chunk_text_by_sentences, max_sentences,
-                                      chunk_text_by_paragraphs, max_paragraphs, chunk_text_by_tokens, max_tokens, chunk_by_semantic, semantic_chunk_size, semantic_chunk_overlap, recursive_summarization, full_text_with_metadata)
-        else:
-            urls = [url]
-
-    if url and not is_valid_url(url):
-        return "Process_URL: Invalid URL format.", "Invalid URL format.", None, None, None, None, None, None
-
-    if url:
-        # Clean the URL to remove playlist parameters if any
-        url = clean_youtube_url(url)
-        logging.info(f"Process_URL: Processing URL: {url}")
-
-    if api_name:
-        print("Process_URL: API Name received:", api_name)  # Debugging line
-
-    video_file_path = None
-    global info_dict
-
-    # If URL/Local video file is provided
-    try:
-        # Extract video info and create download directory.
-        info_dict, title = extract_video_info(url)
-        download_path = create_download_directory(title)
-        current_whsiper_model = whisper_model
-
-        # Download the video and perform transcription.
-        video_path = download_video(url, download_path, info_dict, download_video_flag, current_whsiper_model)
-        global segments
-        audio_file_path, segments = perform_transcription(video_path, offset, whisper_model, vad_filter)
-
-        # Set transcription_text based on whether diarization is enabled.
-        if diarize:
-            transcription_text = combine_transcription_and_diarization(audio_file_path)
-        else:
-            # Note: transcription_text is a dictionary with keys 'audio_file' and 'transcription'
-            audio_file, segments = perform_transcription(video_path, offset, whisper_model, vad_filter)
-            transcription_text = {'audio_file': audio_file, 'transcription': segments}
-
-        if audio_file_path is None or segments is None:
-            logging.error("Process_URL: Transcription failed or segments not available.")
-            return "Process_URL: Transcription failed.", "Transcription failed.", None, None, None, None
-
-        logging.debug(f"Process_URL: Transcription audio_file: {audio_file_path}")
-        logging.debug(f"Process_URL: Transcription segments: {segments}")
-        logging.debug(f"Process_URL: Transcription text: {transcription_text}")
-
-        # Handle chunking
-        chunked_transcriptions = []
-        if chunk_text_by_words:
-            chunked_transcriptions = chunk_text_by_words(transcription_text['transcription'], max_words)
-        elif chunk_text_by_sentences:
-            chunked_transcriptions = chunk_text_by_sentences(transcription_text['transcription'], max_sentences)
-        elif chunk_text_by_paragraphs:
-            chunked_transcriptions = chunk_text_by_paragraphs(transcription_text['transcription'], max_paragraphs)
-        elif chunk_text_by_tokens:
-            chunked_transcriptions = chunk_text_by_tokens(transcription_text['transcription'], max_tokens)
-        elif chunk_by_semantic:
-            chunked_transcriptions = semantic_chunking(transcription_text['transcription'], semantic_chunk_size, 'tokens')
-
-        # Create a full text with metadata
-        if full_text_with_metadata is None:
-            # If transcription_text is a dictionary, extract the actual transcription text.
-            if isinstance(transcription_text, dict) and 'transcription' in transcription_text:
-                transcription_str = '\n'.join(segment.get('Text', '') for segment in transcription_text['transcription'])
-            elif isinstance(transcription_text, list):
-                transcription_str = '\n'.join(segment.get('Text', '') for segment in transcription_text)
-            else:
-                transcription_str = str(transcription_text)
-            # Concatenate the metadata and the extracted transcription text.
-            full_text_with_metadata = f"{json.dumps(info_dict, indent=2)}\n\n{transcription_str}"
-
-                # If we did chunking, we now have the chunked transcripts in 'chunked_transcriptions'
-        elif rolling_summarization:
-        # FIXME - rolling summarization
-        #     text = extract_text_from_segments(segments)
-        #     summary_text = rolling_summarize_function(
-        #         transcription_text,
-        #         detail=detail_level,
-        #         api_name=api_name,
-        #         api_key=api_key,
-        #         custom_prompt_input=custom_prompt_input,
-        #         chunk_by_words=chunk_text_by_words,
-        #         max_words=max_words,
-        #         chunk_by_sentences=chunk_text_by_sentences,
-        #         max_sentences=max_sentences,
-        #         chunk_by_paragraphs=chunk_text_by_paragraphs,
-        #         max_paragraphs=max_paragraphs,
-        #         chunk_by_tokens=chunk_text_by_tokens,
-        #         max_tokens=max_tokens
-        #     )
-            pass
-        else:
-            pass
-        summarized_chunk_transcriptions = []
-        if (chunk_text_by_words or chunk_text_by_sentences or chunk_text_by_paragraphs or
-            chunk_text_by_tokens or chunk_by_semantic) and api_name:
-            for chunk in chunked_transcriptions:
-                summarized_chunks = []
-                if api_name == "anthropic":
-                    summary = summarize_with_anthropic(api_key, chunk, custom_prompt_input, streaming=False)
-                elif api_name == "cohere":
-                    summary = summarize_with_cohere(api_key, chunk, custom_prompt_input, temp, system_message, streaming)
-                elif api_name == "openai":
-                    summary = summarize_with_openai(api_key, chunk, custom_prompt_input, temp, system_message, streaming)
-                elif api_name == "Groq":
-                    summary = summarize_with_groq(api_key, chunk, custom_prompt_input, temp, system_message, streaming)
-                elif api_name == "DeepSeek":
-                    summary = summarize_with_deepseek(api_key, chunk, custom_prompt_input, temp, system_message, streaming)
-                elif api_name == "OpenRouter":
-                    summary = summarize_with_openrouter(api_key, chunk, custom_prompt_input, temp, system_message, streaming)
-                elif api_name == "Mistral":
-                    summary = summarize_with_mistral(api_key, chunk, custom_prompt_input, temp, system_message, streaming)
-                elif api_name == "Google":
-                    summary = summarize_with_google(api_key, chunk, custom_prompt_input, temp, system_message, streaming)
-                # Local LLM APIs
-                elif api_name == "Llama.cpp":
-                    summary = summarize_with_llama(chunk, custom_prompt_input, api_key, temp, system_message, streaming)
-                elif api_name == "Kobold":
-                    summary = summarize_with_kobold(chunk, None, custom_prompt_input, system_message, temp, streaming)
-                elif api_name == "Ooba":
-                    summary = summarize_with_oobabooga(chunk, None, custom_prompt_input, system_message, temp, api_url=None, streaming=False)
-                elif api_name == "Tabbyapi":
-                    summary = summarize_with_tabbyapi(chunk, custom_prompt_input, system_message, None, temp, streaming)
-                elif api_name == "VLLM":
-                    summary = summarize_with_vllm(chunk, custom_prompt_input, None, None, system_message, streaming)
-                elif api_name == "Ollama":
-                    summary = summarize_with_ollama(chunk, custom_prompt_input, api_key, temp, system_message, None, streaming)
-                elif api_name == "custom_openai_api":
-                    summary = summarize_with_custom_openai(chunk, custom_prompt_input, api_key, temp=None, system_message=None, streaming=streaming)
-                elif api_name == "custom_openai_api_2":
-                    summary = summarize_with_custom_openai_2(chunk, custom_prompt_input, api_key, temp=None,
-                                                           system_message=None, streaming=streaming)
-                else:
-                    summary = None
-                summarized_chunk_transcriptions.append(summary)
-
-                # Combine chunked transcriptions and summaries.
-                combined_transcription_text = '\n\n'.join(chunked_transcriptions)
-                combined_transcription_file_path = os.path.join(download_path, 'combined_transcription.txt')
-                with open(combined_transcription_file_path, 'w') as f:
-                    f.write(combined_transcription_text)
-
-                # Combine summarized chunk transcriptions into a single file
-                combined_summary_text = '\n\n'.join(summarized_chunk_transcriptions)
-                combined_summary_file_path = os.path.join(download_path, 'combined_summary.txt')
-                with open(combined_summary_file_path, 'w') as f:
-                    f.write(combined_summary_text)
-
-        # Determine how to get the final summary.
-        if rolling_summarization:
-            summary_text = rolling_summarize(
-                text=extract_text_from_segments(segments),
-                detail=detail_level,
-                model='gpt-4-turbo',
-                additional_instructions=custom_prompt_input,
-                summarize_recursively=recursive_summarization
-            )
-        elif api_name:
-            summary_text = perform_summarization(api_name, full_text_with_metadata, custom_prompt_input, api_key,
-                                                 recursive_summarization, temp=None)
-        else:
-            summary_text = 'Summary not available'
-
-        # Save and register the transcription and summary.
-        if (chunk_text_by_words or chunk_text_by_sentences or chunk_text_by_paragraphs
-                or chunk_text_by_tokens or chunk_by_semantic):
-            json_file_path, summary_file_path = save_transcription_and_summary(combined_transcription_text, combined_summary_text, download_path, info_dict)
-            add_media_to_database(url, info_dict, segments, summary_text, keywords, custom_prompt_input, whisper_model)
-            return transcription_text, summary_text, json_file_path, summary_file_path, None, None
-        else:
-            summary_text = combined_summary_text
-            json_file_path, summary_file_path = save_transcription_and_summary(transcription_text, summary_text, download_path, info_dict)
-            add_media_to_database(url, info_dict, segments, summary_text, keywords, custom_prompt_input, whisper_model)
-            return transcription_text, summary_text, json_file_path, summary_file_path, None, None
-
-    except Exception as e:
-        logging.error(f": {e}")
-        return str(e), 'process_url: Error processing the request.', None, None, None, None
 
 #
 #

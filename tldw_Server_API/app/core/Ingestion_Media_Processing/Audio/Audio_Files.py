@@ -20,7 +20,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from urllib.parse import urlparse
-
 #
 # External Imports
 import requests
@@ -30,7 +29,7 @@ import yt_dlp
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords, \
     check_media_and_whisper_model
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
 from tldw_Server_API.app.core.Utils.Utils import downloaded_files, \
     sanitize_filename, logging
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import extract_metadata
@@ -478,10 +477,10 @@ def process_audio_files(
 
                         # Call summarization only if chunking produced results or wasn't needed
                         if chunked_text:
-                            summary_result = perform_summarization(
+                            summary_result = summarize(
                                 api_name=api_name,
                                 input_data=chunked_text, # Pass the list of chunks
-                                custom_prompt_input=custom_prompt_input,
+                                custom_prompt_arg=custom_prompt_input,
                                 api_key=api_key,
                                 recursive_summarization=summarize_recursively,
                                 temp=None, # Adjust if temperature control is needed

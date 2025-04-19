@@ -26,6 +26,8 @@ https://github.com/Lex-au/Vocalis
     https://www.reddit.com/r/LocalLLaMA/comments/1jy1x1b/comment/mmvm73e/
 https://pypi.org/project/pvporcupine/
 https://github.com/davidbrowne17/csm-streaming
+https://github.com/senstella/csm-mlx
+https://github.com/davidbrowne17/csm-streaming
 https://github.com/yukiarimo/hanasu
 https://codingwithcody.com/2025/04/02/containerized-voice-identification/
 https://github.com/NullMagic2/SoftWhisper

@@ -14,7 +14,7 @@ from typing import Optional, List, Dict, Any
 from docx2txt import docx2txt
 from pypandoc import convert_file
 
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import perform_summarization
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
 from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 from tldw_Server_API.app.core.Utils.Utils import logger
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
@@ -149,13 +149,13 @@ async def process_documents(
             chunked_texts = improved_chunking_process(full_text, chunk_opts)
             if not chunked_texts:
                 # Fallback if chunking returned empty
-                summary = perform_summarization(api_name, full_text, custom_prompt_input, api_key, system_prompt=system_prompt_input)
+                summary = summarize(api_name, full_text, custom_prompt_input, api_key, system_prompt_input)
                 return summary or "No summary"
             else:
                 # Summarize each chunk
                 chunk_summaries = []
                 for chunk_block in chunked_texts:
-                    s = perform_summarization(api_name, chunk_block["text"], custom_prompt_input, api_key, system_prompt=system_prompt_input)
+                    s = summarize(api_name, chunk_block["text"], custom_prompt_input, api_key, system_prompt_input)
                     if s:
                         chunk_summaries.append(s)
                 # Combine them in a single pass

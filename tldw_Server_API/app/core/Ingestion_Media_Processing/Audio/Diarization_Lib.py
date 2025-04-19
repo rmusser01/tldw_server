@@ -19,7 +19,6 @@ from typing import Dict, List, Any
 from pyannote.audio.pipelines.speaker_diarization import SpeakerDiarization
 import yaml
 # Import Local Libraries
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import speech_to_text
 from tldw_Server_API.app.core.Metrics.metrics_logger import timeit
 from tldw_Server_API.app.core.Utils.Utils import logging
 #

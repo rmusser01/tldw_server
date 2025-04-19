@@ -907,6 +907,7 @@ async def _process_batch_media( # Video/Audio - DB interaction handled here
                  "diarize": form_data.diarize, "vad_use": form_data.vad_use,
                  "transcription_model": form_data.transcription_model,
                  "custom_prompt": form_data.custom_prompt, "system_prompt": form_data.system_prompt,
+                 "perform_analysis": form_data.perform_analysis,
                  "perform_chunking": form_data.perform_chunking,
                  "chunk_method": chunk_options.get('method') if chunk_options else None,
                  "max_chunk_size": chunk_options.get('max_size') if chunk_options else 500,
@@ -930,7 +931,8 @@ async def _process_batch_media( # Video/Audio - DB interaction handled here
             from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
             audio_args = {
                  "inputs": items_to_process,
-                 "transcription_model": form_data.transcription_model, "transcription_language": form_data.transcription_language,
+                 "transcription_model": form_data.transcription_model,
+                 "transcription_language": form_data.transcription_language,
                  "perform_chunking": form_data.perform_chunking,
                  "chunk_method": chunk_options.get('method') if chunk_options else None,
                  "max_chunk_size": chunk_options.get('max_size') if chunk_options else 500,
@@ -1681,7 +1683,7 @@ def get_process_videos_form(
     api_key: Optional[str] = Form(None, description="Optional API key"), # Consider secure handling via settings
     use_cookies: bool = Form(False, description="Use cookies for URL download requests"),
     cookies: Optional[str] = Form(None, description="Cookie string if `use_cookies` is True"),
-    transcription_model: str = Form("deepml/distil-large-v3", description="Transcription model"),
+    transcription_model: str = Form("deepdml/faster-whisper-large-v3-turbo-ct2", description="Transcription model"),
     transcription_language: str = Form("en", description="Transcription language"),
     diarize: bool = Form(False, description="Enable speaker diarization"),
     timestamp_option: bool = Form(True, description="Include timestamps in transcription"),
@@ -1742,11 +1744,28 @@ def get_process_videos_form(
         )
         return form_instance
     except ValidationError as e:
-        # Raise HTTPException with Pydantic's validation errors
-        # FastAPI automatically handles this for dependencies
+        # Process errors to make them JSON serializable by handling exceptions in 'ctx'
+        serializable_errors = []
+        for error in e.errors():
+            serializable_error = error.copy()  # Work on a copy
+            if 'ctx' in serializable_error and isinstance(serializable_error.get('ctx'), dict):
+                # Create a new ctx dict, stringifying any exceptions
+                new_ctx = {}
+                for k, v in serializable_error['ctx'].items():
+                    if isinstance(v, Exception):
+                        new_ctx[k] = str(v)  # Convert Exception to string
+                    else:
+                        new_ctx[k] = v  # Keep other values as is
+                serializable_error['ctx'] = new_ctx
+                # Alternatively, if client doesn't need ctx, uncomment the next line:
+                # del serializable_error['ctx']
+            serializable_errors.append(serializable_error)
+
+        logger.warning(f"Pydantic validation failed: {json.dumps(serializable_errors)}")
+        # Raise HTTPException with the processed, serializable error details
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=e.errors(), # Provide structured error details
+            detail=serializable_errors,  # Pass the cleaned list
         ) from e
     except Exception as e: # Catch other potential errors during instantiation
         logger.error(f"Unexpected error creating ProcessVideosForm: {e}", exc_info=True)
@@ -1771,15 +1790,14 @@ async def process_videos_endpoint(
     form_data: ProcessVideosForm = Depends(get_process_videos_form),
     # Keep File parameter separate
     files: Optional[List[UploadFile]] = File(None, description="Video file uploads"),
-    # Optional Auth
-    # user_info: dict = Depends(verify_token),
+    # user_info: dict = Depends(verify_token), # Optional Auth
 ):
     """
     **Process Videos Endpoint (Fixed)**
 
     Transcribes, chunks, and analyses videos from URLs or uploaded files.
     Returns processing artifacts without saving to the database.
-    Corrected the run_in_executor call.
+    Corrected the run_in_executor call and input_ref mapping.
     """
     # --- Validation and Logging ---
     logger.info("Request received for /process-videos. Form data validated via dependency.")
@@ -1787,8 +1805,10 @@ async def process_videos_endpoint(
 
     # --- Setup ---
     loop = asyncio.get_running_loop()
-    batch_result = {"processed_count": 0, "errors_count": 0, "errors": [], "results": [], "confabulation_results": None}
-    file_handling_errors_structured = [] # Store structured file errors
+    batch_result: Dict[str, Any] = {"processed_count": 0, "errors_count": 0, "errors": [], "results": [], "confabulation_results": None}
+    file_handling_errors_structured: List[Dict[str, Any]] = []
+    # --- Map to store temporary path -> original filename ---
+    temp_path_to_original_name: Dict[str, str] = {}
 
     # --- Use TempDirManager for reliable cleanup ---
     with TempDirManager(cleanup=True, prefix="process_video_") as temp_dir:
@@ -1797,12 +1817,23 @@ async def process_videos_endpoint(
         # --- Save Uploads ---
         saved_files_info, file_handling_errors_raw = await _save_uploaded_files(files or [], temp_dir)
 
+        # --- Populate the temp path to original name map ---
+        for sf in saved_files_info:
+            if sf.get("path") and sf.get("original_filename"):
+                # Convert Path object to string for consistent dictionary keys
+                temp_path_to_original_name[str(sf["path"])] = sf["original_filename"]
+            else:
+                logger.warning(f"Missing path or original_filename in saved_files_info item: {sf}")
+
+
         # --- Process File Handling Errors ---
         if file_handling_errors_raw:
             batch_result["errors_count"] += len(file_handling_errors_raw)
             batch_result["errors"].extend([err.get("error", "Unknown file save error") for err in file_handling_errors_raw])
             # Adapt raw file errors to the MediaItemProcessResponse structure
             for err in file_handling_errors_raw:
+                 # *** Use original filename for input_ref here ***
+                 original_filename = err.get("input", "Unknown Filename") # Assume 'input' holds original name from _save_uploaded_files error
                  file_handling_errors_structured.append({
                      "status": "Error",
                      "input_ref": err.get("input", "Unknown Filename"),
@@ -1817,7 +1848,8 @@ async def process_videos_endpoint(
 
         # --- Prepare Inputs for Processing ---
         url_list = form_data.urls or []
-        uploaded_paths = [str(pf["path"]) for pf in saved_files_info]
+        # Get the temporary paths (as strings) from saved_files_info
+        uploaded_paths = [str(sf["path"]) for sf in saved_files_info if sf.get("path")]
         all_inputs_to_process = url_list + uploaded_paths
 
         # Check if there's anything left to process
@@ -1840,6 +1872,7 @@ async def process_videos_endpoint(
             "vad_use": form_data.vad_use,
             "transcription_model": form_data.transcription_model,
             "transcription_language": form_data.transcription_language, # Add language if process_videos needs it
+            "perform_analysis": form_data.perform_analysis,
             "custom_prompt": form_data.custom_prompt,
             "system_prompt": form_data.system_prompt,
             "perform_chunking": form_data.perform_chunking,
@@ -1855,130 +1888,161 @@ async def process_videos_endpoint(
             "use_cookies": form_data.use_cookies,
             "cookies": form_data.cookies,
             "timestamp_option": form_data.timestamp_option,
-            "confab_checkbox": form_data.perform_confabulation_check_of_analysis,
-            # 'keep_original' is often handled internally by the library based on temp dir needs
-            # or could be added if the library requires explicit control
+            "perform_confabulation_check": form_data.perform_confabulation_check_of_analysis,
+            "temp_dir": str(temp_dir),  # Pass the managed temporary directory path
+            # 'keep_original' might be relevant if library needs it, default is False
+            # 'perform_diarization' seems redundant if 'diarize' is passed, check library usage
+            # If perform_diarization is truly needed separately:
+            # "perform_diarization": form_data.diarize, # Or map if different logic
         }
 
         try:
             logger.debug(f"Calling process_videos for /process-videos endpoint with {len(all_inputs_to_process)} inputs.")
-            # Removed import from inside function - ensure it's imported at module level
-            # from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
             batch_func = functools.partial(process_videos, **video_args)
 
-            # *** FIXED run_in_executor call ***
-            # The arguments are already part of batch_func via partial
             processing_output = await loop.run_in_executor(None, batch_func)
+
+            # Debug logging
+            try:
+                print(f"!!! DEBUG PRINT !!! My debug message: {json.dumps(processing_output, indent=2, default=str)}")
+            except Exception as log_err:
+                print(f"!!! DEBUG PRINT !!! My debug message: {log_err}")
 
             # --- Combine Processing Results ---
             # Reset results list if we only had file errors before, or append otherwise
-            current_results = batch_result["results"] # Keep file errors if any
-            batch_result["results"] = [] # Reset results list for merging
+            # Clear the specific counters before processing the library output
+            batch_result["processed_count"] = 0
+            batch_result["errors_count"] = 0
+            batch_result["errors"] = []
+
+            # Start with any structured file errors we recorded earlier
+            final_results_list = list(file_handling_errors_structured)
+            final_errors_list = [err.get("error", "File handling error") for err in file_handling_errors_structured]
 
             if isinstance(processing_output, dict):
-                batch_result["processed_count"] += processing_output.get("processed_count", 0)
-                # Adjust error count based on *new* processing errors
-                new_errors_count = processing_output.get("errors_count", 0)
-                batch_result["errors_count"] += new_errors_count
-                batch_result["errors"].extend(processing_output.get("errors", []))
+                # Add results from the library processing
+                processed_results_from_lib = processing_output.get("results", [])
+                for res in processed_results_from_lib:
+                    # *** Map input_ref back to original filename if applicable ***
+                    current_input_ref = res.get("input_ref") # This is likely the temp path or URL
+                    # If the current_input_ref is a key in our map, use the original name
+                    # Otherwise, keep the current_input_ref (it's likely a URL)
+                    res["input_ref"] = temp_path_to_original_name.get(current_input_ref, current_input_ref)
 
-                processed_results = processing_output.get("results", [])
-                for res in processed_results:
-                    # Ensure structure and no DB fields
+                    # Add endpoint-specific fields
                     res["db_id"] = None
                     res["db_message"] = "Processing only endpoint."
-                    res.setdefault("status", "Error") # Default if missing
-                    res.setdefault("input_ref", "Unknown")
-                    res.setdefault("processing_source", "Unknown")
-                    res.setdefault("media_type", "video")
-                    res.setdefault("metadata", {})
-                    res.setdefault("content", "")
-                    res.setdefault("segments", None)
-                    res.setdefault("chunks", None)
-                    res.setdefault("analysis", None)
-                    res.setdefault("analysis_details", {})
-                    res.setdefault("error", None)
-                    res.setdefault("warnings", None)
-                    res.setdefault("message", None) # Add message if used by library
-                # Combine processing results with any previous file errors
-                batch_result["results"] = current_results + processed_results
+                    final_results_list.append(res) # Add the modified result
+
+                # Add specific errors reported by the library
+                final_errors_list.extend(processing_output.get("errors", []))
 
                 # Handle confabulation results if present
                 if "confabulation_results" in processing_output:
                     batch_result["confabulation_results"] = processing_output["confabulation_results"]
+
             else:
-                # Handle unexpected output from process_videos
+                # Handle unexpected output from process_videos library function
                 logger.error(f"process_videos function returned unexpected type: {type(processing_output)}")
                 general_error_msg = "Video processing library returned invalid data."
-                batch_result["errors_count"] += 1 # Increment general error count
-                batch_result["errors"].append(general_error_msg)
-                # Create error entries for all inputs attempted in processing
-                error_results = []
+                final_errors_list.append(general_error_msg)
+                # Create error entries for all inputs attempted in *this specific* processing call
                 for input_src in all_inputs_to_process:
-                    original_ref = input_src
-                    if input_src in uploaded_paths:
-                        for sf in saved_files_info:
-                            if str(sf["path"]) == input_src:
-                                original_ref = sf.get("original_filename", input_src)
-                                break
-                    error_results.append({
-                         "status": "Error", "input_ref": original_ref, "processing_source": input_src,
-                         "media_type": "video", "metadata": {}, "content": "", "segments": None,
-                         "chunks": None, "analysis": None, "analysis_details": {},
-                         "error": general_error_msg, "warnings": None, "db_id": None, "db_message": "Processing only endpoint.", "message": None
-                     })
-                # Combine errors with any previous file errors
-                batch_result["results"] = current_results + error_results
+                    # *** Use original name for error input_ref if possible ***
+                    original_ref_for_error = temp_path_to_original_name.get(input_src, input_src)
+                    final_results_list.append({
+                        "status": "Error",
+                        "input_ref": original_ref_for_error, # Use original name/URL
+                        "processing_source": input_src, # Show what was actually processed (temp path/URL)
+                        "media_type": "video", "metadata": {}, "content": "", "segments": None,
+                        "chunks": None, "analysis": None, "analysis_details": {},
+                        "error": general_error_msg, "warnings": None, "db_id": None,
+                        "db_message": "Processing only endpoint.", "message": None
+                    })
+
+            # --- Recalculate final counts based on the merged list ---
+            batch_result["results"] = final_results_list
+            batch_result["processed_count"] = sum(1 for r in final_results_list if r.get("status") == "Success")
+            batch_result["errors_count"] = sum(1 for r in final_results_list if r.get("status") == "Error")
+            # Remove duplicates from error messages list if desired
+            # Make sure errors are strings before adding to set
+            unique_errors = set(str(e) for e in final_errors_list if e is not None)
+            batch_result["errors"] = list(unique_errors)
 
 
         except Exception as exec_err:
-            # Catch errors during the execution of the library function itself
+            # Catch errors during the library execution call itself
             logger.error(f"Error executing process_videos: {exec_err}", exc_info=True)
             error_msg = f"Error during video processing execution: {type(exec_err).__name__}"
-            batch_result["errors_count"] += 1
-            batch_result["errors"].append(error_msg)
+
+            # Start with existing file errors
+            final_results_list = list(file_handling_errors_structured)
+            final_errors_list = [err.get("error", "File handling error") for err in file_handling_errors_structured]
+            final_errors_list.append(error_msg)  # Add the execution error
+
             # Create error entries for all inputs attempted in this batch
-            error_results = []
             for input_src in all_inputs_to_process:
-                original_ref = input_src
-                if input_src in uploaded_paths:
-                    for sf in saved_files_info:
-                        if str(sf["path"]) == input_src:
-                             original_ref = sf.get("original_filename", input_src)
-                             break
-                error_results.append({
-                    "status": "Error", "input_ref": original_ref, "processing_source": input_src,
+                 # *** Use original name for error input_ref if possible ***
+                 original_ref_for_error = temp_path_to_original_name.get(input_src, input_src)
+                 final_results_list.append({
+                    "status": "Error",
+                    "input_ref": original_ref_for_error, # Use original name/URL
+                    "processing_source": input_src, # Show what was actually processed (temp path/URL)
                     "media_type": "video", "metadata": {}, "content": "", "segments": None,
                     "chunks": None, "analysis": None, "analysis_details": {},
-                    "error": error_msg, "warnings": None, "db_id": None, "db_message": "Processing only endpoint.", "message": None
+                    "error": error_msg, "warnings": None, "db_id": None,
+                    "db_message": "Processing only endpoint.", "message": None
                 })
-            # Combine errors with any previous file errors
-            batch_result["results"] = batch_result["results"] + error_results # Append to potentially existing file errors
 
+            # --- Update batch_result with merged errors ---
+            batch_result["results"] = final_results_list
+            batch_result["processed_count"] = 0 # Assume all failed if execution failed
+            batch_result["errors_count"] = len(final_results_list) # Count all items as errors now
+            unique_errors = set(str(e) for e in final_errors_list if e is not None)
+            batch_result["errors"] = list(unique_errors)
 
-        # --- Exception Handling & Cleanup ---
-        # The `with TempDirManager(...)` handles cleanup automatically on exit/error.
-        # Catch specific exceptions if needed, otherwise let FastAPI handle general ones.
-        except HTTPException as http_exc:
-            logger.warning(f"HTTPException caught in /process-videos: Status={http_exc.status_code}, Detail={http_exc.detail}")
-            raise http_exc # Re-raise to let FastAPI handle it
-        except Exception as e:
-            # Catch unexpected errors during setup or within the endpoint logic itself
-            logger.error(f"Unhandled exception in process_videos_endpoint: {e}", exc_info=True)
-            # Raise a 500 error, the specific error is already logged.
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error during video processing.")
+        # --- Determine Final Status Code & Return ---
+        # Base the status code *solely* on the final calculated errors_count
+        final_error_count = batch_result.get("errors_count", 0)
+        # Check if there are only warnings and no errors
+        final_success_count = batch_result.get("processed_count", 0)
+        total_items = len(batch_result.get("results", []))
+        has_warnings = any(r.get("status") == "Warning" for r in batch_result.get("results", []))
 
+        if total_items == 0: # Should not happen if validation passed, but handle defensively
+            final_status_code = status.HTTP_400_BAD_REQUEST # Or 500?
+            logger.error("No results generated despite processing attempt.")
+        elif final_error_count == 0:
+             final_status_code = status.HTTP_200_OK
+        elif final_error_count == total_items:
+             final_status_code = status.HTTP_207_MULTI_STATUS # All errors, could also be 4xx/5xx depending on cause
+        else: # Mix of success/warnings/errors
+             final_status_code = status.HTTP_207_MULTI_STATUS
 
-    # --- Determine Final Status Code & Return ---
-    final_status_code = (
-        status.HTTP_200_OK
-        if batch_result.get("errors_count", 0) == 0
-        else status.HTTP_207_MULTI_STATUS
-    )
-    log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
-    logger.log(log_level, f"/process-videos request finished with status {final_status_code}. Results count: {len(batch_result.get('results', []))}, Errors: {batch_result.get('errors_count', 0)}")
+        log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
+        logger.log(log_level,
+                   f"/process-videos request finished with status {final_status_code}. Results count: {len(batch_result.get('results', []))}, Errors: {final_error_count}")
 
-    return JSONResponse(status_code=final_status_code, content=batch_result)
+        # --- TEMPORARY DEBUG ---
+        try:
+            logger.debug("Final batch_result before JSONResponse:")
+            # Log only a subset if the full result is too large
+            logged_result = batch_result.copy()
+            if len(logged_result.get('results', [])) > 5: # Log details for first 5 results only
+                 logged_result['results'] = logged_result['results'][:5] + [{"message": "... remaining results truncated for logging ..."}]
+            logger.debug(json.dumps(logged_result, indent=2, default=str)) # Use default=str for non-serializable items
+
+            success_item_debug = next((r for r in batch_result.get("results", []) if r.get("status") == "Success"), None)
+            if success_item_debug:
+                logger.debug(f"Value of input_ref for success item before return: {success_item_debug.get('input_ref')}")
+            else:
+                logger.debug("No success item found in final results before return.")
+        except Exception as debug_err:
+            logger.error(f"Error during debug logging: {debug_err}")
+        # --- END TEMPORARY DEBUG ---
+
+        return JSONResponse(status_code=final_status_code, content=batch_result)
+
 #
 # End of video ingestion
 ####################################################################################
