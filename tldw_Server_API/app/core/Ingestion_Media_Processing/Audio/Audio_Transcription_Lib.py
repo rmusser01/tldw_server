@@ -741,7 +741,7 @@ class WhisperModel(OriginalWhisperModel):
     valid_model_sizes = [
         "tiny.en", "tiny", "base.en", "base", "small.en", "small", "medium.en", "medium",
         "large-v1", "large-v2", "large-v3", "large", "distil-large-v2", "distil-medium.en",
-        "distil-small.en", "distil-large-v3", "deepdml/faster-whisper-large-v3-turbo-ct2",
+        "distil-small.en", "distil-large-v3", "deepdml/faster-distil-whisper-large-v3.5", "deepdml/faster-whisper-large-v3-turbo-ct2",
         "nyrahealth/faster_CrisperWhisper"
     ]
 

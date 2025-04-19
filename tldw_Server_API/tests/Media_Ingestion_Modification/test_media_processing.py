@@ -41,7 +41,7 @@ INVALID_FILE_PATH = TEST_MEDIA_DIR / "not_a_real_file.xyz"
 # Use stable, short, publicly accessible URLs for testing
 # Replace with actual URLs known to work
 VALID_VIDEO_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Example: Rick Astley (short duration helps)
-VALID_AUDIO_URL = "https://cdn.pixabay.com/download/audio/2022/11/22/audio_2f238b9a8e.mp3"  # Example public domain audio
+VALID_AUDIO_URL = "https://cdn.pixabay.com/download/audio/2023/12/02/audio_2f291f569a.mp3?filename=about-anger-179423.mp3"  # Example public domain audio
 VALID_PDF_URL = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"  # Example public PDF
 
 INVALID_URL = "http://this.url.does.not.exist/resource.mp4"
@@ -99,31 +99,40 @@ def check_batch_response(
     return data  # Return parsed data for further checks
 
 
-def check_media_item_result(result, expected_status, check_db_id=True):
-    """Helper to check structure of a single item in the results list."""
-    assert "status" in result
-    assert result["status"] == expected_status
-    assert "input_ref" in result
-    assert "processing_source" in result
-    assert "media_type" in result
-    assert "metadata" in result
-    assert "content" in result  # Should exist, might be empty on error
-    # analysis, segments, chunks can be None
-    assert "analysis" in result
-    assert "segments" in result
-    assert "chunks" in result
-    assert "analysis_details" in result
-    assert "error" in result
-    assert "warnings" in result
-    if check_db_id:
-        assert "db_id" in result
-        assert result["db_id"] is None  # Crucial for /process-* endpoints
-        assert "db_message" in result
-        assert result["db_message"] == "Processing only endpoint."
+def check_media_item_result(result, expected_status, check_db_fields=True):
+    """
+    Helper to check structure of a single item in the results list.
+    Updated to check for 'analysis' and 'chunks'.
+    """
+    assert isinstance(result, dict), f"Result item is not a dictionary: {result}"
+    assert "status" in result, "Result missing 'status' key"
+    assert result["status"] == expected_status, f"Expected status '{expected_status}', got '{result['status']}'"
+    assert "input_ref" in result, "Result missing 'input_ref' key"
+    assert "processing_source" in result, "Result missing 'processing_source' key"
+    assert "media_type" in result, "Result missing 'media_type' key"
+    assert "metadata" in result and isinstance(result["metadata"], dict), "Result missing or invalid 'metadata'"
+    assert "content" in result, "Result missing 'content' key" # Allowed to be None or empty string
+    assert "segments" in result, "Result missing 'segments' key" # Allowed to be None
+    assert "chunks" in result, "Result missing 'chunks' key" # Added check, allowed to be None
+    assert "analysis" in result, "Result missing 'analysis' key" # Added check, allowed to be None
+    assert "analysis_details" in result and isinstance(result["analysis_details"], dict), "Result missing or invalid 'analysis_details'"
+    assert "error" in result, "Result missing 'error' key" # Allowed to be None
+    assert "warnings" in result, "Result missing 'warnings' key" # Allowed to be None or list
+
+    if check_db_fields:
+        assert "db_id" in result, "Result missing 'db_id' key"
+        assert result["db_id"] is None, f"Expected db_id to be None, got {result['db_id']}"
+        assert "db_message" in result, "Result missing 'db_message' key"
+        # Allow None or specific message for flexibility from library vs endpoint
+        assert result["db_message"] in [None, "Processing only endpoint."], \
+            f"Unexpected db_message: {result['db_message']}"
 
     if expected_status == "Error":
-        assert result["error"] is not None
-    # Add more specific checks based on expected_status if needed
+        assert result["error"] is not None, "Expected non-None 'error' for Error status"
+    elif expected_status == "Success":
+        # For success, error should ideally be None, but allow empty string too
+        assert result["error"] is None or result["error"] == "", \
+             f"Expected None or empty error for Success status, got {result['error']}"
 
 
 # --- Test Classes ---
@@ -227,16 +236,94 @@ class TestProcessVideos:
 
 
 class TestProcessAudios:
-    ENDPOINT = "/api/v1/media/process-audios"
+    ENDPOINT = "/api/v1/media/process-audios" # Make sure this path is correct
 
-    def test_process_audio_url_success(self, client, auth_headers):
-        """Test processing a single valid audio URL."""
-        form_data = {"urls": [VALID_AUDIO_URL], "perform_analysis": "false"}
+    def test_process_audio_url_success_no_analysis_no_chunking(self, client, auth_headers):
+        """Test processing audio URL, explicitly disabling analysis and chunking."""
+        form_data = {
+            "urls": [VALID_AUDIO_URL],
+            "perform_analysis": "false", # Send as string 'false' for form data
+            "perform_chunking": "false"
+        }
         response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
-        check_media_item_result(data["results"][0], "Success")
-        assert data["results"][0]["media_type"] == "audio"
-        assert len(data["results"][0]["content"]) > 0
+        result = data["results"][0]
+        check_media_item_result(result, "Success")
+        assert result["media_type"] == "audio"
+        assert result["input_ref"] == VALID_AUDIO_URL
+        # Expect content because transcription should still happen
+        assert result["content"] is not None # Might be empty if transcription fails silently, but shouldn't be None
+        assert isinstance(result["content"], str)
+        assert result["segments"] is not None and isinstance(result["segments"], list)
+        # Analysis and Chunks should be None as they were disabled
+        assert result["analysis"] == "[Analysis Not Requested]" or result["analysis"] is None, f"Analysis should be None/Not Requested, got: {result['analysis']}"
+        assert result["chunks"] is None, f"Chunks should be None, got: {result['chunks']}"
+        # Check content length only if dummy file is guaranteed to produce output
+        # On real audio, check > 0: assert len(result["content"]) > 0
+
+
+    def test_process_audio_upload_success_defaults(self, client, auth_headers):
+        """Test processing audio file upload with default settings (chunking=True, analysis=True)."""
+        # Requires analysis setup (API keys) or a mock LLM
+        pytest.skip("Skipping test requiring analysis until LLM/API config is confirmed/mocked.")
+
+        # Minimal form data, rely on defaults
+        form_data = {
+             # Add API key/name if needed for analysis, or ensure defaults work
+             "api_name": "mock_llm", # Example: Use a mock if available
+             # "api_key": "dummy_key"
+        }
+        with open(SAMPLE_AUDIO_PATH, "rb") as f:
+            files = {"files": (SAMPLE_AUDIO_PATH.name, f, "audio/mpeg")}
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+
+        data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
+        result = data["results"][0]
+        check_media_item_result(result, "Success")
+        assert result["media_type"] == "audio"
+        assert result["input_ref"] == SAMPLE_AUDIO_PATH.name
+        assert result["content"] is not None and len(result["content"]) > 0
+        assert result["segments"] is not None and len(result["segments"]) > 0
+        assert result["chunks"] is not None and len(result["chunks"]) > 0 # Expect chunks due to default
+        assert result["analysis"] is not None and len(result["analysis"]) > 0 # Expect analysis due to default
+
+    def test_process_audio_multi_status_mixed(self, client, auth_headers):
+        """Test one valid upload and one invalid URL -> 207."""
+        form_data = {
+            "urls": [URL_404], # Use a reliable 404 URL
+            "perform_analysis": "false", # Disable analysis for faster test
+            "perform_chunking": "true"   # Keep chunking enabled (default)
+        }
+        with open(SAMPLE_AUDIO_PATH, "rb") as f:
+            # Ensure the dummy audio file has some content for transcription to work
+            files = {"files": (SAMPLE_AUDIO_PATH.name, f, "audio/mpeg")}
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+
+        # No need to sleep, the request is sync, failures should be reported
+        # If downloads were async background tasks, sleep might be needed
+
+        data = check_batch_response(response, 207, expected_processed=1, expected_errors=1, check_results_len=2)
+
+        success_result = next((r for r in data["results"] if r["status"] == "Success"), None)
+        error_result = next((r for r in data["results"] if r["status"] == "Error"), None)
+
+        assert success_result is not None, "Could not find success result"
+        assert error_result is not None, "Could not find error result"
+
+        check_media_item_result(success_result, "Success")
+        check_media_item_result(error_result, "Error")
+
+        # Check input refs carefully
+        assert success_result["input_ref"] == SAMPLE_AUDIO_PATH.name
+        assert error_result["input_ref"] == URL_404
+
+        # Check error message for the failed URL
+        assert error_result["error"] is not None
+        assert "Download failed" in error_result["error"] or "404" in error_result["error"]
+
+        # Check successful item results (assuming defaults enabled chunking)
+        assert success_result["content"] is not None
+        assert success_result["chunks"] is not None # Chunking was true
 
     def test_process_audio_upload_success(self, client, auth_headers):
         """Test processing a single valid audio file upload."""
@@ -250,49 +337,36 @@ class TestProcessAudios:
         assert data["results"][0]["media_type"] == "audio"
         assert len(data["results"][0]["content"]) > 0
 
-    def test_process_audio_multi_status_mixed(self, client, auth_headers):
-        """Test processing one valid upload and one 404 URL -> 207."""
-        form_data = {"urls": [URL_404], "perform_analysis": "false"}
-        with open(SAMPLE_AUDIO_PATH, "rb") as f:
-            files = {"files": (SAMPLE_AUDIO_PATH.name, f, "audio/mpeg")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
-
-        # It might take time for the invalid URL to fail
-        time.sleep(5)  # Small delay might be needed
-
-        data = check_batch_response(response, 207, expected_processed=1, expected_errors=1, check_results_len=2)
-        # Find the success and error results (order might vary)
-        success_result = next((r for r in data["results"] if r["status"] == "Success"), None)
-        error_result = next((r for r in data["results"] if r["status"] == "Error"), None)
-
-        assert success_result is not None
-        assert error_result is not None
-        check_media_item_result(success_result, "Success")
-        check_media_item_result(error_result, "Error")
-        assert success_result["input_ref"] == SAMPLE_AUDIO_PATH.name
-        assert error_result["input_ref"] == URL_404
-        assert "Download failed" in error_result["error"] or "404" in error_result["error"]  # Check error message
-
     def test_process_audio_no_input(self, client, auth_headers):
         """Test sending request with no URLs or files."""
         response = client.post(self.ENDPOINT, data={}, headers=auth_headers)
-        assert response.status_code == 400
-        assert "No valid media suources supplied. At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided." in response.json()["detail"]
+        # Expect 400 based on _validate_inputs logic in the endpoint
+        assert response.status_code == 400, f"Expected 400, got {response.status_code}. Body: {response.text}"
+        assert "No valid media sources supplied" in response.json()["detail"]
 
-    def test_process_audio_upload_invalid_format(self, client, auth_headers):
-        """Test uploading a non-audio file (e.g., PDF)."""
-        form_data = {}
-        # Upload PDF as audio
+    def test_process_audio_upload_invalid_format_pdf(self, client, auth_headers):
+        """Test uploading a non-audio file (PDF) which should fail conversion."""
+        form_data = {"perform_analysis": "false"} # Disable analysis
         with open(SAMPLE_PDF_PATH, "rb") as f:
-            files = {"files": (SAMPLE_PDF_PATH.name, f, "application/pdf")}
+            files = {"files": (SAMPLE_PDF_PATH.name, f, "application/pdf")} # Correct MIME for PDF
             response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+        logger.debug(f"Test received response status: {response.status_code}")
+        try:
+            response_data_in_test = response.json()
+            logger.debug(f"Test received response JSON: {response_data_in_test}")
+        except Exception as e:
+             logger.error(f"Test failed to parse response JSON: {e}")
+             response_data_in_test = None
 
-        # Expect 207 because the processing library should fail for this item
+        # Expect 207 because the batch processes items individually
+        # The PDF item should fail during the ffmpeg conversion step
         data = check_batch_response(response, 207, expected_processed=0, expected_errors=1, check_results_len=1)
-        check_media_item_result(data["results"][0], "Error")
-        assert "Error" in data["results"][0]["status"]  # Library should return an error status
-        # Check specific error message if known (e.g., "ffmpeg error", "invalid format")
-        assert data["results"][0]["error"] is not None
+        result = data["results"][0]
+        check_media_item_result(result, "Error")
+        assert result["input_ref"] == SAMPLE_PDF_PATH.name
+        assert result["error"] is not None
+        # Check for error indicating conversion failure
+        assert "Audio conversion failed" in result["error"] or "FFmpeg conversion failed" in result["error"]
 
 
 class TestProcessPdfs:

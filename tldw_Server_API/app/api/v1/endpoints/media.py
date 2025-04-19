@@ -705,7 +705,7 @@ def _validate_inputs(media_type: MediaType, urls: Optional[List[str]], files: Op
     if not urls and not files:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No valid media suources supplied. At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided."
+            detail="No valid media sources supplied. At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided."
         )
 
 
@@ -1450,7 +1450,7 @@ async def add_media(
     use_cookies: bool = Form(False, description="Use cookies for URL download requests"),
     cookies: Optional[str] = Form(None, description="Cookie string if `use_cookies` is True"),
     # --- Audio/Video Specific ---
-    transcription_model: str = Form("deepml/distil-large-v3", description="Transcription model"),
+    transcription_model: str = Form("deepdml/faster-distil-whisper-large-v3.5", description="Transcription model"),
     transcription_language: str = Form("en", description="Transcription language"),
     diarize: bool = Form(False, description="Enable speaker diarization"),
     timestamp_option: bool = Form(True, description="Include timestamps in transcription"),
@@ -2051,7 +2051,7 @@ async def process_videos_endpoint(
 #   /process-audio
 
 # =============================================================================
-# Dependency Function for Audio Form Processing (NEW - Modeled after Video)
+# Dependency Function for Audio Form Processing
 # =============================================================================
 def get_process_audios_form(
     # Replicate relevant Form(...) definitions for audio
@@ -2067,7 +2067,7 @@ def get_process_audios_form(
     api_key: Optional[str] = Form(None, description="Optional API key"),
     use_cookies: bool = Form(False, description="Use cookies for URL download requests"),
     cookies: Optional[str] = Form(None, description="Cookie string if `use_cookies` is True"),
-    transcription_model: str = Form("deepml/distil-large-v3", description="Transcription model"),
+    transcription_model: str = Form("deepdml/faster-distil-whisper-large-v3.5", description="Transcription model"),
     transcription_language: str = Form("en", description="Transcription language"),
     diarize: bool = Form(False, description="Enable speaker diarization"),
     timestamp_option: bool = Form(True, description="Include timestamps in transcription"),

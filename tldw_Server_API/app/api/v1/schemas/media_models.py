@@ -115,7 +115,7 @@ class ChunkingOptions(BaseModel):
 
 class AudioVideoOptions(BaseModel):
     """Pydantic model for Audio/Video specific options"""
-    transcription_model: str = Field("deepml/distil-large-v3", description="Model ID for audio/video transcription (e.g., from Hugging Face)")
+    transcription_model: str = Field("deepdml/faster-distil-whisper-large-v3.5", description="Model ID for audio/video transcription (e.g., from Hugging Face)")
     transcription_language: str = Field("en", description="Language for audio/video transcription (ISO 639-1 code)")
     diarize: bool = Field(False, description="Enable speaker diarization (audio/video)")
     timestamp_option: bool = Field(True, description="Include timestamps in the transcription (audio/video)")
