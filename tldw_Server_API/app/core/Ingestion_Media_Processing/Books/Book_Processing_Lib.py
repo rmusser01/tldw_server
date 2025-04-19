@@ -458,7 +458,7 @@ def process_epub(
                 "status": "Success" | "Error",
                 "input_ref": str (file_path),
                 "media_type": "ebook",
-                "text_content": Optional[str],
+                "content": Optional[str],
                 "metadata": Optional[Dict], # {'title': str, 'author': str, 'raw': dict}
                 "chunks": Optional[List[Dict]], # [{'text': str, 'metadata': {...}}]
                 "summary": Optional[str],
@@ -473,7 +473,7 @@ def process_epub(
         "input_ref": file_path, # Use input file path as reference
         "processing_source": file_path, # Same for now, might differ if copied
         "media_type": "ebook",
-        "text_content": None,
+        "content": None,
         "metadata": {"title": None, "author": None, "raw": None}, # Init structure
         "chunks": None,
         "summary": None,
@@ -512,7 +512,7 @@ def process_epub(
             # This case should be caught by the exceptions above now
             raise ValueError("Failed to extract text or book object from EPUB.")
 
-        result["text_content"] = extracted_text
+        result["content"] = extracted_text
         logging.debug(f"Extracted EPUB content using '{extraction_method}' (or fallback). Length: {len(extracted_text)}")
 
         # Extract metadata from ebooklib object
@@ -810,7 +810,7 @@ def _process_markup_or_plain_text(
         "processing_source": file_path, # Actual processed path
         "media_type": media_type,
         "source_format": file_type,
-        "text_content": None,
+        "content": None,
         "metadata": {"title": None, "author": None, "raw": None}, # Init structure
         "chunks": None,
         "summary": None,
@@ -894,7 +894,7 @@ def _process_markup_or_plain_text(
         if not markdown_content:
             # Handle empty content after potential conversion
             raise ValueError("Content became empty after processing.")
-        result["text_content"] = markdown_content
+        result["content"] = markdown_content
 
         # Finalize metadata
         final_title = title_override or extracted_title or filename_stem
@@ -1091,7 +1091,7 @@ def _process_single_ebook(
             "media_type": "ebook",
             "error": f"Worker processing failed: {str(e)}",
             # Ensure other keys are present if needed by consuming code
-            "text_content": None, "metadata": None, "chunks": None, "summary": None,
+            "content": None, "metadata": None, "chunks": None, "summary": None,
             "keywords": keywords or [], "warnings": None
         }
 

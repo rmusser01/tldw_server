@@ -228,6 +228,10 @@ def chunk_text(text: str, method: str, max_size: int, overlap: int, language: st
     elif method == 'semantic':
         logging.debug("Chunking by semantic similarity...")
         return semantic_chunking(text, max_chunk_size=max_size)
+    elif method == 'recursive':
+        logging.debug("Chunking recursively...")
+        return recursive_summarize_chunks(text, summarize_func=rolling_summarize, custom_prompt=None,
+                                          temp=None, system_prompt=None)
     else:
         logging.warning(f"Unknown chunking method '{method}'. Returning full text as a single chunk.")
         return [text]

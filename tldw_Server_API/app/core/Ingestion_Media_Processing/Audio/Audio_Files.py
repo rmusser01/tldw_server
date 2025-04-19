@@ -278,7 +278,7 @@ def process_audio_files(
 
     # Define chunk options dictionary
     chunk_options = {
-        'method': chunk_method or ('sentences' if (chunk_language or transcription_language or 'en') == 'en' else 'recursive'),
+        'method': chunk_method or ('sentences' if (chunk_language or transcription_language or 'en') == 'en' else 'sentences'),
         'max_size': max_chunk_size,
         'overlap': chunk_overlap,
         'adaptive': use_adaptive_chunking,

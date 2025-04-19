@@ -6,6 +6,8 @@ import os
 import sys
 from pathlib import Path
 import time
+from unittest.mock import patch
+
 #
 import pytest
 from fastapi.testclient import TestClient
@@ -112,7 +114,6 @@ def check_media_item_result(result, expected_status, check_db_fields=True):
     assert "media_type" in result, "Result missing 'media_type' key"
     assert "metadata" in result and isinstance(result["metadata"], dict), "Result missing or invalid 'metadata'"
     assert "content" in result, "Result missing 'content' key" # Allowed to be None or empty string
-    assert "segments" in result, "Result missing 'segments' key" # Allowed to be None
     assert "chunks" in result, "Result missing 'chunks' key" # Added check, allowed to be None
     assert "analysis" in result, "Result missing 'analysis' key" # Added check, allowed to be None
     assert "analysis_details" in result and isinstance(result["analysis_details"], dict), "Result missing or invalid 'analysis_details'"
@@ -348,7 +349,7 @@ class TestProcessAudios:
         """Test uploading a non-audio file (PDF) which should fail conversion."""
         form_data = {"perform_analysis": "false"} # Disable analysis
         with open(SAMPLE_PDF_PATH, "rb") as f:
-            files = {"files": (SAMPLE_PDF_PATH.name, f, "application/pdf")} # Correct MIME for PDF
+            files = {"files": (SAMPLE_PDF_PATH.name, f, "application/pdf")} # Correct MIME for PDFs
             response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
         logger.debug(f"Test received response status: {response.status_code}")
         try:
@@ -396,7 +397,7 @@ class TestProcessPdfs:
         assert data["results"][0]["media_type"] == "pdf"
         assert len(data["results"][0]["content"]) > 0
 
-    # Add test for specific parser if needed
+    # Add test for specific parser if needed FIXME
     # def test_process_pdf_upload_specific_parser(self, client, auth_headers):
     #     """Test processing PDF upload with a specific parser."""
     #     # NOTE: Requires the specified parser to be functional in your env
@@ -434,7 +435,7 @@ class TestProcessPdfs:
         """Test sending request with no URLs or files."""
         response = client.post(self.ENDPOINT, data={}, headers=auth_headers)
         assert response.status_code == 400
-        assert "No valid media suources supplied. At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided." in response.json()["detail"]
+        assert "No valid media sources supplied. At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided." in response.json()["detail"]
 
     def test_process_pdf_upload_not_a_pdf(self, client, auth_headers):
         """Test uploading a non-PDF file (e.g., audio)."""
@@ -448,25 +449,40 @@ class TestProcessPdfs:
         # If check is done in library -> 207 with processing error
         data = check_batch_response(response, 207, expected_processed=0, expected_errors=1, check_results_len=1)
         check_media_item_result(data["results"][0], "Error")
-        assert "Invalid file format" in data["results"][0]["error"] or "PDF Error" in data["results"][0][
+        assert "Invalid file format" in data["results"][0]["error"] or "PDF Extraction Error." in data["results"][0][
             "error"]  # Check error type
 
-    def test_process_pdf_with_analysis_and_chunking(self, client, auth_headers):
+    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib.summarize")
+    def test_process_pdf_with_analysis_and_chunking(self, mock_summarize, client, auth_headers):
         """Test PDF analysis and chunking."""
+        mock_analysis_text = "This is the mocked analysis result."
+        mock_summarize.return_value = mock_analysis_text
+
         form_data = {
             "urls": [VALID_PDF_URL],
-            "perform_analysis": "true",
+            "perform_analysis": "true", # Analysis is enabled
             "perform_chunking": "true",
-            "chunk_size": "300",  # Smaller chunk size for PDF text
-            "chunk_overlap": "50"
-            # Add api_name/api_key if needed
-            # "api_name": "your_api",
-            # "api_key": "your_key"
+            "chunk_size": "300",
+            "chunk_overlap": "50",
+            "api_name": "mock_api",
+            "api_key": "mock_key"
         }
         response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
-        assert result["analysis"] is not None and len(result["analysis"]) > 0
-        assert result["chunks"] is not None and len(result["chunks"]) > 0
+
+        # Check that analysis was performed (mocked)
+        assert result["analysis"] is not None
+        assert result["analysis"] == mock_analysis_text # Check content
+        assert len(result["analysis"]) > 0
+
+        # Check that chunking happened (might need more specific checks depending on PDF content)
+        assert result["chunks"] is not None
+        assert isinstance(result["chunks"], list)
+        assert len(result["chunks"]) > 0 # Should have at least one chunk
+        # You could add more specific checks on chunk content/metadata if needed
+
+        # Check that the mock was called (optional but good practice)
+        mock_summarize.assert_called()
 

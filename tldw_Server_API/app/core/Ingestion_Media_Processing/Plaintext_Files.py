@@ -141,8 +141,8 @@ def _process_single_document(
         processed_chunks = None
         if perform_chunking and text_content:
             if chunk_options is None:
-                chunk_options = {'method': 'recursive', 'max_size': 1000, 'overlap': 200}
-            chunk_options.setdefault('method', 'recursive')
+                chunk_options = {'method': 'sentences', 'max_size': 1000, 'overlap': 200}
+            chunk_options.setdefault('method', 'sentences')
 
             logging.info(f"Chunking document content {doc_path} with options: {chunk_options}")
             from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process # Assuming exists

@@ -451,29 +451,6 @@ def chunk_on_delimiter(input_string: str,
     return combined_chunks
 
 
-
-
-# FIXME
-def recursive_summarize_chunks(chunks: List[str], summarize_func, custom_prompt: Optional[str] = None,
-                               temp: Optional[float] = None, system_prompt: Optional[str] = None) -> List[str]:
-    logging.debug("recursive_summarize_chunks...")
-    summarized_chunks = []
-    current_summary = ""
-
-    logging.debug(f"Summarizing {len(chunks)} chunks recursively...")
-    logging.debug(f"Temperature is set to {temp}")
-    for i, chunk in enumerate(chunks):
-        if i == 0:
-            current_summary = summarize_func(chunk, custom_prompt, temp, system_prompt)
-        else:
-            combined_text = current_summary + "\n\n" + chunk
-            current_summary = summarize_func(combined_text, custom_prompt, temp, system_prompt)
-
-        summarized_chunks.append(current_summary)
-
-    return summarized_chunks
-
-
 # Sample text for testing
 sample_text = """
 Natural language processing (NLP) is a subfield of linguistics, computer science, and artificial intelligence 

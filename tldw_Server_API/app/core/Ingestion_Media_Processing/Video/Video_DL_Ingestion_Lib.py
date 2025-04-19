@@ -876,13 +876,14 @@ def process_single_video(
             if perform_chunking:
                 logger.info(f"Performing chunking for {local_file_path_for_transcription}")
                 chunk_opts = {
-                    'method': chunk_method or 'recursive', # Default if None
+                    'method': chunk_method or 'sentences', # Default if None
                     'max_size': max_chunk_size,
                     'overlap': chunk_overlap,
                     'adaptive': use_adaptive_chunking,
                     'multi_level': use_multi_level_chunking,
                     'language': chunk_language or transcription_language or 'en' # Sensible language default
                 }
+                # FIXME - validate chunk_opts
                 processing_result["analysis_details"]["chunking_options"] = chunk_opts
                 try:
                     chunked_texts_list = improved_chunking_process(text_to_analyze, chunk_opts)

@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summari
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Utils.Utils import logging as logger
 #
 # Constants
 MAX_FILE_SIZE_MB = 50
@@ -197,7 +198,7 @@ def process_pdf(
     system_prompt: Optional[str] = None,
     summarize_recursively: bool = False,
     write_to_temp_file: bool = False # Control if bytes should be written to disk
-) -> Dict[str, Any]:
+) -> dict[str, Any] | None:
     """
     Processes a single PDF (from path or bytes): extracts text & metadata, chunks, summarizes.
     Returns a dictionary with processed data, status, and errors. *No DB interaction.*
@@ -227,10 +228,10 @@ def process_pdf(
                 "input_ref": str (filename),
                 "media_type": "pdf",
                 "parser_used": str,
-                "text_content": Optional[str],
+                "content": Optional[str],
                 "metadata": Optional[Dict], # {'title': str, 'author': str, 'raw': dict}
                 "chunks": Optional[List[Dict]],
-                "summary": Optional[str],
+                "analysis": Optional[str],
                 "keywords": Optional[List[str]],
                 "error": Optional[str],
                 "warnings": Optional[List[str]],
@@ -239,15 +240,16 @@ def process_pdf(
     """
     start_time = time.time()
     # Initialize the result dictionary structure
+
     result: Dict[str, Any] = {
         "status": "Pending",
         "input_ref": filename,
         "media_type": "pdf",
         "parser_used": parser,
-        "text_content": None,
+        "content": None,
         "metadata": None,
         "chunks": None,
-        "summary": None,
+        "analysis": None,
         "keywords": keywords or [], # Store keywords passed in
         "error": None,
         "warnings": None,
@@ -260,55 +262,52 @@ def process_pdf(
     }
     log_counter("pdf_processing_attempt", labels={"file_name": filename, "parser": parser})
 
-    temp_pdf_path: Optional[str] = None
-    input_for_processing: Union[str, bytes]
-    input_for_metadata: Union[str, bytes]
+    temp_pdf_path: Optional[str] = None # Path to the temp file if created
+    input_path_for_processing: Optional[str] = None # Always use a path for parsers now
+    input_source_for_metadata: Union[str, bytes] # pymupdf.open can use bytes or path for metadata
 
     try:
-        # --- Step 0: Handle Input Type and Temporary File ---
+        # --- Step 0: Handle Input Type and Ensure File Path for Processing ---
         if isinstance(file_input, bytes):
-            result["processing_source"] = f"bytes_input_({len(file_input)})"  # Indicate bytes source
-            needs_path = parser in ['pymupdf', 'docling']
-            if write_to_temp_file or needs_path:
-                try:
-                    _temp_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+            result["processing_source"] = f"bytes_input_({len(file_input)})"
+            # ALWAYS write bytes to a temp file for consistent parser input
+            try:
+                # Use context manager for safer handling (optional, but good practice)
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as _temp_file:
                     _temp_file.write(file_input)
-                    temp_pdf_path = _temp_file.name
-                    _temp_file.close()
-                    logging.debug(f"Input bytes written to temporary file: {temp_pdf_path}")
-                    input_for_processing = temp_pdf_path
-                    input_for_metadata = temp_pdf_path
-                    result["processing_source"] = temp_pdf_path  # Update with actual path used
-                except Exception as temp_err:
-                    raise IOError(f"Failed to handle temporary file: {temp_err}") from temp_err
-            else:
-                input_for_processing = file_input
-                input_for_metadata = file_input
+                    temp_pdf_path = _temp_file.name # Store the path
+                logging.debug(f"Input bytes written to temporary file: {temp_pdf_path}")
+                input_path_for_processing = temp_pdf_path # Use the path for all parsers
+                input_source_for_metadata = temp_pdf_path # Use path for metadata too for simplicity
+                result["processing_source"] = temp_pdf_path # Update source info to show the temp path used
+            except Exception as temp_err:
+                # Raise a specific error type if temp file fails
+                raise IOError(f"Failed to create or write temporary file: {temp_err}") from temp_err
+
         elif isinstance(file_input, Path):
             input_path_str = str(file_input)
             if not file_input.exists(): raise FileNotFoundError(f"Input file path does not exist: {input_path_str}")
-            input_for_processing = input_path_str
-            input_for_metadata = input_path_str
+            input_path_for_processing = input_path_str
+            input_source_for_metadata = input_path_str # Path for metadata
             result["processing_source"] = input_path_str
+
         elif isinstance(file_input, str):
             if not os.path.exists(file_input): raise FileNotFoundError(f"Input file path does not exist: {file_input}")
-            input_for_processing = file_input
-            input_for_metadata = file_input
+            input_path_for_processing = file_input
+            input_source_for_metadata = file_input # Path for metadata
             result["processing_source"] = file_input
         else:
             raise TypeError(f"Unsupported file_input type: {type(file_input)}")
 
-        # --- Step 1: Extract Text ---
-        text_content = None
+        # --- Step 1: Extract Text (Now always uses a path) ---
+        content = None
         try:
-            logging.info(f"Attempting text extraction for {filename} using parser: {parser}")
+            logging.info(f"Attempting text extraction for {filename} using parser: {parser} on path: {input_path_for_processing}")
             if parser == "pymupdf4llm":
-                # This parser can handle bytes or path directly
-                text_content = pymupdf4llm_parse_pdf(input_for_processing)
+                # Now correctly called with a path
+                content = pymupdf4llm_parse_pdf(input_path_for_processing)
             elif parser == "pymupdf":
-                 if not isinstance(input_for_processing, str):
-                      raise ValueError("Internal Error: pymupdf parser needs a file path, but received bytes.")
-                 text_content = extract_text_and_format_from_pdf(input_for_processing)
+                 content = extract_text_and_format_from_pdf(input_path_for_processing)
             elif parser == "docling":
                 DOCLING_AVAILABLE = False
                 try:
@@ -318,18 +317,22 @@ def process_pdf(
                     DOCLING_AVAILABLE = False
                 if not DOCLING_AVAILABLE:
                     raise ImportError("Docling parser selected, but library is not installed.")
-                if not isinstance(input_for_processing, str):
-                    raise ValueError("Internal Error: docling parser needs a file path, but received bytes.")
-                text_content = docling_parse_pdf(input_for_processing)
+                content = docling_parse_pdf(input_path_for_processing)
             else:
                 # This case should ideally be caught by Pydantic validation in the endpoint
                 logging.warning(f"Unsupported PDF parser specified: {parser}. Attempting fallback to pymupdf4llm.")
                 result["warnings"] = (result["warnings"] or []) + [f"Unsupported parser '{parser}', fallback to 'pymupdf4llm'"]
-                result["parser_used"] = "pymupdf4llm" # Update the parser used in the result
-                text_content = pymupdf4llm_parse_pdf(input_for_processing) # Try fallback
+                result["parser_used"] = "pymupdf4llm"
+                content = pymupdf4llm_parse_pdf(input_path_for_processing) # Fallback also uses path
 
-            result["text_content"] = text_content
-            logging.info(f"Text extracted successfully for {filename} using {result['parser_used']}.")
+            result["content"] = content
+            if content is not None: # Check if extraction actually yielded content
+                 logging.info(f"Text extracted successfully for {filename} using {result['parser_used']}.")
+            else:
+                 # Handle cases where parsing succeeded but returned nothing (e.g., empty PDF)
+                 logging.warning(f"Text extraction using {result['parser_used']} for {filename} yielded no content.")
+                 result["warnings"] = (result["warnings"] or []) + [f"Text extraction yielded no content ({result['parser_used']})."]
+
         except Exception as parse_err:
              # If parsing fails, log the error and add a warning. Continue to metadata extraction.
              logging.error(f"Text extraction failed for {filename} using {parser}: {parse_err}", exc_info=True)
@@ -343,15 +346,12 @@ def process_pdf(
             # Use pymupdf directly for metadata, as it's generally robust
             raw_metadata = {}
             page_count = 0
-            try:
-                import pymupdf
-                with pymupdf.open(stream=input_for_metadata if isinstance(input_for_metadata, bytes) else None, filename=input_for_metadata if isinstance(input_for_metadata, str) else None) as doc:
-                    raw_metadata = doc.metadata
-                    page_count = doc.page_count
-                logging.info(f"Metadata extracted for {filename}.")
-            except:
-                logging.error(f"Failed to extract metadata using pymupdf for {filename}.", exc_info=True)
-                raise RuntimeError("Metadata extraction failed using pymupdf.")
+            # No need for internal try/except around import pymupdf if it's at top level
+            # Use filename argument directly with pymupdf.open
+            with pymupdf.open(filename=input_source_for_metadata) as doc: # Use filename= for path
+                raw_metadata = doc.metadata
+                page_count = doc.page_count
+            logging.info(f"Metadata extracted for {filename}.")
 
             # Add subject and keywords from metadata to the provided keywords list
             pdf_keywords_str = raw_metadata.get('keywords', '')
@@ -370,7 +370,7 @@ def process_pdf(
             result["metadata"] = {
                 "title": final_title,
                 "author": final_author,
-                "page_count": page_count, # Add page count
+                "page_count": page_count,
                 "creationDate": raw_metadata.get('creationDate'),
                 "modDate": raw_metadata.get('modDate'),
                 "producer": raw_metadata.get('producer'),
@@ -382,8 +382,7 @@ def process_pdf(
         except Exception as meta_err:
              logging.error(f"Metadata extraction failed for {filename}: {meta_err}", exc_info=True)
              result["warnings"] = (result["warnings"] or []) + [f"Metadata extraction failed: {str(meta_err)}"]
-             # Still set default metadata structure if extraction fails completely
-             result["metadata"] = {
+             result["metadata"] = { # Still provide default structure
                  "title": title_override or Path(filename).stem,
                  "author": author_override or "Unknown",
                  "page_count": 0,
@@ -394,22 +393,22 @@ def process_pdf(
         # --- Step 3: Chunking ---
         processed_chunks = None
         # Only proceed if text extraction was successful
-        if text_content and perform_chunking:
+        if content and perform_chunking:
             if chunk_options is None:
                 # Provide sensible defaults if none are passed
-                chunk_options = {'method': 'recursive', 'max_size': 500, 'overlap': 100}
-            # Ensure a method is set, default to 'recursive' if missing
-            chunk_options.setdefault('method', 'recursive')
+                chunk_options = {'method': 'sentences', 'max_size': 500, 'overlap': 100}
+            # Ensure a method is set, default to 'sentences' if missing
+            chunk_options.setdefault('method', 'sentences')
 
             logging.info(f"Attempting chunking for {filename} with options: {chunk_options}")
             try:
                 from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
-                processed_chunks = improved_chunking_process(text_content, chunk_options)
+                processed_chunks = improved_chunking_process(content, chunk_options)
 
                 if not processed_chunks:
                      logging.warning(f"Chunking produced no chunks for {filename}. Using full text as one chunk.")
                      # Create a single chunk containing the entire text
-                     processed_chunks = [{'text': text_content, 'metadata': {'chunk_num': 0, 'start_index': 0, 'end_index': len(text_content)}}]
+                     processed_chunks = [{'text': content, 'metadata': {'chunk_num': 0, 'start_index': 0, 'end_index': len(content)}}]
                      result["warnings"] = (result["warnings"] or []) + ["Chunking yielded no results; using full text."]
                 else:
                      logging.info(f"Chunking successful for {filename}. Total chunks created: {len(processed_chunks)}")
@@ -422,12 +421,12 @@ def process_pdf(
                  result["warnings"] = (result["warnings"] or []) + [f"Chunking failed: {str(chunk_err)}"]
                  # If chunking fails, we might still want to proceed with summarization on the full text
                  # Create a single chunk containing the whole text to allow summarization attempt
-                 processed_chunks = [{'text': text_content, 'metadata': {'chunk_num': 0, 'error': f"Chunking failed: {chunk_err}"}}]
+                 processed_chunks = [{'text': content, 'metadata': {'chunk_num': 0, 'error': f"Chunking failed: {chunk_err}"}}]
                  result["chunks"] = processed_chunks # Store the single chunk with error info
 
-        elif text_content:
+        elif content:
              # If not chunking, but text exists, create a single chunk for consistency
-             processed_chunks = [{'text': text_content, 'metadata': {'chunk_num': 0}}]
+             processed_chunks = [{'text': content, 'metadata': {'chunk_num': 0}}]
              result["chunks"] = processed_chunks
              logging.info(f"Chunking disabled for {filename}. Using full text as one chunk.")
         else:
@@ -443,7 +442,7 @@ def process_pdf(
             log_counter("pdf_summarization_attempt", value=len(processed_chunks), labels={"file_name": filename, "api_name": api_name})
 
             chunk_summaries = []  # Store summaries of individual chunks
-            summarized_chunks_for_result = [] # Store chunk data including the generated summary
+            summarized_chunks_for_result = [] # Store chunk data including the generated analysis
 
             # Iterate through each chunk generated earlier
             for i, chunk in enumerate(processed_chunks):
@@ -454,7 +453,7 @@ def process_pdf(
                 if chunk_text:
                     try:
                         # Call the external summarization library function
-                        summary_text = summarize(
+                        analysis_text = summarize(
                             api_name=api_name,
                             input_data=chunk_text,
                             custom_prompt_arg=custom_prompt, # User's custom prompt, if any
@@ -465,34 +464,34 @@ def process_pdf(
                         )
 
                         # Check if the summarization returned a valid, non-empty string
-                        if summary_text and isinstance(summary_text, str) and summary_text.strip():
-                            chunk_summaries.append(summary_text)
-                            # Add the generated summary to the chunk's metadata
-                            chunk_metadata['summary'] = summary_text
+                        if analysis_text and isinstance(analysis_text, str) and analysis_text.strip():
+                            chunk_summaries.append(analysis_text)
+                            # Add the generated analysis to the chunk's metadata
+                            chunk_metadata['analysis'] = analysis_text
                             logging.debug(f"Summarized chunk {i+1}/{len(processed_chunks)} for {filename}.")
                         else:
                             # Summarization returned empty or invalid result
-                            chunk_metadata['summary'] = None # Indicate no summary available
+                            chunk_metadata['analysis'] = None # Indicate no analysis available
                             logging.debug(f"Summarization yielded empty result for chunk {i+1} of {filename}.")
 
                     except Exception as summ_err:
                         # Handle errors during the API call or summarization process
                         logging.warning(f"Summarization failed for chunk {i+1} of {filename}: {summ_err}", exc_info=True)
                         # Store error information in the chunk's metadata
-                        chunk_metadata['summary'] = f"[Summarization Error: {str(summ_err)}]"
+                        chunk_metadata['analysis'] = f"[Summarization Error: {str(summ_err)}]"
                         # Add a warning to the overall result
                         result["warnings"] = (result["warnings"] or []) + [f"Summarization failed for chunk {i+1}: {str(summ_err)}"]
                 else:
                     # Chunk had no text to summarize
-                    chunk_metadata['summary'] = None
+                    chunk_metadata['analysis'] = None
                     logging.debug(f"Skipping summarization for empty chunk {i+1} of {filename}.")
 
                 # Update the chunk with potentially modified metadata
                 chunk['metadata'] = chunk_metadata
-                # Add the chunk (with or without summary metadata) to the list for the final result
+                # Add the chunk (with or without analysis metadata) to the list for the final result
                 summarized_chunks_for_result.append(chunk)
 
-            # Update the main result dictionary with the chunks containing summary metadata
+            # Update the main result dictionary with the chunks containing analysis metadata
             result["chunks"] = summarized_chunks_for_result
 
             # --- Combine chunk summaries (optional recursive step) ---
@@ -509,7 +508,7 @@ def process_pdf(
                             api_name=api_name,
                             input_data=combined_summaries_text,
                             # Use the original custom prompt, or a default recursive prompt if none provided
-                            custom_prompt_arg=custom_prompt or "Provide a concise overall summary of the preceding text sections.",
+                            custom_prompt_arg=custom_prompt or "Provide a concise overall analysis of the preceding text sections.",
                             api_key=api_key,
                             recursive_summarization=False, # This is the final summarization pass
                             temp=None,
@@ -525,22 +524,22 @@ def process_pdf(
                     except Exception as rec_summ_err:
                         # Handle errors during the recursive summarization step
                         logging.error(f"Recursive summarization failed for {filename}: {rec_summ_err}", exc_info=True)
-                        # Fallback: Use the joined chunk summaries as the final summary, but mark the error
+                        # Fallback: Use the joined chunk summaries as the final analysis, but mark the error
                         final_summary = f"[Recursive Summarization Error: {str(rec_summ_err)}]\n\n" + combined_summaries_text
                         result["warnings"] = (result["warnings"] or []) + [f"Recursive summarization failed: {str(rec_summ_err)}"]
                         log_counter("pdf_recursive_summarization_error", labels={"file_name": filename, "error": str(rec_summ_err)})
 
                 else:
-                    # Not recursive, or only one chunk summary: simply join them
+                    # Not recursive, or only one chunk analysis: simply join them
                     final_summary = "\n\n---\n\n".join(chunk_summaries)
                     if len(chunk_summaries) > 1 :
                          logging.info(f"Combined {len(chunk_summaries)} chunk summaries for {filename} (non-recursive).")
                     else:
-                         logging.info(f"Using single chunk summary as final summary for {filename}.")
+                         logging.info(f"Using single chunk analysis as final analysis for {filename}.")
 
 
             # Store the final generated summary (or None if none was generated)
-            result["summary"] = final_summary
+            result["analysis"] = final_summary
             log_counter("pdf_chunks_summarized", value=len(chunk_summaries), labels={"file_name": filename})
             logging.info(f"Summarization processing completed for {filename}.")
 
@@ -560,9 +559,9 @@ def process_pdf(
         # --- Step 5: Determine Final Status ---
         # Check if any errors occurred during the critical steps (parsing, file handling)
         # If text extraction failed, it's likely an Error, otherwise Warning for lesser issues.
-        if not text_content and any("Text extraction failed" in w for w in (result["warnings"] or [])):
+        if not content and any("Text extraction failed" in w for w in (result["warnings"] or [])):
             result["status"] = "Error"
-            result["error"] = result["error"] or "Text extraction failed." # Assign primary error
+            result["error"] = result["error"] or "PDF Extraction Error." # Assign primary error
         elif result["warnings"]:
              # If there were warnings but text was extracted, status is Warning
              result["status"] = "Warning"
@@ -626,10 +625,10 @@ def process_pdf(
             except OSError as rm_err:
                 # Log a warning if cleanup fails, but don't let it prevent returning results
                 logging.warning(f"Could not remove temporary PDF file {temp_pdf_path}: {rm_err}")
-                result["warnings"] = (result["warnings"] or []) + [f"Failed to cleanup temp file: {rm_err}"]
-                # If status was Success, downgrade to Warning due to cleanup issue
-                if result["status"] == "Success":
+                # Ensure status reflects the cleanup issue if processing was otherwise successful
+                if result.get("status") == "Success":
                     result["status"] = "Warning"
+                result["warnings"] = (result["warnings"] or []) + [f"Failed to cleanup temp file: {rm_err}"]
 
 
     # --- Final Logging and Return ---
@@ -659,10 +658,9 @@ async def process_pdf_task(
     parser: str = "pymupdf4llm",
     title_override: Optional[str] = None,
     author_override: Optional[str] = None,
-    keywords: Optional[List[str]] = None, # Expect list
+    keywords: Optional[List[str]] = None,
     perform_chunking: bool = True,
-    # Receive individual chunk params from endpoint model
-    chunk_method: Optional[str] = "recursive",
+    chunk_method: Optional[str] = "sentences",
     max_chunk_size: Optional[int] = 500,
     chunk_overlap: Optional[int] = 100,
     perform_analysis: bool = False,
@@ -691,27 +689,24 @@ async def process_pdf_task(
             }
 
         # Call the synchronous core processing function
-        # Note: If process_pdf itself becomes significantly CPU/IO bound AND this
-        # task needs to be highly concurrent without blocking the main loop,
-        # you might wrap the call to process_pdf in loop.run_in_executor.
-        # However, if the calling endpoint already uses run_in_executor for the
-        # *entire* per-item processing (_process_document_like_item), this is likely redundant.
+        # process_pdf now handles the byte input correctly by creating a temp file
+        logger.debug(f"TASK: Passing to process_pdf -> api_name='{api_name}', api_key='{api_key}'")
         result_dict = process_pdf(
-            file_input=file_bytes,
+            file_input=file_bytes, # Pass bytes directly
             filename=filename,
             parser=parser,
             title_override=title_override,
             author_override=author_override,
-            keywords=keywords, # Pass list
+            keywords=keywords,
             perform_chunking=perform_chunking,
-            chunk_options=chunk_options_dict, # Pass the dict
+            chunk_options=chunk_options_dict,
             perform_analysis=perform_analysis,
             api_name=api_name,
             api_key=api_key,
             custom_prompt=custom_prompt,
             system_prompt=system_prompt,
             summarize_recursively=summarize_recursively,
-            # process_pdf decides whether to write temp file
+            # No need to pass write_to_temp_file
         )
 
         logging.info(f"process_pdf_task completed for {filename} with status: {result_dict.get('status')}")
@@ -727,8 +722,10 @@ async def process_pdf_task(
             "media_type": "pdf",
             "parser_used": parser,
             "error": f"Task-level error: {str(e)}",
-            "text_content": None, "metadata": None, "chunks": None, "summary": None,
-            "keywords": keywords or [], "warnings": None
+            "content": None, "metadata": None, "chunks": None, "analysis": None,
+            "keywords": keywords or [], "warnings": None,
+            # Add analysis_details field for consistency if needed
+            "analysis_details": {}
         }
 
 #
