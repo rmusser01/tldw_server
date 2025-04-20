@@ -978,19 +978,46 @@ class Database:
 #
 # Media-related Functions
 
-def check_media_exists(title: str, url: str) -> Optional[int]:
+def check_media_exists(title: str, url: str, db_instance: Database) -> Optional[int]:
+    """
+    Checks if media exists by title or URL using the provided Database instance.
+
+    Args:
+        title: The title of the media to check.
+        url: The URL of the media to check.
+        db_instance: The specific Database instance (connected to the correct user's DB) to query.
+
+    Returns:
+        The media ID if found, otherwise None.
+    """
+    # Optional: Add a type check for robustness, though Python is duck-typed
+    if not isinstance(db_instance, Database):
+        logging.error("check_media_exists received an invalid db_instance type.")
+        # Decide on error handling: raise TypeError, return None, etc.
+        # Raising an error might be clearer.
+        raise TypeError("A valid Database instance must be provided.")
+
+    # Use the passed db_instance instead of the global 'db'
     try:
-        with db.get_connection() as conn:
+        # Use the get_connection method from the passed instance
+        with db_instance.get_connection() as conn:
             cursor = conn.cursor()
-            query = 'SELECT id FROM Media WHERE title = ? OR url = ?'
+            # Consider if title OR url is the right check, or if they should be separate
+            # If URL is unique, checking only URL might be better.
+            query = 'SELECT id FROM Media WHERE title = ? OR url = ? LIMIT 1'
             cursor.execute(query, (title, url))
+            # Assuming row_factory is set to sqlite3.Row in your Database class
             result = cursor.fetchone()
-            logging.debug(f"check_media_exists query: {query}")
+            logging.debug(f"check_media_exists query on '{db_instance.db_path}': {query}")
             logging.debug(f"check_media_exists params: title={title}, url={url}")
             logging.debug(f"check_media_exists result: {result}")
-            return result[0] if result else None
-    except Exception as e:
-        logging.error(f"Error checking if media exists: {str(e)}")
+            # Access by column name if using row_factory, otherwise by index [0]
+            return result['id'] if result else None
+    except sqlite3.Error as db_err: # Catch specific SQLite errors
+        logging.error(f"SQLite error checking media existence on '{db_instance.db_path}': {db_err}", exc_info=True)
+        return None
+    except Exception as e: # Catch other unexpected errors
+        logging.error(f"Unexpected error checking media existence on '{db_instance.db_path}': {e}")
         logging.error(f"Exception details: {traceback.format_exc()}")
         return None
 
@@ -998,7 +1025,7 @@ def check_media_exists(title: str, url: str) -> Optional[int]:
 def check_should_process_by_url(
     url: str,
     current_transcription_model: str,
-    db=None # Pass db instance or use global
+    db_instance: Database
 ) -> Tuple[bool, Optional[int], str]:
     """
     Checks if media exists by URL and if processing should proceed based on
@@ -1015,6 +1042,7 @@ def check_should_process_by_url(
         - existing_media_id (Optional[int]): The ID if media exists, None otherwise.
         - reason (str): Explanation for the decision.
     """
+    db=db_instance
     with db.transaction() as conn:
         cursor = conn.cursor()
 
@@ -1057,19 +1085,21 @@ def check_should_process_by_url(
         return True, None, f"Database error during pre-check: {e}"
 
 
-def check_media_and_whisper_model(title=None, url=None, current_whisper_model=None):
+def check_media_and_whisper_model(title=None, url=None, current_whisper_model=None, db_instance: Database=None):
     """
     Check if media exists in the database and compare the whisper model used.
 
     :param title: Title of the media (optional)
     :param url: URL of the media (optional)
     :param current_whisper_model: The whisper model currently selected for use
+    :param db_instance: Database connection/manager instance.
     :return: Tuple (bool, str) - (should_download, reason)
     """
+    db=db_instance
     if not title and not url:
         return True, "No title or URL provided"
 
-    with db.get_connection() as conn:
+    with db_instance.get_connection() as conn:
         cursor = conn.cursor()
 
         # First, find the media_id
@@ -1126,7 +1156,8 @@ def check_media_and_whisper_model(title=None, url=None, current_whisper_model=No
         return False, f"Media found with same whisper model (ID: {media_id})"
 
 
-def add_media_chunk(media_id: int, chunk_text: str, start_index: int, end_index: int, chunk_id: str):
+def add_media_chunk(media_id: int, chunk_text: str, start_index: int, end_index: int, chunk_id: str, db_instance: Database):
+    db=db_instance
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -1135,23 +1166,25 @@ def add_media_chunk(media_id: int, chunk_text: str, start_index: int, end_index:
         )
         conn.commit()
 
-def sqlite_update_fts_for_media(db, media_id: int):
+def sqlite_update_fts_for_media(db_instance: Database, media_id: int):
+    db=db_instance
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("INSERT OR REPLACE INTO media_fts (rowid, title, content) SELECT id, title, content FROM Media WHERE id = ?", (media_id,))
         conn.commit()
 
 
-def get_unprocessed_media(db):
+def get_unprocessed_media(db_instance):
     query = """
     SELECT id, content, type, COALESCE(title, '') as file_name
     FROM Media 
     WHERE vector_processing = 0
     ORDER BY id
     """
-    return db.execute_query(query)
+    return db_instance.execute_query(query)
 
-def get_next_media_id():
+# FIXME - rewrite
+def get_next_media_id(db_instance: Database):
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -1162,7 +1195,8 @@ def get_next_media_id():
         conn.close()
 
 
-def mark_media_as_processed(database, media_id):
+def mark_media_as_processed(db_instance: Database, media_id):
+    database = db_instance
     try:
         query = "UPDATE Media SET vector_processing = 1 WHERE id = ?"
         database.execute_query(query, (media_id,))
@@ -1182,8 +1216,9 @@ def mark_media_as_processed(database, media_id):
 
 # Wrapper function for legacy support
 def add_media_to_database(url, info_dict, segments, analysis_content, keywords, custom_prompt_input, whisper_model,
-                          media_type='video', overwrite=False, db=None):
+                          media_type='video', overwrite=False, db_instance: Database=None):
     """Legacy wrapper for add_media_with_keywords"""
+    db=db_instance
     # Extract content from segments
     if isinstance(segments, list):
         content = ' '.join([segment.get('Text', '') for segment in segments if 'Text' in segment])
@@ -1213,13 +1248,14 @@ def add_media_to_database(url, info_dict, segments, analysis_content, keywords, 
 
 # Function to add media with keywords
 def add_media_with_keywords(url, title, media_type, content, keywords, prompt, analysis_content, transcription_model, author,
-                           ingestion_date, overwrite=False, db=None, chunk_options=None, segments=None):
+                           ingestion_date, overwrite=False, db_instance: Database=None, chunk_options=None, segments=None):
+    db=db_instance
     log_counter("add_media_with_keywords_attempt")
     start_time = time.time()
     logging.debug(f"Entering add_media_with_keywords: URL={url}, Title={title}")
 
     if db is None:
-        db = Database()
+        raise DatabaseError("Database connection is not established.")
 
     # Set default values for missing fields
     if url is None:
@@ -1394,77 +1430,9 @@ def add_media_with_keywords(url, title, media_type, content, keywords, prompt, a
         raise DatabaseError(f"Unexpected error: {e}")
 
 
-def ingest_article_to_db(url, title, author, content, keywords, analysis_content, ingestion_date, custom_prompt):
-    try:
-        # Check if content is not empty or whitespace
-        if not content.strip():
-            raise ValueError("Content is empty.")
-
-        keyword_list = keywords.split(',') if keywords else ["default"]
-        keyword_str = ', '.join(keyword_list)
-
-        # Set default values for missing fields
-        url = url or 'Unknown'
-        title = title or 'Unknown'
-        author = author or 'Unknown'
-        keywords = keywords or 'default'
-        analysis_content = analysis_content or 'No analysis_content available'
-        ingestion_date = ingestion_date or datetime.now().strftime('%Y-%m-%d')
-
-        # Log the values of all fields before calling add_media_with_keywords
-        logging.debug(f"URL: {url}")
-        logging.debug(f"Title: {title}")
-        logging.debug(f"Author: {author}")
-        logging.debug(f"Content: {content[:50]}... (length: {len(content)})")  # Log first 50 characters of content
-        logging.debug(f"Keywords: {keywords}")
-        logging.debug(f"analysis_content: {analysis_content}")
-        logging.debug(f"Ingestion Date: {ingestion_date}")
-        logging.debug(f"Custom Prompt: {custom_prompt}")
-
-        # Check if any required field is empty and log the specific missing field
-        if not url:
-            logging.error("URL is missing.")
-            raise ValueError("URL is missing.")
-        if not title:
-            logging.error("Title is missing.")
-            raise ValueError("Title is missing.")
-        if not content:
-            logging.error("Content is missing.")
-            raise ValueError("Content is missing.")
-        if not keywords:
-            logging.error("Keywords are missing.")
-            raise ValueError("Keywords are missing.")
-        if not analysis_content:
-            logging.error("analysis_content is missing.")
-            raise ValueError("analysis_content is missing.")
-        if not ingestion_date:
-            logging.error("Ingestion date is missing.")
-            raise ValueError("Ingestion date is missing.")
-        if not custom_prompt:
-            logging.error("Custom prompt is missing.")
-            raise ValueError("Custom prompt is missing.")
-
-        # Add media with keywords to the database
-        result = add_media_with_keywords(
-            url=url,
-            title=title,
-            media_type='article',
-            content=content,
-            keywords=keyword_str or "article_default",
-            prompt=custom_prompt or None,
-            analysis_content=analysis_content or "No analysis_content generated",
-            transcription_model=None,  # or some default value if applicable
-            author=author or 'Unknown',
-            ingestion_date=ingestion_date
-        )
-        return result
-    except Exception as e:
-        logging.error(f"Failed to ingest article to the database: {e}")
-        return str(e)
-
-
 # Function to add a keyword
-def add_keyword(keyword: str) -> int:
+def add_keyword(keyword: str, db_instance: Database) -> int:
+    db=db_instance
     log_counter("add_keyword_attempt")
     start_time = time.time()
 
@@ -1515,7 +1483,8 @@ def add_keyword(keyword: str) -> int:
 
 
 # Function to delete a keyword
-def delete_keyword(keyword: str) -> str:
+def delete_keyword(keyword: str, db_instance: Database) -> str:
+    db=db_instance
     log_counter("delete_keyword_attempt")
     start_time = time.time()
 
@@ -1549,7 +1518,8 @@ def delete_keyword(keyword: str) -> str:
             raise DatabaseError(f"Error deleting keyword: {e}")
 
 
-def fetch_all_keywords() -> List[str]:
+def fetch_all_keywords(db_instance: Database) -> List[str]:
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -1559,21 +1529,21 @@ def fetch_all_keywords() -> List[str]:
     except sqlite3.Error as e:
         raise DatabaseError(f"Error fetching keywords: {e}")
 
-def keywords_browser_interface():
+def keywords_browser_interface(db_instance: Database):
     keywords = fetch_all_keywords()
     return gr.Markdown("\n".join(f"- {keyword}" for keyword in keywords))
 
-def display_keywords():
+def display_keywords(db_instance: Database):
     try:
-        keywords = fetch_all_keywords()
+        keywords = fetch_all_keywords(db_instance)
         return "\n".join(keywords) if keywords else "No keywords found."
     except DatabaseError as e:
         return str(e)
 
 
-def export_keywords_to_csv():
+def export_keywords_to_csv(db_instance: Database):
     try:
-        keywords = fetch_all_keywords()
+        keywords = fetch_all_keywords(db_instance)
         if not keywords:
             return None, "No keywords found in the database."
 
@@ -1589,10 +1559,10 @@ def export_keywords_to_csv():
         logger.error(f"Error exporting keywords to CSV: {e}")
         return None, f"Error exporting keywords: {e}"
 
-def fetch_keywords_for_media(media_id):
+def fetch_keywords_for_media(media_id, db_instance: Database):
     try:
         # First check if the keywords column exists in MediaModifications
-        with db.get_connection() as conn:
+        with db_instance.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT COUNT(*) 
@@ -1630,14 +1600,14 @@ def fetch_keywords_for_media(media_id):
         logging.error(f"Error fetching keywords: {e}")
         return ["default"]  # Return a default keyword on error
 
-def update_keywords_for_media(media_id: int, keywords: List[str]):
+def update_keywords_for_media(media_id: int, keywords: List[str], db_instance: Database):
     """Update keywords with validation and error handling"""
     try:
         valid_keywords = [k.strip().lower() for k in keywords if k.strip()]
         if not valid_keywords:
             return
 
-        with db.transaction() as conn:
+        with db_instance.transaction() as conn:
             cursor = conn.cursor()
 
             # Clear existing keywords
@@ -1686,9 +1656,10 @@ def update_keywords_for_media(media_id: int, keywords: List[str]):
 ###################################################
 # Function to fetch items based on search query and type
 ###################################################
-def browse_items(search_query, search_type):
+def browse_items(search_query, search_type, db_instance: Database):
+    db=db_instance
     try:
-        with db.get_connection() as conn:
+        with db_instance.get_connection() as conn:
             cursor = conn.cursor()
             if search_type == 'Title':
                 cursor.execute("SELECT id, title, url FROM Media WHERE title LIKE ?", (f'%{search_query}%',))
@@ -1710,7 +1681,7 @@ def browse_items(search_query, search_type):
 ###################################################
 # Function to fetch item details
 ###################################################
-def fetch_item_details(media_id: int, db: Database = None) -> Tuple[str, str, str]:
+def fetch_item_details(media_id: int, db_instance: Database) -> Tuple[str, str, str]:
     """
     Fetches the prompt, analysis_content, and content from the LATEST document version
     associated with the media_id.
@@ -1723,11 +1694,8 @@ def fetch_item_details(media_id: int, db: Database = None) -> Tuple[str, str, st
         A tuple containing (prompt, analysis_content, content).
         Returns default messages if no version or data is found.
     """
-    if db is None:
-        # In a real application, you should ensure the db instance is passed
-        # or handle the global instance creation carefully.
-        # For now, we assume a global 'db' might exist for legacy compatibility,
-        # but it's better practice to pass it explicitly.
+    db=db_instance
+    if db_instance is None:
         logging.warning("fetch_item_details called without explicit db instance.")
         raise ValueError("Global db instance not found and no instance passed.")
 
@@ -1782,7 +1750,7 @@ def fetch_item_details(media_id: int, db: Database = None) -> Tuple[str, str, st
 
 
 # Function to add a version of a prompt and analysis_content
-def add_media_version(media_id: int, prompt: str, analysis_content: str) -> Dict[str, Any]:
+def add_media_version(media_id: int, prompt: str, analysis_content: str, db_instance: Database) -> Dict[str, Any]:
     """
     Legacy wrapper for create_document_version.
     Use create_document_version directly for new code.
@@ -1791,7 +1759,7 @@ def add_media_version(media_id: int, prompt: str, analysis_content: str) -> Dict
 
     try:
         # Get current content from Media table
-        with db.get_connection() as conn:
+        with db_instance.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT content FROM Media WHERE id = ?", (media_id,))
             result = cursor.fetchone()
@@ -1812,17 +1780,20 @@ def add_media_version(media_id: int, prompt: str, analysis_content: str) -> Dict
         raise
 
 
+# FIXME - Rewrite this function to use the new database connection manager
 def search_media_db(
         search_query: str,
         search_fields: List[str],
         keywords: List[str],
         page: int = 1,
         results_per_page: int = 20,
-        connection=None
+        connection=None,
+        db_instance: Database=None
 ) -> Tuple[List[Tuple], int]:
     """
     Search for media items with advanced filtering options.
     """
+    db=db_instance
     # Input validation (keep as is)
     if page < 1:
         raise ValueError("Page number must be 1 or greater")
@@ -1905,8 +1876,8 @@ def search_media_db(
 
 
 # Gradio function to handle user input and display results with pagination, with better feedback
-def search_and_display(search_query, search_fields, keywords, page):
-    results = search_media_db(search_query, search_fields, keywords, page)
+def search_and_display(search_query, search_fields, keywords, page, db_instance: Database):
+    results = search_media_db(search_query, search_fields, keywords, page, db_instance)
 
     if isinstance(results, pd.DataFrame):
         # Convert DataFrame to a list of tuples or lists
@@ -2032,8 +2003,8 @@ def is_valid_date(date_string: str) -> bool:
         return False
 
 
-def check_existing_media(url):
-    db = Database()
+def check_existing_media(url, db_instance: Database):
+    db = db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2046,7 +2017,8 @@ def check_existing_media(url):
 
 
 # FIXME: This function is not complete and needs to be implemented
-def schedule_chunking(media_id: int, content: str, media_name: str, media_type: str = None, chunk_options: dict = None):
+def schedule_chunking(db_instance: Database, media_id: int, content: str, media_name: str, media_type: str = None, chunk_options: dict = None):
+    db = db_instance
     try:
         # Ensure chunk_options is provided; if not, use defaults.
         if chunk_options is None:
@@ -2068,7 +2040,6 @@ def schedule_chunking(media_id: int, content: str, media_name: str, media_type: 
         # Use the converted integers when calling the chunking function.
         chunks = chunk_text(content, method, max_size_int, overlap_int)
 
-        db = Database()
         with db.get_connection() as conn:
             cursor = conn.cursor()
             for i, chunk in enumerate(chunks):
@@ -2100,7 +2071,8 @@ def schedule_chunking(media_id: int, content: str, media_name: str, media_type: 
 #
 # Function to fetch/update media content
 
-def update_media_content(selected_item, item_mapping, content_input, prompt_input, analysis_content):
+def update_media_content(selected_item, item_mapping, content_input, prompt_input, analysis_content, db_instance: Database):
+    db=db_instance
     try:
         if selected_item and item_mapping and selected_item in item_mapping:
             media_id = item_mapping[selected_item]
@@ -2142,7 +2114,7 @@ def update_media_content(selected_item, item_mapping, content_input, prompt_inpu
         return f"Error updating content: {str(e)}"
 
 
-def search_media_database(query: str, connection=None) -> List[Tuple[int, str, str]]:
+def search_media_database(db_instance: Database, query: str, connection=None) -> List[Tuple[int, str, str]]:
     def execute_query(conn):
         try:
             cursor = conn.cursor()
@@ -2154,11 +2126,13 @@ def search_media_database(query: str, connection=None) -> List[Tuple[int, str, s
     if connection:
         return execute_query(connection)
     else:
+        db=db_instance
         with db.get_connection() as conn:
             return execute_query(conn)
 
 
-def load_media_content(media_id: int) -> dict:
+def load_media_content(media_id: int, db_instance: Database) -> dict:
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2175,7 +2149,8 @@ def load_media_content(media_id: int) -> dict:
         raise Exception(f"Error loading media content: {e}")
 
 
-def fetch_items_by_title_or_url(search_query: str, search_type: str):
+def fetch_items_by_title_or_url(search_query: str, search_type: str, db_instance: Database):
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2189,7 +2164,8 @@ def fetch_items_by_title_or_url(search_query: str, search_type: str):
         raise DatabaseError(f"Error fetching items by {search_type}: {e}")
 
 
-def fetch_items_by_keyword(search_query: str):
+def fetch_items_by_keyword(search_query: str, db_instance: Database):
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2206,7 +2182,8 @@ def fetch_items_by_keyword(search_query: str):
         raise DatabaseError(f"Error fetching items by keyword: {e}")
 
 
-def fetch_items_by_content(search_query: str):
+def fetch_items_by_content(search_query: str, db_instance: Database):
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2217,7 +2194,8 @@ def fetch_items_by_content(search_query: str):
         raise DatabaseError(f"Error fetching items by content: {e}")
 
 
-def fetch_item_details_single(media_id: int):
+def fetch_item_details_single(media_id: int, db_instance: Database):
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2257,7 +2235,8 @@ def convert_to_markdown(item):
 
 
 # Gradio function to handle user input and display results with pagination for displaying entries in the DB
-def fetch_paginated_data(page: int, results_per_page: int) -> Tuple[List[Tuple], int]:
+def fetch_paginated_data(page: int, results_per_page: int, db_instance: Database) -> Tuple[List[Tuple], int]:
+    db=db_instance
     try:
         offset = (page - 1) * results_per_page
         with db.get_connection() as conn:
@@ -2288,8 +2267,10 @@ def view_database(page: int, results_per_page: int) -> Tuple[str, str, int]:
     return formatted_results, f"Page {page} of {total_pages}", total_pages
 
 
-def search_and_display_items(query, search_type, page, entries_per_page,char_count):
+# FIXME - Proper DB usage
+def search_and_display_items(query, search_type, page, entries_per_page,char_count, db_instance: Database):
     offset = (page - 1) * entries_per_page
+    db=db_instance
     try:
         with sqlite3.connect('./Databases/server_media_summary.db') as conn:
             cursor = conn.cursor()
@@ -2364,7 +2345,6 @@ def search_and_display_items(query, search_type, page, entries_per_page,char_cou
     except sqlite3.Error as e:
         return f"<p>Error searching items: {e}</p>", "Error", 0
 
-
 #
 # End of Functions to manage prompts DB / Fetch and update media content
 #######################################################################################################################
@@ -2374,7 +2354,7 @@ def search_and_display_items(query, search_type, page, entries_per_page,char_cou
 #
 # Obsidian-related Functions
 
-def import_obsidian_note_to_db(note_data, db: Database = None):
+def import_obsidian_note_to_db(note_data, db_instance: Database):
     """
     Imports or updates an Obsidian note into the database, including tags and
     creating an initial document version containing the frontmatter.
@@ -2386,6 +2366,7 @@ def import_obsidian_note_to_db(note_data, db: Database = None):
     Returns:
         Tuple[bool, Optional[str]]: (success_status, error_message_or_none)
     """
+    db=db_instance
     if db is None:
         logging.warning("import_obsidian_note_to_db called without explicit db instance.")
         raise ValueError("Global db instance not found and no instance passed.")
@@ -2492,7 +2473,8 @@ def import_obsidian_note_to_db(note_data, db: Database = None):
 # Functions to Compare Transcripts
 
 # Fetch Transcripts
-def get_transcripts(media_id):
+def get_transcripts(media_id, db_instance: Database):
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2507,7 +2489,8 @@ def get_transcripts(media_id):
         logging.error(f"Error in get_transcripts: {str(e)}")
         return []
 
-def get_latest_transcription(media_id: int):
+def get_latest_transcription(media_id: int, db_instance: Database):
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2534,7 +2517,8 @@ def get_latest_transcription(media_id: int):
 # Functions to handle deletion of media items
 
 
-def mark_as_trash(media_id: int) -> None:
+def mark_as_trash(media_id: int, db_instance: Database) -> None:
+    db=db_instance
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -2545,7 +2529,8 @@ def mark_as_trash(media_id: int) -> None:
         conn.commit()
 
 
-def restore_from_trash(media_id: int) -> None:
+def restore_from_trash(media_id: int, db_instance: Database) -> None:
+    db=db_instance
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -2556,7 +2541,8 @@ def restore_from_trash(media_id: int) -> None:
         conn.commit()
 
 
-def get_trashed_items() -> List[Dict]:
+def get_trashed_items(db_instance: Database) -> List[Dict]:
+    db=db_instance
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -2568,7 +2554,8 @@ def get_trashed_items() -> List[Dict]:
         return [{'id': row[0], 'title': row[1], 'trash_date': row[2]} for row in cursor.fetchall()]
 
 
-def permanently_delete_item(media_id: int) -> None:
+def permanently_delete_item(media_id: int, db_instance: Database) -> None:
+    db=db_instance
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM Media WHERE id = ?", (media_id,))
@@ -2579,7 +2566,8 @@ def permanently_delete_item(media_id: int) -> None:
         conn.commit()
 
 
-def empty_trash(days_threshold: int) -> Tuple[int, int]:
+def empty_trash(days_threshold: int, db_instance: Database) -> Tuple[int, int]:
+    db=db_instance
     threshold_date = datetime.now() - timedelta(days=days_threshold)
     with db.get_connection() as conn:
         cursor = conn.cursor()
@@ -2601,7 +2589,8 @@ def empty_trash(days_threshold: int) -> Tuple[int, int]:
     return len(old_items), remaining_items
 
 
-def user_delete_item(media_id: int, force: bool = False) -> str:
+def user_delete_item(db_instance: Database, media_id: int, force: bool = False) -> str:
+    db=db_instance
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT is_trash, trash_date FROM Media WHERE id = ?", (media_id,))
@@ -2623,7 +2612,8 @@ def user_delete_item(media_id: int, force: bool = False) -> str:
             return "Item is already in trash. Use force=True to delete permanently before 30 days."
 
 
-def get_chunk_text(media_id: int, chunk_index: int) -> str:
+def get_chunk_text(media_id: int, chunk_index: int, db_instance: Database) -> str:
+    db=db_instance
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT content FROM MediaChunks WHERE media_id = ? AND chunk_index = ?",
@@ -2631,20 +2621,22 @@ def get_chunk_text(media_id: int, chunk_index: int) -> str:
         result = cursor.fetchone()
     return result[0] if result else None
 
-def get_full_document(media_id: int) -> str:
+def get_full_document(media_id: int, db_instance: Database) -> str:
+    db=db_instance
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT content FROM Media WHERE id = ?", (media_id,))
         result = cursor.fetchone()
     return result[0] if result else None
 
-def get_all_content_from_database() -> List[Dict[str, Any]]:
+def get_all_content_from_database(db_instance: Database) -> List[Dict[str, Any]]:
     """
     Retrieve all media content from the database that requires embedding.
 
     Returns:
         List[Dict[str, Any]]: A list of dictionaries, each containing the media ID, content, title, and other relevant fields.
     """
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2673,7 +2665,8 @@ def get_all_content_from_database() -> List[Dict[str, Any]]:
         raise DatabaseError(f"Error retrieving all content from database: {e}")
 
 
-def get_media_content(media_id: int) -> str:
+def get_media_content(media_id: int, db_instance: Database) -> str:
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2689,7 +2682,8 @@ def get_media_content(media_id: int) -> str:
         logging.error(f"Unexpected error in get_media_content: {e}")
         raise
 
-def get_media_title(media_id: int) -> str:
+def get_media_title(media_id: int, db_instance: Database) -> str:
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2700,7 +2694,8 @@ def get_media_title(media_id: int) -> str:
         logging.error(f"Database error in get_media_title: {e}")
         return f"Unknown Source (ID: {media_id})"
 
-def get_media_transcripts(media_id):
+def get_media_transcripts(media_id, db_instance: Database):
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2724,7 +2719,8 @@ def get_media_transcripts(media_id):
         logging.error(f"Error in get_media_transcripts: {str(e)}")
         return []
 
-def get_specific_transcript(transcript_id: int) -> Dict:
+def get_specific_transcript(transcript_id: int, db_instance: Database) -> Dict:
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2747,7 +2743,7 @@ def get_specific_transcript(transcript_id: int) -> Dict:
         return {'error': f"Error retrieving transcript: {str(e)}"}
 
 
-def get_media_summaries(media_id: int, db: Database = None) -> List[Dict]:
+def get_media_summaries(media_id: int, db_instance: Database) -> List[Dict]:
     """
     Retrieves all non-empty analysis content entries (summaries) from the
     DocumentVersions table for a given media ID, ordered by version number descending.
@@ -2761,6 +2757,7 @@ def get_media_summaries(media_id: int, db: Database = None) -> List[Dict]:
         the analysis content ('content'), and the creation timestamp ('created_at').
         Returns an empty list on error or if none found.
     """
+    db=db_instance
     if db is None:
         logging.warning("get_media_summaries called without explicit db instance.")
         raise ValueError("Global db instance not found and no instance passed.")
@@ -2794,7 +2791,7 @@ def get_media_summaries(media_id: int, db: Database = None) -> List[Dict]:
         return []  # Return empty list on error
 
 
-def get_specific_analysis(version_id: int, db: Database = None) -> Dict:
+def get_specific_analysis(version_id: int, db_instance: Database) -> Dict:
     """
     Retrieves the analysis content for a specific document version ID.
 
@@ -2806,6 +2803,7 @@ def get_specific_analysis(version_id: int, db: Database = None) -> Dict:
         A dictionary containing the version ID ('id'), the analysis content ('content'),
         and the creation timestamp ('created_at'), or an error dictionary.
     """
+    db=db_instance
     if db is None:
         logging.warning("get_specific_analysis called without explicit db instance.")
         raise ValueError("Global db instance not found and no instance passed.")
@@ -2837,7 +2835,7 @@ def get_specific_analysis(version_id: int, db: Database = None) -> Dict:
         return {'error': f"Error retrieving analysis content: {str(e)}"}
 
 
-def get_media_prompts(media_id: int, db: Database = None) -> List[Dict]:
+def get_media_prompts(media_id: int, db_instance: Database) -> List[Dict]:
     """
     Retrieves all non-empty prompt entries from the DocumentVersions table
     for a given media ID, ordered by version number descending.
@@ -2851,6 +2849,7 @@ def get_media_prompts(media_id: int, db: Database = None) -> List[Dict]:
         the prompt content ('content'), and the creation timestamp ('created_at').
         Returns an empty list on error or if none found.
     """
+    db=db_instance
     if db is None:
         logging.warning("get_media_prompts called without explicit db instance.")
         raise ValueError("Global db instance not found and no instance passed.")
@@ -2883,7 +2882,7 @@ def get_media_prompts(media_id: int, db: Database = None) -> List[Dict]:
         return []  # Return empty list on error
 
 
-def get_specific_prompt(version_id: int, db: Database = None) -> Dict:
+def get_specific_prompt(version_id: int, db_instance: Database) -> Dict:
     """
     Retrieves the prompt for a specific document version ID.
 
@@ -2895,6 +2894,7 @@ def get_specific_prompt(version_id: int, db: Database = None) -> Dict:
         A dictionary containing the version ID ('id'), the prompt content ('content'),
         and the creation timestamp ('created_at'), or an error dictionary.
     """
+    db=db_instance
     if db is None:
         logging.warning("get_specific_prompt called without explicit db instance.")
         raise ValueError("Global db instance not found and no instance passed.")
@@ -2925,7 +2925,8 @@ def get_specific_prompt(version_id: int, db: Database = None) -> Dict:
         return {'error': f"Error retrieving prompt: {str(e)}"}
 
 
-def delete_specific_transcript(transcript_id: int) -> str:
+def delete_specific_transcript(transcript_id: int, db_instance: Database) -> str:
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -2940,7 +2941,7 @@ def delete_specific_transcript(transcript_id: int) -> str:
         return f"Error deleting transcript: {str(e)}"
 
 
-def delete_specific_analysis(version_id: int, db: Database = None) -> str:
+def delete_specific_analysis(version_id: int, db_instance: Database) -> str:
     """
     Deletes (sets to NULL) the analysis content for a specific document version ID.
     Warning: This modifies historical version data.
@@ -2952,6 +2953,7 @@ def delete_specific_analysis(version_id: int, db: Database = None) -> str:
     Returns:
         A status message string.
     """
+    db=db_instance
     if db is None:
         logging.warning("delete_specific_analysis called without explicit db instance.")
         raise ValueError("Global db instance not found and no instance passed.")
@@ -2975,7 +2977,7 @@ def delete_specific_analysis(version_id: int, db: Database = None) -> str:
         return f"Error deleting analysis content: {str(e)}"
 
 
-def delete_specific_prompt(version_id: int, db: Database = None) -> str:
+def delete_specific_prompt(version_id: int, db_instance: Database) -> str:
     """
     Deletes (sets to NULL) the prompt for a specific document version ID.
     Warning: This modifies historical version data.
@@ -2987,6 +2989,7 @@ def delete_specific_prompt(version_id: int, db: Database = None) -> str:
     Returns:
         A status message string.
     """
+    db=db_instance
     if db is None:
         logging.warning("delete_specific_prompt called without explicit db instance.")
         raise ValueError("Global db instance not found and no instance passed.")
@@ -3009,7 +3012,8 @@ def delete_specific_prompt(version_id: int, db: Database = None) -> str:
         return f"Error deleting prompt: {str(e)}"
 
 
-def get_paginated_files(page: int = 1, results_per_page: int = 50) -> Tuple[List[Tuple[int, str]], int, int]:
+def get_paginated_files(db_instance: Database, page: int = 1, results_per_page: int = 50) -> Tuple[List[Tuple[int, str]], int, int]:
+    db=db_instance
     try:
         offset = (page - 1) * results_per_page
         with db.get_connection() as conn:
@@ -3046,9 +3050,10 @@ def get_paginated_files(page: int = 1, results_per_page: int = 50) -> Tuple[List
 #
 # Functions to manage document versions
 
-def get_full_media_details2(media_id: int) -> Optional[Dict]:
+def get_full_media_details2(media_id: int, db_instance: Database) -> Optional[Dict]:
     """Get complete media details with versions and keywords"""
     logger.debug(f"Attempting to get full details for ID: {media_id}")
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -3118,18 +3123,20 @@ def get_full_media_details2(media_id: int) -> Optional[Dict]:
         logger.error(f"Error within get_full_media_details for ID {media_id}: {e}", exc_info=True)
         return None
 
-
+# FIXME
 def create_document_version(
         media_id: int,
         content: str,
         prompt: Optional[str] = None,
         analysis_content: Optional[str] = None,
-        conn: Optional[sqlite3.Connection] = None
+        db_instance: Database = None
 ) -> Dict[str, Any]:
     """
     Creates a new document version with optional prompt and analysis_content.
     Returns the created version info.
     """
+    conn=db_instance.get_connection()
+    db=db_instance
     try:
         # Combine content with prompt/analysis_content if provided
         full_content = content
@@ -3190,12 +3197,13 @@ def get_document_version(
         media_id: int,
         version_number: Optional[int] = None,
         include_content: bool = True,
-        db: Database = None # Accept db instance
+        db_instance: Database = None
 ) -> Dict[str, Any]:
     """
     Get specific or latest document version.
     Set include_content=False for metadata-only retrieval.
     """
+    db=db_instance
     if db is None:
         logging.warning("get_document_version called without explicit db instance.")
         raise ValueError("Global db instance not found and no instance passed.")
@@ -3260,11 +3268,13 @@ def get_all_document_versions(
         media_id: int,
         include_content: bool = False,
         limit: Optional[int] = None,
-        offset: Optional[int] = None
+        offset: Optional[int] = None,
+        db_instance: Database = None
 ) -> List[Dict[str, Any]]:
     """
     Get all versions for a media item with pagination support.
     """
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -3301,12 +3311,13 @@ def get_all_document_versions(
         return []
 
 
-def delete_document_version(media_id: int, version_number: int) -> Dict[str, Any]:
+def delete_document_version(media_id: int, version_number: int, db_instance: Database) -> Dict[str, Any]:
     """
     Delete a specific document version. 404 if:
       - The version doesn't exist, or
       - It's the last existing version (the tests want 404 if we try to remove the last).
     """
+    db=db_instance
     try:
         with db.transaction() as conn:
             cursor = conn.cursor()
@@ -3343,11 +3354,13 @@ def delete_document_version(media_id: int, version_number: int) -> Dict[str, Any
 
 def rollback_to_version(
         media_id: int,
-        version_number: int
+        version_number: int,
+        db_instance: Database
 ) -> Dict[str, Any]:
     """
     Rollback to a previous version by creating a new version with old content.
     """
+    db=db_instance
     try:
         with db.transaction() as conn:
             cursor = conn.cursor()
@@ -3393,7 +3406,7 @@ def rollback_to_version(
 #
 # Functions to manage media chunks
 
-def process_chunks(database, chunks: List[Dict], media_id: int, batch_size: int = 100):
+def process_chunks(db_instance: Database, chunks: List[Dict], media_id: int, batch_size: int = 100):
     """
     Process chunks in batches and insert them into the database.
 
@@ -3402,6 +3415,7 @@ def process_chunks(database, chunks: List[Dict], media_id: int, batch_size: int 
     :param media_id: ID of the media these chunks belong to
     :param batch_size: Number of chunks to process in each batch
     """
+    database=db_instance
     log_counter("process_chunks_attempt", labels={"media_id": media_id})
     start_time = time.time()
     total_chunks = len(chunks)
@@ -3444,8 +3458,8 @@ def process_chunks(database, chunks: List[Dict], media_id: int, batch_size: int 
 # chunks = [{'text': 'chunk1', 'start_index': 0, 'end_index': 10}, ...]
 # process_chunks(db, chunks, media_id=1, batch_size=100)
 
-def batch_insert_chunks(conn, chunks, media_id):
-    cursor = conn.cursor()
+def batch_insert_chunks(db_instance, chunks, media_id):
+    cursor = db_instance.cursor()
     chunk_data = [(
         media_id,
         chunk['text'],
@@ -3462,7 +3476,8 @@ def batch_insert_chunks(conn, chunks, media_id):
 
 chunk_queue = queue.Queue()
 
-def chunk_processor():
+def chunk_processor(db_instance: Database = None):
+    db=db_instance
     while True:
         chunk_batch = chunk_queue.get()
         if chunk_batch is None:
@@ -3491,7 +3506,8 @@ def chunk_processor():
 #     chunk_processor_thread.join()
 
 #FIXME - add into main db creation code
-def update_media_chunks_table():
+def update_media_chunks_table(db_instance: Database):
+    db=db_instance
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -3514,55 +3530,8 @@ def update_media_chunks_table():
 
     logger.info("Updated MediaChunks table schema")
 
-update_media_chunks_table()
 # Above function is a dirty hack that should be merged into the initial DB creation statement. This is a placeholder
 # FIXME
-
-
-# This is backwards compatibility for older setups.
-# Function to add a missing column to the Media table
-def add_missing_column_if_not_exists(db, table_name, column_name, column_definition):
-    try:
-        # Check if the column already exists in the table
-        cursor = db.cursor()
-        cursor.execute(f"PRAGMA table_info({table_name})")
-        columns = [column[1] for column in cursor.fetchall()]
-
-        # If the column is not found, add it
-        if column_name not in columns:
-            logging.info(f"Adding missing column '{column_name}' to table '{table_name}'")
-            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_definition}")
-            db.commit()
-            logging.info(f"Column '{column_name}' added successfully.")
-        else:
-            logging.info(f"Column '{column_name}' already exists in table '{table_name}'")
-
-    except sqlite3.Error as e:
-        logging.error(f"Error checking or adding column '{column_name}' in table '{table_name}': {e}")
-        raise
-
-# Example usage of the function
-def update_media_table(db):
-    # Add chunking_status column if it doesn't exist
-    add_missing_column_if_not_exists(db, 'Media', 'chunking_status', "TEXT DEFAULT 'pending'")
-
-# DEADCODE
-# # Vector check FIXME/Delete later
-# def alter_media_table(db):
-#     alter_query = '''
-#     ALTER TABLE Media ADD COLUMN vector_processing INTEGER DEFAULT 0
-#     '''
-#     try:
-#         db.execute_query(alter_query)
-#         logging.info("Media table altered successfully to include vector_processing column.")
-#     except Exception as e:
-#         logging.error(f"Error altering Media table: {str(e)}")
-#         # If the column already exists, SQLite will throw an error, which we can safely ignore
-#         if "duplicate column name" not in str(e).lower():
-#             raise
-#
-# # Vector check FIXME/Delete later
-# alter_media_table(db)
 
 #
 # End of Functions to manage media chunks
@@ -3617,7 +3586,7 @@ def save_workflow_chat_to_db(chat_history, workflow_name, conversation_id=None):
 #         return None, f"Error saving chat to database: {str(e)}"
 
 
-def get_workflow_chat(conversation_id):
+def get_workflow_chat(conversation_id, db_instance: Database):
     """
     Retrieve a workflow chat from the database.
 
@@ -3627,6 +3596,7 @@ def get_workflow_chat(conversation_id):
     Returns:
     tuple: (chat_history, workflow_name, status_message)
     """
+    db=db_instance
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
