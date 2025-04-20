@@ -52,7 +52,6 @@ import configparser
 import csv
 import hashlib
 import html
-import json
 import os
 import queue
 import re
@@ -64,13 +63,11 @@ import traceback
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import List, Tuple, Dict, Any, Optional
-
-from fastapi import Path
-
+#
 # Local Libraries
 from tldw_Server_API.app.core.Utils.Utils import get_project_relative_path, get_database_path, \
     get_database_dir, logger, logging
-from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_options, chunk_text
+from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_text
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 #
 # Third-Party Libraries
@@ -391,6 +388,7 @@ class Database:
         Args:
             db_path (str): The full path to the SQLite database file.
         """
+        from pathlib import Path
         self.db_path = Path(db_path).resolve() # Store the absolute path
         # Ensure the parent directory exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1034,7 +1032,7 @@ def check_should_process_by_url(
     Args:
         url: The URL identifier of the media.
         current_transcription_model: The model intended for the current processing request.
-        db: Database connection/manager instance.
+        db_instance: Database connection/manager instance.
 
     Returns:
         Tuple (should_process, existing_media_id, reason)
@@ -1240,7 +1238,7 @@ def add_media_to_database(url, info_dict, segments, analysis_content, keywords, 
         author=info_dict.get('uploader', 'Unknown'),
         ingestion_date=datetime.now().strftime('%Y-%m-%d'),
         overwrite=overwrite,
-        db=db
+        db_instance=db
     )
 
     return message  # Return just the message to maintain backward compatibility
@@ -1393,7 +1391,7 @@ def add_media_with_keywords(url, title, media_type, content, keywords, prompt, a
                     content=content,
                     prompt=prompt, # Pass the initial prompt
                     analysis_content=analysis_content, # Pass the initial analysis
-                    conn=conn # Pass the connection to run within the transaction
+                    db_instance=db # Pass the connection to run within the transaction
                 )
 
         # Transaction committed automatically by context manager if no exceptions
@@ -1530,7 +1528,7 @@ def fetch_all_keywords(db_instance: Database) -> List[str]:
         raise DatabaseError(f"Error fetching keywords: {e}")
 
 def keywords_browser_interface(db_instance: Database):
-    keywords = fetch_all_keywords()
+    keywords = fetch_all_keywords(db_instance)
     return gr.Markdown("\n".join(f"- {keyword}" for keyword in keywords))
 
 def display_keywords(db_instance: Database):
@@ -1666,7 +1664,7 @@ def browse_items(search_query, search_type, db_instance: Database):
             elif search_type == 'URL':
                 cursor.execute("SELECT id, title, url FROM Media WHERE url LIKE ?", (f'%{search_query}%',))
             elif search_type == 'Keyword':
-                return fetch_items_by_keyword(search_query)
+                return fetch_items_by_keyword(search_query, db_instance)
             elif search_type == 'Content':
                 cursor.execute("SELECT id, title, url FROM Media WHERE content LIKE ?", (f'%{search_query}%',))
             else:
@@ -1688,7 +1686,7 @@ def fetch_item_details(media_id: int, db_instance: Database) -> Tuple[str, str, 
 
     Args:
         media_id: The ID of the media item.
-        db: The Database instance to use. If None, uses the global instance (avoid if possible).
+        db_instance: The Database instance to use. If None, uses the global instance (avoid if possible).
 
     Returns:
         A tuple containing (prompt, analysis_content, content).
@@ -1702,7 +1700,7 @@ def fetch_item_details(media_id: int, db_instance: Database) -> Tuple[str, str, 
     try:
         # Use the get_document_version function which already fetches the latest version
         # We need the content, prompt, and analysis_content from that version
-        latest_version = get_document_version(media_id=media_id, include_content=True, db=db) # Pass db instance
+        latest_version = get_document_version(media_id=media_id, version_number=None, include_content=True, db_instance=db) # Pass db instance
 
         if 'error' in latest_version:
             logging.warning(f"No document version found for media_id {media_id}: {latest_version['error']}")
@@ -1921,7 +1919,7 @@ def search_media_db(
 
 # Gradio function to handle user input and display results with pagination, with better feedback
 def search_and_display(search_query, search_fields, keywords, page, db_instance: Database):
-    results = search_media_db(search_query, search_fields, keywords, page, db_instance)
+    results = search_media_db(search_query, search_fields, keywords, page, results_per_page=20, db_instance=db_instance)
 
     if isinstance(results, pd.DataFrame):
         # Convert DataFrame to a list of tuples or lists
@@ -1997,7 +1995,7 @@ def format_results(results):
 
 
 # Function to export search results to CSV or markdown with pagination
-def export_to_file(search_query: str, search_fields: List[str], keyword: str, page: int = 1, results_per_file: int = 1000, export_format: str = 'csv'):
+def export_to_file(search_query: str, search_fields: List[str], keyword: list[str], page: int = 1, results_per_file: int = 1000, export_format: str = 'csv'):
     try:
         results = search_media_db(search_query, search_fields, keyword, page, results_per_file)
         if not results:
@@ -2303,8 +2301,8 @@ def format_results_as_html(results: List[Tuple]) -> str:
     html += "</table>"
     return html
 
-def view_database(page: int, results_per_page: int) -> Tuple[str, str, int]:
-    results, total_entries = fetch_paginated_data(page, results_per_page)
+def view_database(page: int, results_per_page: int, db_instance) -> Tuple[str, str, int]:
+    results, total_entries = fetch_paginated_data(page, results_per_page, db_instance)
     formatted_results = format_results_as_html(results)
     # Calculate total pages
     total_pages = (total_entries + results_per_page - 1) // results_per_page
@@ -2405,7 +2403,7 @@ def import_obsidian_note_to_db(note_data, db_instance: Database):
 
     Args:
         note_data (dict): Dictionary containing note info ('title', 'content', 'tags', 'frontmatter', 'file_path').
-        db (Database, optional): The Database instance. Defaults to None (uses global).
+        db_instance (Database, optional): The Database instance. Defaults to None (uses global).
 
     Returns:
         Tuple[bool, Optional[str]]: (success_status, error_message_or_none)
@@ -2481,7 +2479,7 @@ def import_obsidian_note_to_db(note_data, db_instance: Database):
                 content=note_data['content'],
                 prompt="Obsidian Frontmatter", # Use a standard prompt text
                 analysis_content=frontmatter_str,
-                conn=conn # Pass connection
+                db_instance=db # Pass connection
             )
             if 'error' in version_result:
                  raise DatabaseError(f"Failed to create document version for Obsidian note: {version_result['error']}")
@@ -2622,7 +2620,7 @@ def empty_trash(days_threshold: int, db_instance: Database) -> Tuple[int, int]:
         old_items = cursor.fetchall()
 
         for item in old_items:
-            permanently_delete_item(item[0])
+            permanently_delete_item(item[0], db_instance)
 
         cursor.execute("""
             SELECT COUNT(*) FROM Media 
@@ -2646,11 +2644,11 @@ def user_delete_item(db_instance: Database, media_id: int, force: bool = False) 
         is_trash, trash_date = result
 
         if not is_trash:
-            mark_as_trash(media_id)
+            mark_as_trash(media_id, db_instance)
             return "Item moved to trash."
 
         if force or (trash_date and (datetime.now() - trash_date).days >= 30):
-            permanently_delete_item(media_id)
+            permanently_delete_item(media_id, db_instance)
             return "Item permanently deleted."
         else:
             return "Item is already in trash. Use force=True to delete permanently before 30 days."
@@ -2794,7 +2792,7 @@ def get_media_summaries(media_id: int, db_instance: Database) -> List[Dict]:
 
     Args:
         media_id: The ID of the media item.
-        db: The Database instance.
+        db_instance: The Database instance.
 
     Returns:
         A list of dictionaries, each containing the version ID ('id'),
@@ -2841,7 +2839,7 @@ def get_specific_analysis(version_id: int, db_instance: Database) -> Dict:
 
     Args:
         version_id: The ID of the specific DocumentVersions record.
-        db: The Database instance.
+        db_instance: The Database instance.
 
     Returns:
         A dictionary containing the version ID ('id'), the analysis content ('content'),
@@ -2886,7 +2884,7 @@ def get_media_prompts(media_id: int, db_instance: Database) -> List[Dict]:
 
     Args:
         media_id: The ID of the media item.
-        db: The Database instance.
+        db_instance: The Database instance.
 
     Returns:
         A list of dictionaries, each containing the version ID ('id'),
@@ -2932,7 +2930,7 @@ def get_specific_prompt(version_id: int, db_instance: Database) -> Dict:
 
     Args:
         version_id: The ID of the specific DocumentVersions record.
-        db: The Database instance.
+        db_instance: The Database instance.
 
     Returns:
         A dictionary containing the version ID ('id'), the prompt content ('content'),
@@ -2992,7 +2990,7 @@ def delete_specific_analysis(version_id: int, db_instance: Database) -> str:
 
     Args:
         version_id: The ID of the DocumentVersions record to modify.
-        db: The Database instance.
+        db_instance: The Database instance.
 
     Returns:
         A status message string.
@@ -3028,7 +3026,7 @@ def delete_specific_prompt(version_id: int, db_instance: Database) -> str:
 
     Args:
         version_id: The ID of the DocumentVersions record to modify.
-        db: The Database instance.
+        db_instance: The Database instance.
 
     Returns:
         A status message string.
@@ -3094,78 +3092,82 @@ def get_paginated_files(db_instance: Database, page: int = 1, results_per_page: 
 #
 # Functions to manage document versions
 
-def get_full_media_details2(media_id: int, db_instance: Database) -> Optional[Dict]:
-    """Get complete media details with versions and keywords"""
-    logger.debug(f"Attempting to get full details for ID: {media_id}")
-    db=db_instance
+def get_full_media_details2(media_id: int, db_instance: Database = None): # Use TypedDict in return hint
+    """
+    Get complete media details including keywords and all versions.
+    """
+    if not isinstance(db_instance, Database):
+        raise TypeError("A valid Database instance must be provided.")
+
+    logger.debug(f"Attempting to get full details for ID: {media_id} on DB: {db_instance.db_path}")
     try:
-        with db.get_connection() as conn:
+        with db_instance.get_connection() as conn:
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
-            # Get basic media info - matching your exact schema
-            logger.debug("Executing main media query...")
+            # 1. Get basic media info
             cursor.execute('''
-                SELECT 
-                    id, url, title, type, content,
-                    author, ingestion_date, prompt, analysis_content,
+                SELECT
+                    id, url, title, type, content, author, ingestion_date,
                     transcription_model, is_trash, trash_date,
-                    vector_embedding, chunking_status, vector_processing,
-                    content_hash
-                FROM Media
-                WHERE id = ?
+                    vector_embedding, chunking_status, vector_processing, content_hash
+                FROM Media WHERE id = ?
             ''', (media_id,))
-            media = cursor.fetchone()
-            logger.debug(f"fetchone() result type: {type(media)}") # Should be <class 'tuple'> or None
+            media_row = cursor.fetchone()
 
-            if not media:
-                logger.warning(f"No media found for ID {media_id} in DB.")
+            if not media_row:
+                logger.warning(f"No media found for ID {media_id} in DB {db_instance.db_path}.")
                 return None
 
-            # Convert to dict with all schema fields
-            logger.debug("Attempting to create media_dict...")
+            # 2. Populate the dictionary, ensuring types
             media_dict = {
-                "id": media[0],
-                "url": media[1],
-                "title": media[2],
-                "type": media[3],
-                "content": media[4],
-                "author": media[5],
-                "ingestion_date": media[6],
-                "prompt": media[7],
-                "analysis_content": media[8],
-                "transcription_model": media[9],
-                "is_trash": bool(media[10]),
-                "trash_date": media[11],
-                "vector_embedding": media[12],
-                "chunking_status": media[13],
-                "vector_processing": media[14],
-                "content_hash": media[15],
-                "keywords": [],
-                "versions": []
+                "id": media_row['id'],
+                "url": media_row['url'],
+                "title": media_row['title'],
+                "type": media_row['type'],
+                "content": media_row['content'],
+                "author": media_row['author'],
+                "ingestion_date": media_row['ingestion_date'],
+                "transcription_model": media_row['transcription_model'],
+                "is_trash": bool(media_row['is_trash']), # Ensure bool
+                "trash_date": media_row['trash_date'],
+                "vector_embedding": media_row['vector_embedding'],
+                "chunking_status": media_row['chunking_status'],
+                "vector_processing": media_row['vector_processing'],
+                "content_hash": media_row['content_hash'],
+                "keywords": [], # Initialize as empty list
+                "versions": []  # Initialize as empty list
             }
-            logger.debug(f"media_dict created. Type: {type(media_dict)}") # Should be <class 'dict'>
 
-            # Get keywords
-            logger.debug("Fetching keywords...")
+            # 3. Get keywords
             cursor.execute('''
-                SELECT k.keyword
-                FROM Keywords k
-                JOIN MediaKeywords mk ON k.id = mk.keyword_id
-                WHERE mk.media_id = ?
+                SELECT k.keyword FROM Keywords k JOIN MediaKeywords mk ON k.id = mk.keyword_id
+                WHERE mk.media_id = ? ORDER BY k.keyword COLLATE NOCASE
             ''', (media_id,))
-
-            logger.debug("Fetching versions...")
-            media_dict["keywords"] = [row[0] for row in cursor.fetchall()]
+            # Assign directly to the key
+            media_dict["keywords"] = [row['keyword'] for row in cursor.fetchall()]
             logger.debug(f"Keywords fetched: {media_dict['keywords']}")
 
-            # Get versions
-            media_dict["versions"] = get_all_document_versions(media_id)
+        # 4. Get versions (outside the 'with' block for the connection)
+        # Assign directly to the key
+        media_dict["versions"] = get_all_document_versions(
+            media_id=media_id,
+            include_content=False,
+            db_instance=db_instance
+        )
+        logger.debug(f"Versions fetched: {len(media_dict['versions'])} versions found.")
 
-            return media_dict
+        # Cast the final dictionary to the TypedDict type before returning
+        # This helps the type checker verify the structure.
+        return media_dict # Pylance should understand this structure now
 
-    except Exception as e:
-        logger.error(f"Error within get_full_media_details for ID {media_id}: {e}", exc_info=True)
+    except sqlite3.Error as e:
+        logger.error(f"Database error getting full media details for ID {media_id} on {db_instance.db_path}: {e}", exc_info=True)
         return None
+    except Exception as e:
+        logger.error(f"Unexpected error getting full media details for ID {media_id} on {db_instance.db_path}: {e}", exc_info=True)
+        return None
+
 
 # FIXME
 def create_document_version(
@@ -3316,20 +3318,38 @@ def get_all_document_versions(
         db_instance: Database = None
 ) -> List[Dict[str, Any]]:
     """
-    Get all versions for a media item with pagination support.
+    Get all versions for a media item with pagination support, including prompt and analysis.
+
+    Args:
+        media_id: The ID of the media item.
+        include_content: Whether to include the full content of each version.
+        limit: Maximum number of versions to return.
+        offset: Number of versions to skip (for pagination).
+        db_instance: The Database instance.
+
+    Returns:
+        A list of dictionaries, each representing a document version.
     """
-    db=db_instance
+    if not isinstance(db_instance, Database):
+        raise TypeError("A valid Database instance must be provided to get_all_document_versions.")
+
     try:
-        with db.get_connection() as conn:
+        with db_instance.get_connection() as conn:
+            # Ensure row factory is set
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
-            query = '''
-                SELECT id, version_number, created_at
-                ''' + (', content' if include_content else '') + '''
-                FROM DocumentVersions
-                WHERE media_id = ?
-                ORDER BY version_number DESC
-            '''
+            # Include prompt and analysis_content in the selection
+            select_clause = 'id, version_number, created_at, prompt, analysis_content'
+            if include_content:
+                select_clause += ', content'
+
+            query = f'''
+                    SELECT {select_clause}
+                    FROM DocumentVersions
+                    WHERE media_id = ?
+                    ORDER BY version_number DESC
+                '''
 
             params = [media_id]
 
@@ -3340,18 +3360,34 @@ def get_all_document_versions(
                     query += ' OFFSET ?'
                     params.append(offset)
 
+            logger.debug(f"Executing get_all_document_versions query on {db_instance.db_path} | Params: {params}")
             cursor.execute(query, params)
+            results_raw = cursor.fetchall()
 
-            return [{
-                'id': row[0],
-                'version_number': row[1],
-                'created_at': row[2],
-                'media_id': media_id,
-                **({'content': row[3]} if include_content else {})
-            } for row in cursor.fetchall()]
+            # Convert rows to dictionaries
+            versions_list = []
+            for row in results_raw:
+                version_dict = {
+                    'id': row['id'],
+                    'version_number': row['version_number'],
+                    'created_at': row['created_at'],
+                    'prompt': row['prompt'],
+                    'analysis_content': row['analysis_content'],
+                    'media_id': media_id,  # Add media_id for context if needed elsewhere
+                }
+                if include_content:
+                    version_dict['content'] = row['content']
+                versions_list.append(version_dict)
+
+            return versions_list
 
     except sqlite3.Error as e:
-        logging.error(f"Database error retrieving versions: {str(e)}")
+        logger.error(f"Database error retrieving versions for media_id {media_id} on {db_instance.db_path}: {str(e)}",
+                     exc_info=True)
+        return []  # Return empty list on error
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving versions for media_id {media_id} on {db_instance.db_path}: {str(e)}",
+                     exc_info=True)
         return []
 
 
@@ -3418,7 +3454,9 @@ def rollback_to_version(
             result = create_document_version(
                 media_id=media_id,
                 content=version['content'],
-                conn=conn
+                prompt=version['prompt'],
+                analysis_content=version['analysis_content'],
+                db_instance=db_instance
             )
 
             # Extract the version_number directly from the result
@@ -3454,7 +3492,7 @@ def process_chunks(db_instance: Database, chunks: List[Dict], media_id: int, bat
     """
     Process chunks in batches and insert them into the database.
 
-    :param database: Database instance to use for inserting chunks
+    :param db_instance: Database instance to use for inserting chunks
     :param chunks: List of chunk dictionaries
     :param media_id: ID of the media these chunks belong to
     :param batch_size: Number of chunks to process in each batch

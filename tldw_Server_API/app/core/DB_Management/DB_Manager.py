@@ -22,7 +22,6 @@ from tldw_Server_API.app.core.DB_Management.Media_DB import (
     add_keyword as sqlite_add_keyword,
     delete_keyword as sqlite_delete_keyword,
     export_keywords_to_csv as sqlite_export_keywords_to_csv,
-    ingest_article_to_db as sqlite_ingest_article_to_db,
     add_media_to_database as sqlite_add_media_to_database,
     import_obsidian_note_to_db as sqlite_import_obsidian_note_to_db,
     view_database as sqlite_view_database,

@@ -509,3 +509,6 @@ tldw_Server_API/app/Databases/server_media_summary.db
 tldw_Server_API/app/Databases/chatDB.db
 *.mp4
 /tldw_Server_API/app/core/Ingestion_Media_Processing/models/Whisper
+*.db-wal
+*.db-shm
+*.db

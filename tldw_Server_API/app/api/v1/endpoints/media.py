@@ -204,7 +204,7 @@ async def get_all_media(
     try:
         # Reuse your existing "get_paginated_files(page, results_per_page)"
         # which returns (results, total_pages, current_page)
-        results, total_pages, current_page = get_paginated_files(page, results_per_page)
+        results, total_pages, current_page = get_paginated_files(page, results_per_page, db)
 
         return {
             "items": [
@@ -235,7 +235,7 @@ async def get_all_media(
 )
 def get_media_item(
         media_id: int,
-        #db=Depends(get_db_manager)
+        db=Depends(get_db_manager)
 ):
     """
     **Retrieve Media Item by ID**
@@ -246,7 +246,7 @@ def get_media_item(
     try:
         # -- 1) Fetch the main record (includes title, type, content, author, etc.)
         logging.info(f"Calling get_full_media_details2 for ID: {media_id}")
-        media_info = get_full_media_details2(media_id)
+        media_info = get_full_media_details2(media_id, db)
         logging.info(f"Received media_info type: {type(media_info)}")
         logging.debug(f"Received media_info value: {media_info}")
         if not media_info:
@@ -413,7 +413,8 @@ async def list_versions(
         media_id=media_id,
         include_content=include_content,
         limit=limit,
-        offset=offset
+        offset=offset,
+        db=db
     )
     if not versions:
         raise HTTPException(status_code=404, detail="No versions found")
@@ -441,7 +442,8 @@ async def get_version(
     version = get_document_version(
         media_id=media_id,
         version_number=version_number,
-        include_content=include_content
+        include_content=include_content,
+        db=db
     )
     if 'error' in version:
         raise HTTPException(status_code=404, detail=version['error'])
@@ -465,7 +467,7 @@ async def delete_version(
     Permanently removes a specific version of a media item.
     *Caution: This action cannot be undone.*
     """
-    result = delete_document_version(media_id, version_number)
+    result = delete_document_version(media_id, version_number, db)
     if 'error' in result:
         raise HTTPException(status_code=404, detail=result['error'])
     return result
@@ -488,7 +490,7 @@ async def rollback_version(
     Restores the main content of a media item to the state of a specified previous version.
     This typically creates a *new* version reflecting the rolled-back content.
     """
-    result = rollback_to_version(media_id, request.version_number)
+    result = rollback_to_version(media_id, request.version_number, db)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
 
@@ -589,7 +591,8 @@ async def search_media(
             search_fields=["title", "content"],
             keywords=keywords,
             page=page,
-            results_per_page=results_per_page
+            results_per_page=results_per_page,
+            db_instance=db
         )
 
         # Process results in a more efficient way
@@ -1556,7 +1559,7 @@ async def add_media(
     # --- Keep Token and Files separate ---
     token: str = Header(..., description="Authentication token"), # TODO: Implement auth check
     files: Optional[List[UploadFile]] = File(None, description="List of files to upload"),
-    # db = Depends(...) # Add DB dependency if needed
+    db = Depends(get_db_manager) # Add DB dependency if needed
 ):
     """
     **Add Media Endpoint**
@@ -1619,8 +1622,7 @@ async def add_media(
     # TODO: Add authentication logic using the 'token'
 
     # --- 2. Database Dependency ---
-    # TODO / FIXME: Add DB dependency based on current user
-    # db = Depends(get_db)
+    # The line : `db = Depends(get_db)` in the func args takes care of this
 
     results = []
     temp_dir_manager = TempDirManager(cleanup=not form_data.keep_original_file) # Manages the lifecycle of the temp dir
