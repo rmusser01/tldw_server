@@ -249,7 +249,7 @@ class RichLogHandler(logging.Handler):
             # Use call_soon_threadsafe if emit might be called from non-asyncio threads (workers)
             # For workers started with thread=True, this is necessary.
             if hasattr(self.rich_log_widget, 'app') and self.rich_log_widget.app:
-                self.rich_log_widget.app.loop.call_soon_threadsafe(self.log_queue.put_nowait, message)
+                self.rich_log_widget.app._loop.call_soon_threadsafe(self.log_queue.put_nowait, message)
             else: # Fallback during startup/shutdown
                  if record.levelno >= logging.WARNING: print(f"LOG_FALLBACK: {message}")
         except Exception:
@@ -706,8 +706,14 @@ class TldwCli(App):
 
             # --- Run Worker ---
             self.run_worker(
-                self._api_worker, args=[api_function, filtered_api_args, chat_log_widget],
-                name=f"API_Call_{prefix}", group="api_calls", exclusive=False, thread=True
+                self._api_worker,
+                api_function,  # Pass api_function as the first arg TO the worker
+                filtered_api_args,  # Pass filtered_api_args as the second arg TO the worker
+                chat_log_widget,  # Pass chat_log_widget as the third arg TO the worker
+                name=f"API_Call_{prefix}",
+                group="api_calls",
+                exclusive=False,
+                thread=True
             )
 
     # --- Helper methods for parsing inputs ---
@@ -747,18 +753,20 @@ class TldwCli(App):
              return None
 
     # --- Worker function ---
-    def _api_worker(self, api_func: callable, args: dict, log_widget: RichLog) -> Union[str, Generator[Any, Any, None], None]:
+    def _api_worker(self, api_func: callable, api_args: dict, log_widget: RichLog) -> Union[
+        str, Generator[Any, Any, None], None]:
         """Executes the synchronous API call in a thread."""
         func_name = getattr(api_func, '__name__', 'UNKNOWN_FUNCTION')
         try:
             if api_func is None: raise ValueError("API function is None.")
             logging.info(f"Worker executing: {func_name}")
-            result = api_func(**args) # Assume function handles relevant args
+            # Call the actual API function, unpacking the api_args dictionary
+            result = api_func(**api_args)  # Use the passed api_args dictionary here
             logging.info(f"Worker received result from {func_name}")
             return result
         except Exception as e:
             logging.exception(f"Error during API call in worker ({func_name}): {e}")
-            return f"[bold red]API Error ({func_name}):[/] {str(e)}" # Return error string
+            return f"[bold red]API Error ({func_name}):[/] {str(e)}"  # Return error string
 
     # --- Handle worker completion ---
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
