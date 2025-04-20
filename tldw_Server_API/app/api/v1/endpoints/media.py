@@ -1861,7 +1861,7 @@ def get_process_videos_form(
     "/process-videos",
     # status_code=status.HTTP_200_OK, # Status determined dynamically
     summary="Transcribe / chunk / analyse videos and return the full artefacts (no DB write)",
-    tags=["Media Processing"],
+    tags=["Media Processing (No DB)"],
 )
 async def process_videos_endpoint(
     # --- Dependencies ---
@@ -2238,7 +2238,7 @@ def get_process_audios_form(
     "/process-audios",
     # status_code=status.HTTP_200_OK, # Status determined dynamically
     summary="Transcribe / chunk / analyse audio and return full artefacts (no DB write)",
-    tags=["Media Processing"],
+    tags=["Media Processing (No DB)"],
     # Consider adding response models for better documentation and validation
     # response_model=YourBatchResponseModel,
     # responses={ # Example explicit responses
@@ -3546,7 +3546,7 @@ def normalise_pdf_result(item: dict, original_ref: str) -> dict:
     "/process-pdfs",
     # status_code=status.HTTP_200_OK, # Determined dynamically
     summary="Extract, chunk, analyse PDFs (NO DB Persistence)",
-    tags=["Media Processing"],
+    tags=["Media Processing (No DB)"],
 )
 async def process_pdfs_endpoint(
     background_tasks: BackgroundTasks,

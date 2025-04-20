@@ -22,7 +22,7 @@ https://www.archgw.com/blogs/detecting-hallucinations-in-llm-function-calling-wi
 https://github.com/lechmazur/confabulations
 https://python.langchain.com/docs/how_to/qa_citations/
 https://oumi.ai/blog/posts/introducing-halloumi
-
+https://github.com/Liyan06/MiniCheck
 https://github.com/jacobwarren/Latent-Space-Verification-for-Self-Correcting-LLMs
 https://huggingface.co/jacobpwarren/Qwen2.5-7B-Latent_Verification/discussions
 https://arxiv.org/abs/2504.07527
