@@ -1,0 +1,202 @@
+Screen {
+    layout: vertical;
+}
+
+Header {
+    dock: top;
+    height: 1;
+    background: $accent-darken-1;
+}
+
+Footer {
+    dock: bottom;
+    height: 1;
+    background: $accent-darken-1;
+}
+
+/* Tab bar styling */
+#tabs {
+    dock: top; /* Docks below the header */
+    height: 3;
+    background: $background;
+    padding: 0 1;
+}
+#tabs Button {
+    width: 1fr; /* Distribute width evenly */
+    height: 100%;
+    border: none;
+    background: $panel;
+    color: $text-muted;
+}
+#tabs Button:hover {
+    background: $panel-lighten-1;
+    color: $text;
+}
+#tabs Button.-active {
+    background: $accent;
+    color: $text;
+    text-style: bold;
+    border: none; /* Ensure no competing borders */
+}
+
+/* Main content area fills remaining space */
+#content {
+    height: 1fr;
+    width: 100%; /* Ensure it takes full width */
+}
+
+/* Generic window styling */
+.window {
+    height: 100%; /* Windows fill the content area */
+    width: 100%;
+    layout: horizontal; /* Default: sidebar + main content */
+    overflow: hidden; /* Prevent scrollbars on the window itself */
+}
+.hidden {
+    display: none;
+}
+.placeholder-window {
+    align: center middle;
+    background: $panel;
+}
+
+
+/* Sidebar styling */
+.sidebar {
+    width: 35; /* Slightly wider */
+    background: $boost;
+    padding: 1 2;
+    border-right: thick $background-darken-1; /* Border between sidebar and content */
+    height: 100%; /* Fill vertical space */
+    overflow-y: auto; /* Allow vertical scroll only if needed */
+    overflow-x: hidden;
+}
+.sidebar-title {
+    text-style: bold underline;
+    margin-bottom: 1;
+    width: 100%;
+    text-align: center;
+}
+.sidebar-label {
+    margin-top: 1;
+    text-style: bold;
+}
+.sidebar-input {
+    width: 100%;
+    margin-bottom: 1;
+}
+ .sidebar-textarea {
+    width: 100%;
+    height: 5; /* Give text area more space */
+    border: round $surface;
+    margin-bottom: 1;
+}
+/* Add styling for Select within sidebar if default isn't desired */
+.sidebar Select {
+    width: 100%; /* Make it fill width like inputs */
+    margin-bottom: 1; /* Add spacing below */
+}
+
+/* --- Chat Window specific layouts --- */
+#chat-main-content {
+    layout: vertical; /* Stack logs pane above inputs pane */
+    height: 100%;
+    width: 1fr; /* Take remaining space next to sidebar */
+}
+#chat-panes {
+    height: 1fr; /* Logs take available vertical space */
+    width: 100%;
+}
+.chat-log { /* Base style for all RichLogs used as chat logs */
+    height: 100%;
+    width: 1fr;
+    border: round $surface;
+    padding: 0 1;
+}
+/* Spacing between the two chat logs: Target #chat1-log directly */
+#chat-panes > #chat1-log {
+    margin-right: 1;
+}
+
+/* Input areas styling */
+#chat-input-area, #character-input-area {
+    height: 6; /* Fixed height for input area */
+    width: 100%;
+    align: center bottom; /* Align items horizontally center and vertically bottom */
+    padding: 1; /* Padding around input controls */
+}
+#chat-input-area {
+    border-top: round $surface; /* Separator line above chat inputs */
+}
+
+.chat-input-container {
+     width: 1fr; /* Share space in dual input view */
+     height: 100%;
+}
+ /* Spacing between dual input containers: Target first container by ID */
+#chat1-input-container { /* <-- CORRECTED SELECTOR */
+     margin-right: 1;
+}
+
+.chat-input { /* Style the TextArea */
+    width: 100%;
+    height: 1fr; /* TextArea takes available space in its container */
+    border: round $surface; /* Keep border for inputs */
+}
+.send-button {
+    width: 100%; /* Button below TextArea in dual view */
+    margin-top: 1;
+    height: 3; /* Standard button height */
+}
+
+/* --- Character Chat Window specific layouts --- */
+#character-main-content {
+    layout: vertical; /* Stack top area above input area */
+    height: 100%;
+    width: 1fr; /* Take remaining space next to sidebar */
+}
+
+/* Container for log and portrait */
+#character-top-area {
+    height: 1fr; /* Take up vertical space above input */
+    width: 100%;
+}
+
+/* Adjust chat log when it's next to portrait (on the left now) */
+#character-top-area > .chat-log {
+    /* width: 1fr; Defined by .chat-log */
+    /* height: 100%; Defined by .chat-log */
+    margin: 0 1 1 0; /* Spacing: T R B L (add right margin) */
+    /* border: round $surface; Defined by .chat-log */
+}
+
+/* Style the portrait widget (on the right now) */
+#character-portrait {
+    width: 25; /* Adjust width based on your ASCII art */
+    height: auto; /* Let height be determined by content */
+    border: round $surface;
+    padding: 1;
+    margin: 0 0 1 0; /* Spacing: T R B L (only bottom margin needed) */
+    overflow: hidden; /* Hide overflow if art is too wide */
+    /* Optional: align text if needed */
+    /* text-align: center; */
+}
+
+/* Ensure input area is styled correctly */
+#character-input-area {
+    /* height, width, align, padding already defined */
+    border-top: round $surface; /* Add a separator line */
+}
+
+/* For Character Chat, make button smaller and beside */
+#character-input-area .chat-input {
+    width: 1fr; /* Take most space */
+    height: 100%;
+    margin-right: 1; /* Space between input and button */
+    /* border: round $surface; Defined by .chat-input */
+}
+ #character-input-area .send-button {
+    width: 10; /* Fixed width */
+    height: 100%;
+    margin-top: 0; /* Remove top margin */
+}
