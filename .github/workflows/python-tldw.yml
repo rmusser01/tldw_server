@@ -70,6 +70,16 @@ jobs:
 #        cd ./Tests/Character_Chat
 #        pytest test_character_chat.py
 #
+    - name: Test Media Versioning Functions/Endpoints with pytest
+      run: |
+        pwd
+        pytest -s tldw_Server_API/tests/Media_Ingestion_Modification/test_media_versions.py
+
+    - name: Test Media Processing Endpoint functions with pytest
+      run: |
+        pwd
+        pytest -s tldw_Server_API/tests/Media_Ingestion_Modification/test_media_processing.py
+
     - name: Test tldw runs
       run: |
         pwd

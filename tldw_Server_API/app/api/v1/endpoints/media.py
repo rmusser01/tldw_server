@@ -22,7 +22,7 @@ import uuid
 from datetime import datetime
 from math import ceil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Callable, Literal, Union, Set, Coroutine
+from typing import Any, Dict, List, Optional, Tuple, Callable, Literal, Union, Set
 from urllib.parse import urlparse
 #
 # 3rd-party imports
@@ -40,7 +40,7 @@ from fastapi import (
     UploadFile
 )
 import httpx
-from pydantic import BaseModel, validator, ValidationError
+from pydantic import BaseModel, ValidationError
 import redis
 from pydantic.v1 import Field
 # API Rate Limiter/Caching via Redis
@@ -58,18 +58,17 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     fetch_keywords_for_media, get_full_media_details2, create_document_version, get_all_document_versions, get_document_version, rollback_to_version, delete_document_version, db,
     fetch_item_details, add_media_with_keywords, check_should_process_by_url,
 )
-from tldw_Server_API.app.core.DB_Management.SQLite_DB import DatabaseError, InputError
+from tldw_Server_API.app.core.DB_Management.Media_DB import DatabaseError, InputError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
 #
 # Media Processing
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib import process_epub
 from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib import process_pdf_task
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext_Files import process_document_content
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files import process_document_content
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
 #
 # Document Processing
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
-from tldw_Server_API.app.core.Metrics.metrics_logger import log_histogram, log_counter
 from tldw_Server_API.app.core.Utils.Utils import truncate_content, logging, \
     sanitize_filename, smart_download
 from tldw_Server_API.app.core.Utils.Utils import logging as logger

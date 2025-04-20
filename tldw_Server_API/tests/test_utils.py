@@ -9,7 +9,7 @@ import tempfile
 # 3rd-party Libraries
 #
 # Local Imports
-from tldw_Server_API.app.core.DB_Management.SQLite_DB import Database, create_tables
+from tldw_Server_API.app.core.DB_Management.Media_DB import Database, create_tables
 
 
 #

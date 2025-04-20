@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.DB_Management.Prompts_DB import list_prompts as sq
     search_prompts as sqlite_search_prompts, add_or_update_prompt as sqlite_add_or_update_prompt, \
     load_prompt_details as sqlite_load_prompt_details, insert_prompt_to_db as sqlite_insert_prompt_to_db, \
     delete_prompt as sqlite_delete_prompt
-from tldw_Server_API.app.core.DB_Management.SQLite_DB import (
+from tldw_Server_API.app.core.DB_Management.Media_DB import (
     update_media_content as sqlite_update_media_content,
     search_and_display as sqlite_search_and_display,
     keywords_browser_interface as sqlite_keywords_browser_interface,
