@@ -16,7 +16,7 @@ import chardet # For encoding detection
 #import requests
 #import tqdm
 # --- Textual Imports ---
-from textual.app import App, ComposeResult # Removed RenderResult as it wasn't used
+from textual.app import App, ComposeResult, ScreenStackError  # Removed RenderResult as it wasn't used
 from textual.widgets import (
     Static, Button, Input, Header, Footer, RichLog, TextArea, Select
 )
@@ -344,23 +344,24 @@ class TldwCli(App):
             log_display_widget = self.query_one("#app-log-display", RichLog)
             self._rich_log_handler = RichLogHandler(log_display_widget)
 
-            # Remove potentially conflicting basic stream handlers
+            # Clean up existing handlers if necessary (be cautious)
             for handler in root_logger.handlers[:]:
-                if isinstance(handler, logging.StreamHandler) and not isinstance(handler, RichLogHandler):
-                    logging.debug(f"Removing existing StreamHandler: {handler}")
-                    root_logger.removeHandler(handler)
-            # Remove stale RichLogHandlers
-            for handler in root_logger.handlers[:]:
-                if isinstance(handler, RichLogHandler):
-                    logging.warning(f"Removing potentially stale RichLogHandler: {handler}")
-                    root_logger.removeHandler(handler)
+                 if isinstance(handler, logging.StreamHandler) and not isinstance(handler, (RichLogHandler, logging.FileHandler)):
+                     logging.debug(f"Removing existing StreamHandler: {handler}")
+                     root_logger.removeHandler(handler)
+                 if isinstance(handler, RichLogHandler) and handler is not self._rich_log_handler:
+                     logging.warning(f"Removing potentially stale RichLogHandler: {handler}")
+                     root_logger.removeHandler(handler)
 
             # Configure and add the RichLog handler
             widget_handler_level_str = self.app_config.get("general", {}).get("log_level", "DEBUG").upper()
             widget_handler_level = getattr(logging, widget_handler_level_str, logging.DEBUG)
             self._rich_log_handler.setLevel(widget_handler_level)
             root_logger.addHandler(self._rich_log_handler)
-            root_logger.setLevel(logging.DEBUG)  # Ensure root level is low enough for all handlers
+            # Ensure root level is low enough for all handlers
+            current_root_level = root_logger.getEffectiveLevel()
+            lowest_level = min(current_root_level, widget_handler_level) # Consider file handler level too if added later
+            root_logger.setLevel(logging.DEBUG if lowest_level <= logging.DEBUG else lowest_level)
 
             # Start the log queue processing task
             self._rich_log_handler.start_processor(self)
@@ -421,6 +422,11 @@ class TldwCli(App):
             # 7. Add Handler to Root Logger
             root_logger.addHandler(file_handler)
 
+            # Adjust root logger level again if file handler needs lower level
+            current_root_level = root_logger.getEffectiveLevel()
+            lowest_level = min(current_root_level, file_log_level)
+            root_logger.setLevel(logging.DEBUG if lowest_level <= logging.DEBUG else lowest_level)
+
             logging.info(
                 f"File logging enabled: '{log_file_path}', Level: {logging.getLevelName(file_handler.level)}, Rotation: {max_bytes / (1024 * 1024):.1f}MB / {backup_count} backups")
 
@@ -439,7 +445,7 @@ class TldwCli(App):
             # Then remove the handler
             logging.getLogger().removeHandler(self._rich_log_handler)
             logging.info("RichLogHandler removed and processor stopped.")
-        # Other handlers (like file handler) are typically closed automatically by logging system shutdown
+        # File handlers usually closed by logging shutdown
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -499,6 +505,9 @@ class TldwCli(App):
         """Called automatically when the 'current_tab' reactive variable changes."""
         # No need for manual calls if reactivity is working
         logging.critical(f"!!!! WATCHER watch_current_tab FIRED !!!! Switching from '{old_tab}' to '{new_tab}'")
+        if not self.is_mounted: # Add check to prevent running before mount completes
+            logging.warning("Watcher fired before app fully mounted. Skipping UI updates.")
+            return
         try:
             # Deactivate old tab button and hide old window
             # Use query to safely handle potential missing elements (though they should exist)
@@ -554,7 +563,11 @@ class TldwCli(App):
                  logging.error(f"Watcher: Could not find new window {new_window_query} to display.")
 
         except Exception as e:
-            logging.error(f"!!!! WATCHER ERROR !!!! Error during tab switch from {old_tab} to {new_tab}: {e}", exc_info=True)
+            # Catch specific ScreenStackError during init? Or just log generically.
+            if isinstance(e, ScreenStackError) and not self.is_running:
+                 logging.warning(f"Watcher: Ignored ScreenStackError during app init.")
+            else:
+                 logging.error(f"!!!! WATCHER ERROR !!!! Error during tab switch from {old_tab} to {new_tab}: {e}", exc_info=True)
 
 
     # --- Event Handlers ---
@@ -698,23 +711,35 @@ class TldwCli(App):
                 "topp": top_p, "top_p": top_p, "maxp": top_p, "topk": top_k, "minp": min_p,
                 "api_url": api_url,
             }
-            # Filter args (keeping None for key/sys_msg/url potentially)
-            filtered_api_args = {k: v for k, v in api_args.items() if v is not None or k in ["api_key", "system_message", "api_url"]}
-            loggable_args = {k: v for k, v in filtered_api_args.items() if k != 'api_key'}
+            # Use a distinct name like filtered_api_call_args
+            filtered_api_call_args = {k: v for k, v in api_args.items() if v is not None or k in ["api_key", "system_message", "api_url"]}
+            loggable_args = {k: v for k, v in filtered_api_call_args.items() if k != 'api_key'}
             func_name = getattr(api_function, '__name__', 'UNKNOWN_FUNCTION')
             logging.debug(f"Calling {func_name} with args: {loggable_args}")
 
-            # --- Run Worker ---
-            self.run_worker(
-                self._api_worker,
-                api_function,  # Pass api_function as the first arg TO the worker
-                filtered_api_args,  # Pass filtered_api_args as the second arg TO the worker
-                chat_log_widget,  # Pass chat_log_widget as the third arg TO the worker
-                name=f"API_Call_{prefix}",
-                group="api_calls",
-                exclusive=False,
-                thread=True
-            )
+
+        # --- Define the Worker Wrapper ---
+        # This nested function will run in the worker thread.
+        # It captures necessary variables from the surrounding scope.
+        def api_call_wrapper():
+            # Note: We are accessing 'self', 'api_function', 'filtered_api_call_args',
+            # and 'chat_log_widget' from the enclosing 'on_button_pressed' scope.
+            # Ensure 'chat_log_widget' is only used for logging *within* the worker
+            # if absolutely necessary (better handled by on_worker_state_changed).
+            # The main purpose is to pass args to _api_worker.
+            return self._api_worker(api_function, filtered_api_call_args, chat_log_widget)
+
+        # --- Run Worker ---
+        # *** FIX: Pass the wrapper function as the worker, no other positional args ***
+        self.run_worker(
+            api_call_wrapper,         # The wrapper function is the worker now
+            # NO positional arguments here for the worker itself
+            # Keyword arguments FOR run_worker:
+            name=f"API_Call_{prefix}",
+            group="api_calls",
+            exclusive=False,
+            thread=True
+        )
 
     # --- Helper methods for parsing inputs ---
     def _safe_float(self, value: str, default: float, name: str) -> float:
@@ -753,20 +778,23 @@ class TldwCli(App):
              return None
 
     # --- Worker function ---
-    def _api_worker(self, api_func: callable, api_args: dict, log_widget: RichLog) -> Union[
-        str, Generator[Any, Any, None], None]:
+    def _api_worker(self, api_func: callable, api_args: dict, log_widget: RichLog) -> Union[str, Generator[Any, Any, None], None]:
         """Executes the synchronous API call in a thread."""
+        # (Implementation remains the same as the last correct version)
         func_name = getattr(api_func, '__name__', 'UNKNOWN_FUNCTION')
         try:
             if api_func is None: raise ValueError("API function is None.")
-            logging.info(f"Worker executing: {func_name}")
-            # Call the actual API function, unpacking the api_args dictionary
-            result = api_func(**api_args)  # Use the passed api_args dictionary here
-            logging.info(f"Worker received result from {func_name}")
+            # Note: log_widget is passed here but might not be strictly needed inside
+            # if all TUI updates happen in on_worker_state_changed.
+            # Using it only for logging inside the worker is generally okay.
+            logging.info(
+                f"Worker executing: {func_name} with args: { {k: v for k, v in api_args.items() if k != 'api_key'} }")
+            result = api_func(**api_args)  # Call the actual API function
+            logging.info(f"Worker {func_name} finished successfully.")
             return result
         except Exception as e:
             logging.exception(f"Error during API call in worker ({func_name}): {e}")
-            return f"[bold red]API Error ({func_name}):[/] {str(e)}"  # Return error string
+            return f"[bold red]API Error ({func_name}):[/] {str(e)}"
 
     # --- Handle worker completion ---
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
@@ -793,23 +821,40 @@ class TldwCli(App):
                         logging.info(f"API call ({prefix}) successful. Result length: {len(result)}")
                         chat_log_widget.write(f"AI: {result}")
                 elif isinstance(result, Generator):
-                    logging.warning("Streaming display not fully implemented.")
-                    chat_log_widget.write("[italic]AI: (Streaming response started...)[/]")
-                    # Basic handling: try to display first chunk
-                    try: chat_log_widget.write(f"AI: {next(result)}...")
-                    except StopIteration: chat_log_widget.write("[italic]AI: (Stream ended.)[/]")
-                    except Exception as gen_e: logging.error(f"Error reading stream: {gen_e}")
-                elif result is None: # Should ideally not happen if worker returns error string
-                     logging.error(f"API worker '{worker_name}' returned None. Check worker logs.")
+                    # Basic generator handling (better implementation needed for true streaming)
+                    logging.info(f"API call ({prefix}) successful (Generator started).")
+                    chat_log_widget.write("AI: ") # Start the line
+                    full_response = ""
+                    try:
+                        for chunk in result:
+                            if isinstance(chunk, str):
+                                chat_log_widget.write(chunk, shrink=False) # Append chunk without newline
+                                full_response += chunk
+                            else: # Handle potential non-string chunks if API yields them
+                                logging.warning(f"Received non-string chunk from generator: {type(chunk)}")
+                                chat_log_widget.write(str(chunk), shrink=False)
+                                full_response += str(chunk)
+                        logging.info(f"API call ({prefix}) generator finished. Total length: {len(full_response)}")
+                    except Exception as gen_e:
+                        logging.error(f"Error processing generator stream for '{prefix}': {gen_e}", exc_info=True)
+                        chat_log_widget.write("[bold red] Error during streaming.[/]")
+                elif result is None:
+                     logging.error(f"API worker '{worker_name}' returned None.")
                      chat_log_widget.write("[bold red]AI: Error during processing (worker returned None).[/]")
                 else:
                     logging.error(f"API worker '{worker_name}' returned unexpected type: {type(result)}")
                     chat_log_widget.write(f"[bold red]Error: Unexpected result type from API.[/]")
 
             elif event.state == WorkerState.ERROR:
-                logging.error(f"Worker '{worker_name}' failed:", exc_info=event.worker.error)
-                # Display a generic error, details are in the main log
-                chat_log_widget.write(f"[bold red]AI Error: Processing failed critically. Check logs.[/]")
+                logging.error(f"Worker '{worker_name}' failed critically:", exc_info=event.worker.error)
+                chat_log_widget.write(f"[bold red]AI Error: Processing failed critically. Check logs for details.[/]")
+
+            # Try to focus the input area again after response/error
+            try:
+                text_area = self.query_one(f"#{prefix}-input", TextArea)
+                self.set_timer(0.05, text_area.focus)
+            except Exception:
+                logging.debug(f"Could not refocus input for '{prefix}' after worker completion.")
 
         except Exception as e:
             logging.error(f"Error in on_worker_state_changed for worker '{worker_name}': {e}", exc_info=True)
