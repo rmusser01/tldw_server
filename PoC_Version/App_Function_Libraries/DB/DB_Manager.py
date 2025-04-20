@@ -337,13 +337,6 @@ def check_existing_media(*args, **kwargs):
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of check_existing_media not yet implemented")
 
-def update_media_content_with_version(*args, **kwargs):
-    if db_type == 'sqlite':
-        return sqlite_update_media_content_with_version(*args, **kwargs)
-    elif db_type == 'elasticsearch':
-        # Implement Elasticsearch version
-        raise NotImplementedError("Elasticsearch version of update_media_content not yet implemented")
-
 def import_obsidian_note_to_db(*args, **kwargs):
     if db_type == 'sqlite':
         return sqlite_import_obsidian_note_to_db(*args, **kwargs)

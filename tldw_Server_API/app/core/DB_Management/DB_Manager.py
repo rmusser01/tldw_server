@@ -61,7 +61,6 @@ from tldw_Server_API.app.core.DB_Management.Media_DB import (
     batch_insert_chunks as sqlite_batch_insert_chunks, Database, \
     save_workflow_chat_to_db as sqlite_save_workflow_chat_to_db,
     get_workflow_chat as sqlite_get_workflow_chat, \
-    update_media_content_with_version as sqlite_update_media_content_with_version, \
     check_existing_media as sqlite_check_existing_media,
     get_all_document_versions as sqlite_get_all_document_versions, \
     fetch_paginated_data as sqlite_fetch_paginated_data,
@@ -406,13 +405,6 @@ def check_existing_media(*args, **kwargs):
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of check_existing_media not yet implemented")
-
-def update_media_content_with_version(*args, **kwargs):
-    if db_type == 'sqlite':
-        return sqlite_update_media_content_with_version(*args, **kwargs)
-    elif db_type == 'elasticsearch':
-        # Implement Elasticsearch version
-        raise NotImplementedError("Elasticsearch version of update_media_content not yet implemented")
 
 def import_obsidian_note_to_db(*args, **kwargs):
     if db_type == 'sqlite':

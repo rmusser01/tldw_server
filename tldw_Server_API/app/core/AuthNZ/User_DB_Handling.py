@@ -7,6 +7,8 @@ from pathlib import Path
 #
 # 3rd-party Libraries
 from fastapi import Depends, HTTPException, status, Header
+
+from tldw_Server_API.app.api.v1.DB_Deps.DB_Deps import EXPECTED_API_KEY
 #
 # Local Imports
 from tldw_Server_API.app.core.DB_Management.Media_DB import Database
@@ -21,6 +23,21 @@ from tldw_Server_API.app.core.Utils.Utils import logging
 
 USER_DB_BASE_PATH = Path("./user_databases")
 
+
+
+async def verify_api_key(api_key: str = Header(..., alias="X-API-KEY")): # Use a standard header like X-API-KEY
+    """
+    Simple dependency to verify a fixed API key.
+    Raises 401 Unauthorized if the key is missing or invalid.
+    """
+    if api_key != EXPECTED_API_KEY:
+        logging.warning(f"Invalid API Key received: '{api_key[:5]}...'") # Log carefully
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API Key"
+        )
+    # If the key is valid, the function completes without returning anything.
+    logging.debug("API Key verified successfully.")
 
 
 # Placeholder function to verify token and get user identifier

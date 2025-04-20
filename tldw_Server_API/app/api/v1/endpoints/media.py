@@ -47,6 +47,8 @@ from pydantic.v1 import Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.responses import JSONResponse
+
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import verify_api_key
 #
 # Local Imports
 #
@@ -1503,6 +1505,7 @@ def _determine_final_status(results: List[Dict[str, Any]]) -> int:
 # --- Main Endpoint ---
 @router.post("/add",
              # status_code=status.HTTP_200_OK, # Determined dynamically
+             dependencies=[Depends(verify_api_key)],
              summary="Add media (URLs/files) with processing and persistence",
              tags=["Media Ingestion & Persistence"], # Changed tag
              )
