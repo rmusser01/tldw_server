@@ -1,7 +1,7 @@
-# Local_Summarization_Lib.py
+# Local_LLM_API_Calls_Lib.py
 #########################################
-# Local Summarization Library
-# This library is used to perform summarization with a 'local' inference engine.
+# Local LLM API Calls Library
+# This library is used to perform 'Local' API calls to LLM endpoints.
 #
 ####
 import json

@@ -1,7 +1,7 @@
-# Summarization_General_Lib.py
+# LLM_API_Calls.py
 #########################################
-# General Summarization Library
-# This library is used to perform summarization.
+# General LLM API Calling Library
+# This library is used to perform API Calls against commercial LLM endpoints.
 #
 ####
 ####################
