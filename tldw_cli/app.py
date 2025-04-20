@@ -1,13 +1,20 @@
+# tldw_cli - Textual CLI for LLMs
+# Description: This file contains the main application logic for the tldw_cli, a Textual-based CLI for interacting with various LLM APIs.
+#
+# Imports
 import asyncio
 import logging  # Standard logging library
 import logging.handlers  # For handlers
 import tomllib # Use built-in tomllib for Python 3.11+
-# Or: import toml # If using Python < 3.11, install with: pip install toml
 from pathlib import Path
 import traceback
-import os # Needed if API keys rely on environment variables
+import os
 from typing import Union, Generator, Any # For type hinting
-
+#
+# 3rd-Party Libraries
+import chardet # For encoding detection
+#import requests
+#import tqdm
 # --- Textual Imports ---
 from textual.app import App, ComposeResult # Removed RenderResult as it wasn't used
 from textual.widgets import (
@@ -19,17 +26,17 @@ from textual.reactive import reactive
 # Removed Message import as it wasn't used directly
 from textual.worker import Worker, WorkerState
 from textual.binding import Binding
-
-# --- Import your API libraries ---
+#
+# --- Local API library Imports ---
 # Adjust the path based on your project structure
 try:
     # Assuming libs is a subdirectory
-    from tldw_cli.Libs.LLM_API_Calls import (
+    from .Libs.LLM_API_Calls import (
         chat_with_openai, chat_with_anthropic, chat_with_cohere,
         chat_with_groq, chat_with_openrouter, chat_with_huggingface,
         chat_with_deepseek, chat_with_mistral, chat_with_google
     )
-    from tldw_cli.Libs.LLM_API_Calls_Local import (
+    from .Libs.LLM_API_Calls_Local import (
         # chat_with_local_llm, # Example if this exists
         chat_with_llama, chat_with_kobold,
         chat_with_oobabooga, chat_with_vllm, chat_with_tabbyapi,
@@ -56,14 +63,22 @@ except ImportError as e:
     print("WARNING: Could not import one or more API library functions.")
     print("Check logs for details. Affected API functionality will be disabled.")
     print("-" * 60)
-
+#
+#######################################################################################################################
+#
+# Functions:
 
 # --- Configuration Loading ---
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "tldw_cli" / "config.toml"
 DEFAULT_CONFIG = {
     "general": {"default_tab": "chat", "log_level": "DEBUG"},
-    "logging": {"log_file": None, "file_log_level": "INFO"},
-    "api_keys": { # Placeholders/Documentation
+    "logging": {
+        # "log_file": None, # Keep this if you want an *override* path separate from DB path logic
+        "log_filename": "tldw_cli_app.log", # Default filename to use in DB dir
+        "file_log_level": "INFO",
+        "log_max_bytes": 10 * 1024 * 1024, # 10 MB
+        "log_backup_count": 5
+    },    "api_keys": { # Placeholders/Documentation
         "openai": "Set OPENAI_API_KEY env var", "anthropic": "Set ANTHROPIC_API_KEY env var",
         "google": "Set GOOGLE_API_KEY env var", "cohere": "Set COHERE_API_KEY env var",
         "groq": "Set GROQ_API_KEY env var", "mistral": "Set MISTRAL_API_KEY env var",
@@ -296,8 +311,8 @@ def create_settings_sidebar(id_prefix: str, config: dict) -> ComposeResult:
         yield Input(placeholder="e.g., 50", id=f"{id_prefix}-top-k", value=default_top_k, classes="sidebar-input")
 
 # --- Main App ---
-class TabApp(App):
-    CSS_PATH = "tab_app.css"
+class TldwCli(App):
+    CSS_PATH = "tldw_cli.css"
     BINDINGS = [ Binding("ctrl+q", "quit", "Quit App", show=True) ]
 
     # Define reactive var at CLASS level
@@ -320,69 +335,100 @@ class TabApp(App):
         self._rich_log_handler = None
 
     def on_mount(self) -> None:
-        """Configure logging and start tasks."""
+        """Configure logging (RichLog and File) and start tasks."""
         logging.info("--- App Mounting ---")
+        root_logger = logging.getLogger()  # Get root logger early
+
+        # --- Setup RichLog Handler (TUI Display) ---
         try:
             log_display_widget = self.query_one("#app-log-display", RichLog)
             self._rich_log_handler = RichLogHandler(log_display_widget)
 
-            root_logger = logging.getLogger()
-            # Remove specific basicConfig handlers if they are StreamHandlers (optional)
+            # Remove potentially conflicting basic stream handlers
             for handler in root_logger.handlers[:]:
                 if isinstance(handler, logging.StreamHandler) and not isinstance(handler, RichLogHandler):
-                     # Check if it's the default textual handler, maybe keep it?
-                     # Or remove all non-RichLog handlers if you ONLY want RichLog + File
-                     logging.debug(f"Removing existing StreamHandler: {handler}")
-                     root_logger.removeHandler(handler)
-            # Remove any stale RichLogHandler instances from previous runs (belt & suspenders)
+                    logging.debug(f"Removing existing StreamHandler: {handler}")
+                    root_logger.removeHandler(handler)
+            # Remove stale RichLogHandlers
             for handler in root_logger.handlers[:]:
-                 if isinstance(handler, RichLogHandler):
-                     logging.warning(f"Removing potentially stale RichLogHandler: {handler}")
-                     root_logger.removeHandler(handler)
+                if isinstance(handler, RichLogHandler):
+                    logging.warning(f"Removing potentially stale RichLogHandler: {handler}")
+                    root_logger.removeHandler(handler)
 
-            # Configure and add the handler
+            # Configure and add the RichLog handler
             widget_handler_level_str = self.app_config.get("general", {}).get("log_level", "DEBUG").upper()
             widget_handler_level = getattr(logging, widget_handler_level_str, logging.DEBUG)
             self._rich_log_handler.setLevel(widget_handler_level)
             root_logger.addHandler(self._rich_log_handler)
-            # Ensure root logger level is low enough
-            root_logger.setLevel(logging.DEBUG)
+            root_logger.setLevel(logging.DEBUG)  # Ensure root level is low enough for all handlers
 
-            # Start the log queue processing task (pass self=app)
+            # Start the log queue processing task
             self._rich_log_handler.start_processor(self)
-
-            logging.info(f"Logging configured. Root level: {logging.getLevelName(root_logger.level)}, Widget Handler level: {logging.getLevelName(self._rich_log_handler.level)}")
-
-            # Configure file logging
-            log_file_path = self.app_config.get("logging", {}).get("log_file")
-            if log_file_path:
-                try:
-                    log_file = Path(log_file_path).expanduser().resolve()
-                    log_file.parent.mkdir(parents=True, exist_ok=True)
-                    # Use RotatingFileHandler for size management
-                    file_handler = logging.handlers.RotatingFileHandler(
-                        log_file, maxBytes=10*1024*1024, backupCount=5 # 10MB, 5 backups
-                    )
-                    file_log_level_str = self.app_config.get("logging", {}).get("file_log_level", "INFO").upper()
-                    file_log_level = getattr(logging, file_log_level_str, logging.INFO)
-                    file_handler.setLevel(file_log_level)
-                    file_formatter = logging.Formatter( # Use the same format as RichLogHandler
-                        "{asctime} [{levelname:<8}] {name}:{lineno:<4} : {message}",
-                        style="{", datefmt="%Y-%m-%d %H:%M:%S"
-                    )
-                    file_handler.setFormatter(file_formatter)
-                    root_logger.addHandler(file_handler)
-                    logging.info(f"File logging enabled: '{log_file}', Level: {logging.getLevelName(file_handler.level)}")
-                except Exception as e:
-                    logging.error(f"Failed to configure file logging to '{log_file_path}': {e}", exc_info=True)
-
-            logging.info("App mounted successfully.")
+            logging.info(
+                f"RichLog TUI logging configured. Widget Handler level: {logging.getLevelName(self._rich_log_handler.level)}")
 
         except Exception as e:
-             print(f"!!!!!!!! FATAL ERROR in on_mount during logging setup !!!!!!!!")
-             traceback.print_exc()
-             try: logging.exception("FATAL: Failed to configure RichLogHandler!")
-             except Exception: pass
+            # Use print as last resort if TUI logging setup fails
+            print(f"!!!!!!!! FATAL ERROR setting up RichLog TUI Handler !!!!!!!!")
+            traceback.print_exc()
+            try:
+                logging.exception("FATAL: Failed to configure RichLogHandler!")
+            except Exception:
+                pass  # Avoid error loops
+
+        # --- Setup Rotating File Handler ---
+        try:
+            # 1. Get Database Path from Config
+            db_path_str = self.app_config.get("database", {}).get("path")
+            if not db_path_str:
+                # Log this warning, but don't crash the app if DB path is missing
+                logging.warning("database.path not found in config. Skipping file logging based on DB path.")
+                raise ValueError("database.path not configured.")  # Raise to skip rest of try block
+
+            db_path = Path(db_path_str).expanduser().resolve()
+            log_dir = db_path.parent  # Directory containing the DB
+
+            # 2. Get Log Filename from Config (or default)
+            log_filename = self.app_config.get("logging", {}).get("log_filename", "tldw_cli_app.log")
+            log_file_path = log_dir / log_filename
+
+            # 3. Ensure Log Directory Exists
+            log_dir.mkdir(parents=True, exist_ok=True)
+            logging.debug(f"Ensured log directory exists: {log_dir}")
+
+            # 4. Create RotatingFileHandler
+            # Get rotation settings from config
+            max_bytes = int(self.app_config.get("logging", {}).get("log_max_bytes", 10 * 1024 * 1024))
+            backup_count = int(self.app_config.get("logging", {}).get("log_backup_count", 5))
+
+            # Use UTF-8 encoding for the log file
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_file_path, maxBytes=max_bytes, backupCount=backup_count, encoding='utf-8'
+            )
+
+            # 5. Set Log Level for File Handler
+            file_log_level_str = self.app_config.get("logging", {}).get("file_log_level", "INFO").upper()
+            file_log_level = getattr(logging, file_log_level_str, logging.INFO)
+            file_handler.setLevel(file_log_level)
+
+            # 6. Set Formatter (use same format as RichLog for consistency)
+            file_formatter = logging.Formatter(
+                "{asctime} [{levelname:<8}] {name}:{lineno:<4} : {message}",
+                style="{", datefmt="%Y-%m-%d %H:%M:%S"
+            )
+            file_handler.setFormatter(file_formatter)
+
+            # 7. Add Handler to Root Logger
+            root_logger.addHandler(file_handler)
+
+            logging.info(
+                f"File logging enabled: '{log_file_path}', Level: {logging.getLevelName(file_handler.level)}, Rotation: {max_bytes / (1024 * 1024):.1f}MB / {backup_count} backups")
+
+        except Exception as e:
+            # Log the error but allow the app to continue without file logging
+            logging.error(f"Failed to configure file logging: {e}", exc_info=True)
+
+        logging.info("App mount process completed.")  # Final message after all setup
 
     async def on_unmount(self) -> None:
         """Clean up logging resources on application exit."""
@@ -767,14 +813,17 @@ CONFIG_TOML_CONTENT = """
 [general]
 default_tab = "chat" # e.g., "chat", "character", "logs"
 log_level = "DEBUG" # DEBUG, INFO, WARNING, ERROR, CRITICAL
+
 [logging]
-# log_file = "~/.local/share/tldw_cli/app.log" # Example path
-log_file = "tldw_cli_app.log" # Log to current directory
-file_log_level = "INFO"
+# Controls logging to the file located next to the database file.
+log_filename = "tldw_cli_app.log" # The name of the log file.
+file_log_level = "INFO"        # Level for the file log (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+log_max_bytes = 10485760       # Max file size in bytes before rotation (e.g., 10MB = 10 * 1024 * 1024)
+log_backup_count = 5           # Number of old log files to keep.
+
 [api_keys]
 # Use environment variables (e.g., OPENAI_API_KEY) primarily!
-openai = "Set OPENAI_API_KEY environment variable"
-anthropic = "Set ANTHROPIC_API_KEY environment variable"
+openai = "Set OPENAI_API_KEY environment variable"anthropic = "Set ANTHROPIC_API_KEY environment variable"
 # ... other placeholders ...
 [api_endpoints]
 ollama_url = "http://localhost:11434"
@@ -784,6 +833,7 @@ kobold_url = "http://localhost:5001/api"
 vllm_url = "http://localhost:8000"
 custom_openai_url = "http://localhost:1234/v1"
 custom_openai_2_url = "http://localhost:5678/v1"
+
 [chat_defaults]
 provider = "Ollama"
 model = "ollama/llama3:latest"
@@ -792,6 +842,7 @@ temperature = 0.7
 top_p = 0.95
 min_p = 0.05
 top_k = 50
+
 [character_defaults]
 provider = "Anthropic"
 model = "claude-3-haiku-20240307"
@@ -800,8 +851,10 @@ temperature = 0.8
 top_p = 0.9
 min_p = 0.0
 top_k = 100
+
 [database]
 path = "~/.local/share/tldw_cli/history.db"
+
 [server]
 url = "http://localhost:8001/api/v1"
 token = null
@@ -861,17 +914,21 @@ if __name__ == "__main__":
 
     # --- CSS File Handling ---
     try:
-        css_file = Path(TabApp.CSS_PATH)
+        css_file = Path(TldwCli.CSS_PATH)
         if not css_file.is_file():
              css_file.parent.mkdir(parents=True, exist_ok=True)
              with open(css_file, "w") as f: f.write(css_content)
              logging.info(f"Created default CSS file: {css_file}")
     except Exception as e:
-        logging.error(f"Error handling CSS file '{TabApp.CSS_PATH}': {e}", exc_info=True)
+        logging.error(f"Error handling CSS file '{TldwCli.CSS_PATH}': {e}", exc_info=True)
 
     # --- Run the App ---
     logging.info("Starting Textual App...")
     # Pass the loaded config to the App instance
-    app = TabApp(config=APP_CONFIG)
+    app = TldwCli(config=APP_CONFIG)
     app.run()
     logging.info("Textual App finished.")
+
+#
+# End of app.py
+#######################################################################################################################

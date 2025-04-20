@@ -48,137 +48,219 @@ from typing import Union, AnyStr, Tuple, List, Optional, Protocol, cast
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 #
 # 3rd-Party Imports
-import requests
 import unicodedata
-from tqdm import tqdm
-from loguru import logger
+#from loguru import logger
+import logging
 #
 #######################################################################################################################
 #
 # Function Definitions
 
-logging = logger
-
-def extract_text_from_segments(segments, include_timestamps=True):
-    logger.trace(f"Segments received: {segments}")
-    logger.trace(f"Type of segments: {type(segments)}")
-
-    def extract_text_recursive(data, include_timestamps):
-        if isinstance(data, dict):
-            text = data.get('Text', '')
-            if include_timestamps and 'Time_Start' in data and 'Time_End' in data:
-                return f"{data['Time_Start']}s - {data['Time_End']}s | {text}"
-            for key, value in data.items():
-                if key == 'Text':
-                    return value
-                elif isinstance(value, (dict, list)):
-                    result = extract_text_recursive(value, include_timestamps)
-                    if result:
-                        return result
-        elif isinstance(data, list):
-            return '\n'.join(filter(None, [extract_text_recursive(item, include_timestamps) for item in data]))
-        return None
-
-    text = extract_text_recursive(segments, include_timestamps)
-
-    if text:
-        return text.strip()
-    else:
-        logging.error(f"Unable to extract text from segments: {segments}")
-        return "Error: Unable to extract transcription"
-
-#
-#
-#######################
-# Temp file cleanup
-#
-# Global list to keep track of downloaded files
-downloaded_files = []
-
-def cleanup_downloads():
-    """Function to clean up downloaded files when the server exits."""
-    for file_path in downloaded_files:
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                print(f"Cleaned up file: {file_path}")
-        except Exception as e:
-            print(f"Error cleaning up file {file_path}: {e}")
-
-#
-#
-#######################################################################################################################
-
 
 #######################################################################################################################
 # Config loading
 #
-def load_comprehensive_config():
-    # Get the directory of the current script (Utils.py)
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    logging.trace(f"Current directory: {current_dir}")
 
-    # Go up two levels to the project root directory (tldw)
-    project_root = os.path.dirname(os.path.dirname(current_dir))
-    logging.trace(f"Project root directory: {project_root}")
+log = logging.getLogger(__name__)
 
-    # Construct the path to the config file
-    config_path = os.path.join(project_root, 'Config_Files', 'config.txt')
-    logging.trace(f"Config file path: {config_path}")
+# --- Project Structure Constants ---
 
-    # Check if the config file exists
-    if not os.path.exists(config_path):
-        logging.error(f"Config file not found at {config_path}")
-        raise FileNotFoundError(f"Config file not found at {config_path}")
+# Determine the Project Root Directory dynamically relative to *this file* (Utils.py)
+# Assuming Utils.py is in ~/tldw_cli/Libs/
+UTILS_FILE_PATH = Path(__file__).resolve() # Absolute path to Utils.py
+LIBS_DIR = UTILS_FILE_PATH.parent          # Absolute path to ~/tldw_cli/Libs/
+PROJECT_ROOT_DIR = LIBS_DIR.parent         # Absolute path to ~/tldw_cli/
 
-    # Read the config file
+# --- Configuration File Path ---
+# Config file is directly within the project root
+CONFIG_FILENAME = 'config.txt'
+CONFIG_FILE_PATH = PROJECT_ROOT_DIR / CONFIG_FILENAME
+
+# --- User Database Path (Fixed Location) ---
+USER_DB_DIR = Path.home() / ".config" / "tldw_cli"
+USER_DB_FILENAME = "tldw_cli_Media.db"
+USER_DB_PATH = USER_DB_DIR / USER_DB_FILENAME
+
+# --- Project-Internal Database Directory (if needed) ---
+PROJECT_DB_DIR_NAME = "Databases" # Name of the subdir within project root
+PROJECT_DATABASES_DIR = PROJECT_ROOT_DIR / PROJECT_DB_DIR_NAME
+
+
+def load_comprehensive_config() -> configparser.ConfigParser:
+    """
+    Loads configuration from config.txt located in the project root directory.
+
+    Raises:
+        FileNotFoundError: If config.txt is not found in the project root.
+        configparser.Error: If the file cannot be parsed correctly.
+
+    Returns:
+        configparser.ConfigParser: The loaded configuration object.
+    """
+    log.info(f"Attempting to load configuration from: {CONFIG_FILE_PATH}")
+
+    if not CONFIG_FILE_PATH.is_file():
+        log.error(f"Configuration file '{CONFIG_FILENAME}' not found at expected project root location: {CONFIG_FILE_PATH}")
+        raise FileNotFoundError(f"Required configuration file '{CONFIG_FILENAME}' not found at {CONFIG_FILE_PATH}")
+
     config = configparser.ConfigParser()
-    config.read(config_path)
-
-    # Log the sections found in the config file
-    logging.trace(f"load_comprehensive_config(): Sections found in config: {config.sections()}")
-
-    return config
-
-
-def get_project_root():
-    """Get the absolute path to the project root directory."""
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(os.path.dirname(current_dir))
-    logging.trace(f"Project root: {project_root}")
-    return project_root
+    try:
+        config.read(CONFIG_FILE_PATH)
+        log.info(f"Successfully loaded config. Sections found: {config.sections()}")
+        return config
+    except configparser.Error as e:
+        log.error(f"Error parsing configuration file {CONFIG_FILE_PATH}: {e}", exc_info=True)
+        raise # Re-raise the parsing error
 
 
-def get_database_dir():
-    """Get the absolute path to the database directory."""
-    db_dir = os.path.join(get_project_root(), 'Databases')
-    os.makedirs(db_dir, exist_ok=True)
-    logging.trace(f"Database directory: {db_dir}")
-    return db_dir
-
-
-def get_database_path(db_name: str) -> str:
+def get_project_root() -> Path:
     """
-    Get the full absolute path for a database file.
-    Ensures the path is always within the Databases directory.
+    Returns the absolute path to the project root directory (containing app.py).
+
+    Returns:
+        pathlib.Path: The absolute Path object for the project root.
     """
-    # Remove any directory traversal attempts
-    safe_db_name = os.path.basename(db_name)
-    path = os.path.join(get_database_dir(), safe_db_name)
-    logging.trace(f"Database path for {safe_db_name}: {path}")
-    return path
+    # This is now determined as a constant at the top
+    log.debug(f"Returning project root: {PROJECT_ROOT_DIR}")
+    return PROJECT_ROOT_DIR
 
 
-def get_project_relative_path(relative_path: Union[str, os.PathLike[AnyStr]]) -> str:
-    """Convert a relative path to a path relative to the project root."""
-    path = os.path.join(get_project_root(), str(relative_path))
-    logging.trace(f"Project relative path for {relative_path}: {path}")
-    return path
+def get_user_database_path() -> Path:
+    """
+    Returns the absolute path to the user's primary database file
+    (located in ~/.config/tldw_cli/). Ensures the directory exists.
 
-def get_chromadb_path():
-    path = os.path.join(get_project_root(), 'Databases', 'chroma_db')
-    logging.trace(f"ChromaDB path: {path}")
-    return path
+    Returns:
+        pathlib.Path: The absolute Path object for the user database file.
+    """
+    try:
+        # Ensure the directory ~/.config/tldw_cli exists
+        USER_DB_DIR.mkdir(parents=True, exist_ok=True)
+        log.info(f"Ensured user database directory exists: {USER_DB_DIR}")
+        log.debug(f"Returning user database path: {USER_DB_PATH}")
+        return USER_DB_PATH
+    except OSError as e:
+        log.error(f"Could not create or access user database directory {USER_DB_DIR}: {e}", exc_info=True)
+        # Depending on requirements, you might want to raise an exception here
+        # or return None, or let the subsequent DB access fail.
+        # For now, let's re-raise to make the problem explicit.
+        raise OSError(f"Failed to ensure user database directory exists at {USER_DB_DIR}") from e
+
+
+# --- Functions for Project-Internal Databases (if needed) ---
+
+def get_project_databases_dir() -> Path:
+    """
+    Get the absolute path to the 'Databases' directory within the project structure.
+    Ensures the directory exists.
+
+    Returns:
+        pathlib.Path: The absolute Path object for the project's Databases directory.
+    """
+    try:
+        PROJECT_DATABASES_DIR.mkdir(parents=True, exist_ok=True)
+        log.info(f"Ensured project-internal database directory exists: {PROJECT_DATABASES_DIR}")
+        return PROJECT_DATABASES_DIR
+    except OSError as e:
+        log.error(f"Could not create or access project-internal database directory {PROJECT_DATABASES_DIR}: {e}", exc_info=True)
+        raise OSError(f"Failed to ensure project-internal database directory exists at {PROJECT_DATABASES_DIR}") from e
+
+
+def get_project_database_path(db_filename: str) -> Path:
+    """
+    Get the full absolute path for a database file stored within the
+    project's 'Databases' directory (e.g., for templates, tests).
+
+    Args:
+        db_filename (str): The base name of the database file (e.g., 'test.db').
+                           Directory components will be ignored for safety.
+
+    Returns:
+        pathlib.Path: The absolute Path object for the database file.
+    """
+    # Ensure we only use the filename part to prevent traversal
+    safe_db_filename = Path(db_filename).name
+    if not safe_db_filename:
+        raise ValueError("db_filename cannot be empty or represent a directory.")
+
+    # Get the project DB directory (ensuring it exists)
+    project_db_dir = get_project_databases_dir()
+    full_path = project_db_dir / safe_db_filename
+    log.debug(f"Returning project-internal database path for '{safe_db_filename}': {full_path}")
+    return full_path
+
+
+# --- General Purpose Path Helper ---
+
+def get_project_relative_path(relative_path_str: Union[str, os.PathLike[AnyStr]]) -> Path:
+    """
+    Resolves a path relative to the project root directory.
+
+    Args:
+        relative_path_str (Union[str, os.PathLike[AnyStr]]): The path string relative
+            to the project root (e.g., "Assets/image.png", "Data/file.json").
+
+    Returns:
+        pathlib.Path: The absolute Path object.
+    """
+    # Note: Path() handles PathLike objects correctly
+    # Using '/' operator joins paths appropriately
+    absolute_path = (PROJECT_ROOT_DIR / relative_path_str).resolve()
+    log.debug(f"Resolved project relative path for '{relative_path_str}': {absolute_path}")
+    return absolute_path
+
+# --- Example Usage within Utils.py (for testing) ---
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(levelname)s:%(name)s] %(message)s')
+    print("\n--- Testing Utility Functions ---")
+
+    print(f"\nProject Root: {get_project_root()}")
+    print(f"Config File Path (Constant): {CONFIG_FILE_PATH}")
+    print(f"User DB Path (Constant): {USER_DB_PATH}")
+
+    try:
+        # Create dummy config for loading test
+        if not CONFIG_FILE_PATH.exists():
+             print(f"Creating dummy config at {CONFIG_FILE_PATH} for test...")
+             CONFIG_FILE_PATH.write_text("[Settings]\nvalue = test\n", encoding='utf-8')
+        config_data = load_comprehensive_config()
+        print("\nLoaded Config Sections:", config_data.sections())
+        # Clean up dummy config if created just for test
+        # if CONFIG_FILE_PATH.read_text() == "[Settings]\nvalue = test\n":
+        #     CONFIG_FILE_PATH.unlink()
+        #     print("Cleaned up dummy config.")
+    except Exception as e:
+        print(f"\nError loading config: {e}")
+
+    try:
+        user_db = get_user_database_path()
+        print(f"\nUser Database Path (Ensured Dir): {user_db}")
+    except Exception as e:
+        print(f"\nError getting user database path: {e}")
+
+    try:
+        proj_db_dir = get_project_databases_dir()
+        print(f"\nProject Databases Dir (Ensured): {proj_db_dir}")
+        proj_db_file = get_project_database_path("template.db")
+        print(f"Example Project DB Path: {proj_db_file}")
+        # Test with unsafe path
+        try:
+             get_project_database_path("../outside.db")
+        except ValueError:
+             print("Correctly prevented path traversal for project DB.")
+    except Exception as e:
+        print(f"\nError with project database paths: {e}")
+
+
+    try:
+        asset_path = get_project_relative_path("Assets/logo.png")
+        print(f"\nExample Relative Path: {asset_path}")
+        data_path = get_project_relative_path(Path("Data") / "config.json")
+        print(f"Example Relative Path (using Path): {data_path}")
+    except Exception as e:
+        print(f"\nError with relative path resolution: {e}")
+
+    print("\n--- End Testing ---")
 
 def ensure_directory_exists(path):
     """Ensure that a directory exists, creating it if necessary."""
@@ -465,7 +547,7 @@ def load_and_log_configs():
 
         # Retrieve output paths from the configuration file
         output_path = config.get('Paths', 'output_path', fallback='results')
-        logging.trace(f"Output path set to: {output_path}")
+        logging.info(f"Output path set to: {output_path}")
 
         # Save video transcripts
         save_video_transcripts = config.get('Paths', 'save_video_transcripts', fallback='True')
@@ -477,7 +559,7 @@ def load_and_log_configs():
 
         # Retrieve processing choice from the configuration file
         processing_choice = config.get('Processing', 'processing_choice', fallback='cpu')
-        logging.trace(f"Processing choice set to: {processing_choice}")
+        logging.info(f"Processing choice set to: {processing_choice}")
 
         # [Chunking]
         # # Chunking Defaults
@@ -574,7 +656,7 @@ def load_and_log_configs():
 
         # Retrieve Embedding model settings from the configuration file
         embedding_model = config.get('Embeddings', 'embedding_model', fallback='')
-        logging.trace(f"Embedding model set to: {embedding_model}")
+        logging.info(f"Embedding model set to: {embedding_model}")
         embedding_provider = config.get('Embeddings', 'embedding_provider', fallback='')
         embedding_model = config.get('Embeddings', 'embedding_model', fallback='')
         onnx_model_path = config.get('Embeddings', 'onnx_model_path', fallback="./App_Function_Libraries/onnx_models/text-embedding-3-small.onnx")
@@ -1368,128 +1450,6 @@ def save_segments_to_json(segments, file_name="transcription_segments.json"):
     return json_file_path
 
 
-def safe_download(url: str, tmp_dir: Path, ext: str) -> Path:
-    """
-    Wrapper around download_file() that:
-      1) builds a random filename inside tmp_dir
-      2) returns the Path on success
-    """
-    dst = tmp_dir / (f"{uuid.uuid4().hex}{ext}")
-    # checksum=None, max_retries=3, delay=5 keep the defaults
-    download_file(url, str(dst))          # raises on failure
-    return dst
-
-def smart_download(url: str, tmp_dir: Path) -> Path:
-    """
-    • Chooses a filename & extension automatically
-    • Calls download_file(url, dest_path)
-    • Returns Path to downloaded file
-
-    Order of extension preference:
-      1. The URL path (e.g. “.md”, “.rst”, “.txt” …)
-      2. The HTTP Content‑Type header
-      3. Fallback: “.bin”
-    """
-    # ---------- 1) try URL  -------------------------------------------------
-    parsed = urlparse(url)
-    guessed_ext = Path(parsed.path).suffix.lower()
-
-    # ---------- 2) if no ext, probe HEAD  -----------------------------------
-    if not guessed_ext:
-        try:
-            head = requests.head(url, allow_redirects=True, timeout=10)
-            ctype = head.headers.get("content-type", "")
-            guessed_ext = mimetypes.guess_extension(ctype.split(";")[0].strip()) or ""
-        except Exception:
-            guessed_ext = ""
-
-    # ---------- 3) final fallback  ------------------------------------------
-    if not guessed_ext:
-        guessed_ext = ".bin"
-
-    # ---------- 4) build dest path  -----------------------------------------
-    dest = tmp_dir / f"{uuid.uuid4().hex}{guessed_ext}"
-
-    # ---------- 5) download  ------------------------------------------------
-    download_file(url, str(dest))          # inherits retries / resume
-    return dest
-
-
-def download_file(url, dest_path, expected_checksum=None, max_retries=3, delay=5):
-    temp_path = dest_path + '.tmp'
-
-    for attempt in range(max_retries):
-        try:
-            # Check if a partial download exists and get its size
-            resume_header = {}
-            if os.path.exists(temp_path):
-                resume_header = {'Range': f'bytes={os.path.getsize(temp_path)}-'}
-
-            response = requests.get(url, stream=True, headers=resume_header)
-            response.raise_for_status()
-
-            # Get the total file size from headers
-            total_size = int(response.headers.get('content-length', 0))
-            initial_pos = os.path.getsize(temp_path) if os.path.exists(temp_path) else 0
-
-            mode = 'ab' if 'Range' in response.headers else 'wb'
-            with open(temp_path, mode) as temp_file, tqdm(
-                total=total_size, unit='B', unit_scale=True, desc=dest_path, initial=initial_pos, ascii=True
-            ) as pbar:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:  # filter out keep-alive new chunks
-                        temp_file.write(chunk)
-                        pbar.update(len(chunk))
-
-            # Verify the checksum if provided
-            if expected_checksum:
-                if not verify_checksum(temp_path, expected_checksum):
-                    os.remove(temp_path)
-                    raise ValueError("Downloaded file's checksum does not match the expected checksum")
-
-            # Move the file to the final destination
-            os.rename(temp_path, dest_path)
-            print("Download complete and verified!")
-            return dest_path
-
-        except Exception as e:
-            print(f"Attempt {attempt + 1} failed: {e}")
-            if attempt < max_retries - 1:
-                print(f"Retrying in {delay} seconds...")
-                time.sleep(delay)
-            else:
-                print("Max retries reached. Download failed.")
-                raise
-
-def download_file_if_missing(url: str, local_path: str) -> None:
-    """
-    Download a file from a URL if it does not exist locally.
-    """
-    if os.path.exists(local_path):
-        logging.debug(f"File already exists locally: {local_path}")
-        return
-    logging.info(f"Downloading from {url} to {local_path}")
-    os.makedirs(os.path.dirname(local_path), exist_ok=True)
-    r = requests.get(url, stream=True)
-    r.raise_for_status()
-    with open(local_path, "wb") as f:
-        for chunk in r.iter_content(chunk_size=8192):
-            f.write(chunk)
-
-def create_download_directory(title):
-    base_dir = "Results"
-    # Remove characters that are illegal in Windows filenames and normalize
-    safe_title = normalize_title(title, preserve_spaces=False)
-    logging.debug(f"{title} successfully normalized")
-    session_path = os.path.join(base_dir, safe_title)
-    if not os.path.exists(session_path):
-        os.makedirs(session_path, exist_ok=True)
-        logging.debug(f"Created directory for downloaded video: {session_path}")
-    else:
-        logging.debug(f"Directory already exists for downloaded video: {session_path}")
-    return session_path
-
-
 def safe_read_file(file_path):
     encodings = ['utf-8', 'utf-16', 'ascii', 'latin-1', 'iso-8859-1', 'cp1252', 'utf-8-sig']
 
@@ -1531,7 +1491,6 @@ def safe_read_file(file_path):
     # If all decoding attempts fail, return the error message
     logging.error(f"Unable to decode the file {file_path}")
     return f"Unable to decode the file {file_path}"
-
 
 #
 # End of Files-saving Function Definitions
@@ -1703,23 +1662,73 @@ def format_file_path(file_path, fallback_path=None):
 # DB Config Loading
 
 
-def get_db_config():
-    # Get the directory of the current script
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    # Go up two levels to the project root directory (tldw)
-    project_root = os.path.dirname(os.path.dirname(current_dir))
-    # Construct the path to the config file
-    config_path = os.path.join(project_root, 'Config_Files', 'config.txt')
-    # Read the config file
+def get_db_config_local():
+    """
+    Looks for 'config.txt' in the current working directory,
+    reads the [Database] section, and returns the configuration.
+
+    Raises:
+        FileNotFoundError: If config.txt is not found in the current directory.
+        KeyError: If the '[Database]' section or the required 'type' key
+                  is missing within that section.
+        configparser.Error: If the file cannot be parsed correctly.
+
+    Returns:
+        dict: A dictionary containing 'type' and 'sqlite_path'.
+              'sqlite_path' defaults to './Databases/server_media_summary.db'
+              if not specified in the config file.
+    """
+    config_filename = 'config.txt'
+    # Get the current working directory (where the script is run from)
+    current_working_dir = Path.cwd()
+    # Construct the full path to the config file in the CWD
+    config_path = current_working_dir / config_filename
+
+    logging.info(f"Attempting to load database config from: {config_path}")
+
+    # --- 1. Check if the configuration file exists ---
+    if not config_path.is_file():
+        logging.error(f"Configuration file '{config_filename}' not found in the current directory: {current_working_dir}")
+        raise FileNotFoundError(f"Required configuration file '{config_filename}' not found in the current directory '{current_working_dir}'.")
+
     config = configparser.ConfigParser()
-    config.read(config_path)
-    # Return the database configuration
-    return {
-        'type': config['Database']['type'],
-        'sqlite_path': config.get('Database', 'sqlite_path', fallback='./Databases/server_media_summary.db'),
-        'elasticsearch_host': config.get('Database', 'elasticsearch_host', fallback='localhost'),
-        'elasticsearch_port': config.getint('Database', 'elasticsearch_port', fallback=9200)
-    }
+
+    try:
+        # --- 2. Read the configuration file ---
+        config.read(config_path)
+
+        # --- 3. Check for the required section ---
+        if 'Database' not in config:
+            logging.error(f"'[Database]' section missing in config file: {config_path}")
+            raise KeyError(f"'Database' section not found in {config_path}")
+
+        # --- 4. Get the required 'type' key ---
+        # Access directly - this will raise KeyError if 'type' is missing, which is desired
+        db_type = config['Database']['type']
+        if not db_type: # Also check if the value is empty
+             logging.error(f"Database 'type' key is empty in config file: {config_path}")
+             raise ValueError(f"Database 'type' cannot be empty in {config_path}")
+
+
+        # --- 5. Get the optional 'sqlite_path' key with a fallback ---
+        # Define the default path clearly
+        default_sqlite_path = '(~/.config/tldw_cli/tldw_cli_Media.db'
+        sqlite_path = config.get('Database', 'sqlite_path', fallback=default_sqlite_path)
+
+        logging.info(f"Successfully loaded database config: type='{db_type}', sqlite_path='{sqlite_path}'")
+
+        # --- 6. Return the configuration dictionary ---
+        return {
+            'type': db_type,
+            'sqlite_path': sqlite_path,
+        }
+
+    except KeyError as e:
+        logging.error(f"Missing expected key in '[Database]' section of {config_path}: {e}", exc_info=True)
+        raise # Re-raise the KeyError after logging it
+    except configparser.Error as e:
+        logging.error(f"Error parsing configuration file {config_path}: {e}", exc_info=True)
+        raise # Re-raise other parsing errors
 
 #
 # End of DB Config Loading
@@ -1842,65 +1851,6 @@ class FileProcessor:
         return name
 
 
-class ZipValidator:
-    """Validates zip file contents and structure"""
-
-    MAX_ZIP_SIZE = 100 * 1024 * 1024  # 100MB
-    MAX_FILES = 100
-    VALID_EXTENSIONS = {'.md', '.txt'}
-
-    @staticmethod
-    def validate_zip_file(zip_path: str) -> Tuple[bool, str, List[str]]:
-        """
-        Validate zip file and its contents
-        Returns: (is_valid, error_message, valid_files)
-        """
-        try:
-            # Check zip file size
-            if os.path.getsize(zip_path) > ZipValidator.MAX_ZIP_SIZE:
-                return False, "Zip file too large (max 100MB)", []
-
-            valid_files = []
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                # Check number of files
-                if len(zip_ref.filelist) > ZipValidator.MAX_FILES:
-                    return False, f"Too many files in zip (max {ZipValidator.MAX_FILES})", []
-
-                # Check for directory traversal attempts
-                for file_info in zip_ref.filelist:
-                    if '..' in file_info.filename or file_info.filename.startswith('/'):
-                        return False, "Invalid file paths detected", []
-
-                # Validate each file
-                total_size = 0
-                for file_info in zip_ref.filelist:
-                    # Skip directories
-                    if file_info.filename.endswith('/'):
-                        continue
-
-                    # Check file size
-                    if file_info.file_size > ZipValidator.MAX_ZIP_SIZE:
-                        return False, f"File {file_info.filename} too large", []
-
-                    total_size += file_info.file_size
-                    if total_size > ZipValidator.MAX_ZIP_SIZE:
-                        return False, "Total uncompressed size too large", []
-
-                    # Check file extension
-                    ext = os.path.splitext(file_info.filename)[1].lower()
-                    if ext in ZipValidator.VALID_EXTENSIONS:
-                        valid_files.append(file_info.filename)
-
-            if not valid_files:
-                return False, "No valid markdown or text files found in zip", []
-
-            return True, "", valid_files
-
-        except zipfile.BadZipFile:
-            return False, "Invalid or corrupted zip file", []
-        except Exception as e:
-            return False, f"Error processing zip file: {str(e)}", []
-
 def format_text_with_line_breaks(text):
     # Split the text into sentences and add line breaks
     sentences = text.replace('. ', '.<br>').replace('? ', '?<br>').replace('! ', '!<br>')
@@ -1974,3 +1924,32 @@ def extract_media_id_from_result_string(result_msg: Optional[str]) -> Optional[s
     else:
         # The pattern "Media ID: <id>" was not found in the string
         return None
+
+
+def extract_text_from_segments(segments, include_timestamps=True):
+    logging.info(f"Segments received: {segments}")
+    logging.info(f"Type of segments: {type(segments)}")
+
+    def extract_text_recursive(data, include_timestamps):
+        if isinstance(data, dict):
+            text = data.get('Text', '')
+            if include_timestamps and 'Time_Start' in data and 'Time_End' in data:
+                return f"{data['Time_Start']}s - {data['Time_End']}s | {text}"
+            for key, value in data.items():
+                if key == 'Text':
+                    return value
+                elif isinstance(value, (dict, list)):
+                    result = extract_text_recursive(value, include_timestamps)
+                    if result:
+                        return result
+        elif isinstance(data, list):
+            return '\n'.join(filter(None, [extract_text_recursive(item, include_timestamps) for item in data]))
+        return None
+
+    text = extract_text_recursive(segments, include_timestamps)
+
+    if text:
+        return text.strip()
+    else:
+        logging.error(f"Unable to extract text from segments: {segments}")
+        return "Error: Unable to extract transcription"
