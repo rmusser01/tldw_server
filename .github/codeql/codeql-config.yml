@@ -2,3 +2,4 @@ paths:
  - 'PoC_Version'
 paths-ignore:
  - '**/*.*'
+ - '**/PoC_Version/**'
