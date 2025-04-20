@@ -1,0 +1,54 @@
+
+    Screen { layout: vertical; }
+    Header { dock: top; height: 1; background: $accent-darken-1; }
+    Footer { dock: bottom; height: 1; background: $accent-darken-1; }
+    #tabs { dock: top; height: 3; background: $background; padding: 0 1; }
+    #tabs Button { width: 1fr; height: 100%; border: none; background: $panel; color: $text-muted; }
+    #tabs Button:hover { background: $panel-lighten-1; color: $text; }
+    #tabs Button.-active { background: $accent; color: $text; text-style: bold; border: none; }
+    #content { height: 1fr; width: 100%; }
+    .window { height: 100%; width: 100%; layout: horizontal; overflow: hidden; }
+    .hidden { display: none; }
+    .placeholder-window { align: center middle; background: $panel; }
+
+    /* Sidebar Styling */
+    .sidebar { width: 35; background: $boost; padding: 1 2; border-right: thick $background-darken-1; height: 100%; overflow-y: auto; overflow-x: hidden; }
+    .sidebar-title { text-style: bold underline; margin-bottom: 1; width: 100%; text-align: center; }
+    .sidebar-label { margin-top: 1; text-style: bold; }
+    .sidebar-input { width: 100%; margin-bottom: 1; }
+    .sidebar-textarea { width: 100%; height: 5; border: round $surface; margin-bottom: 1; }
+    .sidebar Select { width: 100%; margin-bottom: 1; }
+    #chat-api-key-placeholder, #character-api-key-placeholder { color: $text-muted; text-style: italic; margin-top: 1; }
+
+
+    /* Base Chat Log Style (for chat and character tabs) */
+    .chat-log { height: 1fr; width: 1fr; border: round $surface; padding: 0 1; }
+
+    /* --- Chat Window (Single Pane) specific layouts --- */
+    #chat-main-content { layout: vertical; height: 100%; width: 1fr; }
+    /* Input area styling (shared) */
+    #chat-input-area, #character-input-area { height: auto; max-height: 12; width: 100%; align: left top; padding: 1; border-top: round $surface; }
+    /* Input widget styling (shared) */
+    .chat-input { width: 1fr; height: auto; max-height: 100%; margin-right: 1; border: round $surface; }
+    /* Send button styling (shared) */
+    .send-button { width: 10; height: 100%; margin-top: 0; }
+
+    /* --- Character Chat Window specific layouts --- */
+    #character-main-content { layout: vertical; height: 100%; width: 1fr; }
+    #character-top-area { height: 1fr; width: 100%; layout: horizontal; margin-bottom: 1; }
+    #character-top-area > .chat-log { margin: 0 1 0 0; height: 100%; margin-bottom: 0; }
+    #character-portrait { width: 25; height: 100%; border: round $surface; padding: 1; margin: 0; overflow: hidden; align: center top; }
+
+    /* --- Styles for Logs Tab --- */
+    #logs-window {
+         padding: 0; border: none; height: 100%; width: 100%;
+         & #logs-content-wrapper { /* If you keep the wrapper */
+             layout: vertical; height: 100%; width: 100%;
+         }
+    }
+    #app-log-display {
+        border: round $surface; height: 1fr; width: 1fr; margin: 0; padding: 1;
+    }
+    /* Removed test-button style */
+
+    
