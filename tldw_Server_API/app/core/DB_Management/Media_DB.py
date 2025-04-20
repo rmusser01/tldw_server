@@ -1780,99 +1780,143 @@ def add_media_version(media_id: int, prompt: str, analysis_content: str, db_inst
         raise
 
 
-# FIXME - Rewrite this function to use the new database connection manager
 def search_media_db(
         search_query: str,
         search_fields: List[str],
         keywords: List[str],
         page: int = 1,
         results_per_page: int = 20,
-        connection=None,
-        db_instance: Database=None
-) -> Tuple[List[Tuple], int]:
+        db_instance: Database = None # Make this parameter MANDATORY
+) -> Tuple[List[Dict[str, Any]], int]: # Return List of Dicts if using row_factory
     """
-    Search for media items with advanced filtering options.
+    Search for media items using the provided Database instance and advanced filtering options.
+
+    Args:
+        search_query: The term to search for.
+        search_fields: A list of fields ('title', 'content', 'author', 'type') to search within.
+        keywords: A list of keywords to filter by.
+        page: The page number for pagination (starts at 1).
+        results_per_page: The number of results to return per page.
+        db_instance: The Database instance connected to the specific user's DB.
+
+    Returns:
+        A tuple containing:
+            - A list of dictionaries representing the matching media items.
+            - The total number of matches found (for pagination calculation).
+
+    Raises:
+        ValueError: If input parameters (page, results_per_page, search_fields) are invalid.
+        DatabaseError: If a database query fails.
+        TypeError: If db_instance is not a valid Database object.
     """
-    db=db_instance
-    # Input validation (keep as is)
+    # --- Input Validation ---
+    if not isinstance(db_instance, Database):
+        # Ensure a valid Database object is passed
+        raise TypeError("A valid Database instance must be provided to search_media_db.")
+
     if page < 1:
         raise ValueError("Page number must be 1 or greater")
-    if results_per_page < 1 or results_per_page > 100:
-        raise ValueError("Results per page must be between 1 and 100")
+    if results_per_page < 1 or results_per_page > 1000: # Allow more results? Adjust as needed
+        raise ValueError("Results per page must be between 1 and 1000")
 
-    # Sanitize and validate search fields (keep as is)
     valid_fields = {"title", "content", "author", "type"}
     sanitized_fields = [field for field in search_fields if field in valid_fields]
+    # Allow searching only by keywords without a search_query/search_fields
     if not sanitized_fields and search_query:
-        raise ValueError("No valid search fields provided")
+        raise ValueError("No valid search fields provided when search_query is present.")
+    if not search_query and not keywords:
+         # Handle case where neither search query nor keywords are provided if needed
+         # Maybe return all items paginated? Or raise error? For now, let it proceed (where_clause = 1=1)
+         pass
 
-    def execute_query(conn):
-        cursor = conn.cursor()
-        try:
-            # Build query components
-            offset = (page - 1) * results_per_page
-            params = []
-            conditions = []
+    # --- Query Building ---
+    offset = (page - 1) * results_per_page
+    params = []
+    conditions = []
 
-            # Build search query conditions
-            if search_query and sanitized_fields:
-                field_conditions = []
-                for field in sanitized_fields:
-                    field_conditions.append(f"Media.{field} LIKE ?")
-                    params.append(f"%{search_query}%")
-                conditions.append(f"({' OR '.join(field_conditions)})")
+    # Build search query conditions using FTS if available and searching content/title
+    # Otherwise use LIKE. FTS is generally much faster for text searching.
+    use_fts = ('content' in sanitized_fields or 'title' in sanitized_fields) and search_query
+    like_fields = [f for f in sanitized_fields if f not in ('content', 'title')]
 
-            # Build keyword conditions
-            if keywords:
-                placeholders = ", ".join(["?"] * len(keywords))
-                if placeholders:  # Only add if we have keywords
-                    conditions.append(f"""EXISTS (
-                        SELECT 1 
-                        FROM MediaKeywords mk 
-                        JOIN Keywords k ON mk.keyword_id = k.id 
-                        WHERE mk.media_id = Media.id 
-                        AND k.keyword IN ({placeholders})
-                    )""")
-                    params.extend(keywords)
+    if use_fts:
+        # Assumes your media_fts table has columns 'title' and 'content'
+        conditions.append("Media.id IN (SELECT rowid FROM media_fts WHERE media_fts MATCH ?)")
+        # Simple FTS query - can be enhanced with field specifiers (e.g., "title:term content:term")
+        params.append(search_query) # Adjust FTS query syntax if needed
 
-            where_clause = " AND ".join(conditions) if conditions else "1=1"
+    if like_fields and search_query:
+        like_conditions = []
+        for field in like_fields:
+            like_conditions.append(f"Media.{field} LIKE ?")
+            params.append(f"%{search_query}%")
+        if like_conditions:
+            conditions.append(f"({' OR '.join(like_conditions)})")
 
-            # First get the total count
-            count_query = f"""
-                SELECT COUNT(DISTINCT Media.id)
-                FROM Media
-                WHERE {where_clause}
-            """
-            cursor.execute(count_query, params.copy())
-            total_matches = cursor.fetchone()[0]
+    # Build keyword conditions (remains the same)
+    if keywords:
+        valid_keywords = [k for k in keywords if k] # Filter out empty strings
+        if valid_keywords:
+            placeholders = ", ".join(["?"] * len(valid_keywords))
+            conditions.append(f"""EXISTS (
+                SELECT 1
+                FROM MediaKeywords mk
+                JOIN Keywords k ON mk.keyword_id = k.id
+                WHERE mk.media_id = Media.id
+                AND k.keyword IN ({placeholders})
+            )""")
+            params.extend(valid_keywords)
 
-            # Then get the paginated results
+    # Construct WHERE clause
+    where_clause = " AND ".join(conditions) if conditions else "1=1" # Default if no search/keyword
+
+    # --- Database Interaction ---
+    try:
+        # Use the get_connection method from the passed db_instance
+        with db_instance.get_connection() as conn:
+            # Ensure row factory is set if you want dict results
+            # conn.row_factory = sqlite3.Row # Set in Database.__init__ is better
+
+            cursor = conn.cursor()
+
+            # 1. Get the total count
+            count_query = f"SELECT COUNT(DISTINCT Media.id) FROM Media WHERE {where_clause}"
+            logger.debug(f"Executing Count Query on {db_instance.db_path}: {count_query} | Params: {params}")
+            cursor.execute(count_query, params) # Use the same params (without limit/offset)
+            total_matches = cursor.fetchone()[0] # Fetch the count
+            logger.debug(f"Total matches found: {total_matches}")
+
+
+            # 2. Get the paginated results
+            # Select desired columns
             results_query = f"""
-                SELECT 
-                    Media.id, Media.url, Media.title, Media.type, 
-                    Media.content, Media.author, Media.ingestion_date
+                SELECT
+                    Media.id, Media.url, Media.title, Media.type,
+                    Media.content, Media.author, Media.ingestion_date,
+                    Media.transcription_model, Media.chunking_status, Media.is_trash
                 FROM Media
                 WHERE {where_clause}
-                ORDER BY Media.ingestion_date DESC
+                ORDER BY Media.ingestion_date DESC, Media.id DESC -- Added secondary sort for consistency
                 LIMIT ? OFFSET ?
             """
-            params.extend([results_per_page, offset])
-            cursor.execute(results_query, params)
-            results = cursor.fetchall()
+            paginated_params = params + [results_per_page, offset] # Add limit/offset to params
+            logger.debug(f"Executing Results Query on {db_instance.db_path}: {results_query} | Params: {paginated_params}")
+            cursor.execute(results_query, paginated_params)
+            # Fetchall returns a list of Row objects (dict-like)
+            results_raw = cursor.fetchall()
 
-            return results, total_matches
-        except Exception as e:
-            logger.error(f"Database error in search_media_db: {str(e)}", exc_info=True)
-            raise
-        finally:
-            cursor.close()
+            # Convert Row objects to standard dictionaries for easier handling/serialization
+            results_list = [dict(row) for row in results_raw]
 
-    # Execute with provided connection or get a new one
-    if connection:
-        return execute_query(connection)
-    else:
-        with db.get_connection() as conn:
-            return execute_query(conn)
+            return results_list, total_matches
+
+    except sqlite3.Error as e:
+        logger.error(f"Database error in search_media_db on {db_instance.db_path}: {e}", exc_info=True)
+        # Re-raise as a custom error or allow sqlite3.Error to propagate
+        raise DatabaseError(f"Failed to search media database: {e}") from e
+    except Exception as e:
+        logger.error(f"Unexpected error in search_media_db on {db_instance.db_path}: {e}", exc_info=True)
+        raise DatabaseError(f"An unexpected error occurred during media search: {e}") from e
 
 
 # Gradio function to handle user input and display results with pagination, with better feedback
