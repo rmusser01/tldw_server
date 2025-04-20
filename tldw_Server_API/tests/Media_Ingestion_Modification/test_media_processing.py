@@ -39,7 +39,19 @@ SAMPLE_VIDEO_PATH = TEST_MEDIA_DIR / "sample.mp4"
 SAMPLE_AUDIO_PATH = TEST_MEDIA_DIR / "sample.mp3"
 SAMPLE_PDF_PATH = TEST_MEDIA_DIR / "sample.pdf"
 SAMPLE_EPUB_PATH = TEST_MEDIA_DIR / "sample.epub"
+SAMPLE_TXT_PATH = TEST_MEDIA_DIR / "sample.txt"
+SAMPLE_MD_PATH = TEST_MEDIA_DIR / "sample.md"
+SAMPLE_DOCX_PATH = TEST_MEDIA_DIR / "sample.docx"
+SAMPLE_RTF_PATH = TEST_MEDIA_DIR / "sample.rtf"
+SAMPLE_HTML_PATH = TEST_MEDIA_DIR / "sample.html"
+SAMPLE_XML_PATH = TEST_MEDIA_DIR / "sample.xml"
+VALID_TXT_URL = "https://github.com/rmusser01/tldw/blob/main/LICENSE.txt" # Example .rst as text
+VALID_MD_URL = "https://github.com/rmusser01/tldw/blob/main/README.md"
+VALID_HTML_URL = "https://www.google.com" # Basic HTML page
+
 INVALID_FILE_PATH = TEST_MEDIA_DIR / "not_a_real_file.xyz"
+
+
 
 # Use stable, short, publicly accessible URLs for testing
 # Replace with actual URLs known to work
@@ -65,6 +77,18 @@ def client():
         pytest.skip(f"Test PDF file not found: {SAMPLE_PDF_PATH}")
     if not SAMPLE_EPUB_PATH.exists():
         pytest.skip(f"Test EPUB file not found: {SAMPLE_EPUB_PATH}")
+    if not SAMPLE_TXT_PATH.exists():
+        pytest.skip(f"Test TXT file not found: {SAMPLE_TXT_PATH}")
+    if not SAMPLE_MD_PATH.exists():
+        pytest.skip(f"Test MD file not found: {SAMPLE_MD_PATH}")
+    if not SAMPLE_DOCX_PATH.exists():
+        pytest.skip(f"Test DOCX file not found: {SAMPLE_DOCX_PATH}")
+    if not SAMPLE_RTF_PATH.exists():
+        pytest.skip(f"Test RTF file not found: {SAMPLE_RTF_PATH}")
+    if not SAMPLE_HTML_PATH.exists():
+        pytest.skip(f"Test HTML file not found: {SAMPLE_HTML_PATH}")
+    if not SAMPLE_XML_PATH.exists():
+        pytest.skip(f"Test XML file not found: {SAMPLE_XML_PATH}")
 
     with TestClient(fastapi_app_instance) as c:
         yield c
@@ -646,7 +670,10 @@ class TestProcessEbooks:
         result = data["results"][0]
         check_media_item_result(result, "Error")
         assert result["input_ref"] == SAMPLE_PDF_PATH.name
-        assert "Upload error: Invalid file extension" in result["error"]
+        # Check for the key part of the actual error message
+        assert "Invalid file type" in result["error"]
+        assert ".pdf" in result["error"]  # Also check that the specific wrong extension is mentioned
+        assert ".epub" in result["error"]  # And that the allowed extension is mentioned
 
     def test_process_ebook_validation_error_bad_method(self, client, auth_headers):
         """Test sending invalid form data (invalid extraction_method)."""
@@ -713,3 +740,223 @@ class TestProcessEbooks:
 
 
 
+# =============================================================================
+# Document Processing Tests
+# =============================================================================
+class TestProcessDocuments:
+    ENDPOINT = "/api/v1/media/process-documents" # Adjust if needed
+
+    # --- Helper to create dummy files ---
+    @pytest.fixture(autouse=True, scope="class")
+    def create_sample_doc_files(self):
+        """Create dummy files for tests if they don't exist."""
+        TEST_MEDIA_DIR.mkdir(exist_ok=True)
+        if not SAMPLE_TXT_PATH.exists(): SAMPLE_TXT_PATH.write_text("This is sample text content.\nSecond line.", encoding='utf-8')
+        if not SAMPLE_MD_PATH.exists(): SAMPLE_MD_PATH.write_text("# Sample Markdown\n\nThis is *markdown*.\n\n- Item 1\n- Item 2", encoding='utf-8')
+        # Cannot easily create binary docx/rtf here, assume they exist or skip tests needing them
+        if not SAMPLE_HTML_PATH.exists(): SAMPLE_HTML_PATH.write_text("<html><head><title>Sample HTML</title><meta name='author' content='HTML Author'></head><body><p>Hello World</p></body></html>", encoding='utf-8')
+        if not SAMPLE_XML_PATH.exists(): SAMPLE_XML_PATH.write_text("<root><title>Sample XML</title><data>Some XML data</data></root>", encoding='utf-8')
+        # NOTE: For DOCX/RTF tests to pass conversion, ensure valid files exist at SAMPLE_DOCX_PATH/SAMPLE_RTF_PATH
+        # Or mock the conversion functions (docx2txt.process, pypandoc.convert_file)
+
+    # --- Happy Path Tests ---
+
+    @pytest.mark.parametrize("file_path, mime_type, expected_format", [
+        (SAMPLE_TXT_PATH, "text/plain", "txt"),
+        (SAMPLE_MD_PATH, "text/markdown", "md"),
+        (SAMPLE_HTML_PATH, "text/html", "html"),
+        (SAMPLE_XML_PATH, "application/xml", "xml"),
+        pytest.param(SAMPLE_DOCX_PATH, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx", marks=pytest.mark.skipif(not SAMPLE_DOCX_PATH.exists(), reason="sample.docx not found")),
+        pytest.param(SAMPLE_RTF_PATH, "application/rtf", "rtf", marks=[pytest.mark.skipif(not SAMPLE_RTF_PATH.exists(), reason="sample.rtf not found"), pytest.mark.xfail(reason="Requires pandoc binary installed")]) # xfail if pandoc likely missing
+    ])
+    def test_process_doc_upload_various_formats(self, file_path, mime_type, expected_format, client, auth_headers):
+        """Test uploading various supported document formats."""
+        form_data = {"perform_analysis": "false"}
+        with open(file_path, "rb") as f:
+            files = {"files": (file_path.name, f, mime_type)}
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+
+        data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
+        result = data["results"][0]
+        check_media_item_result(result, "Success")
+        assert result["media_type"] == "document"
+        assert result["input_ref"] == file_path.name
+        assert result["source_format"] == expected_format
+        assert result["content"] is not None and len(result["content"]) > 0
+        assert result["chunks"] is not None and len(result["chunks"]) > 0 # Default chunking=True
+
+    @pytest.mark.parametrize("url, check_content_part, expected_status, expected_error_part", [
+        (VALID_TXT_URL, "license", 200, None),
+        (VALID_MD_URL, "FastAPI", 200, None),
+        pytest.param(VALID_HTML_URL, None, 207, "does not have an allowed extension",
+                     marks=pytest.mark.skipif(not VALID_HTML_URL, reason="VALID_HTML_URL not defined"))
+    ])
+    def test_process_doc_url_various_formats(self, url, check_content_part, expected_status, expected_error_part, client, auth_headers):
+        """Test processing various document URLs."""
+        form_data = {"urls": [url], "perform_analysis": "false"}
+        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+
+        # Adjust expected counts based on status
+        expected_processed = 1 if expected_status == 200 else 0
+        expected_errors = 1 if expected_status == 207 else 0
+
+        # Use the check_batch_response helper, passing the expected status
+        data = check_batch_response(response, expected_status,
+                                    expected_processed=expected_processed,
+                                    expected_errors=expected_errors,
+                                    check_results_len=1)
+        result = data["results"][0]
+
+        if expected_status == 200:
+            check_media_item_result(result, "Success")
+            assert result["media_type"] == "document"
+            assert result["input_ref"] == url
+            assert result["content"] is not None and len(result["content"]) > 0
+            assert check_content_part in result["content"] # Check if expected text is present
+            assert result["chunks"] is not None and len(result["chunks"]) > 0
+        else: # Expected 207 (failure)
+            check_media_item_result(result, "Error")
+            assert result["input_ref"] == url
+            assert result["error"] is not None
+            assert expected_error_part in result["error"]
+
+    def test_process_doc_multiple_success(self, client, auth_headers):
+        """Test processing multiple valid inputs (URL and Upload)."""
+        form_data = {"urls": [VALID_TXT_URL], "perform_analysis": "false"}
+        with open(SAMPLE_MD_PATH, "rb") as f:
+            files = {"files": (SAMPLE_MD_PATH.name, f, "text/markdown")}
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+
+        data = check_batch_response(response, 200, expected_processed=2, expected_errors=0, check_results_len=2)
+        results = data["results"]
+        assert len(results) == 2
+        found_url = False
+        found_file = False
+        for res in results:
+            check_media_item_result(res, "Success")
+            assert res["media_type"] == "document"
+            if res["input_ref"] == VALID_TXT_URL: found_url = True
+            elif res["input_ref"] == SAMPLE_MD_PATH.name: found_file = True
+        assert found_url and found_file
+
+    def test_process_doc_overrides_and_options(self, client, auth_headers):
+        """Test title/author/keywords overrides and disabling chunking."""
+        test_title = "My Doc Title"
+        test_author = "Doc Author"
+        test_keywords_str = "doc,test,override"
+        test_keywords_list = ["doc", "test", "override"]
+
+        form_data = {
+            "urls": [VALID_TXT_URL],
+            "title": test_title,
+            "author": test_author,
+            "keywords_str": test_keywords_str,
+            "perform_analysis": "false",
+            "perform_chunking": "false" # Disable chunking
+        }
+        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
+        result = data["results"][0]
+        check_media_item_result(result, "Success")
+        assert result["metadata"]["title"] == test_title
+        assert result["metadata"]["author"] == test_author
+        assert result["keywords"] == test_keywords_list
+        assert result["chunks"] is not None and len(result["chunks"]) == 1 # Expect 1 chunk when disabled
+
+    # --- Error Handling Tests ---
+
+    def test_process_doc_multi_status_mixed(self, client, auth_headers):
+        """Test processing one valid URL and one invalid URL -> 207."""
+        form_data = {"urls": [VALID_TXT_URL, INVALID_URL], "perform_analysis": "false"}
+        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+
+        time.sleep(5) # Give download time to fail
+
+        data = check_batch_response(response, 207, expected_processed=1, expected_errors=1, check_results_len=2)
+        success_result = next((r for r in data["results"] if r["status"] == "Success"), None)
+        error_result = next((r for r in data["results"] if r["status"] == "Error"), None)
+
+        assert success_result is not None
+        assert error_result is not None
+        check_media_item_result(success_result, "Success")
+        check_media_item_result(error_result, "Error")
+        assert success_result["input_ref"] == VALID_TXT_URL
+        assert error_result["input_ref"] == INVALID_URL
+        assert "Download/preparation failed" in error_result["error"]
+
+    def test_process_doc_no_input(self, client, auth_headers):
+        """Test sending request with no URLs or files."""
+        response = client.post(self.ENDPOINT, data={}, headers=auth_headers)
+        assert response.status_code == 400
+        assert "At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided." in response.json()["detail"]
+
+    def test_process_doc_upload_invalid_extension(self, client, auth_headers):
+        """Test uploading a file with an unsupported extension (e.g., epub)."""
+        # Use epub as an example of unsupported by this endpoint's ALLOWED_DOC_EXTENSIONS
+        if not SAMPLE_EPUB_PATH.exists(): pytest.skip("sample.epub needed for invalid format test")
+        form_data = {}
+        with open(SAMPLE_EPUB_PATH, "rb") as f:
+            files = {"files": (SAMPLE_EPUB_PATH.name, f, "application/epub+zip")}
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+
+        # _save_uploaded_files should reject based on ALLOWED_DOC_EXTENSIONS
+        data = check_batch_response(response, 207, expected_processed=0, expected_errors=1, check_results_len=1)
+        result = data["results"][0]
+        check_media_item_result(result, "Error")
+        assert result["input_ref"] == SAMPLE_EPUB_PATH.name
+        assert "Upload error: Invalid file type" in result["error"] # Check based on _save_uploaded_files msg
+        assert ".epub" in result["error"]
+
+    @pytest.mark.skipif(not SAMPLE_RTF_PATH.exists(), reason="sample.rtf not found")
+    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext_Files.convert_file", side_effect=ValueError("Mocked pandoc failure"))
+    def test_process_doc_rtf_conversion_failure(self, mock_convert, client, auth_headers):
+        """Test RTF processing when pandoc conversion fails."""
+        form_data = {"perform_analysis": "false"}
+        with open(SAMPLE_RTF_PATH, "rb") as f:
+            files = {"files": (SAMPLE_RTF_PATH.name, f, "application/rtf")}
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+
+        data = check_batch_response(response, 207, expected_processed=0, expected_errors=1, check_results_len=1)
+        result = data["results"][0]
+        check_media_item_result(result, "Error")
+        assert result["input_ref"] == SAMPLE_RTF_PATH.name
+        assert "RTF conversion failed" in result["error"] # Check the prefix
+        assert "Mocked pandoc failure" in result["error"] # Check the original mocked message is included
+
+    def test_process_doc_validation_error_chunking(self, client, auth_headers):
+        """Test invalid chunking parameters -> 422."""
+        form_data = {
+            "urls": [VALID_TXT_URL],
+            "chunk_size": "50",
+            "chunk_overlap": "100" # Overlap > size
+        }
+        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        assert response.status_code == 422
+        assert "chunk_overlap must be less than chunk_size" in str(response.json())
+
+    # --- Mocked Analysis Test ---
+    # IMPORTANT: Update patch path if needed
+    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext_Files.summarize")
+    def test_process_doc_with_analysis_mocked(self, mock_summarize, client, auth_headers):
+        """Test enabling analysis with mocking."""
+        mock_analysis_text = "This is the mocked document analysis."
+        mock_summarize.return_value = mock_analysis_text
+
+        form_data = {
+            "urls": [VALID_TXT_URL],
+            "perform_analysis": "true",
+            "perform_chunking": "true",
+            "api_name": "mock_api",
+            "api_key": "mock_key"
+        }
+        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
+        result = data["results"][0]
+        check_media_item_result(result, "Success")
+
+        mock_summarize.assert_called()
+        assert result["analysis"] is not None
+        assert mock_analysis_text in result["analysis"] # Check if mocked text is present
+        assert result["chunks"] is not None and len(result["chunks"]) > 0
+        # Check analysis_details
+        assert result["analysis_details"]["summarization_model"] == "mock_api"
