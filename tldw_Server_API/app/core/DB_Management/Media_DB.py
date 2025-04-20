@@ -968,9 +968,8 @@ class Database:
 # update_database_schema()
 # diagnose_schema()
 # ensure_all_media_have_versions()
-
-db = Database()
 #
+
 # End of DB Setup Functions
 #######################################################################################################################
 
@@ -1730,9 +1729,7 @@ def fetch_item_details(media_id: int, db: Database = None) -> Tuple[str, str, st
         # For now, we assume a global 'db' might exist for legacy compatibility,
         # but it's better practice to pass it explicitly.
         logging.warning("fetch_item_details called without explicit db instance.")
-        global db # Assuming 'db' is the global instance name used in your original code
-        if 'db' not in globals():
-             raise ValueError("Global db instance not found and no instance passed.")
+        raise ValueError("Global db instance not found and no instance passed.")
 
     try:
         # Use the get_document_version function which already fetches the latest version
@@ -2391,9 +2388,7 @@ def import_obsidian_note_to_db(note_data, db: Database = None):
     """
     if db is None:
         logging.warning("import_obsidian_note_to_db called without explicit db instance.")
-        global db
-        if 'db' not in globals():
-            raise ValueError("Global db instance not found and no instance passed.")
+        raise ValueError("Global db instance not found and no instance passed.")
 
     existing_note = None # Define outside try block for use in logging/return
     try:
@@ -2768,9 +2763,7 @@ def get_media_summaries(media_id: int, db: Database = None) -> List[Dict]:
     """
     if db is None:
         logging.warning("get_media_summaries called without explicit db instance.")
-        global db
-        if 'db' not in globals():
-            raise ValueError("Global db instance not found and no instance passed.")
+        raise ValueError("Global db instance not found and no instance passed.")
 
     try:
         with db.get_connection() as conn:
@@ -2815,9 +2808,7 @@ def get_specific_analysis(version_id: int, db: Database = None) -> Dict:
     """
     if db is None:
         logging.warning("get_specific_analysis called without explicit db instance.")
-        global db
-        if 'db' not in globals():
-            raise ValueError("Global db instance not found and no instance passed.")
+        raise ValueError("Global db instance not found and no instance passed.")
 
     try:
         with db.get_connection() as conn:
@@ -2862,9 +2853,7 @@ def get_media_prompts(media_id: int, db: Database = None) -> List[Dict]:
     """
     if db is None:
         logging.warning("get_media_prompts called without explicit db instance.")
-        global db
-        if 'db' not in globals():
-            raise ValueError("Global db instance not found and no instance passed.")
+        raise ValueError("Global db instance not found and no instance passed.")
 
     try:
         with db.get_connection() as conn:
@@ -2908,9 +2897,7 @@ def get_specific_prompt(version_id: int, db: Database = None) -> Dict:
     """
     if db is None:
         logging.warning("get_specific_prompt called without explicit db instance.")
-        global db
-        if 'db' not in globals():
-            raise ValueError("Global db instance not found and no instance passed.")
+        raise ValueError("Global db instance not found and no instance passed.")
 
     try:
         with db.get_connection() as conn:
@@ -2967,9 +2954,7 @@ def delete_specific_analysis(version_id: int, db: Database = None) -> str:
     """
     if db is None:
         logging.warning("delete_specific_analysis called without explicit db instance.")
-        global db
-        if 'db' not in globals():
-            raise ValueError("Global db instance not found and no instance passed.")
+        raise ValueError("Global db instance not found and no instance passed.")
 
     try:
         # Use transaction for the update
@@ -3004,9 +2989,7 @@ def delete_specific_prompt(version_id: int, db: Database = None) -> str:
     """
     if db is None:
         logging.warning("delete_specific_prompt called without explicit db instance.")
-        global db
-        if 'db' not in globals():
-            raise ValueError("Global db instance not found and no instance passed.")
+        raise ValueError("Global db instance not found and no instance passed.")
 
     try:
         with db.transaction() as conn:
@@ -3215,9 +3198,7 @@ def get_document_version(
     """
     if db is None:
         logging.warning("get_document_version called without explicit db instance.")
-        global db # Assuming global instance 'db'
-        if 'db' not in globals():
-            raise ValueError("Global db instance not found and no instance passed.")
+        raise ValueError("Global db instance not found and no instance passed.")
 
     try:
         with db.get_connection() as conn:

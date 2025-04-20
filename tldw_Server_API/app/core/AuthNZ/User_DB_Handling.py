@@ -12,7 +12,7 @@ from tldw_Server_API.app.api.v1.DB_Deps.DB_Deps import EXPECTED_API_KEY
 #
 # Local Imports
 from tldw_Server_API.app.core.DB_Management.Media_DB import Database
-from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Utils.Utils import logging, load_and_log_configs
 
 #
 #######################################################################################################################
@@ -22,6 +22,11 @@ from tldw_Server_API.app.core.Utils.Utils import logging
 # FIXME - THIS IS PLACEHOLDER CODE, NOT CONFIRMED OR FULLY EVALUATED
 
 USER_DB_BASE_PATH = Path("./user_databases")
+# FIXME
+# Setup check from config for seeing if multiplayer is enabled
+# Also add proper authentication etc. for multiplayer
+MULTIPLAYER = False  # Placeholder for multiplayer mode
+
 
 
 
@@ -44,9 +49,17 @@ async def verify_api_key(api_key: str = Header(..., alias="X-API-KEY")): # Use a
 async def verify_token_and_get_user(token: str = Header(...)) -> str:
     # In a real app, validate the token and return a unique user ID
     # For now, we'll use a dummy check
-    if not token or not token.startswith("valid-token-"):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token")
-    user_id = token.split("-")[-1] # e.g., "user1" from "valid-token-user1"
+    if MULTIPLAYER == True:
+        # Perform token verification logic here
+        if not token or not token.startswith("valid-token-"):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token")
+        # If the prefix matches, it assumes the part after the last hyphen (-) is the user_id(but only before the next hyphen).
+        user_id = token.split("-")[-1]  # e.g., "user1" from "valid-token-user1"
+        pass
+
+    else:
+        # We assume a single user installation/token
+        user_id = "SingleUser"
     if not user_id:
          raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not extract user ID from token")
     logging.info(f"Token verified for user: {user_id}")
