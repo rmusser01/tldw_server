@@ -58,6 +58,7 @@ class MediaUpdateRequest(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     author: Optional[str] = None
+    analysis: Optional[str] = None
     prompt: Optional[str] = None
     summary: Optional[str] = None
     keywords: Optional[List[str]] = None

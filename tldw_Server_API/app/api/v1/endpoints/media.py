@@ -518,40 +518,141 @@ async def rollback_version(
     "/{media_id}",
     tags=["Media Management"], # Assign tag
     summary="Update Media Item", # Add summary
-    status_code=status.HTTP_200_OK, # Or 204 if no body is returned
+    status_code=status.HTTP_200_OK, # Return 200 OK with updated item representation
+    response_model=Dict[str, Any],
+    # FIXME - Response models...
     # response_model=YourUpdatedMediaResponseModel # Define response model if applicable
 )
-async def update_media_item(media_id: int, payload: MediaUpdateRequest, db=Depends(get_db_manager)):
+async def update_media_item(
+    media_id: int,
+    payload: MediaUpdateRequest,
+    db=Depends(get_db_manager) # Use your actual dependency getter
+):
     """
     **Update Media Item Details**
 
-    Modifies attributes of the main media item record, such as title, author,
-    or potentially flags/status. Does not modify version history directly.
-    """
-    # 1) check if media exists
-    row = db.execute_query("SELECT id FROM Media WHERE id=?", (media_id,))
-    if not row:
-        raise HTTPException(status_code=404, detail="Media not found")
+    Modifies attributes of the main media item record (like title, author)
+    and potentially its content.
 
-    # 2) do partial update
+    If **content** is updated:
+      - A new content hash is calculated and stored.
+      - A **new version** is created in DocumentVersions.
+      - If `payload.prompt` and `payload.analysis` are provided, they are stored
+        in the *new* version record.
+      - If `payload.prompt` and `payload.analysis` are *not* provided with the
+        content update, the `prompt` and `analysis_content` fields in the *new*
+        version record will be set to `NULL`.
+
+    If only non-content fields (e.g., title, author) are updated, no new version is created.
+    """
+    logging.debug(f"Received request to update media_id={media_id} with payload: {payload.dict(exclude_unset=True)}")
+
     updates = []
     params = []
-    if payload.title is not None:
-        updates.append("title=?")
-        params.append(payload.title)
-    if payload.content is not None:
-        updates.append("content=?")
-        params.append(payload.content)
-    ...
-    # build your final query
-    if updates:
-        set_clause = ", ".join(updates)
-        query = f"UPDATE Media SET {set_clause} WHERE id=?"
-        params.append(media_id)
-        db.execute_query(query, tuple(params))
+    requires_new_version = False
+    new_content_hash = None
+    new_content = None
 
-    # done => 200
-    return {"message": "ok"}
+    # --- 1. Check if media exists ---
+    try:
+        # Use transaction for check + potential update + version creation
+        with db.transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, content_hash FROM Media WHERE id = ? AND is_trash = 0", (media_id,))
+            media_record = cursor.fetchone()
+
+            if not media_record:
+                logging.warning(f"Update failed: Media not found or is trashed for ID {media_id}")
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found or is in trash")
+
+            current_hash = media_record['content_hash']
+
+            # --- 2. Prepare Update Fields ---
+            if payload.title is not None:
+                updates.append("title = ?")
+                params.append(payload.title)
+            if payload.author is not None: # Example: Add author update
+                updates.append("author = ?")
+                params.append(payload.author)
+            # Add other direct Media table field updates here...
+
+            if payload.content is not None:
+                requires_new_version = True
+                new_content = payload.content
+                new_content_hash = hashlib.sha256(new_content.encode()).hexdigest()
+                # Only update content/hash if it actually changed
+                if new_content_hash != current_hash:
+                    updates.append("content = ?")
+                    params.append(new_content)
+                    updates.append("content_hash = ?")
+                    params.append(new_content_hash)
+                    # If content changed, maybe reset chunking status?
+                    updates.append("chunking_status = ?")
+                    params.append('pending') # Or 'needs_rechunking'?
+                    logging.debug(f"Content update detected for media_id={media_id}. New hash: {new_content_hash}")
+                else:
+                    # Content provided but identical to current, no DB update needed for content/hash
+                    logging.debug(f"Content provided for media_id={media_id} is identical to current content. Skipping content/hash update.")
+                    # If content is identical, we might argue a new version isn't strictly needed *unless* prompt/analysis changed too.
+                    # For simplicity now: if content is in payload, assume intent to version, even if identical.
+                    # If prompt/analysis are also provided, they WILL be saved in the new version.
+
+
+            # --- 3. Execute Update Query (if changes detected) ---
+            if updates:
+                set_clause = ", ".join(updates)
+                query = f"UPDATE Media SET {set_clause} WHERE id = ?"
+                update_params = tuple(params + [media_id])
+                logging.debug(f"Executing Media UPDATE query: {query} | Params: {update_params}")
+                cursor.execute(query, update_params)
+                logging.info(f"Updated Media table fields for media_id={media_id}")
+            else:
+                logging.debug(f"No direct Media table fields to update for media_id={media_id}")
+
+
+            # --- 4. Create New Version if Required ---
+            new_version_number = None
+            if requires_new_version:
+                # Use the content from the payload.
+                # Use prompt/analysis from payload if provided, otherwise None (will become NULL).
+                new_version_prompt = payload.prompt
+                new_version_analysis = payload.analysis # From alias='analysis_content'
+
+                logging.debug(f"Creating new version for media_id={media_id} due to content update.")
+                # Call the updated create_document_version, passing the connection
+                version_info = create_document_version(
+                    media_id=media_id,
+                    content=new_content, # Use the payload content
+                    prompt=new_version_prompt, # Pass payload prompt (or None)
+                    analysis_content=new_version_analysis, # Pass payload analysis (or None)
+                    db_instance=db, # Pass for logging etc.
+                    conn=conn # Pass the active connection!
+                )
+                new_version_number = version_info.get('version_number')
+                logging.info(f"Created new version {new_version_number} for media_id={media_id} during update.")
+
+            # Commit happens automatically by context manager
+
+            # --- 5. Prepare Response ---
+            response_message = f"Media item {media_id} updated successfully."
+            if new_version_number:
+                 response_message += f" New version {new_version_number} created."
+
+            # Optionally fetch the updated item details to return them
+            # cursor.execute("SELECT * FROM Media WHERE id = ?", (media_id,))
+            # updated_data = dict(cursor.fetchone())
+            # return updated_data
+
+            return {"message": response_message, "media_id": media_id, "new_version": new_version_number}
+
+    except HTTPException:
+        raise # Re-raise HTTP exceptions directly
+    except DatabaseError as e:
+        logging.error(f"Database error updating media_id={media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error during update: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error updating media_id={media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred: {e}")
 
 
 ##############################################################################

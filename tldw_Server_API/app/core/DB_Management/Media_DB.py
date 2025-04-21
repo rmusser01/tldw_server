@@ -496,6 +496,165 @@ class Database:
             # If the query fails for some reason, assume table doesn't exist or DB is broken
             return False
 
+    def process_chunks(db_instance, chunks: List[Dict], media_id: int, batch_size: int = 100):
+        """
+        Process chunks in batches and insert them into the database within a single transaction.
+
+        Args:
+            db_instance: Database instance to use for inserting chunks.
+            chunks: List of chunk dictionaries (e.g., {'text': str, 'start_index': int, 'end_index': int}).
+            media_id: ID of the media these chunks belong to.
+            batch_size: Number of chunks to process in each batch.
+        """
+        # database=db_instance # No need to rename
+        # log_counter("process_chunks_attempt", labels={"media_id": media_id}) # Placeholder
+        start_time = time.time()
+        total_chunks = len(chunks)
+        processed_chunks = 0
+        errors_in_transaction = False
+        db = db_instance
+        if not chunks:
+            logging.warning(f"process_chunks called with empty chunk list for media_id {media_id}.")
+            return
+
+        logging.info(
+            f"Starting chunk processing for media_id {media_id}. Total chunks: {total_chunks}, Batch size: {batch_size}")
+
+        try:
+            # Use a single transaction for the entire operation
+            with db.transaction() as conn:  # conn is managed by the context manager
+                for i in range(0, total_chunks, batch_size):
+                    batch = chunks[i:i + batch_size]
+
+                    # --- IMPORTANT: Adapt this to match your chunk dict structure AND target table ---
+                    # Example for inserting into UnvectorizedMediaChunks:
+                    chunk_data = []
+                    for chunk in batch:
+                        text = chunk.get('text', chunk.get('chunk_text'))
+                        if text is not None:  # Ensure text exists
+                            chunk_data.append((
+                                media_id,
+                                text,
+                                chunk.get('chunk_index'),  # Assuming this exists in your chunk dict
+                                chunk.get('start_index', chunk.get('start_char')),
+                                chunk.get('end_index', chunk.get('end_char')),
+                                chunk.get('chunk_type'),
+                                # Add other fields like metadata if needed
+                            ))
+                        else:
+                            logging.warning(
+                                f"Skipping chunk with None text at index {i + batch.index(chunk)} for media_id {media_id}")
+
+                    # Skip empty batches (e.g., if all chunks had None text)
+                    if not chunk_data:
+                        logging.debug(f"Skipping empty processed batch at index {i} for media_id {media_id}")
+                        continue
+
+                    try:
+                        # --- IMPORTANT: Use the correct SQL for your target table ---
+                        # Example SQL for UnvectorizedMediaChunks:
+                        sql = """
+                              INSERT INTO UnvectorizedMediaChunks
+                                  (media_id, chunk_text, chunk_index, start_char, end_char, chunk_type)
+                              VALUES (?, ?, ?, ?, ?, ?) \
+                              """
+                        # Call the new execute_many method.
+                        # commit=False because we are inside a transaction managed by 'with db_instance.transaction()'
+                        db_instance.execute_many(sql, chunk_data, commit=False)
+
+                        processed_chunks += len(chunk_data)
+                        logging.debug(
+                            f"Inserted batch {i // batch_size + 1}, total processed: {processed_chunks}/{total_chunks} chunks for media_id {media_id}")
+                        # log_counter("process_chunks_batch_success", labels={"media_id": media_id}) # Placeholder
+
+                    except (DatabaseError, sqlite3.Error, TypeError) as batch_err:
+                        # Catch specific errors from execute_many or sqlite3
+                        logging.error(
+                            f"Error inserting chunk batch starting at index {i} for media_id {media_id}: {batch_err}",
+                            exc_info=True)
+                        # log_counter("process_chunks_batch_error", labels={"media_id": media_id, "error_type": type(batch_err).__name__}) # Placeholder
+                        errors_in_transaction = True
+                        # Rollback will happen automatically when the exception leaves the 'with' block
+                        raise DatabaseError(
+                            f"Failed to insert chunk batch: {batch_err}") from batch_err  # Re-raise to trigger rollback
+
+            # If the loop completes without error, the transaction commits automatically here.
+            logging.info(f"Successfully finished processing {processed_chunks} chunks for media_id {media_id}")
+            # log_counter("process_chunks_success", labels={"media_id": media_id}) # Placeholder
+
+        except DatabaseError as e:
+            # Catch errors from transaction management or re-raised batch errors
+            logging.error(f"Database transaction error during chunk processing for media_id {media_id}: {e}",
+                          exc_info=True)
+            # log_counter("process_chunks_error", labels={"media_id": media_id, "error_type": "DatabaseError"}) # Placeholder
+            # Transaction already rolled back
+        except Exception as e:
+            logging.error(f"Unexpected error during chunk processing for media_id {media_id}: {e}", exc_info=True)
+            # log_counter("process_chunks_error", labels={"media_id": media_id, "error_type": type(e).__name__}) # Placeholder
+            # Rollback should happen if the error occurred within the 'with' block
+
+        finally:
+            duration = time.time() - start_time
+            logging.info(
+                f"Chunk processing finished for media_id {media_id}. Duration: {duration:.4f}s. Processed: {processed_chunks}/{total_chunks}.")
+            log_histogram("process_chunks_duration", duration, labels={"media_id": media_id}) # Placeholder
+
+
+    def execute_many(self, query: str, params_list: List[tuple], *, commit: bool = False) -> sqlite3.Cursor:
+        """
+        Executes a given SQL query for multiple sets of parameters using cursor.executemany().
+
+        Args:
+            query (str): The SQL query to execute (e.g., "INSERT INTO table (...) VALUES (?, ?)")
+            params_list (List[tuple]): A list of tuples, where each tuple contains parameters
+                                        for one execution of the query.
+            commit (bool): Whether to commit after this operation. Defaults to False.
+                           It's often more efficient to wrap multiple execute_many calls
+                           within a single transaction managed by the caller.
+
+        Returns:
+            sqlite3.Cursor: The cursor object after execution.
+
+        Raises:
+            DatabaseError: If query execution fails.
+            TypeError: If params_list is not suitable for executemany.
+        """
+        conn = self.get_connection()
+        # Basic type checking
+        if not isinstance(params_list, list):
+            # executemany expects an iterable sequence of sequences
+            raise TypeError("params_list must be a list of sequences (e.g., list of tuples).")
+        # Add check for empty list to avoid unnecessary DB call?
+        if not params_list:
+            logging.debug(f"execute_many called with empty params_list for query: {query[:100]}...")
+            # Return a dummy cursor or handle as needed, maybe just return None or raise?
+            # For now, proceed, sqlite3 might handle empty list gracefully or raise its own error.
+            pass
+
+        try:
+            cursor = conn.cursor()
+            logging.debug(f"Executing Many on {self.db_path}: {query[:150]}... with {len(params_list)} parameter sets.")
+            # Use the standard sqlite3 cursor.executemany
+            cursor.executemany(query, params_list)
+
+            if commit:
+                conn.commit()
+                logging.debug(f"Execute Many committed on {self.db_path}")
+            return cursor
+        except sqlite3.Error as e:
+            logging.error(f"Execute Many failed on {self.db_path}: {query[:150]}... Error: {e}", exc_info=True)
+            # Do not rollback here; let the transaction context handle it if called within one
+            raise DatabaseError(f"Execute Many failed: {e}") from e
+        except TypeError as te:
+            # Catch potential TypeError if params_list contents are wrong format for executemany
+            logging.error(f"TypeError during Execute Many on {self.db_path}: {te}. Check format of params_list.",
+                          exc_info=True)
+            raise TypeError(f"Parameter list format error for executemany: {te}") from te
+        except Exception as e:
+            # Catch other unexpected errors
+            logging.error(f"Unexpected error during Execute Many on {self.db_path}: {e}", exc_info=True)
+            raise DatabaseError(f"An unexpected error occurred during Execute Many: {e}") from e
+
     def _ensure_schema(self):
         """
         Ensures the necessary tables and indices exist in the database file.
@@ -614,357 +773,6 @@ class Database:
     #     # ... implementation using self.execute_query and transaction ...
 
 
-
-# Version 1
-# class DatabaseError(Exception):
-#     pass
-#
-# class InputError(Exception):
-#     pass
-#
-#
-# class Database:
-#     def __init__(self, db_name='server_media_summary.db'):
-#         self.db_path = get_database_path(db_name)
-#         self.timeout = 10.0
-#         self._local = threading.local()
-#
-#     @contextmanager
-#     def get_connection(self):
-#         if not hasattr(self._local, 'connection') or self._local.connection is None:
-#             self._local.connection = sqlite3.connect(self.db_path, timeout=self.timeout)
-#             self._local.connection.isolation_level = None  # This enables autocommit mode
-#         yield self._local.connection
-#
-#     def close_connection(self):
-#         if hasattr(self._local, 'connection') and self._local.connection:
-#             self._local.connection.close()
-#             self._local.connection = None
-#
-#     @contextmanager
-#     def transaction(self):
-#         with self.get_connection() as conn:
-#             try:
-#                 # Write-Ahead-Logging enable/disable
-#                 #conn.execute("PRAGMA journal_mode = WAL;")
-#                 conn.execute("BEGIN")
-#                 yield conn
-#                 conn.execute("COMMIT")
-#             except Exception:
-#                 conn.execute("ROLLBACK")
-#                 raise
-#
-#     def execute_query(self, query: str, params: Tuple = ()) -> Any:
-#         with self.get_connection() as conn:
-#             cursor = conn.cursor()
-#             cursor.execute(query, params)
-#             if query.strip().upper().startswith("SELECT"):
-#                 return cursor.fetchall()
-#             else:
-#                 return cursor.rowcount
-#
-#     def execute_many(self, query: str, params_list: List[Tuple]) -> None:
-#         with self.get_connection() as conn:
-#             cursor = conn.cursor()
-#             cursor.executemany(query, params_list)
-#
-#     def table_exists(self, table_name: str) -> bool:
-#         query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
-#         result = self.execute_query(query, (table_name,))
-#         return bool(result)
-#
-# db = Database()
-#
-# # Usage example:
-# if db.table_exists('DocumentVersions'):
-#     logging.debug("DocumentVersions table exists")
-# else:
-#     logging.debug("DocumentVersions table does not exist")
-#
-#
-# # Function to create tables with the new media schema
-# def create_tables(db) -> None:
-#     table_queries = [
-#         # CREATE TABLE statements
-#         '''
-#         CREATE TABLE IF NOT EXISTS Media (
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             url TEXT,
-#             title TEXT NOT NULL,
-#             type TEXT NOT NULL,
-#             content TEXT,
-#             author TEXT,
-#             ingestion_date TEXT,
-#             prompt TEXT,
-#             analysis_content TEXT,
-#             transcription_model TEXT,
-#             is_trash BOOLEAN DEFAULT 0,
-#             trash_date DATETIME,
-#             vector_embedding BLOB,
-#             chunking_status TEXT DEFAULT 'pending',
-#             vector_processing INTEGER DEFAULT 0,
-#             content_hash TEXT UNIQUE
-#         )
-#         ''',
-#         '''
-#         CREATE TABLE IF NOT EXISTS Keywords (
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             keyword TEXT NOT NULL UNIQUE
-#         )
-#         ''',
-#         '''
-#         CREATE TABLE IF NOT EXISTS MediaKeywords (
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             media_id INTEGER NOT NULL,
-#             keyword_id INTEGER NOT NULL,
-#             FOREIGN KEY (media_id) REFERENCES Media(id),
-#             FOREIGN KEY (keyword_id) REFERENCES Keywords(id)
-#         )
-#         ''',
-#         '''
-#         CREATE TABLE IF NOT EXISTS MediaModifications (
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             media_id INTEGER NOT NULL UNIQUE,
-#             prompt TEXT,
-#             analysis_content TEXT,
-#             keywords TEXT,
-#             modification_date TEXT,
-#             FOREIGN KEY (media_id) REFERENCES Media(id)
-#         )
-#         ''',
-#         '''
-#         CREATE TABLE IF NOT EXISTS Transcripts (
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             media_id INTEGER,
-#             whisper_model TEXT,
-#             transcription TEXT,
-#             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (media_id) REFERENCES Media(id)
-#         )
-#         ''',
-#         '''
-#         CREATE TABLE IF NOT EXISTS MediaChunks (
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             media_id INTEGER,
-#             chunk_text TEXT,
-#             start_index INTEGER,
-#             end_index INTEGER,
-#             chunk_id TEXT,
-#             FOREIGN KEY (media_id) REFERENCES Media(id)
-#         )''',
-#         '''
-#         CREATE TABLE IF NOT EXISTS UnvectorizedMediaChunks (
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             media_id INTEGER NOT NULL,
-#             chunk_text TEXT NOT NULL,
-#             chunk_index INTEGER NOT NULL,
-#             start_char INTEGER NOT NULL,
-#             end_char INTEGER NOT NULL,
-#             chunk_type TEXT,
-#             creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-#             last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-#             is_processed BOOLEAN DEFAULT FALSE,
-#             metadata TEXT,
-#             FOREIGN KEY (media_id) REFERENCES Media(id)
-#         )
-#         ''',
-#
-#         # Actual table for versioning:
-#         '''
-#         CREATE TABLE IF NOT EXISTS DocumentVersions (
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             media_id INTEGER NOT NULL,
-#             version_number INTEGER NOT NULL,
-#             prompt TEXT,
-#             analysis_content TEXT,
-#             content TEXT,
-#             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-#             FOREIGN KEY (media_id) REFERENCES Media(id),
-#             UNIQUE (media_id, version_number)
-#         )
-#         ''',
-#     ]
-#
-#     basic_index_queries = [
-#         # CREATE INDEX statements (excluding content_hash index)
-#         'CREATE INDEX IF NOT EXISTS idx_media_title ON Media(title)',
-#         'CREATE INDEX IF NOT EXISTS idx_media_type ON Media(type)',
-#         'CREATE INDEX IF NOT EXISTS idx_media_author ON Media(author)',
-#         'CREATE INDEX IF NOT EXISTS idx_media_ingestion_date ON Media(ingestion_date)',
-#         'CREATE INDEX IF NOT EXISTS idx_keywords_keyword ON Keywords(keyword)',
-#         'CREATE INDEX IF NOT EXISTS idx_mediakeywords_media_id ON MediaKeywords(media_id)',
-#         'CREATE INDEX IF NOT EXISTS idx_mediakeywords_keyword_id ON MediaKeywords(keyword_id)',
-#         'CREATE UNIQUE INDEX IF NOT EXISTS unique_media_modifications_media_id ON MediaModifications(media_id)',
-#         'CREATE INDEX IF NOT EXISTS idx_media_is_trash ON Media(is_trash)',
-#         'CREATE INDEX IF NOT EXISTS idx_mediachunks_media_id ON MediaChunks(media_id)',
-#         'CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_media_id ON UnvectorizedMediaChunks(media_id)',
-#         'CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_is_processed ON UnvectorizedMediaChunks(is_processed)',
-#         'CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_chunk_type ON UnvectorizedMediaChunks(chunk_type)',
-#         'CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_media_url ON Media(url)',
-#         'CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_media_keyword ON MediaKeywords(media_id, keyword_id)',
-#         'CREATE INDEX IF NOT EXISTS idx_document_versions_media_id ON DocumentVersions(media_id)',
-#         'CREATE INDEX IF NOT EXISTS idx_document_versions_version_number ON DocumentVersions(version_number)'
-#     ]
-#
-#     virtual_table_queries = [
-#         # CREATE VIRTUAL TABLE statements
-#         'CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(title, content)',
-#         'CREATE VIRTUAL TABLE IF NOT EXISTS keyword_fts USING fts5(keyword)'
-#     ]
-#
-#     # Execute all table creation queries first
-#     for query in table_queries:
-#         try:
-#             db.execute_query(query)
-#         except Exception as e:
-#             logging.error(f"Error executing query: {query}")
-#             logging.error(f"Error details: {str(e)}")
-#             raise
-#
-#     # Execute basic index queries
-#     for query in basic_index_queries:
-#         try:
-#             db.execute_query(query)
-#         except Exception as e:
-#             logging.error(f"Error executing query: {query}")
-#             logging.error(f"Error details: {str(e)}")
-#             raise
-#
-#     # Execute virtual table queries
-#     for query in virtual_table_queries:
-#         try:
-#             db.execute_query(query)
-#         except Exception as e:
-#             logging.error(f"Error executing query: {query}")
-#             logging.error(f"Error details: {str(e)}")
-#             raise
-#
-#     try:
-#         db.execute_query('CREATE UNIQUE INDEX IF NOT EXISTS idx_media_content_hash ON Media(content_hash)')
-#     except Exception as e:
-#         logging.error("Error creating content_hash index")
-#         logging.error(f"Error details: {str(e)}")
-#         # Don't raise here as this might fail on first creation
-#
-#     # Done
-#     logging.info("All tables, indexes, and virtual tables created successfully.")
-#
-# # ------------------------------------------------------------------------------------------
-# # Safe schema update for existing DBs
-# def update_database_schema():
-#     """
-#     Check for and update schema elements that might be missing in older database versions:
-#     - Checks for content_hash column in Media table
-#     - Checks for keywords column in MediaModifications table
-#     """
-#     try:
-#         logging.info("Checking database schema for updates...")
-#         with db.get_connection() as conn:
-#             cursor = conn.cursor()
-#
-#             # 1. Check for content_hash column in Media table
-#             cursor.execute('''
-#                 SELECT COUNT(*)
-#                 FROM pragma_table_info('Media')
-#                 WHERE name = 'content_hash'
-#             ''')
-#             column_exists = cursor.fetchone()[0]
-#
-#             if not column_exists:
-#                 cursor.execute('ALTER TABLE Media ADD COLUMN content_hash TEXT')
-#                 logging.info("Added content_hash column to 'Media' table.")
-#
-#                 cursor.execute('''
-#                     CREATE UNIQUE INDEX IF NOT EXISTS idx_media_content_hash
-#                     ON Media(content_hash)
-#                 ''')
-#                 logging.info("Created 'content_hash' unique index.")
-#
-#             # 2. Check for keywords column in MediaModifications table
-#             cursor.execute('''
-#                 SELECT COUNT(*)
-#                 FROM pragma_table_info('MediaModifications')
-#                 WHERE name = 'keywords'
-#             ''')
-#             keywords_column_exists = cursor.fetchone()[0]
-#
-#             if not keywords_column_exists:
-#                 cursor.execute('ALTER TABLE MediaModifications ADD COLUMN keywords TEXT')
-#                 logging.info("Added keywords column to 'MediaModifications' table.")
-#
-#             conn.commit()
-#             logging.info("Database schema update completed successfully.")
-#     except Exception as e:
-#         logging.error(f"Schema update failed: {str(e)}")
-#         logging.error(traceback.format_exc())
-#         raise
-#     finally:
-#         db.close_connection()
-#
-#
-# def diagnose_schema():
-#     """Diagnostic function to check the actual schema of the database tables."""
-#     try:
-#         with db.get_connection() as conn:
-#             cursor = conn.cursor()
-#
-#             # Check Media table schema
-#             cursor.execute("PRAGMA table_info(Media)")
-#             media_columns = cursor.fetchall()
-#             logging.info(f"Media table columns: {[col[1] for col in media_columns]}")
-#
-#             # Check MediaModifications table schema
-#             cursor.execute("PRAGMA table_info(MediaModifications)")
-#             mod_columns = cursor.fetchall()
-#             logging.info(f"MediaModifications table columns: {[col[1] for col in mod_columns]}")
-#
-#             # List all tables
-#             cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-#             tables = cursor.fetchall()
-#             logging.info(f"Tables in database: {[table[0] for table in tables]}")
-#
-#     except Exception as e:
-#         logging.error(f"Schema diagnosis failed: {str(e)}")
-#         logging.error(traceback.format_exc())
-#
-#
-# def ensure_all_media_have_versions():
-#     """Ensure all media items have at least one document version"""
-#     try:
-#         with db.transaction() as conn:
-#             cursor = conn.cursor()
-#
-#             # Find media with no versions
-#             cursor.execute("""
-#                 SELECT id, content FROM Media
-#                 WHERE NOT EXISTS (
-#                     SELECT 1 FROM DocumentVersions WHERE media_id = Media.id
-#                 )
-#             """)
-#
-#             items = cursor.fetchall()
-#             for media_id, content in items:
-#                 logging.info(f"Creating initial version for media {media_id}")
-#                 cursor.execute("""
-#                     INSERT INTO DocumentVersions
-#                     (media_id, version_number, content, created_at)
-#                     VALUES (?, 1, ?, CURRENT_TIMESTAMP)
-#                 """, (media_id, content))
-#
-#             if items:
-#                 logging.info(f"Created initial versions for {len(items)} media items")
-#
-#     except Exception as e:
-#         logging.error(f"Error ensuring versions: {str(e)}")
-#
-#
-# # ------------------------------------------------------------------------------------------
-# # Create tables (if they don't exist), then update schema (if needed)
-# create_tables(db)
-# update_database_schema()
-# diagnose_schema()
-# ensure_all_media_have_versions()
-#
 
 # End of DB Setup Functions
 #######################################################################################################################
@@ -1243,187 +1051,258 @@ def add_media_to_database(url, info_dict, segments, analysis_content, keywords, 
 
 
 # Function to add media with keywords
-def add_media_with_keywords(url, title, media_type, content, keywords, prompt, analysis_content, transcription_model, author,
-                           ingestion_date, overwrite=False, db_instance: Database=None, chunk_options=None, segments=None):
-    db=db_instance
-    log_counter("add_media_with_keywords_attempt")
+def add_media_with_keywords(
+    url: Optional[str], # Use Optional type hint
+    title: Optional[str],
+    media_type: Optional[str],
+    content: Optional[str],
+    keywords: Optional[List[str]], # Expect List now based on endpoint model parsing
+    prompt: Optional[str],
+    analysis_content: Optional[str],
+    transcription_model: Optional[str],
+    author: Optional[str],
+    ingestion_date: Optional[str], # Expect string YYYY-MM-DD
+    overwrite: bool = False,
+    db_instance: Database = None,
+    chunk_options: Optional[Dict] = None, # Pass through if needed for scheduling
+    segments: Optional[Any] = None # Pass through if needed elsewhere
+) -> Tuple[Optional[int], str]: # Return media_id (or None on error) and message
+    """
+    Adds or updates a media item in the database, including its keywords and
+    initial document version.
+
+    Args:
+        url: URL or identifier of the media.
+        title: Title of the media.
+        media_type: Type of media (e.g., 'audio', 'pdf').
+        content: The main content (transcript, text).
+        keywords: A list of keyword strings.
+        prompt: Initial prompt associated with the content/analysis.
+        analysis_content: Initial analysis content.
+        transcription_model: Model used for transcription (if applicable).
+        author: Author of the media.
+        ingestion_date: Date of ingestion (YYYY-MM-DD string).
+        overwrite: If True, update existing media found by URL or content hash.
+        db_instance: The Database instance.
+        chunk_options: Options for chunking (passed to scheduler).
+        segments: Original segments data (passed through).
+
+    Returns:
+        Tuple containing the media_id (int or None) and a status message (str).
+
+    Raises:
+        DatabaseError: If database operations fail.
+        InputError: If input validation fails.
+        TypeError: If db_instance is not valid.
+    """
+    # log_counter("add_media_with_keywords_attempt") # Using placeholders
     start_time = time.time()
-    logging.debug(f"Entering add_media_with_keywords: URL={url}, Title={title}")
+    logging.debug(f"Entering add_media_with_keywords: URL={url}, Title={title}, Type={media_type}")
 
-    if db is None:
-        raise DatabaseError("Database connection is not established.")
+    # --- Validation ---
+    if not isinstance(db_instance, Database):
+        raise TypeError("A valid Database instance must be provided.")
 
-    # Set default values for missing fields
-    if url is None:
-        url = 'localhost'
+    # Set default values if None provided (but content is crucial)
+    # url = url # Keep URL as potentially None initially
     title = title or 'Untitled'
-    media_type = media_type or 'Unknown'
-    content = content or 'No content available'
-    keywords = keywords or 'default'
-    prompt = prompt or 'No prompt available'
-    analysis_content = analysis_content or 'No analysis content available'
-    transcription_model = transcription_model or 'Unknown'
-    author = author or 'Unknown'
-    ingestion_date = ingestion_date or datetime.now().strftime('%Y-%m-%d')
+    media_type = media_type or 'unknown'
+    if content is None:
+        # Content is essential for hash and versioning
+        logging.error("add_media_with_keywords called with None content.")
+        raise InputError("Content cannot be None when adding media.")
+    keywords_list = [k.strip().lower() for k in keywords if k and k.strip()] if keywords else ['default'] # Default if empty/None
+    # prompt, analysis_content, transcription_model, author can be None (will be stored as NULL)
+    ingestion_date_str = ingestion_date or datetime.now().strftime('%Y-%m-%d')
 
-    if media_type not in ['article', 'audio', 'book', 'document', 'mediawiki_article', 'mediawiki_dump',
-                        'obsidian_note', 'podcast', 'text', 'video', 'unknown']:
-        log_counter("add_media_with_keywords_error", labels={"error_type": "InvalidMediaType"})
-        duration = time.time() - start_time
-        log_histogram("add_media_with_keywords_duration", duration)
-        raise InputError("Invalid media type. Allowed types: article, audio file, document, obsidian_note, podcast, text, video, unknown.")
+    # Simplified media type validation (adjust allowed types as needed)
+    allowed_types = {'article', 'audio', 'book', 'document', 'ebook', 'mediawiki_article', 'mediawiki_dump',
+                     'obsidian_note', 'pdf', 'podcast', 'text', 'video', 'unknown'}
+    log_counter("add_media_with_keywords_error", labels={"error_type": "InvalidMediaType"})
+    duration = time.time() - start_time
+    log_histogram("add_media_with_keywords_duration", duration)
+    if media_type not in allowed_types:
+        # log_counter("add_media_with_keywords_error", labels={"error_type": "InvalidMediaType"})
+        raise InputError(f"Invalid media type '{media_type}'. Allowed: {', '.join(allowed_types)}.")
 
-    if ingestion_date and not is_valid_date(ingestion_date):
+    if ingestion_date and not is_valid_date(ingestion_date_str):
         log_counter("add_media_with_keywords_error", labels={"error_type": "InvalidDateFormat"})
         duration = time.time() - start_time
         log_histogram("add_media_with_keywords_duration", duration)
-        raise InputError("Invalid ingestion date format. Use YYYY-MM-DD.")
+        raise InputError(f"Invalid ingestion date format '{ingestion_date}'. Use YYYY-MM-DD.")
 
-    # Handle keywords as either string or list
-    if isinstance(keywords, str):
-        keyword_list = [keyword.strip().lower() for keyword in keywords.split(',')]
-    elif isinstance(keywords, list):
-        keyword_list = [keyword.strip().lower() for keyword in keywords]
-    else:
-        keyword_list = ['default']
-
-    # Generate content hash
+    # --- Preparation ---
     content_hash = hashlib.sha256(content.encode()).hexdigest()
+    logging.debug(f"Generated content hash: {content_hash}")
 
-    # Generate URL if not provided
+    # Generate a placeholder URL if none provided (using hash ensures uniqueness if content is unique)
     if not url:
-        url = f"https://No-URL-Submitted.com/{media_type}/{content_hash}"
+        url = f"local://{media_type}/{content_hash}"
+        logging.info(f"No URL provided, generated placeholder: {url}")
 
-    logging.info(f"Adding/updating media: URL={url}, Title={title}, Type={media_type}")
-    logging.debug(f"Content (first 500 chars): {content[:500]}...")
-    logging.debug(f"Keywords: {keyword_list}")
-    logging.info(f"Prompt: {prompt}")
-    logging.info(f"analysis_content: {analysis_content}")
-    logging.info(f"Author: {author}")
-    logging.info(f"Ingestion Date: {ingestion_date}")
-    logging.info(f"Transcription Model: {transcription_model}")
-    logging.info(f"Overwrite: {overwrite}")
+    logging.info(f"Processing add/update for: URL='{url}', Title='{title}', Type='{media_type}'")
+    logging.debug(f"Keywords: {keywords_list}, Overwrite={overwrite}")
+    # Avoid logging full content/prompt/analysis unless necessary and sensitive data is masked
+    # logging.debug(f"Content Hash: {content_hash}")
+    # logging.debug(f"Prompt: {prompt[:100] if prompt else 'None'}...")
+    # logging.debug(f"Analysis: {analysis_content[:100] if analysis_content else 'None'}...")
 
-    def extract_text_from_segments(segments):
-        if isinstance(segments, list):
-            return ' '.join([segment.get('Text', '') for segment in segments if 'Text' in segment])
-        elif isinstance(segments, dict):
-            return segments.get('text', '') or segments.get('content', '')
-        else:
-            return str(segments)
-
+    # --- Database Interaction ---
     try:
-        with db.get_connection() as conn:
+        # Use a single transaction for all related inserts/updates
+        with db_instance.transaction() as conn:
             cursor = conn.cursor()
 
-            # Check if media already exists using URL or content_hash
+            # Check if media already exists by URL (preferred identifier) or content_hash
             cursor.execute('SELECT id FROM Media WHERE url = ? OR content_hash = ?', (url, content_hash))
             existing_media = cursor.fetchone()
-            logging.debug(f"Existing media check result: {existing_media}")
+            logging.debug(f"Existing media check result for URL/Hash: {existing_media}")
 
             media_id = None
-            action = "skipped"
+            action = "skipped" # Default action
 
             if existing_media:
                 media_id = existing_media[0]
-                logging.debug(f"Existing media ID: {media_id}")
+                logging.debug(f"Found existing media with ID: {media_id}")
 
                 if overwrite:
-                    # Update existing media
-                    logging.debug("Updating existing media (overwrite=True)")
+                    logging.info(f"Overwrite requested. Updating existing media ID: {media_id}")
+                    # --- Update Media Table ---
                     cursor.execute('''
                     UPDATE Media
                     SET url = ?, title = ?, type = ?, content = ?, author = ?,
-                        ingestion_date = ?, transcription_model = ?, chunking_status = ?,
-                        content_hash = ?, is_trash = 0, trash_date = NULL -- Reset trash status on overwrite
+                        ingestion_date = ?, transcription_model = ?,
+                        chunking_status = ?, -- Reset chunking status on update
+                        content_hash = ?,
+                        is_trash = 0, trash_date = NULL -- Un-trash if overwriting
                     WHERE id = ?
-                    ''', (url, title, media_type, content, author, ingestion_date,
+                    ''', (url, title, media_type, content, author, ingestion_date_str,
                           transcription_model, 'pending', content_hash, media_id))
                     action = "updated"
-                    # Clear old keywords for overwrite
+                    # log_counter("add_media_with_keywords_update")
+
+                    # --- Clear Old Keywords ---
+                    # Important: Clear before adding new ones
                     cursor.execute('DELETE FROM MediaKeywords WHERE media_id = ?', (media_id,))
-                    # Optional: Delete old versions? Or keep history? Keep for now.
-                    log_counter("add_media_with_keywords_update")
+                    logging.debug(f"Cleared old keywords for updated media ID: {media_id}")
+
+                    # Optional: Delete old versions? Decide based on requirements.
+                    # For now, keep history and just add a new version later.
+
                 else:
-                    action = "already exists (not updated)"
-                    log_counter("add_media_with_keywords_skipped")
+                    action = "already_exists_skipped"
+                    logging.info(f"Media already exists (ID: {media_id}) and overwrite is False. Skipping update.")
+                    # log_counter("add_media_with_keywords_skipped")
             else:
-                logging.debug("Inserting new media")
+                logging.info("No existing media found by URL/Hash. Inserting new media.")
+                # --- Insert New Media Record ---
                 cursor.execute('''
                 INSERT INTO Media (url, title, type, content, author, ingestion_date,
-                                   transcription_model, chunking_status, content_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (url, title, media_type, content, author, ingestion_date,
+                                   transcription_model, chunking_status, content_hash, is_trash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0) -- Ensure is_trash is initially 0
+                ''', (url, title, media_type, content, author, ingestion_date_str,
                       transcription_model, 'pending', content_hash))
                 media_id = cursor.lastrowid # Get the ID of the newly inserted row
-                logging.debug(f"New media inserted with ID: {media_id}")
                 action = "added"
+                logging.info(f"New media inserted with ID: {media_id}")
                 log_counter("add_media_with_keywords_insert")
 
-            # Only proceed if added or updated
+            # --- Process Keywords & Versioning (Only if Added or Updated) ---
             if action in ["updated", "added"]:
                 # --- Handle Keywords ---
-                keyword_list = [k.strip().lower() for k in keywords if k.strip()] # Ensure keywords is a list here
-                if keyword_list:
-                    keyword_params = [(kw,) for kw in set(keyword_list)] # Use set for unique keywords
+                if keywords_list:
+                    # Ensure keywords exist in Keywords table
+                    unique_keywords = list(set(keywords_list)) # Process unique keywords
+                    keyword_params = [(kw,) for kw in unique_keywords]
                     cursor.executemany('INSERT OR IGNORE INTO Keywords (keyword) VALUES (?)', keyword_params)
 
-                    # Get keyword IDs
-                    placeholders = ','.join(['?'] * len(keyword_params))
-                    cursor.execute(f'SELECT id, keyword FROM Keywords WHERE keyword IN ({placeholders})', [p[0] for p in keyword_params])
+                    # Get keyword IDs for linking
+                    placeholders = ','.join(['?'] * len(unique_keywords))
+                    cursor.execute(f'SELECT id, keyword FROM Keywords WHERE keyword IN ({placeholders})', unique_keywords)
                     keyword_id_map = {kw: kid for kid, kw in cursor.fetchall()}
 
-                    # Insert media-keyword associations
-                    media_keyword_params = [(media_id, keyword_id_map[kw]) for kw in keyword_list if kw in keyword_id_map]
+                    # Insert media-keyword links
+                    media_keyword_params = [
+                        (media_id, keyword_id_map[kw])
+                        for kw in keywords_list # Iterate original list to preserve potential duplicates if needed by logic, though link table is unique
+                        if kw in keyword_id_map # Ensure keyword was found/inserted
+                    ]
                     if media_keyword_params:
+                         # Use INSERT OR IGNORE to handle potential race conditions or duplicate calls
                          cursor.executemany('INSERT OR IGNORE INTO MediaKeywords (media_id, keyword_id) VALUES (?, ?)', media_keyword_params)
+                         logging.debug(f"Linked {len(media_keyword_params)} keywords to media ID: {media_id}")
 
-                # --- Update FTS ---
+                # --- Update FTS Index ---
+                # Use INSERT OR REPLACE to handle both inserts and updates cleanly
+                # FTS trigger should ideally handle this, but explicit update is safer
                 cursor.execute('INSERT OR REPLACE INTO media_fts (rowid, title, content) VALUES (?, ?, ?)',
                             (media_id, title, content))
+                logging.debug(f"Updated FTS index for media ID: {media_id}")
 
-                # --- Create Initial Document Version ---
-                # This now stores the initial prompt and analysis
-                create_document_version(
+                # --- Create Initial/Updated Document Version ---
+                # Call the *updated* create_document_version, passing the connection
+                logging.debug(f"Creating document version for media ID: {media_id} (Action: {action})")
+                version_info = create_document_version(
                     media_id=media_id,
                     content=content,
-                    prompt=prompt, # Pass the initial prompt
-                    analysis_content=analysis_content, # Pass the initial analysis
-                    db_instance=db # Pass the connection to run within the transaction
+                    prompt=prompt, # Pass the initial/updated prompt (can be None)
+                    analysis_content=analysis_content, # Pass the initial/updated analysis (can be None)
+                    db_instance=db_instance, # Pass instance for context
+                    conn=conn # IMPORTANT: Pass the active connection
                 )
+                logging.info(f"Created version {version_info.get('version_number')} for media ID: {media_id}")
 
-        # Transaction committed automatically by context manager if no exceptions
+            # Transaction commits automatically if no exceptions raised
 
-        # Schedule chunking outside the transaction if it involves external processes or long operations
+        # --- Post-Transaction Actions (e.g., Scheduling) ---
         if action in ["updated", "added"] and media_id is not None:
-             # TODO: Refactor schedule_chunking if needed
-             # schedule_chunking(media_id, content, title, chunk_options)
-             pass # Placeholder for scheduling
+             if chunk_options:
+                  logging.info(f"Scheduling chunking for media ID: {media_id} with options: {chunk_options}")
+                  # Replace with actual scheduling call:
+                  # schedule_chunking_task(media_id, content, title, chunk_options, db_instance.db_path)
+             else:
+                  logging.debug(f"No chunking options provided for media ID: {media_id}, skipping scheduling.")
+             # Set chunking_status more accurately based on scheduling success?
+             # db_instance.execute_query("UPDATE Media SET chunking_status = ? WHERE id = ?", ('scheduled', media_id), commit=True)
 
+
+        # --- Logging and Return ---
         duration = time.time() - start_time
         log_histogram("add_media_with_keywords_duration", duration)
 
-        if action in ["updated", "added"]:
+        if action == "updated":
+            message = f"Media '{title}' (ID: {media_id}) updated successfully."
             log_counter("add_media_with_keywords_success")
-            message = f"Media '{title}' {action} with ID {media_id} and URL: {url}. Keywords: {', '.join(keyword_list)}." # Add keywords if desired
-        else: # Skipped case
-             message = f"Media '{title}' {action} (ID: {media_id}) with URL: {url}"
+        elif action == "added":
+            message = f"Media '{title}' (ID: {media_id}) added successfully."
+            log_counter("add_media_with_keywords_success")
+        else: # Skipped
+            message = f"Media '{title}' (ID: {media_id}) already exists and was not overwritten."
 
-
-        logging.info(message)
-        # Ensure media_id is returned even if skipped
+        logging.info(f"add_media_with_keywords completed for URL '{url}'. Action: {action}. Duration: {duration:.4f}s. Message: {message}")
+        # Ensure media_id is returned even if skipped, allows endpoint to report correctly
         return media_id, message
 
+    # --- Error Handling ---
+    except InputError as ie:
+         logging.warning(f"Input error in add_media_with_keywords for URL {url}: {ie}")
+         raise # Re-raise InputError to be handled by the endpoint
+    except sqlite3.IntegrityError as ie:
+         # Often due to UNIQUE constraint violations (e.g., URL already exists by different hash?)
+         logging.error(f"Database Integrity Error for URL {url}: {ie}", exc_info=True)
+         # log_counter("add_media_with_keywords_error", labels={"error_type": "IntegrityError"})
+         raise DatabaseError(f"Failed adding media due to data integrity issue: {ie}") from ie
     except sqlite3.Error as e:
-        logging.error(f"SQL Error in add_media_with_keywords for URL {url}: {e}", exc_info=True)
-        # Duration/log counter done in finally block if needed, or here
-        raise DatabaseError(f"Error adding media with keywords: {e}") from e
+        logging.error(f"SQLite Error for URL {url}: {e}", exc_info=True)
+        # log_counter("add_media_with_keywords_error", labels={"error_type": "SQLiteError"})
+        raise DatabaseError(f"Database error adding media: {e}") from e
     except Exception as e:
-        logging.error(f"Unexpected Error in add_media_with_keywords: {e}")
-        duration = time.time() - start_time
-        log_histogram("add_media_with_keywords_duration", duration)
-        log_counter("add_media_with_keywords_error", labels={"error_type": type(e).__name__})
-        raise DatabaseError(f"Unexpected error: {e}")
+        logging.error(f"Unexpected Error for URL {url}: {e}", exc_info=True)
+        # log_counter("add_media_with_keywords_error", labels={"error_type": type(e).__name__})
+        raise DatabaseError(f"An unexpected error occurred while adding media: {e}") from e
+    # finally: # Duration logging can be done here if needed even on error
+    #      duration = time.time() - start_time
+    #      log_histogram("add_media_with_keywords_duration", duration)
 
 
 # Function to add a keyword
@@ -1685,56 +1564,56 @@ def fetch_item_details(media_id: int, db_instance: Database) -> Tuple[str, str, 
 
     Args:
         media_id: The ID of the media item.
-        db_instance: The Database instance to use. If None, uses the global instance (avoid if possible).
+        db_instance: The Database instance to use.
 
     Returns:
         A tuple containing (prompt, analysis_content, content).
-        Returns default messages if no version or data is found.
+        Returns default messages/None if no version or data is found.
+
+    Raises:
+        DatabaseError: If a database query fails.
+        TypeError: If db_instance is not a valid Database object.
     """
-    db=db_instance
-    if db_instance is None:
-        logging.warning("fetch_item_details called without explicit db instance.")
-        raise ValueError("Global db instance not found and no instance passed.")
+    if not isinstance(db_instance, Database):
+        raise TypeError("A valid Database instance must be provided.")
+
+    logging.debug(f"Fetching latest item details (prompt, analysis, content) for media_id={media_id} from DB: {db_instance.db_path}")
 
     try:
-        # Use the get_document_version function which already fetches the latest version
-        # We need the content, prompt, and analysis_content from that version
-        latest_version = get_document_version(media_id=media_id, version_number=None, include_content=True, db_instance=db) # Pass db instance
+        # Call the (soon to be updated) get_document_version to fetch the LATEST version's details
+        # Passing None for version_number fetches the latest.
+        # Ensure include_content=True to get the 'content' field.
+        latest_version = get_document_version(
+            media_id=media_id,
+            version_number=None,
+            include_content=True,
+            db_instance=db_instance
+        )
 
-        if 'error' in latest_version:
-            logging.warning(f"No document version found for media_id {media_id}: {latest_version['error']}")
-            # Fallback: Try fetching content directly from Media table if absolutely needed,
-            # but ideally, content should always exist in a version.
-            try:
-                with db.get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT content FROM Media WHERE id = ?", (media_id,))
-                    content_result = cursor.fetchone()
-                    content = content_result[0] if content_result else "No content available."
-                return "No prompt available.", "No analysis content available.", content
-            except Exception as fallback_e:
-                 logging.error(f"Fallback fetch failed for media_id {media_id}: {fallback_e}")
-                 return "Error fetching prompt.", "Error fetching analysis content.", "Error fetching media."
+        if latest_version and 'error' not in latest_version:
+            # Extract data using .get() with default values (though NULL is stored in DB)
+            prompt = latest_version.get('prompt')  # Will be None if NULL in DB
+            analysis_content = latest_version.get('analysis_content') # Will be None if NULL in DB
+            content = latest_version.get('content') # Should ideally not be NULL
 
-        # Extract data from the latest version dict (assuming get_document_version is updated too)
-        # Need to ensure get_document_version actually fetches prompt/analysis from the version table
-        prompt = latest_version.get('prompt', "No prompt available.")
-        analysis_content = latest_version.get('analysis_content', "No analysis content available.")
-        content = latest_version.get('content', "No content available.")
+            logging.debug(f"Found latest version {latest_version.get('version_number')} for media_id={media_id}")
+            # Return the actual values (could be None)
+            return prompt, analysis_content, content
+        else:
+            # This case means the media item exists but has NO versions, which shouldn't happen
+            # with the updated add_media_with_keywords logic. Log a warning.
+            error_msg = latest_version.get('error', 'Unknown error') if latest_version else 'No version found'
+            logging.warning(f"No document version found for media_id {media_id}: {error_msg}. This might indicate an issue with initial version creation.")
+            # Return None for all fields to indicate data wasn't found in versions
+            return None, None, None
 
-        # Handle None values gracefully
-        prompt = prompt if prompt is not None else "No prompt available."
-        analysis_content = analysis_content if analysis_content is not None else "No analysis content available."
-        content = content if content is not None else "No content available."
-
-        return prompt, analysis_content, content
-
+    # Catch specific DB errors first if possible
     except sqlite3.Error as e:
-        logging.error(f"Error fetching item details for media_id {media_id}: {e}", exc_info=True)
-        return "Error fetching prompt.", "Error fetching analysis content.", "Error fetching media."
-    except Exception as e: # Catch other potential errors like DatabaseError from get_document_version
-        logging.error(f"Unexpected error fetching item details for media_id {media_id}: {e}", exc_info=True)
-        return "Error fetching prompt.", "Error fetching analysis content.", "Error fetching media."
+        logging.error(f"SQLite error fetching latest version details for media_id {media_id} from {db_instance.db_path}: {e}", exc_info=True)
+        raise DatabaseError(f"Database error fetching item details: {e}") from e
+    except Exception as e: # Catch other potential errors (like DatabaseError from get_document_version)
+        logging.error(f"Unexpected error fetching item details for media_id {media_id} from {db_instance.db_path}: {e}", exc_info=True)
+        raise DatabaseError(f"Unexpected error fetching item details: {e}") from e
 
 #
 #  End of Media-related Functions
@@ -1745,53 +1624,22 @@ def fetch_item_details(media_id: int, db_instance: Database) -> Tuple[str, str, 
 #
 # Media-related Functions
 
-
-# Function to add a version of a prompt and analysis_content
-def add_media_version(media_id: int, prompt: str, analysis_content: str, db_instance: Database) -> Dict[str, Any]:
-    """
-    Legacy wrapper for create_document_version.
-    Use create_document_version directly for new code.
-    """
-    logging.warning("add_media_version is deprecated, use create_document_version instead")
-
-    try:
-        # Get current content from Media table
-        with db_instance.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT content FROM Media WHERE id = ?", (media_id,))
-            result = cursor.fetchone()
-
-            if not result:
-                raise ValueError(f"No media found with ID {media_id}")
-            content = result[0]
-
-        # Use the new function
-        return create_document_version(
-            media_id=media_id,
-            content=content,
-            prompt=prompt,
-            analysis_content=analysis_content
-        )
-    except Exception as e:
-        logging.error(f"Error in add_media_version: {str(e)}")
-        raise
-
-
 def search_media_db(
-        search_query: str,
+        search_query: Optional[str], # Allow None
         search_fields: List[str],
-        keywords: List[str],
+        keywords: Optional[List[str]], # Allow None or empty list
         page: int = 1,
         results_per_page: int = 20,
-        db_instance: Database = None # Make this parameter MANDATORY
-) -> Tuple[List[Dict[str, Any]], int]: # Return List of Dicts if using row_factory
+        db_instance: Database = None # Make mandatory later if desired, for now check explicitly
+) -> Tuple[List[Dict[str, Any]], int]:
     """
-    Search for media items using the provided Database instance and advanced filtering options.
+    Search for media items using the provided Database instance, FTS, and keyword filters.
 
     Args:
-        search_query: The term to search for.
+        search_query: The term to search for in specified fields (can be None).
         search_fields: A list of fields ('title', 'content', 'author', 'type') to search within.
-        keywords: A list of keywords to filter by.
+                       'title' and 'content' will use FTS if search_query is provided.
+        keywords: A list of keywords to filter by (can be None or empty).
         page: The page number for pagination (starts at 1).
         results_per_page: The number of results to return per page.
         db_instance: The Database instance connected to the specific user's DB.
@@ -1808,111 +1656,140 @@ def search_media_db(
     """
     # --- Input Validation ---
     if not isinstance(db_instance, Database):
-        # Ensure a valid Database object is passed
+        # Make this mandatory by removing the default None in signature if needed
         raise TypeError("A valid Database instance must be provided to search_media_db.")
 
     if page < 1:
         raise ValueError("Page number must be 1 or greater")
-    if results_per_page < 1 or results_per_page > 1000: # Allow more results? Adjust as needed
-        raise ValueError("Results per page must be between 1 and 1000")
+    if results_per_page < 1: # Removed upper limit check, handle large requests carefully
+        raise ValueError("Results per page must be 1 or greater")
 
     valid_fields = {"title", "content", "author", "type"}
-    sanitized_fields = [field for field in search_fields if field in valid_fields]
-    # Allow searching only by keywords without a search_query/search_fields
+    # Use provided fields, default to title/content if none are given but query exists?
+    sanitized_fields = [field for field in search_fields if field in valid_fields] if search_fields else []
     if not sanitized_fields and search_query:
-        raise ValueError("No valid search fields provided when search_query is present.")
-    if not search_query and not keywords:
-         # Handle case where neither search query nor keywords are provided if needed
-         # Maybe return all items paginated? Or raise error? For now, let it proceed (where_clause = 1=1)
-         pass
+        # Default search fields if query is present but fields are not
+        sanitized_fields = ["title", "content"]
+        # raise ValueError("No valid search fields provided when search_query is present.")
+
+    # Ensure keywords is a list if provided
+    keyword_list = [k.strip().lower() for k in keywords if k and k.strip()] if keywords else []
+
+    if not search_query and not keyword_list:
+         # If you want to prevent searches without criteria, raise error here:
+         # raise ValueError("Search query or keywords must be provided.")
+         # Otherwise, it will return all non-trashed items paginated.
+         logging.debug("Executing search with no query or keywords - will return all non-trashed items.")
 
     # --- Query Building ---
     offset = (page - 1) * results_per_page
     params = []
-    conditions = []
+    conditions = ["Media.is_trash = 0"] # Always exclude trashed items by default
 
-    # Build search query conditions using FTS if available and searching content/title
-    # Otherwise use LIKE. FTS is generally much faster for text searching.
-    use_fts = ('content' in sanitized_fields or 'title' in sanitized_fields) and search_query
-    like_fields = [f for f in sanitized_fields if f not in ('content', 'title')]
+    # Build search query conditions
+    fts_fields = {"title", "content"}
+    like_fields = {"author", "type"} # Fields suitable for LIKE
 
-    if use_fts:
-        # Assumes your media_fts table has columns 'title' and 'content'
-        conditions.append("Media.id IN (SELECT rowid FROM media_fts WHERE media_fts MATCH ?)")
-        # Simple FTS query - can be enhanced with field specifiers (e.g., "title:term content:term")
-        params.append(search_query) # Adjust FTS query syntax if needed
+    # Fields requested for searching that can use FTS
+    fts_search_requested = bool(set(sanitized_fields) & fts_fields)
+    # Fields requested for searching that should use LIKE
+    like_search_requested = list(set(sanitized_fields) & like_fields)
 
-    if like_fields and search_query:
-        like_conditions = []
-        for field in like_fields:
-            like_conditions.append(f"Media.{field} LIKE ?")
-            params.append(f"%{search_query}%")
-        if like_conditions:
-            conditions.append(f"({' OR '.join(like_conditions)})")
+    if search_query:
+        # Use FTS if title or content are among the search fields
+        if fts_search_requested:
+            # Assumes media_fts table exists and has columns mirroring Media.id, title, content
+            # Basic MATCH query. Consider adding field specifiers e.g., "title:term content:term"
+            # Or use more complex FTS queries if needed.
+            conditions.append("Media.id IN (SELECT rowid FROM media_fts WHERE media_fts MATCH ?)")
+            params.append(search_query) # Simple phrase search
+            logging.debug(f"Using FTS search for query: '{search_query}'")
 
-    # Build keyword conditions (remains the same)
-    if keywords:
-        valid_keywords = [k for k in keywords if k] # Filter out empty strings
-        if valid_keywords:
-            placeholders = ", ".join(["?"] * len(valid_keywords))
-            conditions.append(f"""EXISTS (
-                SELECT 1
+        # Use LIKE for other specified fields
+        if like_search_requested:
+            like_conditions = []
+            for field in like_search_requested:
+                # Ensure field name is safe (already validated against valid_fields)
+                like_conditions.append(f"Media.{field} LIKE ? COLLATE NOCASE") # Case-insensitive LIKE
+                params.append(f"%{search_query}%")
+            if like_conditions:
+                conditions.append(f"({' OR '.join(like_conditions)})")
+                logging.debug(f"Using LIKE search on fields: {like_search_requested} for query: '{search_query}'")
+
+    # Build keyword conditions
+    if keyword_list:
+        placeholders = ", ".join(["?"] * len(keyword_list))
+        # Use a subquery checking MediaKeywords and Keywords tables
+        conditions.append(f"""
+            Media.id IN (
+                SELECT mk.media_id
                 FROM MediaKeywords mk
                 JOIN Keywords k ON mk.keyword_id = k.id
-                WHERE mk.media_id = Media.id
-                AND k.keyword IN ({placeholders})
-            )""")
-            params.extend(valid_keywords)
+                WHERE k.keyword IN ({placeholders})
+                GROUP BY mk.media_id
+                HAVING COUNT(DISTINCT k.id) = ?
+            )
+        """) # This ensures ALL provided keywords match for a media item
+        params.extend(keyword_list)
+        params.append(len(keyword_list)) # Add count for HAVING clause
+        logging.debug(f"Filtering by ALL keywords: {keyword_list}")
+        # If you want ANY keyword match, remove GROUP BY/HAVING and use EXISTS or simple IN
 
     # Construct WHERE clause
-    where_clause = " AND ".join(conditions) if conditions else "1=1" # Default if no search/keyword
+    where_clause = " AND ".join(conditions) if conditions else "1=1" # Should always have is_trash = 0
 
     # --- Database Interaction ---
     try:
-        # Use the get_connection method from the passed db_instance
-        with db_instance.get_connection() as conn:
-            # Ensure row factory is set if you want dict results
-            # conn.row_factory = sqlite3.Row # Set in Database.__init__ is better
-
+        # Use transaction context for connection management
+        with db_instance.transaction() as conn:
             cursor = conn.cursor()
 
-            # 1. Get the total count
-            count_query = f"SELECT COUNT(DISTINCT Media.id) FROM Media WHERE {where_clause}"
-            logger.debug(f"Executing Count Query on {db_instance.db_path}: {count_query} | Params: {params}")
-            cursor.execute(count_query, params) # Use the same params (without limit/offset)
-            total_matches = cursor.fetchone()[0] # Fetch the count
-            logger.debug(f"Total matches found: {total_matches}")
-
+            # 1. Get the total count matching the criteria
+            count_query = f"SELECT COUNT(Media.id) FROM Media WHERE {where_clause}"
+            logging.debug(f"Executing Count Query on {db_instance.db_path}: {count_query} | Params: {params}")
+            cursor.execute(count_query, tuple(params)) # Use tuple for params
+            count_result = cursor.fetchone()
+            total_matches = count_result[0] if count_result else 0
+            logging.debug(f"Total matches found: {total_matches}")
 
             # 2. Get the paginated results
-            # Select desired columns
-            results_query = f"""
-                SELECT
-                    Media.id, Media.url, Media.title, Media.type,
-                    Media.content, Media.author, Media.ingestion_date,
-                    Media.transcription_model, Media.chunking_status, Media.is_trash
-                FROM Media
-                WHERE {where_clause}
-                ORDER BY Media.ingestion_date DESC, Media.id DESC -- Added secondary sort for consistency
-                LIMIT ? OFFSET ?
-            """
-            paginated_params = params + [results_per_page, offset] # Add limit/offset to params
-            logger.debug(f"Executing Results Query on {db_instance.db_path}: {results_query} | Params: {paginated_params}")
-            cursor.execute(results_query, paginated_params)
-            # Fetchall returns a list of Row objects (dict-like)
-            results_raw = cursor.fetchall()
+            results_list = []
+            if total_matches > 0:
+                # Select desired columns from Media table
+                # Note: Does not fetch keywords here, assumes caller will fetch if needed
+                results_query = f"""
+                    SELECT
+                        Media.id, Media.url, Media.title, Media.type,
+                        Media.content, Media.author, Media.ingestion_date,
+                        Media.transcription_model, Media.chunking_status, Media.content_hash
+                    FROM Media
+                    WHERE {where_clause}
+                    ORDER BY Media.ingestion_date DESC, Media.id DESC -- Sort by date then ID
+                    LIMIT ? OFFSET ?
+                """
+                paginated_params = tuple(params + [results_per_page, offset]) # Add limit/offset
+                logging.debug(f"Executing Results Query on {db_instance.db_path} | Limit={results_per_page}, Offset={offset} | Params: {paginated_params}")
+                cursor.execute(results_query, paginated_params)
+                results_raw = cursor.fetchall() # Returns list of Row objects
 
-            # Convert Row objects to standard dictionaries for easier handling/serialization
-            results_list = [dict(row) for row in results_raw]
+                # Convert Row objects to standard dictionaries
+                results_list = [dict(row) for row in results_raw]
+                logging.debug(f"Fetched {len(results_list)} results for page {page}")
+
+            # Fetch keywords separately if needed by caller (example commented out)
+            # if results_list:
+            #     media_ids = [r['id'] for r in results_list]
+            #     keywords_map = fetch_keywords_for_media_batch(media_ids, db_instance) # Assumes this helper exists
+            #     for res in results_list:
+            #         res['keywords'] = keywords_map.get(res['id'], [])
 
             return results_list, total_matches
 
     except sqlite3.Error as e:
-        logger.error(f"Database error in search_media_db on {db_instance.db_path}: {e}", exc_info=True)
-        # Re-raise as a custom error or allow sqlite3.Error to propagate
+        logging.error(f"SQLite error in search_media_db on {db_instance.db_path}: {e}", exc_info=True)
         raise DatabaseError(f"Failed to search media database: {e}") from e
     except Exception as e:
-        logger.error(f"Unexpected error in search_media_db on {db_instance.db_path}: {e}", exc_info=True)
+        logging.error(f"Unexpected error in search_media_db on {db_instance.db_path}: {e}", exc_info=True)
         raise DatabaseError(f"An unexpected error occurred during media search: {e}") from e
 
 
@@ -1993,46 +1870,173 @@ def format_results(results):
     return df
 
 
-# Function to export search results to CSV or markdown with pagination
-def export_to_file(search_query: str, search_fields: List[str], keyword: list[str], page: int = 1, results_per_file: int = 1000, export_format: str = 'csv'):
+def fetch_keywords_for_media_batch(media_ids: List[int], db_instance: Database) -> Dict[int, List[str]]:
+    """
+    Placeholder: Fetches keywords for multiple media IDs efficiently.
+
+    Args:
+        media_ids: A list of media IDs.
+        db_instance: The Database instance.
+
+    Returns:
+        A dictionary mapping media_id to a list of its keywords.
+    """
+    if not media_ids:
+        return {}
+
+    keywords_map = {media_id: [] for media_id in media_ids}
+    placeholders = ','.join('?' * len(media_ids))
+    query = f"""
+        SELECT mk.media_id, k.keyword
+        FROM MediaKeywords mk
+        JOIN Keywords k ON mk.keyword_id = k.id
+        WHERE mk.media_id IN ({placeholders})
+        ORDER BY mk.media_id, k.keyword COLLATE NOCASE
+    """
     try:
-        results = search_media_db(search_query, search_fields, keyword, page, results_per_file)
-        if not results:
+        cursor = db_instance.execute_query(query, tuple(media_ids))
+        for row in cursor.fetchall():
+            keywords_map[row['media_id']].append(row['keyword'])
+        return keywords_map
+    except (DatabaseError, sqlite3.Error) as e:
+         logging.error(f"Failed to fetch keywords batch: {e}", exc_info=True)
+         return keywords_map # Return empty lists on error
+
+
+# Function to export search results to CSV or markdown with pagination
+def export_to_file(
+    search_query: str,
+    search_fields: List[str],
+    keywords: List[str], # Renamed parameter
+    db_instance: Database, # Added db_instance parameter
+    page: int = 1,
+    results_per_page: int = 1000, # Renamed parameter for consistency
+    export_format: str = 'csv'
+) -> str: # Return status message string
+    """
+    Exports search results to a CSV or Markdown file.
+
+    Args:
+        search_query: The term to search for.
+        search_fields: List of fields ('title', 'content', 'author', 'type') to search.
+        keywords: A list of keywords to filter by.
+        db_instance: The Database instance to use for searching and fetching keywords.
+        page: The page number for pagination.
+        results_per_page: Max number of results to fetch and write to the file.
+        export_format: The desired output format ('csv' or 'markdown').
+
+    Returns:
+        A string indicating the success or failure message.
+    """
+    try:
+        logging.info(f"Exporting search results: page={page}, format={export_format}, query='{search_query}', keywords={keywords}")
+
+        # 1. Perform the search using the updated search_media_db
+        results_list, total_matches = search_media_db(
+            search_query=search_query,
+            search_fields=search_fields,
+            keywords=keywords,
+            page=page,
+            results_per_page=results_per_page,
+            db_instance=db_instance # Pass the db instance
+        )
+
+        if not results_list:
+            logging.warning("No results found for the given search criteria.")
             return "No results found to export."
 
-        # Create an 'exports' directory if it doesn't exist
-        if not os.path.exists('exports'):
-            os.makedirs('exports')
+        logging.info(f"Found {len(results_list)} results (out of {total_matches} total) for page {page} to export.")
 
-        if export_format == 'csv':
-            filename = f'exports/search_results_page_{page}.csv'
-            with open(filename, 'w', newline='', encoding='utf-8') as file:
-                writer = csv.writer(file)
-                writer.writerow(['URL', 'Title', 'Type', 'Content', 'Author', 'Ingestion Date', 'Prompt', 'analysis_content'])
-                for row in results:
-                    writer.writerow(row)
-        elif export_format == 'markdown':
-            filename = f'exports/search_results_page_{page}.md'
-            with open(filename, 'w', encoding='utf-8') as file:
-                for item in results:
-                    markdown_content = convert_to_markdown({
-                        'title': item[1],
-                        'url': item[0],
-                        'type': item[2],
-                        'content': item[3],
-                        'author': item[4],
-                        'ingestion_date': item[5],
-                        'analysis_content': item[7],
-                        'keywords': item[8].split(',') if item[8] else []
-                    })
-                    file.write(markdown_content)
-                    file.write("\n---\n\n")  # Separator between items
+        # 2. Fetch keywords for the found results (efficiently)
+        media_ids = [item['id'] for item in results_list]
+        keywords_map = fetch_keywords_for_media_batch(media_ids, db_instance)
+
+        # 3. Create 'exports' directory if needed
+        export_dir = 'exports'
+        try:
+            if not os.path.exists(export_dir):
+                os.makedirs(export_dir)
+                logging.info(f"Created export directory: {export_dir}")
+        except OSError as e:
+             logging.error(f"Failed to create export directory '{export_dir}': {e}", exc_info=True)
+             # Decide whether to raise or return error message
+             return f"Error: Could not create export directory '{export_dir}'."
+
+
+        # Define base filename
+        # Consider adding query/keywords to filename for clarity if desired
+        sanitized_query = "".join(c if c.isalnum() else "_" for c in search_query[:20]) if search_query else "all"
+        filename_base = f"search_results_{sanitized_query}_page_{page}"
+
+        # 4. Handle Export based on format
+        if export_format.lower() == 'csv':
+            filename = os.path.join(export_dir, f'{filename_base}.csv')
+            try:
+                with open(filename, 'w', newline='', encoding='utf-8') as file:
+                    # Define header based on available data + fetched keywords
+                    header = ['ID', 'URL', 'Title', 'Type', 'Author', 'Ingestion Date', 'Keywords', 'Content']
+                    writer = csv.writer(file)
+                    writer.writerow(header)
+
+                    for item in results_list:
+                        item_keywords = keywords_map.get(item['id'], [])
+                        # Write row using dictionary keys, join keywords for CSV cell
+                        writer.writerow([
+                            item.get('id'),
+                            item.get('url'),
+                            item.get('title'),
+                            item.get('type'),
+                            item.get('author'),
+                            item.get('ingestion_date'),
+                            ', '.join(item_keywords), # Join keywords list into string
+                            item.get('content') # Content last as it can be long
+                        ])
+                logging.info(f"Successfully exported {len(results_list)} results to CSV: {filename}")
+                return f"Results exported successfully to {filename}"
+            except IOError as e:
+                 logging.error(f"Failed to write CSV file '{filename}': {e}", exc_info=True)
+                 return f"Error: Failed to write CSV file '{filename}'."
+
+
+        elif export_format.lower() == 'markdown':
+            filename = os.path.join(export_dir, f'{filename_base}.md')
+            try:
+                with open(filename, 'w', encoding='utf-8') as file:
+                    for i, item in enumerate(results_list):
+                        # Prepare data dict for the conversion helper
+                        item_data_for_md = {
+                            'id': item.get('id'),
+                            'title': item.get('title'),
+                            'url': item.get('url'),
+                            'type': item.get('type'),
+                            'content': item.get('content'),
+                            'author': item.get('author'),
+                            'ingestion_date': item.get('ingestion_date'),
+                            'keywords': keywords_map.get(item['id'], []) # Pass keywords as list
+                        }
+                        markdown_content = convert_to_markdown(item_data_for_md)
+                        file.write(markdown_content)
+                        # Add separator only if it's not the last item
+                        if i < len(results_list) - 1:
+                            file.write("\n\n---\n\n") # Separator between items
+
+                logging.info(f"Successfully exported {len(results_list)} results to Markdown: {filename}")
+                return f"Results exported successfully to {filename}"
+            except IOError as e:
+                 logging.error(f"Failed to write Markdown file '{filename}': {e}", exc_info=True)
+                 return f"Error: Failed to write Markdown file '{filename}'."
+
         else:
-            return f"Unsupported export format: {export_format}"
+            logging.warning(f"Unsupported export format requested: {export_format}")
+            return f"Error: Unsupported export format '{export_format}'. Use 'csv' or 'markdown'."
 
-        return f"Results exported to {filename}"
-    except (DatabaseError, InputError) as e:
-        return str(e)
+    # Catch specific DB errors and general exceptions
+    except (DatabaseError, InputError) as db_err:
+        logging.error(f"Database or Input Error during export: {db_err}", exc_info=True)
+        return f"Export failed due to database/input error: {db_err}"
+    except Exception as e:
+        logging.error(f"An unexpected error occurred during export: {e}", exc_info=True)
+        return f"An unexpected error occurred during export: {e}"
 
 
 # Helper function to validate date format
@@ -2263,18 +2267,26 @@ def fetch_item_details_single(media_id: int, db_instance: Database):
         return "Error fetching prompt.", "Error fetching analysis_content.", "Error fetching content."
 
 
-def convert_to_markdown(item):
-    markdown = f"# {item['title']}\n\n"
-    markdown += f"**URL:** {item['url']}\n\n"
-    markdown += f"**Author:** {item['author']}\n\n"
-    markdown += f"**Ingestion Date:** {item['ingestion_date']}\n\n"
-    markdown += f"**Type:** {item['type']}\n\n"
-    markdown += f"**Keywords:** {', '.join(item['keywords'])}\n\n"
-    markdown += "## analysis_content\n\n"
-    markdown += f"{item['analysis_content']}\n\n"
-    markdown += "## Content\n\n"
-    markdown += f"{item['content']}\n\n"
-    return markdown
+def convert_to_markdown(item_data: Dict[str, Any]) -> str:
+    """
+    Placeholder function to convert a media item dictionary to a Markdown string.
+    Replace with your actual implementation.
+    """
+    lines = []
+    lines.append(f"# {item_data.get('title', 'No Title')}")
+    if item_data.get('url'):
+        lines.append(f"**URL:** {item_data['url']}")
+    if item_data.get('author'):
+        lines.append(f"**Author:** {item_data['author']}")
+    if item_data.get('ingestion_date'):
+        lines.append(f"**Date:** {item_data['ingestion_date']}")
+    if item_data.get('type'):
+        lines.append(f"**Type:** {item_data['type']}")
+    if item_data.get('keywords'):
+        lines.append(f"**Keywords:** {', '.join(item_data['keywords'])}")
+    lines.append("\n## Content")
+    lines.append(f"```\n{item_data.get('content', 'No Content')}\n```") # Basic content block
+    return "\n".join(lines)
 
 
 # Gradio function to handle user input and display results with pagination for displaying entries in the DB
@@ -3057,32 +3069,78 @@ def delete_specific_prompt(version_id: int, db_instance: Database) -> str:
 
 
 def get_paginated_files(db_instance: Database, page: int = 1, results_per_page: int = 50) -> Tuple[List[Tuple[int, str]], int, int]:
-    db=db_instance
+    """
+    Fetches a paginated list of media items (id, title) from the database.
+
+    Args:
+        db_instance: The Database instance to use.
+        page: The page number (1-based).
+        results_per_page: The number of items per page.
+
+    Returns:
+        A tuple containing:
+            - results: List of tuples (id, title).
+            - total_pages: Total number of pages.
+            - current_page: The requested page number.
+
+    Raises:
+        DatabaseError: If a database query fails.
+        TypeError: If db_instance is not a valid Database object.
+    """
+    if not isinstance(db_instance, Database):
+        raise TypeError("A valid Database instance must be provided.")
+    if page < 1:
+        raise ValueError("Page number must be 1 or greater.")
+    if results_per_page < 1:
+        raise ValueError("Results per page must be 1 or greater.")
+
+    logging.debug(f"Fetching paginated files: page={page}, results_per_page={results_per_page} from DB: {db_instance.db_path}")
+
     try:
         offset = (page - 1) * results_per_page
-        with db.get_connection() as conn:
+        # Use the transaction context manager even for reads for consistent connection handling
+        with db_instance.transaction() as conn: # Ensures connection is managed correctly
             cursor = conn.cursor()
 
-            # Get total count of media items
-            cursor.execute("SELECT COUNT(*) FROM Media")
-            total_entries = cursor.fetchone()[0]
+            # Get total count of non-trashed media items (assuming you want to exclude trashed items)
+            # If you want all items, remove the "WHERE is_trash = 0" clause
+            cursor.execute("SELECT COUNT(*) FROM Media WHERE is_trash = 0")
+            count_result = cursor.fetchone()
+            total_entries = count_result[0] if count_result else 0
+            logging.debug(f"Total non-trashed media entries found: {total_entries}")
 
-            # Fetch paginated results
+
+            # Fetch paginated results, excluding trashed items
             cursor.execute("""
-                SELECT id, title 
-                FROM Media 
-                ORDER BY title
+                SELECT id, title
+                FROM Media
+                WHERE is_trash = 0
+                ORDER BY title COLLATE NOCASE -- Case-insensitive title sorting
                 LIMIT ? OFFSET ?
             """, (results_per_page, offset))
-            results = cursor.fetchall()
+            # fetchall() will use the row_factory set in the Database class
+            results_raw = cursor.fetchall()
+            # Convert Row objects to simple tuples if required by the endpoint caller
+            results = [(row['id'], row['title']) for row in results_raw]
 
         # Calculate total pages
-        total_pages = (total_entries + results_per_page - 1) // results_per_page
+        total_pages = 0
+        if total_entries > 0 and results_per_page > 0:
+             total_pages = (total_entries + results_per_page - 1) // results_per_page
+        # Alternative: Use math.ceil
+        # import math
+        # total_pages = math.ceil(total_entries / results_per_page) if results_per_page > 0 else 0
 
+
+        logging.debug(f"Returning {len(results)} results. Total pages: {total_pages}")
         return results, total_pages, page
+
     except sqlite3.Error as e:
-        logging.error(f"Error fetching paginated files: {e}")
-        raise DatabaseError(f"Error fetching paginated files: {e}")
+        logging.error(f"SQLite error fetching paginated files from {db_instance.db_path}: {e}", exc_info=True)
+        raise DatabaseError(f"Error fetching paginated files: {e}") from e
+    except Exception as e:
+        logging.error(f"Unexpected error fetching paginated files from {db_instance.db_path}: {e}", exc_info=True)
+        raise DatabaseError(f"Unexpected error fetching paginated files: {e}") from e
 
 
 #
@@ -3171,74 +3229,101 @@ def get_full_media_details2(media_id: int, db_instance: Database = None): # Use 
         return None
 
 
-# FIXME - REWRITE TO REFLECT NEW SCHEMA
 def create_document_version(
         media_id: int,
         content: str,
         prompt: Optional[str] = None,
         analysis_content: Optional[str] = None,
-        db_instance: Database = None
+        db_instance: Database = None,
+        # Add conn parameter for use within existing transactions
+        conn: Optional[sqlite3.Connection] = None
 ) -> Dict[str, Any]:
     """
-    Creates a new document version with optional prompt and analysis_content.
-    Returns the created version info.
-    """
-    conn=db_instance.get_connection()
-    db=db_instance
-    try:
-        # Combine content with prompt/analysis_content if provided
-        full_content = content
-        if prompt or analysis_content:
-            full_content = f"Prompt: {prompt or ''}\n\nanalysis_content: {analysis_content or ''}\n\nContent:\n{content}"
+    Creates a new document version record in the DocumentVersions table.
 
-        def _create(connection):
+    Args:
+        media_id: The ID of the associated media item.
+        content: The content snapshot for this version.
+        prompt: The prompt associated with this version's analysis (optional).
+        analysis_content: The analysis associated with this version's content (optional).
+        db_instance: The Database instance (required if conn is not provided).
+        conn: An existing sqlite3.Connection (optional, used for transactions).
+
+    Returns:
+        A dictionary containing the new version_number and media_id.
+
+    Raises:
+        DatabaseError: If the database operation fails.
+        ValueError: If neither db_instance nor conn is provided.
+    """
+    if conn is None and db_instance is None:
+        raise ValueError("Either db_instance or conn must be provided.")
+    if conn and not isinstance(conn, sqlite3.Connection):
+         raise TypeError("Provided conn must be a valid sqlite3.Connection.")
+    if db_instance and not isinstance(db_instance, Database):
+         raise TypeError("Provided db_instance must be a valid Database object.")
+
+    # Prefer using the passed connection if available (for transactions)
+    db_to_use = db_instance if db_instance else None # Primarily for logging path
+    log_path = db_to_use.db_path if db_to_use else "existing connection"
+    logging.debug(f"Creating document version for media_id={media_id} on DB: {log_path}")
+
+    # Define the operation as a function to run within transaction or directly
+    def _create_version_operation(connection: sqlite3.Connection) -> Dict[str, Any]:
+        try:
             cursor = connection.cursor()
 
-            # Get next version number
+            # --- Get the next version number ---
             cursor.execute('''
-                SELECT COALESCE(MAX(version_number), 0) + 1 
-                FROM DocumentVersions 
+                SELECT COALESCE(MAX(version_number), 0) + 1
+                FROM DocumentVersions
                 WHERE media_id = ?
             ''', (media_id,))
-            version_number = cursor.fetchone()[0]
+            version_number_result = cursor.fetchone()
+            # Ensure we handle the case where fetchone might return None (though COALESCE should prevent it)
+            version_number = version_number_result[0] if version_number_result else 1
 
-            # Insert new version
+            logging.debug(f"Determined next version number: {version_number} for media_id={media_id}")
+
+            # --- Insert the new version record ---
+            # Note: prompt and analysis_content can be NULL in the table
             cursor.execute('''
-                INSERT INTO DocumentVersions 
-                (media_id, version_number, content)
-                VALUES (?, ?, ?)
-            ''', (media_id, version_number, full_content))
+                INSERT INTO DocumentVersions
+                (media_id, version_number, content, prompt, analysis_content, created_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (media_id, version_number, content, prompt, analysis_content))
 
-            # Also update MediaModifications if prompt/analysis_content provided
-            if prompt or analysis_content:
-                cursor.execute('''
-                    INSERT INTO MediaModifications 
-                    (media_id, prompt, analysis_content, modification_date)
-                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(media_id) DO UPDATE SET
-                        prompt = excluded.prompt,
-                        analysis_content = excluded.analysis_content,
-                        modification_date = excluded.modification_date
-                ''', (media_id, prompt, analysis_content))
+            logging.info(f"Successfully created version {version_number} for media_id={media_id}")
 
+            # Return essential info
             return {
                 'media_id': media_id,
                 'version_number': version_number,
-                'content_length': len(full_content)
+                # Add content length if needed, but usually not required
+                # 'content_length': len(content)
             }
+        except sqlite3.IntegrityError as ie:
+             # This might happen if (media_id, version_number) UNIQUE constraint is violated (race condition?)
+             logging.error(f"Integrity error creating version for media_id={media_id}: {ie}", exc_info=True)
+             raise DatabaseError(f"Failed to create document version due to integrity constraint: {ie}") from ie
+        except sqlite3.Error as e:
+            logging.error(f"SQLite error creating version {version_number} for media_id={media_id}: {e}", exc_info=True)
+            raise DatabaseError(f"Failed to create document version: {e}") from e
 
+    # Execute the operation
+    try:
         if conn:
-            return _create(conn)
+            # Run directly using the provided connection (part of an outer transaction)
+            return _create_version_operation(conn)
         else:
-            with db.transaction() as connection:
-                return _create(connection)
-
-    except sqlite3.Error as e:
-        logging.error(f"Database error creating document version: {str(e)}")
-        raise DatabaseError(f"Failed to create document version: {str(e)}")
-    except Exception as e:
-        logging.error(f"Unexpected error creating document version: {str(e)}")
+            # Run within its own transaction using the db_instance
+            with db_to_use.transaction() as new_conn:
+                return _create_version_operation(new_conn)
+    except DatabaseError: # Re-raise DatabaseErrors caught inside
         raise
+    except Exception as e:
+        logging.error(f"Unexpected error wrapper creating version for media_id={media_id}: {e}", exc_info=True)
+        raise DatabaseError(f"An unexpected error occurred: {e}") from e
 
 
 def get_document_version(
@@ -3246,18 +3331,37 @@ def get_document_version(
         version_number: Optional[int] = None,
         include_content: bool = True,
         db_instance: Database = None
-) -> Dict[str, Any]:
+) -> Optional[Dict[str, Any]]: # Return Optional[Dict] or raise error
     """
-    Get specific or latest document version.
-    Set include_content=False for metadata-only retrieval.
+    Get a specific document version or the latest version for a media item.
+
+    Args:
+        media_id: The ID of the media item.
+        version_number: The specific version number to retrieve. If None, retrieves the latest.
+        include_content: Whether to include the full 'content' field.
+        db_instance: The Database instance to use.
+
+    Returns:
+        A dictionary representing the document version, or None if not found.
+        The dictionary contains 'id', 'media_id', 'version_number', 'created_at',
+        'prompt', 'analysis_content', and optionally 'content'.
+
+    Raises:
+        DatabaseError: If a database query fails.
+        TypeError: If db_instance is not a valid Database object.
+        ValueError: If version_number is provided but is not a positive integer.
     """
-    db=db_instance
-    if db is None:
-        logging.warning("get_document_version called without explicit db instance.")
-        raise ValueError("Global db instance not found and no instance passed.")
+    if not isinstance(db_instance, Database):
+        raise TypeError("A valid Database instance must be provided.")
+    if version_number is not None and (not isinstance(version_number, int) or version_number < 1):
+        raise ValueError("Version number must be a positive integer.")
+
+    log_msg = f"Getting {'latest' if version_number is None else f'version {version_number}'} for media_id={media_id}"
+    logging.debug(f"{log_msg} from DB: {db_instance.db_path} (Include content: {include_content})")
 
     try:
-        with db.get_connection() as conn:
+        # Use transaction context for connection management
+        with db_instance.transaction() as conn:
             cursor = conn.cursor()
 
             # Construct the SELECT clause dynamically
@@ -3265,6 +3369,7 @@ def get_document_version(
             if include_content:
                 select_cols += ", content"
 
+            params = [media_id]
             if version_number is None:
                 # Get latest version
                 query = f'''
@@ -3274,7 +3379,6 @@ def get_document_version(
                     ORDER BY version_number DESC
                     LIMIT 1
                 '''
-                params = (media_id,)
             else:
                 # Get specific version
                 query = f'''
@@ -3282,63 +3386,66 @@ def get_document_version(
                     FROM DocumentVersions
                     WHERE media_id = ? AND version_number = ?
                 '''
-                params = (media_id, version_number)
+                params.append(version_number)
 
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             result = cursor.fetchone() # Fetch using the row factory
 
             if not result:
-                return {'error': 'Version not found'}
+                logging.warning(f"Version {'latest' if version_number is None else version_number} not found for media_id {media_id}")
+                return None # Return None instead of {'error': ...}
 
-            # Access columns by name using sqlite3.Row factory
-            version = {
-                'id': result['id'],
-                'version_number': result['version_number'],
-                'created_at': result['created_at'],
-                'prompt': result['prompt'],
-                'analysis_content': result['analysis_content'],
-                'media_id': media_id
-            }
-            if include_content:
-                version['content'] = result['content']
+            # Convert Row object to dictionary
+            version_data = dict(result) # Convert Row to dict
+            version_data['media_id'] = media_id # Ensure media_id is present
 
-            return version
+            return version_data
 
     except sqlite3.Error as e:
-        logging.error(f"Database error retrieving version {version_number} for media {media_id}: {str(e)}")
-        return {'error': f"Database error: {str(e)}"}
+        logging.error(f"SQLite error retrieving {log_msg}: {e}", exc_info=True)
+        raise DatabaseError(f"Database error retrieving version: {e}") from e
     except Exception as e:
-         logging.error(f"Unexpected error retrieving version {version_number} for media {media_id}: {str(e)}")
-         return {'error': f"Unexpected error: {str(e)}"}
+         logging.error(f"Unexpected error retrieving {log_msg}: {e}", exc_info=True)
+         raise DatabaseError(f"Unexpected error retrieving version: {e}") from e
 
 
 def get_all_document_versions(
         media_id: int,
         include_content: bool = False,
         limit: Optional[int] = None,
-        offset: Optional[int] = None,
+        offset: Optional[int] = 0, # Default offset to 0
         db_instance: Database = None
 ) -> List[Dict[str, Any]]:
     """
-    Get all versions for a media item with pagination support, including prompt and analysis.
+    Get all versions for a media item with pagination, including prompt and analysis_content.
 
     Args:
         media_id: The ID of the media item.
         include_content: Whether to include the full content of each version.
-        limit: Maximum number of versions to return.
-        offset: Number of versions to skip (for pagination).
+        limit: Maximum number of versions to return. None for no limit.
+        offset: Number of versions to skip (for pagination). Defaults to 0.
         db_instance: The Database instance.
 
     Returns:
-        A list of dictionaries, each representing a document version.
+        A list of dictionaries, each representing a document version. Returns empty list if none found or on error.
+
+    Raises:
+        DatabaseError: If a database query fails.
+        TypeError: If db_instance is not a valid Database object.
+        ValueError: If limit or offset are invalid.
     """
     if not isinstance(db_instance, Database):
-        raise TypeError("A valid Database instance must be provided to get_all_document_versions.")
+        raise TypeError("A valid Database instance must be provided.")
+    if limit is not None and (not isinstance(limit, int) or limit < 1):
+        raise ValueError("Limit must be a positive integer.")
+    if offset is not None and (not isinstance(offset, int) or offset < 0):
+         raise ValueError("Offset must be a non-negative integer.")
+
+    logging.debug(f"Getting all versions for media_id={media_id} (Limit={limit}, Offset={offset}, Content={include_content}) from DB: {db_instance.db_path}")
 
     try:
-        with db_instance.get_connection() as conn:
-            # Ensure row factory is set
-            conn.row_factory = sqlite3.Row
+        # Use transaction context for connection management
+        with db_instance.transaction() as conn:
             cursor = conn.cursor()
 
             # Include prompt and analysis_content in the selection
@@ -3355,83 +3462,116 @@ def get_all_document_versions(
 
             params = [media_id]
 
+            # Apply limit and offset if specified
+            # Note: SQLite requires LIMIT before OFFSET if both are used.
             if limit is not None:
                 query += ' LIMIT ?'
                 params.append(limit)
-                if offset is not None:
+                # OFFSET only makes sense if LIMIT is also applied
+                if offset is not None and offset > 0:
                     query += ' OFFSET ?'
                     params.append(offset)
 
-            logger.debug(f"Executing get_all_document_versions query on {db_instance.db_path} | Params: {params}")
-            cursor.execute(query, params)
+            logging.debug(f"Executing get_all_document_versions query | Params: {params}")
+            cursor.execute(query, tuple(params))
             results_raw = cursor.fetchall()
 
-            # Convert rows to dictionaries
-            versions_list = []
-            for row in results_raw:
-                version_dict = {
-                    'id': row['id'],
-                    'version_number': row['version_number'],
-                    'created_at': row['created_at'],
-                    'prompt': row['prompt'],
-                    'analysis_content': row['analysis_content'],
-                    'media_id': media_id,  # Add media_id for context if needed elsewhere
-                }
-                if include_content:
-                    version_dict['content'] = row['content']
-                versions_list.append(version_dict)
+            # Convert rows to dictionaries using the Row factory's dict conversion
+            versions_list = [dict(row) for row in results_raw]
+            # Add media_id for context if needed elsewhere (optional)
+            for v in versions_list:
+                v['media_id'] = media_id
 
+            logging.debug(f"Found {len(versions_list)} versions for media_id={media_id}")
             return versions_list
 
     except sqlite3.Error as e:
-        logger.error(f"Database error retrieving versions for media_id {media_id} on {db_instance.db_path}: {str(e)}",
+        logging.error(f"SQLite error retrieving versions for media_id {media_id} from {db_instance.db_path}: {e}",
                      exc_info=True)
-        return []  # Return empty list on error
+        # Return empty list on error as per original docstring
+        return []
     except Exception as e:
-        logger.error(f"Unexpected error retrieving versions for media_id {media_id} on {db_instance.db_path}: {str(e)}",
+        logging.error(f"Unexpected error retrieving versions for media_id {media_id} from {db_instance.db_path}: {e}",
                      exc_info=True)
         return []
 
 
 def delete_document_version(media_id: int, version_number: int, db_instance: Database) -> Dict[str, Any]:
     """
-    Delete a specific document version. 404 if:
-      - The version doesn't exist, or
-      - It's the last existing version (the tests want 404 if we try to remove the last).
+    Delete a specific document version.
+
+    Returns {'error': message} if:
+      - The version doesn't exist.
+      - It's the last existing version for the media item.
+    Returns {'success': message} on successful deletion.
+
+    Args:
+        media_id: The ID of the media item.
+        version_number: The specific version number to delete.
+        db_instance: The Database instance.
+
+    Raises:
+        DatabaseError: If a database query fails unexpectedly.
+        TypeError: If db_instance is not a valid Database object.
+        ValueError: If version_number is invalid.
     """
-    db=db_instance
+    if not isinstance(db_instance, Database):
+        raise TypeError("A valid Database instance must be provided.")
+    if not isinstance(version_number, int) or version_number < 1:
+        raise ValueError("Version number must be a positive integer.")
+
+    logging.debug(f"Attempting to delete version {version_number} for media_id={media_id} from DB: {db_instance.db_path}")
+
     try:
-        with db.transaction() as conn:
+        # Use a transaction to ensure atomicity of checks and delete
+        with db_instance.transaction() as conn:
             cursor = conn.cursor()
 
-            # how many total versions for this media?
+            # Check how many total versions exist for this media item
             cursor.execute('''
                 SELECT COUNT(*) FROM DocumentVersions
                 WHERE media_id = ?
             ''', (media_id,))
-            total = cursor.fetchone()[0]
-            if total <= 1:
+            count_result = cursor.fetchone()
+            total_versions = count_result[0] if count_result else 0
+
+            if total_versions <= 1:
+                logging.warning(f"Attempted to delete the last version ({version_number}) for media_id={media_id}")
                 return {'error': 'Cannot delete the last version'}
 
-            # see if the target version exists
+            # Check if the target version exists before attempting delete
             cursor.execute('''
                 SELECT 1 FROM DocumentVersions
                 WHERE media_id = ? AND version_number = ?
             ''', (media_id, version_number))
-            if not cursor.fetchone():
+            exists = cursor.fetchone()
+
+            if not exists:
+                logging.warning(f"Version {version_number} not found for deletion for media_id={media_id}")
                 return {'error': 'Version not found'}
 
-            # now delete
+            # Perform the delete operation
             cursor.execute('''
                 DELETE FROM DocumentVersions
                 WHERE media_id = ? AND version_number = ?
             ''', (media_id, version_number))
+            rows_affected = cursor.rowcount
 
-            return {'success': f'Version {version_number} deleted'}
+            if rows_affected > 0:
+                 logging.info(f"Successfully deleted version {version_number} for media_id={media_id}")
+                 return {'success': f'Version {version_number} deleted successfully'}
+            else:
+                 # Should not happen if exists check passed, but handle defensively
+                 logging.error(f"Version {version_number} found but delete affected 0 rows for media_id={media_id}")
+                 return {'error': 'Deletion failed unexpectedly after existence check'}
 
     except sqlite3.Error as e:
-        logging.error(f"Database error deleting version: {str(e)}")
-        return {'error': str(e)}
+        logging.error(f"SQLite error deleting version {version_number} for media_id={media_id}: {e}", exc_info=True)
+        # Don't return {'error': str(e)} here, raise a proper exception
+        raise DatabaseError(f"Database error deleting version: {e}") from e
+    except Exception as e:
+        logging.error(f"Unexpected error deleting version {version_number} for media_id={media_id}: {e}", exc_info=True)
+        raise DatabaseError(f"Unexpected error deleting version: {e}") from e
 
 
 def rollback_to_version(
@@ -3440,46 +3580,119 @@ def rollback_to_version(
         db_instance: Database
 ) -> Dict[str, Any]:
     """
-    Rollback to a previous version by creating a new version with old content.
+    Rolls back the main Media record to a previous version's state by:
+    1. Fetching the content, prompt, and analysis from the target version.
+    2. Creating a NEW version record in DocumentVersions with this fetched data.
+    3. Updating the main Media table's 'content' and 'content_hash' fields
+       to match the rolled-back content.
+
+    Args:
+        media_id: The ID of the media item.
+        version_number: The version number to roll back to.
+        db_instance: The Database instance.
+
+    Returns:
+        A dictionary indicating success and the new version number created,
+        or an error dictionary. Example: {'success': msg, 'new_version_number': num} or {'error': msg}
+
+    Raises:
+        DatabaseError: If database operations fail.
+        TypeError: If db_instance is not valid.
+        ValueError: If version_number is invalid.
     """
-    db=db_instance
+    if not isinstance(db_instance, Database):
+        raise TypeError("A valid Database instance must be provided.")
+    if not isinstance(version_number, int) or version_number < 1:
+        raise ValueError("Version number must be a positive integer.")
+
+    logging.debug(f"Attempting rollback to version {version_number} for media_id={media_id} on DB: {db_instance.db_path}")
+
     try:
-        with db.transaction() as conn:
+        # Use a single transaction for all operations
+        with db_instance.transaction() as conn:
             cursor = conn.cursor()
 
-            # Get the target version content
-            version = get_document_version(media_id, version_number, include_content=True)
-            if 'error' in version:
-                return version
-
-            # Create new version with this content
-            result = create_document_version(
+            # --- 1. Get the target version data ---
+            # Use the updated get_document_version
+            target_version_data = get_document_version(
                 media_id=media_id,
-                content=version['content'],
-                prompt=version['prompt'],
-                analysis_content=version['analysis_content'],
-                db_instance=db_instance
+                version_number=version_number,
+                include_content=True,
+                db_instance=db_instance # Pass instance, get_document_version will use the transaction's conn
             )
 
-            # Extract the version_number directly from the result
-            # Result should be a dict with 'version_number' key
-            new_version_number = result.get('version_number')
+            if target_version_data is None:
+                logging.warning(f"Rollback failed: Target version {version_number} not found for media_id={media_id}")
+                return {'error': f'Version {version_number} not found'}
 
-            # Log what we're getting back from create_document_version
-            logging.info(f"Rollback result: {result}")
-            logging.info(f"New version number: {new_version_number}")
+            target_content = target_version_data.get('content')
+            target_prompt = target_version_data.get('prompt')
+            target_analysis = target_version_data.get('analysis_content')
+
+            # Ensure content exists before proceeding
+            if target_content is None:
+                 logging.error(f"Rollback failed: Target version {version_number} for media_id={media_id} has NULL content.")
+                 return {'error': f'Version {version_number} has no content to roll back to.'}
+
+            # --- 2. Create a *new* version reflecting the rollback state ---
+            # Pass the connection 'conn' to run within the current transaction
+            new_version_info = create_document_version(
+                media_id=media_id,
+                content=target_content,
+                prompt=target_prompt,
+                analysis_content=target_analysis,
+                db_instance=db_instance, # Still pass instance for logging etc.
+                conn=conn # Pass the active connection!
+            )
+            new_version_number = new_version_info.get('version_number')
+            if not new_version_number:
+                 # This shouldn't happen if create_document_version is correct
+                 logging.error(f"Rollback failed: create_document_version did not return a version number for media_id={media_id}")
+                 raise DatabaseError("Failed to get new version number during rollback.")
+
+            logging.debug(f"Created new version {new_version_number} during rollback for media_id={media_id}")
+
+            # --- 3. Update the main Media table ---
+            # Calculate the hash of the rolled-back content
+            new_content_hash = hashlib.sha256(target_content.encode()).hexdigest()
+
+            # Update Media.content and Media.content_hash
+            # Also update transcription_model if relevant? Maybe copy from original rolled-back version?
+            # For now, just update content and hash.
+            cursor.execute('''
+                UPDATE Media
+                SET content = ?,
+                    content_hash = ?
+                WHERE id = ?
+            ''', (target_content, new_content_hash, media_id))
+            rows_affected = cursor.rowcount
+
+            if rows_affected == 0:
+                 # This indicates the media_id doesn't exist in the Media table, a major inconsistency.
+                 logging.error(f"Rollback warning: Media record for ID {media_id} not found during update.")
+                 # Rollback might still be considered partially successful as version was created,
+                 # but raise an error because the main record wasn't updated.
+                 raise DatabaseError(f"Media record {media_id} not found for final rollback update.")
+
+            logging.info(f"Successfully rolled back media_id={media_id} to state of version {version_number} (New version: {new_version_number})")
+
+            # Commit happens automatically when 'with' block exits without error
 
             return {
-                'success': f'Rolled back to version {version_number}',
+                'success': f'Successfully rolled back to version {version_number}. State saved as new version {new_version_number}.',
                 'new_version_number': new_version_number
             }
 
     except sqlite3.Error as e:
-        logging.error(f"Database error during rollback: {str(e)}")
-        return {'error': str(e)}
+        logging.error(f"SQLite error during rollback for media_id={media_id} to version {version_number}: {e}", exc_info=True)
+        # Re-raise as specific error
+        raise DatabaseError(f"Database error during rollback: {e}") from e
+    except DatabaseError as de: # Catch errors raised by helpers
+        logging.error(f"DatabaseError during rollback for media_id={media_id} to version {version_number}: {de}", exc_info=True)
+        raise # Re-raise
     except Exception as e:
-        logging.error(f"Unexpected error during rollback: {str(e)}")
-        return {'error': str(e)}
+        logging.error(f"Unexpected error during rollback for media_id={media_id} to version {version_number}: {e}", exc_info=True)
+        raise DatabaseError(f"Unexpected error during rollback: {e}") from e
 
 #
 # End of Functions to manage document versions

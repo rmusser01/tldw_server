@@ -1974,3 +1974,10 @@ def extract_media_id_from_result_string(result_msg: Optional[str]) -> Optional[s
     else:
         # The pattern "Media ID: <id>" was not found in the string
         return None
+
+def is_valid_date(date_string): # Placeholder
+    try:
+        datetime.strptime(date_string, '%Y-%m-%d')
+        return True
+    except ValueError:
+        return False
