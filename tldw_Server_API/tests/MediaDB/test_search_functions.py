@@ -6,9 +6,12 @@ import hashlib
 
 # Adjust import paths
 try:
-    from app.db.database_setup import Database, DatabaseError
-    from app.db.search_functions import search_media_db
-    from app.db.media_functions import add_media_with_keywords
+    from tldw_Server_API.app.core.DB_Management.Media_DB import (
+        Database,
+        DatabaseError,
+        search_media_db,
+        add_media_with_keywords
+    )
 except ImportError as e:
     print(f"Error importing functions for search tests: {e}")
     raise

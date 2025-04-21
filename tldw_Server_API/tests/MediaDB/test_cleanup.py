@@ -2,7 +2,7 @@
 import pytest
 import os
 from unittest.mock import patch
-from PoC_Version.App_Function_Libraries.Utils.Utils import cleanup_downloads
+from tldw_Server_API.app.core.Utils.Utils import cleanup_downloads
 
 @pytest.fixture
 def temp_download_files():
@@ -15,7 +15,7 @@ def temp_download_files():
         if os.path.exists(file):
             os.remove(file)
 
-@patch('App_Function_Libraries.Utils.Utils.downloaded_files', new_callable=lambda: ['test1.mp4', 'test2.mp3', 'test3.txt'])
+@patch('tldw_Server_API.app.core.Utils.Utils.downloaded_files', new_callable=lambda: ['test1.mp4', 'test2.mp3', 'test3.txt'])
 def test_cleanup_downloads(mock_downloaded_files, temp_download_files):
     cleanup_downloads()
     for file in temp_download_files:

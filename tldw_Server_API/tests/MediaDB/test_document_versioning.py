@@ -5,8 +5,9 @@ from typing import Dict, Any
 
 # Adjust import paths based on your project structure
 try:
-    from app.db.database_setup import Database, DatabaseError
-    from app.db.versioning_functions import ( # Assuming versioning funcs are separate
+    from tldw_Server_API.app.core.DB_Management.Media_DB import (
+        Database,
+        DatabaseError,
         create_document_version,
         get_document_version,
         get_all_document_versions,

@@ -6,10 +6,15 @@ import sqlite3
 
 # Adjust import paths
 try:
-    from app.db.database_setup import Database, DatabaseError, InputError
-    from app.db.keyword_functions import add_keyword, delete_keyword # Assuming these are separate
-    from app.db.media_functions import add_media_with_keywords # Assuming this is separate
-    from app.db.search_functions import search_media_db # Assuming this is separate
+    from tldw_Server_API.app.core.DB_Management.Media_DB import (
+        Database,
+        DatabaseError,
+        InputError,
+        add_keyword,
+        delete_keyword,
+        add_media_with_keywords,
+        search_media_db
+    )
 except ImportError as e:
     print(f"Error importing functions for error handling tests: {e}")
     raise
@@ -38,12 +43,11 @@ def test_transaction_rollback(db_instance: Database):
             conn.execute("INSERT INTO Media (url, title, type, content, content_hash) VALUES (?, ?, ?, ?, ?)",
                          ('err_test', 'Err Test', 'doc', 'content', 'hash123'))
             # This will fail because table doesn't exist
-            conn.execute("INSERT INTO nonexistent_table (id) VALUES (?)", (1,))
-    except DatabaseError as e:
+            conn.execute("INSERT INTO nonexistent_table (id) VALUES (?)", (1,)) # <- This raises sqlite3.OperationalError
+    except DatabaseError as e: # <- The transaction context re-raises this
         # Expecting the DatabaseError wrapper around the OperationalError
         assert "no such table: nonexistent_table" in str(e.__cause__) # Check the underlying cause
-
-    # Verify the initial insert was rolled back
+    # Verify the initial insert was rolled back (This part runs AFTER the exception)
     with db_instance.transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM Media WHERE url = ?", ('err_test',))

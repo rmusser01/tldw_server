@@ -8,7 +8,10 @@ import tempfile # Use tempfile for the test DB path
 
 # Adjust import path
 try:
-    from app.db.database_setup import Database, DatabaseError
+    from tldw_Server_API.app.core.DB_Management.Media_DB import (
+        Database,
+        DatabaseError
+    )
     # Remove create_tables import if it's not used externally
     # from app.db.database_setup import create_tables
     # Keep Utils import if needed for path logic, but Database class handles path now

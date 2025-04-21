@@ -388,39 +388,44 @@ class Database:
         Args:
             db_path (str): The full path to the SQLite database file.
         """
-        from pathlib import Path
-        self.db_path = Path(db_path).resolve() # Store the absolute path
-        # Ensure the parent directory exists
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.is_memory_db = (db_path == ':memory:') # Check if it's in-memory
+
+        if self.is_memory_db:
+            self.db_path_str = ':memory:'
+            # No need to resolve or create parent directories for memory DB
+            logging.info("Initializing Database object for :memory:")
+        else:
+            # Resolve path for file-based DBs
+            from pathlib import Path
+            self.db_path = Path(db_path).resolve() # Store the absolute path object
+            self.db_path_str = str(self.db_path) # Store the string representation
+            # Ensure the parent directory exists
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            logging.info(f"Initializing Database object for path: {self.db_path_str}")
         # Use thread-local storage for connections
         self._local = threading.local()
-        logging.info(f"Initializing Database object for path: {self.db_path}")
-        self._ensure_schema() # IMPORTANT: Create/verify schema on initialization
+        self._ensure_schema() # Create/verify schema on initialization
 
     def _get_thread_connection(self) -> sqlite3.Connection:
         """Gets or creates a database connection for the current thread."""
         if not hasattr(self._local, 'conn') or self._local.conn is None:
             try:
-                # Connect to the specific database file for this instance
-                # check_same_thread=False is generally needed for web frameworks
-                # timeout can be increased if experiencing database locking issues
+                # Use the stored string path (works for both :memory: and file paths)
                 self._local.conn = sqlite3.connect(
-                    str(self.db_path),
+                    self.db_path_str,
                     check_same_thread=False,
-                    timeout=10 # Increased timeout (default is 5 seconds)
+                    timeout=10
                 )
-                # Use Row factory for dict-like access to columns
                 self._local.conn.row_factory = sqlite3.Row
-                # Enable Write-Ahead Logging for better concurrency
-                self._local.conn.execute("PRAGMA journal_mode=WAL;")
-                # Enable foreign key constraints
+                # Enable WAL mode only for file-based databases
+                if not self.is_memory_db:
+                    self._local.conn.execute("PRAGMA journal_mode=WAL;")
                 self._local.conn.execute("PRAGMA foreign_keys = ON;")
-                logging.debug(f"Opened SQLite connection to {self.db_path} [thread: {threading.current_thread().name}]")
+                logging.debug(f"Opened SQLite connection to {self.db_path_str} [thread: {threading.current_thread().name}]")
             except sqlite3.Error as e:
-                logging.error(f"Failed to connect to database at {self.db_path}: {e}", exc_info=True)
-                # Reset to prevent retrying with a failed connection object
+                logging.error(f"Failed to connect to database at {self.db_path_str}: {e}", exc_info=True)
                 self._local.conn = None
-                raise DatabaseError(f"Failed to connect to database '{self.db_path}': {e}") from e
+                raise DatabaseError(f"Failed to connect to database '{self.db_path_str}': {e}") from e
         return self._local.conn
 
     def get_connection(self) -> sqlite3.Connection:
@@ -471,20 +476,38 @@ class Database:
     def transaction(self):
         """Provides a transactional context manager."""
         conn = self.get_connection()
-        in_transaction = conn.in_transaction # Check if already in transaction
+        # Use the connection's in_transaction flag, handles nested transactions
+        in_outer_transaction = conn.in_transaction
         try:
-            if not in_transaction:
-                logging.debug(f"Beginning transaction for {self.db_path}")
+            if not in_outer_transaction:
+                logging.debug(f"Beginning transaction for {self.db_path_str}")
+                # BEGIN implicitly starts a transaction if not already in one
+                # Using BEGIN explicitly is fine too
                 conn.execute("BEGIN")
             yield conn # Yield the connection for use within the 'with' block
-            if not in_transaction:
+            if not in_outer_transaction:
+                # Only commit if this context manager started the transaction
                 conn.commit()
-                logging.debug(f"Transaction committed for {self.db_path}")
+                logging.debug(f"Transaction committed for {self.db_path_str}")
         except Exception as e:
-            if not in_transaction:
-                logging.error(f"Transaction failed for {self.db_path}, rolling back: {e}", exc_info=True)
-                conn.rollback()
-            raise # Re-raise the exception after rollback/logging
+            # Only rollback if this context manager started the transaction
+            if not in_outer_transaction:
+                logging.error(f"Transaction failed for {self.db_path_str}, rolling back: {e}", exc_info=True)
+                try:
+                    conn.rollback()
+                except sqlite3.Error as rb_err:
+                    # Log if rollback itself fails, but still raise original error
+                    logging.error(f"Rollback failed: {rb_err}", exc_info=True)
+
+            if isinstance(e, DatabaseError):
+                raise # Re-raise if it's already our custom type
+            elif isinstance(e, sqlite3.Error):
+                # Wrap sqlite3 errors in our custom DatabaseError
+                raise DatabaseError(f"Transaction failed due to DB error: {e}") from e
+            else:
+                # Wrap other Python exceptions too (or just re-raise e)
+                raise DatabaseError(f"Transaction failed due to non-DB error: {e}") from e
+        # No finally block needed, rollback/commit handled in except/try
 
     def table_exists(self, table_name: str) -> bool:
         """Checks if a table exists in the database."""
@@ -732,8 +755,9 @@ class Database:
 
         except sqlite3.Error as e:
             if conn: conn.rollback() # Rollback on any schema error
-            logging.error(f"Failed to ensure schema for {self.db_path}: {e}", exc_info=True)
-            raise DatabaseError(f"Database schema initialization failed for '{self.db_path}': {e}") from e
+            # Use self.db_path_str in the error message
+            logging.error(f"Failed to ensure schema for {self.db_path_str}: {e}", exc_info=True)
+            raise DatabaseError(f"Database schema initialization failed for '{self.db_path_str}': {e}") from e
         finally:
              if conn: conn.close() # Close the dedicated schema connection
 
@@ -762,6 +786,7 @@ class Database:
             logging.info(f"--- End Schema Diagnosis for {self.db_path} ---")
         except Exception as e:
             logging.error(f"Schema diagnosis failed for {self.db_path}: {e}", exc_info=True)
+
 
     # --- Add other specific data access methods as needed ---
     # Example:
@@ -3397,6 +3422,7 @@ def get_document_version(
 
             # Convert Row object to dictionary
             version_data = dict(result) # Convert Row to dict
+            version_data: Dict[str, Any] = dict(result)
             version_data['media_id'] = media_id # Ensure media_id is present
 
             return version_data

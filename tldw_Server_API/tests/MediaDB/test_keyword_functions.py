@@ -10,14 +10,12 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import get_all_document_v
 
 # Adjust import paths
 try:
-    from app.db.database_setup import Database, DatabaseError, InputError
-    # Assuming keyword/media functions are separated
-    from app.db.keyword_functions import (
+    from tldw_Server_API.app.core.DB_Management.Media_DB import (
+        Database, DatabaseError, InputError,
         add_keyword, delete_keyword, fetch_all_keywords,
-        fetch_keywords_for_media, update_keywords_for_media
-        # remove keywords_browser_interface, display_keywords, export_keywords_to_csv if they are UI/CLI helpers
+        fetch_keywords_for_media, update_keywords_for_media,
+        add_media_with_keywords
     )
-    from app.db.media_functions import add_media_with_keywords
     # from app.db.article_ingestion import ingest_article_to_db # If testing this too
 except ImportError as e:
     print(f"Error importing functions for keyword tests: {e}")
