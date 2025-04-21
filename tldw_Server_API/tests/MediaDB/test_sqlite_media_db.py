@@ -88,6 +88,9 @@ def test_transaction_commit(db_instance: Database):
 
 def test_transaction_rollback_on_exception(db_instance: Database):
     media_id_should_not_exist = None
+    caught_exception = None
+
+    # Step 1: Execute the transaction and catch the expected exception
     try:
         with db_instance.transaction() as conn:
             cursor = conn.cursor()
@@ -95,20 +98,26 @@ def test_transaction_rollback_on_exception(db_instance: Database):
                            ('test_trans_rollback', 'Trans Rollback', 'doc', 'content', 'hash_trans_rollback'))
             media_id_should_not_exist = cursor.lastrowid
             raise ValueError("Simulated error to trigger rollback") # Simulate error
-    except ValueError as e:
-        # Catch the simulated error
-        assert "Simulated error" in str(e)
+    except DatabaseError as e:
+        caught_exception = e # Store the caught exception
     except Exception as e:
-        pytest.fail(f"Caught unexpected exception: {e}")
+         pytest.fail(f"Caught unexpected exception type during transaction: {type(e).__name__}: {e}")
 
+    # Step 2: Assert that the correct exception was caught
+    assert caught_exception is not None, "DatabaseError was not raised by the transaction manager"
+    assert isinstance(caught_exception, DatabaseError)
+    assert "Transaction failed due to non-DB error: Simulated error" in str(caught_exception)
+    assert isinstance(caught_exception.__cause__, ValueError)
+    assert "Simulated error" in str(caught_exception.__cause__)
 
-    # Verify the insert was rolled back
-    results = db_instance.execute_query("SELECT COUNT(*) FROM Media WHERE url = ?", ('test_trans_rollback',))
-    assert results.fetchone()[0] == 0
-    # Also check if the ID was potentially reused (shouldn't happen with rollback)
-    if media_id_should_not_exist:
-         results_id = db_instance.execute_query("SELECT COUNT(*) FROM Media WHERE id = ?", (media_id_should_not_exist,))
-         assert results_id.fetchone()[0] == 0
+    # Step 3: Verify the rollback occurred
+    with db_instance.transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM Media WHERE url = ?", ('test_trans_rollback',))
+        assert cursor.fetchone()[0] == 0, "Rollback failed - record still exists"
+        if media_id_should_not_exist:
+             results_id = db_instance.execute_query("SELECT COUNT(*) FROM Media WHERE id = ?", (media_id_should_not_exist,))
+             assert results_id.fetchone()[0] == 0, "Rollback failed - ID check failed"
 
 
 # execute_many is not part of the provided Database class, skip or add if needed

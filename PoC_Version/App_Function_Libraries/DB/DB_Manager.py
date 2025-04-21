@@ -140,8 +140,6 @@ elif db_type == 'elasticsearch':
 else:
     raise ValueError(f"Unsupported database type: {db_type}")
 
-print(f"Database path: {db.db_path}")
-
 def get_db_config():
     try:
         config = load_comprehensive_config()
@@ -191,9 +189,6 @@ elif db_type == 'elasticsearch':
     raise NotImplementedError("Elasticsearch support not yet implemented")
 else:
     raise ValueError(f"Unsupported database type: {db_type}")
-
-# Print database path for debugging
-print(f"Database path: {db.db_path}")
 
 # Sanity Check for SQLite DB
 # FIXME - Remove this after testing / Writing Unit tests

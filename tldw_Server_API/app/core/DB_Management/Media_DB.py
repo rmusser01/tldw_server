@@ -437,7 +437,7 @@ class Database:
         if hasattr(self._local, 'conn') and self._local.conn is not None:
             self._local.conn.close()
             self._local.conn = None
-            logging.debug(f"Closed SQLite connection to {self.db_path} [thread: {threading.current_thread().name}]")
+            logging.debug(f"Closed SQLite connection to {self.db_path_str} [thread: {threading.current_thread().name}]")
 
     def execute_query(self, query: str, params: tuple = None, *, commit: bool = False) -> sqlite3.Cursor:
         """
@@ -457,7 +457,7 @@ class Database:
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
-            logging.debug(f"Executing Query on {self.db_path}: {query[:150]}... Params: {params}")
+            logging.debug(f"Executing Query on {self.db_path_str}: {query[:150]}... Params: {params}")
             if params:
                 cursor.execute(query, params)
             else:
@@ -465,10 +465,10 @@ class Database:
 
             if commit:
                 conn.commit()
-                logging.debug(f"Query committed on {self.db_path}")
+                logging.debug(f"Query committed on {self.db_path_str}")
             return cursor
         except sqlite3.Error as e:
-            logging.error(f"Query failed on {self.db_path}: {query[:150]}... Error: {e}", exc_info=True)
+            logging.error(f"Query failed on {self.db_path_str}: {query[:150]}... Error: {e}", exc_info=True)
             # Do not rollback here; let the transaction context handle it
             raise DatabaseError(f"Query execution failed: {e}") from e
 
@@ -656,115 +656,133 @@ class Database:
 
         try:
             cursor = conn.cursor()
-            logging.debug(f"Executing Many on {self.db_path}: {query[:150]}... with {len(params_list)} parameter sets.")
+            logging.debug(f"Executing Many on {self.db_path_str}: {query[:150]}... with {len(params_list)} parameter sets.")
             # Use the standard sqlite3 cursor.executemany
             cursor.executemany(query, params_list)
 
             if commit:
                 conn.commit()
-                logging.debug(f"Execute Many committed on {self.db_path}")
+                logging.debug(f"Execute Many committed on {self.db_path_str}")
             return cursor
         except sqlite3.Error as e:
-            logging.error(f"Execute Many failed on {self.db_path}: {query[:150]}... Error: {e}", exc_info=True)
+            logging.error(f"Execute Many failed on {self.db_path_str}: {query[:150]}... Error: {e}", exc_info=True)
             # Do not rollback here; let the transaction context handle it if called within one
             raise DatabaseError(f"Execute Many failed: {e}") from e
         except TypeError as te:
             # Catch potential TypeError if params_list contents are wrong format for executemany
-            logging.error(f"TypeError during Execute Many on {self.db_path}: {te}. Check format of params_list.",
+            logging.error(f"TypeError during Execute Many on {self.db_path_str}: {te}. Check format of params_list.",
                           exc_info=True)
             raise TypeError(f"Parameter list format error for executemany: {te}") from te
         except Exception as e:
             # Catch other unexpected errors
-            logging.error(f"Unexpected error during Execute Many on {self.db_path}: {e}", exc_info=True)
+            logging.error(f"Unexpected error during Execute Many on {self.db_path_str}: {e}", exc_info=True)
             raise DatabaseError(f"An unexpected error occurred during Execute Many: {e}") from e
 
     def _ensure_schema(self):
         """
-        Ensures the necessary tables and indices exist in the database file.
-        This method is called automatically during __init__.
-        Uses a separate connection for schema setup to avoid transaction conflicts.
+        Ensures the necessary tables and indices exist in the database.
+        Uses the thread-local connection managed by the instance.
         """
-        conn = None # Ensure conn is defined for finally block
+        conn = self.get_connection() # Get the same connection used by execute_query etc.
+
         try:
-            # Use a dedicated connection for schema modifications
-            conn = sqlite3.connect(str(self.db_path))
-            conn.execute("PRAGMA foreign_keys = ON;") # Enable FKs for schema changes too
             cursor = conn.cursor()
 
-            logging.info(f"Ensuring schema exists for database: {self.db_path}")
+            logging.info(f"Ensuring schema exists for database: {self.db_path_str} using thread-local connection")
 
-            # Begin transaction for schema modifications
-            cursor.execute("BEGIN")
+            in_outer_transaction = conn.in_transaction
 
-            # 1. Create Tables
-            logging.debug(f"Creating tables if not exist for {self.db_path}...")
-            for query in self._TABLE_QUERIES:
-                cursor.execute(query)
-
-            # 2. Create Indices (handle potential pre-existence gracefully)
-            logging.debug(f"Creating indices if not exist for {self.db_path}...")
-            for query in self._INDEX_QUERIES:
-                 try: cursor.execute(query)
-                 except sqlite3.Error as idx_err: logging.warning(f"Non-fatal: Could not execute index query '{query[:70]}...' for {self.db_path} (may already exist or conflict): {idx_err}")
-
-            # 3. Create Virtual Tables & Triggers (handle potential pre-existence)
-            logging.debug(f"Creating virtual tables/triggers if not exist for {self.db_path}...")
-            for query in self._VIRTUAL_TABLE_QUERIES:
-                 try: cursor.execute(query)
-                 except sqlite3.Error as vt_err: logging.warning(f"Non-fatal: Could not execute virtual table/trigger query '{query[:70]}...' for {self.db_path} (may already exist or conflict): {vt_err}")
-
-            # 4. Schema Updates (ALTER TABLE, etc.)
-            logging.debug(f"Applying schema updates if needed for {self.db_path}...")
-            # Check/Add content_hash column and index (keep this logic)
-            cursor.execute("SELECT COUNT(*) FROM pragma_table_info('Media') WHERE name = 'content_hash'")
-            if cursor.fetchone()[0] == 0:
-                logging.info(f"Adding 'content_hash' column to Media table in {self.db_path}")
-                cursor.execute('ALTER TABLE Media ADD COLUMN content_hash TEXT')
-            # Create index separately
+            if not in_outer_transaction:
+                cursor.execute("BEGIN")
             try:
-                cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_media_content_hash ON Media(content_hash)')
-            except sqlite3.Error as idx_err:
-                logging.warning(...)
+                # 1. Create Tables
+                logging.debug(f"Creating tables if not exist for {self.db_path_str}...")
+                # ... (loop through _TABLE_QUERIES) ...
+                for query in self._TABLE_QUERIES:
+                    cursor.execute(query)
 
-            # 5. Data Integrity Checks / Migrations (like ensuring initial versions)
-            logging.debug(f"Performing data integrity checks for {self.db_path}...")
-            # Modify this query to fetch necessary data *if* prompt/analysis were removed from Media
-            # You might need to fetch the *last* modification's prompt/analysis if available
-            # or just use NULLs for the initial version's prompt/analysis fields.
+                # 2. Create Indices
+                logging.debug(f"Creating indices if not exist for {self.db_path_str}...")
+                # ... (loop through _INDEX_QUERIES) ...
+                for query in self._INDEX_QUERIES:
+                     try: cursor.execute(query)
+                     except sqlite3.Error as idx_err: logging.warning(f"Non-fatal: Could not execute index query '{query[:70]}...' for {self.db_path_str} (may already exist or conflict): {idx_err}")
 
-            # Simpler initial version creation if prompt/analysis removed from Media:
-            cursor.execute("""
-                           SELECT id, content
-                           FROM Media
-                           WHERE NOT EXISTS (SELECT 1 FROM DocumentVersions WHERE media_id = Media.id)
-                           """)
-            items_needing_version = cursor.fetchall()
-            if items_needing_version:
-                logging.info(
-                    f"Creating initial versions for {len(items_needing_version)} media items in {self.db_path}")
-                for media_id, content in items_needing_version:
-                    cursor.execute("""
-                                   INSERT INTO DocumentVersions (media_id, version_number, content, prompt,
-                                                                 analysis_content, created_at)
-                                   VALUES (?, 1, ?, NULL, NULL, CURRENT_TIMESTAMP)
-                                   """, (media_id, content or ''))  # Insert NULL for prompt/analysis
+                # 3. Create Virtual Tables & Triggers
+                logging.debug(f"Creating virtual tables/triggers if not exist for {self.db_path_str}...")
+                 # ... (loop through _VIRTUAL_TABLE_QUERIES) ...
+                for query in self._VIRTUAL_TABLE_QUERIES:
+                     try: cursor.execute(query)
+                     except sqlite3.Error as vt_err: logging.warning(f"Non-fatal: Could not execute virtual table/trigger query '{query[:70]}...' for {self.db_path_str} (may already exist or conflict): {vt_err}")
 
-            # Commit transaction
-            conn.commit()
-            logging.info(f"Schema verification and update successfully completed for {self.db_path}")
 
-        except sqlite3.Error as e:
-            if conn: conn.rollback() # Rollback on any schema error
-            # Use self.db_path_str in the error message
-            logging.error(f"Failed to ensure schema for {self.db_path_str}: {e}", exc_info=True)
-            raise DatabaseError(f"Database schema initialization failed for '{self.db_path_str}': {e}") from e
+                # 4. Schema Updates (ALTER TABLE, etc.)
+                logging.debug(f"Applying schema updates if needed for {self.db_path_str}...")
+                # ... (content_hash column and index creation logic) ...
+                cursor.execute("SELECT COUNT(*) FROM pragma_table_info('Media') WHERE name = 'content_hash'")
+                if cursor.fetchone()[0] == 0:
+                    logging.info(f"Adding 'content_hash' column to Media table in {self.db_path_str}")
+                    cursor.execute('ALTER TABLE Media ADD COLUMN content_hash TEXT')
+                try:
+                    cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_media_content_hash ON Media(content_hash)')
+                except sqlite3.Error as idx_err:
+                    logging.warning(f"Non-fatal: Could not create content_hash index for {self.db_path_str} (may already exist): {idx_err}")
+
+                # 5. Data Integrity Checks / Migrations
+                logging.debug(f"Performing data integrity checks for {self.db_path_str}...")
+                # ... (initial version creation logic) ...
+                cursor.execute("""
+                               SELECT id, content
+                               FROM Media
+                               WHERE NOT EXISTS (SELECT 1 FROM DocumentVersions WHERE media_id = Media.id)
+                               """)
+                items_needing_version = cursor.fetchall()
+                if items_needing_version:
+                    logging.info(
+                        f"Creating initial versions for {len(items_needing_version)} media items in {self.db_path_str}")
+                    for media_id, content in items_needing_version:
+                        cursor.execute("""
+                                       INSERT INTO DocumentVersions (media_id, version_number, content, prompt,
+                                                                     analysis_content, created_at)
+                                       VALUES (?, 1, ?, NULL, NULL, CURRENT_TIMESTAMP)
+                                       """, (media_id, content or ''))
+
+
+                # Commit transaction only if we started it
+                if not in_outer_transaction:
+                    conn.commit()
+                logging.info(f"Schema verification and update successfully completed for {self.db_path_str}")
+
+            except sqlite3.Error as e:
+                # Rollback only if we started the transaction
+                if not in_outer_transaction:
+                    try:
+                        conn.rollback()
+                        logging.warning(f"Rolled back schema changes for {self.db_path_str} due to error: {e}")
+                    except sqlite3.Error as rb_err:
+                         logging.error(f"Rollback failed during schema creation error handling: {rb_err}")
+                # Re-raise the original error, wrapped appropriately
+                logging.error(f"Failed to ensure schema for {self.db_path_str}: {e}", exc_info=True)
+                raise DatabaseError(f"Database schema setup failed for '{self.db_path_str}': {e}") from e
+
+        except (DatabaseError, sqlite3.Error) as e:
+             # Catch errors from get_connection itself or re-raised errors from inner try
+             logging.error(f"Outer exception during schema setup for {self.db_path_str}: {e}", exc_info=True)
+             if isinstance(e, DatabaseError):
+                 raise
+             else:
+                 raise DatabaseError(f"Schema setup failed: {e}") from e
         finally:
-             if conn: conn.close() # Close the dedicated schema connection
+            # This block will always execute.
+            # We have no cleanup specific to _ensure_schema here,
+            # as the connection is managed elsewhere.
+            pass
+            # DO NOT add conn.close() here.
 
     # FIXME - Update to reflect new schema
     def diagnose_schema(self):
         """Logs the schema of key tables for diagnostic purposes."""
-        logging.info(f"--- Diagnosing Schema for {self.db_path} ---")
+        logging.info(f"--- Diagnosing Schema for {self.db_path_str} ---")
         try:
             conn = self.get_connection() # Use thread connection for reading schema
             cursor = conn.cursor()
@@ -783,9 +801,9 @@ class Database:
             cursor.execute("SELECT name, sql FROM sqlite_master WHERE type='index'")
             indices = cursor.fetchall()
             logging.info(f"All Indices found: {[idx['name'] for idx in indices]}")
-            logging.info(f"--- End Schema Diagnosis for {self.db_path} ---")
+            logging.info(f"--- End Schema Diagnosis for {self.db_path_str} ---")
         except Exception as e:
-            logging.error(f"Schema diagnosis failed for {self.db_path}: {e}", exc_info=True)
+            logging.error(f"Schema diagnosis failed for {self.db_path_str}: {e}", exc_info=True)
 
 
     # --- Add other specific data access methods as needed ---
@@ -837,16 +855,16 @@ def check_media_exists(title: str, url: str, db_instance: Database) -> Optional[
             cursor.execute(query, (title, url))
             # Assuming row_factory is set to sqlite3.Row in your Database class
             result = cursor.fetchone()
-            logging.debug(f"check_media_exists query on '{db_instance.db_path}': {query}")
+            logging.debug(f"check_media_exists query on '{db_instance.db_path_str}': {query}")
             logging.debug(f"check_media_exists params: title={title}, url={url}")
             logging.debug(f"check_media_exists result: {result}")
             # Access by column name if using row_factory, otherwise by index [0]
             return result['id'] if result else None
     except sqlite3.Error as db_err: # Catch specific SQLite errors
-        logging.error(f"SQLite error checking media existence on '{db_instance.db_path}': {db_err}", exc_info=True)
+        logging.error(f"SQLite error checking media existence on '{db_instance.db_path_str}': {db_err}", exc_info=True)
         return None
     except Exception as e: # Catch other unexpected errors
-        logging.error(f"Unexpected error checking media existence on '{db_instance.db_path}': {e}")
+        logging.error(f"Unexpected error checking media existence on '{db_instance.db_path_str}': {e}")
         logging.error(f"Exception details: {traceback.format_exc()}")
         return None
 
@@ -1335,7 +1353,11 @@ def add_keyword(keyword: str, db_instance: Database) -> int:
     db=db_instance
     log_counter("add_keyword_attempt")
     start_time = time.time()
-
+    if not keyword: # Checks for None or empty string
+        logging.warning("Attempted to add None or empty keyword.")
+        # Decide behaviour: raise error or return None?
+        # Let's raise for consistency with InputError expectation
+        raise InputError("Keyword cannot be None or empty.")
     if not keyword.strip():
         log_counter("add_keyword_error", labels={"error_type": "EmptyKeyword"})
         duration = time.time() - start_time
@@ -1343,11 +1365,11 @@ def add_keyword(keyword: str, db_instance: Database) -> int:
         raise DatabaseError("Keyword cannot be empty")
 
     keyword = keyword.strip().lower()
-    with db.get_connection() as conn:
+    with db.transaction() as conn:
         cursor = conn.cursor()
         try:
             # Insert into Keywords table
-            cursor.execute('INSERT OR IGNORE INTO Keywords (keyword) VALUES (?)', (keyword,))
+            cursor.execute("INSERT OR IGNORE INTO Keywords (keyword) VALUES (?)", (keyword,))
 
             # Get the keyword_id (whether it was just inserted or already existed)
             cursor.execute('SELECT id FROM Keywords WHERE keyword = ?', (keyword,))
@@ -1602,7 +1624,7 @@ def fetch_item_details(media_id: int, db_instance: Database) -> Tuple[str, str, 
     if not isinstance(db_instance, Database):
         raise TypeError("A valid Database instance must be provided.")
 
-    logging.debug(f"Fetching latest item details (prompt, analysis, content) for media_id={media_id} from DB: {db_instance.db_path}")
+    logging.debug(f"Fetching latest item details (prompt, analysis, content) for media_id={media_id} from DB: {db_instance.db_path_str}")
 
     try:
         # Call the (soon to be updated) get_document_version to fetch the LATEST version's details
@@ -1634,10 +1656,10 @@ def fetch_item_details(media_id: int, db_instance: Database) -> Tuple[str, str, 
 
     # Catch specific DB errors first if possible
     except sqlite3.Error as e:
-        logging.error(f"SQLite error fetching latest version details for media_id {media_id} from {db_instance.db_path}: {e}", exc_info=True)
+        logging.error(f"SQLite error fetching latest version details for media_id {media_id} from {db_instance.db_path_str}: {e}", exc_info=True)
         raise DatabaseError(f"Database error fetching item details: {e}") from e
     except Exception as e: # Catch other potential errors (like DatabaseError from get_document_version)
-        logging.error(f"Unexpected error fetching item details for media_id {media_id} from {db_instance.db_path}: {e}", exc_info=True)
+        logging.error(f"Unexpected error fetching item details for media_id {media_id} from {db_instance.db_path_str}: {e}", exc_info=True)
         raise DatabaseError(f"Unexpected error fetching item details: {e}") from e
 
 #
@@ -1771,7 +1793,7 @@ def search_media_db(
 
             # 1. Get the total count matching the criteria
             count_query = f"SELECT COUNT(Media.id) FROM Media WHERE {where_clause}"
-            logging.debug(f"Executing Count Query on {db_instance.db_path}: {count_query} | Params: {params}")
+            logging.debug(f"Executing Count Query on {db_instance.db_path_str}: {count_query} | Params: {params}")
             cursor.execute(count_query, tuple(params)) # Use tuple for params
             count_result = cursor.fetchone()
             total_matches = count_result[0] if count_result else 0
@@ -1793,7 +1815,7 @@ def search_media_db(
                     LIMIT ? OFFSET ?
                 """
                 paginated_params = tuple(params + [results_per_page, offset]) # Add limit/offset
-                logging.debug(f"Executing Results Query on {db_instance.db_path} | Limit={results_per_page}, Offset={offset} | Params: {paginated_params}")
+                logging.debug(f"Executing Results Query on {db_instance.db_path_str} | Limit={results_per_page}, Offset={offset} | Params: {paginated_params}")
                 cursor.execute(results_query, paginated_params)
                 results_raw = cursor.fetchall() # Returns list of Row objects
 
@@ -1811,10 +1833,10 @@ def search_media_db(
             return results_list, total_matches
 
     except sqlite3.Error as e:
-        logging.error(f"SQLite error in search_media_db on {db_instance.db_path}: {e}", exc_info=True)
+        logging.error(f"SQLite error in search_media_db on {db_instance.db_path_str}: {e}", exc_info=True)
         raise DatabaseError(f"Failed to search media database: {e}") from e
     except Exception as e:
-        logging.error(f"Unexpected error in search_media_db on {db_instance.db_path}: {e}", exc_info=True)
+        logging.error(f"Unexpected error in search_media_db on {db_instance.db_path_str}: {e}", exc_info=True)
         raise DatabaseError(f"An unexpected error occurred during media search: {e}") from e
 
 
@@ -3119,7 +3141,7 @@ def get_paginated_files(db_instance: Database, page: int = 1, results_per_page: 
     if results_per_page < 1:
         raise ValueError("Results per page must be 1 or greater.")
 
-    logging.debug(f"Fetching paginated files: page={page}, results_per_page={results_per_page} from DB: {db_instance.db_path}")
+    logging.debug(f"Fetching paginated files: page={page}, results_per_page={results_per_page} from DB: {db_instance.db_path_str}")
 
     try:
         offset = (page - 1) * results_per_page
@@ -3161,10 +3183,10 @@ def get_paginated_files(db_instance: Database, page: int = 1, results_per_page: 
         return results, total_pages, page
 
     except sqlite3.Error as e:
-        logging.error(f"SQLite error fetching paginated files from {db_instance.db_path}: {e}", exc_info=True)
+        logging.error(f"SQLite error fetching paginated files from {db_instance.db_path_str}: {e}", exc_info=True)
         raise DatabaseError(f"Error fetching paginated files: {e}") from e
     except Exception as e:
-        logging.error(f"Unexpected error fetching paginated files from {db_instance.db_path}: {e}", exc_info=True)
+        logging.error(f"Unexpected error fetching paginated files from {db_instance.db_path_str}: {e}", exc_info=True)
         raise DatabaseError(f"Unexpected error fetching paginated files: {e}") from e
 
 
@@ -3184,7 +3206,7 @@ def get_full_media_details2(media_id: int, db_instance: Database = None): # Use 
     if not isinstance(db_instance, Database):
         raise TypeError("A valid Database instance must be provided.")
 
-    logger.debug(f"Attempting to get full details for ID: {media_id} on DB: {db_instance.db_path}")
+    logger.debug(f"Attempting to get full details for ID: {media_id} on DB: {db_instance.db_path_str}")
     try:
         with db_instance.get_connection() as conn:
             conn.row_factory = sqlite3.Row
@@ -3201,7 +3223,7 @@ def get_full_media_details2(media_id: int, db_instance: Database = None): # Use 
             media_row = cursor.fetchone()
 
             if not media_row:
-                logger.warning(f"No media found for ID {media_id} in DB {db_instance.db_path}.")
+                logger.warning(f"No media found for ID {media_id} in DB {db_instance.db_path_str}.")
                 return None
 
             # 2. Populate the dictionary, ensuring types
@@ -3247,10 +3269,10 @@ def get_full_media_details2(media_id: int, db_instance: Database = None): # Use 
         return media_dict # Pylance should understand this structure now
 
     except sqlite3.Error as e:
-        logger.error(f"Database error getting full media details for ID {media_id} on {db_instance.db_path}: {e}", exc_info=True)
+        logger.error(f"Database error getting full media details for ID {media_id} on {db_instance.db_path_str}: {e}", exc_info=True)
         return None
     except Exception as e:
-        logger.error(f"Unexpected error getting full media details for ID {media_id} on {db_instance.db_path}: {e}", exc_info=True)
+        logger.error(f"Unexpected error getting full media details for ID {media_id} on {db_instance.db_path_str}: {e}", exc_info=True)
         return None
 
 
@@ -3382,7 +3404,7 @@ def get_document_version(
         raise ValueError("Version number must be a positive integer.")
 
     log_msg = f"Getting {'latest' if version_number is None else f'version {version_number}'} for media_id={media_id}"
-    logging.debug(f"{log_msg} from DB: {db_instance.db_path} (Include content: {include_content})")
+    logging.debug(f"{log_msg} from DB: {db_instance.db_path_str} (Include content: {include_content})")
 
     try:
         # Use transaction context for connection management
@@ -3467,7 +3489,7 @@ def get_all_document_versions(
     if offset is not None and (not isinstance(offset, int) or offset < 0):
          raise ValueError("Offset must be a non-negative integer.")
 
-    logging.debug(f"Getting all versions for media_id={media_id} (Limit={limit}, Offset={offset}, Content={include_content}) from DB: {db_instance.db_path}")
+    logging.debug(f"Getting all versions for media_id={media_id} (Limit={limit}, Offset={offset}, Content={include_content}) from DB: {db_instance.db_path_str}")
 
     try:
         # Use transaction context for connection management
@@ -3512,12 +3534,12 @@ def get_all_document_versions(
             return versions_list
 
     except sqlite3.Error as e:
-        logging.error(f"SQLite error retrieving versions for media_id {media_id} from {db_instance.db_path}: {e}",
+        logging.error(f"SQLite error retrieving versions for media_id {media_id} from {db_instance.db_path_str}: {e}",
                      exc_info=True)
         # Return empty list on error as per original docstring
         return []
     except Exception as e:
-        logging.error(f"Unexpected error retrieving versions for media_id {media_id} from {db_instance.db_path}: {e}",
+        logging.error(f"Unexpected error retrieving versions for media_id {media_id} from {db_instance.db_path_str}: {e}",
                      exc_info=True)
         return []
 
@@ -3546,7 +3568,7 @@ def delete_document_version(media_id: int, version_number: int, db_instance: Dat
     if not isinstance(version_number, int) or version_number < 1:
         raise ValueError("Version number must be a positive integer.")
 
-    logging.debug(f"Attempting to delete version {version_number} for media_id={media_id} from DB: {db_instance.db_path}")
+    logging.debug(f"Attempting to delete version {version_number} for media_id={media_id} from DB: {db_instance.db_path_str}")
 
     try:
         # Use a transaction to ensure atomicity of checks and delete
@@ -3631,7 +3653,7 @@ def rollback_to_version(
     if not isinstance(version_number, int) or version_number < 1:
         raise ValueError("Version number must be a positive integer.")
 
-    logging.debug(f"Attempting rollback to version {version_number} for media_id={media_id} on DB: {db_instance.db_path}")
+    logging.debug(f"Attempting rollback to version {version_number} for media_id={media_id} on DB: {db_instance.db_path_str}")
 
     try:
         # Use a single transaction for all operations

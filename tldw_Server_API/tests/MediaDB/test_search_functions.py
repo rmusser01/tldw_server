@@ -21,11 +21,10 @@ except ImportError as e:
 
 # Helper to add test data
 def add_search_test_data(db: Database):
-    add_media_with_keywords(url="search1", title="First Test Document", media_type="document", content="Content mentioning apple and banana.", keywords=["fruit", "test", "alpha"], prompt="p1", analysis_content="a1", author="Alice", ingestion_date="2024-01-01", db_instance=db)
-    add_media_with_keywords(url="search2", title="Second Test Video", media_type="video", content="Video transcript about orange.", keywords=["fruit", "video", "beta"], prompt="p2", analysis_content="a2", author="Bob", ingestion_date="2024-01-02", db_instance=db)
-    add_media_with_keywords(url="search3", title="Third Document", media_type="document", content="Another one, apple related.", keywords=["test", "gamma"], prompt="p3", analysis_content="a3", author="Alice", ingestion_date="2024-01-03", db_instance=db)
-    # Add a trashed item
-    media_id_trash, _ = add_media_with_keywords(url="search4_trash", title="Trashed Item", media_type="document", content="This should not appear.", keywords=["trash"], prompt="p4", analysis_content="a4", author="Charlie", ingestion_date="2024-01-04", db_instance=db)
+    add_media_with_keywords(url="search1", title="First Test Document", media_type="document", content="Content mentioning apple and banana.", keywords=["fruit", "test", "alpha"], prompt="p1", analysis_content="a1", author="Alice", ingestion_date="2024-01-01", transcription_model=None, db_instance=db) # Add arg
+    add_media_with_keywords(url="search2", title="Second Test Video", media_type="video", content="Video transcript about orange.", keywords=["fruit", "video", "beta"], prompt="p2", analysis_content="a2", author="Bob", ingestion_date="2024-01-02", transcription_model="Whisper-Small", db_instance=db) # Add arg
+    add_media_with_keywords(url="search3", title="Third Document", media_type="document", content="Another one, apple related.", keywords=["test", "gamma"], prompt="p3", analysis_content="a3", author="Alice", ingestion_date="2024-01-03", transcription_model=None, db_instance=db) # Add arg
+    media_id_trash, _ = add_media_with_keywords(url="search4_trash", title="Trashed Item", media_type="document", content="This should not appear.", keywords=["trash"], prompt="p4", analysis_content="a4", author="Charlie", ingestion_date="2024-01-04", transcription_model=None, db_instance=db) # Add arg
     if media_id_trash:
          with db.transaction() as conn:
              conn.execute("UPDATE Media SET is_trash = 1 WHERE id = ?", (media_id_trash,))
