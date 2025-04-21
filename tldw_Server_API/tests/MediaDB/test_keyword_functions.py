@@ -70,10 +70,9 @@ def test_delete_keyword_success(memory_db_instance: Database):
 
 def test_delete_keyword_not_found(memory_db_instance: Database):
     result = delete_keyword("nonexistent_keyword", db_instance=memory_db_instance)
-    if isinstance(result, Dict):
-        assert "not found" in result.get('error', result.get('message', ''))
-    else:
-        assert result is False # Or handle potential exception
+    # Assert based on the actual string return value
+    assert isinstance(result, str) # Function returns a string message
+    assert "not found" in result   # Check if the message indicates failure
 
 # --- Test fetch_all_keywords ---
 def test_fetch_all_keywords(memory_db_instance: Database):

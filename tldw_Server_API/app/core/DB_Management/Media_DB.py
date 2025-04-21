@@ -378,7 +378,7 @@ class Database:
         END;
         ''',
         # Similar for keywords if needed, though less common
-        # 'CREATE VIRTUAL TABLE IF NOT EXISTS keyword_fts USING fts5(keyword, content=\'Keywords\', content_rowid=\'id\')'
+        'CREATE VIRTUAL TABLE IF NOT EXISTS keyword_fts USING fts5(keyword, content=\'Keywords\', content_rowid=\'id\')'
     ]
 
     def __init__(self, db_path: str):
@@ -1284,7 +1284,8 @@ def add_media_with_keywords(
 
                 # --- Create Initial/Updated Document Version ---
                 # Call the *updated* create_document_version, passing the connection
-                logging.debug(f"Creating document version for media ID: {media_id} (Action: {action})")
+                logging.debug(
+                    f"Creating document version for media ID: {media_id} (Action: {action}) using DB '{db_instance.db_path_str}'")  # Use db_path_str
                 version_info = create_document_version(
                     media_id=media_id,
                     content=content,
@@ -1293,6 +1294,11 @@ def add_media_with_keywords(
                     db_instance=db_instance, # Pass instance for context
                     conn=conn # IMPORTANT: Pass the active connection
                 )
+                # Check for potential errors from create_document_version if needed
+                if not version_info or 'version_number' not in version_info:
+                    # Handle error case if version creation failed unexpectedly
+                    raise DatabaseError(f"Failed to create document version for media ID {media_id} during add/update.")
+
                 logging.info(f"Created version {version_info.get('version_number')} for media ID: {media_id}")
 
             # Transaction commits automatically if no exceptions raised
@@ -1302,7 +1308,7 @@ def add_media_with_keywords(
              if chunk_options:
                   logging.info(f"Scheduling chunking for media ID: {media_id} with options: {chunk_options}")
                   # Replace with actual scheduling call:
-                  # schedule_chunking_task(media_id, content, title, chunk_options, db_instance.db_path)
+                  # schedule_chunking_task(media_id, content, title, chunk_options, db_instance.db_path_string)
              else:
                   logging.debug(f"No chunking options provided for media ID: {media_id}, skipping scheduling.")
              # Set chunking_status more accurately based on scheduling success?
@@ -1350,22 +1356,23 @@ def add_media_with_keywords(
 
 # Function to add a keyword
 def add_keyword(keyword: str, db_instance: Database) -> int:
-    db=db_instance
-    log_counter("add_keyword_attempt")
-    start_time = time.time()
-    if not keyword: # Checks for None or empty string
-        logging.warning("Attempted to add None or empty keyword.")
-        # Decide behaviour: raise error or return None?
-        # Let's raise for consistency with InputError expectation
-        raise InputError("Keyword cannot be None or empty.")
-    if not keyword.strip():
-        log_counter("add_keyword_error", labels={"error_type": "EmptyKeyword"})
-        duration = time.time() - start_time
-        log_histogram("add_keyword_duration", duration)
-        raise DatabaseError("Keyword cannot be empty")
+    # Use db_instance directly, no 'self'
+    # db=db_instance # Alias is optional
 
-    keyword = keyword.strip().lower()
-    with db.transaction() as conn:
+    # log_counter("add_keyword_attempt") # Keep metrics if they work
+    start_time = time.time()
+
+    if not keyword or not keyword.strip(): # Check for None, empty, or whitespace-only
+        logging.warning("Attempted to add None, empty, or whitespace-only keyword.")
+        # log_counter("add_keyword_error", labels={"error_type": "EmptyKeyword"}) # Log before raising
+        # duration = time.time() - start_time
+        # log_histogram("add_keyword_duration", duration)
+        raise InputError("Keyword cannot be None, empty, or just whitespace.") # Use InputError
+
+    keyword = keyword.strip().lower() # Strip *after* validation passes
+
+    # Use the transaction context from the passed db_instance
+    with db_instance.transaction() as conn:
         cursor = conn.cursor()
         try:
             # Insert into Keywords table
@@ -1373,34 +1380,45 @@ def add_keyword(keyword: str, db_instance: Database) -> int:
 
             # Get the keyword_id (whether it was just inserted or already existed)
             cursor.execute('SELECT id FROM Keywords WHERE keyword = ?', (keyword,))
-            keyword_id = cursor.fetchone()[0]
+            result = cursor.fetchone()
+            if not result:
+                # This case should ideally not happen with INSERT OR IGNORE if the keyword is valid
+                raise DatabaseError(f"Could not find or insert keyword '{keyword}'")
+            keyword_id = result[0]
 
-            # Check if the keyword exists in keyword_fts
-            cursor.execute('SELECT rowid FROM keyword_fts WHERE rowid = ?', (keyword_id,))
-            if not cursor.fetchone():
-                # If it doesn't exist in keyword_fts, insert it
-                cursor.execute('INSERT OR IGNORE INTO keyword_fts (rowid, keyword) VALUES (?, ?)', (keyword_id, keyword))
+            # --- EXPLICIT FTS INSERT (Requires FTS table exists in the DB schema) ---
+            # Use INSERT OR REPLACE which handles both cases (insert if not exist, update if exists)
+            cursor.execute('INSERT OR REPLACE INTO keyword_fts (rowid, keyword) VALUES (?, ?)', (keyword_id, keyword))
+            # --- END FTS INSERT ---
 
-            logging.info(f"Keyword '{keyword}' added or updated with ID: {keyword_id}")
-            conn.commit()
 
-            duration = time.time() - start_time
-            log_histogram("add_keyword_duration", duration)
-            log_counter("add_keyword_success")
+            logging.info(f"Keyword '{keyword}' added or found with ID: {keyword_id}. FTS updated.")
+            # conn.commit() # Commit handled by transaction context
+
+            # duration = time.time() - start_time # Keep metrics if working
+            # log_histogram("add_keyword_duration", duration)
+            # log_counter("add_keyword_success")
 
             return keyword_id
         except sqlite3.IntegrityError as e:
-            logging.error(f"Integrity error adding keyword: {e}")
-            duration = time.time() - start_time
-            log_histogram("add_keyword_duration", duration)
-            log_counter("add_keyword_error", labels={"error_type": "IntegrityError"})
-            raise DatabaseError(f"Integrity error adding keyword: {e}")
+            logging.error(f"Integrity error adding keyword '{keyword}': {e}", exc_info=True)
+            # duration = time.time() - start_time
+            # log_histogram("add_keyword_duration", duration)
+            # log_counter("add_keyword_error", labels={"error_type": "IntegrityError"})
+            raise DatabaseError(f"Integrity error adding keyword: {e}") from e
         except sqlite3.Error as e:
-            logging.error(f"Error adding keyword: {e}")
-            duration = time.time() - start_time
-            log_histogram("add_keyword_duration", duration)
-            log_counter("add_keyword_error", labels={"error_type": "SQLiteError"})
-            raise DatabaseError(f"Error adding keyword: {e}")
+            logging.error(f"Error adding keyword '{keyword}': {e}", exc_info=True)
+             # Check if the error is specifically "no such table: keyword_fts"
+            if "no such table: keyword_fts" in str(e):
+                 logging.error(f"Critical Error: keyword_fts table does not exist for DB '{db_instance.db_path_str}'. Schema setup failed? Error: {e}")
+                 # Re-raise potentially more specific error if needed
+            # duration = time.time() - start_time
+            # log_histogram("add_keyword_duration", duration)
+            # log_counter("add_keyword_error", labels={"error_type": "SQLiteError"})
+            raise DatabaseError(f"Error adding keyword: {e}") from e
+        except Exception as e: # Catch unexpected errors
+            logging.error(f"Unexpected error adding keyword '{keyword}': {e}", exc_info=True)
+            raise DatabaseError(f"Unexpected error adding keyword: {e}") from e
 
 
 
@@ -3312,7 +3330,7 @@ def create_document_version(
 
     # Prefer using the passed connection if available (for transactions)
     db_to_use = db_instance if db_instance else None # Primarily for logging path
-    log_path = db_to_use.db_path if db_to_use else "existing connection"
+    log_path = db_to_use.db_path_str if db_to_use else "existing connection"
     logging.debug(f"Creating document version for media_id={media_id} on DB: {log_path}")
 
     # Define the operation as a function to run within transaction or directly

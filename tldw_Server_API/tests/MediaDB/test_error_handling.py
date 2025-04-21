@@ -66,9 +66,13 @@ def test_search_media_db_with_invalid_page(db_instance: Database):
 # Add tests for TypeError if db_instance is missing if you make it mandatory.
 
 def test_add_keyword_with_invalid_data(db_instance: Database):
-    # Assuming add_keyword raises DatabaseError or ValueError for empty input now
-    with pytest.raises((DatabaseError, ValueError)): # Catch either, depending on implementation
-        add_keyword("", db_instance=db_instance) # Pass db_instance
+    # Test the specific case where keyword is None or empty (now raises InputError)
+    with pytest.raises(InputError, match="Keyword cannot be None or empty"):
+        add_keyword(None, db_instance=db_instance) # Test None
+    with pytest.raises(InputError, match="Keyword cannot be None or empty"):
+        add_keyword("", db_instance=db_instance) # Test empty string
+    with pytest.raises(InputError, match="Keyword cannot be empty after stripping whitespace"):
+        add_keyword("   ", db_instance=db_instance) # Test whitespace only
 
 def test_delete_nonexistent_keyword(db_instance: Database):
     # Assuming delete_keyword returns a dict or raises an error

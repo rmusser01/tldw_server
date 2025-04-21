@@ -1,4 +1,6 @@
 # tests/test_document_versioning.py
+import logging
+
 import pytest
 import sqlite3
 from typing import Dict, Any
@@ -21,32 +23,29 @@ except ImportError as e:
 # Use the fixture from conftest.py
 # No need for mock_db or mock_get_connection fixtures here anymore
 
+
 def insert_test_media(db: Database, media_id: int = 1, title: str = 'Test Doc') -> int:
     """Helper to insert a basic media record."""
-    # Minimal insert matching new Media schema requirements (url/hash needed)
-    # We might need to bypass normal insertion if testing versioning in isolation.
-    # For simplicity, assume URL/Hash aren't strictly checked *within* versioning tests,
-    # OR insert them properly. Let's insert properly.
     url = f"http://test.com/{media_id}"
     content = f"Initial content for {media_id}"
+    # Ensure hashlib is imported if not already
+    import hashlib
     content_hash = hashlib.sha256(content.encode()).hexdigest()
     try:
-        with db.transaction() as conn:
+        # Use the transaction context manager from the db instance
+        with db.transaction() as conn: # Make sure to use the passed 'db' instance
             conn.execute("""
                 INSERT OR IGNORE INTO Media (id, url, title, type, content, content_hash)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (media_id, url, title, 'document', content, content_hash))
+            # Logging here should use db.db_path_str if needed
+            # logging.debug(f"Inserted test media {media_id} into {db.db_path_str}") # Example
         return media_id
     except Exception as e:
-        print(f"Error inserting test media {media_id}: {e}")
-        # If media already exists, that's okay for these tests
-        return media_id
-    finally:
-        # Add initial version required by foreign key constraint if bypassed above
-        # Usually add_media_with_keywords handles this. If testing versioning functions
-        # directly, we might need to ensure version 1 exists.
-        # Let's assume create_document_version handles the first version correctly.
-        pass
+        # Use db.db_path_str in logging
+        logging.error(f"Error inserting test media {media_id} into {db.db_path_str}: {e}", exc_info=True)
+        # Re-raise or handle as needed for test clarity
+        raise # Re-raise the exception so the test knows something went wrong here
 
 # Import hashlib if needed for helper
 import hashlib
