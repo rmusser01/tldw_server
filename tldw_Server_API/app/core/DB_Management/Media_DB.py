@@ -544,9 +544,6 @@ class Database:
             except sqlite3.Error as idx_err:
                 logging.warning(...)
 
-            # --- REMOVE Check/Add keywords column in MediaModifications ---
-            # --- REMOVE Check/Add prompt/analysis_content columns in Media if decided ---
-
             # 5. Data Integrity Checks / Migrations (like ensuring initial versions)
             logging.debug(f"Performing data integrity checks for {self.db_path}...")
             # Modify this query to fetch necessary data *if* prompt/analysis were removed from Media
@@ -581,6 +578,7 @@ class Database:
         finally:
              if conn: conn.close() # Close the dedicated schema connection
 
+    # FIXME - Update to reflect new schema
     def diagnose_schema(self):
         """Logs the schema of key tables for diagnostic purposes."""
         logging.info(f"--- Diagnosing Schema for {self.db_path} ---")
@@ -1557,6 +1555,7 @@ def export_keywords_to_csv(db_instance: Database):
         logger.error(f"Error exporting keywords to CSV: {e}")
         return None, f"Error exporting keywords: {e}"
 
+# FIXME - REWRITE TO NOT USE MEDIAMODFIICATIONS
 def fetch_keywords_for_media(media_id, db_instance: Database):
     try:
         # First check if the keywords column exists in MediaModifications
@@ -2113,6 +2112,7 @@ def schedule_chunking(db_instance: Database, media_id: int, content: str, media_
 #
 # Function to fetch/update media content
 
+# FIXME - REWRITE TO NOT USE MEDIAMODIFICATIONS
 def update_media_content(selected_item, item_mapping, content_input, prompt_input, analysis_content, db_instance: Database):
     db=db_instance
     try:
@@ -2236,6 +2236,7 @@ def fetch_items_by_content(search_query: str, db_instance: Database):
         raise DatabaseError(f"Error fetching items by content: {e}")
 
 
+# FIXME REWRITE THIS FUNCTION
 def fetch_item_details_single(media_id: int, db_instance: Database):
     db=db_instance
     try:
@@ -2596,6 +2597,7 @@ def get_trashed_items(db_instance: Database) -> List[Dict]:
         return [{'id': row[0], 'title': row[1], 'trash_date': row[2]} for row in cursor.fetchall()]
 
 
+# FIXME - REWRITE TO NOT USE MEDIAMODIFICATIOSN
 def permanently_delete_item(media_id: int, db_instance: Database) -> None:
     db=db_instance
     with db.get_connection() as conn:
@@ -3169,7 +3171,7 @@ def get_full_media_details2(media_id: int, db_instance: Database = None): # Use 
         return None
 
 
-# FIXME
+# FIXME - REWRITE TO REFLECT NEW SCHEMA
 def create_document_version(
         media_id: int,
         content: str,

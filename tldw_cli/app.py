@@ -702,17 +702,18 @@ class TldwCli(App):
 
             # --- Get API URL from Config ---
             api_endpoints = self.app_config.get("api_endpoints", {})
-            api_url = self._get_api_url(selected_provider, api_endpoints)
+            api_url = self._get_api_name(selected_provider, api_endpoints)
 
             # --- Prepare API Arguments ---
             api_args = {
-                "api_key": None, "input_data": message, "model": selected_model,
+                "api_name": api_url, "api_key": None, "input_data": message, "model": selected_model,
                 "system_message": system_prompt, "temp": temperature, "streaming": False,
                 "topp": top_p, "top_p": top_p, "maxp": top_p, "topk": top_k, "minp": min_p,
-                "api_url": api_url,
+
             }
+
             # Use a distinct name like filtered_api_call_args
-            filtered_api_call_args = {k: v for k, v in api_args.items() if v is not None or k in ["api_key", "system_message", "api_url"]}
+            filtered_api_call_args = {k: v for k, v in api_args.items() if v is not None or k in ["api_key", "system_message", "api_name"]}
             loggable_args = {k: v for k, v in filtered_api_call_args.items() if k != 'api_key'}
             func_name = getattr(api_function, '__name__', 'UNKNOWN_FUNCTION')
             logging.debug(f"Calling {func_name} with args: {loggable_args}")
@@ -757,7 +758,7 @@ class TldwCli(App):
             return default
 
     # --- Helper method for getting API URL ---
-    def _get_api_url(self, provider: str, endpoints: dict) -> Union[str, None]:
+    def _get_api_name(self, provider: str, endpoints: dict) -> Union[str, None]:
         provider_key_map = {
             "Ollama": "ollama_url", "Llama.cpp": "llama_cpp_url", "Oobabooga": "oobabooga_url",
             "KoboldCpp": "kobold_url", "vLLM": "vllm_url", "Custom": "custom_openai_url",

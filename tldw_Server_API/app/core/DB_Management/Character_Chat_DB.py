@@ -38,7 +38,7 @@ print(f"Chat Database path: {chat_DB_PATH}")
 # Functions
 
 # FIXME - Setup properly and test/add documentation for its existence...
-def initialize_database():
+def initialize_character_chat_database():
     """Initialize the SQLite database with required tables and FTS5 virtual tables."""
     conn = None
     try:
@@ -207,7 +207,7 @@ def initialize_database():
 # Call initialize_database() at the start of your application
 def setup_chat_database():
     try:
-        initialize_database()
+        initialize_character_chat_database()
     except Exception as e:
         logging.critical(f"Failed to initialize database: {e}")
         sys.exit(1)

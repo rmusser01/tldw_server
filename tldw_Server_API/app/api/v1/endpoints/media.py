@@ -1738,9 +1738,9 @@ async def add_media(
 ####################################################################################
 
 
-######################## Video Ingestion Endpoint ###################################
+######################## Video Processing Endpoint ###################################
 #
-# Video Ingestion Endpoint
+# Video Processing Endpoint
 # Endpoints:
 # POST /api/v1/process-video
 
@@ -2124,11 +2124,11 @@ async def process_videos_endpoint(
         return JSONResponse(status_code=final_status_code, content=batch_result)
 
 #
-# End of video ingestion
+# End of Video Processing
 ####################################################################################
 
 
-######################## Audio Ingestion Endpoint ###################################
+######################## Audio Processing Endpoint ###################################
 # Endpoints:
 #   /process-audio
 
@@ -2477,7 +2477,7 @@ async def process_audios_endpoint(
 ##############################################################################################
 
 
-######################## Ebook Ingestion Endpoint ###################################
+######################## Ebook Processing Endpoint ###################################
 
 # ─────────────────────── Form Model ─────────────────────────
 class ProcessEbooksForm(AddMediaForm):
@@ -2942,7 +2942,7 @@ async def process_ebooks_endpoint(
 # End of Ebook Processing Endpoint
 #################################################################################################
 
-######################## Document Ingestion Endpoint ###################################
+######################## Document Processing Endpoint ###################################
 
 # ─────────────────────── Form Model ─────────────────────────
 class ProcessDocumentsForm(AddMediaForm):
@@ -3354,7 +3354,7 @@ async def process_documents_endpoint(
 ############################################################################################
 
 
-######################## PDF Ingestion Endpoint ###################################
+######################## PDF Processing Endpoint ###################################
 # Endpoints:
 #
 
@@ -3780,11 +3780,11 @@ async def process_pdfs_endpoint(
     return JSONResponse(status_code=final_status_code, content=batch_result)
 
 #
-# End of PDF Ingestion
+# End of PDF Processing Endpoint
 ############################################################################################
 
 
-######################## XML Ingestion Endpoint ###################################
+######################## XML Processing Endpoint ###################################
 # Endpoints:
 # FIXME
 
