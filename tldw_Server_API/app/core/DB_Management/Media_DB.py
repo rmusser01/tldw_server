@@ -1545,44 +1545,57 @@ def update_keywords_for_media(media_id: int, keywords: List[str], db_instance: D
     """Update keywords with validation and error handling"""
     try:
         valid_keywords = [k.strip().lower() for k in keywords if k.strip()]
-        if not valid_keywords:
-            return
 
         with db_instance.transaction() as conn:
             cursor = conn.cursor()
 
             # Clear existing keywords
+            logging.debug(f"Clearing existing keywords for media_id {media_id}")
             cursor.execute('DELETE FROM MediaKeywords WHERE media_id = ?', (media_id,))
 
-            # Insert new keywords
-            keyword_ids = []
-            for keyword in set(valid_keywords):
-                # Insert or ignore existing keywords
-                cursor.execute('''
-                    INSERT OR IGNORE INTO Keywords (keyword) VALUES (?)
-                ''', (keyword,))
+            # --- Process only if there are valid keywords to add ---
+            if valid_keywords:
+                # Insert new keywords
+                keyword_ids = []
+                unique_valid_keywords = set(valid_keywords)  # Use set for efficiency
+                logging.debug(f"Processing {len(unique_valid_keywords)} unique valid keywords for media_id {media_id}")
+                for keyword in unique_valid_keywords:
+                    # Insert or ignore existing keywords
+                    cursor.execute('INSERT OR IGNORE INTO Keywords (keyword) VALUES (?)', (keyword,))
 
-                # Get keyword ID
-                cursor.execute('''
-                    SELECT id FROM Keywords WHERE keyword = ?
-                ''', (keyword,))
-                result = cursor.fetchone()
-                if not result:
-                    raise ValueError(f"Keyword '{keyword}' not found after insertion")
-                keyword_ids.append(result[0])
+                    # Get keyword ID
+                    cursor.execute('SELECT id FROM Keywords WHERE keyword = ?', (keyword,))
+                    result = cursor.fetchone()
+                    if not result:
+                        # This indicates an issue, maybe log/raise more specifically
+                        logging.error(f"Keyword '{keyword}' not found after INSERT OR IGNORE for media_id {media_id}")
+                        raise DatabaseError(f"Keyword '{keyword}' failed to insert/retrieve during update")
+                    keyword_ids.append(result[0])
 
-            # Insert relationships
-            cursor.executemany('''
-                INSERT INTO MediaKeywords (media_id, keyword_id)
-                VALUES (?, ?)
-            ''', [(media_id, kid) for kid in keyword_ids])
+                # Insert relationships
+                if keyword_ids:
+                    logging.debug(f"Inserting {len(keyword_ids)} keyword links for media_id {media_id}")
+                    cursor.executemany('INSERT INTO MediaKeywords (media_id, keyword_id) VALUES (?, ?)',
+                                       [(media_id, kid) for kid in keyword_ids])
+                else:
+                    logging.debug(f"No valid keyword IDs obtained to link for media_id {media_id}")
+            else:
+                logging.debug(
+                    f"No valid keywords provided to update for media_id {media_id}, only clearing was performed.")
+
+            # --- ADD EXPLICIT RETURN ON SUCCESS ---
+        logging.info(f"Keywords successfully updated for media_id {media_id}")
+        return True  # Indicate success explicitly
 
     except sqlite3.Error as e:
-        logging.error(f"Database error updating keywords: {e}")
-        raise DatabaseError(f"Keyword update failed: {e}")
-    except ValueError as e:
-        logging.error(f"Keyword validation error: {e}")
-        raise DatabaseError(str(e))
+        logging.error(f"Database error updating keywords for media_id {media_id}: {e}", exc_info=True)
+        raise DatabaseError(f"Keyword update failed: {e}") from e
+    except ValueError as e:  # Catch potential errors from keyword processing logic
+        logging.error(f"Value error updating keywords for media_id {media_id}: {e}", exc_info=True)
+        raise DatabaseError(str(e)) from e
+    except Exception as e:  # Catch any other unexpected errors
+        logging.error(f"Unexpected error updating keywords for media_id {media_id}: {e}", exc_info=True)
+        raise DatabaseError(f"An unexpected error occurred during keyword update: {e}") from e
 
 #
 # End of Keyword-related functions

@@ -57,8 +57,8 @@ def test_delete_keyword_success(memory_db_instance: Database):
     result = delete_keyword(kw, db_instance=memory_db_instance)
 
     # Adjust assertion based on actual return value (e.g., dict or bool)
-    if isinstance(result, Dict):
-        assert "deleted successfully" in result.get('success', '')
+    if isinstance(result, str):
+        assert "deleted successfully" in result
     else:
         assert result is True # Or whatever success looks like
 

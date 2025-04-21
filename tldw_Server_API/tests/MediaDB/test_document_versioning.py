@@ -101,12 +101,15 @@ def test_create_subsequent_version(memory_db_instance: Database):
     # Verify DB state for version 2
     with db.transaction() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT content, prompt FROM DocumentVersions WHERE media_id = ? AND version_number = ?", (media_id, 2))
+        # Add analysis_content to the SELECT
+        cursor.execute(
+            "SELECT content, prompt, analysis_content FROM DocumentVersions WHERE media_id = ? AND version_number = ?",
+            (media_id, 2))
         row = cursor.fetchone()
         assert row is not None
         assert row['content'] == content2
         assert row['prompt'] == "P2"
-        assert row['analysis_content'] is None # Check analysis defaults to NULL
+        assert row['analysis_content'] is None  # Now this key exists
 
 # Add test for creating version with non-existent media ID (should fail due to FOREIGN KEY)
 # def test_create_version_invalid_media_id(memory_db_instance: Database):
@@ -173,12 +176,12 @@ def test_get_all_document_versions(memory_db_instance: Database):
     create_document_version(media_id=media_id, content="V1", prompt="P1", analysis_content="A1", db_instance=db)
     create_document_version(media_id=media_id, content="V2", prompt="P2", analysis_content="A2", db_instance=db)
 
-    results = get_all_document_versions(media_id=media_id, db_instance=db)
+    results = get_all_document_versions(media_id=media_id, include_content=True, db_instance=db)
 
     assert len(results) == 2
     # Results are ordered DESC by version_number
     assert results[0]['version_number'] == 2
-    assert results[0]['content'] == "V2"
+    assert results[0]['content'] == "V2"  # This assertion should now pass
     assert results[0]['prompt'] == "P2"
     assert results[0]['analysis_content'] == "A2"
     assert results[1]['version_number'] == 1
