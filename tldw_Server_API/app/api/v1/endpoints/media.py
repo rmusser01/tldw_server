@@ -2869,7 +2869,7 @@ async def process_ebooks_endpoint(
             if form_data.urls:
                 logger.info(f"Attempting to download {len(form_data.urls)} URLs asynchronously...")
                 download_tasks = [
-                    _download_url_async(client, url, temp_dir, expected_extension=".epub")
+                    _download_url_async(client, url, temp_dir, allowed_extensions = {".epub", ".pdf", ".mobi"})
                     for url in form_data.urls
                 ]
                 # Associate tasks with original URLs for error reporting
@@ -4451,7 +4451,6 @@ async def _download_url_async(
         async with client.stream("GET", url, follow_redirects=True, timeout=60.0) as response:
             response.raise_for_status()  # Raise HTTPStatusError for 4xx/5xx
 
-            # --- MODIFIED: Extension Check ---
             if check_extension and allowed_extensions:
                 # Get the actual suffix from the final target path
                 actual_suffix = target_path.suffix.lower()  # Use the generated path's suffix
@@ -4466,7 +4465,6 @@ async def _download_url_async(
                 if not actual_suffix or actual_suffix not in allowed_extensions:
                     raise ValueError(
                         f"Downloaded file '{target_path.name}' from {url} does not have an allowed extension (allowed: {', '.join(allowed_extensions)})")
-            # --- End MODIFICATION ---
 
             async with aiofiles.open(target_path, 'wb') as f:
                 async for chunk in response.aiter_bytes(chunk_size=8192):
