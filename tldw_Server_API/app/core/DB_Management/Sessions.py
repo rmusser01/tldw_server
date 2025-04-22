@@ -1,9 +1,23 @@
-# Example: Place this in a suitable location (e.g., app/db/session.py or app/dependencies.py)
+# Sessions.py
+#
+# Description: This file contains the FastAPI dependency for managing database sessions and user authentication.
+#
+# Imports
+#
+# 3rd-Party Libraries
 from fastapi import Depends, HTTPException, Header, status
-#from app.core.security import get_user_from_token  # Hypothetical: Function to validate token and get user
-#from app.db.managers import get_db_manager_for_user  # Hypothetical: Function to get the DB manager instance
+#
+# Local Imports
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_current_user
+#
+########################################################################################################################
+#
+# Functions:
+
+
 
 def get_user_from_token(token: str):
+    get_current_user(token)  # Placeholder for actual token validation logic
     pass
 
 def get_db_manager_for_user(user_id: int):
@@ -38,3 +52,6 @@ async def get_current_db_manager(token: str = Header(...)):
 
     return db_manager  # Return the manager object
 
+#
+# # End of Sessions.py
+########################################################################################################################

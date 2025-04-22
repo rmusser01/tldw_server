@@ -4,22 +4,27 @@
 # Imports
 import os
 from pathlib import Path
+from typing import Optional
+
 #
 # 3rd-party Libraries
 from fastapi import Depends, HTTPException, status, Header
-
-from tldw_Server_API.app.api.v1.DB_Deps.DB_Deps import EXPECTED_API_KEY
 #
 # Local Imports
+# DB
 from tldw_Server_API.app.core.DB_Management.Media_DB import Database
+from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_by_username
+# Security
+from tldw_Server_API.app.core.Security.Security import decode_access_token
+# Utils
 from tldw_Server_API.app.core.Utils.Utils import logging, load_and_log_configs
-
+# API
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import EXPECTED_API_KEY
+from tldw_Server_API.app.api.v1.API_Deps.v1_endpoint_deps import oauth2_scheme
 #
 #######################################################################################################################
 #
 # Functions:
-
-# FIXME - THIS IS PLACEHOLDER CODE, NOT CONFIRMED OR FULLY EVALUATED
 
 USER_DB_BASE_PATH = Path("./user_databases")
 # FIXME
@@ -46,24 +51,61 @@ async def verify_api_key(api_key: str = Header(..., alias="X-API-KEY")): # Use a
 
 
 # Placeholder function to verify token and get user identifier
-async def verify_token_and_get_user(token: str = Header(...)) -> str:
-    # In a real app, validate the token and return a unique user ID
-    # For now, we'll use a dummy check
-    if MULTIPLAYER == True:
-        # Perform token verification logic here
+async def verify_token_and_get_user(token: Optional[str] = Header(None)) -> str:
+    # Check if multiplayer is off AND token is missing
+    if not MULTIPLAYER and token is None:
+        # FIXME - integrate with config/install for allowing a custom user_id when set to singleuser mode
+        #user_id = f"{SingleUser}"
+        user_id = "SingleUser"  # Default user ID for single-user mode
+        logging.info(f"Single-user mode, no token provided. Using default user_id: {user_id}")
+        return user_id
+    # Existing multiplayer or single-user-with-token logic
+    elif MULTIPLAYER:
         if not token or not token.startswith("valid-token-"):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token")
-        # If the prefix matches, it assumes the part after the last hyphen (-) is the user_id(but only before the next hyphen).
-        user_id = token.split("-")[-1]  # e.g., "user1" from "valid-token-user1"
-        pass
-
-    else:
-        # We assume a single user installation/token
+             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token for multiplayer mode")
+        user_id = token.split("-")[-1]
+    elif not MULTIPLAYER and token is not None:
+        # Single user mode but a token WAS provided (maybe for future use?)
+        # You could choose to ignore it or validate it if needed later.
+        # For now, let's assume we still use SingleUser for the DB path
         user_id = "SingleUser"
+        logging.info(f"Single-user mode, token provided but ignored for DB path. Using default user_id: {user_id}")
+    else:
+        # Should not happen if logic above is correct
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected state in token verification")
+
     if not user_id:
-         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not extract user ID from token")
-    logging.info(f"Token verified for user: {user_id}")
+         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not determine user ID") # Should be caught earlier
+
+    logging.info(f"Token logic determined user: {user_id}")
     return user_id
+
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    global MULTIPLAYER0
+    if MULTIPLAYER == "True":
+        payload = decode_access_token(token)
+        if payload is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    else:
+        payload = 'SingleUserMode'
+
+    username: str = payload.get("sub")  # "sub" is subject
+    if username is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    # fetch user from DB
+    user_dict = get_user_by_username(username)
+    if not user_dict:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    # optionally check if is_active, etc.
+    return user_dict
+
 
 # Dependency to get the correct DB instance for the user
 async def get_db_for_user(user_id: str = Depends(verify_token_and_get_user)) -> Database:
@@ -83,7 +125,7 @@ async def get_db_for_user(user_id: str = Depends(verify_token_and_get_user)) -> 
         # The Database class likely handles connection pooling or creation
         db = Database(db_path=str(db_path))
         # You might need to explicitly initialize the schema if the DB is new
-        # db.initialize_schema_if_needed() # Add a method like this to your Database class
+        #db.initialize_schema_if_needed() # Add a method like this to your Database class
         return db
     except OSError as e:
         logging.error(f"Failed to create directory or access DB for user '{user_id}' at {USER_DB_BASE_PATH / user_id}: {e}", exc_info=True)

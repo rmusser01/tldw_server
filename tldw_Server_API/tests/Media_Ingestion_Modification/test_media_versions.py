@@ -10,8 +10,6 @@ from fastapi.testclient import TestClient
 #
 # Local Imports
 from tldw_Server_API.app.main import app
-from tldw_Server_API.app.core.DB_Management.DB_Dependency import get_db_manager
-from tldw_Server_API.app.core.DB_Management.Media_DB import Database, create_tables
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     create_document_version, get_document_version, get_all_document_versions,
     delete_document_version, rollback_to_version

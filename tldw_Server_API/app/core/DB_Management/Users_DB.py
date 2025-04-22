@@ -11,11 +11,9 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, HTTPException
 #
 # Local Imports
-from tldw_Server_API.app.core.DB_Management.DB_Manager import (
-    db,
-)
+
 from tldw_Server_API.app.core.Security.Security import decode_access_token
-from tldw_Server_API.app.core.DB_Management.DB_Manager import Database  # or your custom class
+from tldw_Server_API.app.core.DB_Management.DB_Manager import Database # or your custom class
 #
 #######################################################################################################################
 #

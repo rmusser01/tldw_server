@@ -1,31 +1,32 @@
-
-
-
-
-
-
-
-
-#OAuth2PasswordBearer Security Dependency
+# Server_API/app/api/v1/endpoints/auth.py
+# Description: This code provides a FastAPI endpoint for user authentication using OAuth2 with password flow.
+#
+# Imports
+from typing import Any
+#
+# # 3rd-party Libraries
+from fastapi import APIRouter, Depends, HTTPException, status, Form
+from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.security import OAuth2PasswordBearer
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+from tldw_Server_API.app.api.v1.schemas.auth import Token
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_current_user
+from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_by_username
+from tldw_Server_API.app.core.Security.Security import verify_password, create_access_token
+
+#
+# Local Imports
+#
+#######################################################################################################################
+#
+# Functions:
+router = APIRouter()
 
 
 # FIXME - placeholder for actual logic
-# more OAuth2 stuff
+
+
 # /Server_API/app/api/v1/endpoints/auth.py
-
-from fastapi import APIRouter, Depends, HTTPException, status, Form
-from fastapi.security import OAuth2PasswordRequestForm
-from typing import Any
-
-from app.core.security import verify_password, create_access_token
-from app.core.DB_Management.DB_Manager import get_user_by_username
-from ...schemas.auth import Token
-
-router = APIRouter()
-
 @router.post("/login", response_model=Token)
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
     """
@@ -61,4 +62,6 @@ def read_protected_route(current_user: dict = Depends(get_current_user)):
 # If the token is valid, current_user is populated with the user record from DB.
 
 
-
+#
+# # End of auth.py
+#######################################################################################################################

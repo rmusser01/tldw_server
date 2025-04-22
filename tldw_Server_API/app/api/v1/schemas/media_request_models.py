@@ -12,7 +12,6 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, validator, computed_field
 #
 # Local Imports
-from tldw_Server_API.app.core.DB_Management.DB_Manager import fetch_item_details_single
 #
 #######################################################################################################################
 #

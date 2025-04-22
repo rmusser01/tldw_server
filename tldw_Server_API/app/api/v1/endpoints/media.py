@@ -48,19 +48,17 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.responses import JSONResponse
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import verify_api_key
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import verify_api_key, get_db_for_user
 #
 # Local Imports
-#
 # DB Mgmt
-from tldw_Server_API.app.core.DB_Management.DB_Dependency import get_db_manager
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     search_media_db,
     get_paginated_files,
-    fetch_keywords_for_media, get_full_media_details2, create_document_version, get_all_document_versions, get_document_version, rollback_to_version, delete_document_version, db,
+    fetch_keywords_for_media, get_full_media_details2, create_document_version, get_all_document_versions, get_document_version, rollback_to_version, delete_document_version,
     fetch_item_details, add_media_with_keywords, check_should_process_by_url,
 )
-from tldw_Server_API.app.core.DB_Management.Media_DB import DatabaseError, InputError
+from tldw_Server_API.app.core.DB_Management.Media_DB import DatabaseError, InputError, Database
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
 #
 # Media Processing
@@ -78,7 +76,7 @@ from tldw_Server_API.app.core.Utils.Utils import logging as logger
 # Web Scraping
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article, scrape_from_sitemap, \
     scrape_by_url_level, recursive_scrape
-from tldw_Server_API.app.api.v1.schemas.media_models import MediaUpdateRequest, VersionCreateRequest, \
+from tldw_Server_API.app.api.v1.schemas.media_request_models import MediaUpdateRequest, VersionCreateRequest, \
     VersionRollbackRequest, \
     IngestWebContentRequest, ScrapeMethod, MediaType, AddMediaForm, ChunkMethod, PdfEngine, ProcessVideosForm, \
     ProcessAudiosForm
@@ -195,7 +193,7 @@ async def get_all_media(
     request: Request,
     page: int = Query(1, ge=1, description="Page number"),
     results_per_page: int = Query(10, ge=1, le=100, description="Results per page"),
-    db=Depends(get_db_manager)
+    db=Depends(get_db_for_user)
 ):
     """
     Retrieve a paginated listing of all media items.
@@ -204,7 +202,7 @@ async def get_all_media(
     try:
         # Reuse your existing "get_paginated_files(page, results_per_page)"
         # which returns (results, total_pages, current_page)
-        results, total_pages, current_page = get_paginated_files(page, results_per_page, db)
+        results, total_pages, current_page = get_paginated_files(db_instance=db, page=page, results_per_page=results_per_page)
 
         return {
             "items": [
@@ -235,7 +233,7 @@ async def get_all_media(
 )
 def get_media_item(
         media_id: int,
-        db=Depends(get_db_manager)
+        db=Depends(get_db_for_user)
 ):
     """
     **Retrieve Media Item by ID**
@@ -362,7 +360,7 @@ def get_media_item(
 async def create_version(
     media_id: int,
     request: VersionCreateRequest,
-    db=Depends(get_db_manager)
+    db=Depends(get_db_for_user)
 ):
     """
     **Create a New Document Version**
@@ -401,7 +399,7 @@ async def list_versions(
     include_content: bool = False,
     limit: int = 10,
     offset: int = 0,
-    db=Depends(get_db_manager)
+    db=Depends(get_db_for_user)
 ):
     """
     **List Versions for a Media Item**
@@ -431,7 +429,7 @@ async def get_version(
     media_id: int,
     version_number: int,
     include_content: bool = True,
-    db=Depends(get_db_manager)
+    db=Depends(get_db_for_user)
 ):
     """
     **Get Specific Version Details**
@@ -459,7 +457,7 @@ async def get_version(
 async def delete_version(
     media_id: int,
     version_number: int,
-    db=Depends(get_db_manager)
+    db=Depends(get_db_for_user)
 ):
     """
     **Delete a Specific Version**
@@ -482,7 +480,7 @@ async def delete_version(
 async def rollback_version(
         media_id: int,
         request: VersionRollbackRequest,
-        db=Depends(get_db_manager)
+        db=Depends(get_db_for_user)
 ):
     """
     **Rollback to a Previous Version**
@@ -526,7 +524,7 @@ async def rollback_version(
 async def update_media_item(
     media_id: int,
     payload: MediaUpdateRequest,
-    db=Depends(get_db_manager) # Use your actual dependency getter
+    db=Depends(get_db_for_user)
 ):
     """
     **Update Media Item Details**
@@ -671,7 +669,7 @@ async def search_media(
         keywords: Optional[str] = Query(None, description="Comma-separated keywords to filter by"),
         page: int = Query(1, ge=1, description="Page number"),
         results_per_page: int = Query(10, ge=1, le=100, description="Results per page"),
-        db=Depends(get_db_manager)
+        db=Depends(get_db_for_user)
 ):
     """
     Search media items by text query and/or keywords.
@@ -1660,7 +1658,7 @@ async def add_media(
     # --- Keep Token and Files separate ---
     token: str = Header(..., description="Authentication token"), # TODO: Implement auth check
     files: Optional[List[UploadFile]] = File(None, description="List of files to upload"),
-    db = Depends(get_db_manager) # Add DB dependency if needed
+    db = Depends(get_db_for_user)
 ):
     """
     **Add Media Endpoint**
@@ -1881,6 +1879,9 @@ def get_process_videos_form(
     custom_chapter_pattern: Optional[str] = Form(None, description="Regex pattern for custom chapter splitting"),
     perform_rolling_summarization: bool = Form(False, description="Perform rolling summarization"),
     summarize_recursively: bool = Form(False, description="Perform recursive summarization"),
+    # --- Keep Token and Files separate ---
+    token: str = Header(..., description="Authentication token"),  # TODO: Implement auth check
+    db=Depends(get_db_for_user)
 ) -> ProcessVideosForm:
     """
     Dependency function to parse form data and validate it
@@ -1967,9 +1968,13 @@ def get_process_videos_form(
 async def process_videos_endpoint(
     # --- Dependencies ---
     background_tasks: BackgroundTasks,
-    # Use the dependency function to get validated form data
+    # 1. Auth + UserID Determined through `get_db_by_user`
+    # Add check here for granular permissions if needed
+    # 2. DB Dependency
+    db: Database = Depends(get_db_for_user),
+    # 3. Form Data Dependency: Parses form fields into the Pydantic model.
     form_data: ProcessVideosForm = Depends(get_process_videos_form),
-    # Keep File parameter separate
+    # 4. File Uploads
     files: Optional[List[UploadFile]] = File(None, description="Video file uploads"),
     # user_info: dict = Depends(verify_token), # Optional Auth
 ):
@@ -2352,11 +2357,14 @@ def get_process_audios_form(
 )
 async def process_audios_endpoint(
     background_tasks: BackgroundTasks,
-    # --- Use Dependency Injection for Form Data ---
+    # 1. Auth + UserID Determined through `get_db_by_user`
+    # token: str = Header(None), # Use Header(None) for optional
+    # 2. DB Dependency
+    db: Database = Depends(get_db_for_user),
+    # 3. Use Dependency Injection for Form Data
     form_data: ProcessAudiosForm = Depends(get_process_audios_form),
-    # --- File uploads remain separate ---
+    # 4. File uploads remain separate
     files: Optional[List[UploadFile]] = File(None, description="Audio file uploads"),
-    # Optional Auth: token: str = Header(None), # Use Header(None) for optional
 ):
     """
     **Process Audio Endpoint (Refactored)**
@@ -2782,10 +2790,14 @@ def get_process_ebooks_form(
 )
 async def process_ebooks_endpoint(
     background_tasks: BackgroundTasks,
+    # 1. Auth + UserID Determined through `get_db_by_user`
+    # token: str = Header(None), # Use Header(None) for optional
+    # 2. DB Dependency
+    db: Database = Depends(get_db_for_user),
+    # 3. Use Dependency Injection for Form Data
     form_data: ProcessEbooksForm = Depends(get_process_ebooks_form), # Use the dependency
+    # 4. File uploads remain separate
     files: Optional[List[UploadFile]] = File(None, description="EPUB file uploads (.epub)"),
-    token: str = Header(None), # Auth placeholder - Make optional or required as needed
-    # db_manager=Depends(get_db_manager) # No DB needed
 ):
     """
     **Process Ebooks Endpoint (No Persistence)**
@@ -3177,9 +3189,14 @@ def get_process_documents_form(
 )
 async def process_documents_endpoint(
     # background_tasks: BackgroundTasks, # Remove if unused
+    # 1. Auth + UserID Determined through `get_db_by_user`
+    # token: str = Header(None), # Use Header(None) for optional
+    # 2. DB Dependency
+    db: Database = Depends(get_db_for_user),
+    # 3. Form Data Dependency
     form_data: ProcessDocumentsForm = Depends(get_process_documents_form), # Use the dependency
+    # 4. File Upload
     files: Optional[List[UploadFile]] = File(None, description="Document file uploads (.txt, .md, .docx, .rtf, .html, .xml)"),
-    # token: str = Header(None), # Auth placeholder - Make optional or required as needed
 ):
     """
     **Process Documents Endpoint (No Persistence)**
@@ -3651,10 +3668,12 @@ def normalise_pdf_result(item: dict, original_ref: str) -> dict:
 )
 async def process_pdfs_endpoint(
     background_tasks: BackgroundTasks,
+    # 1. Auth + UserID Determined through `get_db_by_user`
+    # token: str = Header(None), # Use Header(None) for optional
+    # 2. DB Dependency
+    db: Database = Depends(get_db_for_user),
     form_data: ProcessPDFsForm = Depends(get_process_pdfs_form),
     files: Optional[List[UploadFile]] = File(None,  description="PDF uploads"),
-    token: str = Header(...), # Auth
-    # db_manager=Depends(get_db_manager) # No DB needed
 ):
     """Process PDFs (No Persistence)"""
     logger.info("Request received for /process-pdfs (no persistence).")
@@ -3981,7 +4000,7 @@ async def ingest_web_content(
     request: IngestWebContentRequest,
     background_tasks: BackgroundTasks,
     token: str = Header(..., description="Authentication token"),
-    db=Depends(get_db_manager),
+    db=Depends(get_db_for_user),
 ):
     """
     A single endpoint that supports multiple advanced scraping methods:
@@ -4309,7 +4328,13 @@ class WebScrapingRequest(BaseModel):
     mode: str = "persist"  # or "ephemeral"
 
 @router.post("/process-web-scraping")
-async def process_web_scraping_endpoint(payload: WebScrapingRequest):
+async def process_web_scraping_endpoint(
+        payload: WebScrapingRequest,
+        # 1. Auth + UserID Determined through `get_db_by_user`
+        # token: str = Header(None), # Use Header(None) for optional
+        # 2. DB Dependency
+        db: Database = Depends(get_db_for_user),
+    ):
     """
     Ingest / scrape data from websites or sitemaps, optionally summarize,
     then either store ephemeral or persist in DB.
@@ -4347,8 +4372,13 @@ async def process_web_scraping_endpoint(payload: WebScrapingRequest):
 # Endpoints:
 #     GET /api/v1/media/debug/schema
 # Debugging and Diagnostics
-@router.get("/debug/schema")
-async def debug_schema():
+@router.get("/debug/schema",)
+async def debug_schema(
+        # 1. Auth + UserID Determined through `get_db_by_user`
+        # token: str = Header(None), # Use Header(None) for optional
+        # 2. DB Dependency
+        db: Database = Depends(get_db_for_user),
+    ):
     """Diagnostic endpoint to check database schema."""
     try:
         schema_info = {}

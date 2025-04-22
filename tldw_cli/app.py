@@ -312,7 +312,7 @@ def create_settings_sidebar(id_prefix: str, config: dict) -> ComposeResult:
 
 # --- Main App ---
 class TldwCli(App):
-    CSS_PATH = "tldw_cli.css"
+    CSS_PATH = "CSS/tldw_cli.css"
     BINDINGS = [ Binding("ctrl+q", "quit", "Quit App", show=True) ]
 
     # Define reactive var at CLASS level

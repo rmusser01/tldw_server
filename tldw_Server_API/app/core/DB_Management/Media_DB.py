@@ -380,7 +380,6 @@ class Database:
         # Similar for keywords if needed, though less common
         'CREATE VIRTUAL TABLE IF NOT EXISTS keyword_fts USING fts5(keyword, content=\'Keywords\', content_rowid=\'id\')'
     ]
-
     def __init__(self, db_path: str):
         """
         Initializes the Database object for a specific file path.
@@ -588,14 +587,14 @@ class Database:
                         processed_chunks += len(chunk_data)
                         logging.debug(
                             f"Inserted batch {i // batch_size + 1}, total processed: {processed_chunks}/{total_chunks} chunks for media_id {media_id}")
-                        # log_counter("process_chunks_batch_success", labels={"media_id": media_id}) # Placeholder
+                        log_counter("process_chunks_batch_success", labels={"media_id": media_id}) # Placeholder
 
                     except (DatabaseError, sqlite3.Error, TypeError) as batch_err:
                         # Catch specific errors from execute_many or sqlite3
                         logging.error(
                             f"Error inserting chunk batch starting at index {i} for media_id {media_id}: {batch_err}",
                             exc_info=True)
-                        # log_counter("process_chunks_batch_error", labels={"media_id": media_id, "error_type": type(batch_err).__name__}) # Placeholder
+                        log_counter("process_chunks_batch_error", labels={"media_id": media_id, "error_type": type(batch_err).__name__}) # Placeholder
                         errors_in_transaction = True
                         # Rollback will happen automatically when the exception leaves the 'with' block
                         raise DatabaseError(
@@ -603,17 +602,17 @@ class Database:
 
             # If the loop completes without error, the transaction commits automatically here.
             logging.info(f"Successfully finished processing {processed_chunks} chunks for media_id {media_id}")
-            # log_counter("process_chunks_success", labels={"media_id": media_id}) # Placeholder
+            log_counter("process_chunks_success", labels={"media_id": media_id}) # Placeholder
 
         except DatabaseError as e:
             # Catch errors from transaction management or re-raised batch errors
             logging.error(f"Database transaction error during chunk processing for media_id {media_id}: {e}",
                           exc_info=True)
-            # log_counter("process_chunks_error", labels={"media_id": media_id, "error_type": "DatabaseError"}) # Placeholder
+            log_counter("process_chunks_error", labels={"media_id": media_id, "error_type": "DatabaseError"}) # Placeholder
             # Transaction already rolled back
         except Exception as e:
             logging.error(f"Unexpected error during chunk processing for media_id {media_id}: {e}", exc_info=True)
-            # log_counter("process_chunks_error", labels={"media_id": media_id, "error_type": type(e).__name__}) # Placeholder
+            log_counter("process_chunks_error", labels={"media_id": media_id, "error_type": type(e).__name__}) # Placeholder
             # Rollback should happen if the error occurred within the 'with' block
 
         finally:
@@ -1354,6 +1353,117 @@ def add_media_with_keywords(
     #      log_histogram("add_media_with_keywords_duration", duration)
 
 
+def ingest_article_to_db_new(
+    *, # Make arguments keyword-only for clarity
+    db_instance: Database,
+    url: str,
+    title: str,
+    content: str,
+    author: Optional[str] = None,
+    keywords: Optional[List[str]] = None, # Expect a list now, or None
+    summary: Optional[str] = None,
+    ingestion_date: Optional[str] = None, # Expect ISO format string or None
+    custom_prompt: Optional[str] = None,
+    overwrite: bool = False # Add overwrite flag, default to False
+) -> Tuple[Optional[int], str]: # Return (db_id, message) tuple like add_media_with_keywords
+    """
+    Ingests a web article into the database using the provided Database instance.
+
+    Args:
+        db_instance: An initialized Database object for the target database.
+        url: The URL of the article (used as the unique identifier).
+        title: The title of the article.
+        content: The main text content of the article.
+        author: The author of the article (optional).
+        keywords: A list of keywords associated with the article (optional).
+        summary: A summary or analysis of the article (optional).
+        ingestion_date: The date of ingestion (YYYY-MM-DD format, optional, defaults to now).
+        custom_prompt: The prompt used to generate the summary (optional).
+        overwrite: If True, attempts to overwrite existing media with the same URL. Defaults to False.
+
+    Returns:
+        A tuple containing:
+            - The database ID of the inserted/updated media item (int) or None if skipped/failed without ID.
+            - A status message (str).
+
+    Raises:
+        TypeError: If db_instance is not a valid Database object.
+        ValueError: If required fields (url, title, content) are missing or invalid.
+        DatabaseError: If a database operation fails during insertion/update.
+        InputError: If specific input validation fails within add_media_with_keywords.
+    """
+    # 1. Validate Database Instance
+    if not isinstance(db_instance, Database):
+        logging.error("ingest_article_to_db_new: Invalid Database instance provided.")
+        raise TypeError("A valid Database instance must be provided.")
+
+    # 2. Validate Required Inputs
+    if not url or not url.strip():
+        logging.error("ingest_article_to_db_new: URL is required and cannot be empty.")
+        raise ValueError("URL is required.")
+    if not title or not title.strip():
+        logging.error("ingest_article_to_db_new: Title is required and cannot be empty.")
+        raise ValueError("Title is required.")
+    if not content or not content.strip():
+        logging.error("ingest_article_to_db_new: Content is required and cannot be empty.")
+        raise ValueError("Content is required.")
+
+    # 3. Prepare Optional Fields and Defaults
+    final_keywords = keywords if keywords else ['default_article'] # Use default list if None/empty
+    final_author = author if author else None # Pass None if not provided
+    final_summary = summary if summary else None # Pass None if not provided
+    final_prompt = custom_prompt if custom_prompt else None # Pass None if not provided
+    final_ingestion_date = ingestion_date if ingestion_date else datetime.now().strftime('%Y-%m-%d')
+
+    # 4. Log before calling DB function (avoid logging full content unless necessary)
+    logging.debug(f"Attempting to ingest article via add_media_with_keywords:")
+    logging.debug(f"  URL: {url}")
+    logging.debug(f"  Title: {title}")
+    logging.debug(f"  Author: {final_author}")
+    logging.debug(f"  Keywords: {final_keywords}")
+    logging.debug(f"  Summary Length: {len(final_summary) if final_summary else 0}")
+    logging.debug(f"  Content Length: {len(content)}")
+    logging.debug(f"  Ingestion Date: {final_ingestion_date}")
+    logging.debug(f"  Prompt: {final_prompt}")
+    logging.debug(f"  Overwrite: {overwrite}")
+    logging.debug(f"  DB Path: {db_instance.db_path_str}")
+
+
+    # 5. Call the core DB function within a try...except block
+    try:
+        # Call add_media_with_keywords, mapping arguments correctly
+        # **Crucially, pass the db_instance**
+        media_id, message = add_media_with_keywords(
+            url=url,
+            title=title,
+            media_type='article', # Hardcode media type
+            content=content,
+            keywords=final_keywords, # Pass the list
+            prompt=final_prompt, # Pass the prompt
+            analysis_content=final_summary, # Map 'summary' to 'analysis_content'
+            transcription_model=None, # Not applicable for articles
+            author=final_author,
+            ingestion_date=final_ingestion_date,
+            overwrite=overwrite, # Pass the overwrite flag
+            db_instance=db_instance,  # Pass the database instance
+            # Add chunk_options=None if the function requires it, but likely not needed here
+        )
+        logging.info(f"Article ingestion result for URL '{url}': ID={media_id}, Msg='{message}'")
+        return media_id, message
+
+
+    except (DatabaseError, InputError, ValueError, TypeError) as e:
+        # Catch specific, expected errors from the DB layer or validation
+        logging.error(f"Failed to ingest article '{url}' to database {db_instance.db_path_str}: {type(e).__name__} - {e}", exc_info=True)
+        # Re-raise the caught exception so the caller can handle it
+        raise e
+    except Exception as e:
+        # Catch unexpected errors
+        logging.exception(f"Unexpected error ingesting article '{url}' to database {db_instance.db_path_str}: {e}")
+        # Wrap in DatabaseError or raise a custom exception for the caller
+        raise DatabaseError(f"An unexpected error occurred during article ingestion: {e}") from e
+
+
 # Function to add a keyword
 def add_keyword(keyword: str, db_instance: Database) -> int:
     # Use db_instance directly, no 'self'
@@ -1499,47 +1609,54 @@ def export_keywords_to_csv(db_instance: Database):
         logger.error(f"Error exporting keywords to CSV: {e}")
         return None, f"Error exporting keywords: {e}"
 
-# FIXME - REWRITE TO NOT USE MEDIAMODFIICATIONS
-def fetch_keywords_for_media(media_id, db_instance: Database):
+
+def fetch_keywords_for_media(media_id: int, db_instance: Database) -> List[str]:
+    """
+    Fetches the list of keywords associated with a specific media ID
+    by joining the MediaKeywords and Keywords tables.
+
+    Args:
+        media_id: The ID of the media item.
+        db_instance: The Database instance to use.
+
+    Returns:
+        A list of keyword strings associated with the media ID.
+        Returns an empty list if no keywords are found or on error.
+    """
+    logging.debug(f"Fetching keywords for media_id={media_id} using MediaKeywords table from DB: {db_instance.db_path_str}")
+
     try:
-        # First check if the keywords column exists in MediaModifications
+        # Use the connection context manager from the db_instance
         with db_instance.get_connection() as conn:
+            # The Database class should already set the row_factory, allowing dict access
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) 
-                FROM pragma_table_info('MediaModifications') 
-                WHERE name = 'keywords'
-            """)
-            keywords_column_exists = cursor.fetchone()[0]
 
-            if keywords_column_exists:
-                # Try to get keywords from MediaModifications first
-                cursor.execute("""
-                    SELECT keywords
-                    FROM MediaModifications
-                    WHERE media_id = ?
-                    ORDER BY modification_date DESC
-                    LIMIT 1
-                """, (media_id,))
-                result = cursor.fetchone()
-
-                if result and result[0]:
-                    # If we found keywords in MediaModifications, return them
-                    return [k.strip() for k in result[0].split(',') if k.strip()]
-
-            # Fallback: Get keywords from Keywords table via MediaKeywords
+            # --- Query using JOIN on the correct tables ---
             cursor.execute('''
                 SELECT k.keyword
                 FROM Keywords k
                 JOIN MediaKeywords mk ON k.id = mk.keyword_id
                 WHERE mk.media_id = ?
+                ORDER BY k.keyword COLLATE NOCASE -- Optional: Order alphabetically
             ''', (media_id,))
-            keywords = [row[0] for row in cursor.fetchall()]
 
-            return keywords or ["default"]
+            # Fetch results using the column name (assuming row_factory is set)
+            keywords = [row['keyword'] for row in cursor.fetchall()]
+
+            # --- Return the result (will be [] if query returns no rows) ---
+            logging.debug(f"Found keywords for media_id={media_id}: {keywords}")
+            return keywords
+
     except sqlite3.Error as e:
-        logging.error(f"Error fetching keywords: {e}")
-        return ["default"]  # Return a default keyword on error
+        # Log the specific database error
+        logging.error(f"SQLite error fetching keywords for media_id {media_id}: {e}", exc_info=True)
+        # Return an empty list to indicate failure or absence of keywords gracefully
+        return []
+    except Exception as e:
+        # Catch any other unexpected errors during the fetch
+        logging.error(f"Unexpected error fetching keywords for media_id {media_id}: {e}", exc_info=True)
+        return []
+
 
 def update_keywords_for_media(media_id: int, keywords: List[str], db_instance: Database):
     """Update keywords with validation and error handling"""

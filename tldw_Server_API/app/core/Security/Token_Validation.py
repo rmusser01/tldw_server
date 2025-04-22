@@ -1,31 +1,27 @@
+# Token_Validation.py
+#
+# Description: This file contains functions for validating JWT tokens and retrieving user information from the database.
+#
+# Imports
+#
+# 3rd-Party Libraries
+from fastapi import Depends, HTTPException, status
+#
+# Local Imports
+from tldw_Server_API.app.api.v1.endpoints.auth import oauth2_scheme
+from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_by_username
+from tldw_Server_API.app.core.Security.Security import decode_access_token
+#
+########################################################################################################################
+#
+# Functions:
+
 
 # FIXME - placeholder for actual logic
-from fastapi import Depends, HTTPException, status
-from jose import JWTError
-
-def get_current_user(token: str = Depends(oauth2_scheme)):
-    payload = decode_access_token(token)
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    username: str = payload.get("sub")  # "sub" is subject
-    if username is None:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    # fetch user from DB
-    user_dict = get_user_by_username(username)
-    if not user_dict:
-        raise HTTPException(status_code=401, detail="User not found")
-
-    # optionally check if is_active, etc.
-    return user_dict
 
 
 
-# If the token is invalid/expired, we raise a 401.
+
 #
-# Otherwise, we find the user in DB. Return that user as the “current user.”
+# End of Token_Validation.py
+########################################################################################################################

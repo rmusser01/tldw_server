@@ -42,9 +42,10 @@ from playwright.sync_api import sync_playwright
 import requests
 import trafilatura
 from tqdm import tqdm
+
+from tldw_Server_API.app.core.DB_Management.DB_Manager import ingest_article_to_db
 #
 # Import Local
-from tldw_Server_API.app.core.DB_Management.DB_Manager import ingest_article_to_db
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_histogram, log_counter
 from tldw_Server_API.app.core.Utils.Utils import logging, load_and_log_configs

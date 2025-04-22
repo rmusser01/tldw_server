@@ -16,7 +16,7 @@ https://huggingface.co/papers/2412.07626
 https://towardsdatascience.com/ai-powered-information-extraction-and-matchmaking-0408c93ec1b9/
 https://github.com/databridge-org/databridge-core
 https://github.com/cocoindex-io/cocoindex
-
+https://github.com/AIDC-AI/Ovis
 
   
 ## ETL Pipelines

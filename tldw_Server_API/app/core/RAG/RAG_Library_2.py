@@ -304,7 +304,7 @@ def generate_answer(api_choice: str, context: str, query: str) -> str:
     query = rag_prompt_placeholder + query
     rag_prompt_entries = []
     rag_prompt_dict_data = parse_user_dict_markdown_file(file_path)
-    print("DEBUG: rag_prompt_dict_data =", rag_prompt_dict_data)
+    print("DEBUG: rag_prompt_dict_data =", rag_prompt_dict_data) #DEBUGPRINT
     for k, v in rag_prompt_dict_data.items():
         # k is your "key", v is your "content"
         rag_prompt_entries.append(ChatDictionary(key=k, content=v))

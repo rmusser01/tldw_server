@@ -51,6 +51,13 @@ RAG
 Finetuning: 
 - https://eugeneyan.com/writing/finetuning/
 
+``````
+On the source pane, give us the ability to enter in proper bibliographic information for a source in a variety of formats (MLA, Chicago etc.) When pulling the source name for citations, use this information instead and properly cite the footnote. You should still include the hotlink to the specific location in the material, or perhaps inside the footnote, just directly quote the relavent paragraph. When I am working with uploaded books, I can always just search my original digital copy to get the page number. 
+
+You could also have a bibliography tab on the sources which will generate an annotated bibliography from the same material. Having the ability for an agent to properly generate and fill out the bibliography itself would be nice of course, but I would be more than happy to just enter it in myself if the result was citations that were actually useful when taken outside of NotebookLM by copy/paste.
+```
+
+
 
 ----------------------------------------------------------------------------------------------------------------
 ### <a name="citations"></a> Citations

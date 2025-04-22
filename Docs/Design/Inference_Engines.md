@@ -34,5 +34,5 @@ https://huggingface.co/blog/Kseniase/testtimecompute
 https://eqimp.github.io/hogwild_llm/
 https://transformer-circuits.pub/2025/attribution-graphs/biology.html
 https://arxiv.org/pdf/2502.17601
-
+https://www.reddit.com/r/LocalLLaMA/comments/1k0tkca/massive_5000_tokens_per_second_on_2x3090/
 
