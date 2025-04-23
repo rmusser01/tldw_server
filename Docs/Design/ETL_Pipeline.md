@@ -17,7 +17,7 @@ https://towardsdatascience.com/ai-powered-information-extraction-and-matchmaking
 https://github.com/databridge-org/databridge-core
 https://github.com/cocoindex-io/cocoindex
 https://github.com/AIDC-AI/Ovis
-
+https://github.com/matthsena/AlcheMark
   
 ## ETL Pipelines
 

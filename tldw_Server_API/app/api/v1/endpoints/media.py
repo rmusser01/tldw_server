@@ -46,7 +46,7 @@ from pydantic.v1 import Field
 # API Rate Limiter/Caching via Redis
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import verify_api_key, get_db_for_user
 #
@@ -369,30 +369,42 @@ async def create_version(
     content, prompt, and analysis.
     """
     # Check if the media exists:
-    exists = db.execute_query("SELECT id FROM Media WHERE id=?", (media_id,))
-    if not exists:
-        raise HTTPException(status_code=422, detail="Invalid media_id")
+    media_exists = db.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,), fetch_one=True)
+    if not media_exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
 
     try:
         result = create_document_version(
             media_id=media_id,
             content=request.content,
             prompt=request.prompt,
-            analysis=request.analysis
+            analysis_content=request.analysis,
+            db_instance=db,
         )
-        return result
-    except DatabaseError as e:
+        if isinstance(result, dict) and "version_number" in result:
+            return {"media_id": result.get("media_id", media_id), "version_number": result["version_number"]}
+        elif isinstance(result, dict) and "error" in result:
+            # Handle potential errors from the DB function itself
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
+        else:
+            # Unexpected result from DB function
+            logging.error(f"Unexpected result from create_document_version: {result}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create version")
+
+    except DatabaseError as e:  # specific DB error handling
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logging.error(f"Version creation failed: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    except HTTPException:  # Re-raise HTTP exceptions directly
+        raise
+    except Exception as e:  # generic error handling
+        logging.error(f"Version creation failed unexpectedly for media {media_id}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during version creation")
 
 
 @router.get(
     "/{media_id}/versions",
     tags=["Media Versioning"], # Assign tag
     summary="List Media Versions", # Add summary
-    # response_model=List[YourVersionListResponseModel] # Define response model
+    # response_model=List[YourVersionListResponseModel] # Define response model FIXME
 )
 async def list_versions(
     media_id: int,
@@ -407,15 +419,19 @@ async def list_versions(
     Retrieves a list of available versions for a specific media item.
     Optionally includes the full content for each version. Supports pagination.
     """
+    # Check if media exists first
+    media_exists = db.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,), fetch_one=True)
+    if not media_exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
+
     versions = get_all_document_versions(
         media_id=media_id,
         include_content=include_content,
         limit=limit,
         offset=offset,
-        db=db
+        db_instance=db
     )
-    if not versions:
-        raise HTTPException(status_code=404, detail="No versions found")
+
     return versions
 
 
@@ -423,7 +439,7 @@ async def list_versions(
     "/{media_id}/versions/{version_number}",
     tags=["Media Versioning"], # Assign tag
     summary="Get Specific Media Version", # Add summary
-    # response_model=YourVersionDetailResponseModel # Define response model
+    # response_model=YourVersionDetailResponseModel # Define response model FIXME
 )
 async def get_version(
     media_id: int,
@@ -437,27 +453,36 @@ async def get_version(
     Retrieves the details of a single, specific version for a media item.
     By default, includes the full content.
     """
+    # Check to make sure media exists
+    media_exists = db.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,), fetch_one=True)
+    if not media_exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
+
     version = get_document_version(
         media_id=media_id,
         version_number=version_number,
         include_content=include_content,
-        db=db
+        db_instance=db
     )
-    if 'error' in version:
-        raise HTTPException(status_code=404, detail=version['error'])
+    if version is None or (isinstance(version, dict) and 'error' in version):
+         # Assuming the DB function returns a dict like {'error': 'Version not found'} or None
+         error_detail = "Version not found" # Default message
+         if isinstance(version, dict) and 'error' in version:
+              error_detail = version['error'] # Use specific error from DB if available
+         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_detail)
     return version
 
 
 @router.delete(
     "/{media_id}/versions/{version_number}",
-    tags=["Media Versioning"], # Assign tag
-    summary="Delete Media Version", # Add summary
-    status_code=status.HTTP_204_NO_CONTENT, # Standard for successful DELETE with no body
+    tags=["Media Versioning"],
+    summary="Delete Media Version",
+    status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_version(
     media_id: int,
     version_number: int,
-    db=Depends(get_db_for_user)
+    db_instance=Depends(get_db_for_user)
 ):
     """
     **Delete a Specific Version**
@@ -465,10 +490,29 @@ async def delete_version(
     Permanently removes a specific version of a media item.
     *Caution: This action cannot be undone.*
     """
-    result = delete_document_version(media_id, version_number, db)
-    if 'error' in result:
-        raise HTTPException(status_code=404, detail=result['error'])
-    return result
+    # Ensure media exists
+    media_exists = db_instance.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,), fetch_one=True)
+    if not media_exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
+
+    result = delete_document_version(media_id, version_number, db_instance)
+
+    if isinstance(result, dict) and 'error' in result:
+        error_msg = result['error']
+        if "Cannot delete the only version" in error_msg:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+        elif "Version not found" in error_msg:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_msg)
+        else: # Other unexpected DB error
+            logging.error(f"Unexpected error from delete_document_version: {error_msg}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete version due to database issue.")
+    elif isinstance(result, dict) and result.get('success'):
+         # Success! Return 204 No Content. FastAPI handles this if no body is returned.
+         return Response(status_code=status.HTTP_204_NO_CONTENT)
+    else:
+        # If the DB function doesn't return the expected dict format on success/error
+        logging.error(f"Unexpected result format from delete_document_version: {result}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal error during version deletion.")
 
 
 @router.post(
@@ -480,7 +524,7 @@ async def delete_version(
 async def rollback_version(
         media_id: int,
         request: VersionRollbackRequest,
-        db=Depends(get_db_for_user)
+        db_instance=Depends(get_db_for_user)
 ):
     """
     **Rollback to a Previous Version**
@@ -488,9 +532,28 @@ async def rollback_version(
     Restores the main content of a media item to the state of a specified previous version.
     This typically creates a *new* version reflecting the rolled-back content.
     """
-    result = rollback_to_version(media_id, request.version_number, db)
+    # Validate media exists in the first place
+    media_exists = db_instance.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,), fetch_one=True)
+    if not media_exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
+
+    # Perform rollback
+    result = rollback_to_version(
+            media_id=media_id,
+            request=request.version_number,
+            db_instance=db_instance
+    )
+    # Check if the rollback was successful
     if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
+        error_msg = result["error"]
+        if "Target version for rollback not found" in error_msg:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_msg)
+        elif "Cannot rollback to the current latest version" in error_msg:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+        elif "Media item not found" in error_msg: # Assuming DB function might return this
+             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_msg)
+        else: # Generic rollback failure
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
 
     # Ensure we have a valid new_version_number
     new_version = result.get("new_version_number")
@@ -1210,7 +1273,7 @@ async def _process_batch_media( # Video/Audio - DB interaction handled here
             # Extract data needed for the database from the process_result dict
             # Use transcript as content for audio/video
             content_for_db = process_result.get('transcript', process_result.get('content'))
-            summary_for_db = process_result.get('summary', process_result.get('analysis')) # Use 'summary' preferably
+            analysis_for_db = process_result.get('summary', process_result.get('analysis')) # Use 'summary' preferably
             metadata_for_db = process_result.get('metadata', {})
             analysis_details_for_db = process_result.get('analysis_details', {})
             transcription_model_used = analysis_details_for_db.get('transcription_model', form_data.transcription_model)
@@ -1235,7 +1298,7 @@ async def _process_batch_media( # Video/Audio - DB interaction handled here
                         "content": content_for_db,
                         "keywords": final_keywords_list, # Pass the combined list
                         "prompt": form_data.custom_prompt, # Use prompt from form
-                        "analysis_content": summary_for_db, # Pass summary/analysis
+                        "analysis_content": analysis_for_db, # Pass summary/analysis
                         "transcription_model": transcription_model_used, # Model used in processing
                         "author": metadata_for_db.get('author', form_data.author),
                         "ingestion_date": datetime.now().strftime('%Y-%m-%d'),
@@ -1519,7 +1582,7 @@ async def _process_document_like_item(
     if final_result.get("status") in ["Success", "Warning"]:
         # Extract data from the final_result dictionary (populated by the processor)
         content_for_db = final_result.get('content', '') # Use content key
-        summary_for_db = final_result.get('summary') or final_result.get('analysis')
+        analysis_for_db = final_result.get('summary') or final_result.get('analysis')
         metadata_for_db = final_result.get('metadata', {})
         # Determine model used (e.g., parser for PDF, import for others)
         # Use 'parser_used' for PDF, 'transcription_model' (if applicable), or default
@@ -1536,7 +1599,7 @@ async def _process_document_like_item(
                     # Use keywords from result (merged from input + extracted)
                     "keywords": final_result.get('keywords', []),
                     "prompt": form_data.custom_prompt, # Get prompt from form
-                    "analysis_content": summary_for_db,
+                    "analysis_content": analysis_for_db,
                     "transcription_model": model_used, # Use determined model
                     "author": metadata_for_db.get('author', 'Unknown'),
                     "ingestion_date": datetime.now().strftime('%Y-%m-%d'),
@@ -1579,7 +1642,7 @@ async def _process_document_like_item(
     # Standardize output keys (map content to content/transcript)
     final_result["content"] = final_result.get("content")
     final_result["transcript"] = final_result.get("content") # For consistency with A/V
-    final_result["analysis"] = final_result.get("summary") # For consistency
+    final_result["analysis"] = final_result.get("analysis") # For consistency
 
     return final_result
 
@@ -3844,7 +3907,7 @@ async def process_pdfs_endpoint(
                 res.setdefault("metadata", None)
                 res.setdefault("content", None)
                 res.setdefault("chunks", None)
-                res.setdefault("summary", None)
+                res.setdefault("analysis", None)
                 res.setdefault("keywords", None)
                 res.setdefault("analysis_details", {})
 
@@ -3872,7 +3935,7 @@ async def process_pdfs_endpoint(
                      "status": "Error", "input_ref": "Unknown Task", "error": error_detail,
                      "media_type": "pdf", "db_id": None, "db_message": "Processing only endpoint.",
                      "metadata": None, "content": None, "chunks": None,
-                     "summary": None, "keywords": None, "warnings": None,
+                     "analysis": None, "keywords": None, "warnings": None,
                      "analysis_details": {},
                      "processing_source": original_ref,
                  })
@@ -4211,8 +4274,8 @@ async def ingest_web_content(
         # Insert your real translation code here:
         # for item in raw_results:
         #   item["content"] = translator.translate(item["content"], to_lang=request.translation_language)
-        #   if item.get("summary"):
-        #       item["summary"] = translator.translate(item["summary"], to_lang=request.translation_language)
+        #   if item.get("analysis"):
+        #       item["analysis"] = translator.translate(item["analysis"], to_lang=request.translation_language)
 
     # 6) Perform optional chunking
     if request.perform_chunking:
@@ -4247,7 +4310,7 @@ async def ingest_web_content(
     #         content=r.get("content", ""),
     #         keywords=r.get("keywords", ""),
     #         ingestion_date=r.get("ingested_at", ""),
-    #         summary=r.get("summary", None),
+    #         analysis=r.get("analysis", None),
     #         chunking_data=r.get("chunks", [])
     #     )
     #     media_ids.append(media_id)

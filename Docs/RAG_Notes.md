@@ -25,14 +25,14 @@ https://engineeringblog.yelp.com/2025/02/search-query-understanding-with-LLMs.ht
 https://github.com/ibm-granite/granite-io/blob/main/docs/design.md
 https://www.jeremykun.com/2015/04/06/markov-chain-monte-carlo-without-all-the-bullshit/
 https://mode-rag.readthedocs.io/en/latest/
-
-
+https://huggingface.co/posts/Kseniase/836565977783893
+https://github.com/nishchaljs/MobiRAG
 
 
 Models
 	https://huggingface.co/THUDM/GLM-Z1-32B-0414
 	https://huggingface.co/collections/THUDM/glm-4-0414-67f3cbcb34dd9d252707cb2e
-
+	
 Agentic RAG
 	https://arxiv.org/pdf/2501.09136
 	https://github.com/asinghcsu/AgenticRAG-Survey

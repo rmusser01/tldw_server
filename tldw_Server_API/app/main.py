@@ -86,6 +86,25 @@ app = FastAPI(
     description="Version 0.0.1: Smooth Slide | FastAPI Backend for the tldw project"
 )
 
+
+# --- FIX: Add CORS Middleware ---
+origins = [
+    "http://localhost",
+    "http://127.0.0.1",
+    # Add any other origins your frontend/tests might use
+    "*", # Use with caution, be more specific in production
+]
+
+# FIXME - CORS
+# # -- If you have any global middleware, add it here --
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"], # Must include OPTIONS, GET, POST, DELETE etc.
+    allow_headers=["*"],
+)
+
 # Static files serving
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
@@ -93,18 +112,6 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return FileResponse(FAVICON_PATH, media_type="image/x-icon")
-
-
-
-# FIXME - CORS
-# # -- If you have any global middleware, add it here --
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 @app.get("/")
 async def root():

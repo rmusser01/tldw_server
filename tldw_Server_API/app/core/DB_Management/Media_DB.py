@@ -3772,7 +3772,7 @@ def delete_document_version(media_id: int, version_number: int, db_instance: Dat
 
 def rollback_to_version(
         media_id: int,
-        version_number: int,
+        target_version_number: int,
         db_instance: Database
 ) -> Dict[str, Any]:
     """
@@ -3798,10 +3798,10 @@ def rollback_to_version(
     """
     if not isinstance(db_instance, Database):
         raise TypeError("A valid Database instance must be provided.")
-    if not isinstance(version_number, int) or version_number < 1:
+    if not isinstance(target_version_number, int) or target_version_number < 1:
         raise ValueError("Version number must be a positive integer.")
 
-    logging.debug(f"Attempting rollback to version {version_number} for media_id={media_id} on DB: {db_instance.db_path_str}")
+    logging.debug(f"Attempting rollback to version {target_version_number} for media_id={media_id} on DB: {db_instance.db_path_str}")
 
     try:
         # Use a single transaction for all operations
@@ -3812,14 +3812,14 @@ def rollback_to_version(
             # Use the updated get_document_version
             target_version_data = get_document_version(
                 media_id=media_id,
-                version_number=version_number,
+                version_number=target_version_number,
                 include_content=True,
                 db_instance=db_instance # Pass instance, get_document_version will use the transaction's conn
             )
 
             if target_version_data is None:
-                logging.warning(f"Rollback failed: Target version {version_number} not found for media_id={media_id}")
-                return {'error': f'Version {version_number} not found'}
+                logging.warning(f"Rollback failed: Target version {target_version_number} not found for media_id={media_id}")
+                return {'error': f'Version {target_version_number} not found'}
 
             target_content = target_version_data.get('content')
             target_prompt = target_version_data.get('prompt')
@@ -3827,8 +3827,8 @@ def rollback_to_version(
 
             # Ensure content exists before proceeding
             if target_content is None:
-                 logging.error(f"Rollback failed: Target version {version_number} for media_id={media_id} has NULL content.")
-                 return {'error': f'Version {version_number} has no content to roll back to.'}
+                 logging.error(f"Rollback failed: Target version {target_version_number} for media_id={media_id} has NULL content.")
+                 return {'error': f'Version {target_version_number} has no content to roll back to.'}
 
             # --- 2. Create a *new* version reflecting the rollback state ---
             # Pass the connection 'conn' to run within the current transaction
@@ -3870,24 +3870,24 @@ def rollback_to_version(
                  # but raise an error because the main record wasn't updated.
                  raise DatabaseError(f"Media record {media_id} not found for final rollback update.")
 
-            logging.info(f"Successfully rolled back media_id={media_id} to state of version {version_number} (New version: {new_version_number})")
+            logging.info(f"Successfully rolled back media_id={media_id} to state of version {target_version_number} (New version: {new_version_number})")
 
             # Commit happens automatically when 'with' block exits without error
 
             return {
-                'success': f'Successfully rolled back to version {version_number}. State saved as new version {new_version_number}.',
+                'success': f'Successfully rolled back to version {target_version_number}. State saved as new version {new_version_number}.',
                 'new_version_number': new_version_number
             }
 
     except sqlite3.Error as e:
-        logging.error(f"SQLite error during rollback for media_id={media_id} to version {version_number}: {e}", exc_info=True)
+        logging.error(f"SQLite error during rollback for media_id={media_id} to version {target_version_number}: {e}", exc_info=True)
         # Re-raise as specific error
         raise DatabaseError(f"Database error during rollback: {e}") from e
     except DatabaseError as de: # Catch errors raised by helpers
-        logging.error(f"DatabaseError during rollback for media_id={media_id} to version {version_number}: {de}", exc_info=True)
+        logging.error(f"DatabaseError during rollback for media_id={media_id} to version {target_version_number}: {de}", exc_info=True)
         raise # Re-raise
     except Exception as e:
-        logging.error(f"Unexpected error during rollback for media_id={media_id} to version {version_number}: {e}", exc_info=True)
+        logging.error(f"Unexpected error during rollback for media_id={media_id} to version {target_version_number}: {e}", exc_info=True)
         raise DatabaseError(f"Unexpected error during rollback: {e}") from e
 
 #

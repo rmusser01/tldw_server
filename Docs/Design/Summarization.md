@@ -20,6 +20,8 @@ https://blog.metrostar.com/iteratively-summarize-long-documents-llm
 https://arxiv.org/html/2412.15487v1
 https://arxiv.org/pdf/2204.01849
 https://arxiv.org/pdf/2501.08167
+https://aizip.substack.com/p/evaluating-small-language-models
+https://github.com/aizip/RED-flow
 Unread/Unreviewed
 	Articles
 		https://github.com/aws-samples/llm-based-advanced-summarization

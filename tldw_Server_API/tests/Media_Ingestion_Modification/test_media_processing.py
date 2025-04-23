@@ -908,7 +908,7 @@ class TestProcessDocuments:
         assert ".epub" in result["error"]
 
     @pytest.mark.skipif(not SAMPLE_RTF_PATH.exists(), reason="sample.rtf not found")
-    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext_Files.convert_file", side_effect=ValueError("Mocked pandoc failure"))
+    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.convert_file", side_effect=ValueError("Mocked pandoc failure"))
     def test_process_doc_rtf_conversion_failure(self, mock_convert, client, auth_headers):
         """Test RTF processing when pandoc conversion fails."""
         form_data = {"perform_analysis": "false"}
@@ -936,7 +936,7 @@ class TestProcessDocuments:
 
     # --- Mocked Analysis Test ---
     # IMPORTANT: Update patch path if needed
-    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext_Files.summarize")
+    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.summarize")
     def test_process_doc_with_analysis_mocked(self, mock_summarize, client, auth_headers):
         """Test enabling analysis with mocking."""
         mock_analysis_text = "This is the mocked document analysis."

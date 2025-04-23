@@ -21,7 +21,7 @@ https://www.turingpost.com/p/arize1
 https://github.com/tpetkovich/Agentic_Guideline_Gen_Example/blob/main/Agentic_Guideline_Gen_Example.ipynb
 https://github.com/xufangzhi/phi-Decoding
     https://arxiv.org/html/2503.13288v1
-
+https://github.com/elder-plinius/CL4R1T4S/tree/main
 COSTAR
 Context, Objective, Style, Tone, Audience, Response
 https://towardsdatascience.com/how-i-won-singapores-gpt-4-prompt-engineering-competition-34c195a93d41

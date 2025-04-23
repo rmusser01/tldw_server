@@ -59,14 +59,13 @@ class MediaUpdateRequest(BaseModel):
     author: Optional[str] = None
     analysis: Optional[str] = None
     prompt: Optional[str] = None
-    summary: Optional[str] = None
     keywords: Optional[List[str]] = None
 
-# Make prompt and summary REQUIRED so missing them yields 422
+# Make prompt and analysis REQUIRED so missing them yields 422
 class VersionCreateRequest(BaseModel):
     content: str
     prompt: str
-    summary: str
+    analysis_content: str
 
 class VersionResponse(BaseModel):
     id: int
@@ -207,7 +206,7 @@ class MediaItemProcessResponse(BaseModel):
     content: str # The main extracted text or full transcript
     segments: Optional[List[Dict[str, Any]]] # For timestamped transcripts, if applicable
     chunks: Optional[List[Dict[str, Any]]] # If chunking happened within the processor
-    analysis: Optional[str] # The generated summary, if analysis was performed
+    analysis: Optional[str] # The generated analysis, if analysis was performed
     analysis_details: Optional[Dict[str, Any]] # e.g., whisper model used, summarization prompt
     error: Optional[str] # Detailed error message if status != 'Success'
     warnings: Optional[List[str]] # For non-critical issues
