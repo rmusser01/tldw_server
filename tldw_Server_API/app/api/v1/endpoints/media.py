@@ -263,7 +263,7 @@ def get_media_item(
         kw_list = media_info.get('keywords') or ["default"]
 
         # -- 3) Fetch the latest prompt & analysis from MediaModifications
-        prompt, analysis, _ = fetch_item_details(media_id)
+        prompt, analysis, _ = fetch_item_details(media_id, db_instance=db)
         if not prompt:
             prompt = None
         if not analysis:
@@ -369,16 +369,16 @@ async def create_version(
     content, prompt, and analysis.
     """
     # Check if the media exists:
-    media_exists = db.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,), fetch_one=True)
-    if not media_exists:
+    cursor = db.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,))
+    media_exists_row = cursor.fetchone()
+    if not media_exists_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
-
     try:
         result = create_document_version(
             media_id=media_id,
             content=request.content,
             prompt=request.prompt,
-            analysis_content=request.analysis,
+            analysis_content=request.analysis_content,
             db_instance=db,
         )
         if isinstance(result, dict) and "version_number" in result:
@@ -420,8 +420,9 @@ async def list_versions(
     Optionally includes the full content for each version. Supports pagination.
     """
     # Check if media exists first
-    media_exists = db.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,), fetch_one=True)
-    if not media_exists:
+    cursor = db.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,))
+    media_exists_row = cursor.fetchone()
+    if not media_exists_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
 
     versions = get_all_document_versions(
@@ -454,8 +455,9 @@ async def get_version(
     By default, includes the full content.
     """
     # Check to make sure media exists
-    media_exists = db.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,), fetch_one=True)
-    if not media_exists:
+    cursor = db.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,))
+    media_exists_row = cursor.fetchone()
+    if not media_exists_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
 
     version = get_document_version(
@@ -491,27 +493,33 @@ async def delete_version(
     *Caution: This action cannot be undone.*
     """
     # Ensure media exists
-    media_exists = db_instance.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,), fetch_one=True)
-    if not media_exists:
+    cursor = db_instance.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,))
+    media_exists_row = cursor.fetchone()
+    if not media_exists_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
 
     result = delete_document_version(media_id, version_number, db_instance)
 
-    if isinstance(result, dict) and 'error' in result:
-        error_msg = result['error']
-        if "Cannot delete the only version" in error_msg:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
-        elif "Version not found" in error_msg:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_msg)
-        else: # Other unexpected DB error
-            logging.error(f"Unexpected error from delete_document_version: {error_msg}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete version due to database issue.")
-    elif isinstance(result, dict) and result.get('success'):
-         # Success! Return 204 No Content. FastAPI handles this if no body is returned.
-         return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if isinstance(result, dict):
+        if 'error' in result:
+            error_msg = result['error']
+            logging.warning(f"DB function delete_document_version returned error: {error_msg}") # Log the specific DB error
+            if "Cannot delete the only version" in error_msg:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+            elif "Version not found" in error_msg:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_msg)
+            else: # Other DB error
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error during deletion: {error_msg}")
+        elif result.get('success'):
+             # Success! Return 204 No Content.
+             return Response(status_code=status.HTTP_204_NO_CONTENT)
+        else:
+             # Dictionary returned, but unexpected format (no 'error' or 'success')
+             logging.error(f"Unexpected dictionary format from delete_document_version: {result}")
+             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal error processing deletion result.")
     else:
-        # If the DB function doesn't return the expected dict format on success/error
-        logging.error(f"Unexpected result format from delete_document_version: {result}")
+        # DB function returned something other than a dictionary
+        logging.error(f"Unexpected result type from delete_document_version: {type(result)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal error during version deletion.")
 
 
@@ -533,14 +541,15 @@ async def rollback_version(
     This typically creates a *new* version reflecting the rolled-back content.
     """
     # Validate media exists in the first place
-    media_exists = db_instance.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,), fetch_one=True)
-    if not media_exists:
+    cursor = db_instance.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,))
+    media_exists_row = cursor.fetchone()
+    if not media_exists_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
 
     # Perform rollback
     result = rollback_to_version(
             media_id=media_id,
-            request=request.version_number,
+            target_version_number=request.version_number,
             db_instance=db_instance
     )
     # Check if the rollback was successful

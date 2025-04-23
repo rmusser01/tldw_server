@@ -71,6 +71,7 @@ from tldw_Server_API.app.core.DB_Management.Media_DB import (
     get_full_media_details2 as get_full_media_details, \
     check_should_process_by_url as sqlite_check_should_process_by_url, \
     ingest_article_to_db_new as sqlite_ingest_article_to_db, \
+    rollback_to_version as sqlite_rollback_to_version, \
 )
 from tldw_Server_API.app.core.DB_Management.RAG_QA_Chat_DB import start_new_conversation as sqlite_start_new_conversation, \
     save_message as sqlite_save_message, load_chat_history as sqlite_load_chat_history, \
@@ -461,7 +462,7 @@ def update_keywords_for_media(*args, **kwargs):
 
 def rollback_to_version(*arg, **kwargs):
     if db_type == 'sqlite':
-        return sqlite_get_document_version(*arg, **kwargs)
+        return sqlite_rollback_to_version(*arg, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of rollback_to_version not yet implemented")

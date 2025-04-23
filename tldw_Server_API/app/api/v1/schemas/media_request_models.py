@@ -61,7 +61,7 @@ class MediaUpdateRequest(BaseModel):
     prompt: Optional[str] = None
     keywords: Optional[List[str]] = None
 
-# Make prompt and analysis REQUIRED so missing them yields 422
+# Make prompt and analysis_content REQUIRED so missing them yields 422
 class VersionCreateRequest(BaseModel):
     content: str
     prompt: str
