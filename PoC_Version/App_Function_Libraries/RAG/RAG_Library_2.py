@@ -477,6 +477,7 @@ def filter_results_by_keywords(results: List[Dict[str, Any]], keywords: List[str
     log_counter("filter_results_by_keywords_success", labels={"filtered_count": len(filtered_results)})
     return filtered_results
 
+
 # FIXME: to be implememted
 def extract_media_id_from_result(result: str) -> Optional[int]:
     # Implement this function based on how you store the media_id in your results
