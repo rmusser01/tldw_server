@@ -9,7 +9,9 @@ from typing import Dict, List, Any, Optional, Literal
 #
 # 3rd-party imports
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, validator, computed_field
+from pydantic import BaseModel, Field, validator, computed_field, field_validator
+
+
 #
 # Local Imports
 #
@@ -97,13 +99,13 @@ class ChunkingOptions(BaseModel):
     chunk_overlap: int = Field(200, ge=0, description="Overlap size between chunks (non-negative integer)")
     custom_chapter_pattern: Optional[str] = Field(None, description="Optional regex pattern for custom chapter splitting (ebook/docs)")
 
-    @validator('chunk_overlap')
+    @field_validator('chunk_overlap')
     def overlap_less_than_size(cls, v, values):
         if 'chunk_size' in values and v >= values['chunk_size']:
             raise ValueError('chunk_overlap must be less than chunk_size')
         return v
 
-    @validator('custom_chapter_pattern')
+    @field_validator('custom_chapter_pattern')
     def validate_regex(cls, v):
         if v is not None:
             try:
@@ -178,14 +180,14 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
     }
 
     # Validator to ensure 'cookies' is provided if 'use_cookies' is True
-    @validator('cookies', always=True)
+    @field_validator('cookies')
     def check_cookies_provided(cls, v, values):
         if values.get('use_cookies') and not v:
             raise ValueError("Cookie string must be provided when 'use_cookies' is set to True.")
         return v
 
     # Add validator for start/end time format
-    @validator('start_time', 'end_time')
+    @field_validator('start_time', 'end_time')
     def check_time_format(cls, v):
         if v is None:
             return v

@@ -6,6 +6,7 @@ import logging
 #
 # 3rd-party Libraries
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from loguru import logger
 from fastapi import FastAPI
@@ -86,6 +87,24 @@ app = FastAPI(
     description="Version 0.0.1: Smooth Slide | FastAPI Backend for the tldw project"
 )
 
+############################# TEST DB Handling #####################################
+# --- TEST DB Instance ---
+test_db_instance_ref = None # Global or context variable to hold the test DB instance
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup code can go here
+    yield
+    # Shutdown code
+    global test_db_instance_ref
+    if test_db_instance_ref and hasattr(test_db_instance_ref, 'close_all_connections'):
+        print("--- App Shutdown: Closing DB connections ---")
+        test_db_instance_ref.close_all_connections()
+    else:
+        print("--- App Shutdown: No test DB instance found to close ---")
+#
+############################# End of Test DB Handling###################
+
 
 # --- FIX: Add CORS Middleware ---
 origins = [
@@ -141,3 +160,6 @@ app.include_router(prompt_router, prefix="/api/v1/prompts", tags=["prompts]"])
 # The docs at http://localhost:8000/docs will show an “Authorize” button. You can log in by calling POST /api/v1/auth/login with a form that includes username and password. The docs interface is automatically aware because we used OAuth2PasswordBearer.
 
 
+#
+## End of main.py
+########################################################################################################################

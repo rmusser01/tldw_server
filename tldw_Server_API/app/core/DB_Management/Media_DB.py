@@ -62,7 +62,11 @@ import time
 import traceback
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from math import ceil
 from typing import List, Tuple, Dict, Any, Optional
+
+from fastapi import HTTPException
+
 #
 # Local Libraries
 from tldw_Server_API.app.core.Utils.Utils import get_project_relative_path, get_database_path, \
@@ -498,6 +502,8 @@ class Database:
                     # Log if rollback itself fails, but still raise original error
                     logging.error(f"Rollback failed: {rb_err}", exc_info=True)
 
+            if isinstance(e, HTTPException):
+                raise e  # Re-raise HTTP exceptions directly
             if isinstance(e, DatabaseError):
                 raise # Re-raise if it's already our custom type
             elif isinstance(e, sqlite3.Error):
@@ -3263,7 +3269,8 @@ def delete_specific_prompt(version_id: int, db_instance: Database) -> str:
         return f"Error deleting prompt: {str(e)}"
 
 
-def get_paginated_files(db_instance: Database, page: int = 1, results_per_page: int = 50) -> Tuple[List[Tuple[int, str]], int, int]:
+def get_paginated_files(db_instance: Database, page: int = 1, results_per_page: int = 50) -> tuple[list[
+    Any], int, int, int] | tuple[list[Any], int | Any, int, Any]:
     """
     Fetches a paginated list of media items (id, title) from the database.
 
@@ -3293,49 +3300,77 @@ def get_paginated_files(db_instance: Database, page: int = 1, results_per_page: 
 
     try:
         offset = (page - 1) * results_per_page
-        # Use the transaction context manager even for reads for consistent connection handling
-        with db_instance.transaction() as conn: # Ensures connection is managed correctly
-            cursor = conn.cursor()
+        total_items = 0
+        results = []
+        try:
+            with db_instance.transaction() as conn:
+                # Get total count first
+                count_cursor = conn.execute("SELECT COUNT(*) FROM Media WHERE is_trash = 0")
+                total_items = count_cursor.fetchone()[0]
 
-            # Get total count of non-trashed media items (assuming you want to exclude trashed items)
-            # If you want all items, remove the "WHERE is_trash = 0" clause
-            cursor.execute("SELECT COUNT(*) FROM Media WHERE is_trash = 0")
-            count_result = cursor.fetchone()
-            total_entries = count_result[0] if count_result else 0
-            logging.debug(f"Total non-trashed media entries found: {total_entries}")
+                # Get paginated items including type
+                query = """
+                    SELECT id, title, type
+                    FROM Media
+                    WHERE is_trash = 0
+                    ORDER BY id DESC  -- Or another consistent order
+                    LIMIT ? OFFSET ?
+                """
+                cursor = conn.execute(query, (results_per_page, offset))
+                # Fetch as dictionaries or tuples based on how the endpoint uses it
+                # Assuming endpoint expects tuples (id, title, type)
+                results = cursor.fetchall()
 
-
-            # Fetch paginated results, excluding trashed items
-            cursor.execute("""
-                SELECT id, title
-                FROM Media
-                WHERE is_trash = 0
-                ORDER BY title COLLATE NOCASE -- Case-insensitive title sorting
-                LIMIT ? OFFSET ?
-            """, (results_per_page, offset))
-            # fetchall() will use the row_factory set in the Database class
-            results_raw = cursor.fetchall()
-            # Convert Row objects to simple tuples if required by the endpoint caller
-            results = [(row['id'], row['title']) for row in results_raw]
-
-        # Calculate total pages
-        total_pages = 0
-        if total_entries > 0 and results_per_page > 0:
-             total_pages = (total_entries + results_per_page - 1) // results_per_page
-        # Alternative: Use math.ceil
-        # import math
-        # total_pages = math.ceil(total_entries / results_per_page) if results_per_page > 0 else 0
-
-
-        logging.debug(f"Returning {len(results)} results. Total pages: {total_pages}")
-        return results, total_pages, page
-
+            total_pages = ceil(total_items / results_per_page) if results_per_page > 0 else 0
+            return results, total_pages, page, total_items
+        except Exception as e:
+             logging.error(f"Error fetching paginated files: {e}", exc_info=True)
+             return [], 0, page, 0 # Return empty/zero on error
     except sqlite3.Error as e:
         logging.error(f"SQLite error fetching paginated files from {db_instance.db_path_str}: {e}", exc_info=True)
         raise DatabaseError(f"Error fetching paginated files: {e}") from e
     except Exception as e:
         logging.error(f"Unexpected error fetching paginated files from {db_instance.db_path_str}: {e}", exc_info=True)
         raise DatabaseError(f"Unexpected error fetching paginated files: {e}") from e
+
+
+    #     # Use the transaction context manager even for reads for consistent connection handling
+    #     with db_instance.transaction() as conn: # Ensures connection is managed correctly
+    #         cursor = conn.cursor()
+    #
+    #         # Get total count of non-trashed media items (assuming you want to exclude trashed items)
+    #         # If you want all items, remove the "WHERE is_trash = 0" clause
+    #         cursor.execute("SELECT COUNT(*) FROM Media WHERE is_trash = 0")
+    #         count_result = cursor.fetchone()
+    #         total_entries = count_result[0] if count_result else 0
+    #         logging.debug(f"Total non-trashed media entries found: {total_entries}")
+    #
+    #
+    #         # Fetch paginated results, excluding trashed items
+    #         cursor.execute("""
+    #             SELECT id, title
+    #             FROM Media
+    #             WHERE is_trash = 0
+    #             ORDER BY title COLLATE NOCASE -- Case-insensitive title sorting
+    #             LIMIT ? OFFSET ?
+    #         """, (results_per_page, offset))
+    #         # fetchall() will use the row_factory set in the Database class
+    #         results_raw = cursor.fetchall()
+    #         # Convert Row objects to simple tuples if required by the endpoint caller
+    #         results = [(row['id'], row['title']) for row in results_raw]
+    #
+    #     # Calculate total pages
+    #     total_pages = 0
+    #     if total_entries > 0 and results_per_page > 0:
+    #          total_pages = (total_entries + results_per_page - 1) // results_per_page
+    #     # Alternative: Use math.ceil
+    #     # import math
+    #     # total_pages = math.ceil(total_entries / results_per_page) if results_per_page > 0 else 0
+    #
+    #
+    #     logging.debug(f"Returning {len(results)} results. Total pages: {total_pages}")
+    #     return results, total_pages, page
+    #
 
 
 #
@@ -3723,34 +3758,44 @@ def delete_document_version(media_id: int, version_number: int, db_instance: Dat
         with db_instance.transaction() as conn:
             cursor = conn.cursor()
 
-            # Check how many total versions exist for this media item
+            # --- Check if the target version exists FIRST ---
             cursor.execute('''
-                SELECT COUNT(*) FROM DocumentVersions
-                WHERE media_id = ?
-            ''', (media_id,))
+                           SELECT 1
+                           FROM DocumentVersions
+                           WHERE media_id = ?
+                             AND version_number = ?
+                           ''', (media_id, version_number))
+            exists = cursor.fetchone()
+            if not exists:
+                logging.warning(f"Version {version_number} not found for deletion for media_id={media_id}")
+                return {'error': 'Version not found'}  # Return 404 trigger
+
+            # --- If it EXISTS, *then* check if it's the last one ---
+            cursor.execute('''
+                           SELECT COUNT(*)
+                           FROM DocumentVersions
+                           WHERE media_id = ?
+                           ''', (media_id,))
             count_result = cursor.fetchone()
             total_versions = count_result[0] if count_result else 0
 
+            # This condition is now only reachable if the version *does* exist
             if total_versions <= 1:
-                logging.warning(f"Attempted to delete the last version ({version_number}) for media_id={media_id}")
-                return {'error': 'Cannot delete the last version'}
-
-            # Check if the target version exists before attempting delete
-            cursor.execute('''
-                SELECT 1 FROM DocumentVersions
-                WHERE media_id = ? AND version_number = ?
-            ''', (media_id, version_number))
-            exists = cursor.fetchone()
-
-            if not exists:
-                logging.warning(f"Version {version_number} not found for deletion for media_id={media_id}")
-                return {'error': 'Version not found'}
+                logging.warning(
+                    f"Attempted to delete the only existing version ({version_number}) for media_id={media_id}")
+                # Use the string the endpoint expects!
+                return {'error': 'Cannot delete the only version'}
 
             # Perform the delete operation
+            rows_affected = cursor.rowcount
+
+            # --- Perform the delete operation ---
             cursor.execute('''
                 DELETE FROM DocumentVersions
                 WHERE media_id = ? AND version_number = ?
             ''', (media_id, version_number))
+
+            # Now check the rowcount from the DELETE operation
             rows_affected = cursor.rowcount
 
             if rows_affected > 0:
@@ -3784,7 +3829,7 @@ def rollback_to_version(
 
     Args:
         media_id: The ID of the media item.
-        version_number: The version number to roll back to.
+        target_version_number: The version number to roll back to.
         db_instance: The Database instance.
 
     Returns:
@@ -3808,6 +3853,21 @@ def rollback_to_version(
         with db_instance.transaction() as conn:
             cursor = conn.cursor()
 
+            # --- 0. Check if target IS the latest version ---
+            cursor.execute('''
+                           SELECT MAX(version_number)
+                           FROM DocumentVersions
+                           WHERE media_id = ?
+                           ''', (media_id,))
+            latest_version_result = cursor.fetchone()
+            latest_version_number = latest_version_result[0] if latest_version_result and latest_version_result[
+                0] is not None else 0
+
+            if target_version_number == latest_version_number:
+                logging.warning(
+                    f"Rollback attempted to the current latest version ({target_version_number}) for media_id={media_id}")
+                return {'error': 'Cannot rollback to the current latest version'}
+
             # --- 1. Get the target version data ---
             # Use the updated get_document_version
             target_version_data = get_document_version(
@@ -3819,7 +3879,7 @@ def rollback_to_version(
 
             if target_version_data is None:
                 logging.warning(f"Rollback failed: Target version {target_version_number} not found for media_id={media_id}")
-                return {'error': f'Version {target_version_number} not found'}
+                return {'error': f'Rollback failed: Target version {target_version_number} not found'}
 
             target_content = target_version_data.get('content')
             target_prompt = target_version_data.get('prompt')

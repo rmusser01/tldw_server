@@ -27,7 +27,8 @@ https://www.jeremykun.com/2015/04/06/markov-chain-monte-carlo-without-all-the-bu
 https://mode-rag.readthedocs.io/en/latest/
 https://huggingface.co/posts/Kseniase/836565977783893
 https://github.com/nishchaljs/MobiRAG
-
+https://patann.dev/
+https://substack.com/home/post/p-161922553
 
 Models
 	https://huggingface.co/THUDM/GLM-Z1-32B-0414

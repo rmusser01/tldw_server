@@ -202,21 +202,27 @@ async def get_all_media(
     try:
         # Reuse your existing "get_paginated_files(page, results_per_page)"
         # which returns (results, total_pages, current_page)
-        results, total_pages, current_page = get_paginated_files(db_instance=db, page=page, results_per_page=results_per_page)
-
+        results, total_pages, current_page, total_items = get_paginated_files(
+            db_instance=db,
+            page=page,
+            results_per_page=results_per_page
+        )
         return {
             "items": [
                 {
                     "id": item[0],
                     "title": item[1],
+                    "type": item[2],
                     "url": f"/api/v1/media/{item[0]}"
                 }
+                # Assuming results are tuples (id, title, type, url)
                 for item in results
             ],
             "pagination": {
                 "page": current_page,
                 "results_per_page": results_per_page,
-                "total_pages": total_pages
+                "total_pages": total_pages,
+                "total_items": total_items
             }
         }
     except Exception as e:
@@ -245,13 +251,15 @@ def get_media_item(
         # -- 1) Fetch the main record (includes title, type, content, author, etc.)
         logging.info(f"Calling get_full_media_details2 for ID: {media_id}")
         media_info = get_full_media_details2(media_id, db)
-        logging.info(f"Received media_info type: {type(media_info)}")
-        logging.debug(f"Received media_info value: {media_info}")
         if not media_info:
             logging.warning(f"Media not found for ID: {media_id}")
             raise HTTPException(status_code=404, detail="Media not found")
 
+        logging.info(f"Received media_info type: {type(media_info)}")
+        logging.debug(f"Received media_info value: {media_info}")
+
         logging.info("Attempting to access keys in media_info...")
+
         media_type = media_info['type']
         raw_content = media_info['content']
         author = media_info['author']
@@ -395,10 +403,12 @@ async def create_version(
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:  # Re-raise HTTP exceptions directly
         raise
-    except Exception as e:  # generic error handling
+    except AttributeError as e:
+        logging.error(f"Pydantic model access error in create_version for media {media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: Field mismatch - {e}")
+    except Exception as e:
         logging.error(f"Version creation failed unexpectedly for media {media_id}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error during version creation")
-
 
 @router.get(
     "/{media_id}/versions",
@@ -504,7 +514,7 @@ async def delete_version(
         if 'error' in result:
             error_msg = result['error']
             logging.warning(f"DB function delete_document_version returned error: {error_msg}") # Log the specific DB error
-            if "Cannot delete the only version" in error_msg:
+            if 'Cannot delete the only version' in error_msg:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
             elif "Version not found" in error_msg:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_msg)
@@ -555,7 +565,7 @@ async def rollback_version(
     # Check if the rollback was successful
     if "error" in result:
         error_msg = result["error"]
-        if "Target version for rollback not found" in error_msg:
+        if "not found" in error_msg.lower():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_msg)
         elif "Cannot rollback to the current latest version" in error_msg:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)

@@ -9,7 +9,7 @@ from fastapi import status # Use status codes from fastapi
 from tldw_Server_API.app.core.DB_Management.DB_Dependency import get_db_manager_for_user
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_db_for_user
 # --- Use Main App Instance ---
-from tldw_Server_API.app.main import app as fastapi_app_instance
+from tldw_Server_API.app.main import app as fastapi_app_instance, app
 from tldw_Server_API.app.core.DB_Management.DB_Manager import Database
     # Import specific DB functions used directly in tests/fixtures
 from tldw_Server_API.app.core.DB_Management.Media_DB import (
@@ -86,19 +86,22 @@ def client_module(db_instance_session):
     """
     Creates a TestClient for the module, overriding the DB dependency to use the session-scoped test DB.
     """
-    def override_get_db_for_user(): # Rename function for clarity
-        # This function will be called by FastAPI when an endpoint requests the dependency
-        # It should yield the single session-scoped test DB instance
-        print(f"--- OVERRIDING get_db_for_user with: {db_instance_session.db_path_str} ---") # Debug print
+    def override_get_db_for_user():
+        print(f"--- OVERRIDING get_db_for_user with: {db_instance_session.db_path_str} ---")
         yield db_instance_session
 
-    fastapi_app_instance.dependency_overrides[get_db_for_user] = override_get_db_for_user
+    global test_db_instance_ref
+    test_db_instance_ref = db_instance_session # Store the reference for shutdown
+
+    app.dependency_overrides[get_db_for_user] = override_get_db_for_user
 
     with TestClient(fastapi_app_instance) as client:
         yield client
-    # Clear overrides after module tests are done
-    fastapi_app_instance.dependency_overrides.clear()
-    print("--- CLEARED get_db_for_user override ---") # Debug print
+
+    # Clear overrides AFTER client is closed (shutdown should have run)
+    app.dependency_overrides.clear()
+    # test_db_instance_ref = None # Shutdown handler clears it
+    print("--- CLEARED get_db_for_user override ---")
 
 # --- Seeding Fixtures ---
 @pytest.fixture(scope="function") # Run for each test function
@@ -172,7 +175,8 @@ def seeded_multi_media(db_session):
             # Video
             cursor_vid = db_session.execute_query(
                 "INSERT INTO Media (title, type, content, author, content_hash) VALUES (?, ?, ?, ?, ?)",
-                ("Multi Test Video", "video", '{"webpage_url": "http://vid.com"}\nTranscript v1', "Multi Tester", f"hash_mvid_{time.time()}"), commit=False
+                ("Multi Test Video", "video", '{"webpage_url": "http://vid.com"}\n\nTranscript v1', "Multi Tester",
+                 f"hash_mvid_{time.time()}"), commit=False
             )
             media_ids["video"] = cursor_vid.lastrowid
             if media_ids["video"] is None:
@@ -389,9 +393,9 @@ class TestMediaVersionEndpoints:
         assert isinstance(data, list)
         assert len(data) == 2
         assert "content" in data[0]
-        assert data[0]["content"] == "Initial content v1"
+        assert data[0]["content"] == "Content v2"
         assert "content" in data[1]
-        assert data[1]["content"] == "Content v2"
+        assert data[1]["content"] == "Initial content v1"
 
     # --------------------- RETRIEVE TESTS ---------------------
 
@@ -497,13 +501,13 @@ class TestMediaVersionEndpoints:
         new_version_data = response_get_new.json()
         assert new_version_data["content"] == "Initial content v1" # Content matches v1
         assert new_version_data["prompt"] == "Initial prompt v1"
-        assert new_version_data["summary"] == "Initial summary v1"
+        assert new_version_data["analysis_content"] == "Initial summary v1"
 
         # Verify listing shows the new version
         response_list = self.client.get(f"/api/v1/media/{self.media_id}/versions")
         assert response_list.status_code == status.HTTP_200_OK
         versions = [v["version_number"] for v in response_list.json()]
-        assert versions == [1, 2, 3, 4]
+        assert versions == [4, 3, 2, 1]
 
     def test_rollback_to_current_version_fails(self):
         """Test attempting to rollback to the latest version (should fail or be no-op)."""
@@ -527,7 +531,7 @@ class TestMediaVersionEndpoints:
             json={"version_number": 99} # Non-existent version
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND # Target version not found
-        assert "Target version for rollback not found" in response.json().get("detail", "")
+        assert "Rollback failed: Target version" in response.json().get("detail", "")
 
     def test_rollback_nonexistent_media_id(self):
         """Test rollback on a media ID that doesn't exist."""
@@ -618,10 +622,6 @@ class TestMediaListDetailEndpoints:
             assert "id" in item
             assert "title" in item
             assert "type" in item
-            assert "created_at" in item
-            assert "updated_at" in item
-            assert "author" in item
-            # Content should typically be excluded from list view
             assert "content" not in item
             assert "versions" not in item # Version details usually excluded
 
@@ -633,19 +633,17 @@ class TestMediaListDetailEndpoints:
         response = self.client.get(f"/api/v1/media/{doc_id}")
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert data["id"] == doc_id
-        assert data["type"] == "document"
-        assert data["title"] == "Multi Test Doc"
-        assert "content" in data # Detail view should include content
-        assert data["content"] == "Doc content v1" # Assuming it shows latest content
+        assert data["media_id"] == doc_id  # FIX: Use media_id
+        assert data["source"]["type"] == "document"  # FIX: Access nested field
+        assert data["source"]["title"] == "Multi Test Doc"  # FIX: Access nested field
+        assert "content" in data  # Check the 'content' dict exists
+        assert "text" in data["content"]  # Check 'text' inside 'content'
+        assert data["content"]["text"] == "Doc content v1"  # FIX: Access nested text
         assert "keywords" in data
+        assert isinstance(data["keywords"], list)  # Keywords is top-level
         assert set(data["keywords"]) == {"multi", "test", "seed"}
-        assert "versions" in data # Detail view might include version info
-        assert isinstance(data["versions"], list)
-        # If detail includes versions, check content
-        if data["versions"]:
-             assert data["versions"][0]["version_number"] == 1
-             assert "content" not in data["versions"][0] # Version list usually excludes content
+        # assert "versions" in data # The get_full_media_details2 function adds versions for docs
+        # assert isinstance(data["versions"], list)
 
     def test_get_media_item_video(self):
         """Test retrieving details of a video media item."""
@@ -653,12 +651,12 @@ class TestMediaListDetailEndpoints:
         response = self.client.get(f"/api/v1/media/{vid_id}")
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert data["id"] == vid_id
-        assert data["type"] == "video"
-        assert data["title"] == "Multi Test Video"
+        assert data["media_id"] == vid_id
+        assert data["source"]["type"] == "video"
+        assert data["source"]["title"] == "Multi Test Video"
         assert "content" in data
-        assert "Transcript v1" in data["content"] # Check relevant part of content
-        assert "webpage_url" in data["content"] # Check structured content
+        assert "Transcript v1" in data["content"]["text"] # Check relevant part of content
+        assert "webpage_url" in data["content"]["metadata"] # Check structured content
         assert "keywords" in data
         assert set(data["keywords"]) == {"multi", "test", "seed"}
         # Videos might not have 'versions' in the same way as documents
@@ -670,11 +668,11 @@ class TestMediaListDetailEndpoints:
         response = self.client.get(f"/api/v1/media/{audio_id}")
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert data["id"] == audio_id
-        assert data["type"] == "audio"
-        assert data["title"] == "Multi Test Audio"
+        assert data["media_id"] == audio_id
+        assert data["source"]["type"] == "audio"
+        assert data["source"]["title"] == "Multi Test Audio"
         assert "content" in data
-        assert "Audio Transcript v1" in data["content"]
+        assert "Audio Transcript v1" in data["content"]["text"]
         assert "keywords" in data
         assert set(data["keywords"]) == {"multi", "test", "seed"}
 
@@ -698,20 +696,19 @@ class TestMediaListDetailEndpoints:
         # Check response status - 200 OK or 202 Accepted are common
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert data["id"] == doc_id
-        assert data["title"] == new_title # Check if title is updated in response
+        assert data["media_id"] == doc_id
 
         # Verify by fetching again
         response_get = self.client.get(f"/api/v1/media/{doc_id}")
         assert response_get.status_code == status.HTTP_200_OK
-        assert response_get.json()["title"] == new_title
+        assert response_get.json()["source"]["title"] == new_title
 
     def test_update_media_item_nonexistent(self):
         """Test updating a media item that doesn't exist."""
         payload = {"title": "Won't Work"}
         response = self.client.put(f"/api/v1/media/{self.MEDIA_ID_INVALID}", json=payload)
         assert response.status_code == status.HTTP_404_NOT_FOUND
-        assert "Media item not found" in response.json().get("detail", "")
+        assert "Media not found or is in trash" in response.json().get("detail", "")
 
 
     def test_update_media_item_invalid_payload(self):

@@ -8,6 +8,7 @@
 ### Link Dump:
 repo2txt integration/clone https://github.com/abinthomasonline/repo2txt
 https://www.anthropic.com/engineering/claude-code-best-practices
+https://github.com/ymichael/open-codex
 https://github.com/brandondocusen/CntxtPY
 https://github.com/cyclotruc/gitdigest
 https://github.com/simonw/files-to-prompt

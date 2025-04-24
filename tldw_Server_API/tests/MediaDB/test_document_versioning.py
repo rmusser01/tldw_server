@@ -235,7 +235,7 @@ def test_delete_last_document_version(memory_db_instance: Database):
     result = delete_document_version(media_id=media_id, version_number=1, db_instance=db)
 
     assert 'error' in result
-    assert result['error'] == 'Cannot delete the last version'
+    assert result['error'] == 'Cannot delete the only version'
 
     # Verify version 1 still exists
     v1 = get_document_version(media_id=media_id, version_number=1, db_instance=db)

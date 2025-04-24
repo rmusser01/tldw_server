@@ -58,8 +58,10 @@ https://github.com/sshh12/spark-stack
 https://github.com/abi/screenshot-to-
 https://data.perkins.org/
 https://designdetails.fm/episodes
+https://blikket.co/ux-vs-cro-how-harmonizing-design-and-strategy-can-skyrocket-your-ecommerce-revenue/
 https://copycoder.ai/
 https://docs.replit.com/replitai/agent
+https://uxplanet.org/ui-design-with-chatgpt-4o-4d79b2a32008
 https://bolt.new/
 https://github.com/rmusser01/agentic_rag/tree/main
 https://github.com/astramind-ai/Pulsar
