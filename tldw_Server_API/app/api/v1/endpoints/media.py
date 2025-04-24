@@ -850,7 +850,8 @@ def parse_advanced_query(search_request: SearchRequest) -> Dict:
 # Pure Media Ingestion endpoint - for adding media to the DB with no analysis/modifications
 #
 # Endpoints:
-#   POST /api/v1/media/add
+#
+
 
 # Per-User Media Ingestion and Analysis
 # FIXME - Ensure that each function processes multiple files/URLs at once

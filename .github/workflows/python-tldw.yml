@@ -73,12 +73,14 @@ jobs:
     - name: Test Media Versioning Functions/Endpoints with pytest
       run: |
         pwd
-        pytest -s tldw_Server_API/tests/Media_Ingestion_Modification/test_media_versions.py
+        cd ./tldw_Server_API/tests/Media_Ingestion_Modification/
+        pytest -s test_media_versions.py
 
     - name: Test Media Processing Endpoint functions with pytest
       run: |
         pwd
-        pytest -s tldw_Server_API/tests/Media_Ingestion_Modification/test_media_processing.py
+        cd ./tldw_Server_API/tests/Media_Ingestion_Modification/
+        pytest -s test_media_processing.py
 
     - name: Test tldw runs
       run: |

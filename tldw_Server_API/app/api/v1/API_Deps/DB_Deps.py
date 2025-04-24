@@ -16,11 +16,6 @@ from tldw_Server_API.app.core.DB_Management.Media_DB import Database # Adjust im
 #
 # Functions:
 
-# --- Configuration ---
-# Load the fixed API key from an environment variable or use a default
-# IMPORTANT: For real use, use environment variables or a secrets manager.
-EXPECTED_API_KEY = os.environ.get("TEST_API_KEY", "default-secret-key-for-testing")
-
 # Define the path for the single database file
 # Use Path object for better path handling
 SINGLE_DB_FILE_PATH = Path("./single-user-folder/main_media_library.sqlite") # Example: store in a 'data' subdir

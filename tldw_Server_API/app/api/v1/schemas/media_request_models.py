@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional, Literal
 # 3rd-party imports
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, validator, computed_field, field_validator
+from pydantic_core.core_schema import ValidationInfo
 
 
 #
@@ -99,19 +100,27 @@ class ChunkingOptions(BaseModel):
     chunk_overlap: int = Field(200, ge=0, description="Overlap size between chunks (non-negative integer)")
     custom_chapter_pattern: Optional[str] = Field(None, description="Optional regex pattern for custom chapter splitting (ebook/docs)")
 
+
     @field_validator('chunk_overlap')
-    def overlap_less_than_size(cls, v, values):
-        if 'chunk_size' in values and v >= values['chunk_size']:
-            raise ValueError('chunk_overlap must be less than chunk_size')
+    @classmethod
+    def overlap_less_than_size(cls, v: int, info: ValidationInfo) -> int:
+        # Check if 'chunk_size' is available in the already validated data
+        if 'chunk_size' in info.data and info.data['chunk_size'] is not None:
+            chunk_size = info.data['chunk_size']
+            if v >= chunk_size:
+                raise ValueError('chunk_overlap must be less than chunk_size')
+        # If chunk_size hasn't been validated yet or is missing, this check might implicitly pass
+        # or you might want to handle that case explicitly if chunk_size is always required before overlap.
         return v
 
     @field_validator('custom_chapter_pattern')
-    def validate_regex(cls, v):
+    @classmethod
+    def validate_regex(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
             try:
                 re.compile(v)
-            except re.error:
-                raise ValueError(f"Invalid regex pattern provided for custom_chapter_pattern: {v}")
+            except re.error as e: # Catch specific error
+                raise ValueError(f"Invalid regex pattern provided for custom_chapter_pattern: {v}. Error: {e}")
         return v
 
 class AudioVideoOptions(BaseModel):
@@ -181,17 +190,22 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
 
     # Validator to ensure 'cookies' is provided if 'use_cookies' is True
     @field_validator('cookies')
-    def check_cookies_provided(cls, v, values):
-        if values.get('use_cookies') and not v:
+    @classmethod
+    def check_cookies_provided(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
+        # Access other validated fields via info.data
+        # Check if 'use_cookies' exists in data AND is True
+        if info.data.get('use_cookies') and not v:
             raise ValueError("Cookie string must be provided when 'use_cookies' is set to True.")
         return v
 
     # Add validator for start/end time format
     @field_validator('start_time', 'end_time')
-    def check_time_format(cls, v):
+    @classmethod
+    def check_time_format(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return v
         # Example basic check: Allow seconds or HH:MM:SS format
+        # Use raw strings (r'') for regex patterns
         if re.fullmatch(r'\d+', v) or re.fullmatch(r'\d{1,2}:\d{2}:\d{2}', v):
             return v
         raise ValueError("Time format must be seconds or HH:MM:SS")

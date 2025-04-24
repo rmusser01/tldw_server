@@ -19,20 +19,22 @@ from tldw_Server_API.app.core.Security.Security import decode_access_token
 # Utils
 from tldw_Server_API.app.core.Utils.Utils import logging, load_and_log_configs
 # API
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import EXPECTED_API_KEY
 from tldw_Server_API.app.api.v1.API_Deps.v1_endpoint_deps import oauth2_scheme
 #
 #######################################################################################################################
 #
 # Functions:
 
-USER_DB_BASE_PATH = Path("./user_databases")
+
 # FIXME
 # Setup check from config for seeing if multiplayer is enabled
 # Also add proper authentication etc. for multiplayer
 MULTIPLAYER = False  # Placeholder for multiplayer mode
 
-
+# --- Configuration ---
+# Load the fixed API key from an environment variable or use a default
+EXPECTED_API_KEY = os.environ.get("TEST_API_KEY", "default-secret-key-for-testing")
+USER_DB_BASE_PATH = Path("./user_databases")
 
 
 async def verify_api_key(api_key: str = Header(..., alias="X-API-KEY")): # Use a standard header like X-API-KEY

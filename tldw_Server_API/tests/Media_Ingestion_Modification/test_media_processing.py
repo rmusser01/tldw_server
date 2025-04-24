@@ -94,6 +94,16 @@ def client():
         yield c
 
 
+@pytest.fixture
+def auth_headers():
+    """Provides authentication/required headers."""
+    # Add any other required headers like X-API-KEY
+    return {
+        "token": "YOUR_TEST_TOKEN", # Keep if needed for user auth
+        "X-API-KEY": "YOUR_TEST_API_KEY" # Add required API key
+    }
+
+
 @pytest.fixture(scope="module")
 def auth_headers():
     """Provides dummy authentication headers if needed."""
