@@ -11,6 +11,8 @@
 # FIXME
 #
 # Imports
+import re
+
 import aiofiles
 import asyncio
 import functools
@@ -1826,11 +1828,14 @@ async def add_media(
             url_list = form_data.urls or []
             all_input_sources = url_list + uploaded_file_paths
 
-            if not all_input_sources:
-                 logging.warning("No valid inputs remaining after file handling.")
-                 # Return 207 if only file saving errors occurred, else maybe 400
-                 status_code = status.HTTP_207_MULTI_STATUS if file_save_errors else status.HTTP_400_BAD_REQUEST
-                 return JSONResponse(status_code=status_code, content={"results": results})
+            if not all_input_sources and not file_save_errors:
+                 logging.error("No input URLs or files provided.")
+                 # If there were no saving errors either, it's a bad request.
+                 # If only saving errors occured, the loop below won't run, and we'll return 207 later.
+                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No input URLs or files provided.")
+            elif not all_input_sources and file_save_errors:
+                 logging.warning("No valid inputs remaining after file handling errors.")
+                 # Proceed to return the errors with 207 status outside the main processing block
 
             # Pass the instantiated 'form_data' object to helpers
             chunking_options_dict = _prepare_chunking_options_dict(form_data)
@@ -1845,41 +1850,37 @@ async def add_media(
             logging.info(f"Processing {len(all_input_sources)} items of type '{form_data.media_type}'")
 
             if form_data.media_type in ['video', 'audio']:
-                # Pass DB to batch processor
                 batch_results = await _process_batch_media(
-                    media_type=form_data.media_type, # Use keyword arg for clarity
-                    urls=url_list,
-                    uploaded_file_paths=uploaded_file_paths,
-                    source_to_ref_map=source_to_ref_map,
-                    form_data=form_data,
-                    chunk_options=chunking_options_dict,
-                    loop=loop,
-                    db=db
+                    media_type=form_data.media_type, urls=url_list, uploaded_file_paths=uploaded_file_paths,
+                    source_to_ref_map=source_to_ref_map, form_data=form_data,
+                    chunk_options=chunking_options_dict, loop=loop, db=db
                 )
                 results.extend(batch_results)
-
-            else:
-                # Process PDF/Document/Ebook individually
-                tasks = []
-                for source in all_input_sources:
-                    is_url = source in url_list
-                    input_ref = source_to_ref_map[source]  # Get original reference
-                    tasks.append(
-                        _process_document_like_item(
-                            item_input_ref=input_ref,
-                            processing_source=source,
-                            media_type=form_data.media_type,
-                            is_url=is_url,
-                            form_data=form_data,
-                            chunk_options=chunking_options_dict,
-                            temp_dir=temp_dir_path,
-                            loop=loop,
-                            db_manager=db  # Pass the db instance
-                        )
+            else:  # PDF/Document/Ebook
+                tasks = [
+                    _process_document_like_item(
+                        item_input_ref=source_to_ref_map[source], processing_source=source,
+                        media_type=form_data.media_type, is_url=(source in url_list),
+                        form_data=form_data, chunk_options=chunking_options_dict,
+                        temp_dir=temp_dir_path, loop=loop, db_manager=db
                     )
-                # Run individual processing tasks concurrently
+                    for source in all_input_sources
+                ]
                 individual_results = await asyncio.gather(*tasks)
                 results.extend(individual_results)
+
+        # --- 7. Determine Final Status Code and Return Response (Success Path) ---
+        # This part is now reached only if the try block completes successfully
+        final_status_code = _determine_final_status(results)
+        log_message = f"Request finished successfully with status {final_status_code}. Results count: {len(results)}"
+
+        if final_status_code == status.HTTP_200_OK:
+             logger.info(log_message)
+        else: # Likely HTTP_207_MULTI_STATUS if some items failed processing
+             logger.warning(log_message)
+
+        # Successfully completed processing, return results
+        return JSONResponse(status_code=final_status_code, content={"results": results})
 
     except HTTPException as e:
         # Log and re-raise HTTP exceptions, ensure cleanup is scheduled if needed
@@ -1905,15 +1906,8 @@ async def add_media(
             else:
                 logging.info(f"Scheduling background cleanup for temporary directory: {temp_dir_path}")
                 background_tasks.add_task(shutil.rmtree, temp_dir_path, ignore_errors=True)
-
-    # --- 7. Determine Final Status Code and Return Response ---
-    final_status_code = _determine_final_status(results)
-    log_message = f"Request finished with status {final_status_code}. Results count: {len(results)}"
-    if final_status_code == status.HTTP_200_OK:
-        logger.info(log_message)
-    else:
-        logger.warning(log_message)  # Use loguru's warning level directly
-    return JSONResponse(status_code=final_status_code, content={"results": results})
+        elif temp_dir_path:
+             logging.debug(f"Temporary directory {temp_dir_path} was planned but might not exist or cleanup not needed.")
 
 #
 # End of General media ingestion and analysis
@@ -4541,7 +4535,8 @@ async def _download_url_async(
                     # Try getting from Content-Disposition header if available
                     content_disposition = response.headers.get('content-disposition')
                     if content_disposition:
-                        disp_filename = httpx.Headers({'content-disposition': content_disposition}).get_filename()
+                        match = re.search(r'filename=["\'](.*?)["\']', content_disposition)
+                        disp_filename = match.group(1) if match else None
                         if disp_filename:
                             actual_suffix = Path(disp_filename).suffix.lower()
 
