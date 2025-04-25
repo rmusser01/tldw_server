@@ -16,6 +16,7 @@ import toml
 # 3rd-Party Libraries
 # --- Textual Imports ---
 from textual.app import App, ComposeResult
+from textual.logging import TextualHandler
 from textual.widgets import (
     Static, Button, Input, Header, Footer, RichLog, TextArea, Select
 )
@@ -296,6 +297,7 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
         # Load config ONCE
         self.app_config = load_config() # Ensure this is called
         self.providers_models = get_providers_and_models() # Ensure this is called
+        log.debug(f"__INIT__: Providers and Models loaded in __init__: {self.providers_models}")
 
         # Determine the *value* for the initial tab but don't set the reactive var yet
         initial_tab_from_config = get_setting("general", "default_tab", "chat")
@@ -307,6 +309,97 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
 
         log.info(f"App __init__: Determined initial tab value: {self._initial_tab_value}")
         self._rich_log_handler: Optional[RichLogHandler] = None # Initialize handler attribute
+
+    def _setup_logging(self):
+        """Sets up all logging handlers. Call from on_mount."""
+        print("--- _setup_logging START ---")  # Use print for initial debug
+        # Configure the root logger FIRST
+        root_logger = logging.getLogger()
+        initial_log_level_str = self.app_config.get("general", {}).get("log_level", "INFO").upper()
+        initial_log_level = getattr(logging, initial_log_level_str, logging.INFO)
+        # Set root level - handlers can have higher levels but not lower
+        root_logger.setLevel(initial_log_level)
+        print(f"Root logger level initially set to: {logging.getLevelName(root_logger.level)}")
+
+        # Clear existing handlers added by basicConfig or previous runs (optional but safer)
+        # for handler in root_logger.handlers[:]:
+        #     root_logger.removeHandler(handler)
+        # print("Cleared existing root logger handlers.")
+
+        # Add TextualHandler for console (replaces basicConfig's default StreamHandler)
+        # This integrates better with Textual's console capture.
+        textual_console_handler = TextualHandler()
+        textual_console_handler.setLevel(initial_log_level)  # Use general log level for console
+        console_formatter = logging.Formatter(
+            "%(asctime)s [%(levelname)-8s] %(name)s:%(lineno)d - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        textual_console_handler.setFormatter(console_formatter)
+        root_logger.addHandler(textual_console_handler)
+        print(f"Added TextualHandler to root logger (Level: {logging.getLevelName(initial_log_level)}).")
+
+        # --- Setup RichLog Handler ---
+        try:
+            log_display_widget = self.query_one("#app-log-display", RichLog)
+            self._rich_log_handler = RichLogHandler(log_display_widget)
+            # Set level for RichLog explicitly (e.g., DEBUG to see everything)
+            self._rich_log_handler.setLevel(logging.DEBUG)  # Or read from config if needed
+            # Formatter is set within RichLogHandler's __init__ now
+            root_logger.addHandler(self._rich_log_handler)
+            # Processor start moved to after mount completes
+            print(f"Added RichLogHandler to root logger (Level: {logging.getLevelName(self._rich_log_handler.level)}).")
+
+        except QueryError:
+            print("!!! ERROR: Failed to find #app-log-display widget for RichLogHandler setup.")
+            log.error("Failed to find #app-log-display widget for RichLogHandler setup.")
+            self._rich_log_handler = None
+        except Exception as e:
+            print(f"!!! ERROR setting up RichLogHandler: {e}")
+            log.exception("Error setting up RichLogHandler")
+            self._rich_log_handler = None
+
+        # --- Setup File Logging ---
+        try:
+            log_file_path = get_log_file_path()  # Get path from config module
+            log_dir = log_file_path.parent
+            log_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
+            print(f"Ensured log directory exists: {log_dir}")
+
+            max_bytes = int(get_setting("logging", "log_max_bytes", DEFAULT_CONFIG["logging"]["log_max_bytes"]))
+            backup_count = int(
+                get_setting("logging", "log_backup_count", DEFAULT_CONFIG["logging"]["log_backup_count"]))
+            file_log_level_str = get_setting("logging", "file_log_level", "INFO").upper()
+            file_log_level = getattr(logging, file_log_level_str, logging.INFO)
+
+            # Use standard RotatingFileHandler
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_file_path, maxBytes=max_bytes, backupCount=backup_count, encoding='utf-8'
+            )
+            file_handler.setLevel(file_log_level)
+            file_formatter = logging.Formatter(
+                # Use standard %()s placeholders for standard handler
+                "%(asctime)s [%(levelname)-8s] %(name)s:%(lineno)d - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S"
+            )
+            file_handler.setFormatter(file_formatter)
+            root_logger.addHandler(file_handler)
+            print(
+                f"Added RotatingFileHandler to root logger (File: '{log_file_path}', Level: {logging.getLevelName(file_log_level)}).")
+
+        except Exception as e:
+            print(f"!!! ERROR setting up file logging: {e}")
+            log.exception("Error setting up file logging")
+
+        # Re-evaluate the lowest level needed for the root logger AFTER adding all handlers
+        lowest_level = min(
+            initial_log_level,  # Base level set initially
+            self._rich_log_handler.level if self._rich_log_handler else logging.CRITICAL,
+            file_handler.level if 'file_handler' in locals() else logging.CRITICAL
+        )
+        root_logger.setLevel(lowest_level)
+        print(f"Final Root logger level set to: {logging.getLevelName(root_logger.level)}")
+        log.info("Logging setup complete.")  # Now log using the configured system
+        print("--- _setup_logging END ---")
 
     def compose(self) -> ComposeResult:
         log.debug("App composing UI...")
@@ -362,60 +455,42 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
                     with Container(id=f"{tab_id}-window", classes="window placeholder-window"):
                          yield Static(f"{tab_id.replace('_', ' ').capitalize()} Window Placeholder")
 
-
     def on_mount(self) -> None:
-        """Configure logging, set initial tab visibility, and set reactive value."""
-        log.info("--- App Mounting ---")
-        root_logger = logging.getLogger()
+        """Configure logging, set initial tab visibility, and start processors."""
+        # Don't call super().on_mount() if not needed
 
-        # --- Setup RichLog Handler ---
-        try:
-            log_display_widget = self.query_one("#app-log-display", RichLog)
-            self._rich_log_handler = RichLogHandler(log_display_widget)
-            # Add handler (removal logic might be needed if run multiple times)
-            root_logger.addHandler(self._rich_log_handler)
-            self._rich_log_handler.start_processor(self) # Start processing queue
-            log.info("RichLogHandler configured and started.")
-        except QueryError:
-             log.error("Failed to find #app-log-display widget during mount for RichLogHandler setup.")
-        except Exception as e:
-            log.exception("Error setting up RichLogHandler in on_mount")
+        # Call the setup function
+        self._setup_logging()
 
-        # --- Setup File Logging ---
-        try:
-            log_file_path = get_log_file_path() # Get path from config module
-            log_dir = log_file_path.parent
-            log_dir.mkdir(parents=True, exist_ok=True) # Ensure directory exists
+        # Start the RichLog processor AFTER mount is complete and event loop is running
+        if self._rich_log_handler:
+            log.debug("Starting RichLogHandler processor task...")
+            self._rich_log_handler.start_processor(self)  # Pass the app instance
 
-            max_bytes = int(get_setting("logging", "log_max_bytes", DEFAULT_CONFIG["logging"]["log_max_bytes"]))
-            backup_count = int(get_setting("logging", "log_backup_count", DEFAULT_CONFIG["logging"]["log_backup_count"]))
-            file_log_level_str = get_setting("logging", "file_log_level", "INFO").upper()
-            file_log_level = getattr(logging, file_log_level_str, logging.INFO)
+        # --- Set Initial Window Visibility ---
+        log.debug(f"on_mount: Setting initial window visibility based on tab: {self._initial_tab_value}")
+        for tab_id in ALL_TABS:
+            try:
+                window = self.query_one(f"#{tab_id}-window")
+                is_visible = (tab_id == self._initial_tab_value)
+                window.display = is_visible
+                log.debug(f"  - Window #{tab_id}-window display set to {is_visible}")
+            except QueryError:
+                log.error(f"on_mount: Could not find window '#{tab_id}-window' to set initial display.")
+            except Exception as e:
+                log.error(f"on_mount: Error setting display for '#{tab_id}-window': {e}", exc_info=True)
 
-            file_handler = logging.handlers.RotatingFileHandler(
-                log_file_path, maxBytes=max_bytes, backupCount=backup_count, encoding='utf-8'
-            )
-            file_handler.setLevel(file_log_level)
-            file_formatter = logging.Formatter(
-                "{asctime} [{levelname:<8}] {name}:{lineno:<4} : {message}",
-                style="{", datefmt="%Y-%m-%d %H:%M:%S"
-            )
-            file_handler.setFormatter(file_formatter)
-            root_logger.addHandler(file_handler)
-            log.info(f"File logging configured: '{log_file_path}', Level: {logging.getLevelName(file_log_level)}")
+        # *** Set the actual initial tab value AFTER UI is composed and mounted ***
+        log.info(f"App on_mount: Setting current_tab reactive value to {self._initial_tab_value}")
+        self.current_tab = self._initial_tab_value
 
-            # Adjust root logger level after adding all handlers
-            lowest_level = min(
-                root_logger.level,
-                self._rich_log_handler.level if self._rich_log_handler else logging.CRITICAL,
-                file_handler.level
-            )
-            root_logger.setLevel(lowest_level)
-            log.info(f"Root logger level set to: {logging.getLevelName(root_logger.level)}")
+        log.info("App mount process completed.")
 
-        except Exception as e:
-            log.exception("Error setting up file logging in on_mount")
-
+        async def on_shutdown_request(self, event) -> None:
+            log.info("--- App Shutdown Requested ---")
+            if self._rich_log_handler:
+                await self._rich_log_handler.stop_processor()
+                log.info("RichLogHandler processor stopped.")
 
         # --- Set Initial Window Visibility ---
         log.debug(f"on_mount: Setting initial window visibility based on tab: {self._initial_tab_value}")
@@ -439,11 +514,23 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
     async def on_unmount(self) -> None:
         """Clean up logging resources on application exit."""
         log.info("--- App Unmounting ---")
+        # Processor should already be stopped by on_shutdown_request if graceful
+        # Ensure handlers are removed here regardless
         if self._rich_log_handler:
-            await self._rich_log_handler.stop_processor()
             logging.getLogger().removeHandler(self._rich_log_handler)
-            log.info("RichLogHandler removed and processor stopped.")
-        logging.shutdown() # Ensure logs are flushed
+            log.info("RichLogHandler removed.")
+        # Find and remove file handler (more robustly)
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            if isinstance(handler, logging.handlers.RotatingFileHandler):
+                try:
+                    handler.close()  # Ensure file is closed
+                    root_logger.removeHandler(handler)
+                    log.info("File handler removed.")
+                except Exception as e:
+                    log.error(f"Error removing file handler: {e}")
+        logging.shutdown()  # Ensure logs are flushed
+        print("--- App Unmounted ---")  # Use print as logging might be shut down
 
 
     # WATCHER - Handles UI changes when current_tab's VALUE changes
@@ -497,69 +584,86 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
 
         # --- Event Handlers ---
         def on_select_changed(self, event: Select.Changed) -> None:
-            """Handle changes in Select widgets, specifically for API provider."""
-            log.critical(
-                f"--- on_select_changed entered! ID={event.control.id} Value={event.value} ---")  #DEBUGPRINT
             select_id = event.control.id
-            log.debug(f"on_select_changed triggered by: ID='{select_id}', Value='{event.value}'")  # Log trigger
+            new_value = str(event.value) if event.value is not None else ""
+            log.debug(f"--- on_select_changed START --- ID='{select_id}', Value='{new_value}'")  # Use log now
 
             if select_id and select_id.endswith("-api-provider"):
                 id_prefix = select_id.removesuffix("-api-provider")
-                new_provider = str(event.value) if event.value is not None else ""
+                new_provider = new_value  # Already stringified
                 log.info(f"Provider Select changed for '{id_prefix}'. New provider: '{new_provider}'")
 
                 model_select_id = f"#{id_prefix}-api-model"
-                log.debug(f"Attempting to find model select: {model_select_id}")
+                log.debug(f"Attempting to query model select: {model_select_id}")
 
                 try:
                     model_select = self.query_one(model_select_id, Select)
                     log.debug(f"Found model select widget: {model_select}")
-                except QueryError:
-                    log.error(
-                        f"CRITICAL: Could not find model select widget with ID '{model_select_id}'. Check sidebar generation.")
+                except QueryError as e:
+                    log.error(f"QueryError finding model select '{model_select_id}': {e}", exc_info=True)
                     return
                 except Exception as e:
-                    log.error(f"Error querying model select '{model_select_id}': {e}")
+                    log.error(f"Unexpected error querying model select '{model_select_id}': {e}", exc_info=True)
                     return
 
-                # Log the state of providers_models
-                log.debug(f"Current self.providers_models: {self.providers_models}")
+                # Log the source data
+                log.debug(f"Using self.providers_models keys: {list(self.providers_models.keys())}")
+                log.debug(f"Looking up models for provider key: '{new_provider}'")  # The exact key being used
 
-                models = self.providers_models.get(new_provider, []) if new_provider else []
-                log.debug(f"Models retrieved for '{new_provider}': {models}")
+                # Get models, ensuring case sensitivity is handled if necessary
+                # The .get() handles missing keys gracefully.
+                models = self.providers_models.get(new_provider, [])
+                log.debug(f"Models retrieved: {models}")
 
                 new_model_options = [(model, model) for model in models]
                 log.debug(f"New model options generated: {new_model_options}")
 
                 log.debug(f"Calling set_options on {model_select_id}...")
-                model_select.set_options(new_model_options)
-                log.debug(f"Finished set_options.")
+                try:
+                    model_select.set_options(new_model_options)
+                    log.debug(f"Finished set_options.")
+                except Exception as e:
+                    log.error(f"Error during set_options: {e}", exc_info=True)
+                    # Optionally clear options or set a placeholder on error
+                    model_select.set_options([])
+                    model_select.prompt = "Error loading models"
+                    return  # Stop further processing if options failed
 
+                # Logic to set the value (seems okay, but log it)
                 if models:
-                    # Determine default model logic (keep existing logic)
                     config_defaults = self.app_config.get(f"{id_prefix}_defaults", {})
                     config_default_model = config_defaults.get("model")
-                    model_to_set = models[0]  # Default to first
+                    model_to_set = models[0]  # Default to first available
+                    # Check if the default provider matches and the default model is valid for this provider
                     if config_defaults.get("provider") == new_provider and config_default_model in models:
                         model_to_set = config_default_model
-                        log.debug(f"Determined model to set (from config default): '{model_to_set}'")
+                        log.debug(f"Using config default model: '{model_to_set}'")
                     else:
-                        log.debug(f"Determined model to set (first available): '{model_to_set}'")
+                        log.debug(f"Using first available model: '{model_to_set}'")
 
                     log.debug(f"Setting value of {model_select_id} to: '{model_to_set}'")
-                    model_select.value = model_to_set
-                    model_select.prompt = "Select Model..."
-                    log.debug(f"Value set. Current value: {model_select.value}")
+                    # --- This might be the crucial part ---
+                    # Ensure the value being set is actually in the new options list
+                    if model_to_set not in [opt[1] for opt in new_model_options]:
+                        log.warning(
+                            f"Model '{model_to_set}' not found in new options {new_model_options}. Falling back to first option or None.")
+                        model_to_set = models[0] if models else None  # Fallback again
+
+                    model_select.value = model_to_set  # Set the value AFTER set_options
+                    model_select.prompt = "Select Model..."  # Reset prompt
+                    log.debug(f"Model select value after setting: {model_select.value}")
                 else:
-                    log.debug(f"No models available for '{new_provider}'. Clearing value and updating prompt.")
-                    model_select.value = None
+                    log.debug(f"No models for '{new_provider}'. Clearing value.")
+                    model_select.value = None  # Use None for empty value
                     model_select.prompt = "No models available" if new_provider else "Select Provider first"
 
-                # Maybe refresh isn't needed, but doesn't hurt
+                # Optional: force a refresh if updates seem inconsistent
                 # model_select.refresh()
-                # log.debug(f"Refreshed model select widget: {model_select.id}")
+                # log.debug(f"Refreshed {model_select_id}")
+
             else:
                 log.debug(f"Ignoring Select.Changed event from non-provider select: {select_id or 'UNKNOWN'}")
+            log.debug(f"--- on_select_changed END --- ID='{select_id}'")
 
         async def on_button_pressed(self, event: Button.Pressed) -> None:
             """Handle button presses for tabs, sending messages, and message actions."""

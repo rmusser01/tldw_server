@@ -1,0 +1,133 @@
+# default_css.py
+# Description: This file contains the default CSS for the tldw CLI application.
+#
+# Imports
+#
+# 3rd-party Libraries
+#
+# Local Imports
+#
+#######################################################################################################################
+#
+# Static declarations:
+# Constants
+DEFAULT_CSS_CONTENT = """
+
+Screen { layout: vertical; }
+Header { dock: top; height: 1; background: $accent-darken-1; }
+Footer { dock: bottom; height: 1; background: $accent-darken-1; }
+#tabs { dock: top; height: 3; background: $background; padding: 0 1; }
+#tabs Button { width: 1fr; height: 100%; border: none; background: $panel; color: $text-muted; }
+#tabs Button:hover { background: $panel-lighten-1; color: $text; }
+#tabs Button.-active { background: $accent; color: $text; text-style: bold; border: none; }
+#content { height: 1fr; width: 100%; }
+.window { height: 100%; width: 100%; layout: horizontal; overflow: hidden; display: block; }
+.window.hidden { display: none; }
+.placeholder-window { align: center middle; background: $panel; }
+
+/* Sidebar Styling */
+.sidebar { width: 35; background: $boost; padding: 1 2; border-right: thick $background-darken-1; height: 100%; overflow-y: auto; overflow-x: hidden; }
+.sidebar-title { text-style: bold underline; margin-bottom: 1; width: 100%; text-align: center; }
+.sidebar-label { margin-top: 1; text-style: bold; }
+.sidebar-input { width: 100%; margin-bottom: 1; }
+.sidebar-textarea { width: 100%; height: 5; border: round $surface; margin-bottom: 1; }
+.sidebar Select { width: 100%; margin-bottom: 1; }
+#chat-api-key-placeholder, #character-api-key-placeholder { color: $text-muted; text-style: italic; margin-top: 1; }
+
+/* Chat Window Layout */
+#chat-main-content { layout: vertical; height: 100%; width: 1fr; }
+#chat-input-area, #character-input-area { height: auto; max-height: 12; width: 100%; align: left top; padding: 1 0 0 0; border-top: round $surface; }
+.chat-input { width: 1fr; height: auto; max-height: 10; border: round $surface; margin: 0 1 0 0; }
+.send-button { width: 10; height: 3; margin: 0; }
+
+/* Character Window Layout */
+#character-main-content { layout: vertical; height: 100%; width: 1fr; }
+#character-top-area { height: 1fr; width: 100%; layout: horizontal; margin-bottom: 1; }
+#character-top-area > .chat-log { margin: 0 1 0 0; height: 100%; margin-bottom: 0; } /* If still using RichLog here */
+#character-portrait { width: 25; height: 100%; border: round $surface; padding: 1; margin: 0; overflow: hidden; align: center top; }
+
+/* Logs Tab */
+#logs-window { padding: 0; border: none; height: 100%; width: 100%; }
+#app-log-display { border: none; height: 1fr; width: 1fr; margin: 0; padding: 1; }
+
+/* --- Chat Message Widget Styling --- */
+/* Container for message list */
+#chat-log { /* This is now the VerticalScroll */
+    height: 1fr;
+    width: 1fr;
+    /* border: round $surface; Remove border from container */
+    padding: 0 1; /* Padding for messages */
+}
+
+/* Individual message widget */
+ChatMessage {
+    width: 100%;
+    height: auto;
+    margin-bottom: 1;
+}
+ChatMessage > Vertical { /* The inner container holding text and actions */
+    border: round $surface;
+    background: $panel;
+    padding: 0 1;
+    width: 100%; /* Take full width */
+    height: auto; /* Adjust height to content */
+}
+ChatMessage.-user > Vertical { /* User message specific style */
+    background: $boost;
+    border: round $accent-lighten-1;
+    /* You might want different alignment for user messages */
+    /* align-horizontal: right; */ /* Example: if container allows */
+}
+ChatMessage.-ai > Vertical { /* AI message specific style */
+    background: $panel;
+    border: round $surface;
+}
+.message-header {
+    width: 100%;
+    padding: 0 1;
+    color: $text-muted;
+    background: $surface-darken-1;
+    text-style: bold;
+    height: 1; /* Ensure header takes minimal height */
+}
+.message-text {
+    padding: 1;
+    width: 100%;
+    height: auto;
+}
+.message-actions {
+    height: auto;
+    padding: 0 1 1 1; /* Add bottom padding */
+    width: 100%;
+    border-top: solid $surface-lighten-1;
+    align: right middle; /* Align buttons to the right */
+    margin-top: 1; /* Add space above buttons */
+}
+/* Hide actions by default for AI messages while generating */
+ChatMessage.-ai .message-actions.-generating {
+    display: none;
+}
+.message-actions Button {
+    min-width: 8;
+    width: auto; /* Let button size adjust */
+    height: 1;
+    margin: 0 0 0 1; /* Space between buttons */
+    padding: 0 1; /* Padding inside buttons */
+    border: none; /* Optional: remove default button border */
+    background: $surface-lighten-2;
+    color: $text-muted;
+}
+.message-actions Button:hover {
+    background: $surface;
+    color: $text;
+    border: none;
+}
+/* Specific button styling (optional) */
+.message-actions #copy:hover { background: $success; }
+.message-actions #regenerate:hover { background: $warning; }
+/* etc. */
+"""
+
+#
+# End of default_css.py
+#######################################################################################################################
