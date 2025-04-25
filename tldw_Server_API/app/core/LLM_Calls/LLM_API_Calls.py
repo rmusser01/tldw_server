@@ -23,7 +23,7 @@
 import json
 import os
 import time
-from typing import List
+from typing import List, Any
 #
 # Import 3rd-Party Libraries
 import requests
@@ -38,6 +38,17 @@ from tldw_Server_API.app.core.Utils.Utils import load_and_log_configs, logging
 #
 
 # FIXME: Update to include full arguments
+
+# --- Helper function for safe type conversion ---
+def _safe_cast(value: Any, cast_to: type, default: Any = None) -> Any:
+    """Safely casts value to specified type, returning default on failure."""
+    if value is None:
+        return default
+    try:
+        return cast_to(value)
+    except (ValueError, TypeError):
+        logging.warning(f"Could not cast '{value}' to {cast_to}. Using default: {default}")
+        return default
 
 def extract_text_from_segments(segments):
     logging.debug(f"Segments received: {segments}")

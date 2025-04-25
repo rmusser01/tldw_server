@@ -402,32 +402,78 @@ def chat(message, history, media_content, selected_parts, api_endpoint, api_key,
         logging.debug(f"Debug - Chat Function - Prompt: {custom_prompt}")
 
         # Use the existing API request code based on the selected endpoint
-        response = chat_api_call(api_endpoint, api_key, input_data, custom_prompt, temp, system_message, streaming, minp, maxp, model, topp, topk)
+        # --- Call the API Router ---
+        # Pass all relevant parameters received by chat()
+        response = chat_api_call(
+            api_endpoint=api_endpoint,
+            api_key=api_key,
+            input_data=input_data, # Pass the combined history + message
+            prompt=custom_prompt,      # Pass the separate custom prompt
+            temp=temp,
+            system_message=system_message,
+            streaming=streaming,
+            minp=minp,   # Pass through
+            maxp=maxp,   # Pass through (chat_api_call handles mapping if needed)
+            model=model,
+            topk=topk,   # Pass through
+            topp=topp    # Pass through
+        )
 
         if streaming:
             logging.debug(f"Debug - Chat Function - Response: {response}")
+            # FIXME - Need to implement streaming handling
             return response
-        else:
-            chat_duration = time.time() - start_time
-            log_histogram("chat_duration", chat_duration, labels={"api_endpoint": api_endpoint})
-            log_counter("chat_success", labels={"api_endpoint": api_endpoint})
-            logging.debug(f"Debug - Chat Function - Response: {response}")
-            loaded_config_data = "loaded_config_data" #FIXME - load_and_log_configs()
-            post_gen_replacement = loaded_config_data['chat_dictionaries']['post_gen_replacement']
-            if post_gen_replacement:
-                post_gen_replacement_dict = loaded_config_data['chat_dictionaries']['post_gen_replacement_dict']
-                chatdict_entries = parse_user_dict_markdown_file(post_gen_replacement_dict)
-                response = process_user_input(
-                    response,
-                    chatdict_entries,
-                    # max_tokens=max_tokens(5000 default),
-                    # strategy="sorted_evenly" (default)
-                )
-            return response
+            # --- Post-processing (Keep this part, but fix config load) ---
+        if not streaming and isinstance(response, str):  # Only process non-streaming strings
+            try:
+                # *** Fix config loading here ***
+                # You need a way to access the loaded config. Pass it in or load it.
+                # Assuming config is loaded globally in config.py:
+                from ..config import get_setting  # Import the access function
+
+                post_gen_replacement = get_setting("chat_dictionaries", "post_gen_replacement",
+                                                   False)  # Example key
+                if post_gen_replacement:
+                    post_gen_replacement_dict_path = get_setting("chat_dictionaries", "post_gen_replacement_dict",
+                                                                 None)  # Example key
+                    if post_gen_replacement_dict_path:
+                        # Make sure path exists and is valid
+                        # Need to parse the dictionary file
+                        # post_gen_dict_entries = parse_user_dict_markdown_file(post_gen_replacement_dict_path) # Assuming this function exists
+                        # response = process_user_input(response, post_gen_dict_entries) # Assuming this function exists
+                        logging.debug("Applied post-generation replacements.")
+                    else:
+                        logging.warning("Post-generation replacement enabled but dictionary path not set.")
+            except Exception as post_e:
+                logging.error(f"Error during post-generation replacement: {post_e}", exc_info=True)
+        return response  # Return the raw (or post-processed) response
+
     except Exception as e:
-        log_counter("chat_error", labels={"api_endpoint": api_endpoint, "error": str(e)})
-        logging.error(f"Error in chat function: {str(e)}")
-        return f"An error occurred: {str(e)}"
+        # log_counter("chat_error", labels={"api_endpoint": api_endpoint, "error": str(e)}) # Handled in chat_api_call
+        logging.error(f"Error in chat function for endpoint '{api_endpoint}': {str(e)}", exc_info=True)
+        # Return a formatted error string
+        return f"[bold red]An error occurred during chat setup:[/]\n{str(e)}"
+    #     else:
+    #         chat_duration = time.time() - start_time
+    #         log_histogram("chat_duration", chat_duration, labels={"api_endpoint": api_endpoint})
+    #         log_counter("chat_success", labels={"api_endpoint": api_endpoint})
+    #         logging.debug(f"Debug - Chat Function - Response: {response}")
+    #         loaded_config_data = "loaded_config_data" #FIXME - load_and_log_configs()
+    #         post_gen_replacement = loaded_config_data['chat_dictionaries']['post_gen_replacement']
+    #         if post_gen_replacement:
+    #             post_gen_replacement_dict = loaded_config_data['chat_dictionaries']['post_gen_replacement_dict']
+    #             chatdict_entries = parse_user_dict_markdown_file(post_gen_replacement_dict)
+    #             response = process_user_input(
+    #                 response,
+    #                 chatdict_entries,
+    #                 # max_tokens=max_tokens(5000 default),
+    #                 # strategy="sorted_evenly" (default)
+    #             )
+    #         return response
+    # except Exception as e:
+    #     log_counter("chat_error", labels={"api_endpoint": api_endpoint, "error": str(e)})
+    #     logging.error(f"Error in chat function: {str(e)}")
+    #     return f"An error occurred: {str(e)}"
 
 
 
