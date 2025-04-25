@@ -12,23 +12,24 @@ import toml
 #
 # Local Imports
 # --- Add project root to sys.path ---
-# This allows Python to find the 'tldw_app' package
 project_dir = Path(__file__).parent.resolve()
 sys.path.insert(0, str(project_dir))
 print(f"Project directory added to sys.path: {project_dir}")
 
-# --- Import from the 'tldw_app' package ---
+# --- Import from the CORRECT 'tldw_app' package ---
 try:
-    from app import TldwCli
-    from config import load_config, get_config_path, DEFAULT_CONFIG
-    # Assuming you move the CSS string content to a file like tldw_app/css/default_css.py
-    from CSS.default_css import DEFAULT_CSS_CONTENT
+    # Use 'tldw_app' consistently
+    from tldw_app.app import TldwCli
+    from tldw_app.config import load_config, get_config_path, DEFAULT_CONFIG
+    # Ensure this import path is correct based on your structure inside tldw_app
+    from tldw_app.CSS.default_css import DEFAULT_CSS_CONTENT
 except ModuleNotFoundError as e:
-    print(f"ERROR: Failed to import from tldw_app package.")
-    print(f"       Ensure '{project_dir}' is correct and contains 'tldw_app'.")
+    # Update the error message to reflect 'tldw_app'
+    print(f"ERROR: run.py: Failed to import from tldw_app package.")
+    print(f"       Ensure '{project_dir}' is correct and contains 'tldw_app'.") # Check for tldw_app
     print(f"       Make sure tldw_app and its subdirs have __init__.py files.")
     print(f"       Original error: {e}")
-    sys.exit(1) # Exit if core components can't be imported
+    sys.exit(1)
 
 # --- Initial Setup ---
 logging.basicConfig(level="DEBUG", format="%(asctime)s [%(levelname)s] %(name)s - %(message)s")
@@ -50,10 +51,10 @@ def ensure_default_files():
         except Exception as e:
             log.error(f"Failed to create default config file: {e}", exc_info=True)
 
-    # CSS File - Path needs to point *inside* the package now
-    # TldwCli.CSS_PATH should be relative e.g., "css/tldw_cli.tcss"
+
+    # CSS File Path
     try:
-        # Construct path relative to the project root where run.py is
+        # Construct path using 'tldw_app' directory
         css_path_in_package = project_dir / "tldw_app" / TldwCli.CSS_PATH
         if not css_path_in_package.exists():
             log.warning(f"CSS file not found at {css_path_in_package}, creating default.")
@@ -65,7 +66,6 @@ def ensure_default_files():
          log.error("Could not determine CSS_PATH from TldwCli class. Skipping CSS check.")
     except Exception as e:
         log.error(f"Failed to create default CSS file: {e}", exc_info=True)
-
 
 if __name__ == "__main__":
     log.info("Ensuring default files...")

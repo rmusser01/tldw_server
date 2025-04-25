@@ -16,10 +16,10 @@ from pathlib import Path
 # External Imports
 #
 # Local Imports
-from tldw_cli.tldw_cli_app.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_cli.tldw_cli_app.api.LLM_API_Calls import chat_with_openai, chat_with_anthropic, chat_with_huggingface, \
+from ..Metrics.metrics_logger import log_counter, log_histogram
+from ..api.LLM_API_Calls import chat_with_openai, chat_with_anthropic, chat_with_huggingface, \
     chat_with_google, chat_with_openrouter, chat_with_groq, chat_with_deepseek, chat_with_cohere, chat_with_mistral
-from tldw_cli.tldw_cli_app.api.LLM_API_Calls_Local import chat_with_aphrodite, chat_with_kobold, chat_with_oobabooga, \
+from ..api.LLM_API_Calls_Local import chat_with_aphrodite, chat_with_kobold, chat_with_oobabooga, \
     chat_with_llama, chat_with_tabbyapi, chat_with_local_llm, chat_with_ollama, chat_with_vllm, chat_with_custom_openai, \
     chat_with_custom_openai_2
 #

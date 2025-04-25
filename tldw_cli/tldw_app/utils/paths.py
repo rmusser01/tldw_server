@@ -2,22 +2,25 @@
 # Description: This file contains functions to manage file paths and directories for the tldw_cli application.
 #
 # Imports
-#
-# 3rd-party Libraries
-#
-# Local Imports
-#
-#######################################################################################################################
-#
-# Functions:
 import logging
 import os
 from pathlib import Path
 from typing import Union, AnyStr
-
+#
+# 3rd-party Libraries
+#
+# Local Imports
 from tldw_Server_API.app.core.Utils.Utils import load_comprehensive_config, get_user_database_path
-from tldw_cli.utils.Utils import PROJECT_DATABASES_DIR, log, PROJECT_ROOT_DIR, CONFIG_FILE_PATH, USER_DB_PATH, \
+from ..utils.Utils import PROJECT_DATABASES_DIR, log, PROJECT_ROOT_DIR, CONFIG_FILE_PATH, USER_DB_PATH, \
     USER_DB_DIR
+
+
+#
+#######################################################################################################################
+#
+# Functions:
+
+
 
 
 def get_project_root():

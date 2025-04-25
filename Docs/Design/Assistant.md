@@ -11,8 +11,8 @@ https://github.com/abdibrokhim/paper-ai-voice-assistant
 https://arxiv.org/abs/2504.02197
 https://github.com/yankooliveira/toads
 https://github.com/kortix-ai/suna
-
-
+https://github.com/dyad-sh/dyad
+https://github.com/homanmirgolbabaee/arxiv-wizard-search?tab=readme-ov-file#-arxiv-research-assistant
 
 
 
