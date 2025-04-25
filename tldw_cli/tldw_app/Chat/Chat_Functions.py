@@ -352,6 +352,7 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
 
 def chat(message, history, media_content, selected_parts, api_endpoint, api_key, custom_prompt, temperature,
          system_message=None, streaming=False, minp=None, maxp=None, model=None, topp=None, topk=None, chatdict_entries=None, max_tokens=500, strategy="sorted_evenly"):
+    # FIXME - move to chat_api_call, and add another metric_name for chat lengths (track entire convo)
     log_counter("chat_attempt", labels={"api_endpoint": api_endpoint})
     start_time = time.time()
     try:
@@ -361,6 +362,7 @@ def chat(message, history, media_content, selected_parts, api_endpoint, api_key,
         logging.info(f"Debug - Chat Function - API Endpoint: {api_endpoint}")
         # logging.info(f"Debug - Chat Function - Prompt: {prompt}")
 
+        # --- Input Processing ---
         # Ensure selected_parts is a list
         if not isinstance(selected_parts, (list, tuple)):
             selected_parts = [selected_parts] if selected_parts else []

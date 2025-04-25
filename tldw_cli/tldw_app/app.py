@@ -26,6 +26,8 @@ from textual.worker import Worker, WorkerState
 from textual.binding import Binding
 from textual.dom import DOMNode # For type hinting if needed
 from textual.css.query import QueryError # For specific error handling
+
+from tldw_cli.tldw_app.Chat.Chat_Functions import chat
 #
 # --- Local API library Imports ---
 from .config import get_setting, get_providers_and_models, log, get_log_file_path
@@ -71,7 +73,37 @@ except ImportError as e:
 #
 #######################################################################################################################
 #
-# Functions:
+# Statics
+
+
+# Make sure these imports succeed first!
+if API_IMPORTS_SUCCESSFUL:
+    API_FUNCTION_MAP = {
+        "OpenAI": chat_with_openai,
+        "Anthropic": chat_with_anthropic,
+        "Cohere": chat_with_cohere,
+        "Groq": chat_with_groq,
+        "OpenRouter": chat_with_openrouter,
+        "HuggingFace": chat_with_huggingface,
+        "DeepSeek": chat_with_deepseek,
+        "MistralAI": chat_with_mistral, # Key from config
+        "Google": chat_with_google,
+        "Llama_cpp": chat_with_llama,    # Key from config
+        "KoboldCpp": chat_with_kobold,   # Key from config
+        "Oobabooga": chat_with_oobabooga,# Key from config
+        "vLLM": chat_with_vllm,       # Key from config
+        "TabbyAPI": chat_with_tabbyapi,  # Key from config
+        "Aphrodite": chat_with_aphrodite,# Key from config
+        "Ollama": chat_with_ollama,     # Key from config
+        "Custom": chat_with_custom_openai, # Key from config
+        "Custom_2": chat_with_custom_openai_2, # Key from config
+        # "local-llm": chat_with_local_llm # Add if this is a distinct provider in config
+    }
+    log.info(f"API_FUNCTION_MAP populated with {len(API_FUNCTION_MAP)} entries.")
+else:
+    API_FUNCTION_MAP = {}
+    log.error("API_FUNCTION_MAP is empty due to import failures.")
+
 
 # --- Configuration Loading ---
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "tldw_cli" / "config.toml"
@@ -108,6 +140,13 @@ DEFAULT_CONFIG = {
     "database": {"path": str(Path.home() / ".local" / "share" / "tldw_cli" / "history.db")},
     "server": {"url": "http://localhost:8001/api", "token": None }
 }
+
+#
+#
+#####################################################################################################################
+#
+# Functions:
+
 
 def load_config(config_path: Path = DEFAULT_CONFIG_PATH) -> dict:
     """Loads configuration from TOML file, merging with defaults."""
@@ -671,7 +710,7 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
             button_id = button.id
             log.debug(f"Button pressed: {button_id}, Classes: {button.classes}")
 
-            # --- Tab Switching ---
+            # --- Tab Switching --- (Keep this part as is)
             if button_id and button_id.startswith("tab-"):
                 new_tab_id = button_id.replace("tab-", "")
                 log.info(f"Tab button {button_id} pressed. Requesting switch to '{new_tab_id}'")
@@ -679,18 +718,18 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
                     self.current_tab = new_tab_id
                 else:
                     log.debug(f"Already on tab '{new_tab_id}'. Ignoring.")
-                return  # Finished handling tab button
+                return
 
             # --- Send Message ---
             if button_id and button_id.startswith("send-"):
                 chat_id_part = button_id.replace("send-", "")
                 prefix = chat_id_part
-                log.info(f"'Send' button pressed for '{chat_id_part}'")
+                log.info(f"Send button pressed for '{chat_id_part}'")
 
                 # --- Query Widgets ---
                 try:
                     text_area = self.query_one(f"#{prefix}-input", TextArea)
-                    chat_container = self.query_one(f"#{prefix}-log", VerticalScroll)  # Changed to VerticalScroll
+                    chat_container = self.query_one(f"#{prefix}-log", VerticalScroll)
                     provider_widget = self.query_one(f"#{prefix}-api-provider", Select)
                     model_widget = self.query_one(f"#{prefix}-api-model", Select)
                     system_prompt_widget = self.query_one(f"#{prefix}-system-prompt", TextArea)
@@ -698,11 +737,18 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
                     top_p_widget = self.query_one(f"#{prefix}-top-p", Input)
                     min_p_widget = self.query_one(f"#{prefix}-min-p", Input)
                     top_k_widget = self.query_one(f"#{prefix}-top-k", Input)
+                    # Add query for custom prompt if you have one
+                    # custom_prompt_widget = self.query_one(f"#{prefix}-custom-prompt", TextArea) # Example
                 except QueryError as e:
                     log.error(f"Send Button: Could not find UI widgets for '{prefix}': {e}")
+                    # Optionally mount an error message in the chat_container
+                    await chat_container.mount(
+                        ChatMessage(f"Internal Error: Missing UI elements for {prefix}.", role="AI", classes="-error"))
                     return
                 except Exception as e:
                     log.error(f"Send Button: Unexpected error querying widgets for '{prefix}': {e}")
+                    await chat_container.mount(
+                        ChatMessage("Internal Error: Could not query UI elements.", role="AI", classes="-error"))
                     return
 
                 # --- Get Values ---
@@ -711,23 +757,49 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
                 selected_model = str(model_widget.value) if model_widget.value else None
                 system_prompt = system_prompt_widget.text
                 temperature = self._safe_float(temp_widget.value, 0.7, "temperature")
-                top_p = self._safe_float(top_p_widget.value, 0.95, "top_p")
-                min_p = self._safe_float(min_p_widget.value, 0.05, "min_p")
-                top_k = self._safe_int(top_k_widget.value, 50, "top_k")
+                top_p = self._safe_float(top_p_widget.value, 0.95, "top_p")  # UI value for top_p
+                min_p = self._safe_float(min_p_widget.value, 0.05, "min_p")  # UI value for min_p
+                top_k = self._safe_int(top_k_widget.value, 50, "top_k")  # UI value for top_k
+                custom_prompt = ""  # Fetch from UI if needed: custom_prompt_widget.text
+                # Determine streaming based on config or UI element if you add one
+                # Placeholder: Use False for now
+                should_stream = False
 
                 # --- Basic Validation ---
-                if not API_IMPORTS_SUCCESSFUL:
-                    # Maybe mount an error message?
-                    await chat_container.mount(
-                        ChatMessage("API libraries failed load. Cannot send.", role="AI", classes="-error"))
-                    log.error(f"Send attempt ('{prefix}') failed: API libraries not loaded.")
-                    return
                 if not message: log.debug(
                     f"Empty message submitted in '{prefix}'."); text_area.clear(); text_area.focus(); return
                 if not selected_provider: await chat_container.mount(
-                    ChatMessage("Select API Provider.", role="AI", classes="-error")); return
+                    ChatMessage("Please select an API Provider.", role="AI", classes="-error")); return
                 if not selected_model: await chat_container.mount(
-                    ChatMessage("Select Model.", role="AI", classes="-error")); return
+                    ChatMessage("Please select a Model.", role="AI", classes="-error")); return
+                # Check if API functions loaded (check the flag)
+                if not API_IMPORTS_SUCCESSFUL:
+                    await chat_container.mount(
+                        ChatMessage("Error: Core API functions failed to load. Cannot send message.", role="AI",
+                                    classes="-error"))
+                    log.error("Attempted to send message, but API imports failed.")
+                    return
+
+                # --- Build History ---
+                chat_history = []
+                try:
+                    # Iterate through existing ChatMessage widgets in the container
+                    message_widgets = chat_container.query(ChatMessage)
+                    user_msg = None
+                    for msg_widget in message_widgets:
+                        if msg_widget.role == "User":
+                            user_msg = msg_widget.message_text  # Store user message
+                        elif msg_widget.role == "AI" and user_msg is not None:
+                            # Pair the last user message with this AI response
+                            chat_history.append((user_msg, msg_widget.message_text))
+                            user_msg = None  # Reset user message
+                    log.debug(f"Built chat history with {len(chat_history)} turns.")
+                except Exception as e:
+                    log.error(f"Failed to build chat history: {e}", exc_info=True)
+                    # Decide whether to proceed without history or show an error
+                    await chat_container.mount(
+                        ChatMessage("Internal Error: Could not retrieve chat history.", role="AI", classes="-error"))
+                    return
 
                 # --- Mount User Message ---
                 user_msg_widget = ChatMessage(message, role="User")
@@ -736,73 +808,67 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
                 text_area.clear()
                 text_area.focus()
 
-                # --- Prepare and Dispatch API Call ---
-                api_function = API_FUNCTION_MAP.get(selected_provider)
-                if not api_function:
-                    await chat_container.mount(
-                        ChatMessage(f"Error: API backend for {selected_provider} not available.", role="AI",
-                                    classes="-error"))
-                    log.error(f"API function for provider {selected_provider} not found or loaded.")
-                    return
-
-                # Get API URL (if needed for local models)
-                api_url = self._get_api_name(selected_provider, self.app_config.get("api_endpoints", {}))
-
-                # TODO: Build chat history for context
-                # For now, just send the current message
-                input_for_api = message
-
-                # TODO: Get API key securely (from env var or config, avoid passing directly if possible)
-                # Placeholder: Assume key is retrieved somehow if needed by the function
-                api_key_for_call = os.environ.get(f"{selected_provider.upper()}_API_KEY")  # Example
-
-                # Determine streaming preference (example, adjust as needed)
-                # should_stream = get_setting("providers", f"{selected_provider}_streaming", False)
-                should_stream = False  # Default to non-streaming for simplicity initially
-
-                # Prepare arguments dictionary based on what the specific API function expects
-                # This needs careful mapping based on your api/llm_api.py functions
-                api_args = {
-                    "api_key": api_key_for_call,
-                    "input_data": input_for_api,
-                    "model": selected_model,
-                    "custom_prompt_arg": "",  # Maybe combine prompt+input here? Adjust API funcs
-                    "system_message": system_prompt,
-                    "temp": temperature,
-                    "streaming": should_stream,
-                    "topp": top_p,  # Map UI value to expected param name
-                    "top_k": top_k,
-                    "minp": min_p,
-                    # Add other relevant params like api_url if needed by local functions
-                    "api_url": api_url if selected_provider in ["Ollama", "Llama.cpp", "Oobabooga", "KoboldCpp",
-                                                                "vLLM"] else None,
-                }
-
-                # Remove None values unless specifically required by the API func
-                filtered_api_call_args = {k: v for k, v in api_args.items() if v is not None}
-                loggable_args = {k: v for k, v in filtered_api_call_args.items() if k != 'api_key'}
-                func_name = getattr(api_function, '__name__', 'UNKNOWN_FUNCTION')
-                log.debug(f"Calling {func_name} with filtered args: {loggable_args}")
+                # --- Prepare and Dispatch API Call via Worker calling chat_wrapper ---
+                # Fetch API key (adjust based on your actual key management)
+                # Example: using environment variables
+                api_key_for_call = os.environ.get(f"{selected_provider.upper()}_API_KEY")
+                if not api_key_for_call:
+                    # Try finding it in the config as a fallback (less secure)
+                    api_key_for_call = get_setting("api_keys", selected_provider.lower())
+                    if not api_key_for_call or "Set " in api_key_for_call:  # Check for placeholder text
+                        log.warning(f"API Key for {selected_provider} not found in environment or config.")
+                        # Allow calls to local models that might not need a key
+                        # Or display an error if it's a known cloud provider
+                        if selected_provider in ["OpenAI", "Anthropic", "Google", "MistralAI", "Groq", "Cohere",
+                                                 "OpenRouter", "HuggingFace", "DeepSeek"]:
+                            await chat_container.mount(
+                                ChatMessage(f"API Key for {selected_provider} not configured.", role="AI",
+                                            classes="-error"))
+                            return
+                        api_key_for_call = None  # Explicitly set to None for local models
 
                 # --- Mount Placeholder AI Message ---
                 ai_placeholder_widget = ChatMessage(message="AI thinking...", role="AI", generation_complete=False)
                 await chat_container.mount(ai_placeholder_widget)
                 chat_container.scroll_end(animate=False)
-                self.current_ai_message_widget = ai_placeholder_widget
+                self.current_ai_message_widget = ai_placeholder_widget  # Store reference
 
-                # --- Define Worker Wrapper ---
-                current_api_func = api_function
-                current_api_args = filtered_api_call_args  # Use filtered args
-                current_placeholder = ai_placeholder_widget
-
-                def api_call_wrapper() -> Union[str, Generator[Any, Any, None], None]:
-                    log.debug(f"Worker wrapper executing for {prefix}")
-                    # Pass the filtered args to the worker
-                    return self._api_worker(current_api_func, current_api_args, current_placeholder)
+                # --- Define Worker Target using chat_wrapper ---
+                # Use a lambda to capture current values and pass them to the wrapper
+                # Note: We pass the UI parameter values directly. chat_wrapper calls chat(), which calls chat_api_call(),
+                # and chat_api_call handles the mapping (e.g., top_p vs maxp vs topp).
+                worker_target = lambda: self.chat_wrapper(
+                    message=message,
+                    history=chat_history,
+                    # --- Pass other necessary params ---
+                    api_endpoint=selected_provider,
+                    api_key=api_key_for_call,
+                    custom_prompt=custom_prompt,  # Pass the UI custom prompt
+                    temperature=temperature,
+                    system_message=system_prompt,
+                    streaming=should_stream,
+                    minp=min_p,  # Pass min_p from UI
+                    # maxp=top_p,    # Pass top_p from UI as maxp if chat_wrapper/chat expects it
+                    model=selected_model,
+                    topp=top_p,  # Pass top_p from UI as topp
+                    topk=top_k,  # Pass top_k from UI
+                    # Add placeholders for unused chat() params for now
+                    media_content={},
+                    selected_parts=[],
+                    chatdict_entries=None,
+                    max_tokens=500,  # Default or get from config/UI
+                    strategy="sorted_evenly"  # Default or get from config/UI
+                )
 
                 # --- Run Worker ---
-                log.debug(f"Running worker API_Call_{prefix}")
-                self.run_worker(api_call_wrapper, name=f"API_Call_{prefix}", group="api_calls", thread=True)
+                log.debug(f"Running worker 'API_Call_{prefix}' to execute chat_wrapper")
+                self.run_worker(
+                    worker_target,
+                    name=f"API_Call_{prefix}",
+                    group="api_calls",
+                    thread=True,  # Run in a separate thread
+                    description=f"Calling {selected_provider}"
+                )
                 return  # Finished handling send button
 
             # --- Handle Action Buttons inside ChatMessage ---
@@ -870,21 +936,43 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
                 if not button_id.startswith("tab-"):  # Avoid logging tab clicks as warnings
                     log.warning(f"Button pressed with unhandled ID or context: {button_id}")
 
-        # --- Worker function ---
-        def _api_worker(self, api_func: callable, api_args: dict, placeholder_widget: ChatMessage) -> Union[
-            str, Generator[Any, Any, None], None]:
-            """Executes the API call in a thread."""
-            func_name = getattr(api_func, '__name__', 'UNKNOWN_FUNCTION')
+        def chat_wrapper(self, message, history, api_endpoint, api_key, custom_prompt, temperature,
+                         system_message, streaming, minp, model, topp, topk,
+                         # Removed maxp if chat() doesn't use it directly
+                         media_content, selected_parts, chatdict_entries, max_tokens, strategy):
+            """
+            This method runs in the worker thread and calls the main chat logic.
+            It receives parameters captured by the lambda in on_button_pressed.
+            """
+            log.debug(f"chat_wrapper executing for endpoint '{api_endpoint}'")
             try:
-                log.info(
-                    f"Worker {func_name} starting execution with args: {{k: v for k, v in api_args.items() if k != 'api_key'}}")
-                # *** Call the actual API function with the filtered arguments ***
-                result = api_func(**api_args)
-                log.info(f"Worker {func_name} finished successfully.")
+                # Call the imported chat function from Chat_Functions.py
+                result = chat(
+                    message=message,
+                    history=history,
+                    media_content=media_content,
+                    selected_parts=selected_parts,
+                    api_endpoint=api_endpoint,
+                    api_key=api_key,
+                    custom_prompt=custom_prompt,  # Pass custom_prompt from UI
+                    temperature=temperature,
+                    system_message=system_message,
+                    streaming=streaming,
+                    minp=minp,
+                    # maxp=maxp, # Pass maxp if chat() needs it, otherwise remove
+                    model=model,
+                    topp=topp,  # Pass topp from UI
+                    topk=topk,  # Pass topk from UI
+                    chatdict_entries=chatdict_entries,
+                    max_tokens=max_tokens,
+                    strategy=strategy
+                )
+                log.debug(f"chat_wrapper finished for '{api_endpoint}'. Result type: {type(result)}")
                 return result
             except Exception as e:
-                log.exception(f"Error during API call in worker ({func_name}): {e}")
-                return f"[bold red]API Error ({func_name}):[/] {str(e)}"
+                log.exception(f"Error inside chat_wrapper for endpoint {api_endpoint}: {e}")
+                # Return a formatted error string that on_worker_state_changed can display
+                return f"[bold red]Error during chat processing:[/]\n{str(e)}"
 
         # --- Handle worker completion ---
         def on_worker_state_changed(self, event: Worker.StateChanged) -> None:

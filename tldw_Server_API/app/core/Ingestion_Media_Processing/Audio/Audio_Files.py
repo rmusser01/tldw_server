@@ -192,7 +192,7 @@ def process_audio_files(
     custom_title: Optional[str] = None,
     author: Optional[str] = None,
     temp_dir: Optional[str] = None # Explicit temp dir passed from API
-) -> Dict[str, Any]:
+) -> dict[str, int | list[Any | None] | list[dict[str, Any]]] | None:
     """
     Processes a list of audio inputs (URLs or local file paths). Handles download,
     conversion, transcription, chunking, and analysis (summarization). Returns

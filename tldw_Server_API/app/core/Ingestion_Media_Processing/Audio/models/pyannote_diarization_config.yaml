@@ -1,0 +1,13 @@
+pipeline:
+  params:
+    clustering: AgglomerativeClustering
+    embedding: /FULL/PATH/TO/SCRIPT/tldw/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/models/pyannote_model_wespeaker-voxceleb-resnet34-LM.bin #models/pyannote_model_wespeaker-voxceleb-resnet34-LM.bin
+    segmentation: /FULL/PATH/TO/SCRIPT/tldw/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/models/pyannote_model_segmentation-3.0.bin #models/pyannote_model_segmentation-3.0.bin
+
+params:
+  segmentation:
+    min_duration_off: 0.0
+  clustering:
+    method: centroid
+    min_cluster_size: 12
+    threshold: 0.7045654963945799
