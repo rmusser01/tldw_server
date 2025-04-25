@@ -9,12 +9,10 @@ import tomllib # Use built-in tomllib for Python 3.11+
 from pathlib import Path
 import traceback
 import os
-from typing import Union, Generator, Any # For type hinting
+from typing import Union, Generator, Any, Optional  # For type hinting
 #
 # 3rd-Party Libraries
 import chardet # For encoding detection
-#import requests
-#import tqdm
 # --- Textual Imports ---
 from textual.app import App, ComposeResult, ScreenStackError  # Removed RenderResult as it wasn't used
 from textual.widgets import (
@@ -22,42 +20,46 @@ from textual.widgets import (
 )
 from textual.containers import Horizontal, Container, Vertical, VerticalScroll
 from textual.reactive import reactive
-# Removed Widget import as it wasn't used directly
-# Removed Message import as it wasn't used directly
 from textual.worker import Worker, WorkerState
 from textual.binding import Binding
+from textual.dom import DOMNode # For type hinting if needed
+from textual.message import Message # For custom messages if needed
+from textual.css.query import NoMatches, QueryError # For specific error handling
 #
 # --- Local API library Imports ---
+from config import get_setting, get_providers_and_models, log, get_log_file_path
+
 # Adjust the path based on your project structure
 try:
-    # Assuming libs is a subdirectory
-    from .Libs.LLM_API_Calls import (
+    # Import from the new 'api' directory
+    from api.LLM_API_Calls import (
         chat_with_openai, chat_with_anthropic, chat_with_cohere,
         chat_with_groq, chat_with_openrouter, chat_with_huggingface,
-        chat_with_deepseek, chat_with_mistral, chat_with_google
+        chat_with_deepseek, chat_with_mistral, chat_with_google,
+        )
+    from api.LLM_API_Calls_Local import (
+        # Add local API functions if they are in the same file
+        chat_with_llama, chat_with_kobold, chat_with_oobabooga,
+        chat_with_vllm, chat_with_tabbyapi, chat_with_aphrodite,
+        chat_with_ollama, chat_with_custom_openai, chat_with_custom_openai_2
     )
-    from .Libs.LLM_API_Calls_Local import (
-        # chat_with_local_llm, # Example if this exists
-        chat_with_llama, chat_with_kobold,
-        chat_with_oobabooga, chat_with_vllm, chat_with_tabbyapi,
-        chat_with_aphrodite, chat_with_ollama,
-        chat_with_custom_openai, chat_with_custom_openai_2 # Assuming these exist
-    )
+    # You'll need a map for these later, ensure names match
+    API_FUNCTION_MAP = {
+        "OpenAI": chat_with_openai, "Anthropic": chat_with_anthropic, # etc...
+         # Make sure all providers from config have a mapping here or handle None
+    }
     API_IMPORTS_SUCCESSFUL = True
+    log.info("Successfully imported API functions from .api.llm_api")
 except ImportError as e:
-    # Use logging right away if possible
-    try:
-        logging.error(f"Failed to import API libraries during initial load: {e}", exc_info=True)
-    except Exception: # Fallback if logging itself fails early
-        print(f"ERROR: Failed to import API libraries during initial load: {e}")
-
-    # Set ALL potentially imported functions to None to prevent NameErrors later
+    log.error(f"Failed to import API libraries from .api.llm_api: {e}", exc_info=True)
+    # Set functions to None so the app doesn't crash later trying to use them
     chat_with_openai = chat_with_anthropic = chat_with_cohere = chat_with_groq = \
     chat_with_openrouter = chat_with_huggingface = chat_with_deepseek = \
     chat_with_mistral = chat_with_google = \
     chat_with_llama = chat_with_kobold = chat_with_oobabooga = chat_with_vllm = \
     chat_with_tabbyapi = chat_with_aphrodite = chat_with_ollama = \
-    chat_with_custom_openai = chat_with_custom_openai_2 = None # Add chat_with_local_llm if needed
+    chat_with_custom_openai = chat_with_custom_openai_2 = None
+    API_FUNCTION_MAP = {} # Clear the map on failure
     API_IMPORTS_SUCCESSFUL = False
     print("-" * 60)
     print("WARNING: Could not import one or more API library functions.")
@@ -142,6 +144,7 @@ def load_config(config_path: Path = DEFAULT_CONFIG_PATH) -> dict:
             logging.error(f"Failed to create default config file at {config_path}: {e}", exc_info=True)
     return config
 
+# log = logging.getLogger(__name__)
 # --- Constants ---
 TAB_CHAT = "chat"; TAB_CHARACTER = "character"; TAB_MEDIA = "media"; TAB_SEARCH = "search"
 TAB_INGEST = "ingest"; TAB_LOGS = "logs"; TAB_STATS = "stats"
@@ -166,17 +169,6 @@ LOCAL_PROVIDERS = {
 }
 ALL_API_MODELS = {**API_MODELS_BY_PROVIDER, **LOCAL_PROVIDERS}
 AVAILABLE_PROVIDERS = list(ALL_API_MODELS.keys())
-
-# --- API Function Map ---
-# (Ensure this aligns with your actual imported functions or None values)
-API_FUNCTION_MAP = {
-    "OpenAI": chat_with_openai, "Anthropic": chat_with_anthropic, "Google": chat_with_google,
-    "MistralAI": chat_with_mistral, "Custom": chat_with_custom_openai, "Llama.cpp": chat_with_llama,
-    "Oobabooga": chat_with_oobabooga, "KoboldCpp": chat_with_kobold, "Ollama": chat_with_ollama,
-    "vLLM": chat_with_vllm, "TabbyAPI": chat_with_tabbyapi, "Aphrodite": chat_with_aphrodite,
-    "Custom-2": chat_with_custom_openai_2, "Groq": chat_with_groq, "Cohere": chat_with_cohere,
-    "OpenRouter": chat_with_openrouter, "HuggingFace": chat_with_huggingface, "DeepSeek": chat_with_deepseek,
-}
 
 # --- ASCII Portrait ---
 ASCII_PORTRAIT = r"""
@@ -275,7 +267,9 @@ def create_settings_sidebar(id_prefix: str, config: dict) -> ComposeResult:
     """Yields the widgets for a settings sidebar, using config for defaults."""
     with VerticalScroll(id=f"{id_prefix}-sidebar", classes="sidebar"):
         defaults = config.get(f"{id_prefix}_defaults", config.get("chat_defaults", {}))
-        default_provider = defaults.get("provider", AVAILABLE_PROVIDERS[0] if AVAILABLE_PROVIDERS else "")
+        providers_models = get_providers_and_models() # Get latest from config
+        available_providers = list(providers_models.keys())
+        default_provider = defaults.get("provider", available_providers[0] if available_providers else "")
         default_model = defaults.get("model", "")
         default_system_prompt = defaults.get("system_prompt", "")
         default_temp = str(defaults.get("temperature", 0.7))
@@ -312,129 +306,132 @@ def create_settings_sidebar(id_prefix: str, config: dict) -> ComposeResult:
 
 # --- Main App ---
 class TldwCli(App):
-    CSS_PATH = "CSS/tldw_cli.css"
+    # Use forward slashes for paths, works cross-platform
+    CSS_PATH = "css/tldw_cli.tcss"
     BINDINGS = [ Binding("ctrl+q", "quit", "Quit App", show=True) ]
 
-    # Define reactive var at CLASS level
-    current_tab = reactive(TAB_CHAT) # Default to CHAT, will be updated in __init__
+    # Define reactive at class level with a placeholder default and type hint
+    current_tab: reactive[str] = reactive("chat", layout=True)
 
-    def __init__(self, config: dict):
+    def __init__(self):
         super().__init__()
-        self.app_config = config
-        # Determine initial tab from config and SET the reactive variable
-        initial_tab_from_config = self.app_config.get("general", {}).get("default_tab", TAB_CHAT)
-        if initial_tab_from_config not in ALL_TABS:
-            logging.warning(f"Default tab '{initial_tab_from_config}' from config not valid. Falling back to '{TAB_CHAT}'.")
-            self.initial_tab = TAB_CHAT
-        else:
-            self.initial_tab = initial_tab_from_config
-        # Set the *initial value* of the reactive variable AFTER super().__init__()
-        self.current_tab = self.initial_tab
-        logging.info(f"App initialized. Initial tab set to: {self.current_tab}")
+        # Load config ONCE
+        self.app_config = load_config()
+        self.providers_models = get_providers_and_models()
 
-        self._rich_log_handler = None
+        # Determine the *value* for the initial tab but don't set the reactive var yet
+        initial_tab_from_config = get_setting("general", "default_tab", "chat")
+        if initial_tab_from_config not in ALL_TABS:
+            log.warning(f"Default tab '{initial_tab_from_config}' from config not valid. Falling back to 'chat'.")
+            self._initial_tab_value = "chat"
+        else:
+            self._initial_tab_value = initial_tab_from_config
+
+
+        log.info(f"App __init__: Determined initial tab value: {self._initial_tab_value}")
+        self._rich_log_handler: Optional[RichLogHandler] = None
+
 
     def on_mount(self) -> None:
-        """Configure logging (RichLog and File) and start tasks."""
-        logging.info("--- App Mounting ---")
-        root_logger = logging.getLogger()  # Get root logger early
+        """Configure logging, set initial tab visibility, and set reactive value."""
+        log.info("--- App Mounting ---")
+        root_logger = logging.getLogger()
 
         # --- Setup RichLog Handler (TUI Display) ---
         try:
-            log_display_widget = self.query_one("#app-log-display", RichLog)
+            log_display_widget = self.query_one("#app-log-display", RichLog) # Ensure this ID exists in compose
             self._rich_log_handler = RichLogHandler(log_display_widget)
 
-            # Clean up existing handlers if necessary (be cautious)
+            # Remove default basicConfig stream handler if it exists
             for handler in root_logger.handlers[:]:
                  if isinstance(handler, logging.StreamHandler) and not isinstance(handler, (RichLogHandler, logging.FileHandler)):
-                     logging.debug(f"Removing existing StreamHandler: {handler}")
-                     root_logger.removeHandler(handler)
-                 if isinstance(handler, RichLogHandler) and handler is not self._rich_log_handler:
-                     logging.warning(f"Removing potentially stale RichLogHandler: {handler}")
+                     log.debug(f"Removing existing StreamHandler: {handler}")
                      root_logger.removeHandler(handler)
 
-            # Configure and add the RichLog handler
-            widget_handler_level_str = self.app_config.get("general", {}).get("log_level", "DEBUG").upper()
+            # Get TUI log level from config
+            widget_handler_level_str = get_setting("general", "log_level", "DEBUG").upper()
             widget_handler_level = getattr(logging, widget_handler_level_str, logging.DEBUG)
             self._rich_log_handler.setLevel(widget_handler_level)
             root_logger.addHandler(self._rich_log_handler)
-            # Ensure root level is low enough for all handlers
-            current_root_level = root_logger.getEffectiveLevel()
-            lowest_level = min(current_root_level, widget_handler_level) # Consider file handler level too if added later
-            root_logger.setLevel(logging.DEBUG if lowest_level <= logging.DEBUG else lowest_level)
 
-            # Start the log queue processing task
+            # Start the log queue processing task (needs self/app passed)
             self._rich_log_handler.start_processor(self)
-            logging.info(
-                f"RichLog TUI logging configured. Widget Handler level: {logging.getLevelName(self._rich_log_handler.level)}")
+            log.info(f"RichLog TUI logging configured. Level: {logging.getLevelName(widget_handler_level)}")
 
+        except QueryError:
+             log.error("Failed to find #app-log-display widget during mount for RichLogHandler setup.")
         except Exception as e:
-            # Use print as last resort if TUI logging setup fails
-            print(f"!!!!!!!! FATAL ERROR setting up RichLog TUI Handler !!!!!!!!")
-            traceback.print_exc()
-            try:
-                logging.exception("FATAL: Failed to configure RichLogHandler!")
-            except Exception:
-                pass  # Avoid error loops
+            log.exception("Error setting up RichLogHandler in on_mount") # Logs traceback
 
         # --- Setup Rotating File Handler ---
         try:
-            # 1. Get Database Path from Config
-            db_path_str = self.app_config.get("database", {}).get("path")
-            if not db_path_str:
-                # Log this warning, but don't crash the app if DB path is missing
-                logging.warning("database.path not found in config. Skipping file logging based on DB path.")
-                raise ValueError("database.path not configured.")  # Raise to skip rest of try block
+            log_file_path = get_log_file_path() # Get path from config module
+            log_dir = log_file_path.parent
+            log_dir.mkdir(parents=True, exist_ok=True) # Ensure directory exists
 
-            db_path = Path(db_path_str).expanduser().resolve()
-            log_dir = db_path.parent  # Directory containing the DB
-
-            # 2. Get Log Filename from Config (or default)
-            log_filename = self.app_config.get("logging", {}).get("log_filename", "tldw_cli_app.log")
-            log_file_path = log_dir / log_filename
-
-            # 3. Ensure Log Directory Exists
-            log_dir.mkdir(parents=True, exist_ok=True)
-            logging.debug(f"Ensured log directory exists: {log_dir}")
-
-            # 4. Create RotatingFileHandler
-            # Get rotation settings from config
-            max_bytes = int(self.app_config.get("logging", {}).get("log_max_bytes", 10 * 1024 * 1024))
-            backup_count = int(self.app_config.get("logging", {}).get("log_backup_count", 5))
+            max_bytes = int(get_setting("logging", "log_max_bytes", DEFAULT_CONFIG["logging"]["log_max_bytes"]))
+            backup_count = int(get_setting("logging", "log_backup_count", DEFAULT_CONFIG["logging"]["log_backup_count"]))
+            file_log_level_str = get_setting("logging", "file_log_level", "INFO").upper()
+            file_log_level = getattr(logging, file_log_level_str, logging.INFO)
 
             # Use UTF-8 encoding for the log file
             file_handler = logging.handlers.RotatingFileHandler(
                 log_file_path, maxBytes=max_bytes, backupCount=backup_count, encoding='utf-8'
             )
-
-            # 5. Set Log Level for File Handler
-            file_log_level_str = self.app_config.get("logging", {}).get("file_log_level", "INFO").upper()
-            file_log_level = getattr(logging, file_log_level_str, logging.INFO)
             file_handler.setLevel(file_log_level)
 
-            # 6. Set Formatter (use same format as RichLog for consistency)
+            # Set Formatter (use same format as RichLog for consistency)
             file_formatter = logging.Formatter(
                 "{asctime} [{levelname:<8}] {name}:{lineno:<4} : {message}",
                 style="{", datefmt="%Y-%m-%d %H:%M:%S"
             )
             file_handler.setFormatter(file_formatter)
 
-            # 7. Add Handler to Root Logger
+            # Add Handler to Root Logger
             root_logger.addHandler(file_handler)
 
-            # Adjust root logger level again if file handler needs lower level
+            # Ensure root logger level accommodates all handlers
+            # Note: widget_handler_level needs to be accessible here if defined above
             current_root_level = root_logger.getEffectiveLevel()
-            lowest_level = min(current_root_level, file_log_level)
+            try: # Use try-except in case widget_handler_level wasn't set due to prior error
+                 lowest_level = min(current_root_level, widget_handler_level, file_log_level)
+            except NameError:
+                 lowest_level = min(current_root_level, file_log_level) # Fallback
+
             root_logger.setLevel(logging.DEBUG if lowest_level <= logging.DEBUG else lowest_level)
 
-            logging.info(
-                f"File logging enabled: '{log_file_path}', Level: {logging.getLevelName(file_handler.level)}, Rotation: {max_bytes / (1024 * 1024):.1f}MB / {backup_count} backups")
+            log.info(f"File logging configured: '{log_file_path}', Level: {logging.getLevelName(file_log_level)}")
 
+        except ValueError as e:
+            log.error(f"Configuration error for file logging: {e}") # Specific config errors
+        except OSError as e:
+            log.error(f"OS error during file logging setup (check permissions for {log_file_path.parent}): {e}")
         except Exception as e:
-            # Log the error but allow the app to continue without file logging
-            logging.error(f"Failed to configure file logging: {e}", exc_info=True)
+            log.exception("Error setting up file logging in on_mount") # Logs traceback
 
-        logging.info("App mount process completed.")  # Final message after all setup
+        # --- Set Initial Window Visibility ---
+        # THIS IS WHERE THE DISPLAY LOGIC BELONGS
+        log.debug(f"on_mount: Setting initial window visibility based on tab: {self._initial_tab_value}")
+        for tab_id in ALL_TABS:
+            try:
+                window = self.query_one(f"#{tab_id}-window")
+                # Determine if it should be visible based on the initial tab value
+                is_visible = (tab_id == self._initial_tab_value)
+                # Set its display property
+                window.display = is_visible
+                log.debug(f"  - Window #{tab_id}-window display set to {is_visible}")
+            except QueryError:
+                # Log an error if a window defined in compose isn't found - indicates a potential typo
+                log.error(f"on_mount: Could not find window '#{tab_id}-window' to set initial display. Check IDs in compose_content_area.")
+            except Exception as e:
+                log.error(f"on_mount: Error setting display for '#{tab_id}-window': {e}", exc_info=True)
+
+        # *** Set the actual initial tab value AFTER UI is composed and mounted ***
+        log.info(f"App on_mount: Setting current_tab reactive value to {self._initial_tab_value}")
+        self.current_tab = self._initial_tab_value
+
+        log.info("App mount process completed.")
+        log.info(f"Root logger level set to: {logging.getLevelName(root_logger.level)}")
 
     async def on_unmount(self) -> None:
         """Clean up logging resources on application exit."""
@@ -448,127 +445,140 @@ class TldwCli(App):
         # File handlers usually closed by logging shutdown
 
     def compose(self) -> ComposeResult:
+        log.debug("App composing UI...")
         yield Header()
+        # Use 'yield from' to yield widgets *from* the sub-generators
         yield from self.compose_tabs()
         yield from self.compose_content_area()
         yield Footer()
+        log.debug("App compose finished.")
 
     def compose_tabs(self) -> ComposeResult:
-        with Horizontal(id="tabs"):
+         with Horizontal(id="tabs"):
             for tab_id in ALL_TABS:
                 yield Button(
                     tab_id.replace('_', ' ').capitalize(),
                     id=f"tab-{tab_id}",
-                    classes="-active" if tab_id == self.current_tab else "" # Use current_tab after __init__
+                    # Initial active state based on the value determined in __init__
+                    classes="-active" if tab_id == self._initial_tab_value else ""
                 )
 
     def compose_content_area(self) -> ComposeResult:
-         # Pass the loaded config to the sidebar creator
+        initial_tab = self._initial_tab_value # Use value determined in __init__
+        log.debug(f"Compose: Initial tab for display logic: {initial_tab}")
+
         with Container(id="content"):
             # Determine visibility based on self.current_tab set in __init__
             # --- Chat Window ---
-            with Container(id=f"{TAB_CHAT}-window", classes="window" if self.current_tab == TAB_CHAT else "window hidden"):
+            with Container(id=f"{TAB_CHAT}-window", classes="window"):
+                # Use yield from if create_settings_sidebar is a generator
                 yield from create_settings_sidebar(TAB_CHAT, self.app_config)
                 with Container(id="chat-main-content"):
                     yield RichLog(id="chat-log", wrap=True, highlight=True, classes="chat-log")
                     with Horizontal(id="chat-input-area"):
                         yield TextArea(id="chat-input", classes="chat-input")
                         yield Button("Send", id="send-chat", classes="send-button")
+            # Set initial display state AFTER the container is defined in compose
+            log.debug(f"Compose: Chat window display = {initial_tab == TAB_CHAT}")
 
             # --- Character Chat Window ---
-            with Container(id=f"{TAB_CHARACTER}-window", classes="window" if self.current_tab == TAB_CHARACTER else "window hidden"):
+            with Container(id=f"{TAB_CHARACTER}-window", classes="window"):
                 yield from create_settings_sidebar(TAB_CHARACTER, self.app_config)
                 with Container(id="character-main-content"):
                     with Horizontal(id="character-top-area"):
                         yield RichLog(id="character-log", wrap=True, highlight=True, classes="chat-log")
-                        yield Static(ASCII_PORTRAIT, id="character-portrait")
+                        yield Static("Portrait Placeholder", id="character-portrait") # Replace with actual portrait logic
                     with Horizontal(id="character-input-area"):
                         yield TextArea(id="character-input", classes="chat-input")
                         yield Button("Send", id="send-character", classes="send-button")
+            log.debug(f"Compose: Character window display = {initial_tab == TAB_CHARACTER}")
 
             # --- Logs Window ---
-            with Container(id=f"{TAB_LOGS}-window", classes="window" if self.current_tab == TAB_LOGS else "window hidden"):
+            with Container(id=f"{TAB_LOGS}-window", classes="window"):
                  yield RichLog(id="app-log-display", wrap=True, highlight=True, markup=True, auto_scroll=True)
+            log.debug(f"Compose: Logs window display = {initial_tab == TAB_LOGS}")
 
             # --- Other Placeholder Windows ---
             for tab_id in ALL_TABS:
                 if tab_id not in [TAB_CHAT, TAB_CHARACTER, TAB_LOGS]:
-                    yield Static(
-                        f"{tab_id.replace('_', ' ').capitalize()} Window Placeholder",
-                        id=f"{tab_id}-window",
-                        classes="window placeholder-window" + ("" if self.current_tab == tab_id else " hidden")
-                    )
+                    # Use a simple Container for placeholders initially
+                    with Container(id=f"{tab_id}-window", classes="window placeholder-window"):
+                         yield Static(f"{tab_id.replace('_', ' ').capitalize()} Window Placeholder")
+                    log.debug(f"Compose: {tab_id} window display = {initial_tab == tab_id}")
 
-    # --- Reactive Watcher ---
-    # This method name MUST match 'watch_' + attribute_name
-    def watch_current_tab(self, old_tab: str, new_tab: str) -> None:
-        """Called automatically when the 'current_tab' reactive variable changes."""
-        # No need for manual calls if reactivity is working
-        logging.critical(f"!!!! WATCHER watch_current_tab FIRED !!!! Switching from '{old_tab}' to '{new_tab}'")
-        if not self.is_mounted: # Add check to prevent running before mount completes
-            logging.warning("Watcher fired before app fully mounted. Skipping UI updates.")
-            return
+
+    # WATCHER - Handles UI changes when current_tab's VALUE changes
+    def watch_current_tab(self, old_tab: Optional[str], new_tab: str) -> None:
+        """Shows/hides the relevant content window when the tab changes."""
+        # The value passed (new_tab) should now always be a string because
+        # we set the value in on_mount and on_button_pressed.
+
+        # Add check for valid string, just in case
+        if not isinstance(new_tab, str) or not new_tab:
+             log.error(f"Watcher received invalid new_tab value: {new_tab!r}. Aborting tab switch.")
+             return
+        if old_tab and not isinstance(old_tab, str):
+             log.warning(f"Watcher received invalid old_tab value: {old_tab!r}.")
+             old_tab = None # Treat as if there was no previous tab
+
+        log.debug(f"Watcher: Switching tab from '{old_tab}' to '{new_tab}'")
+
+        # Use try/except blocks for robustness when querying elements
+        if old_tab and old_tab != new_tab: # Only hide if different and valid
+            try:
+                self.query_one(f"#tab-{old_tab}").remove_class("-active")
+            except QueryError:
+                log.warning(f"Watcher: Could not find old button #tab-{old_tab} to deactivate.")
+            except Exception as e:
+                log.error(f"Watcher: Error deactivating old button #tab-{old_tab}: {e}")
+
+            try:
+                self.query_one(f"#{old_tab}-window").display = False
+            except QueryError:
+                 log.warning(f"Watcher: Could not find old window #{old_tab}-window to hide.")
+            except Exception as e:
+                log.error(f"Watcher: Error hiding old window #{old_tab}-window: {e}")
+
         try:
-            # Deactivate old tab button and hide old window
-            # Use query to safely handle potential missing elements (though they should exist)
-            old_button_query = f"#tab-{old_tab}"
-            old_window_query = f"#{old_tab}-window"
-
-            old_buttons = self.query(old_button_query)
-            if old_buttons:
-                old_buttons.first().remove_class("-active")
-                logging.debug(f"Watcher: Deactivated button {old_button_query}")
-            else:
-                logging.warning(f"Watcher: Could not find old button {old_button_query} to deactivate.")
-
-            old_windows = self.query(old_window_query)
-            if old_windows:
-                 old_windows.first().display = False # More reliable than adding/removing classes sometimes
-                 # old_windows.first().add_class("hidden") # Alternative using CSS class
-                 logging.debug(f"Watcher: Hid window {old_window_query}")
-            else:
-                logging.warning(f"Watcher: Could not find old window {old_window_query} to hide.")
-
-            # Activate new tab button and show new window
-            new_button_query = f"#tab-{new_tab}"
-            new_window_query = f"#{new_tab}-window"
-
-            new_buttons = self.query(new_button_query)
-            if new_buttons:
-                new_buttons.first().add_class("-active")
-                logging.debug(f"Watcher: Activated button {new_button_query}")
-            else:
-                 logging.error(f"Watcher: Could not find new button {new_button_query} to activate.")
-
-            new_windows = self.query(new_window_query)
-            if new_windows:
-                 new_window = new_windows.first()
-                 new_window.display = True # Make sure it's visible
-                 # new_window.remove_class("hidden") # Alternative using CSS class
-                 logging.debug(f"Watcher: Displayed window {new_window_query}")
-
-                 # Try to focus input area in non-log tabs
-                 if new_tab not in [TAB_LOGS]:
-                     inputs = new_window.query("TextArea")
-                     if inputs:
-                         try:
-                             # Need to defer focus slightly until after layout/display updates
-                             self.set_timer(0.05, inputs.first().focus)
-                             logging.debug(f"Watcher: Scheduled focus for TextArea in tab {new_tab}")
-                         except Exception as focus_err:
-                             logging.warning(f"Watcher: Could not schedule focus for TextArea in tab {new_tab}: {focus_err}")
-                     else:
-                         logging.debug(f"Watcher: No TextArea found to focus in tab {new_tab}")
-            else:
-                 logging.error(f"Watcher: Could not find new window {new_window_query} to display.")
-
+            self.query_one(f"#tab-{new_tab}").add_class("-active")
+        except QueryError:
+            log.error(f"Watcher: Could not find new button #tab-{new_tab} to activate.")
         except Exception as e:
-            # Catch specific ScreenStackError during init? Or just log generically.
-            if isinstance(e, ScreenStackError) and not self.is_running:
-                 logging.warning(f"Watcher: Ignored ScreenStackError during app init.")
-            else:
-                 logging.error(f"!!!! WATCHER ERROR !!!! Error during tab switch from {old_tab} to {new_tab}: {e}", exc_info=True)
+            log.error(f"Watcher: Error activating new button #tab-{new_tab}: {e}")
 
+        try:
+            new_window = self.query_one(f"#{new_tab}-window")
+            new_window.display = True
+
+            # Focus input on relevant tabs
+            if new_tab not in [TAB_LOGS]: # Add other non-input tabs if needed
+                try:
+                    # Prefer focusing TextArea, fallback to Input if needed
+                    input_widget = new_window.query_one(TextArea)
+                except QueryError:
+                    try:
+                        input_widget = new_window.query_one(Input)
+                    except QueryError:
+                        input_widget = None
+
+                if input_widget:
+                    # Schedule focus slightly after display change seems complete
+                    def _focus_input():
+                        try:
+                            input_widget.focus()
+                            log.debug(f"Watcher: Focused {input_widget.__class__.__name__} in '{new_tab}'")
+                        except Exception as focus_err:
+                            log.warning(f"Watcher: Could not focus input widget in '{new_tab}': {focus_err}")
+
+                    self.set_timer(0.05, _focus_input)
+                    log.debug(f"Watcher: Scheduled focus for input in '{new_tab}'")
+                else:
+                    log.debug(f"Watcher: No TextArea or Input found to focus in '{new_tab}'")
+
+        except QueryError:
+             log.error(f"Watcher: Could not find new window #{new_tab}-window to display.")
+        except Exception as e:
+            log.error(f"Watcher: Error showing new window #{new_tab}-window: {e}", exc_info=True)
 
     # --- Event Handlers ---
     def on_select_changed(self, event: Select.Changed) -> None:
@@ -619,26 +629,24 @@ class TldwCli(App):
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses for tabs and sending messages."""
         button_id = event.button.id
-        logging.debug(f"Button pressed: {button_id}")
+        log.debug(f"Button pressed: {button_id}")
 
-        # --- Handle Tab Switching ---
         if button_id and button_id.startswith("tab-"):
             new_tab_id = button_id.replace("tab-", "")
-            logging.info(f"Tab button {button_id} pressed. Requesting switch to '{new_tab_id}'")
-
-            if new_tab_id == self.current_tab:
-                logging.debug(f"Already on tab '{new_tab_id}'. Ignoring.")
-                return
-
-            # Assigning to the reactive variable SHOULD trigger the watcher
-            self.current_tab = new_tab_id
-            # No manual call needed if reactivity works correctly
+            log.info(f"Tab button {button_id} pressed. Requesting switch to '{new_tab_id}'")
+            if new_tab_id != self.current_tab:
+                # Assign the *string value* to the reactive variable
+                self.current_tab = new_tab_id # This triggers the watcher
+            else:
+                log.debug(f"Already on tab '{new_tab_id}'. Ignoring.")
+            # --- Tab Button Logic Ends Here ---
 
         elif button_id and button_id.startswith("send-"):
-            # --- Send message logic ---
+            # --- Send Message Logic Starts Here ---
             chat_id_part = button_id.replace("send-", "")
-            prefix = chat_id_part
-            logging.info(f"'Send' button pressed for '{chat_id_part}'")
+            prefix = chat_id_part # 'prefix' is defined within this block
+            log.info(f"'Send' button pressed for '{chat_id_part}'")
+
             # --- Query Widgets ---
             try:
                 text_area = self.query_one(f"#{prefix}-input", TextArea)
@@ -650,11 +658,17 @@ class TldwCli(App):
                 top_p_widget = self.query_one(f"#{prefix}-top-p", Input)
                 min_p_widget = self.query_one(f"#{prefix}-min-p", Input)
                 top_k_widget = self.query_one(f"#{prefix}-top-k", Input)
-            except Exception as e:
-                logging.error(f"Could not find required UI widgets for '{prefix}': {e}", exc_info=True)
-                try: self.query_one(f"#{prefix}-log", RichLog).write("[bold red]Error: UI elements missing.[/]")
-                except Exception: logging.error("Also failed to write UI error to chat log.")
+            except QueryError as e:
+                log.error(f"Could not find required UI widgets for '{prefix}': {e}", exc_info=True)
+                try:
+                    # Try to find *any* log widget to display the error if the specific one failed
+                    self.query_one("#chat-log", RichLog).write(f"[bold red]Error: UI elements missing for {prefix}.[/]")
+                except QueryError:
+                    log.critical("PANIC: Could not find any chat log to write UI error message.")
                 return
+            except Exception as e:
+                 log.error(f"Unexpected error querying widgets for '{prefix}': {e}", exc_info=True)
+                 return
 
             # --- Get Values ---
             message = text_area.text.strip()
@@ -667,13 +681,14 @@ class TldwCli(App):
             min_p = self._safe_float(min_p_widget.value, 0.05, "min_p")
             top_k = self._safe_int(top_k_widget.value, 50, "top_k")
 
+
             # --- Basic Validation ---
             if not API_IMPORTS_SUCCESSFUL:
                 chat_log_widget.write("[bold red]API libraries failed load. Cannot send.[/]")
                 logging.error(f"Send attempt ('{prefix}') failed: API libraries not loaded.")
                 return
             if not message:
-                logging.debug(f"Empty message submitted in '{prefix}'.")
+                log.debug(f"Empty message submitted in '{prefix}'.")
                 text_area.clear(); text_area.focus()
                 return
             if not selected_provider:
@@ -690,15 +705,15 @@ class TldwCli(App):
             text_area.clear()
 
             # --- Prepare and Dispatch API Call ---
-            logging.info(f"API call: P='{selected_provider}', M='{selected_model}'")
-            chat_log_widget.write(f"[dim]AI thinking ({selected_provider} / {selected_model})...[/]")
-
-            api_function = API_FUNCTION_MAP.get(selected_provider)
-            if api_function is None:
-                error_msg = f"Error: API function for '{selected_provider}' not found/loaded."
-                logging.error(error_msg)
-                chat_log_widget.write(f"[bold red]{error_msg}[/]")
-                return
+            # ... (get api_function, api_url, prepare api_args, filter args) ...
+            # Ensure API_FUNCTION_MAP is correctly imported/defined
+            # api_function = API_FUNCTION_MAP.get(selected_provider)
+            api_function = None # Placeholder - Fetch actual function
+            if not api_function:
+                 # Handle error: function not found/loaded
+                 chat_log_widget.write(f"[bold red]Error: API backend for {selected_provider} not available.[/]")
+                 log.error(f"API function for provider {selected_provider} not found or loaded.")
+                 return
 
             # --- Get API URL from Config ---
             api_endpoints = self.app_config.get("api_endpoints", {})
@@ -719,28 +734,32 @@ class TldwCli(App):
             logging.debug(f"Calling {func_name} with args: {loggable_args}")
 
 
-        # --- Define the Worker Wrapper ---
-        # This nested function will run in the worker thread.
-        # It captures necessary variables from the surrounding scope.
-        def api_call_wrapper():
-            # Note: We are accessing 'self', 'api_function', 'filtered_api_call_args',
-            # and 'chat_log_widget' from the enclosing 'on_button_pressed' scope.
-            # Ensure 'chat_log_widget' is only used for logging *within* the worker
-            # if absolutely necessary (better handled by on_worker_state_changed).
-            # The main purpose is to pass args to _api_worker.
-            return self._api_worker(api_function, filtered_api_call_args, chat_log_widget)
+            # --- Define the Worker Wrapper ---
+            # Capture variables needed by the worker
+            current_api_func = api_function
+            current_api_args = filtered_api_call_args
+            current_log_widget = chat_log_widget # Pass the specific log widget
 
-        # --- Run Worker ---
-        # *** FIX: Pass the wrapper function as the worker, no other positional args ***
-        self.run_worker(
-            api_call_wrapper,         # The wrapper function is the worker now
-            # NO positional arguments here for the worker itself
-            # Keyword arguments FOR run_worker:
-            name=f"API_Call_{prefix}",
-            group="api_calls",
-            exclusive=False,
-            thread=True
-        )
+            def api_call_wrapper() -> Union[str, Generator[Any, Any, None], None]:
+                """Wrapper to execute the API call in the worker thread."""
+                # Use the captured variables
+                log.debug(f"Worker wrapper executing for {prefix}")
+                return self._api_worker(current_api_func, current_api_args, current_log_widget)
+
+            # --- Run Worker ---
+            log.debug(f"Running worker API_Call_{prefix}")
+            self.run_worker(
+                api_call_wrapper,
+                name=f"API_Call_{prefix}", # 'prefix' is defined in this scope
+                group="api_calls",
+                exclusive=False, # Allow multiple API calls concurrently if desired
+                thread=True # Run in a separate thread
+            )
+            # --- Send Message Logic Ends Here ---
+
+        else:
+            log.warning(f"Button pressed with unhandled ID: {button_id}")
+
 
     # --- Helper methods for parsing inputs ---
     def _safe_float(self, value: str, default: float, name: str) -> float:
@@ -779,40 +798,44 @@ class TldwCli(App):
              return None
 
     # --- Worker function ---
-    def _api_worker(self, api_func: callable, api_args: dict, log_widget: RichLog) -> Union[str, Generator[Any, Any, None], None]:
+    def _api_worker(self, api_func: callable, api_args: dict, log_widget_ref: RichLog) -> Union[str, Generator[Any, Any, None], None]:
         """Executes the synchronous API call in a thread."""
-        # (Implementation remains the same as the last correct version)
+        # log_widget_ref is passed but mainly for context if needed;
+        # TUI updates should happen in on_worker_state_changed.
         func_name = getattr(api_func, '__name__', 'UNKNOWN_FUNCTION')
         try:
-            if api_func is None: raise ValueError("API function is None.")
-            # Note: log_widget is passed here but might not be strictly needed inside
-            # if all TUI updates happen in on_worker_state_changed.
-            # Using it only for logging inside the worker is generally okay.
-            logging.info(
-                f"Worker executing: {func_name} with args: { {k: v for k, v in api_args.items() if k != 'api_key'} }")
-            result = api_func(**api_args)  # Call the actual API function
-            logging.info(f"Worker {func_name} finished successfully.")
+            # ... (call api_func(**api_args), handle result/exceptions) ...
+            log.info(f"Worker {func_name} starting execution.")
+            # Example: Replace with your actual API call
+            # result = api_func(**api_args)
+            import time; time.sleep(2) # Simulate work
+            result = f"Simulated response for args: {api_args}"
+            log.info(f"Worker {func_name} finished successfully.")
             return result
         except Exception as e:
-            logging.exception(f"Error during API call in worker ({func_name}): {e}")
+            log.exception(f"Error during API call in worker ({func_name}): {e}")
+            # Return the error message so it can be displayed in the TUI
             return f"[bold red]API Error ({func_name}):[/] {str(e)}"
+
 
     # --- Handle worker completion ---
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         """Called when a worker changes state."""
         worker_name = event.worker.name or "Unknown Worker"
-        logging.debug(f"Worker '{worker_name}' state changed to: {event.state}")
+        log.debug(f"Worker '{worker_name}' state changed to: {event.state}")
 
         if not worker_name.startswith("API_Call_"):
-            logging.debug(f"Ignoring state change for non-API worker: {worker_name}")
+            log.debug(f"Ignoring state change for non-API worker: {worker_name}")
             return
 
         prefix = worker_name.replace("API_Call_", "")
         try:
+            # Find the correct log widget for this worker's tab
             chat_log_widget = self.query_one(f"#{prefix}-log", RichLog)
 
             if event.state == WorkerState.SUCCESS:
                 result = event.worker.result
+                # ... (handle result: string, generator, error string, None) ...
                 if isinstance(result, str):
                     # Check if the result itself is an error message from the worker
                     if result.startswith("[bold red]API Error"):
@@ -840,11 +863,12 @@ class TldwCli(App):
                         logging.error(f"Error processing generator stream for '{prefix}': {gen_e}", exc_info=True)
                         chat_log_widget.write("[bold red] Error during streaming.[/]")
                 elif result is None:
-                     logging.error(f"API worker '{worker_name}' returned None.")
-                     chat_log_widget.write("[bold red]AI: Error during processing (worker returned None).[/]")
+                     log.error(f"API worker '{worker_name}' returned None.")
+                     chat_log_widget.write("[bold red]AI: Error - No response received.[/]")
                 else:
-                    logging.error(f"API worker '{worker_name}' returned unexpected type: {type(result)}")
-                    chat_log_widget.write(f"[bold red]Error: Unexpected result type from API.[/]")
+                     log.error(f"API worker '{worker_name}' returned unexpected type: {type(result)}")
+                     chat_log_widget.write(f"[bold red]Error: Unexpected result type.[/]")
+
 
             elif event.state == WorkerState.ERROR:
                 logging.error(f"Worker '{worker_name}' failed critically:", exc_info=event.worker.error)
@@ -857,8 +881,10 @@ class TldwCli(App):
             except Exception:
                 logging.debug(f"Could not refocus input for '{prefix}' after worker completion.")
 
+        except QueryError:
+             log.error(f"Failed to find log widget '#{prefix}-log' for worker '{worker_name}' completion.")
         except Exception as e:
-            logging.error(f"Error in on_worker_state_changed for worker '{worker_name}': {e}", exc_info=True)
+            log.error(f"Error in on_worker_state_changed for worker '{worker_name}': {e}", exc_info=True)
 
 
 # --- Configuration File Content (for reference or auto-creation) ---
@@ -979,7 +1005,7 @@ if __name__ == "__main__":
     # --- Run the App ---
     logging.info("Starting Textual App...")
     # Pass the loaded config to the App instance
-    app = TldwCli(config=APP_CONFIG)
+    app = TldwCli()
     app.run()
     logging.info("Textual App finished.")
 

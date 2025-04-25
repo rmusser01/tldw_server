@@ -4,18 +4,20 @@
 # This library is used to perform 'Local' API calls to LLM endpoints.
 #
 ####
+# Imports
 import json
+import logging
 import os
-from typing import Any, Generator, Union
-
+from typing import Any, Generator, Union, List, Dict
+#
+# 3rd-Party Imports
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
-
-from tldw_cli.Libs.Utils import logging, extract_text_from_segments, load_and_log_configs, \
-    loaded_config_data
-
-
+#
+# Local Imports
+#
+#
 ####################
 # Function List
 # FIXME - UPDATE
@@ -35,6 +37,30 @@ from tldw_cli.Libs.Utils import logging, extract_text_from_segments, load_and_lo
 #######################################################################################################################
 # Function Definitions
 #
+
+def extract_text_from_segments(segments: List[Dict]) -> str:
+    # (Keep existing implementation)
+    logging.debug(f"Segments received: {segments}")
+    logging.debug(f"Type of segments: {type(segments)}")
+    text = ""
+    if isinstance(segments, list):
+        for segment in segments:
+            # logging.debug(f"Current segment: {segment}") # Can be verbose
+            # logging.debug(f"Type of segment: {type(segment)}")
+            if isinstance(segment, dict) and 'Text' in segment:
+                text += segment['Text'] + " "
+            elif isinstance(segment, dict) and 'text' in segment: # Adding flexibility for key case
+                 text += segment['text'] + " "
+            else:
+                logging.warning(f"Skipping segment due to missing 'Text' key or wrong type: {segment}")
+    elif isinstance(segments, str): # Allow passing a pre-joined string
+        logging.debug("Segments received as a single string.")
+        text = segments
+    else:
+        logging.warning(f"Unexpected type of 'segments': {type(segments)}. Trying to convert to string.")
+        text = str(segments) # Attempt conversion
+
+    return text.strip()
 
 def chat_with_local_llm(input_data, custom_prompt_arg, temp, system_message=None, streaming=False, top_k=None, top_p=None, min_p=None):
     try:
@@ -74,21 +100,21 @@ def chat_with_local_llm(input_data, custom_prompt_arg, temp, system_message=None
             top_k = int(top_k)
             logging.debug(f"Local LLM: Using top_k: {top_k}")
         elif top_k is None:
-            top_k = load_and_log_configs().get('local_llm', {}).get('top_k', 100)
+            top_k = "load_and_log_configs" # FIXME - load_and_log_configs().get('local_llm', {}).get('top_k', 100)
             logging.debug(f"Local LLM: Using top_k from config: {top_k}")
 
         if isinstance(top_p, float):
             top_p = float(top_p)
             logging.debug(f"Local LLM: Using top_p: {top_p}")
         elif top_p is None:
-            top_p = load_and_log_configs().get('local_llm', {}).get('top_p', 0.95)
+            top_p = "load_and_log_configs" # FIXME - load_and_log_configs().get('local_llm', {}).get('top_p', 0.95)
             logging.debug(f"Local LLM: Using top_p from config: {top_p}")
 
         if isinstance(min_p, float):
             min_p = float(min_p)
             logging.debug(f"Local LLM: Using min_p: {min_p}")
         elif min_p is None:
-            min_p = load_and_log_configs().get('local_llm', {}).get('min_p', 0.05)
+            min_p = "load_and_log_configs" # FIXME - load_and_log_configs().get('local_llm', {}).get('min_p', 0.05)
             logging.debug(f"Local LLM: Using min_p from config: {min_p}")
 
         local_llm_system_message = "You are a helpful AI assistant."
@@ -123,7 +149,7 @@ def chat_with_local_llm(input_data, custom_prompt_arg, temp, system_message=None
             "min_p": min_p
         }
 
-        local_api_timeout = loaded_config_data['local_llm']['api_timeout']
+        local_api_timeout = "loaded_and_config_data" # FIXME - loaded_config_data['local_llm']['api_timeout']
         logging.debug("Local LLM: Posting request")
         response = requests.post('http://127.0.0.1:8080/v1/chat/completions', headers=headers, json=data, timeout=local_api_timeout)
 
@@ -172,7 +198,7 @@ def chat_with_local_llm(input_data, custom_prompt_arg, temp, system_message=None
 
 
 def chat_with_llama(input_data, custom_prompt, temp, api_url=None, api_key=None, system_prompt=None, streaming=False, top_k=None, top_p=None, min_p=None):
-    loaded_config_data = load_and_log_configs()
+    loaded_config_data = "load_and_log_configs" # FIXME - load_and_log_configs()
     try:
         # API key validation
         if api_key is None:
@@ -211,7 +237,7 @@ def chat_with_llama(input_data, custom_prompt, temp, api_url=None, api_key=None,
             top_k = int(top_k)
             logging.debug(f"Llama.cpp: Using top_k: {top_k}")
         elif top_k is None:
-            top_k = load_and_log_configs().get('llama_api', {}).get('top_k', 100)
+            top_k = "load_and_log_configs" # FIXME - load_and_log_configs().get('llama_api', {}).get('top_k', 100)
             top_k = int(top_k)
             logging.debug(f"Llama.cpp: Using top_k from config: {top_k}")
         if not isinstance(streaming, int):
@@ -221,7 +247,7 @@ def chat_with_llama(input_data, custom_prompt, temp, api_url=None, api_key=None,
             top_p = float(top_p)
             logging.debug(f"Llama.cpp: Using top_p: {top_p}")
         elif top_p is None:
-            top_p = load_and_log_configs().get('llama_api', {}).get('top_p', 0.95)
+            top_p = "load_and_log_configs" # FIXME - load_and_log_configs().get('llama_api', {}).get('top_p', 0.95)
             top_p = float(top_p)
             logging.debug(f"Llama.cpp: Using top_p from config: {top_p}")
         if not isinstance(streaming, int):
@@ -231,7 +257,7 @@ def chat_with_llama(input_data, custom_prompt, temp, api_url=None, api_key=None,
             min_p = float(min_p)
             logging.debug(f"Llama.cpp: Using min_p: {min_p}")
         elif min_p is None:
-            min_p = load_and_log_configs().get('llama_api', {}).get('min_p', 0.05)
+            min_p = "load_and_log_configs" # FIXME - load_and_log_configs().get('llama_api', {}).get('min_p', 0.05)
             min_p = float(min_p)
             logging.debug(f"Llama.cpp: Using min_p from config: {min_p}")
         if not isinstance(streaming, int):
@@ -361,7 +387,7 @@ def chat_with_kobold(input_data, api_key, custom_prompt_input, temp=None, system
     logging.debug("Kobold: Summarization process starting...")
     try:
         logging.debug("Kobold: Loading and validating configurations")
-        loaded_config_data = load_and_log_configs()
+        loaded_config_data = "load_and_log_configs" # FIXME - load_and_log_configs()
         if loaded_config_data is None:
             logging.error("Failed to load configuration data")
             kobold_api_key = None
@@ -396,7 +422,7 @@ def chat_with_kobold(input_data, api_key, custom_prompt_input, temp=None, system
             top_k = int(top_k)
             logging.debug(f"Kobold.cpp: Using top_k: {top_k}")
         elif top_k is None:
-            top_k = load_and_log_configs().get('kobold_api', {}).get('top_k', 100)
+            top_k = "load_and_log_configs" # FIXME - load_and_log_configs().get('kobold_api', {}).get('top_k', 100)
             top_k = int(top_k)
             logging.debug(f"Kobold.cpp: Using top_k from config: {top_k}")
         if not isinstance(streaming, int):
@@ -406,14 +432,14 @@ def chat_with_kobold(input_data, api_key, custom_prompt_input, temp=None, system
             top_p = float(top_p)
             logging.debug(f"Kobold.cpp: Using top_p: {top_p}")
         elif top_p is None:
-            top_p = load_and_log_configs().get('kobold_api', {}).get('top_p', 0.95)
+            top_p = "load_and_log_configs" # FIXME - load_and_log_configs().get('kobold_api', {}).get('top_p', 0.95)
             top_p = float(top_p)
             logging.debug(f"Kobold.cpp: Using top_p from config: {top_p}")
         if not isinstance(streaming, int):
             raise ValueError(f"Invalid type for 'top_p': Expected a float, got {type(streaming).__name__}")
 
         if not isinstance(temp, float):
-            temp = load_and_log_configs().get('kobold_api', {}).get('temperature', 0.7)
+            temp = "load_and_log_configs" # FIXME - load_and_log_configs().get('kobold_api', {}).get('temperature', 0.7)
             logging.debug(f"Kobold.cpp: Using temperature from config: {temp}")
         if not isinstance(temp, float):
             raise ValueError(f"Invalid type for 'temp': Expected a float, got {type(streaming).__name__}")
@@ -622,7 +648,7 @@ def chat_with_oobabooga(input_data, api_key, custom_prompt, system_prompt=None, 
     logging.debug("Oobabooga: Summarization process starting...")
     try:
         logging.debug("Oobabooga: Loading and validating configurations")
-        loaded_config_data = load_and_log_configs()
+        loaded_config_data = "load_and_log_configs" # FIXME - load_and_log_configs()
         ooba_api_key = None
 
         # Config data check
@@ -664,13 +690,13 @@ def chat_with_oobabooga(input_data, api_key, custom_prompt, system_prompt=None, 
             top_p = float(top_p)
             logging.debug(f"Ooba: Using top_p: {top_p}")
         elif top_p is None:
-            top_p = load_and_log_configs().get('ooba_api', {}).get('top_p', 0.95)
+            top_p = "load_and_log_configs" # FIXME - load_and_log_configs().get('ooba_api', {}).get('top_p', 0.95)
             logging.debug(f"Ooba: Using top_p from config: {top_p}")
         if not isinstance(top_p, float):
             raise ValueError(f"Invalid type for 'top_p': Expected a float, got {type(streaming).__name__}")
 
         if temp is None:
-            temp = load_and_log_configs().get('ooba_api', {}).get('temperature', 0.7)
+            temp = "load_and_log_configs" # FIXME - load_and_log_configs().get('ooba_api', {}).get('temperature', 0.7)
             logging.debug(f"Ooba: Using temperature from config: {temp}")
         if not isinstance(temp, float):
             raise ValueError(f"Invalid type for 'temp': Expected a float, got {type(streaming).__name__}")
@@ -828,7 +854,7 @@ def chat_with_tabbyapi(
     logging.debug("TabbyAPI: Chat request process starting...")
     try:
         logging.debug("TabbyAPI: Loading and validating configurations")
-        loaded_config_data = load_and_log_configs()
+        loaded_config_data = "load_and_log_configs" # FIXME - load_and_log_configs()
         if loaded_config_data is None:
             logging.error("Failed to load configuration data")
             tabby_api_key = None
@@ -1043,7 +1069,7 @@ def chat_with_tabbyapi(
 
 def chat_with_aphrodite(api_key, input_data, custom_prompt, temp=None, system_message=None, streaming=None,
                         topp=None, minp=None, topk=None, model=None):
-    loaded_config_data = load_and_log_configs()
+    loaded_config_data = "load_and_log_configs" # FIXME - load_and_log_configs()
     logging.info("Aphrodite Chat: Function entered")
     logging.debug("Aphrodite Chat: Loading and validating configurations")
     try:
@@ -1266,7 +1292,7 @@ def chat_with_ollama(input_data, custom_prompt, api_url=None, api_key=None,
                      top_p=None):
     # https://github.com/ollama/ollama/blob/main/docs/openai.md
     # 1. Load config
-    loaded_config_data = load_and_log_configs()
+    loaded_config_data = "load_and_log_configs" # FIXME - load_and_log_configs()
     try:
         # ----------------------------------------------------------------
         # 2. Validate and retrieve API Key, API URL, Model from parameters or config
@@ -1482,7 +1508,7 @@ def chat_with_vllm(
     logging.debug("vLLM: Chat request being made...")
     try:
         logging.debug("vLLM: Loading and validating configurations")
-        loaded_config_data = load_and_log_configs()
+        loaded_config_data = "load_and_log_configs" # FIXME - load_and_log_configs()
         if loaded_config_data is None:
             logging.error("Failed to load configuration data")
             return "vLLM: Failed to load configuration data"
@@ -1698,7 +1724,7 @@ def chat_with_vllm(
 
 
 def chat_with_custom_openai(api_key, input_data, custom_prompt_arg, temp=None, system_message=None, streaming=False, maxp=None, model=None, minp=None, topk=None):
-    loaded_config_data = load_and_log_configs()
+    loaded_config_data = "load_and_log_configs" # FIXME - load_and_log_configs()
     custom_openai_api_key = api_key
     try:
         # API key validation
@@ -1725,7 +1751,7 @@ def chat_with_custom_openai(api_key, input_data, custom_prompt_arg, temp=None, s
 
         # Set temperature
         if temp is None:
-            temp = load_and_log_configs()['custom_openai_api']['temperature']
+            temp = "load_and_log_configs" # FIXME - load_and_log_configs()['custom_openai_api']['temperature']
         temp = float(temp)
 
         # Set system message
@@ -1734,7 +1760,7 @@ def chat_with_custom_openai(api_key, input_data, custom_prompt_arg, temp=None, s
 
         # Set Streaming
         if streaming is None:
-            streaming = load_and_log_configs()['custom_openai_api']['streaming']
+            streaming = "load_and_log_configs" # FIXME - load_and_log_configs()['custom_openai_api']['streaming']
             streaming = bool(streaming)
         if streaming is True:
             logging.debug("Custom OpenAI API: Streaming mode enabled")
@@ -1898,7 +1924,7 @@ def chat_with_custom_openai(api_key, input_data, custom_prompt_arg, temp=None, s
 
 
 def chat_with_custom_openai_2(api_key, input_data, custom_prompt_arg, temp=None, system_message=None, streaming=False, maxp=None, model=None, minp=None, topk=None):
-    loaded_config_data = load_and_log_configs()
+    loaded_config_data = "load_and_log_configs" # FIXME - load_and_log_configs()
     custom_openai_api_key = api_key
     try:
         # API key validation
@@ -1929,7 +1955,7 @@ def chat_with_custom_openai_2(api_key, input_data, custom_prompt_arg, temp=None,
 
         # Set temperature
         if temp is None:
-            temp = load_and_log_configs()['custom_openai_api_2']['temperature']
+            temp = "load_and_log_configs" # FIXME - load_and_log_configs()['custom_openai_api_2']['temperature']
         temp = float(temp)
 
         # Set system message
@@ -1938,7 +1964,7 @@ def chat_with_custom_openai_2(api_key, input_data, custom_prompt_arg, temp=None,
 
         # Set Streaming
         if streaming is None:
-            streaming = load_and_log_configs()['custom_openai_api_2']['streaming']
+            streaming = "load_and_log_configs" # FIXME - load_and_log_configs()['custom_openai_api_2']['streaming']
             streaming = bool(streaming)
         if streaming is True:
             logging.debug("Custom OpenAI API-2: Streaming mode enabled")

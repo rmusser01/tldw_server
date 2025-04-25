@@ -1,0 +1,92 @@
+
+# tldw_cli/config.toml
+
+[general]
+default_tab = "chat"  # "chat", "character", "logs", "media", "search", "ingest", "stats"
+log_level = "DEBUG" # TUI Log Level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+[logging]
+# Log file will be placed in the same directory as the database file specified below.
+log_filename = "tldw_cli_app.log"
+file_log_level = "INFO" # File Log Level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+log_max_bytes = 10485760 # 10 MB
+log_backup_count = 5
+
+[database]
+# Path to the main application data/history database.
+# Use ~ for home directory expansion.
+path = "~/.local/share/tldw_cli/tldw_cli_data.db"
+# Path to user config dir (derived from this in code if needed for other files)
+# user_config_dir = "~/.config/tldw_cli" # Example if needed explicitly
+
+[api_endpoints]
+# Optional: Specify URLs for local/custom endpoints if they differ from library defaults
+# These keys should match the provider names used in the app (adjust if needed)
+Ollama = "http://localhost:11434"
+Llama_cpp = "http://localhost:8080" # Check if your API lib uses this name
+Oobabooga = "http://localhost:5000/api" # Check if your API lib uses this name
+KoboldCpp = "http://localhost:5001/api" # Check if your API lib uses this name
+vLLM = "http://localhost:8000" # Check if your API lib uses this name
+Custom = "http://localhost:1234/v1"
+Custom_2 = "http://localhost:5678/v1"
+# Add other local URLs if needed
+
+[providers]
+# List available providers and their associated models (can be fetched dynamically later)
+# Format: ProviderName = ["model1", "model2", ...]
+OpenAI = ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
+Anthropic = ["claude-3-5-sonnet-20240620", "claude-3-opus-20240229", "claude-3-haiku-20240307"]
+Google = ["gemini-1.5-pro-latest", "gemini-1.5-flash-latest"]
+MistralAI = ["mistral-large-latest", "mistral-small-latest", "open-mixtral-8x7b"]
+Groq = ["llama3-70b-8192", "mixtral-8x7b-32768"]
+Cohere = ["command-r-plus", "command-r"]
+OpenRouter = ["meta-llama/llama-3-70b-instruct"] # Example, add more
+HuggingFace = ["mistralai/Mixtral-8x7B-Instruct-v0.1"] # Example, add more
+DeepSeek = ["deepseek-chat"]
+# Local Providers
+Ollama = ["llama3:latest", "mistral:latest"] # Use format expected by your Ollama client
+Llama_cpp = ["."] # Often model is specified at server start, client might not need it
+Oobabooga = ["."] # Often model is specified at server start
+KoboldCpp = ["."] # Often model is specified at server start
+vLLM = ["."] # Often model is specified at server start
+Custom = ["custom-model-alpha", "custom-model-beta"]
+Custom_2 = ["custom-model-gamma"]
+TabbyAPI = ["tabby-model"] # Add if used
+Aphrodite = ["aphrodite-engine"] # Add if used
+
+[chat_defaults]
+# Default settings specifically for the 'Chat' tab
+provider = "Ollama"
+model = "llama3:latest" # Make sure this exists in the [providers.Ollama] list above
+system_prompt = "You are a helpful AI assistant."
+temperature = 0.7
+top_p = 0.95
+min_p = 0.05 # Check if API supports this
+top_k = 50   # Check if API supports this
+
+[character_defaults]
+# Default settings specifically for the 'Character' tab
+provider = "Anthropic"
+model = "claude-3-haiku-20240307" # Make sure this exists in [providers.Anthropic]
+system_prompt = "You are roleplaying as a witty pirate captain."
+temperature = 0.8
+top_p = 0.9
+min_p = 0.0 # Check if API supports this
+top_k = 100 # Check if API supports this
+
+# --- Sections below are placeholders based on config.txt, integrate as needed ---
+# [tts_settings]
+# default_provider = "kokoro"
+# ...
+
+# [search_settings]
+# default_provider = "google"
+# ...
+
+# [embedding_settings]
+# provider = "openai"
+# ...
+
+# [chunking_settings]
+# default_method = "words"
+# ...

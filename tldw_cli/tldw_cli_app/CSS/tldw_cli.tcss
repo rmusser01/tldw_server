@@ -1,3 +1,4 @@
+
 Screen { layout: vertical; }
     Header { dock: top; height: 1; background: $accent-darken-1; }
     Footer { dock: bottom; height: 1; background: $accent-darken-1; }

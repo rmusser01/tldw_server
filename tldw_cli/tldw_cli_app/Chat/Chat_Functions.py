@@ -1,13 +1,13 @@
 # Chat_Functions.py
-# Chat functions for interacting with the LLMs as chatbots
-import base64
+# Description: Chat functions for interacting with the LLMs as chatbots
+#
 # Imports
+import base64
 import json
+import logging
 import os
 import random
 import re
-import sqlite3
-import tempfile
 import time
 import warnings
 from datetime import datetime, timedelta
@@ -16,18 +16,12 @@ from pathlib import Path
 # External Imports
 #
 # Local Imports
-from tldw_Server_API.app.core.DB_Management.DB_Manager import start_new_conversation, delete_messages_in_conversation, save_message
-from tldw_Server_API.app.core.DB_Management.RAG_QA_Chat_DB import get_db_connection, get_conversation_name
-from tldw_Server_API.app.core.LLM_Calls.LLM_API_Calls import chat_with_openai, chat_with_anthropic, chat_with_cohere, \
-    chat_with_groq, chat_with_openrouter, chat_with_deepseek, chat_with_mistral, chat_with_huggingface, chat_with_google
-from tldw_Server_API.app.core.LLM_Calls.LLM_API_Calls_Local import chat_with_aphrodite, chat_with_local_llm, chat_with_ollama, \
-    chat_with_kobold, chat_with_llama, chat_with_oobabooga, chat_with_tabbyapi, chat_with_vllm, chat_with_custom_openai, \
+from tldw_cli.tldw_cli_app.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_cli.tldw_cli_app.api.LLM_API_Calls import chat_with_openai, chat_with_anthropic, chat_with_huggingface, \
+    chat_with_google, chat_with_openrouter, chat_with_groq, chat_with_deepseek, chat_with_cohere, chat_with_mistral
+from tldw_cli.tldw_cli_app.api.LLM_API_Calls_Local import chat_with_aphrodite, chat_with_kobold, chat_with_oobabooga, \
+    chat_with_llama, chat_with_tabbyapi, chat_with_local_llm, chat_with_ollama, chat_with_vllm, chat_with_custom_openai, \
     chat_with_custom_openai_2
-from tldw_Server_API.app.core.DB_Management.Media_DB import load_media_content
-from tldw_Server_API.app.core.Utils.Utils import generate_unique_filename, load_and_log_configs, logging
-from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-
-
 #
 ####################################################################################################
 #
@@ -416,7 +410,7 @@ def chat(message, history, media_content, selected_parts, api_endpoint, api_key,
             log_histogram("chat_duration", chat_duration, labels={"api_endpoint": api_endpoint})
             log_counter("chat_success", labels={"api_endpoint": api_endpoint})
             logging.debug(f"Debug - Chat Function - Response: {response}")
-            loaded_config_data = load_and_log_configs()
+            loaded_config_data = "loaded_config_data" #FIXME - load_and_log_configs()
             post_gen_replacement = loaded_config_data['chat_dictionaries']['post_gen_replacement']
             if post_gen_replacement:
                 post_gen_replacement_dict = loaded_config_data['chat_dictionaries']['post_gen_replacement_dict']
@@ -433,128 +427,6 @@ def chat(message, history, media_content, selected_parts, api_endpoint, api_key,
         logging.error(f"Error in chat function: {str(e)}")
         return f"An error occurred: {str(e)}"
 
-
-def save_chat_history_to_db_wrapper(chatbot, conversation_id, media_content, media_name=None):
-    log_counter("save_chat_history_to_db_attempt")
-    start_time = time.time()
-    logging.info(f"Attempting to save chat history. Media content type: {type(media_content)}")
-
-    try:
-        # First check if we can access the database
-        try:
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT 1")
-        except sqlite3.DatabaseError as db_error:
-            logging.error(f"Database is corrupted or inaccessible: {str(db_error)}")
-            return conversation_id, "Database error: The database file appears to be corrupted. Please contact support."
-
-        # Now attempt the save
-        if not conversation_id:
-            # Only for new conversations, not updates
-            media_id = None
-            if isinstance(media_content, dict) and 'content' in media_content:
-                try:
-                    content = media_content['content']
-                    content_json = content if isinstance(content, dict) else json.loads(content)
-                    media_id = content_json.get('webpage_url')
-                    media_name = media_name or content_json.get('title', 'Unnamed Media')
-                except (json.JSONDecodeError, AttributeError) as e:
-                    logging.error(f"Error processing media content: {str(e)}")
-                    media_id = "unknown_media"
-                    media_name = media_name or "Unnamed Media"
-            else:
-                media_id = "unknown_media"
-                media_name = media_name or "Unnamed Media"
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            conversation_title = f"{media_name}_{timestamp}"
-            conversation_id = start_new_conversation(title=conversation_title, media_id=media_id)
-            logging.info(f"Created new conversation with ID: {conversation_id}")
-
-        # For both new and existing conversations
-        try:
-            delete_messages_in_conversation(conversation_id)
-            for user_msg, assistant_msg in chatbot:
-                if user_msg:
-                    save_message(conversation_id, "user", user_msg)
-                if assistant_msg:
-                    save_message(conversation_id, "assistant", assistant_msg)
-        except sqlite3.DatabaseError as db_error:
-            logging.error(f"Database error during message save: {str(db_error)}")
-            return conversation_id, "Database error: Unable to save messages. Please try again or contact support."
-
-        save_duration = time.time() - start_time
-        log_histogram("save_chat_history_to_db_duration", save_duration)
-        log_counter("save_chat_history_to_db_success")
-
-        return conversation_id, "Chat history saved successfully!"
-
-    except Exception as e:
-        log_counter("save_chat_history_to_db_error", labels={"error": str(e)})
-        error_message = f"Failed to save chat history: {str(e)}"
-        logging.error(error_message, exc_info=True)
-        return conversation_id, error_message
-
-
-def save_chat_history(history, conversation_id, media_content):
-    log_counter("save_chat_history_attempt")
-    start_time = time.time()
-    try:
-        content, conversation_name = generate_chat_history_content(history, conversation_id, media_content)
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_conversation_name = re.sub(r'[^a-zA-Z0-9_-]', '_', conversation_name)
-        base_filename = f"{safe_conversation_name}_{timestamp}.json"
-
-        # Create a temporary file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_file:
-            temp_file.write(content)
-            temp_file_path = temp_file.name
-
-        # Generate a unique filename
-        unique_filename = generate_unique_filename(os.path.dirname(temp_file_path), base_filename)
-        final_path = os.path.join(os.path.dirname(temp_file_path), unique_filename)
-
-        # Rename the temporary file to the unique filename
-        os.rename(temp_file_path, final_path)
-
-        save_duration = time.time() - start_time
-        log_histogram("save_chat_history_duration", save_duration)
-        log_counter("save_chat_history_success")
-        return final_path
-    except Exception as e:
-        log_counter("save_chat_history_error", labels={"error": str(e)})
-        logging.error(f"Error saving chat history: {str(e)}")
-        return None
-
-
-def generate_chat_history_content(history, conversation_id, media_content):
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    conversation_name = get_conversation_name(conversation_id)
-
-    if not conversation_name:
-        media_name = extract_media_name(media_content)
-        if media_name:
-            conversation_name = f"{media_name}-chat"
-        else:
-            conversation_name = f"chat-{timestamp}"  # Fallback name
-
-    chat_data = {
-        "conversation_id": conversation_id,
-        "conversation_name": conversation_name,
-        "timestamp": timestamp,
-        "history": [
-            {
-                "role": "user" if i % 2 == 0 else "bot",
-                "content": msg[0] if isinstance(msg, tuple) else msg
-            }
-            for i, msg in enumerate(history)
-        ]
-    }
-
-    return json.dumps(chat_data, indent=2), conversation_name
 
 
 def extract_media_name(media_content):
@@ -574,45 +446,6 @@ def extract_media_name(media_content):
     logging.warning(f"Unexpected media_content format: {type(media_content)}")
     return None
 
-
-def update_chat_content(selected_item, use_content, use_summary, use_prompt, item_mapping):
-    log_counter("update_chat_content_attempt")
-    start_time = time.time()
-    logging.debug(f"Debug - Update Chat Content - Selected Item: {selected_item}\n")
-    logging.debug(f"Debug - Update Chat Content - Use Content: {use_content}\n\n\n\n")
-    logging.debug(f"Debug - Update Chat Content - Use Summary: {use_summary}\n\n")
-    logging.debug(f"Debug - Update Chat Content - Use Prompt: {use_prompt}\n\n")
-    logging.debug(f"Debug - Update Chat Content - Item Mapping: {item_mapping}\n\n")
-
-    if selected_item and selected_item in item_mapping:
-        media_id = item_mapping[selected_item]
-        content = load_media_content(media_id)
-        selected_parts = []
-        if use_content and "content" in content:
-            selected_parts.append("content")
-        if use_summary and "summary" in content:
-            selected_parts.append("summary")
-        if use_prompt and "prompt" in content:
-            selected_parts.append("prompt")
-
-        # Modified debug print
-        if isinstance(content, dict):
-            print(f"Debug - Update Chat Content - Content keys: {list(content.keys())}")
-            for key, value in content.items():
-                print(f"Debug - Update Chat Content - {key} (first 500 char): {str(value)[:500]}\n\n\n\n")
-        else:
-            print(f"Debug - Update Chat Content - Content(first 500 char): {str(content)[:500]}\n\n\n\n")
-
-        print(f"Debug - Update Chat Content - Selected Parts: {selected_parts}")
-        update_duration = time.time() - start_time
-        log_histogram("update_chat_content_duration", update_duration)
-        log_counter("update_chat_content_success")
-        return content, selected_parts
-    else:
-        log_counter("update_chat_content_error", labels={"error": str("No item selected or item not in mapping")})
-        print(f"Debug - Update Chat Content - No item selected or item not in mapping")
-        return {}, []
-
 #
 # End of Chat functions
 #######################################################################################################################
@@ -621,49 +454,99 @@ def update_chat_content(selected_item, use_content, use_summary, use_prompt, ite
 #######################################################################################################################
 #
 # Chat Dictionary Functions
-
 def parse_user_dict_markdown_file(file_path):
     """
-    Parse a Markdown file with custom termination symbol for multi-line values.
+    Parse a Markdown-like file with key-value pairs.
+    Supports multi-line values indicated by 'key: |' and terminated by '---@@@---'.
+
+    Args:
+        file_path (str): The path to the file to parse.
+
+    Returns:
+        dict: A dictionary containing the parsed key-value pairs.
+              Multi-line values are stored as single strings with preserved newlines.
     """
     logging.debug(f"Parsing user dictionary file: {file_path}")
     replacement_dict = {}
     current_key = None
     current_value = []
+    # Regex for the multi-line termination symbol (allows surrounding whitespace)
     termination_pattern = re.compile(r'^\s*---@@@---\s*$')
+    # Regex for key-value pairs. Allows for optional value part.
+    # Group 1: Key (non-greedy, anything before ':')
+    # Group 2: Value (everything after ':', can be empty)
+    key_value_pattern = re.compile(r'^\s*([^:\n]+?)\s*:\s*(.*?)\s*$')
 
-    with open(file_path, 'r', encoding='utf-8') as file:
-        for line in file:
-            # Check for termination pattern first
-            if termination_pattern.match(line):
-                if current_key:
-                    replacement_dict[current_key] = '\n'.join(current_value).strip()
-                    current_key, current_value = None, []
-                continue
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            for line_num, line in enumerate(file, 1): # Use enumerate for better error messages
 
-            # Match key lines only when not in multi-line mode
-            if not current_key:
-                key_value_match = re.match(r'^\s*([^:\n]+?)\s*:\s*(.*?)\s*$', line)
-                if key_value_match:
-                    key, value = key_value_match.groups()
-                    if value.strip() == '|':
-                        current_key = key.strip()
-                        current_value = []
+                # 1. Check for termination pattern FIRST
+                if termination_pattern.match(line):
+                    if current_key:
+                        # Finish the current multi-line value
+                        replacement_dict[current_key] = '\n'.join(current_value).strip()
+                        logging.debug(f"Line {line_num}: Ended multi-line value for key '{current_key}'")
+                        current_key, current_value = None, []
                     else:
-                        replacement_dict[key.strip()] = value.strip()
-                continue
+                        # Termination symbol found unexpectedly
+                        logging.warning(f"Line {line_num}: Found termination symbol '---@@@---' outside of a multi-line value block. Ignoring.")
+                    continue # Process next line
 
-            # Processing multi-line content
-            if current_key:
-                # Strip trailing whitespace but preserve leading spaces
-                cleaned_line = line.rstrip('\n\r')
-                current_value.append(cleaned_line)
+                # 2. If currently processing a multi-line value, append the line
+                if current_key:
+                    # Append the raw line, stripping only the trailing newline/CR
+                    # Preserves leading/trailing whitespace on the line itself
+                    cleaned_line = line.rstrip('\n\r')
+                    current_value.append(cleaned_line)
+                    continue # Process next line
 
-        # Handle any remaining multi-line value at EOF
+                # 3. If not in multi-line mode, try to match a new key-value pair
+                key_value_match = key_value_pattern.match(line)
+                if key_value_match:
+                    # *** THE FIX IS HERE: Check if key_value_match is not None ***
+                    key, value = key_value_match.groups()
+                    key = key.strip()
+                    value_stripped = value.strip() # Check the stripped value
+
+                    if not key: # Skip if key is empty after stripping
+                         logging.warning(f"Line {line_num}: Ignoring line with empty key: {line.strip()}")
+                         continue
+
+                    if value_stripped == '|':
+                        # Start of a multi-line value
+                        if current_key: # Should not happen based on logic order, but good practice
+                             logging.warning(f"Line {line_num}: Started new multi-line key '{key}' while previous key '{current_key}' was active. Finishing previous.")
+                             replacement_dict[current_key] = '\n'.join(current_value).strip()
+
+                        current_key = key
+                        current_value = []
+                        logging.debug(f"Line {line_num}: Started multi-line value for key '{key}'")
+                    else:
+                        # Single-line value (or empty value)
+                        replacement_dict[key] = value_stripped # Use the stripped value part
+                        logging.debug(f"Line {line_num}: Parsed single-line key='{key}', value='{value_stripped}'")
+
+                # else: # Optional: Handle lines that don't match any expected format
+                    # if line.strip(): # Only log if the line isn't just whitespace
+                    #     logging.warning(f"Line {line_num}: Ignoring line, does not match key: value pattern or multi-line continuation: {line.strip()}")
+
+
+        # Handle any remaining multi-line value at End Of File
         if current_key:
+            logging.debug(f"EOF: Finalizing multi-line value for key '{current_key}'")
             replacement_dict[current_key] = '\n'.join(current_value).strip()
 
-    logging.debug(f"Parsed entries: {replacement_dict}")
+    except FileNotFoundError:
+        logging.error(f"Error: File not found at {file_path}")
+        return {} # Return empty dict on error
+    except Exception as e:
+        logging.error(f"An error occurred while parsing {file_path}: {e}")
+        return {} # Return empty dict on error
+
+
+    logging.debug(f"Parsed {len(replacement_dict)} entries from {file_path}") # More informative log
+    # logging.debug(f"Parsed entries: {replacement_dict}") # Can be very verbose
     return replacement_dict
 
 
@@ -951,7 +834,7 @@ def load_characters():
             with open(characters_file, 'r') as f:
                 characters = json.load(f)
             logging.info(f"Loaded characters from {characters_file}")
-            logging.trace(f"Loaded {len(characters)} characters from {characters_file}")
+            logging.info(f"Loaded {len(characters)} characters from {characters_file}")
             load_duration = time.time() - start_time
             log_histogram("load_characters_duration", load_duration)
             log_counter("load_characters_success", labels={"character_count": len(characters)})

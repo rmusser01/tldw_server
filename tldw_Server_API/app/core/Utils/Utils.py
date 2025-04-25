@@ -1981,3 +1981,7 @@ def is_valid_date(date_string): # Placeholder
         return True
     except ValueError:
         return False
+
+
+def get_user_database_path():
+    return None
