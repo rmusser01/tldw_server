@@ -34,7 +34,7 @@ https://arxiv.org/abs/2501.16302
 https://paperswithcode.com/paper/monolith-real-time-recommendation-system-with
 https://snap-research.github.io/open-set-video-personalization/
 https://github.com/leafac/kill-the-newsletter
-
-
-
+https://github.com/fabriziosalmi/UglyFeed
+https://github.com/Tiendil/feeds.fun
+https://github.com/DIYgod/RSSHub
 
