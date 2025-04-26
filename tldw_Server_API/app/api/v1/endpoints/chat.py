@@ -62,7 +62,7 @@ from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
 router = APIRouter()
 
 @router.post(
-    "/chat/completions",
+    "/completions",
     summary="Creates a model response via a proxy to the specified or default LLM provider.",
     tags=["Chat"],
     responses={
