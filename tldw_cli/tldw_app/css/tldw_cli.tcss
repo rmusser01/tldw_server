@@ -20,7 +20,7 @@ Footer { dock: bottom; height: 1; background: $accent-darken-1; }
 .placeholder-window { align: center middle; background: $panel; }
 
 /* Sidebar Styling */
-.sidebar { width: 35; background: $boost; padding: 1 2; border-right: thick $background-darken-1; height: 100%; overflow-y: auto; overflow-x: hidden; }
+.sidebar { width: 42; background: $boost; padding: 1 2; border-right: thick $background-darken-1; height: 100%; overflow-y: auto; overflow-x: hidden; }
 .sidebar-title { text-style: bold underline; margin-bottom: 1; width: 100%; text-align: center; }
 .sidebar-label { margin-top: 1; text-style: bold; }
 .sidebar-input { width: 100%; margin-bottom: 1; }

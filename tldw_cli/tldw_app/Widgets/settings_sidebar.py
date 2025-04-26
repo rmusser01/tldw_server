@@ -17,6 +17,8 @@ from ..config import get_providers_and_models
 #
 # Functions:
 
+# Sidebar visual constants ---------------------------------------------------
+SIDEBAR_WIDTH = "30%"
 
 def create_settings_sidebar(id_prefix: str, config: dict) -> ComposeResult:
     """Yield the widgets for the settings sidebar.
