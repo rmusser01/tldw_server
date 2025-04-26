@@ -900,6 +900,19 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
                 logging.info(f"Action: Thumb Down clicked for {message_role} message.")
                 button.label = "👎(OK)"  # Provide visual feedback
 
+            elif "delete-button" in button_classes:
+                logging.info(
+                    "Action: Delete clicked for %s message: '%s…'",
+                    message_role,
+                    message_text[:50],
+                )
+                try:
+                    await action_widget.remove()  # removes the ChatMessage from the DOM
+                    # If this was the AI placeholder being deleted, clear the reference
+                    if action_widget is self.current_ai_message_widget:
+                        self.current_ai_message_widget = None
+                except Exception as exc:  # noqa: BLE001
+                    logging.error("Failed to delete message: %s", exc, exc_info=True)
 
             elif "regenerate-button" in button_classes and message_role == "AI":
                 logging.info(f"Action: Regenerate clicked for AI message.")
