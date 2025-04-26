@@ -32,7 +32,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 #
 # Import Local libraries
-from tldw_cli.tldw_app.config import get_setting
+from ..config import get_setting
 #
 #######################################################################################################################
 # Function Definitions
@@ -127,7 +127,6 @@ def get_openai_embeddings(input_data: str, model: str) -> List[float]:
 
 
 def chat_with_openai(api_key, input_data, custom_prompt_arg, temp, system_message, streaming, maxp, model):
-    log = logging.getLogger(__name__)
     provider_section_key = "openai" # Key used in [api_settings.*] in config.toml
     # https://platform.openai.com/docs/api-reference
 
@@ -791,7 +790,6 @@ def chat_with_cohere(api_key=None, input_data=None, model=None, custom_prompt_ar
 # https://console.groq.com/docs/quickstart
 def chat_with_groq(api_key, input_data, custom_prompt_arg, temp=None, system_message=None, streaming=None, maxp=None, model=None):
     """Interacts with the Groq API using settings from config."""
-    log = logging.getLogger(__name__)
     provider_section_key = "groq" # Key used in [api_settings.*] in config.toml
     logging.debug(f"Groq: Chat process starting for model '{model or 'default'}'...")
 
@@ -1250,7 +1248,6 @@ def chat_with_huggingface(
     Interacts with the Hugging Face Inference API (Chat Completions endpoint)
     using settings from config.
     """
-    log = logging.getLogger(__name__)
     provider_section_key = "huggingface" # Key in config.toml [api_settings.*]
     logging.debug(f"HuggingFace Chat: Process starting...")
 
@@ -1952,7 +1949,6 @@ def chat_with_mistral(api_key, input_data, custom_prompt_arg, temp=None, system_
 
 def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=None, system_message=None, streaming=None, topp=None, topk=None):
     """Interacts with the Google Gemini API via its OpenAI compatibility endpoint using settings from config."""
-    log = logging.getLogger(__name__)
     provider_section_key = "google" # Key used in [api_settings.*] in config.toml
 
     try:
@@ -1963,22 +1959,22 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
             api_key_env_var_name = get_setting("api_settings", f"{provider_section_key}.api_key_env_var", "GOOGLE_API_KEY")
             google_api_key = os.environ.get(api_key_env_var_name)
             if google_api_key:
-                log.info(f"Google: Using API key from environment variable {api_key_env_var_name}")
+                logging.info(f"Google: Using API key from environment variable {api_key_env_var_name}")
             # else: # Optional: Fallback to reading directly from config (less secure)
             #     google_api_key = get_setting("api_settings", f"{provider_section_key}.api_key")
             #     if google_api_key:
-            #         log.warning("Google: Using API key found directly in config file (less secure).")
+            #         logging.warning("Google: Using API key found directly in config file (less secure).")
 
         if not google_api_key:
-            log.error("Google: API key not found in argument, environment variable, or config.")
+            logging.error("Google: API key not found in argument, environment variable, or config.")
             return "Google: API Key Not Provided/Found/Configured."
-        log.debug(f"Google: Using API Key: {google_api_key[:5]}...{google_api_key[-5:]}")
+        logging.debug(f"Google: Using API Key: {google_api_key[:5]}...{google_api_key[-5:]}")
 
         # Model: Priority -> argument > config default
         google_model = model
         if not google_model:
             google_model = get_setting("api_settings", f"{provider_section_key}.model", "gemini-1.5-pro-latest") # Default from config.toml
-        log.debug(f"Google: Using model: {google_model}")
+        logging.debug(f"Google: Using model: {google_model}")
 
         # Streaming: Priority -> argument > config default
         if streaming is None:
@@ -1986,7 +1982,7 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
             streaming = _safe_cast(streaming_cfg, bool, False)
         else:
              streaming = _safe_cast(streaming, bool, False) # Ensure boolean if passed as arg
-        log.debug(f"Google: Streaming mode: {streaming}")
+        logging.debug(f"Google: Streaming mode: {streaming}")
 
         # Temperature: Priority -> argument > config default
         if temp is None:
@@ -1994,7 +1990,7 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
             temp_value = _safe_cast(temp_cfg, float, 0.7)
         else:
              temp_value = _safe_cast(temp, float, 0.7)
-        log.debug(f"Google: Using temperature: {temp_value}")
+        logging.debug(f"Google: Using temperature: {temp_value}")
 
         # Top_p (topp): Priority -> argument > config default
         # Note: Google compatibility endpoint likely uses 'top_p'. 'topp' is UI variable name.
@@ -2003,7 +1999,7 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
             top_p_value = _safe_cast(topp_cfg, float, 0.9)
         else:
              top_p_value = _safe_cast(topp, float, 0.9)
-        log.debug(f"Google: Using top_p: {top_p_value}")
+        logging.debug(f"Google: Using top_p: {top_p_value}")
 
         # Top_k (topk): Priority -> argument > config default
         # Note: Google compatibility endpoint likely uses 'top_k'. 'topk' is UI variable name.
@@ -2012,18 +2008,18 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
             top_k_value = _safe_cast(topk_cfg, int, 0) # Default to 0 if cast fails (often disables top_k)
         else:
              top_k_value = _safe_cast(topk, int, 0)
-        log.debug(f"Google: Using top_k: {top_k_value}")
+        logging.debug(f"Google: Using top_k: {top_k_value}")
 
         # Max Tokens: Load from config
         # Note: Google compatibility endpoint likely uses 'max_tokens'.
         max_tokens_cfg = get_setting("api_settings", f"{provider_section_key}.max_tokens", 8192) # Check default in config.toml
         max_tokens_value = _safe_cast(max_tokens_cfg, int, 8192)
-        log.debug(f"Google: Using max_tokens: {max_tokens_value}")
+        logging.debug(f"Google: Using max_tokens: {max_tokens_value}")
 
         # System Message: Priority -> argument > fixed default
         if system_message is None:
             system_message = "You are a helpful AI assistant." # Or load from config if needed
-        log.debug(f"Google: Using system message: {system_message[:100]}...")
+        logging.debug(f"Google: Using system message: {system_message[:100]}...")
 
         # Timeout, Retries, Delay: Load from config
         timeout_cfg = get_setting("api_settings", f"{provider_section_key}.timeout", 120)
@@ -2032,17 +2028,17 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
         retry_count = _safe_cast(retries_cfg, int, 3)
         delay_cfg = get_setting("api_settings", f"{provider_section_key}.retry_delay", 5)
         retry_delay = _safe_cast(delay_cfg, int, 5) # Or float for backoff
-        log.debug(f"Google: Timeout={api_timeout}, Retries={retry_count}, Delay={retry_delay}")
+        logging.debug(f"Google: Timeout={api_timeout}, Retries={retry_count}, Delay={retry_delay}")
 
 
         # --- Input Data Processing ---
         # (Keep your existing input data handling logic: file loading, json parsing, text extraction)
-        log.debug(f"Google: Raw input data type: {type(input_data)}")
+        logging.debug(f"Google: Raw input data type: {type(input_data)}")
         text = "" # Initialize text
         if isinstance(input_data, str):
             if input_data.strip().startswith('{'):
                  try: data = json.loads(input_data); text = json.dumps(data) # Or extract specific fields
-                 except json.JSONDecodeError: log.error("Google: Failed to parse JSON string, using raw string."); text = input_data
+                 except json.JSONDecodeError: logging.error("Google: Failed to parse JSON string, using raw string."); text = input_data
             elif os.path.isfile(input_data):
                 try:
                      with open(input_data, 'r', encoding='utf-8') as f: data = json.load(f)
@@ -2052,11 +2048,11 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
                      elif isinstance(data, list):
                          text = extract_text_from_segments(data)
                      else:
-                         log.warning(f"Loaded JSON from {input_data} but couldn't find segments. Using JSON dump.")
+                         logging.warning(f"Loaded JSON from {input_data} but couldn't find segments. Using JSON dump.")
                          text = json.dumps(data)
-                except FileNotFoundError: log.error(f"Input file not found: {input_data}"); return f"Google: Input file not found {input_data}"
-                except json.JSONDecodeError: log.error(f"Invalid JSON in file: {input_data}"); return f"Google: Invalid JSON file {input_data}"
-                except Exception as e: log.error(f"Error reading file {input_data}: {e}"); return f"Google: Error reading file {input_data}"
+                except FileNotFoundError: logging.error(f"Input file not found: {input_data}"); return f"Google: Input file not found {input_data}"
+                except json.JSONDecodeError: logging.error(f"Invalid JSON in file: {input_data}"); return f"Google: Invalid JSON file {input_data}"
+                except Exception as e: logging.error(f"Error reading file {input_data}: {e}"); return f"Google: Error reading file {input_data}"
             else:
                  text = input_data # Assume it's plain text
         elif isinstance(input_data, list):
@@ -2065,16 +2061,16 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
              # Decide how to handle a dict input - maybe extract segments or dump?
              if 'segments' in input_data: text = extract_text_from_segments(input_data['segments'])
              elif 'text' in input_data: text = input_data['text']
-             else: log.warning("Received dict input without 'segments' or 'text', dumping."); text = json.dumps(input_data)
+             else: logging.warning("Received dict input without 'segments' or 'text', dumping."); text = json.dumps(input_data)
         else:
-            log.error(f"Google: Invalid input data format: {type(input_data)}")
+            logging.error(f"Google: Invalid input data format: {type(input_data)}")
             return f"Google: Invalid input data format {type(input_data)}"
 
         if not text:
-            log.warning("Google: Extracted text is empty.")
+            logging.warning("Google: Extracted text is empty.")
             # return "Google: Input data resulted in empty text." # Optionally return error
 
-        log.debug(f"Google: Extracted text (first 500 chars): {text[:500]}...")
+        logging.debug(f"Google: Extracted text (first 500 chars): {text[:500]}...")
 
 
         # --- Prepare Request ---
@@ -2087,7 +2083,7 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
         }
         # Combine the extracted text with the custom prompt
         google_prompt = f"{text}\n\n{custom_prompt_arg}" if custom_prompt_arg else text
-        log.debug(f"Google: Combined prompt (first 500 chars): {google_prompt[:500]}...")
+        logging.debug(f"Google: Combined prompt (first 500 chars): {google_prompt[:500]}...")
 
         # Construct payload using OpenAI compatible names
         data = {
@@ -2119,7 +2115,7 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
         api_url = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
 
         if streaming:
-            log.debug(f"Google: Posting streaming request to {api_url}")
+            logging.debug(f"Google: Posting streaming request to {api_url}")
             response = session.post(
                 api_url,
                 headers=headers,
@@ -2127,7 +2123,7 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
                 stream=True,
                 timeout=api_timeout
             )
-            log.debug(f"Google: Raw Response Status: {response.status_code}")
+            logging.debug(f"Google: Raw Response Status: {response.status_code}")
             response.raise_for_status() # Raise HTTP errors
 
             # --- Stream Processing Generator ---
@@ -2141,7 +2137,7 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
                             if decoded_line.startswith('data: '):
                                 data_str = decoded_line[len('data: '):].strip()
                                 if data_str == '[DONE]':
-                                    log.info(f"Google: Stream finished. Total length: {len(full_response_text)}")
+                                    logging.info(f"Google: Stream finished. Total length: {len(full_response_text)}")
                                     break
                                 try:
                                     data_json = json.loads(data_str)
@@ -2151,11 +2147,11 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
                                          full_response_text += chunk
                                          yield chunk
                                 except json.JSONDecodeError:
-                                    log.error(f"Google: Error decoding stream JSON: {decoded_line}")
+                                    logging.error(f"Google: Error decoding stream JSON: {decoded_line}")
                                 except (KeyError, IndexError):
-                                     log.error(f"Google: Unexpected stream JSON structure: {data_json}")
+                                     logging.error(f"Google: Unexpected stream JSON structure: {data_json}")
                 except Exception as stream_err:
-                     log.error(f"Google: Error during stream iteration: {stream_err}", exc_info=True)
+                     logging.error(f"Google: Error during stream iteration: {stream_err}", exc_info=True)
                      # Yield an error message chunk if needed
                      yield f"\n[STREAM ERROR: {stream_err}]"
                 finally:
@@ -2163,46 +2159,46 @@ def chat_with_google(api_key, input_data, custom_prompt_arg, model=None, temp=No
             return stream_generator() # Return the generator
 
         else: # Non-streaming
-            log.debug(f"Google: Posting non-streaming request to {api_url}")
+            logging.debug(f"Google: Posting non-streaming request to {api_url}")
             response = session.post(
                 api_url,
                 headers=headers,
                 json=data,
                 timeout=api_timeout
             )
-            log.debug(f"Google: Response Status: {response.status_code}")
+            logging.debug(f"Google: Response Status: {response.status_code}")
 
             if response.status_code == 200:
                 response_data = response.json()
-                # log.debug(f"Google: Response Data: {response_data}") # Careful with logging
+                # logging.debug(f"Google: Response Data: {response_data}") # Careful with logging
                 # Parse OpenAI compatible response structure
                 if 'choices' in response_data and len(response_data['choices']) > 0:
                     message_content = response_data['choices'][0].get('message', {}).get('content')
                     if message_content:
                         chat_response = message_content.strip()
-                        log.info("Google: Chat request successful.")
-                        # log.debug(f"Google: Chat response: {chat_response[:200]}...")
+                        logging.info("Google: Chat request successful.")
+                        # logging.debug(f"Google: Chat response: {chat_response[:200]}...")
                         return chat_response
                     else:
-                        log.warning("Google: 'content' missing in response choices[0].message.")
+                        logging.warning("Google: 'content' missing in response choices[0].message.")
                         return "Google: Response message content missing."
                 else:
-                    log.warning("Google: 'choices' array missing or empty in response data.")
+                    logging.warning("Google: 'choices' array missing or empty in response data.")
                     return "Google: Chat response format unexpected (no choices)."
             else:
-                log.error(f"Google: Chat request failed. Status: {response.status_code}, Body: {response.text[:500]}...")
+                logging.error(f"Google: Chat request failed. Status: {response.status_code}, Body: {response.text[:500]}...")
                 return f"Google: Failed request. Status: {response.status_code}"
 
     # --- Exception Handling ---
     except requests.exceptions.RequestException as e:
-        log.error(f"Google: RequestException: {e}", exc_info=True)
+        logging.error(f"Google: RequestException: {e}", exc_info=True)
         return f"Google: Network or Request Error: {e}"
     except json.JSONDecodeError as e:
         # This might happen if input file is invalid JSON
-        log.error(f"Google: Error decoding JSON (input or response): {e}", exc_info=True)
+        logging.error(f"Google: Error decoding JSON (input or response): {e}", exc_info=True)
         return f"Google: Error parsing JSON data."
     except Exception as e:
-        log.error(f"Google: Unexpected error: {e}", exc_info=True)
+        logging.error(f"Google: Unexpected error: {e}", exc_info=True)
         return f"Google: Unexpected error occurred: {e}"
 
 #

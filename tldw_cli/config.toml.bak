@@ -1,229 +1,21 @@
-# tldw_cli/config.py
-# Description: Configuration management for the tldw_cli application.
-#
-# Imports
-import tomllib
-import logging
-import os
-from pathlib import Path
-import toml
-from typing import Dict, Any, List, Optional
-#
-# Third-Party Imports
-## No third-party imports in this file
-# Local Imports
-#
-#######################################################################################################################
-#
-# Functions:
-
-# --- Default Configuration ---
-DEFAULT_CONFIG_PATH = Path.home() / ".config" / "tldw_cli" / "config.toml"
-DEFAULT_CONFIG = {
-    "general": {"default_tab": "chat", "log_level": "INFO"},
-    "logging": {
-        "log_filename": "tldw_cli_app.log",
-        "file_log_level": "INFO",
-        "log_max_bytes": 10 * 1024 * 1024, # 10 MB
-        "log_backup_count": 5
-    },
-    "database": {
-        "path": "~/.local/share/tldw_cli/tldw_cli_data.db"
-    },
-    "api_endpoints": {
-        "Ollama": "http://localhost:11434", # Minimal default
-    },
-    # *** Keep default providers EMPTY as discussed before - let user config define it ***
-    "providers": {},
-    "chat_defaults": {
-        # Use a provider guaranteed by DEFAULT_CONFIG if file load fails completely
-        "provider": "Ollama", "model": "llama3:latest",
-        "system_prompt": "You are a helpful assistant.",
-        "temperature": 0.7, "top_p": 1.0, "min_p": 0.0, "top_k": 0,
-    },
-    "character_defaults": {
-        # Use a fallback provider if file load fails
-        "provider": "Ollama", "model": "llama3:latest", # Changed fallback
-        "system_prompt": "You are a helpful character.",
-        "temperature": 0.8, "top_p": 1.0, "min_p": 0.0, "top_k": 0,
-    }
-}
-
-# --- Configuration Path ---
-def get_config_path() -> Path:
-    env_path = os.environ.get("TLDW_CLI_CONFIG_PATH")
-    if env_path:
-        path = Path(env_path).expanduser().resolve()
-        logging.debug(f"Using config path from TLDW_CLI_CONFIG_PATH: {path}")
-        return path
-    config_dir = Path.home() / ".config" / "tldw_cli"
-    default_path = config_dir / "config.toml"
-    logging.debug(f"Using default config path: {default_path}")
-    return default_path
-
-# --- Global Cache ---
-_APP_CONFIG: Optional[Dict[str, Any]] = None
-
-# --- Loading Function ---
-def load_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
-    """Loads configuration, merges with defaults, handles errors, caches."""
-    global _APP_CONFIG
-    # Use print for initial check as logging might not be ready
-    print(f"--- load_config: Top - _APP_CONFIG is None? {_APP_CONFIG is None} ---")
-    if _APP_CONFIG is not None:
-        print(f"--- load_config: RETURNING CACHED CONFIG ---")
-        # logging.debug("Returning cached config.") # Log is fine here
-        return _APP_CONFIG
-
-    if config_path is None:
-        config_path = get_config_path()
-
-    print(f"--- load_config: Checking path: {config_path.resolve()}")
-    print(f"--- load_config: Does path exist? {config_path.exists()}")
-
-    # Deep copy defaults FIRST
-    config = {k: v.copy() if isinstance(v, dict) else v for k, v in DEFAULT_CONFIG.items()}
-    logging.info(f"Initialized config with DEFAULTS. Default providers: {config.get('providers')}") # Log initial state
-
-    try:
-        print(f"--- load_config: Before mkdir parent: {config_path.parent} ---")
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        print(f"--- load_config: After mkdir parent ---")
-        logging.info(f"Ensured parent directory exists: {config_path.parent}")
-
-        if config_path.exists():
-            print(f"--- load_config: INSIDE if config_path.exists() ---")
-            logging.info(f"Config file FOUND at {config_path}")
-            user_config = None # Initialize before try block
-            try:
-                print(f"--- load_config: Entering inner try block ---")
-                print(f"--- load_config: Attempting 'with open...' ---")
-                with open(config_path, "rb") as f:
-                    print(f"--- load_config: File opened. Attempting tomllib.load... ---")
-                    user_config = tomllib.load(f)
-                    print(f"--- load_config: tomllib.load SUCCEEDED ---")
-
-                if user_config:
-                    logging.info(f"Successfully parsed TOML file.")
-                    raw_providers = user_config.get("providers")
-                    print(f"--- load_config: Raw [providers] section: {raw_providers} ---")
-
-                    # --- Merge Logic ---
-                    logging.debug("Starting merge process...")
-                    for section, section_config in user_config.items():
-                        # Special handling for 'providers': REPLACE the default entirely
-                        if section == "providers":
-                            # Ensure the loaded section_config is actually a dictionary
-                            if isinstance(section_config, dict):
-                                config[section] = section_config # Replace
-                                logging.info(f"MERGE: Replaced entire '{section}' section from user config.")
-                            else:
-                                logging.warning(f"MERGE: User config section '{section}' is not a dictionary. Skipping merge for this section.")
-                        # Merge other dictionary sections
-                        elif section in config and isinstance(config[section], dict) and isinstance(section_config, dict):
-                            config[section].update(section_config)
-                            logging.info(f"MERGE: Updated '{section}' section.")
-                        # Add/overwrite other sections/values
-                        else:
-                            config[section] = section_config
-                            logging.info(f"MERGE: Set/added section '{section}' from user config.")
-                    logging.debug("Finished merge process.")
-                    # --- End Merge Logic ---
-
-                else:
-                    print(f"--- load_config: WARNING - tomllib.load did not return data ---")
-                    logging.warning("Parsed TOML file but result was empty/None.")
-
-            except tomllib.TOMLDecodeError as e:
-                print(f"--- load_config: EXCEPTION - TOMLDecodeError: {e} ---")
-                logging.error(f"!!! TOML Decode Error in {config_path}: {e}", exc_info=True)
-                logging.warning("Using (initial) default configuration values due to TOML error.")
-            except Exception as e:
-                print(f"--- load_config: EXCEPTION - General Exception during parse/merge: {e} ---")
-                logging.error(f"!!! Unexpected error processing config file {config_path}: {e}", exc_info=True)
-                logging.warning("Using (initial) default configuration values due to loading error.")
-        else:
-            logging.warning(f"Config file NOT FOUND at {config_path}. Using defaults and attempting to create.")
-            # Default creation logic (keep as is)
-            try:
-                with open(config_path, "w", encoding="utf-8") as f:
-                    toml.dump(DEFAULT_CONFIG, f)
-                logging.info(f"Created default configuration file at: {config_path}")
-            except ImportError:
-                 logging.warning("`toml` library not found. Cannot write default config file.")
-                 with open(config_path, "w", encoding="utf-8") as f:
-                     f.write("# Config file for tldw_cli. Install 'toml' or create manually.\n")
-            except Exception as e:
-                logging.error(f"Failed to create default config file at {config_path}: {e}", exc_info=True)
-
-    except OSError as e:
-        logging.error(f"OS error accessing config directory or file {config_path}: {e}", exc_info=True)
-        logging.warning("Using (initial) default configuration values due to OS error.")
-    except Exception as e:
-        logging.error(f"General error during config loading setup for {config_path}: {e}", exc_info=True)
-        logging.warning("Using (initial) default configuration values due to unexpected error.")
-
-    # Log final state and cache
-    merged_providers = config.get("providers")
-    logging.info(f"FINAL_CONFIG_STATE: Final merged [providers] section keys: {list(merged_providers.keys()) if merged_providers else 'None'}")
-    _APP_CONFIG = config
-    logging.debug(f"Configuration loaded and cached. Sections={list(_APP_CONFIG.keys())}")
-    return _APP_CONFIG
-
-
-# --- Convenience Access Functions ---
-def get_setting(section: str, key: str, default: Any = None) -> Any:
-    config = load_config()
-    return config.get(section, {}).get(key, default)
-
-def get_providers_and_models() -> Dict[str, List[str]]:
-    """
-    Loads provider and model configuration, validates it, and returns
-    a dictionary of valid providers mapped to their list of models.
-    """
-    config = load_config()
-    providers = config.get("providers", {}) # Get the potentially merged providers
-
-    valid_providers: Dict[str, List[str]] = {} # Initialize the dictionary to be returned
-
-    if isinstance(providers, dict): # Ensure it's a dictionary first
-        for provider, models in providers.items():
-            # Validate each provider's model list
-            if isinstance(models, list) and all(isinstance(m, str) for m in models):
-                valid_providers[provider] = models
-            else:
-                logging.warning(f"Invalid model list for provider '{provider}' in loaded config. Value: {models!r}. Skipping.")
-    else:
-        # Log the error, but don't return early.
-        # valid_providers remains {} which is the intended return value in this case.
-        logging.error(f"Loaded 'providers' section is not a dictionary: {providers!r}. Returning empty.")
-
-    logging.debug(f"get_providers_and_models returning providers: {list(valid_providers.keys())}")
-
-    return valid_providers
-
-# (get_database_path and get_log_file_path remain the same)
-def get_database_path() -> Path:
-    config = load_config()
-    db_path_str = config.get("database", {}).get("path", DEFAULT_CONFIG["database"]["path"])
-    db_path = Path(db_path_str).expanduser().resolve()
-    try:
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        logging.error(f"Could not create database directory {db_path.parent}: {e}", exc_info=True)
-    return db_path
-
-def get_log_file_path() -> Path:
-    db_dir = get_database_path().parent
-    log_filename = get_setting("logging", "log_filename", DEFAULT_CONFIG["logging"]["log_filename"])
-    return db_dir / log_filename
-
-
-
-# --- Configuration File Content (for reference or auto-creation) ---
-CONFIG_TOML_CONTENT = """
-# Configuration for tldw-cli TUI App
 # tldw_cli/config.toml
+[general]
+default_tab = "chat"
+log_level = "DEBUG"
+
+[logging]
+log_filename = "tldw_cli_app.log"
+file_log_level = "INFO"
+log_max_bytes = 10485760
+log_backup_count = 5
+
+[database]
+path = "~/.local/share/tldw_cli/tldw_cli_data.db"
+
+[providers]
+# Only include a couple for testing
+OpenAI = ["gpt-4o", "gpt-3.5-turbo"]
+Ollama = ["llama3:latest"]
 [general]
 default_tab = "chat"  # "chat", "character", "logs", "media", "search", "ingest", "stats"
 log_level = "DEBUG" # TUI Log Level: DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -566,8 +358,3 @@ top_k = 100 # Check if API supports this
 # [chunking_settings]
 # default_method = "words"
 # ...
-"""
-
-#
-# End of tldw_cli/config.py
-#######################################################################################################################

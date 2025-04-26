@@ -14,12 +14,9 @@ from typing import Any, Generator, Union, List, Dict, Optional
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
-
-from tldw_cli.tldw_app.config import get_setting
-
-
 #
 # Local Imports
+from ..config import get_setting
 #
 #
 ####################
@@ -226,7 +223,6 @@ def chat_with_local_llm(input_data, custom_prompt_arg, temp, system_message=None
 # --- Refactored chat_with_llama ---
 def chat_with_llama(input_data, custom_prompt, temp=None, api_url=None, api_key=None, system_prompt=None, streaming=None, top_k=None, top_p=None, min_p=None):
     """Interacts with the Llama.cpp server API using settings from config."""
-    log = logging.getLogger(__name__)
     provider_section_key = "llama_cpp" # Key used in [api_settings.*] in config.toml
 
     try:
@@ -485,7 +481,6 @@ def chat_with_llama(input_data, custom_prompt, temp=None, api_url=None, api_key=
 # https://lite.koboldai.net/koboldcpp_api#/api%2Fv1/post_api_v1_generate
 def chat_with_kobold(input_data, api_key=None, custom_prompt_input=None, temp=None, system_message=None, streaming=None, top_k=None, top_p=None):
     """Interacts with the Kobold API using settings from config."""
-    log = logging.getLogger(__name__)
     provider_section_key = "koboldcpp" # Key used in [api_settings.*] in config.toml
     logging.debug(f"Kobold ({provider_section_key}): Chat request process starting...")
 
@@ -942,7 +937,6 @@ def chat_with_tabbyapi(
     min_p=None,   # Argument for min_p (check if Tabby supports)
     model=None    # Argument for model override
 ):
-    log = logging.getLogger(__name__)
     provider_section_key = "tabbyapi" # Key used in [api_settings.*] in config.toml
     logging.debug(f"{provider_section_key.capitalize()}: Chat request process starting...")
 
@@ -1207,7 +1201,6 @@ def chat_with_aphrodite(api_key: Optional[str] = None,
                         topk: Optional[int] = None,
                         model: Optional[str] = None):
     """Interacts with an Aphrodite-engine compatible API using settings from config."""
-    log = logging.getLogger(__name__)
     provider_section_key = "aphrodite" # Key used in [api_settings.*] in config.toml
 
     try:
@@ -1714,7 +1707,6 @@ def chat_with_vllm(
     topk: Optional[int] = None # Allow None
 ) -> Union[str, Generator[Any, Any, None], Any]: # Use Union for type hint clarity
 
-    log = logging.getLogger(__name__)
     provider_section_key = "vllm" # Key for [api_settings.vllm] in config.toml
     logging.debug(f"vLLM: Chat request started with provider key '{provider_section_key}'")
 
@@ -1956,7 +1948,6 @@ def chat_with_vllm(
 
 def chat_with_custom_openai(api_key, input_data, custom_prompt_arg, temp=None, system_message=None, streaming=None, maxp=None, model=None, minp=None, topk=None):
     """Interacts with a custom OpenAI-compatible API using settings from config."""
-    log = logging.getLogger(__name__)
     # --- Use the key defined in config.toml [api_settings.custom] ---
     provider_section_key = "custom"
 
@@ -2179,7 +2170,6 @@ def chat_with_custom_openai(api_key, input_data, custom_prompt_arg, temp=None, s
 # --- Refactored chat_with_custom_openai_2 ---
 def chat_with_custom_openai_2(api_key, input_data, custom_prompt_arg, temp=None, system_message=None, streaming=None, maxp=None, model=None, minp=None, topk=None):
     """Interacts with a second custom OpenAI-compatible API using settings from config."""
-    log = logging.getLogger(__name__)
     provider_section_key = "custom_2" # Key used in [api_settings.*] in config.toml
     logging.info(f"Custom OpenAI API-2: Chat request initiated.")
 

@@ -13,10 +13,6 @@ import toml
 project_dir = Path(__file__).parent.resolve()
 sys.path.insert(0, str(project_dir))
 print(f"Project directory added to sys.path: {project_dir}")
-
-log = logging
-
-# --- Import from the CORRECT 'tldw_app' package ---
 try:
     # Use 'tldw_app' consistently
     from tldw_app.app import TldwCli
@@ -30,6 +26,19 @@ except ModuleNotFoundError as e:
     print(f"       Make sure tldw_app and its subdirs have __init__.py files.")
     print(f"       Original error: {e}")
     sys.exit(1)
+try:
+    from tldw_app import config
+    config._APP_CONFIG = None
+    print("--- run.py: Cleared config cache (_APP_CONFIG = None) ---")
+except Exception as e:
+    print(f"--- run.py: WARNING - Could not clear config cache: {e} ---")
+#
+#######################################################################################################################
+#
+# Functions:
+
+log = logging
+
 
 def ensure_default_files():
     """Creates default config and CSS files if they don't exist."""
@@ -38,7 +47,10 @@ def ensure_default_files():
     if not config_path.exists():
         print(f"Config file not found at {config_path}, creating default.")  # Use print before logging setup
         try:
+            print(f"--- load_config: Before mkdir parent: {config_path.parent} ---")
             config_path.parent.mkdir(parents=True, exist_ok=True)
+            print(f"--- load_config: After mkdir parent ---")
+            log.info(f"Ensured parent directory exists: {config_path.parent}")
             with open(config_path, "w", encoding="utf-8") as f:
                 toml.dump(DEFAULT_CONFIG, f)
             print(f"Created default configuration file: {config_path}")

@@ -25,7 +25,7 @@ def log_counter(metric_name, labels=None, value=1):
         # FIXME
         "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
     }
-    logger.info("metric", extra=log_entry)
+    logging.info("metric", extra=log_entry)
 
 
 def log_histogram(metric_name, value, labels=None):
@@ -38,7 +38,7 @@ def log_histogram(metric_name, value, labels=None):
         # FIXME
         "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
     }
-    logger.info("metric", extra=log_entry)
+    logging.info("metric", extra=log_entry)
 
 
 def timeit(func):

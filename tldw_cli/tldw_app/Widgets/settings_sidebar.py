@@ -4,6 +4,8 @@
 # Imports
 #
 # 3rd-Party Imports
+import logging
+
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Static, Select, TextArea, Input
@@ -20,6 +22,7 @@ def create_settings_sidebar(id_prefix: str, config: dict) -> ComposeResult:
     with VerticalScroll(id=f"{id_prefix}-sidebar", classes="sidebar"):
         defaults = config.get(f"{id_prefix}_defaults", config.get("chat_defaults", {}))
         providers_models = get_providers_and_models() # Get latest from config
+        logging.info(f"Sidebar {id_prefix}: Received providers_models. Count: {len(providers_models)}. Keys: {list(providers_models.keys())}")
         available_providers = list(providers_models.keys())
         default_provider = defaults.get("provider", available_providers[0] if available_providers else "")
         default_model = defaults.get("model", "")
@@ -32,6 +35,7 @@ def create_settings_sidebar(id_prefix: str, config: dict) -> ComposeResult:
         yield Static("Settings", classes="sidebar-title")
         yield Static("API Provider", classes="sidebar-label")
         provider_options = [(provider, provider) for provider in available_providers] # Use corrected list
+        logging.info(f"Sidebar {id_prefix}: Generated provider options for Select: {provider_options}")
         yield Select(
             options=provider_options, prompt="Select Provider...", allow_blank=False,
             id=f"{id_prefix}-api-provider", value=default_provider

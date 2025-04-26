@@ -51,8 +51,8 @@ class ChatMessage(Widget):
         height: auto;
         width: 100%;
         padding: 0 1;
-        /* margin-top: 1; */ /* Removed top margin */
-        border-top: thin $surface-lighten-1;
+        /* margin-top: 1; */ /* Removed top margin */      
+        border-top: solid $surface-lighten-1;
         align: right middle; /* Align buttons to the right */
         display: block; /* Default display state */
     }
@@ -67,6 +67,11 @@ class ChatMessage(Widget):
     .message-actions Button:hover {
         background: $surface;
         color: $text;
+    }
+    /* Specific hover style for delete */
+    .message-actions .delete-button:hover {
+        background: $error; /* Use the theme's error color (usually red) */
+        color: white; /* Adjust text color for contrast if needed */
     }
     /* Initially hide AI actions until generation is complete */
     ChatMessage.-ai .message-actions.-generating {
@@ -103,7 +108,7 @@ class ChatMessage(Widget):
                     yield Button("👍", classes="action-button thumb-up-button", id="thumb-up")
                     yield Button("👎", classes="action-button thumb-down-button", id="thumb-down")
                     yield Button("🔄", classes="action-button regenerate-button", id="regenerate") # Emoji for regenerate
-
+                    yield Button("🗑️", classes="action-button delete-button") # Label: Delete, Class: delete-button
     def update_message_chunk(self, chunk: str):
         """Append a chunk of text to the message (for streaming)."""
         if self.role == "AI":

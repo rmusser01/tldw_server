@@ -20,7 +20,7 @@ https://github.com/Nighthawk42/mOrpheus
 https://jordandarefsky.com/blog/2024/parakeet/
 https://github.com/collabora/WhisperLive
 
-
+https://huggingface.co/moonshotai/Kimi-Audio-7B-Instruct
 
 https://github.com/Lex-au/Orpheus-FastAPI
 https://huggingface.co/collections/stepfun-ai/step-audio-67b33accf45735bb21131b0b

@@ -15,8 +15,7 @@ from loguru import logger
 #
 # Functions:
 
-loaded_config_data = "loaded_config_data" #FIXME - load_and_log_configs()
-log_metrics_file = loaded_config_data['logging']['log_metrics_file'] or './Logs/tldw_metrics_logs.json'
+log_metrics_file = '~/.local/tldw_cli/Logs/tldw_metrics_logs.json'
 
 def retention_function(files):
     """
@@ -98,8 +97,7 @@ def setup_logger(args):
         file_log_path = args.log_file
         logger.info(f"Log file created at: {file_log_path}")
     else:
-        config = "config" #FIXME - load_and_log_configs()
-        file_log_path = config['logging']['log_file']
+        file_log_path = '~/.local/tldw_cli/Logs/tldw_app_logs.json'
         logger.info(f"No logfile provided via command-line. Using default: {file_log_path}")
 
     # Ensure directory exists
@@ -114,16 +112,13 @@ def setup_logger(args):
         format="{time:YYYY-MM-DD HH:mm:ss} - {level} - {message}"
     )
 
-    # Metrics file sink with JSON formatting
-    config = "config" #FIXME - load_and_log_configs()
-    metrics_log_file = config['logging'].get('log_metrics_file')
-    if metrics_log_file:
-        metrics_dir = os.path.dirname(metrics_log_file)
+    if log_metrics_file:
+        metrics_dir = os.path.dirname(log_metrics_file)
         if metrics_dir and not os.path.exists(metrics_dir):
             os.makedirs(metrics_dir, exist_ok=True)
 
         logger.add(
-            metrics_log_file,
+            log_metrics_file,
             level="DEBUG",
             format="{time} - {level} - {message}",  # Simple format for JSON sink
             serialize=True,  # This enables JSON serialization

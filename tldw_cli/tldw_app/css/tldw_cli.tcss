@@ -6,8 +6,17 @@ Footer { dock: bottom; height: 1; background: $accent-darken-1; }
 #tabs Button:hover { background: $panel-lighten-1; color: $text; }
 #tabs Button.-active { background: $accent; color: $text; text-style: bold; border: none; }
 #content { height: 1fr; width: 100%; }
-.window { height: 100%; width: 100%; layout: horizontal; overflow: hidden; display: block; }
-.window.hidden { display: none; }
+
+/* Base style for ALL windows. The watcher will set display: True/False */
+.window {
+    height: 100%;
+    width: 100%;
+    layout: horizontal; /* Or vertical if needed by default */
+    overflow: hidden;
+}
+
+/* REMOVED .hidden class */
+
 .placeholder-window { align: center middle; background: $panel; }
 
 /* Sidebar Styling */
@@ -17,97 +26,133 @@ Footer { dock: bottom; height: 1; background: $accent-darken-1; }
 .sidebar-input { width: 100%; margin-bottom: 1; }
 .sidebar-textarea { width: 100%; height: 5; border: round $surface; margin-bottom: 1; }
 .sidebar Select { width: 100%; margin-bottom: 1; }
-#chat-api-key-placeholder, #character-api-key-placeholder { color: $text-muted; text-style: italic; margin-top: 1; }
 
-/* Chat Window Layout */
-#chat-main-content { layout: vertical; height: 100%; width: 1fr; }
-#chat-input-area, #character-input-area { height: auto; max-height: 12; width: 100%; align: left top; padding: 1 0 0 0; border-top: round $surface; }
-.chat-input { width: 1fr; height: auto; max-height: 10; border: round $surface; margin: 0 1 0 0; }
-.send-button { width: 10; height: 3; margin: 0; }
+/* --- Chat Window specific layouts --- */
+#chat-main-content {
+    layout: vertical;
+    height: 100%;
+    width: 1fr;
+}
+/* VerticalScroll for chat messages */
+#chat-log {
+    height: 1fr; /* Takes remaining space */
+    width: 100%;
+    /* border: round $surface; Optional: Add border to scroll area */
+    padding: 0 1; /* Padding around messages */
+}
 
-/* Character Window Layout */
-#character-main-content { layout: vertical; height: 100%; width: 1fr; }
-#character-top-area { height: 1fr; width: 100%; layout: horizontal; margin-bottom: 1; }
-#character-top-area > .chat-log { margin: 0 1 0 0; height: 100%; margin-bottom: 0; } /* If still using RichLog here */
-#character-portrait { width: 25; height: 100%; border: round $surface; padding: 1; margin: 0; overflow: hidden; align: center top; }
+/* Input area styling (shared by chat and character) */
+#chat-input-area, #character-input-area {
+    height: auto;    /* Allow height to adjust */
+    max-height: 12;  /* Limit growth */
+    width: 100%;
+    align: left top; /* Align children to top-left */
+    padding: 1; /* Consistent padding */
+    border-top: round $surface;
+}
+/* Input widget styling (shared) */
+.chat-input { /* Targets TextArea */
+    width: 1fr;
+    height: auto;      /* Allow height to adjust */
+    max-height: 100%;  /* Don't overflow parent */
+    margin-right: 1; /* Space before button */
+    border: round $surface;
+}
+/* Send button styling (shared) */
+.send-button { /* Targets Button */
+    width: 10;
+    height: 3; /* Fixed height for consistency */
+    /* align-self: stretch; REMOVED */
+    margin-top: 0;
+}
 
-/* Logs Tab */
+/* --- Character Chat Window specific layouts --- */
+#character-main-content {
+    layout: vertical;
+    height: 100%;
+    width: 1fr;
+}
+#character-top-area {
+    height: 1fr; /* Top area takes remaining vertical space */
+    width: 100%;
+    layout: horizontal;
+    margin-bottom: 1;
+}
+/* Log when next to portrait (Still RichLog here) */
+#character-top-area > #character-log { /* Target by ID is safer */
+    margin: 0 1 0 0;
+    height: 100%;
+    margin-bottom: 0; /* Override base margin */
+    border: round $surface; /* Added border back for RichLog */
+    padding: 0 1; /* Added padding back for RichLog */
+    width: 1fr; /* Ensure it takes space */
+}
+/* Portrait styling */
+#character-portrait {
+    width: 25;
+    height: 100%;
+    border: round $surface;
+    padding: 1;
+    margin: 0;
+    overflow: hidden;
+    align: center top;
+}
+
+/* Logs Window */
 #logs-window { padding: 0; border: none; height: 100%; width: 100%; }
 #app-log-display { border: none; height: 1fr; width: 1fr; margin: 0; padding: 1; }
 
-/* --- Chat Message Widget Styling --- */
-/* Container for message list */
-#chat-log { /* This is now the VerticalScroll */
-    height: 1fr;
-    width: 1fr;
-    /* border: round $surface; Remove border from container */
-    padding: 0 1; /* Padding for messages */
-}
-
-/* Individual message widget */
+/* --- ChatMessage Styling --- */
 ChatMessage {
     width: 100%;
     height: auto;
     margin-bottom: 1;
 }
-ChatMessage > Vertical { /* The inner container holding text and actions */
+ChatMessage > Vertical {
     border: round $surface;
     background: $panel;
     padding: 0 1;
-    width: 100%; /* Take full width */
-    height: auto; /* Adjust height to content */
+    width: 100%;
+    height: auto;
 }
-ChatMessage.-user > Vertical { /* User message specific style */
-    background: $boost;
-    border: round $accent-lighten-1;
-    /* You might want different alignment for user messages */
-    /* align-horizontal: right; */ /* Example: if container allows */
-}
-ChatMessage.-ai > Vertical { /* AI message specific style */
-    background: $panel;
-    border: round $surface;
+ChatMessage.-user > Vertical {
+    background: $boost; /* Different background for user */
+    border: round $accent;
 }
 .message-header {
     width: 100%;
     padding: 0 1;
-    color: $text-muted;
     background: $surface-darken-1;
     text-style: bold;
-    height: 1; /* Ensure header takes minimal height */
+    height: 1; /* Ensure header is minimal height */
 }
 .message-text {
-    padding: 1;
+    padding: 1; /* Padding around the text itself */
     width: 100%;
     height: auto;
 }
 .message-actions {
     height: auto;
-    padding: 0 1 1 1; /* Add bottom padding */
     width: 100%;
-    border-top: solid $surface-lighten-1;
+    padding: 1; /* Add padding around buttons */
+    /* Use a VALID border type */
+    border-top: solid $surface-lighten-1; /* CHANGED thin to solid */
     align: right middle; /* Align buttons to the right */
-    margin-top: 1; /* Add space above buttons */
-}
-/* Hide actions by default for AI messages while generating */
-ChatMessage.-ai .message-actions.-generating {
-    display: none;
+    display: block; /* Default display state */
 }
 .message-actions Button {
     min-width: 8;
-    width: auto; /* Let button size adjust */
     height: 1;
     margin: 0 0 0 1; /* Space between buttons */
-    padding: 0 1; /* Padding inside buttons */
-    border: none; /* Optional: remove default button border */
+    border: none;
     background: $surface-lighten-2;
     color: $text-muted;
 }
 .message-actions Button:hover {
     background: $surface;
     color: $text;
-    border: none;
 }
-/* Specific button styling (optional) */
-.message-actions #copy:hover { background: $success; }
-.message-actions #regenerate:hover { background: $warning; }
-/* etc. */
+/* Initially hide AI actions until generation is complete */
+ChatMessage.-ai .message-actions.-generating {
+    display: none;
+}

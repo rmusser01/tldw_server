@@ -46,7 +46,6 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 # 3rd-Party Imports
 import chardet
 import unicodedata
-#from loguru import logger
 #
 #######################################################################################################################
 #
@@ -56,8 +55,6 @@ import unicodedata
 #######################################################################################################################
 # Config loading
 #
-
-log = logging.getLogger(__name__)
 
 # --- Project Structure Constants ---
 
