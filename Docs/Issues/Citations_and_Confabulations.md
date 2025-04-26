@@ -6,7 +6,7 @@
 3. [References](#references)
 
 
-
+https://huggingface.co/spaces/LISA-Kadi/LISA-demo/tree/main
 https://arxiv.org/abs/2412.07965
 https://arxiv.org/abs/2501.08292
 https://huggingface.co/QuantFactory/gemma-7b-aps-it-GGUF
@@ -18,7 +18,19 @@ https://huggingface.co/papers/2502.09604
 https://github.com/voidism/SelfCite
 https://www.reddit.com/r/LocalLLaMA/comments/1j5lym7/lightweight_hallucination_detector_for_local_rag/
 https://liveideabench.com/
+https://www.archgw.com/blogs/detecting-hallucinations-in-llm-function-calling-with-entropy-and-varentropy
 https://github.com/lechmazur/confabulations
+https://python.langchain.com/docs/how_to/qa_citations/
+https://oumi.ai/blog/posts/introducing-halloumi
+https://github.com/Liyan06/MiniCheck
+https://github.com/jacobwarren/Latent-Space-Verification-for-Self-Correcting-LLMs
+https://huggingface.co/jacobpwarren/Qwen2.5-7B-Latent_Verification/discussions
+https://arxiv.org/abs/2504.07527
+https://arxiv.org/abs/2504.00824
+https://arxiv.org/abs/2503.22216
+https://allenai.org/blog/olmotrace
+
+
 RAG
   https://www.lycee.ai/blog/rag-ragallucinations-and-how-to-fight-them
   https://huggingface.co/PleIAs/Pleias-Nano
@@ -33,10 +45,18 @@ RAG
   https://arxiv.org/abs/2411.06037
   https://www.sciencedirect.com/science/article/abs/pii/S0306457320309675
   https://github.com/Huffon/factsumm
+  https://diamantai.substack.com/p/graph-rag-explained?utm_campaign=post&triedRedirect=true
   https://arxiv.org/abs/2410.07176
 
 Finetuning: 
 - https://eugeneyan.com/writing/finetuning/
+
+``````
+On the source pane, give us the ability to enter in proper bibliographic information for a source in a variety of formats (MLA, Chicago etc.) When pulling the source name for citations, use this information instead and properly cite the footnote. You should still include the hotlink to the specific location in the material, or perhaps inside the footnote, just directly quote the relavent paragraph. When I am working with uploaded books, I can always just search my original digital copy to get the page number. 
+
+You could also have a bibliography tab on the sources which will generate an annotated bibliography from the same material. Having the ability for an agent to properly generate and fill out the bibliography itself would be nice of course, but I would be more than happy to just enter it in myself if the result was citations that were actually useful when taken outside of NotebookLM by copy/paste.
+```
+
 
 
 ----------------------------------------------------------------------------------------------------------------

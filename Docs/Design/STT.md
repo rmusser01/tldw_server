@@ -77,5 +77,5 @@ STT
     https://github.com/FreedomIntelligence/Soundwave
         https://arxiv.org/abs/2502.12900
 https://github.com/psdwizzard/MeetingBuddy
-
+https://github.com/mehtabmahir/easy-whisper-ui
 

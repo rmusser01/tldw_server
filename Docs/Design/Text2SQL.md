@@ -24,7 +24,7 @@ https://generativeai.pub/ai-innovations-and-insights-15-text2sql-and-extractous-
 https://medium.com/wrenai/how-uber-is-saving-140-000-hours-each-month-using-text-to-sql-and-how-you-can-harness-the-same-fb4818ae4ea3
 https://github.com/Sauradip07/NLToSQL/tree/main
 https://medium.com/firebird-technologies/building-a-reliable-text-to-sql-pipeline-a-step-by-step-guide-pt-1-9041b0777a77
-
+https://huggingface.co/papers/2503.24364
 
 
 

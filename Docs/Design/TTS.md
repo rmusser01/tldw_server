@@ -16,11 +16,56 @@ https://huggingface.co/kyutai
 https://github.com/kyutai-labs/hibiki
 https://metis-demo.github.io/#metis-tts
 https://github.com/RobViren/kokovoicelab
+https://github.com/Nighthawk42/mOrpheus
+https://jordandarefsky.com/blog/2024/parakeet/
+https://github.com/collabora/WhisperLive
+
+https://huggingface.co/moonshotai/Kimi-Audio-7B-Instruct
+
+https://github.com/Lex-au/Orpheus-FastAPI
 https://huggingface.co/collections/stepfun-ai/step-audio-67b33accf45735bb21131b0b
 https://github.com/mbzuai-oryx/LLMVoX
 https://github.com/abus-aikorea/voice-pro
 https://github.com/rmusser01/LiveBench/tree/llamacpp-api
+https://github.com/santinic/audiblez
+https://github.com/Lex-au/Vocalis
+    https://www.reddit.com/r/LocalLLaMA/comments/1jy1x1b/comment/mmvm73e/
+https://pypi.org/project/pvporcupine/
+https://github.com/davidbrowne17/csm-streaming
+https://github.com/senstella/csm-mlx
+https://github.com/davidbrowne17/csm-streaming
+https://github.com/yukiarimo/hanasu
+https://codingwithcody.com/2025/04/02/containerized-voice-identification/
+https://github.com/NullMagic2/SoftWhisper
+https://github.com/thomasgauthier/csm-hf/
+https://github.com/zeropointnine/tts-toy
+https://github.com/edwko/OuteTTS
+https://index-tts.github.io/#section2
+https://arxiv.org/abs/2504.03289
+https://github.com/yukiarimo/hanasu
+https://github.com/taresh18/conversify-speech
+
+https://huggingface.co/senstella/csm-expressiva-1b
 https://github.com/KartDriver/mira_converse/blob/main/server/src/server_audio_core.py
+https://github.com/zenforic/csm-multi
+https://github.com/isaiahbjork/orpheus-tts-local
+https://github.com/tarun7r/Vocal-Agent
+https://huggingface.co/DavidBrowne17/Muchi
+https://www.reddit.com/r/LocalLLaMA/comments/1jcufi6/improvements_to_kokoro_tts_v10/
+    https://github.com/nazdridoy/kokoro-tts
+https://webrtchacks.com/the-unofficial-guide-to-openai-realtime-webrtc-api/
+https://github.com/canopyai/Orpheus-TTS
+    https://github.com/canopyai/Orpheus-TTS
+    https://github.com/isaiahbjork/orpheus-tts-local/
+    https://github.com/Lex-au/Orpheus-FastAPI
+webrtc
+https://huggingface.co/spaces/fastrtc/talk-to-claude/blob/main/app.py
+https://github.com/freddyaboulton/fastrtc
+
+Canary
+    https://huggingface.co/nvidia/canary-1b-flash
+    https://huggingface.co/nvidia/canary-180m-flash
+
 
 ### Services
 - Google Cloud Text-to-Speech
@@ -176,6 +221,8 @@ Outte
 Parler
     https://github.com/huggingface/parler-tts
 Paroli - Streaming mode implementation of the Piper TTS with RK3588 NPU acceleration support.
+Phi-4
+    https://huggingface.co/microsoft/Phi-4-multimodal-instruct
 PiperTTS - A fast, local neural text to speech system that is optimized for the Raspberry Pi 4.
     https://github.com/rhasspy/piper
     https://github.com/rhasspy/piper/issues/644

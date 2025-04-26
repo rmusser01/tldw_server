@@ -1,6 +1,6 @@
 <div align="center">
 
-<h1>tl/dw</h1>
+<h1>tldw</h1>
 
 [![License](https://img.shields.io/badge/license-apache2.0-green)](https://img.shields.io/badge/license-apache2.0-green)
 [![madewithlove](https://img.shields.io/badge/made_with-%E2%9D%A4-red?style=for-the-badge&labelColor=orange)](https://github.com/rmusser01/tldw) 
@@ -11,16 +11,53 @@
 ## All Automated. All Local. All Yours.
 </div>
 
-### Latest Update (3/14/2025):
-<details>
-
-- Currently pausing all work on extra features, current goal is migration to FastAPI backend and a new JS frontend.
-- Finally getting away from Gradio. (Gradio was a placeholder UI to facilitate setting up the app and getting it working/showing it as a proof of concept)
-- First bits after migrating to FastAPI will be consolidation of ingestion and summarization into a single endpoint in the UI.
-- Working on TTS support for more models
-- Adding temp file upload for chatting without ingesting files into the DB
+### Latest Update (4/25/2025):
+- README needs to be updated....
+- tl/dr: 
+  - The API is functional, and the GUI is being worked on.
+  - App is working, but DB replacement/integration of a syncing library is being worked on. Not pushing to main until this is done.
+  - When the syncing library is done and the API endpoint exists/whole thing works, I'll push to main. (should be soon)
+  - Working Endpoints: 
+    - POST /media/process-videos
+    - POST /media/process-audios
+    - POST /media/process-pdfs
+    - POST /media/process-ebooks
+    - POST /media/process-texts
+    - GET /media/
+    - GET/PUT media/{id}
+    - GET /media/{id}/versions
+    - GET/DELETE /media/{id}/versions/{version_number}
+    - POST /media/{id}/versions/rollback
+    - GET /media/search
+    - POST /media/add
+    - GET /media/debug/schema
+    - POST /api/v1/chat/completions (Following OpenAI API spec)
+  - The GUI will be a TUI for now(https://github.com/rmusser01/tldw_chatbook). WebApp eventually. 
+  - The API is not fully documented(thanks FastAPI autodoc), but the endpoints are functional.
+  - The project is being actively developed, and I am looking for help with the GUI. (webapp specifically, but help with TUI is also welcome))
+  - If you want to help out, please reach out via the Issues page, discussions page or email.
+- FastAPI API is implemented.
+- Processing endpoints for Audio, video, pdf, ebook and plain text are implemented, as well as ingestion into the DB.
+- The API is fully functional for those endpoints (I've also added an openai chat endpoint as well, but not extensively tested)
+- API is not fully documented besides the autodoc from FastAPI.
+- Currently, there are two main development focuses of the project:
+  - The API
+    - Migration from the existing MediaDB to the new API DB. The biggest change is the combination of the chat DBs into one, and allowing for synchronization of the DBs. So you'll be able to have your local instance synced with your 'home' server. (WIP)
+    - Once the Sync Library is fully implemented, tested, and confirmed working, I'll be working on the API endpoints for the sync library. (should be quick)
+    - After that, I'll be working on the API endpoint for 'search' aka RAG. (Will be revisiting the pipeline for improvements)
+    - After RAG, I'll be revisiting the Chat Library for chat dictionary support and other improvements relating to it.
+  - The GUI
+    - I am not a web dev. I do however, happen to know that TUIs exist, and as such, am building one at https://github.com/rmusser01/tldw_chatbook (currently usable as a standalone chat client)
+    - It will be the primary/'official' GUI for the tldw server (for now, eventually will do a webUI and make that the main UI)
+    - The app, 'tldw_chatbook' or 'chatbook', is a TUI built using [Textual](https://textual.textualize.io/). It is designed to be a standalone chat client, so that it can be used separately from tldw.
+    - The goal of chatbook is to provide a simple, easy-to-use interface for interacting with the tldw server API, completely offline and local.
+    - This means that ideally, every server option/API endpoint (minus user reg?) will be available in chatbook.
+    - Where this is going, is that you'll be able to have your local chatbook client, and be able to sync it to your home server, and download your chats/settings/media DB.
+    - You'll also be able to use the '/media/process-*' endpoints, to process your media, store the results in your local media DB, and then sync it to your home server if you want.
+    - So you can keep your local media DB up to date, and then sync it to your home server/vice versa.
+    - This has extended the timeline for an initial release, but I think it will be worth it in the end.
+    - I do plan on opening up a Discord server for the project, but I don't have the time to manage it right now. So if you want to help out, please feel free to reach out via the Issues page, discussions page or email.
 - 
-</details>
 
 ### [Public Demo on HuggingFace Spaces](https://huggingface.co/spaces/oceansweep/Vid-Summarizer/?__theme=dark)- Demo is not working!
 - Demo is not currently working and is being updated. Please use the local version for now.
@@ -41,32 +78,6 @@
 - You can find the original scripts by `the-crypt-keeper` in the `tldw-original-scripts` directory, a snapshot of the files before I made my changes.
 - The GUI is currently a placeholder. Please excuse its crappiness for now. It will be replaced with a FastAPI backend and a new JS frontend. (Gradio is a placeholder UI)
 </details>
-
-### Updating from a version installed prior to X date:
-
-<details>
-<summary>Jan 3rd:</summary>
-
-- If you're updating from a prior version, your config.txt file needs to be updated.
-- You can either just use the new config file and copy over your old values, or you can just add the new values to your existing config file.
-- Either way, the app won't work unless the config file is updated.
-- If you're reading this, then you're already on the latest version, so you can just update the config file and you'll be good to go.
-</details>
-
-Nov 1st:
-<details>
-
-- If you're updating from a version published prior to Nov 1st, your Media DB is not compatible with the new version. You'll need to start fresh.
-- I've written a script to help you migrate your data from the old DB to the new one. `Helper_Scripts/DB-Related/migrate_db.py`.
-- Process to migrate your data:
-  1. Install/run the new version of the app. This will create a new `media_summary.db` file in the `Databases` directory.
-  2. Run the `migrate_db.py` script with the old and new DB paths as arguments. - `python migrate_db.py --source media_summary_old.db --target media_summary_new.db --export-path .\`
-  3. This will migrate all your data from the old DB to the new one, and export the saved conversations to the `export-path` you specify.
-  4. Re-import any/all saved conversations into the new RAG_QA_Chat.db 
-</details>
-
-
-#### ![Video Walkthrough of a Fresh Install](Docs/Screenshots/tldw-run-through-blank.webm)
 
 ### Screenshots of the UI
 Screenshot of the Frontpage ![Screenshot](Docs/Screenshots/blank-front.png)

@@ -4,6 +4,8 @@ List of stuff I don't feel like filing an issue for (yet).
 
 
 ## To Do
+- SChema for Users DB
+- Mapping for users from users DB to other DBs/permissions mgmt
 - searx https://github.com/Jay4242/llm-websearch/blob/main/llm-websearch.bash
 - Blogpost
 - https://adamj.eu/tech/2024/12/30/python-temporary-files-directories-unittest/
@@ -146,5 +148,28 @@ https://huggingface.co/papers/2410.03017
 https://huggingface.co/papers/2409.18943
 https://arxiv.org/pdf/2409.16493
 
+```
+ would like to access a generated markdown page of the Timeline, FAQ, Study Guide and Briefing doc.  and pin that and be able to send it out to people rather the the full notebook, a '.md' file.
+
+A way to generate that on the fly would be a really on-brand feature. that could promote collaboration and quick prototyping and discussion within the human groups using NotebookLM.
+```
+
+``````
+Proposal:
+I'd like to suggest adding a third button/section, perhaps called "Subscriptions" or "Watchlist".
+
+How it would work:
+In this section, users could add links to:
+
+    RSS feeds
+    YouTube playlists
+    Entire YouTube channels
 
 
+NotebookLM would then periodically check these sources for new content (new RSS posts, new videos). The "Subscriptions" section would display a list of the latest items from the added feeds/channels. Users could then easily review this list and select (accept or decline) the items they want to import as new sources into their notebook.
+
+Benefits:
+
+    Automation: Makes it easier to track regularly updated sources (like news, industry blogs, video tutorial series).
+    Efficiency: Instead of manually searching for and adding each new article/video, we'd have a quick way to select and import relevant updates.
+    Up-to-dateness: Helps keep notebooks powered by the latest information from the channels we follow.

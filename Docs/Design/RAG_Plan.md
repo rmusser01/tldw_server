@@ -7,9 +7,7 @@
 
 
 
-Agentic RAG
-	https://arxiv.org/pdf/2501.09136
-	https://github.com/asinghcsu/AgenticRAG-Survey
+
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ### Goal<a name="goal"></a>
@@ -70,49 +68,3 @@ https://arxiv.org/abs/2407.21712
   	- https://github.com/SeekStorm/SeekStorm
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-
-```
-Taken from 
-Systematically Improving RAG Applications prep:
-
-**Week 1: Cold Start Problem**
-
-- Overview of the Playbook and RAG System Inference Flywheel
-- Understanding and Justifying the Playbook
-- LLM Synthetic Data Generation for Evaluation
-- Leading vs Lagging Metrics
-- Evaluation and Improvement Strategies
-
-**Week 2: Identifying Failure Modes**
-
-- Segmenting input space of questions
-- Developing specialized systems based on topics and  capabilities 
-- Improving precision and recall before considering generation
-- Working with domain experts to decompose problem space 
-
-**Week 3: Extending Capabilities**
-
-- Understanding limited inventory and capabilities issues 
-- Metadata filtering
-- Rerankers w/ COhere 
-- Fine-Tuning Embedding Models
-- Multimodal data handling (PDFs, PPTs, Tables, Images)
-
-**Week 4: Representations**
-
-- Understanding Embeddings and Search
-- Routing queries using classifiers
-- Evaluating routing effectiveness
-- Handling multiple routes
-- Parallel Routing with instructor 
-- Identifying what tools to provide agents 
-
-**Week 5: Product**
-
-- Generation techniques
-- Streaming responses
-- Managing citations
-- Feedback UI and collecting labels
-- Prompt engineering and rejecting wor
-```

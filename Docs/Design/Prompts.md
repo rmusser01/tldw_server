@@ -17,9 +17,11 @@ https://github.com/lks-ai/prowl
 https://github.com/MIATECHPARTNERS/PromptChains
 https://github.com/mazen160/llmquery/
 https://juuzt.ai/knowledge-base/prompt-frameworks/
-
-
-
+https://www.turingpost.com/p/arize1
+https://github.com/tpetkovich/Agentic_Guideline_Gen_Example/blob/main/Agentic_Guideline_Gen_Example.ipynb
+https://github.com/xufangzhi/phi-Decoding
+    https://arxiv.org/html/2503.13288v1
+https://github.com/elder-plinius/CL4R1T4S/tree/main
 COSTAR
 Context, Objective, Style, Tone, Audience, Response
 https://towardsdatascience.com/how-i-won-singapores-gpt-4-prompt-engineering-competition-34c195a93d41
@@ -38,6 +40,20 @@ Response: Finally, this is about how you want the AI’s answer to look. Do you 
 ```
 
 
+Fix the root cause
+```
+Analyze this error: [bug details]
+Don't just fix the immediate issue. Identify the underlying root cause by:
+- Examining potential architectural problems
+- Considering edge cases
+- Suggesting a comprehensive solution that prevents similar issues
+```
 
 
-
+Ask for explanations:
+```
+Can you explain what you generated in detail:
+1. What is the purpose of this section?
+2. How does it work step-by-step?
+3. What alternatives did you consider and why did you choose this one?
+```

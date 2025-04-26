@@ -1,0 +1,88 @@
+# This workflow will install Python dependencies, run tests and lint with a single version of Python
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+
+name: Python tldw
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-run-tests:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.12"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-mock
+        sudo apt install portaudio19-dev python3-all-dev
+        
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip check
+#    - name: Test ChromaDB lib functions with pytest
+#      run: |
+#        pwd
+#        ls
+#        ls ./Config_Files
+#        cd ./Tests/ChromaDB/
+#        pytest ./test_chromadb.py
+#
+#    - name: Test RAG lib functions with pytest
+#      run: |
+#        pwd
+#        cd ./Tests/RAG
+#        pytest test_RAG_Library_2.py
+#        pytest test_enhanced_rag_pipeline.py
+#
+#    - name: Test RAG Notes functions with pytest
+#      run: |
+#        pwd
+#        cd ./Tests/RAG_QA_Chat
+#        pytest test_notes_search.py
+#
+#    - name: Test SQLite lib functions with pytest
+#      run: |
+#        pwd
+#
+#        pytest -s tldw_Server_API/tests/
+#
+#    - name: Test Utils lib functions with pytest
+#      run: |
+#        pwd
+#        cd ./Tests/Utils
+#        pytest test_utils.py
+#
+#    - name: Test Character Chat Library functions with pytest
+#      run: |
+#        pwd
+#        cd ./Tests/Character_Chat
+#        pytest test_character_chat.py
+#
+    - name: Test Media Versioning Functions/Endpoints with pytest
+      run: |
+        pwd
+        cd ./tldw_Server_API/tests/Media_Ingestion_Modification/
+        pytest -s test_media_versions.py
+
+    - name: Test Media Processing Endpoint functions with pytest
+      run: |
+        pwd
+        cd ./tldw_Server_API/tests/Media_Ingestion_Modification/
+        pytest -s test_media_processing.py
+
+    - name: Test tldw runs
+      run: |
+        pwd
+         uvicorn tldw_Server_API.app.main:app 

@@ -8,7 +8,7 @@
 4. chromadb fails to install - https://github.com/chroma-core/chroma/issues/189
 
 
-
+cc
 Inspo
     https://github.com/hoarder-app/hoarder
     kokoro voice mixing - https://github.com/NeuralFalconYT/Kokoro-82M-WebUI
@@ -126,7 +126,7 @@ Jailbreaks
     https://arxiv.org/pdf/2409.11445
 
 
-
+https://blog.dusktreader.dev/2025/03/29/self-contained-python-scripts-with-uv/
 
 
 

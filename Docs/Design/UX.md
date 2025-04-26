@@ -58,14 +58,25 @@ https://github.com/sshh12/spark-stack
 https://github.com/abi/screenshot-to-
 https://data.perkins.org/
 https://designdetails.fm/episodes
+https://blikket.co/ux-vs-cro-how-harmonizing-design-and-strategy-can-skyrocket-your-ecommerce-revenue/
 https://copycoder.ai/
 https://docs.replit.com/replitai/agent
+https://uxplanet.org/ui-design-with-chatgpt-4o-4d79b2a32008
 https://bolt.new/
 https://github.com/rmusser01/agentic_rag/tree/main
 https://github.com/astramind-ai/Pulsar
+https://github.com/CodeUpdaterBot/ClickUi
 https://github.com/woshixiaobai2019/mirau-chat-ui
 https://uxdesign.cc/the-importance-of-hover-states-c9312d7fd516
 https://trends.uxdesign.cc/
+https://silkhq.co/
+https://github.com/shokuninstudio/Dou
+https://oumi.ai/blog/posts/introducing-halloumi
+https://brandingstyleguides.com
+https://zeroheight.com/how-we-document/design-system-report-2025-brought-to-you-by-zeroheight/
+https://www.a11y-collective.com/blog/cognitive-accessibility/
+
+https://atomicdesign.bradfrost.com/chapter-1/
 https://bolters.io/
 https://github.com/abhishekkrthakur/aiaio
 https://www.phind.com/blog/phind-2-model-creation
@@ -94,7 +105,15 @@ https://github.com/stackblitz-labs/bolt.diy
 https://github.com/Haervwe/open-webui-tools
 https://uxdesign.cc/the-evolution-of-attention-c6154276f1b4
 https://otranscribe.com/
+https://github.com/rusiaaman/chat.md
+https://chartscss.org/
+https://departmentofproduct.substack.com/p/deep-the-ux-of-notifications
+https://echarts.apache.org/en/index.html
+https://github.com/botoxparty/XP.css
+https://www.nngroup.com/articles/discoverability-ai-amazon
+https://uxdesign.cc/designing-for-ai-engineers-what-ui-patterns-and-principles-you-need-to-know-8b16a5b62a61
 https://www.dive.club/ideas/new-types-of-ui-that-generative-ai-has-necessitated
+https://southbridge-research.notion.site/A-review-of-editing-with-LLMs-1755fec70db180149cc3fc4b1210823d
 https://interactjs.io/
 https://perchance.org/ai-chat
 https://uiverse.io/elements
@@ -117,6 +136,13 @@ https://github.com/satellitecomponent/Neurite
 https://uxdesign.cc/ai-and-cognitive-offloading-sharing-the-thinking-process-with-machines-2d27e66e0f31
 https://www.typingmind.com
 https://github.com/felladrin/MiniSearch
+https://uxdesign.cc/human-centered-ai-5-key-frameworks-for-ux-designers-6b1ad9e53d23
+https://realpython.com/python-textual/
+
+Style guide
+  https://contentdesign.london/blog/create-a-great-style-guide-that-people-use
+  https://archive.is/2laTl
+  https://archive.is/30Wkf
 
 
 Turn into notes
@@ -139,6 +165,47 @@ Prompt Engineering page:
 - Looks like Claude Workshop UI window
 
 
+Queue prompts while waiting for a response, split existing chat off into a new thread
+  why can’t I queue a prompt while waiting for a response to generate?
+  would be a huge QOL upgrade if we didn’t have to wait a full minute or two to submit follow-up queries
+  even if it was just a single slot to put one query “on-deck” that would be huge
+  add multiple slots and let the AI help manage the queue and now your chat interface is agentic
+
 
 Website features
 https://github.com/albirrkarim/react-speech-highlight-demo
+
+
+### Buttons
+- Making better buttons
+    - Make buttons look like buttons, don't use unusual shapes or styles
+    - Differentiate between buttons and links - Buttons does something, links take you somewhere
+    - Make the primary action button stand out - use color, size, and placement
+    - Use simple labels for buttons - Don't use jargon or technical terms
+    - Use clear and concise labels for buttons - Don't use long phrases or sentences
+    - Use relevant labels for buttons - Don't use generic labels like "click here"
+    - Use a 'large' font size for buttons.
+    - Don't wrap text on buttons - text should be on one line
+    - Use action verbs as button labels 
+    - Don't use disabled buttons when possible - Show an error or CTA instead
+    - Place buttons side-by-side when possible
+    - Use standard layout for buttons - Don't use unusual icons or styles for buttons
+    - Avoid icon-only buttons, use labels with icons whenever possible
+    - Don't use two icons in the same button, one button, one icon.
+    - Use enough/proper color contrast for buttons - Don't use low contrast colors
+        * https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html
+        * maintain a minimum contrast ratio of 4.5:1 for normal text and 3:1 for larger text.
+    - Use the right size for buttons - Don't use small buttons and don't use large buttons
+        - Sizing of buttons can be used to denote priority, low-med-high
+    - Use proper spacing & kerning for buttons - Don't use too much or too little spacing
+    - Use a clear focused and hover states for buttons - visible focus state is important for keyboard users
+    - Don't rely on colors to indicate states - use text / color / icons as well
+    - Confirm with users the buttons work. Do user testing.
+
+
+### User interaction Messages
+- Success Messages
+  - Avoid unnecessary words
+  - Start with a Noun or verb
+  - Drop Articles (a, the, an)
+  - Be clear & Direct

@@ -4,9 +4,43 @@
 https://medium.com/@eliot64/bridging-legal-ai-and-trust-how-we-won-the-llm-x-law-hackathon-45081a8681d9
 https://github.com/Kain-90/RAG-Play
 https://github.com/superlinear-ai/raglite
-
+https://levelup.gitconnected.com/testing-18-rag-techniques-to-find-the-best-094d166af27f
+https://arxiv.org/abs/2503.10357
+https://arxiv.org/pdf/2502.08826v2
+https://github.com/yale-nlp/MCTS-RAG
+https://arxiv.org/abs/2503.21729
+https://arxiv.org/pdf/2501.00332
+https://arxiv.org/html/2503.21460v1
+https://github.com/huggingface/yourbench
+https://arxiv.org/pdf/2401.17043
+https://arxiv.org/pdf/2502.14802
 
 Unsorted
+https://ai.gopubby.com/8-common-mistakes-in-vector-search-and-how-to-avoid-them-e48d849c23f8
+https://arxiv.org/pdf/2501.11551v4
+https://aiexpjourney.substack.com/p/the-mystery-of-rag-optimization-insights
+https://ai.plainenglish.io/part-2-chatting-with-my-companys-brain-how-i-built-my-ai-knowledge-buddy-16a38b59792b
+https://medium.com/data-science-collective/ai-engineering-3-3-dataset-engineering-inference-optimization-and-architecture-and-user-aac4ddf43c23
+https://engineeringblog.yelp.com/2025/02/search-query-understanding-with-LLMs.html
+https://github.com/ibm-granite/granite-io/blob/main/docs/design.md
+https://www.jeremykun.com/2015/04/06/markov-chain-monte-carlo-without-all-the-bullshit/
+https://mode-rag.readthedocs.io/en/latest/
+https://huggingface.co/posts/Kseniase/836565977783893
+https://github.com/nishchaljs/MobiRAG
+https://huggingface.co/PleIAs/Pleias-RAG-1B-gguf
+https://arxiv.org/abs/2504.13587
+https://patann.dev/
+https://substack.com/home/post/p-161922553
+
+Models
+	https://huggingface.co/THUDM/GLM-Z1-32B-0414
+	https://huggingface.co/collections/THUDM/glm-4-0414-67f3cbcb34dd9d252707cb2e
+	
+Agentic RAG
+	https://arxiv.org/pdf/2501.09136
+	https://github.com/asinghcsu/AgenticRAG-Survey
+
+
 
 Graphs (GraphRAG / KnowledgeGraphs)
 	GARLIC

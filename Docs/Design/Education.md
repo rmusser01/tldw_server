@@ -17,6 +17,7 @@ https://github.com/Rolandjg/skool4free
 https://paperswithcode.com/paper/into-the-unknown-unknowns-engaged-human
 https://arxiv.org/pdf/2501.09092
 https://knowt.com/
+https://www.slidehero.ai/
 https://ai-cosmos.hashnode.dev/the-limits-of-ai-in-education-lessons-from-a-spanish-tutor-experiment
 
 one2manny
