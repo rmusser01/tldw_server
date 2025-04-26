@@ -888,14 +888,75 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
             message_text = action_widget.message_text
             message_role = action_widget.role
 
+            # ───────────── existing branches above this point … ─────────────
             if "edit-button" in button_classes:
-                logging.info(f"Action: Edit clicked for {message_role} message: '{message_text[:50]}...'")
-                try:
-                    # Query for Static specifically
-                    text_widget = action_widget.query_one(".message-text", Static)
-                    text_widget.update(Text(f"[EDITING...] {message_text}"))
-                except QueryError:
-                    logging.error("Could not find .message-text Static widget for editing.")
+                """
+                First click  → switch the message into an editable TextArea.
+                Second click → save the edits, restore the Static, and reset the button.
+                """
+                logging.info(
+                    "Action: Edit clicked for %s message: '%s…'",
+                    message_role,
+                    message_text[:50],
+                )
+
+                # A private flag stored on the ChatMessage
+                is_editing = getattr(action_widget, "_editing", False)
+
+                if not is_editing:
+                    # ── START EDITING ────────────────────────────────────────────────
+                    static_text: Static = action_widget.query_one(".message-text", Static)
+
+                    # Current text (Rich.Text exposes `.plain`; fall back to str())
+                    current = (
+                        static_text.renderable.plain
+                        if hasattr(static_text.renderable, "plain")
+                        else str(static_text.renderable)
+                    )
+
+                    # Hide the Static and mount a TextArea in its place
+                    static_text.display = False
+                    editor = TextArea(
+                        text=current,  # <-- TextArea’s ctor uses *text*
+                        id="edit-area",
+                        classes="edit-area",
+                    )
+                    editor.styles.width = "100%"
+                    await action_widget.mount(editor, before=static_text)
+                    editor.focus()
+
+                    # Set flag & button label
+                    action_widget._editing = True  # type: ignore[attr-defined]
+                    button.label = "Stop editing"
+                    logging.debug("Editing started.")
+
+                else:
+                    # ── STOP EDITING & SAVE ─────────────────────────────────────────
+                    try:
+                        editor: TextArea = action_widget.query_one("#edit-area", TextArea)
+                        new_text = editor.text.strip()  # <-- property is .text
+                    except QueryError:
+                        logging.error("Edit TextArea not found when stopping edit.")
+                        new_text = message_text
+
+                    # Remove the TextArea
+                    try:
+                        await editor.remove()
+                    except Exception:
+                        pass
+
+                    # Restore the Static with updated content
+                    static_text: Static = action_widget.query_one(".message-text", Static)
+                    static_text.update(new_text)
+                    static_text.display = True
+
+                    # Update the ChatMessage’s own copy for later operations
+                    action_widget.message_text = new_text
+
+                    # Clear flag & reset button label
+                    action_widget._editing = False  # type: ignore[attr-defined]
+                    button.label = "✏️"
+                    logging.debug("Editing finished. New length: %d", len(new_text))
 
             elif "copy-button" in button_classes:
                 logging.info(
