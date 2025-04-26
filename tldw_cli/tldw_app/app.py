@@ -872,16 +872,41 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
                     logging.error("Could not find .message-text Static widget for editing.")
 
             elif "copy-button" in button_classes:
-                logging.info(f"Action: Copy clicked for {message_role} message: '{message_text[:50]}...'")
-                try:
-                    # FIXME - Implement actual copy to clipboard
-                    self.app.set_clipboard(message_text)
-                    logging.info("Message copied to clipboard.")
-                    button.label = "✅Copied"
-                    self.set_timer(1.5, lambda: setattr(button, 'label', '📋'))
-                except Exception as e:
-                    logging.error(f"Clipboard action failed: {e}")
+                logging.info(
+                    "Action: Copy clicked for %s message: '%s…'",
+                    message_role,
+                    message_text[:50],
+                )
 
+                copied = False
+                try:
+                    # ── Textual ≥ 0.57 ────────────────────────────────────────────────
+                    if hasattr(self, "copy_to_clipboard"):
+                        self.copy_to_clipboard(message_text)
+                        copied = True
+
+                    # ── Early Textual builds (local clipboard only) ──────────────────
+                    elif hasattr(self, "set_clipboard"):  # legacy helper
+                        self.set_clipboard(message_text)
+                        copied = True
+
+                    # ── Fallback to pyperclip (optional dependency) ──────────────────
+                    else:
+                        import importlib.util
+                        if importlib.util.find_spec("pyperclip"):
+                            import pyperclip  # type: ignore
+                            pyperclip.copy(message_text)
+                            copied = True
+                        else:
+                            logging.warning("pyperclip not available; clipboard copy skipped.")
+
+                except Exception as exc:  # noqa: BLE001
+                    logging.error("Clipboard action failed: %s", exc, exc_info=True)
+
+                # ── user feedback ─────────────────────────────────────────────────────
+                if copied:
+                    button.label = "✅Copied"
+                    self.set_timer(1.5, lambda: setattr(button, "label", "📋"))
 
             elif "speak-button" in button_classes:
                 logging.info(f"Action: Speak clicked for {message_role} message: '{message_text[:50]}...'")

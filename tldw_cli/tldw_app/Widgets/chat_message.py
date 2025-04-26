@@ -102,13 +102,13 @@ class ChatMessage(Widget):
                 yield Button("Edit", classes="action-button edit-button")
                 yield Button("📋", classes="action-button copy-button", id="copy") # Emoji for copy
                 yield Button("🔊", classes="action-button speak-button", id="speak") # Emoji for speak
+                yield Button("🗑️", classes="action-button delete-button")  # Emoji for delete ; Label: Delete, Class: delete-button
 
                 # AI-specific buttons
                 if self.role == "AI":
                     yield Button("👍", classes="action-button thumb-up-button", id="thumb-up")
                     yield Button("👎", classes="action-button thumb-down-button", id="thumb-down")
                     yield Button("🔄", classes="action-button regenerate-button", id="regenerate") # Emoji for regenerate
-                    yield Button("🗑️", classes="action-button delete-button") # Label: Delete, Class: delete-button
     def update_message_chunk(self, chunk: str):
         """Append a chunk of text to the message (for streaming)."""
         if self.role == "AI":
