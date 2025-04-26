@@ -689,6 +689,27 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
 
             # --- Get Values ---
             message = text_area.text.strip()
+            if not message:
+                try:
+                    # look at the very last ChatMessage in the container
+                    last_msg_widget: ChatMessage | None = None
+                    for last_msg_widget in reversed(chat_container.query(ChatMessage)):
+                        # break on the first real message (skip system banners etc. if any)
+                        if last_msg_widget.role in ("User", "AI"):
+                            break
+
+                    if last_msg_widget and last_msg_widget.role == "User":
+                        # reuse its text as the message to send
+                        message = last_msg_widget.message_text
+                        # DON'T mount a duplicate user bubble later
+                        reuse_last_user_bubble = True
+                    else:
+                        reuse_last_user_bubble = False
+                except Exception as exc:
+                    logging.error("Failed to inspect last message: %s", exc, exc_info=True)
+                    reuse_last_user_bubble = False
+            else:
+                reuse_last_user_bubble = False
             selected_provider = str(provider_widget.value) if provider_widget.value else None
             selected_model = str(model_widget.value) if model_widget.value else None
             system_prompt = system_prompt_widget.text
@@ -702,8 +723,10 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
             should_stream = False
 
             # --- Basic Validation ---
-            if not message: logging.debug(
-                f"Empty message submitted in '{prefix}'."); text_area.clear(); text_area.focus(); return
+            if not message:
+                logging.debug("Empty message and no reusable user bubble in '%s'.", prefix)
+                text_area.focus()
+                return
             if not selected_provider: await chat_container.mount(
                 ChatMessage("Please select an API Provider.", role="AI", classes="-error")); return
             if not selected_model: await chat_container.mount(
@@ -738,8 +761,9 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
                 return
 
             # --- Mount User Message ---
-            user_msg_widget = ChatMessage(message, role="User")
-            await chat_container.mount(user_msg_widget)
+            if not reuse_last_user_bubble:
+                user_msg_widget = ChatMessage(message, role="User")
+                await chat_container.mount(user_msg_widget)
             chat_container.scroll_end(animate=True)
             text_area.clear()
             text_area.focus()
