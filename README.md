@@ -1,6 +1,6 @@
 <div align="center">
 
-<h1>tl/dw</h1>
+<h1>tldw</h1>
 
 [![License](https://img.shields.io/badge/license-apache2.0-green)](https://img.shields.io/badge/license-apache2.0-green)
 [![madewithlove](https://img.shields.io/badge/made_with-%E2%9D%A4-red?style=for-the-badge&labelColor=orange)](https://github.com/rmusser01/tldw) 
@@ -11,14 +11,30 @@
 ## All Automated. All Local. All Yours.
 </div>
 
-### Latest Update (3/14/2025):
+### Latest Update (4/25/2025):
 <details>
 
-- Currently pausing all work on extra features, current goal is migration to FastAPI backend and a new JS frontend.
-- Finally getting away from Gradio. (Gradio was a placeholder UI to facilitate setting up the app and getting it working/showing it as a proof of concept)
-- First bits after migrating to FastAPI will be consolidation of ingestion and summarization into a single endpoint in the UI.
-- Working on TTS support for more models
-- Adding temp file upload for chatting without ingesting files into the DB
+- README needs to be updated....
+- FastAPI API is implemented.
+- Processing endpoints for Audio, video, pdf, ebook and plain text are implemented, as well as ingestion into the DB.
+- The API is fully functional for those endpoints (I've also added an openai chat endpoint as well, but not extensively tested)
+- API is not fully documented besides the autodoc from FastAPI.
+- Currently, there are two main development focuses of the project:
+  - The API
+    - Migration from the existing MediaDB to the new API DB. The biggest change is the combination of the chat DBs into one, and allowing for syncronization of the DBs. So you'll be able to have your local instance synced with your 'home' server. (WIP)
+    - Once the Sync Library is fully implemented, tested, and confirmed working, I'll be working on the API endpoints for the sync library.
+    - After that, I'll be working on the API endpoint for 'search' aka RAG.
+  - The GUI
+    - I am not a web dev. I do however, happen to know that TUIs exist, and as such, am building one at https://github.com/rmusser01/tldw_chatbook (currently usable as a standalone chat client)
+    - It will be the primary/'official' GUI for the tldw server (for now, eventually will do a webUI and make that the main UI)
+    - The app, 'tldw_chatbook' or 'chatbook', is a TUI built using Textual (link). It is designed to be a standalone chat client, so that it can be used separately from tldw.
+    - The goal of chatbook is to provide a simple, easy-to-use interface for interacting with the tldw server API, completely offline and local.
+    - This means that ideally, every server option/API endpoint (minus user reg?) will be available in chatbook.
+    - Where this is going, is that you'll be able to have your local chatbook client, and be able to sync it to your home server, and download your chats/settings/media DB.
+    - You'll also be able to use the '/media/process-*' endpoints, to process your media, store the results in your local media DB, and then sync it to your home server if you want.
+    - So you can keep your local media DB up to date, and then sync it to your home server/vice versa.
+    - This has extended the timeline for an initial release, but I think it will be worth it in the end.
+    - I do plan on opening up a Discord server for the project, but I don't have the time to manage it right now. So if you want to help out, please feel free to reach out via the Issues page, discussions page or email.
 - 
 </details>
 
