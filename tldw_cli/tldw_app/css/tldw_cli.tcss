@@ -156,3 +156,16 @@ ChatMessage.-user > Vertical {
 ChatMessage.-ai .message-actions.-generating {
     display: none;
 }
+/* microphone button – same box as Send but subdued colour */
+.mic-button {
+    width: 1;
+    height: 3;
+    margin-right: 1;           /* gap before Send */
+    border: none;
+    background: $surface-darken-1;
+    color: $text-muted;
+}
+.mic-button:hover {
+    background: $surface;
+    color: $text;
+}

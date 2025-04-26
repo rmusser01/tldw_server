@@ -37,7 +37,7 @@ DEFAULT_CONFIG = {
     "providers": {},
     "chat_defaults": {
         # Use a provider guaranteed by DEFAULT_CONFIG if file load fails completely
-        "provider": "Ollama", "model": "llama3:latest",
+        "provider": "OpenAI", "model": "gpt-4o",
         "system_prompt": "You are a helpful assistant.",
         "temperature": 0.7, "top_p": 1.0, "min_p": 0.0, "top_k": 0,
     },

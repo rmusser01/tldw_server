@@ -33,7 +33,7 @@ def create_settings_sidebar(id_prefix: str, config: dict) -> ComposeResult:
         default_top_k = str(defaults.get("top_k", 50))
 
         yield Static("Settings", classes="sidebar-title")
-        yield Static("API Provider", classes="sidebar-label")
+        yield Static("Inference Endpoints & \nService Providers", classes="sidebar-label")
         provider_options = [(provider, provider) for provider in available_providers] # Use corrected list
         logging.info(f"Sidebar {id_prefix}: Generated provider options for Select: {provider_options}")
         yield Select(

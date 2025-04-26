@@ -424,6 +424,7 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
                     yield VerticalScroll(id="chat-log")
                     with Horizontal(id="chat-input-area"):
                         yield TextArea(id="chat-input", classes="chat-input")
+                        yield Button("🎤", id="mic-chat", classes="mic-button")
                         yield Button("Send", id="send-chat", classes="send-button")
 
             # --- Character Chat Window ---
@@ -437,6 +438,7 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
                          yield Static(ASCII_PORTRAIT, id="character-portrait") # Use ASCII art
                      with Horizontal(id="character-input-area"):
                          yield TextArea(id="character-input", classes="chat-input")
+                         yield Button("🎤", id="mic-character", classes="mic-button")
                          yield Button("Send", id="send-character", classes="send-button")
 
             # --- Logs Window ---
@@ -973,6 +975,7 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
                 except Exception as e:
                     logging.error(f"Error updating regenerate placeholder: {e}")
                 # FIXME - Implement actual regeneration (find previous user message, call API worker again)
+
         else:
             # This handles buttons not inside a ChatMessage or unhandled IDs
             if not button_id.startswith("tab-"):  # Avoid logging tab clicks as warnings
@@ -1154,8 +1157,8 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
         # Map provider names (case-insensitive keys from config/UI) to endpoint keys in config.toml
         # Ensure these keys match your config.toml [api_endpoints] section
         provider_key_map = {
-            "Ollama": "Ollama",  # Assuming key in config is "Ollama"
             "Llama.cpp": "Llama_cpp",
+            "Ollama": "Ollama",  # Assuming key in config is "Ollama"
             "Oobabooga": "Oobabooga",
             "KoboldCpp": "KoboldCpp",
             "vLLM": "vLLM",
@@ -1435,6 +1438,19 @@ ChatMessage.-user > Vertical {
 /* Initially hide AI actions until generation is complete */
 ChatMessage.-ai .message-actions.-generating {
     display: none;
+}
+/* microphone button – same box as Send but subdued colour */
+.mic-button {
+    width: 3;
+    height: 3;
+    margin-right: 1;           /* gap before Send */
+    border: none;
+    background: $surface-darken-1;
+    color: $text-muted;
+}
+.mic-button:hover {
+    background: $surface;
+    color: $text;
 }
     """
 
