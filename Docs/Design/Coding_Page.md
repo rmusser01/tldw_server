@@ -38,6 +38,8 @@ https://github.com/google/diff-match-patch
 https://highlightjs.org/
 https://github.com/The-Pocket/Tutorial-Codebase-Knowledge/blob/main/docs/design.md
 https://github.com/The-Pocket/PocketFlow
+https://ariana.dev/blog/introducing-ariana#how-we-design-it
+https://ampcode.com/how-to-build-an-agent
 
 
 

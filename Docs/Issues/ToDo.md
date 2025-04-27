@@ -173,3 +173,73 @@ Benefits:
     Automation: Makes it easier to track regularly updated sources (like news, industry blogs, video tutorial series).
     Efficiency: Instead of manually searching for and adding each new article/video, we'd have a quick way to select and import relevant updates.
     Up-to-dateness: Helps keep notebooks powered by the latest information from the channels we follow.
+
+
+
+# Executive Summary: Phase 2 Plan for Sync System
+
+After the initial local-first SQLite deployment, the next critical steps for scaling are: (1) enforce **server-assigned timestamps** to eliminate clock drift issues, (2) persist **deferred link operations** across sessions for robustness, (3) implement **client acknowledgment tracking and garbage collection** for `sync_log` growth control, (4) prepare for a **Postgres backend** with Row-Level Security for multi-tenant support, and (5) enhance **metrics and observability**.  
+**Timing:** These upgrades must begin before expanding beyond ~20 devices or any production multi-user environment to avoid costly retrofitting.
+
+Here’s a **clean, forward-looking "Phase 2 Growth Plan" memo** you can use internally or forward to leadership:
+
+---
+
+# Phase 2: Growth Plan for Synchronization System  
+**(Post-Initial SQLite Deployment)**
+
+## Objective:
+Ensure that the synchronization architecture, originally designed for small teams and single-device use cases, can **scale safely and predictably** to multi-user, multi-device, and eventually multi-tenant environments.
+
+---
+
+## Key Focus Areas:
+
+1. **Server-Authoritative Timestamps**  
+   Transition from trusting client-generated `last_modified` timestamps to **server-assigned timestamps** during sync ingestion.  
+   - Required to eliminate inconsistencies caused by client clock drift.
+   - Impacts conflict resolution logic (LWW becomes truly canonical).
+
+2. **Persistent Deferred Queue for Links**  
+   Refactor deferred link/unlink operations (`MediaKeywords`) to **persist across sessions**.  
+   - Deferred changes must survive application crashes, network failures, or sync retries.
+   - Design persistent "deferred queue" table or mechanism.
+
+3. **`sync_log` Garbage Collection Mechanism**  
+   Implement **client acknowledgment** tracking and **safe vacuuming** of old `sync_log` entries.
+   - Prevent unbounded database growth.
+   - Server must track per-client sync state (last change_id or last_modified).
+   - Design deletion policies (e.g., "only purge changes acknowledged by 100% of active clients").
+
+4. **Postgres Backend Hardening**  
+   Prepare for a Postgres backend with:
+   - Equivalent metadata integrity protections (triggers or `CHECK` constraints).
+   - **Row Level Security (RLS)** policies for true tenant isolation.
+   - Updated `sync_log` ingestion pipelines for multi-tenant awareness.
+
+5. **Security Enhancements (as needed):**
+   - Cryptographic signing and verification of sync payloads (if clients become less trusted).
+   - Enforce transport-layer encryption (HTTPS/TLS mandatory).
+   - Scope-based OAuth authorization if adopting multi-user models.
+
+6. **Enhanced Observability and Metrics:**
+   - Integrate full metrics pipeline (e.g., Prometheus, OpenTelemetry).
+   - Track key sync metrics:
+     - Fetch latency
+     - Apply latency
+     - Conflict rates
+     - Deferred operation rates
+     - Client sync error rates
+
+---
+
+## Strategic Timing:
+
+| Milestone | Trigger to Begin Next Phase |
+|:--|:--|
+| Local-first SQLite sync | ✅  (Now) |
+| Small team (5–20 devices) | **Start server timestamp enforcement, deferred persistence** |
+| Shared team-wide sync server | **Implement `sync_log` ACK tracking and garbage collection** |
+| Multi-team/multi-tenant deployments | **Postgres hardening + OAuth/RLS** |
+
+---

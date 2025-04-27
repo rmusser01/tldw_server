@@ -839,3 +839,816 @@ WHEN OLD.deleted = 1 AND NEW.deleted = 0 BEGIN
       'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted));
 END;
 """
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#Version 2
+"""
+Okay, let's tackle point #1 first: Enforce metadata integrity at DB-layer.
+
+We'll add BEFORE UPDATE triggers to the six syncable tables (Media, Keywords, Transcripts, MediaChunks, UnvectorizedMediaChunks, DocumentVersions). These triggers will run before any update operation completes and will abort the transaction if the validation rules are violated.
+
+Validation Rules:
+
+    NEW.version must be exactly OLD.version + 1.
+
+    NEW.client_id must not be NULL and not be an empty string ('').
+
+These triggers ensure that even if the application code calling the library has a bug (forgets to increment version or provide client_id), the database itself prevents the inconsistent data from being saved, maintaining the integrity required for synchronization.
+
+Here is the full updated schema including the original structure plus the new validation triggers added at the end:
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+Placement: The new validation triggers are added at the very end of the schema script.
+
+BEFORE UPDATE: They use BEFORE UPDATE to check the data before the update is allowed to proceed.
+
+RAISE(ABORT, '...'): If a validation condition (WHERE ...) is met, this function immediately stops the UPDATE operation and rolls back the current transaction (if any), returning the error message.
+
+Checks:
+
+    NEW.version IS NOT OLD.version + 1: Ensures the sync version number is strictly incremented by one.
+
+    NEW.client_id IS NULL OR NEW.client_id = '': Ensures a non-empty client_id is provided with the update.
+
+Coverage: These triggers cover all six tables that contain the sync metadata columns and are expected to be modified directly via UPDATE statements requiring version increments.
+
+No WHEN Clause: These validation triggers apply to all UPDATE stateme
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+-- Enable Foreign Key support
+PRAGMA foreign_keys = ON;
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- Core Data Tables with Sync Metadata
+-- ───────────────────────────────────────────────────────────────────────────
+
+-- Media Table (Central Entity)
+-- ============================
+CREATE TABLE IF NOT EXISTS Media (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url TEXT UNIQUE,
+    title TEXT NOT NULL,
+    type TEXT NOT NULL,
+    content TEXT,
+    author TEXT,
+    ingestion_date DATETIME, -- Changed to DATETIME
+    transcription_model TEXT,
+    is_trash BOOLEAN DEFAULT 0 NOT NULL, -- For UI Trash Can feature
+    trash_date DATETIME,                 -- Changed to DATETIME
+    vector_embedding BLOB,               -- Often excluded from sync payload due to size/volatility (Local Only)
+    chunking_status TEXT DEFAULT 'pending' NOT NULL, -- Likely managed locally, exclude from sync (Local Only)
+    vector_processing INTEGER DEFAULT 0 NOT NULL,    -- Likely managed locally, exclude from sync (Local Only)
+    content_hash TEXT UNIQUE NOT NULL,
+
+    -- Sync Metadata Columns --
+    uuid TEXT UNIQUE NOT NULL, -- Globally unique identifier for sync
+    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, -- App should ideally set this explicitly on change
+    version INTEGER NOT NULL DEFAULT 1,                        -- App must increment this on change
+    client_id TEXT NOT NULL,                                   -- Identifier of the client that made the last change (Set by App)
+    deleted BOOLEAN NOT NULL DEFAULT 0                         -- Soft delete flag for sync
+);
+-- Original Indices
+CREATE INDEX IF NOT EXISTS idx_media_title ON Media(title);
+CREATE INDEX IF NOT EXISTS idx_media_type ON Media(type);
+CREATE INDEX IF NOT EXISTS idx_media_author ON Media(author);
+CREATE INDEX IF NOT EXISTS idx_media_ingestion_date ON Media(ingestion_date);
+CREATE INDEX IF NOT EXISTS idx_media_chunking_status ON Media(chunking_status); -- For local queries
+CREATE INDEX IF NOT EXISTS idx_media_vector_processing ON Media(vector_processing); -- For local queries
+CREATE INDEX IF NOT EXISTS idx_media_is_trash ON Media(is_trash); -- For UI queries
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_content_hash ON Media(content_hash);
+-- Sync Indices
+CREATE UNIQUE INDEX IF NOT EXISTS idx_media_uuid ON Media(uuid);
+CREATE INDEX IF NOT EXISTS idx_media_last_modified ON Media(last_modified);
+CREATE INDEX IF NOT EXISTS idx_media_deleted ON Media(deleted);
+
+
+-- Keywords Table
+-- ==============
+CREATE TABLE IF NOT EXISTS Keywords (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    keyword TEXT NOT NULL UNIQUE COLLATE NOCASE,
+
+    -- Sync Metadata Columns --
+    uuid TEXT UNIQUE NOT NULL,
+    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, -- App should ideally set this explicitly on change
+    version INTEGER NOT NULL DEFAULT 1,                        -- App must increment this on change
+    client_id TEXT NOT NULL,                                   -- Set by App
+    deleted BOOLEAN NOT NULL DEFAULT 0
+);
+-- Original Indices (keyword covered by UNIQUE)
+-- Sync Indices
+CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_uuid ON Keywords(uuid);
+CREATE INDEX IF NOT EXISTS idx_keywords_last_modified ON Keywords(last_modified);
+CREATE INDEX IF NOT EXISTS idx_keywords_deleted ON Keywords(deleted);
+
+
+-- MediaKeywords Table (Relationship Table - No direct sync metadata needed)
+-- ==========================================================================
+-- Sync is handled by 'link'/'unlink' operations in sync_log triggered below.
+-- NOTE: Soft-deleting Media/Keywords does NOT automatically delete rows here
+-- due to use of soft deletes. Application logic must handle unlinking.
+CREATE TABLE IF NOT EXISTS MediaKeywords (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    keyword_id INTEGER NOT NULL,
+    UNIQUE (media_id, keyword_id),
+    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,     -- Cascade works on HARD delete only
+    FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE -- Cascade works on HARD delete only
+);
+-- Original Indices
+CREATE INDEX IF NOT EXISTS idx_mediakeywords_media_id ON MediaKeywords(media_id);
+CREATE INDEX IF NOT EXISTS idx_mediakeywords_keyword_id ON MediaKeywords(keyword_id);
+
+
+-- Transcripts Table
+-- =================
+-- NOTE: Soft-deleting parent Media does NOT automatically soft-delete Transcripts.
+-- Application/Sync logic must handle this relationship based on Media.deleted flag.
+CREATE TABLE IF NOT EXISTS Transcripts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    whisper_model TEXT,
+    transcription TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- Keep original creation time
+    UNIQUE (media_id, whisper_model), -- Original constraint
+    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE, -- Cascade works on HARD delete only
+
+    -- Sync Metadata Columns --
+    uuid TEXT UNIQUE NOT NULL,
+    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, -- App should ideally set this explicitly on change
+    version INTEGER NOT NULL DEFAULT 1,                        -- App must increment this on change
+    client_id TEXT NOT NULL,                                   -- Set by App
+    deleted BOOLEAN NOT NULL DEFAULT 0
+);
+-- Original Indices
+CREATE INDEX IF NOT EXISTS idx_transcripts_media_id ON Transcripts(media_id);
+-- Sync Indices
+CREATE UNIQUE INDEX IF NOT EXISTS idx_transcripts_uuid ON Transcripts(uuid);
+CREATE INDEX IF NOT EXISTS idx_transcripts_last_modified ON Transcripts(last_modified);
+CREATE INDEX IF NOT EXISTS idx_transcripts_deleted ON Transcripts(deleted);
+
+
+-- MediaChunks Table (Consider if still needed if vector embeddings are not stored here)
+-- =================
+-- Represents processed/structured chunks of media content.
+-- NOTE: Soft-deleting parent Media does NOT automatically soft-delete MediaChunks.
+-- Application/Sync logic must handle this relationship based on Media.deleted flag.
+CREATE TABLE IF NOT EXISTS MediaChunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    chunk_text TEXT,
+    start_index INTEGER,
+    end_index INTEGER,
+    chunk_id TEXT UNIQUE, -- Assumed Globally Unique Identifier for the chunk content/position. If unique per media, use UNIQUE(media_id, chunk_id)
+    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE, -- Cascade works on HARD delete only
+
+    -- Sync Metadata Columns --
+    uuid TEXT UNIQUE NOT NULL,
+    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, -- App should ideally set this explicitly on change
+    version INTEGER NOT NULL DEFAULT 1,                        -- App must increment this on change
+    client_id TEXT NOT NULL,                                   -- Set by App
+    deleted BOOLEAN NOT NULL DEFAULT 0
+);
+-- Original Indices
+CREATE INDEX IF NOT EXISTS idx_mediachunks_media_id ON MediaChunks(media_id);
+-- Sync Indices
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mediachunks_uuid ON MediaChunks(uuid);
+CREATE INDEX IF NOT EXISTS idx_mediachunks_last_modified ON MediaChunks(last_modified);
+CREATE INDEX IF NOT EXISTS idx_mediachunks_deleted ON MediaChunks(deleted);
+
+
+-- UnvectorizedMediaChunks Table (Likely precursor to processing/vectorization)
+-- =============================
+-- Stores chunks identified during initial processing, before vectorization (if any).
+-- Can be created asynchronously after Media ingestion.
+-- NOTE: Soft-deleting parent Media does NOT automatically soft-delete these chunks.
+-- Application/Sync logic must handle this relationship based on Media.deleted flag.
+CREATE TABLE IF NOT EXISTS UnvectorizedMediaChunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    chunk_text TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    start_char INTEGER,
+    end_char INTEGER,
+    chunk_type TEXT,
+    creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- Keep original creation time
+    last_modified_orig TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- Renamed original timestamp if needed for app logic (Consider removing if sync `last_modified` is sufficient)
+    is_processed BOOLEAN DEFAULT FALSE NOT NULL, -- Local state, exclude from sync payload (Local Only)
+    metadata TEXT, -- Potentially sync this if it contains relevant info (e.g., user notes)
+    UNIQUE (media_id, chunk_index, chunk_type), -- Original constraint
+    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE, -- Cascade works on HARD delete only
+
+    -- Sync Metadata Columns --
+    uuid TEXT UNIQUE NOT NULL,
+    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, -- Sync timestamp (App should ideally set explicitly)
+    version INTEGER NOT NULL DEFAULT 1,                        -- App must increment this on change
+    client_id TEXT NOT NULL,                                   -- Set by App
+    deleted BOOLEAN NOT NULL DEFAULT 0
+);
+-- Original Indices
+CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_media_id ON UnvectorizedMediaChunks(media_id);
+CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_is_processed ON UnvectorizedMediaChunks(is_processed); -- For local queries
+CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_chunk_type ON UnvectorizedMediaChunks(chunk_type);
+-- Sync Indices
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_uuid ON UnvectorizedMediaChunks(uuid);
+CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_last_modified ON UnvectorizedMediaChunks(last_modified);
+CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_deleted ON UnvectorizedMediaChunks(deleted);
+
+
+-- DocumentVersions Table
+-- ======================
+-- Stores snapshots or analysis versions related to a media item.
+-- NOTE: Soft-deleting parent Media does NOT automatically soft-delete DocumentVersions.
+-- Application/Sync logic must handle this relationship based on Media.deleted flag.
+CREATE TABLE IF NOT EXISTS DocumentVersions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    version_number INTEGER NOT NULL, -- Local version sequence per media item
+    prompt TEXT,
+    analysis_content TEXT,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- Keep original creation time
+    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE, -- Cascade works on HARD delete only
+    UNIQUE (media_id, version_number), -- Original constraint
+
+    -- Sync Metadata Columns --
+    uuid TEXT UNIQUE NOT NULL,
+    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, -- App should ideally set this explicitly on change
+    version INTEGER NOT NULL DEFAULT 1,                        -- App must increment this on change
+    client_id TEXT NOT NULL,                                   -- Set by App
+    deleted BOOLEAN NOT NULL DEFAULT 0
+);
+-- Original Indices
+CREATE INDEX IF NOT EXISTS idx_document_versions_media_id ON DocumentVersions(media_id);
+CREATE INDEX IF NOT EXISTS idx_document_versions_version_number ON DocumentVersions(version_number);
+-- Sync Indices
+CREATE UNIQUE INDEX IF NOT EXISTS idx_documentversions_uuid ON DocumentVersions(uuid);
+CREATE INDEX IF NOT EXISTS idx_documentversions_last_modified ON DocumentVersions(last_modified);
+CREATE INDEX IF NOT EXISTS idx_documentversions_deleted ON DocumentVersions(deleted);
+
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- Virtual FTS Tables (Keep as is, they reference the main tables)
+-- ───────────────────────────────────────────────────────────────────────────
+
+-- FTS for Media
+CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
+    title,
+    content,
+    content='Media',
+    content_rowid='id' -- Links to Media.id (ROWID)
+);
+-- FTS Triggers for Media (Keep original triggers, they update FTS based on Media changes)
+CREATE TRIGGER IF NOT EXISTS media_ai AFTER INSERT ON Media BEGIN
+    INSERT INTO media_fts (rowid, title, content) VALUES (new.id, new.title, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS media_ad AFTER DELETE ON Media BEGIN
+    DELETE FROM media_fts WHERE rowid = old.id;
+END;
+CREATE TRIGGER IF NOT EXISTS media_au AFTER UPDATE ON Media BEGIN
+    UPDATE media_fts SET title = new.title, content = new.content WHERE rowid = old.id;
+END;
+
+-- FTS for Keywords
+CREATE VIRTUAL TABLE IF NOT EXISTS keyword_fts USING fts5(
+    keyword,
+    content='Keywords',
+    content_rowid='id' -- Links to Keywords.id (ROWID)
+);
+-- FTS Triggers for Keywords
+CREATE TRIGGER IF NOT EXISTS keywords_fts_ai AFTER INSERT ON Keywords BEGIN
+    INSERT INTO keyword_fts(rowid, keyword) VALUES (new.id, new.keyword);
+END;
+CREATE TRIGGER IF NOT EXISTS keywords_fts_ad AFTER DELETE ON Keywords BEGIN
+    DELETE FROM keyword_fts WHERE rowid = old.id;
+END;
+CREATE TRIGGER IF NOT EXISTS keywords_fts_au AFTER UPDATE ON Keywords BEGIN
+    UPDATE keyword_fts SET keyword = new.keyword WHERE rowid = old.id;
+END;
+
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- Synchronization Log Table and Indices
+-- ───────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS sync_log (
+    change_id    INTEGER  PRIMARY KEY AUTOINCREMENT, -- Local log entry ID
+    entity       TEXT     NOT NULL,   -- Table name (e.g., 'Media', 'Keywords', 'MediaKeywords')
+    entity_uuid  TEXT     NOT NULL,   -- UUID of the record changed, or synthetic ID for relationships
+    operation    TEXT     NOT NULL CHECK(operation IN ('create','update','delete', 'link', 'unlink')),
+    timestamp    DATETIME NOT NULL,   -- Matches the record's last_modified or the time of the link/unlink (Changed to DATETIME)
+    client_id    TEXT     NOT NULL,   -- Source device UUID that made the change
+    version      INTEGER  NOT NULL,   -- Version number of the record *after* the change (or parent's version for links)
+    payload      TEXT              -- JSON blob of the record's state or link info
+);
+
+-- Indices for efficient querying by sync process
+CREATE INDEX IF NOT EXISTS idx_sync_log_ts ON sync_log(timestamp);
+CREATE INDEX IF NOT EXISTS idx_sync_log_entity_uuid ON sync_log(entity_uuid);
+CREATE INDEX IF NOT EXISTS idx_sync_log_client_id ON sync_log(client_id);
+
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- Triggers to Populate sync_log
+-- (Includes specific UNDELETE triggers)
+-- ───────────────────────────────────────────────────────────────────────────
+
+-- ========================
+-- Triggers for Media Table
+-- ========================
+DROP TRIGGER IF EXISTS media_sync_create;
+CREATE TRIGGER media_sync_create
+AFTER INSERT ON Media
+BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES (
+    'Media', NEW.uuid, 'create',
+    NEW.last_modified, NEW.client_id, NEW.version,
+    json_object(
+      'uuid', NEW.uuid, 'url', NEW.url, 'title', NEW.title, 'type', NEW.type,
+      'content', NEW.content, 'author', NEW.author, 'ingestion_date', NEW.ingestion_date,
+      'transcription_model', NEW.transcription_model, 'is_trash', NEW.is_trash, 'trash_date', NEW.trash_date,
+      'content_hash', NEW.content_hash, 'last_modified', NEW.last_modified,
+      'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted
+    )
+  );
+END;
+
+DROP TRIGGER IF EXISTS media_sync_update;
+CREATE TRIGGER media_sync_update
+AFTER UPDATE ON Media
+WHEN OLD.deleted = NEW.deleted AND (
+     ifnull(OLD.url,'') != ifnull(NEW.url,'') OR
+     ifnull(OLD.title,'') != ifnull(NEW.title,'') OR
+     ifnull(OLD.type,'') != ifnull(NEW.type,'') OR
+     ifnull(OLD.content,'') != ifnull(NEW.content,'') OR
+     ifnull(OLD.author,'') != ifnull(NEW.author,'') OR
+     ifnull(OLD.ingestion_date,'') != ifnull(NEW.ingestion_date,'') OR
+     ifnull(OLD.transcription_model,'') != ifnull(NEW.transcription_model,'') OR
+     ifnull(OLD.is_trash,0) != ifnull(NEW.is_trash,0) OR
+     ifnull(OLD.trash_date,'') != ifnull(NEW.trash_date,'') OR
+     ifnull(OLD.content_hash,'') != ifnull(NEW.content_hash,'') OR
+     ifnull(OLD.last_modified,'') != ifnull(NEW.last_modified,'') OR
+     ifnull(OLD.version,0) != ifnull(NEW.version,0) OR
+     ifnull(OLD.client_id, '') != ifnull(NEW.client_id, '')
+)
+BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES (
+    'Media', NEW.uuid, 'update',
+    NEW.last_modified, NEW.client_id, NEW.version,
+    json_object(
+      'uuid', NEW.uuid, 'url', NEW.url, 'title', NEW.title, 'type', NEW.type,
+      'content', NEW.content, 'author', NEW.author, 'ingestion_date', NEW.ingestion_date,
+      'transcription_model', NEW.transcription_model, 'is_trash', NEW.is_trash, 'trash_date', NEW.trash_date,
+      'content_hash', NEW.content_hash, 'last_modified', NEW.last_modified,
+      'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted
+    )
+  );
+END;
+
+DROP TRIGGER IF EXISTS media_sync_delete;
+CREATE TRIGGER media_sync_delete
+AFTER UPDATE ON Media
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES (
+    'Media', NEW.uuid, 'delete',
+    NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id)
+  );
+END;
+
+DROP TRIGGER IF EXISTS media_sync_undelete;
+CREATE TRIGGER media_sync_undelete
+AFTER UPDATE ON Media
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES (
+    'Media', NEW.uuid, 'update',
+    NEW.last_modified, NEW.client_id, NEW.version,
+    json_object(
+      'uuid', NEW.uuid, 'url', NEW.url, 'title', NEW.title, 'type', NEW.type,
+      'content', NEW.content, 'author', NEW.author, 'ingestion_date', NEW.ingestion_date,
+      'transcription_model', NEW.transcription_model, 'is_trash', NEW.is_trash, 'trash_date', NEW.trash_date,
+      'content_hash', NEW.content_hash, 'last_modified', NEW.last_modified,
+      'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted
+    )
+  );
+END;
+
+
+-- ==========================
+-- Triggers for Keywords Table
+-- ==========================
+DROP TRIGGER IF EXISTS keywords_sync_create;
+CREATE TRIGGER keywords_sync_create AFTER INSERT ON Keywords BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('Keywords', NEW.uuid, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'keyword', NEW.keyword, 'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted));
+END;
+
+DROP TRIGGER IF EXISTS keywords_sync_update;
+CREATE TRIGGER keywords_sync_update AFTER UPDATE ON Keywords
+WHEN OLD.deleted = NEW.deleted AND (
+    ifnull(OLD.keyword,'') != ifnull(NEW.keyword,'') OR
+    ifnull(OLD.last_modified,'') != ifnull(NEW.last_modified,'') OR
+    ifnull(OLD.version,0) != ifnull(NEW.version,0) OR
+    ifnull(OLD.client_id, '') != ifnull(NEW.client_id, '')
+) BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('Keywords', NEW.uuid, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+     json_object('uuid', NEW.uuid, 'keyword', NEW.keyword, 'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted));
+END;
+
+DROP TRIGGER IF EXISTS keywords_sync_delete;
+CREATE TRIGGER keywords_sync_delete AFTER UPDATE ON Keywords
+WHEN OLD.deleted = 0 AND NEW.deleted = 1 BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('Keywords', NEW.uuid, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id));
+END;
+
+DROP TRIGGER IF EXISTS keywords_sync_undelete;
+CREATE TRIGGER keywords_sync_undelete AFTER UPDATE ON Keywords
+WHEN OLD.deleted = 1 AND NEW.deleted = 0 BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('Keywords', NEW.uuid, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+     json_object('uuid', NEW.uuid, 'keyword', NEW.keyword, 'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted));
+END;
+
+
+-- =======================================
+-- Triggers for MediaKeywords Relationship
+-- =======================================
+DROP TRIGGER IF EXISTS mediakeywords_sync_link;
+CREATE TRIGGER mediakeywords_sync_link
+AFTER INSERT ON MediaKeywords
+BEGIN
+    SELECT RAISE(ABORT, 'Cannot link keyword: Media record not found or missing UUID')
+    WHERE NOT EXISTS (SELECT 1 FROM Media WHERE id = NEW.media_id AND uuid IS NOT NULL);
+    SELECT RAISE(ABORT, 'Cannot link keyword: Keyword record not found or missing UUID')
+    WHERE NOT EXISTS (SELECT 1 FROM Keywords WHERE id = NEW.keyword_id AND uuid IS NOT NULL);
+
+    INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+    SELECT
+        'MediaKeywords',
+        m.uuid || '_' || k.uuid,
+        'link',
+        strftime('%Y-%m-%d %H:%M:%S', 'now'), -- Use UTC time 'now'
+        m.client_id, -- Convention: Use Media's client_id
+        m.version,   -- Convention: Use Media's version
+        json_object('media_uuid', m.uuid, 'keyword_uuid', k.uuid)
+    FROM Media m, Keywords k
+    WHERE m.id = NEW.media_id AND k.id = NEW.keyword_id;
+END;
+
+DROP TRIGGER IF EXISTS mediakeywords_sync_unlink;
+CREATE TRIGGER mediakeywords_sync_unlink
+AFTER DELETE ON MediaKeywords
+BEGIN
+     INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+     SELECT
+         'MediaKeywords',
+         ifnull(m.uuid, 'unknown_media_' || OLD.media_id) || '_' || ifnull(k.uuid, 'unknown_keyword_' || OLD.keyword_id),
+         'unlink',
+         strftime('%Y-%m-%d %H:%M:%S', 'now'), -- Use UTC time 'now'
+         ifnull(m.client_id, 'unknown'), -- Best guess
+         ifnull(m.version, 0),           -- Best guess
+         json_object(
+             'media_uuid', ifnull(m.uuid, 'unknown_media_' || OLD.media_id),
+             'keyword_uuid', ifnull(k.uuid, 'unknown_keyword_' || OLD.keyword_id)
+         )
+     FROM (SELECT OLD.media_id as media_id, OLD.keyword_id as keyword_id) AS OldIds
+     LEFT JOIN Media m ON m.id = OldIds.media_id
+     LEFT JOIN Keywords k ON k.id = OldIds.keyword_id;
+END;
+
+
+-- ==========================
+-- Triggers for Transcripts Table
+-- ==========================
+DROP TRIGGER IF EXISTS transcripts_sync_create;
+CREATE TRIGGER transcripts_sync_create AFTER INSERT ON Transcripts BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('Transcripts', NEW.uuid, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id),
+      'whisper_model', NEW.whisper_model, 'transcription', NEW.transcription, 'created_at', NEW.created_at,
+      'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted));
+END;
+
+DROP TRIGGER IF EXISTS transcripts_sync_update;
+CREATE TRIGGER transcripts_sync_update AFTER UPDATE ON Transcripts
+WHEN OLD.deleted = NEW.deleted AND (
+    ifnull(OLD.whisper_model,'') != ifnull(NEW.whisper_model,'') OR
+    ifnull(OLD.transcription,'') != ifnull(NEW.transcription,'') OR
+    ifnull(OLD.last_modified,'') != ifnull(NEW.last_modified,'') OR
+    ifnull(OLD.version,0) != ifnull(NEW.version,0) OR
+    ifnull(OLD.client_id, '') != ifnull(NEW.client_id, '')
+) BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('Transcripts', NEW.uuid, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id),
+      'whisper_model', NEW.whisper_model, 'transcription', NEW.transcription, 'created_at', NEW.created_at,
+      'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted));
+END;
+
+DROP TRIGGER IF EXISTS transcripts_sync_delete;
+CREATE TRIGGER transcripts_sync_delete AFTER UPDATE ON Transcripts
+WHEN OLD.deleted = 0 AND NEW.deleted = 1 BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('Transcripts', NEW.uuid, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id), 'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id));
+END;
+
+DROP TRIGGER IF EXISTS transcripts_sync_undelete;
+CREATE TRIGGER transcripts_sync_undelete AFTER UPDATE ON Transcripts
+WHEN OLD.deleted = 1 AND NEW.deleted = 0 BEGIN
+ INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('Transcripts', NEW.uuid, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id),
+      'whisper_model', NEW.whisper_model, 'transcription', NEW.transcription, 'created_at', NEW.created_at,
+      'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted));
+END;
+
+
+-- ==========================
+-- Triggers for MediaChunks Table
+-- ==========================
+DROP TRIGGER IF EXISTS mediachunks_sync_create;
+CREATE TRIGGER mediachunks_sync_create AFTER INSERT ON MediaChunks BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('MediaChunks', NEW.uuid, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id),
+      'chunk_text', NEW.chunk_text, 'start_index', NEW.start_index, 'end_index', NEW.end_index, 'chunk_id', NEW.chunk_id,
+      'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted));
+END;
+
+DROP TRIGGER IF EXISTS mediachunks_sync_update;
+CREATE TRIGGER mediachunks_sync_update AFTER UPDATE ON MediaChunks
+WHEN OLD.deleted = NEW.deleted AND (
+    ifnull(OLD.chunk_text,'') != ifnull(NEW.chunk_text,'') OR
+    ifnull(OLD.start_index,0) != ifnull(NEW.start_index,0) OR
+    ifnull(OLD.end_index,0) != ifnull(NEW.end_index,0) OR
+    ifnull(OLD.chunk_id,'') != ifnull(NEW.chunk_id,'') OR
+    ifnull(OLD.last_modified,'') != ifnull(NEW.last_modified,'') OR
+    ifnull(OLD.version,0) != ifnull(NEW.version,0) OR
+    ifnull(OLD.client_id, '') != ifnull(NEW.client_id, '')
+) BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('MediaChunks', NEW.uuid, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id),
+      'chunk_text', NEW.chunk_text, 'start_index', NEW.start_index, 'end_index', NEW.end_index, 'chunk_id', NEW.chunk_id,
+      'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted));
+END;
+
+DROP TRIGGER IF EXISTS mediachunks_sync_delete;
+CREATE TRIGGER mediachunks_sync_delete AFTER UPDATE ON MediaChunks
+WHEN OLD.deleted = 0 AND NEW.deleted = 1 BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('MediaChunks', NEW.uuid, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id), 'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id));
+END;
+
+DROP TRIGGER IF EXISTS mediachunks_sync_undelete;
+CREATE TRIGGER mediachunks_sync_undelete AFTER UPDATE ON MediaChunks
+WHEN OLD.deleted = 1 AND NEW.deleted = 0 BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('MediaChunks', NEW.uuid, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id),
+      'chunk_text', NEW.chunk_text, 'start_index', NEW.start_index, 'end_index', NEW.end_index, 'chunk_id', NEW.chunk_id,
+      'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted));
+END;
+
+
+-- =======================================
+-- Triggers for UnvectorizedMediaChunks Table
+-- =======================================
+DROP TRIGGER IF EXISTS unvectorizedmediachunks_sync_create;
+CREATE TRIGGER unvectorizedmediachunks_sync_create AFTER INSERT ON UnvectorizedMediaChunks BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('UnvectorizedMediaChunks', NEW.uuid, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id),
+      'chunk_text', NEW.chunk_text, 'chunk_index', NEW.chunk_index, 'start_char', NEW.start_char,
+      'end_char', NEW.end_char, 'chunk_type', NEW.chunk_type, 'creation_date', NEW.creation_date,
+      'metadata', NEW.metadata,
+      'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted
+      ));
+END;
+
+DROP TRIGGER IF EXISTS unvectorizedmediachunks_sync_update;
+CREATE TRIGGER unvectorizedmediachunks_sync_update AFTER UPDATE ON UnvectorizedMediaChunks
+WHEN OLD.deleted = NEW.deleted AND (
+    ifnull(OLD.chunk_text,'') != ifnull(NEW.chunk_text,'') OR
+    ifnull(OLD.chunk_index,0) != ifnull(NEW.chunk_index,0) OR
+    ifnull(OLD.start_char,0) != ifnull(NEW.start_char,0) OR
+    ifnull(OLD.end_char,0) != ifnull(NEW.end_char,0) OR
+    ifnull(OLD.chunk_type,'') != ifnull(NEW.chunk_type,'') OR
+    ifnull(OLD.metadata,'') != ifnull(NEW.metadata,'') OR
+    ifnull(OLD.last_modified,'') != ifnull(NEW.last_modified,'') OR
+    ifnull(OLD.version,0) != ifnull(NEW.version,0) OR
+    ifnull(OLD.client_id, '') != ifnull(NEW.client_id, '')
+) BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('UnvectorizedMediaChunks', NEW.uuid, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id),
+      'chunk_text', NEW.chunk_text, 'chunk_index', NEW.chunk_index, 'start_char', NEW.start_char,
+      'end_char', NEW.end_char, 'chunk_type', NEW.chunk_type, 'creation_date', NEW.creation_date,
+      'metadata', NEW.metadata,
+      'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted
+      ));
+END;
+
+DROP TRIGGER IF EXISTS unvectorizedmediachunks_sync_delete;
+CREATE TRIGGER unvectorizedmediachunks_sync_delete AFTER UPDATE ON UnvectorizedMediaChunks
+WHEN OLD.deleted = 0 AND NEW.deleted = 1 BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('UnvectorizedMediaChunks', NEW.uuid, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id), 'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id));
+END;
+
+DROP TRIGGER IF EXISTS unvectorizedmediachunks_sync_undelete;
+CREATE TRIGGER unvectorizedmediachunks_sync_undelete AFTER UPDATE ON UnvectorizedMediaChunks
+WHEN OLD.deleted = 1 AND NEW.deleted = 0 BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('UnvectorizedMediaChunks', NEW.uuid, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id),
+      'chunk_text', NEW.chunk_text, 'chunk_index', NEW.chunk_index, 'start_char', NEW.start_char,
+      'end_char', NEW.end_char, 'chunk_type', NEW.chunk_type, 'creation_date', NEW.creation_date,
+      'metadata', NEW.metadata,
+      'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted
+      ));
+END;
+
+
+-- ==================================
+-- Triggers for DocumentVersions Table
+-- ==================================
+DROP TRIGGER IF EXISTS documentversions_sync_create;
+CREATE TRIGGER documentversions_sync_create AFTER INSERT ON DocumentVersions BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('DocumentVersions', NEW.uuid, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id),
+      'version_number', NEW.version_number, 'prompt', NEW.prompt, 'analysis_content', NEW.analysis_content,
+      'content', NEW.content, 'created_at', NEW.created_at, 'last_modified', NEW.last_modified,
+      'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted));
+END;
+
+DROP TRIGGER IF EXISTS documentversions_sync_update;
+CREATE TRIGGER documentversions_sync_update AFTER UPDATE ON DocumentVersions
+WHEN OLD.deleted = NEW.deleted AND (
+    ifnull(OLD.prompt,'') != ifnull(NEW.prompt,'') OR
+    ifnull(OLD.analysis_content,'') != ifnull(NEW.analysis_content,'') OR
+    ifnull(OLD.content,'') != ifnull(NEW.content,'') OR
+    ifnull(OLD.version_number,0) != ifnull(NEW.version_number,0) OR
+    ifnull(OLD.last_modified,'') != ifnull(NEW.last_modified,'') OR
+    ifnull(OLD.version,0) != ifnull(NEW.version,0) OR
+    ifnull(OLD.client_id, '') != ifnull(NEW.client_id, '')
+) BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('DocumentVersions', NEW.uuid, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id),
+      'version_number', NEW.version_number, 'prompt', NEW.prompt, 'analysis_content', NEW.analysis_content,
+      'content', NEW.content, 'created_at', NEW.created_at, 'last_modified', NEW.last_modified,
+      'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted));
+END;
+
+DROP TRIGGER IF EXISTS documentversions_sync_delete;
+CREATE TRIGGER documentversions_sync_delete AFTER UPDATE ON DocumentVersions
+WHEN OLD.deleted = 0 AND NEW.deleted = 1 BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('DocumentVersions', NEW.uuid, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id), 'last_modified', NEW.last_modified, 'version', NEW.version, 'client_id', NEW.client_id));
+END;
+
+DROP TRIGGER IF EXISTS documentversions_sync_undelete;
+CREATE TRIGGER documentversions_sync_undelete AFTER UPDATE ON DocumentVersions
+WHEN OLD.deleted = 1 AND NEW.deleted = 0 BEGIN
+  INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+  VALUES ('DocumentVersions', NEW.uuid, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+    json_object('uuid', NEW.uuid, 'media_uuid', (SELECT uuid FROM Media WHERE id = NEW.media_id),
+      'version_number', NEW.version_number, 'prompt', NEW.prompt, 'analysis_content', NEW.analysis_content,
+      'content', NEW.content, 'created_at', NEW.created_at, 'last_modified', NEW.last_modified,
+      'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted));
+END;
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- Synchronization Data Validation Triggers (NEW)
+-- ───────────────────────────────────────────────────────────────────────────
+
+-- ========================
+-- Validation for Media Table
+-- ========================
+DROP TRIGGER IF EXISTS media_validate_sync_update;
+CREATE TRIGGER media_validate_sync_update
+BEFORE UPDATE ON Media
+BEGIN
+    -- Check version increment (must be exactly +1)
+    SELECT RAISE(ABORT, 'Sync Error (Media): Version must increment by exactly 1.')
+    WHERE NEW.version IS NOT OLD.version + 1;
+
+    -- Check client_id presence
+    SELECT RAISE(ABORT, 'Sync Error (Media): Client ID cannot be NULL or empty.')
+    WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+
+    -- Optional: Check timestamp is not older (helps prevent accidental regressions)
+    -- SELECT RAISE(ABORT, 'Sync Error (Media): New last_modified timestamp cannot be older than the existing one.')
+    -- WHERE NEW.last_modified < OLD.last_modified;
+END;
+
+-- ==========================
+-- Validation for Keywords Table
+-- ==========================
+DROP TRIGGER IF EXISTS keywords_validate_sync_update;
+CREATE TRIGGER keywords_validate_sync_update
+BEFORE UPDATE ON Keywords
+BEGIN
+    SELECT RAISE(ABORT, 'Sync Error (Keywords): Version must increment by exactly 1.')
+    WHERE NEW.version IS NOT OLD.version + 1;
+
+    SELECT RAISE(ABORT, 'Sync Error (Keywords): Client ID cannot be NULL or empty.')
+    WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+END;
+
+-- ==========================
+-- Validation for Transcripts Table
+-- ==========================
+DROP TRIGGER IF EXISTS transcripts_validate_sync_update;
+CREATE TRIGGER transcripts_validate_sync_update
+BEFORE UPDATE ON Transcripts
+BEGIN
+    SELECT RAISE(ABORT, 'Sync Error (Transcripts): Version must increment by exactly 1.')
+    WHERE NEW.version IS NOT OLD.version + 1;
+
+    SELECT RAISE(ABORT, 'Sync Error (Transcripts): Client ID cannot be NULL or empty.')
+    WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+END;
+
+-- ==========================
+-- Validation for MediaChunks Table
+-- ==========================
+DROP TRIGGER IF EXISTS mediachunks_validate_sync_update;
+CREATE TRIGGER mediachunks_validate_sync_update
+BEFORE UPDATE ON MediaChunks
+BEGIN
+    SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Version must increment by exactly 1.')
+    WHERE NEW.version IS NOT OLD.version + 1;
+
+    SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Client ID cannot be NULL or empty.')
+    WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+END;
+
+-- =======================================
+-- Validation for UnvectorizedMediaChunks Table
+-- =======================================
+DROP TRIGGER IF EXISTS unvectorizedmediachunks_validate_sync_update;
+CREATE TRIGGER unvectorizedmediachunks_validate_sync_update
+BEFORE UPDATE ON UnvectorizedMediaChunks
+BEGIN
+    SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Version must increment by exactly 1.')
+    WHERE NEW.version IS NOT OLD.version + 1;
+
+    SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Client ID cannot be NULL or empty.')
+    WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+END;
+
+-- ==================================
+-- Validation for DocumentVersions Table
+-- ==================================
+DROP TRIGGER IF EXISTS documentversions_validate_sync_update;
+CREATE TRIGGER documentversions_validate_sync_update
+BEFORE UPDATE ON DocumentVersions
+BEGIN
+    SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): Version must increment by exactly 1.')
+    WHERE NEW.version IS NOT OLD.version + 1;
+
+    SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): Client ID cannot be NULL or empty.')
+    WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+END;
+"""

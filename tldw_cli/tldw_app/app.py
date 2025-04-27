@@ -34,7 +34,7 @@ from .config import get_setting, get_providers_and_models, get_log_file_path, DE
     DEFAULT_CONFIG_PATH, CONFIG_TOML_CONTENT
 from .Widgets.chat_message import ChatMessage
 from .Widgets.settings_sidebar import create_settings_sidebar
-
+from .Widgets.titlebar import TitleBar
 # Adjust the path based on your project structure
 try:
     # Import from the new 'api' directory
@@ -246,7 +246,7 @@ logging.info("Initial basic logging configured.")
 # --- Main App ---
 class TldwCli(App[None]): # Specify return type for run() if needed, None is common
     """A Textual app for interacting with LLMs."""
-
+    TITLE = "🧠📝🔍  tldw CLI"
     # Use forward slashes for paths, works cross-platform
     CSS_PATH = "css/tldw_cli.tcss"
     BINDINGS = [ Binding("ctrl+q", "quit", "Quit App", show=True) ]
@@ -257,7 +257,7 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
     # Add state to hold the currently streaming AI message widget
     current_ai_message_widget: Optional[ChatMessage] = None
 
-    # --- ADD REACTIVES FOR PROVIDER SELECTS ---
+    # --- REACTIVES FOR PROVIDER SELECTS ---
     # Initialize with a dummy value or fetch default from config here
     # Ensure the initial value matches what's set in compose/settings_sidebar
     # Fetching default provider from config:
@@ -266,8 +266,9 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
 
     chat_api_provider_value: reactive[Optional[str]] = reactive(_default_chat_provider)
     character_api_provider_value: reactive[Optional[str]] = reactive(_default_character_provider)
-    # --- END ADD REACTIVES ---
 
+    # Reactives for sidebar
+    chat_sidebar_collapsed: reactive[bool] = reactive(False, layout=True)
 
     def __init__(self):
         super().__init__()
@@ -395,6 +396,8 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
     def compose(self) -> ComposeResult:
         logging.debug("App composing UI...")
         yield Header()
+        # Set up the main title bar with a static title
+        yield TitleBar()
         yield from self.compose_tabs()
         yield from self.compose_content_area()
         yield Footer()
@@ -423,6 +426,7 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
                     # *** Use VerticalScroll for ChatMessages ***
                     yield VerticalScroll(id="chat-log")
                     with Horizontal(id="chat-input-area"):
+                        yield Button("☰", id="toggle-chat-sidebar", classes="sidebar-toggle")
                         yield TextArea(id="chat-input", classes="chat-input")
                         yield Button("🎤", id="mic-chat", classes="mic-button")
                         yield Button("Send", id="send-chat", classes="send-button")
@@ -638,6 +642,14 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
 
         print(">>> DEBUG: watch_current_tab finished.")
 
+    def watch_chat_sidebar_collapsed(self, collapsed: bool) -> None:
+        """Hide or show the chat sidebar."""
+        try:
+            sidebar = self.query_one("#chat-sidebar")  # id from create_settings_sidebar
+            sidebar.display = not collapsed  # True → visible
+        except QueryError:
+            logging.error("Chat sidebar widget not found.")
+
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses for tabs, sending messages, and message actions."""
         button = event.button
@@ -656,6 +668,12 @@ class TldwCli(App[None]): # Specify return type for run() if needed, None is com
             else:
                 print(f">>> DEBUG: Already on tab '{new_tab_id}'. Ignoring.")
                 logging.debug(f"Already on tab '{new_tab_id}'. Ignoring.")
+            return
+
+        # ── sidebar toggle ────────────────────────────────────────────
+        if button_id == "toggle-chat-sidebar":
+            self.chat_sidebar_collapsed = not self.chat_sidebar_collapsed
+            logging.debug("Sidebar now %s", "collapsed" if self.chat_sidebar_collapsed else "expanded")
             return
 
         # --- Send Message ---
@@ -1512,6 +1530,35 @@ ChatMessage.-ai .message-actions.-generating {
 .mic-button:hover {
     background: $surface;
     color: $text;
+}
+.sidebar-toggle {
+    width: 3;
+    height: 3;
+    margin-right: 1;
+    border: none;
+    background: $surface-darken-1;
+    color: $text;
+}
+.sidebar-toggle:hover {
+    background: $surface;
+}
+
+/* collapsed side-bar; width zero and no border */
+.sidebar.collapsed {
+    width: 0 !important;
+    border-right: none !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    display: none;          /* ensures it doesn’t grab focus */
+}
+#app-titlebar {
+    dock: top;
+    height: 1;                 /* single line */
+    background: $accent;       /* or any colour */
+    color: $text;
+    text-align: center;
+    text-style: bold;
+    padding: 0 1;
 }
     """
 

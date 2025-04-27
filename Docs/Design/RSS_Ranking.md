@@ -37,4 +37,12 @@ https://github.com/leafac/kill-the-newsletter
 https://github.com/fabriziosalmi/UglyFeed
 https://github.com/Tiendil/feeds.fun
 https://github.com/DIYgod/RSSHub
+https://rss-bridge.org/
+https://www.zacusca.net/
+https://scour.ing/about
+https://feeds.fun/
+https://andregarzia.com/2025/04/rss-doesnt-necessarily-means-firehose.html
+
+
+
 

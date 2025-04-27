@@ -184,6 +184,33 @@ ChatMessage.-ai .message-actions.-generating {
     background: $surface;
     color: $text;
 }
+.sidebar-toggle {
+    width: 2;                /* tiny square */
+    height: 3;
+    margin-right: 1;
+    border: none;
+    background: $surface-darken-1;
+    color: $text;
+}
+.sidebar-toggle:hover { background: $surface; }
+
+/* collapsed side-bar; width zero and no border */
+.sidebar.collapsed {
+    width: 0 !important;
+    border-right: none !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    display: none;          /* ensures it doesn’t grab focus */
+}
+#app-titlebar {
+    dock: top;
+    height: 1;                 /* single line */
+    background: $accent;       /* or any colour */
+    color: $text;
+    text-align: center;
+    text-style: bold;
+    padding: 0 1;
+}
 """
 
 #

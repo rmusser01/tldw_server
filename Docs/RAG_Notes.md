@@ -31,6 +31,10 @@ https://huggingface.co/PleIAs/Pleias-RAG-1B-gguf
 https://arxiv.org/abs/2504.13587
 https://patann.dev/
 https://substack.com/home/post/p-161922553
+https://github.com/microsoft/LMOps/tree/main/corag
+https://www.figma.com/slides/eq8UzeTluT3qLKOpzlLj8y/LlamaIndex-Talk--Document-Agents-?node-id=51004-814&t=7F9MAlkLnukNb3f6-0
+
+
 
 Models
 	https://huggingface.co/THUDM/GLM-Z1-32B-0414

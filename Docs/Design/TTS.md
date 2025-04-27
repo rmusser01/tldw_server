@@ -19,7 +19,7 @@ https://github.com/RobViren/kokovoicelab
 https://github.com/Nighthawk42/mOrpheus
 https://jordandarefsky.com/blog/2024/parakeet/
 https://github.com/collabora/WhisperLive
-
+https://github.com/Lex-au/Vocalis?tab=readme-ov-file
 https://huggingface.co/moonshotai/Kimi-Audio-7B-Instruct
 
 https://github.com/Lex-au/Orpheus-FastAPI

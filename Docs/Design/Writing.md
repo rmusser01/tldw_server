@@ -27,7 +27,7 @@ https://arxiv.org/abs/2503.17126
 https://github.com/langchain-ai/open-canvas
 https://github.com/aomukai/Writingway
 https://github.com/sam-paech/antislop-sampler
-
+https://github.com/YofarDev/chapitre
 
 
 
