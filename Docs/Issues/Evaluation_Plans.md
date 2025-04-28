@@ -23,7 +23,13 @@ https://arxiv.org/html/2411.12990v1
 https://github.com/knoveleng/rainbowplus
 https://github.com/salman-lui/x-teaming
 https://arxiv.org/abs/2504.15909
-
+https://huggingface.co/spaces/lmgame/game_arena_bench
+https://www.vgbench.com/
+https://huggingface.co/NousResearch/Minos-v1
+https://colab.research.google.com/github/mistralai/cookbook/blob/main/mistral/classifier_factory/intent_classification.ipynb
+https://colab.research.google.com/github/mistralai/cookbook/blob/main/mistral/classifier_factory/moderation_classifier.ipynb
+https://colab.research.google.com/github/mistralai/cookbook/blob/main/mistral/classifier_factory/product_classification.ipynb
+https://docs.mistral.ai/capabilities/finetuning/classifier_factory/
 
 
 

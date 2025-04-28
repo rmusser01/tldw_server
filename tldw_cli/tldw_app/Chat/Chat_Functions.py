@@ -12,6 +12,11 @@ import time
 import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
+
+import requests
+
+from tldw_Server_API.app.core.Chat.Chat_Functions import ChatConfigurationError, ChatBadRequestError, ChatAPIError, \
+    ChatAuthenticationError, ChatRateLimitError, ChatProviderError
 #
 # External Imports
 #
@@ -79,259 +84,51 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
 
         # --- Routing Logic ---
         if endpoint_lower == 'openai':
-            response = chat_with_openai(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt' to 'custom_prompt_arg'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming,
-                maxp=maxp, # OpenAI uses 'top_p' internally, handled by chat_with_openai
-                model=model
-            )
-
+            response = chat_with_openai(api_key=api_key, input_data=input_data, custom_prompt_arg=prompt, temp=temp, system_message=system_message, streaming=streaming, maxp=maxp, model=model)
         elif endpoint_lower == 'anthropic':
-            # No need to load config here, let chat_with_anthropic handle it
-            response = chat_with_anthropic(
-                api_key=api_key,
-                input_data=input_data,
-                model=model,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                system_prompt=system_message, # Map 'system_message'
-                streaming=streaming,
-                temp=temp,
-                topp=topp, # Pass 'topp'
-                topk=topk  # Pass 'topk'
-                # chat_with_anthropic handles retries internally
-            )
-
+            response = chat_with_anthropic(api_key=api_key, input_data=input_data, model=model, custom_prompt_arg=prompt, system_prompt=system_message, streaming=streaming, temp=temp, topp=topp, topk=topk)
         elif endpoint_lower == "cohere":
-            response = chat_with_cohere(
-                api_key=api_key,
-                input_data=input_data,
-                model=model,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                system_prompt=system_message, # Map 'system_message'
-                temp=temp,
-                streaming=streaming,
-                topp=topp, # Pass 'topp'
-                topk=topk  # Pass 'topk'
-            )
-
+            response = chat_with_cohere(api_key=api_key, input_data=input_data, model=model, custom_prompt_arg=prompt, system_prompt=system_message, temp=temp, streaming=streaming, topp=topp, topk=topk)
         elif endpoint_lower == "groq":
-            response = chat_with_groq(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming,
-                maxp=maxp # Groq uses 'top_p' internally, handled by chat_with_groq
-            )
-
+            response = chat_with_groq(api_key=api_key, input_data=input_data, custom_prompt_arg=prompt, temp=temp, system_message=system_message, streaming=streaming, maxp=maxp)
         elif endpoint_lower == "openrouter":
-            response = chat_with_openrouter(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming,
-                top_p=topp, # Map 'topp' to 'top_p'
-                top_k=topk, # Map 'topk' to 'top_k'
-                minp=minp  # Pass 'minp'
-            )
-
+            response = chat_with_openrouter(api_key=api_key, input_data=input_data, custom_prompt_arg=prompt, temp=temp, system_message=system_message, streaming=streaming, top_p=topp, top_k=topk, minp=minp)
         elif endpoint_lower == "deepseek":
-            response = chat_with_deepseek(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming,
-                topp=topp # Pass 'topp'
-            )
-
+            response = chat_with_deepseek(api_key=api_key, input_data=input_data, custom_prompt_arg=prompt, temp=temp, system_message=system_message, streaming=streaming, topp=topp)
         elif endpoint_lower == "mistral":
-            response = chat_with_mistral(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming,
-                topp=topp, # Pass 'topp'
-                model=model
-            )
-
+            response = chat_with_mistral(api_key=api_key, input_data=input_data, custom_prompt_arg=prompt, temp=temp, system_message=system_message, streaming=streaming, topp=topp, model=model)
         elif endpoint_lower == "google":
-            response = chat_with_google(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming,
-                topp=topp, # Pass 'topp'
-                topk=topk  # Pass 'topk'
-            )
-
+            response = chat_with_google(api_key=api_key, input_data=input_data, custom_prompt_arg=prompt, temp=temp, system_message=system_message, streaming=streaming, topp=topp, topk=topk)
         elif endpoint_lower == "huggingface":
-            response = chat_with_huggingface(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                system_prompt=system_message, # Map 'system_message'
-                temp=temp,
-                streaming=streaming
-            )
-
+            response = chat_with_huggingface(api_key=api_key, input_data=input_data, custom_prompt_arg=prompt, system_prompt=system_message, temp=temp, streaming=streaming)
         elif endpoint_lower == "llama.cpp":
-             # chat_with_llama expects api_url as 4th arg, pass None to use config default
-            response = chat_with_llama(
-                input_data=input_data,
-                custom_prompt=prompt, # Map 'prompt' to 'custom_prompt'
-                temp=temp,
-                api_url=None, # Let the function load from config
-                api_key=api_key,
-                system_prompt=system_message, # Map 'system_message'
-                streaming=streaming,
-                top_k=topk, # Map 'topk'
-                top_p=topp, # Map 'topp'
-                min_p=minp  # Map 'minp'
-            )
-
+            response = chat_with_llama(input_data=input_data, custom_prompt=prompt, temp=temp, api_url=None, api_key=api_key, system_prompt=system_message, streaming=streaming, top_k=topk, top_p=topp, min_p=minp)
         elif endpoint_lower == "kobold":
-            response = chat_with_kobold(
-                input_data=input_data,
-                api_key=api_key,
-                custom_prompt_input=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message, # Pass system_message
-                streaming=streaming,
-                top_k=topk, # Map 'topk'
-                top_p=topp # Map 'topp'
-            )
-
+            response = chat_with_kobold(input_data=input_data, api_key=api_key, custom_prompt_input=prompt, temp=temp, system_message=system_message, streaming=streaming, top_k=topk, top_p=topp)
         elif endpoint_lower == "ooba":
-             # chat_with_oobabooga expects api_url as 5th arg, pass None
-            response = chat_with_oobabooga(
-                input_data=input_data,
-                api_key=api_key,
-                custom_prompt=prompt, # Map 'prompt'
-                system_prompt=system_message, # Map 'system_message'
-                api_url=None, # Let the function load from config
-                streaming=streaming,
-                temp=temp,
-                top_p=topp # Map 'topp'
-            )
-
+            response = chat_with_oobabooga(input_data=input_data, api_key=api_key, custom_prompt=prompt, system_prompt=system_message, api_url=None, streaming=streaming, temp=temp, top_p=topp)
         elif endpoint_lower == "tabbyapi":
-            response = chat_with_tabbyapi(
-                input_data=input_data,
-                custom_prompt_input=prompt, # Map 'prompt'
-                system_message=system_message,
-                api_key=api_key, # Pass api_key
-                temp=temp,
-                streaming=streaming, # Pass streaming
-                top_k=topk, # Pass topk
-                top_p=topp, # Pass topp
-                min_p=minp # Pass minp
-            )
-
+            response = chat_with_tabbyapi(input_data=input_data, custom_prompt_input=prompt, system_message=system_message, api_key=api_key, temp=temp, streaming=streaming, top_k=topk, top_p=topp, min_p=minp)
         elif endpoint_lower == "vllm":
-             # chat_with_vllm expects api_url as 4th arg, pass None
-            response = chat_with_vllm(
-                input_data=input_data,
-                custom_prompt_input=prompt, # Map 'prompt'
-                api_key=api_key,
-                vllm_api_url=None, # Let the function load from config
-                model=model, # Pass model
-                system_prompt=system_message, # Map 'system_message'
-                temp=temp,
-                streaming=streaming,
-                minp=minp, # Pass minp
-                topp=topp, # Pass topp
-                topk=topk # Pass topk
-             )
-
+            response = chat_with_vllm(input_data=input_data, custom_prompt_input=prompt, api_key=api_key, vllm_api_url=None, model=model, system_prompt=system_message, temp=temp, streaming=streaming, minp=minp, topp=topp, topk=topk)
         elif endpoint_lower == "local-llm":
-            response = chat_with_local_llm(
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming, # Pass streaming
-                top_k=topk, # Pass topk
-                top_p=topp, # Pass topp
-                min_p=minp # Pass minp
-            )
-
+            response = chat_with_local_llm(input_data=input_data, custom_prompt_arg=prompt, temp=temp, system_message=system_message, streaming=streaming, top_k=topk, top_p=topp, min_p=minp)
         elif endpoint_lower == "ollama":
-             # chat_with_ollama expects api_url as 3rd arg, pass None
-            response = chat_with_ollama(
-                input_data=input_data,
-                custom_prompt=prompt, # Map 'prompt'
-                api_url=None, # Let the function load from config
-                api_key=api_key,
-                temp=temp,
-                system_message=system_message,
-                model=model, # Pass model
-                streaming=streaming, # Pass streaming
-                top_p=topp # Pass topp
-            )
-
+            response = chat_with_ollama(input_data=input_data, custom_prompt=prompt, api_url=None, api_key=api_key, temp=temp, system_message=system_message, model=model, streaming=streaming, top_p=topp)
         elif endpoint_lower == "aphrodite":
-            response = chat_with_aphrodite(
-                api_key=api_key, # Pass api_key
-                input_data=input_data,
-                custom_prompt=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming, # Pass streaming
-                topp=topp, # Pass topp
-                minp=minp, # Pass minp
-                topk=topk, # Pass topk
-                model=model # Pass model
-            )
-
+            response = chat_with_aphrodite(api_key=api_key, input_data=input_data, custom_prompt=prompt, temp=temp, system_message=system_message, streaming=streaming, topp=topp, minp=minp, topk=topk, model=model)
         elif endpoint_lower == "custom-openai-api":
-            response = chat_with_custom_openai(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming, # Pass streaming
-                maxp=maxp, # Pass maxp (maps to top_p internally)
-                model=model, # Pass model
-                minp=minp, # Pass minp
-                topk=topk # Pass topk
-            )
-
+            response = chat_with_custom_openai(api_key=api_key, input_data=input_data, custom_prompt_arg=prompt, temp=temp, system_message=system_message, streaming=streaming, maxp=maxp, model=model, minp=minp, topk=topk)
         elif endpoint_lower == "custom-openai-api-2":
-             # NOTE: chat_with_custom_openai_2 doesn't accept maxp, minp, topk in its signature
-            response = chat_with_custom_openai_2(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming, # Pass streaming
-                model=model # Pass model
-            )
-
+            response = chat_with_custom_openai_2(api_key=api_key, input_data=input_data, custom_prompt_arg=prompt, temp=temp, system_message=system_message, streaming=streaming, model=model)
         else:
-            # --- Error for unsupported endpoint ---
             logging.error(f"Unsupported API endpoint requested: {api_endpoint}")
-            raise ValueError(f"Unsupported API endpoint: {api_endpoint}")
+            raise ValueError(f"Unsupported API endpoint: {api_endpoint}") # Raise ValueError
 
         # --- Success Logging and Return ---
         call_duration = time.time() - start_time
         log_histogram("chat_api_call_duration", call_duration, labels={"api_endpoint": endpoint_lower})
         log_counter("chat_api_call_success", labels={"api_endpoint": endpoint_lower})
-        # Avoid logging potentially huge responses
         if isinstance(response, str):
              logging.debug(f"Debug - Chat API Call - Response (first 500 chars): {response[:500]}...")
         elif hasattr(response, '__iter__') and not isinstance(response, (str, bytes, dict)):
@@ -340,14 +137,65 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
              logging.debug(f"Debug - Chat API Call - Response Type: {type(response)}")
         return response
 
+    # --- Exception Mapping ---
+    except requests.exceptions.HTTPError as e:
+        status_code = getattr(e.response, "status_code", 500)
+        error_text = getattr(e.response, "text", str(e))
+
+        # ESCAPE braces so Loguru won’t treat them as formatting fields
+        safe_text = error_text.replace("{", "{{").replace("}", "}}")
+
+        logging.error(
+            f"HTTPError caught for {endpoint_lower}. "
+            f"Status: {status_code}. Details: {safe_text[:500]}…",
+            exc_info=False,
+        )
+        return {
+            "__error__": True,
+            "status_code": status_code,
+            "provider": endpoint_lower,
+            "message": f"API call to {endpoint_lower} failed with status {status_code}",
+            "details": error_text,  # keep the original, unhashed string for callers
+        }
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Network error connecting to {endpoint_lower}: {e}", exc_info=False)
+        # Return error info
+        return {
+            "__error__": True,
+            "status_code": 504,  # Gateway Timeout
+            "provider": endpoint_lower,
+            "message": f"Network error contacting {endpoint_lower}",
+            "details": str(e)
+        }
+
+    except (ValueError, TypeError, KeyError) as e:
+         logging.error(f"Value/Type/Key error during chat API call setup for {endpoint_lower}: {e}", exc_info=True)
+         # Return error info
+         error_type = "Configuration/Parameter Error"
+         status = 400
+         if "Unsupported API endpoint" in str(e):
+             error_type = "Unsupported API"
+             status = 501 # Not Implemented might be better
+         return {
+             "__error__": True,
+             "status_code": status,
+             "provider": endpoint_lower,
+             "message": f"{error_type} for {endpoint_lower}",
+             "details": str(e)
+         }
+
+    # --- Final Catch-all ---
     except Exception as e:
-        # --- Error Logging and Return ---
-        call_duration = time.time() - start_time
-        log_histogram("chat_api_call_duration", call_duration, labels={"api_endpoint": endpoint_lower}) # Log duration even on error
-        log_counter("chat_api_call_error", labels={"api_endpoint": endpoint_lower, "error_type": type(e).__name__, "error_message": str(e)})
-        logging.error(f"Error in chat_api_call for endpoint '{endpoint_lower}': {str(e)}", exc_info=True) # Include traceback
-        # Return a user-friendly error message
-        return f"An error occurred while calling the '{endpoint_lower}' API: {str(e)}"
+        # ... (logging) ...
+        # Return error info
+        return {
+            "__error__": True,
+            "status_code": 500,
+            "provider": endpoint_lower,
+            "message": f"An unexpected internal error occurred in chat_api_call for {endpoint_lower}",
+            "details": str(e)
+        }
 
 
 def chat(message, history, media_content, selected_parts, api_endpoint, api_key, custom_prompt, temperature,

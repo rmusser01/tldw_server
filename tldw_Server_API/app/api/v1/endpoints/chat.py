@@ -6,8 +6,11 @@
 import asyncio
 import logging
 import json
+import os
 from functools import partial
 from typing import List, Optional, Union, Dict, Any, Literal
+from dotenv import load_dotenv
+import toml
 #
 # 3rd-party imports
 from fastapi import (
@@ -30,28 +33,31 @@ from pydantic import BaseModel
 from pydantic import BaseModel, Field, HttpUrl, ValidationError, field_validator, model_validator
 import redis
 import requests
+from requests import RequestException, HTTPError
 # API Rate Limiter/Caching via Redis
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from loguru import logger
 from starlette.responses import JSONResponse, StreamingResponse
-
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest, \
-    ChatCompletionSystemMessageParam, API_KEYS, DEFAULT_LLM_PROVIDER
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_db_for_user
 #
 # Local Imports
+from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest, API_KEYS, \
+    DEFAULT_LLM_PROVIDER
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_db_for_user
 from tldw_Server_API.app.core.Chat.Chat_Functions import (
-    get_character_names,
-    get_conversation_name,
-    alert_token_budget_exceeded, chat_api_call,
+        chat_api_call,
+        ChatAuthenticationError,
+        ChatRateLimitError,
+        ChatBadRequestError,
+        ChatConfigurationError,
+        ChatProviderError,
+        ChatAPIError,
 )
 from tldw_Server_API.app.core.DB_Management.Media_DB import Database
 #
 # DB Mgmt
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
-#from tldw_Server_API.app.core.DB_Management.DB_Manager import DBManager
 #
 #
 #######################################################################################################################
@@ -99,7 +105,7 @@ async def create_chat_completion(
     current_api_key = API_KEYS.get(target_endpoint.lower())
     # Allow providers without keys (like some local LLMs)
     # if not current_api_key and target_endpoint.lower() not in ["llama.cpp", "local-llm", "ooba"]: # Add other keyless providers if needed
-    is_key_required = target_endpoint.lower() not in ["llama.cpp", "local-llm", "ooba", "tabbyapi"] # Example: List providers potentially not needing a key
+    is_key_required = target_endpoint.lower() not in ["llama.cpp", "local-llm", "ooba", "tabbyapi", "kobold"] # Example: List providers potentially not needing a key
     if not current_api_key and is_key_required:
          logger.error(f"API Key for provider '{target_endpoint}' is not configured on the server.")
          raise HTTPException(
@@ -158,68 +164,116 @@ async def create_chat_completion(
 
     # Get the current event loop
     loop = asyncio.get_running_loop()
-
-    # --- Handle Streaming ---
-    if request_data.stream:
-        logger.info(f"Streaming requested for {target_endpoint}.")
-        try:
+    try:  # Single main try block for the core logic
+        # --- Handle Streaming ---
+        if request_data.stream:
+            logger.info(f"Streaming requested for {target_endpoint}.")
             # Use partial to wrap the function call with arguments for the executor
             func_call = partial(chat_api_call, **chat_args_cleaned)
+            # Exceptions from chat_api_call will be raised here by run_in_executor
             stream_generator = await loop.run_in_executor(None, func_call)
 
+            # Check if the returned value is actually iterable *before* wrapping
             if not hasattr(stream_generator, '__aiter__') and not hasattr(stream_generator, '__iter__'):
-                 logger.error(f"chat_api_call did not return a valid generator/iterator for streaming from {target_endpoint}.")
-                 raise HTTPException(status_code=500, detail="Streaming setup error in backend.")
+                logger.error(
+                    f"chat_api_call did not return a valid generator/iterator for streaming from {target_endpoint}.")
+                # Raise error to be caught by handlers below
+                raise ChatProviderError(provider=target_endpoint,
+                                        message="Streaming setup error: backend function did not return iterator.",
+                                        status_code=500)
 
             async def async_stream_wrapper():
                 # Wrapper for handling sync/async iterators from executor
                 try:
                     if hasattr(stream_generator, '__aiter__'):
-                         async for chunk in stream_generator:
-                             yield chunk # Assume chunk is already formatted for SSE
+                        async for chunk in stream_generator: yield chunk
                     elif hasattr(stream_generator, '__iter__'):
-                         for chunk in stream_generator:
-                             yield chunk # Assume chunk is already formatted for SSE
-                             await asyncio.sleep(0) # Yield control
-                    else:
-                         logger.error(f"Backend function {target_endpoint} did not return iterable for streaming.")
-                         yield f"data: {json.dumps({'error': 'Streaming error'})}\n\n"
-                         yield "data: [DONE]\n\n"
-                except Exception as e:
-                     logger.error(f"Error during streaming from {target_endpoint}: {e}", exc_info=True)
-                     error_payload = json.dumps({"error": {"message": f"Stream generation error: {str(e)}", "type": "stream_error"}})
-                     yield f"data: {error_payload}\n\n"
-                     yield "data: [DONE]\n\n" # Ensure stream terminates
+                        for chunk in stream_generator:
+                            yield chunk
+                            await asyncio.sleep(0)  # Yield control
+                    # No need for 'else' here, the check above should prevent invalid types
+                except Exception as stream_e:
+                    logger.error(f"Error during streaming generation from {target_endpoint}: {stream_e}", exc_info=True)
+                    error_payload = json.dumps(
+                        {"error": {"message": f"Stream generation error: {str(stream_e)}", "type": "stream_error"}})
+                    yield f"data: {error_payload}\n\n"
+                finally:
+                    # Always send DONE event
+                    yield "data: [DONE]\n\n"
 
             return StreamingResponse(async_stream_wrapper(), media_type="text/event-stream")
 
-        except Exception as e:
-             logger.error(f"Error setting up streaming response for {target_endpoint}: {e}", exc_info=True)
-             raise HTTPException(status_code=500, detail=f"Failed to initiate stream: {str(e)}")
-
-    # --- Handle Non-Streaming ---
-    else:
-        logger.info(f"Non-streaming request to {target_endpoint}.")
-        try:
+        # --- Handle Non-Streaming ---
+        else:
+            logger.info(f"Non-streaming request to {target_endpoint}.")
             # Use partial for cleaner executor call
             func_call = partial(chat_api_call, **chat_args_cleaned)
+            # Exceptions from chat_api_call will be raised here by run_in_executor
             response_data = await loop.run_in_executor(None, func_call)
 
-            if isinstance(response_data, str) and response_data.startswith("An error occurred"):
-                 logger.error(f"Error from chat_api_call ({target_endpoint}): {response_data}")
-                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=response_data)
-
             logger.info(f"Successfully received response from {target_endpoint} for model: {request_data.model}")
-            # Return the raw response from the shim function for now
-            # Ensure it's JSON serializable
             return JSONResponse(content=jsonable_encoder(response_data))
 
-        except ValueError as ve:
-             logger.error(f"Value error calling chat_api_call for {target_endpoint}: {ve}", exc_info=True)
-             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
-        except Exception as e:
-             logger.error(f"Unexpected error processing chat completion for {target_endpoint}: {e}", exc_info=True)
-             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal server error processing chat request for {target_endpoint}.")
+    # --- CATCH SPECIFIC Chat*Errors FIRST ---
+    except ChatAuthenticationError as e:
+        logger.warning("Caught ChatAuthenticationError (%s): %s", e.provider, e.message)  # Safe logging
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message)
+    except ChatRateLimitError as e:
+        logger.warning("Caught ChatRateLimitError (%s): %s", e.provider, e.message)  # Safe logging
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=e.message)
+    except ChatBadRequestError as e:
+        logger.warning("Caught ChatBadRequestError (%s): %s", e.provider, e.message)  # Safe logging
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=e.message)
+    except ChatConfigurationError as e:
+        logger.error("Caught ChatConfigurationError (%s): %s", e.provider, e.message, exc_info=True)  # Safe logging
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=e.message)
+    except ChatProviderError as e:
+        # This now also catches the stream setup error raised above
+        logger.error("Caught ChatProviderError (%s, Status: %s): %s", e.provider, e.status_code, e.message,
+                     exc_info=True)  # Safe logging
+        http_status = e.status_code if 400 <= e.status_code < 600 else 502
+        raise HTTPException(status_code=http_status, detail=e.message)
+    except ChatAPIError as e:  # Catch base or other specific Chat errors
+        logger.error("Caught ChatAPIError (%s): %s", e.provider, e.message, exc_info=True)  # Safe logging
+        http_status = e.status_code if 400 <= e.status_code < 600 else 500
+        raise HTTPException(status_code=http_status, detail=e.message)
+
+    # --- CATCH GENERIC LIBRARY/NETWORK ERRORS (if they escape chat_api_call or happen in executor/stream setup) ---
+    except HTTPError as e:  # From requests library
+        status_code = e.response.status_code if e.response is not None else 500
+        detail = f"Upstream API Error ({target_endpoint}): Status {status_code}"
+        try:
+            detail += f" - {e.response.text[:200]}" if e.response is not None else ""
+        except:
+            pass
+        logger.error("Caught unmapped HTTPError in endpoint: %s", detail, exc_info=True)  # Safe logging
+        http_status = status_code if 400 <= status_code < 600 else 500
+        if status_code == 401: http_status = 401  # Ensure 401 is passed correctly if caught here
+        raise HTTPException(status_code=http_status, detail=detail)
+    except RequestException as e:  # From requests library
+        logger.error("Caught unmapped RequestException in endpoint: %s", e, exc_info=True)  # Safe logging
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                            detail=f"Network error contacting {target_endpoint}: {e}")
+
+    # --- CATCH POTENTIAL CONFIG/VALUE ERRORS ---
+    except (ValueError, TypeError, KeyError) as e:
+        logger.error("Caught config/value/key error in endpoint: %s", e, exc_info=True)  # Safe logging
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid parameter or configuration: {e}")
+
+    # --- FINAL CATCH-ALL ---
+    except Exception as e:
+        # Log details about the unknown exception 'e' using safe % formatting
+        logger.error("!!! ENDPOINT CAUGHT UNEXPECTED EXCEPTION !!!")
+        logger.error("!!! Type: %s", type(e).__name__)
+        logger.error("!!! Args: %s", e.args)
+        logger.error("!!! Str: %s", str(e))
+        logger.exception(
+            "FINAL CATCH-ALL - Unexpected error processing chat completion endpoint for %s:", target_endpoint)
+
+        # Return a more informative generic error including the type
+        detail_str = str(e)[:100]  # Get first 100 chars safely
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"An unexpected internal server error occurred. Type: {type(e).__name__}. Details: {detail_str}")
 
 #
 # End of media.py

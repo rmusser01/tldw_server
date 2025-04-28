@@ -513,3 +513,4 @@ tldw_Server_API/app/Databases/chatDB.db
 *.db-shm
 *.db
 /user_databases
+.env

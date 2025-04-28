@@ -18,7 +18,14 @@ https://github.com/databridge-org/databridge-core
 https://github.com/cocoindex-io/cocoindex
 https://github.com/AIDC-AI/Ovis
 https://github.com/matthsena/AlcheMark
-  
+  https://github.com/run-llama/llama_cloud_services
+
+
+
+
+
+
+
 ## ETL Pipelines
 
 ### Data Sources

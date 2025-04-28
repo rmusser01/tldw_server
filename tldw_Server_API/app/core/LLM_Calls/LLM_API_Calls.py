@@ -129,1932 +129,1164 @@ def get_openai_embeddings(input_data: str, model: str) -> List[float]:
 
 def chat_with_openai(api_key, input_data, custom_prompt_arg, temp, system_message, streaming, maxp, model):
     loaded_config_data = load_and_log_configs()
+    openai_config = loaded_config_data.get('openai_api', {})
+
+    # --- API Key Resolution ---
     openai_api_key = api_key
-    # https://platform.openai.com/docs/api-reference/invite
+    if not openai_api_key:
+        logging.info("OpenAI: API key not provided as parameter, checking config.")
+        openai_api_key = openai_config.get('api_key') # Get from loaded config
+
+    if not openai_api_key:
+        # Let chat_api_call handle raising ChatConfigurationError based on its logic
+        logging.error("OpenAI: API key is missing.")
+        raise ValueError("OpenAI API Key is required but not found.") # Raise error
+
+    log_key = f"{openai_api_key[:5]}...{openai_api_key[-5:]}" if len(openai_api_key) > 9 else "Provided Key"
+    logging.debug(f"OpenAI: Using API Key: {log_key}")
+
+    # --- Parameter Resolution (with fallbacks to config) ---
+    if streaming is None: streaming = openai_config.get('streaming', False)
+    if temp is None: temp = float(openai_config.get('temperature', 0.7))
+    if maxp is None: maxp = float(openai_config.get('top_p', 0.95))
+    if model is None: model = openai_config.get('model', 'gpt-4o-mini')
+    if system_message is None: system_message = "You are a helpful AI assistant."
+    # Note: OpenAI uses max_tokens in the request body, not max_completion_tokens anymore for chat
+    max_tokens = int(openai_config.get('max_tokens', 4096))
+
+    # Type validation for streaming
+    if isinstance(streaming, str): streaming = streaming.lower() == "true"
+    elif isinstance(streaming, int): streaming = bool(streaming)
+    if not isinstance(streaming, bool):
+        raise ValueError(f"Invalid type for 'streaming': Expected boolean, got {type(streaming).__name__}")
+
+    logging.debug(f"OpenAI: Streaming: {streaming}, Model: {model}, Temp: {temp}, TopP: {maxp}")
+
+    # --- Prepare Request ---
+    headers = {
+        'Authorization': f'Bearer {openai_api_key}',
+        'Content-Type': 'application/json'
+    }
+
+    # Handle input_data format (assuming it's typically message list)
+    if isinstance(input_data, list):
+        messages = input_data # Assume it's already in OpenAI message format
+        # Inject system message if not already present
+        if not any(msg.get('role') == 'system' for msg in messages):
+            messages.insert(0, {"role": "system", "content": system_message})
+        # Append custom_prompt_arg to the last user message if provided
+        if custom_prompt_arg and messages and messages[-1].get('role') == 'user':
+             messages[-1]['content'] = f"{messages[-1]['content']}\n\n{custom_prompt_arg}"
+        elif custom_prompt_arg: # If no user message or only system message
+             messages.append({"role": "user", "content": custom_prompt_arg})
+    elif isinstance(input_data, str): # If only a string is passed
+         messages = [
+             {"role": "system", "content": system_message},
+             {"role": "user", "content": f"{input_data}\n\n{custom_prompt_arg}" if custom_prompt_arg else input_data}
+         ]
+    else:
+        raise ValueError("Invalid 'input_data' format for OpenAI. Expected list of messages or string.")
+
+    data = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens, # Use max_tokens
+        "temperature": temp,
+        "stream": streaming,
+        "top_p": maxp
+    }
+
+    # --- Execute Request ---
+    api_url = 'https://api.openai.com/v1/chat/completions'
     try:
-        # API key validation
-        if not openai_api_key:
-            logging.info("OpenAI: API key not provided as parameter")
-            logging.info("OpenAI: Attempting to use API key from config file")
-            openai_api_key = loaded_config_data['openai_api']['api_key']
-
-        if not openai_api_key or openai_api_key == "":
-            logging.error("OpenAI: API key not found or is empty")
-            return "OpenAI: API Key Not Provided/Found in Config file or is empty"
-
-        logging.debug(f"OpenAI: Using API Key: {openai_api_key[:5]}...{openai_api_key[-5:]}")
-
-        # Streaming mode
-        if isinstance(streaming, str):
-            streaming = streaming.lower() == "true"
-        elif isinstance(streaming, int):
-            streaming = bool(streaming)  # Convert integers (1/0) to boolean
-        elif streaming is None:
-            streaming = loaded_config_data['openai_api']['streaming']
         if streaming:
-            logging.debug("OpenAI: Streaming mode enabled")
+            logging.debug("OpenAI: Posting request (streaming)")
+            # Use context manager for session
+            with requests.Session() as session:
+                response = session.post(api_url, headers=headers, json=data, stream=True, timeout=60) # Add timeout
+                response.raise_for_status() # IMPORTANT: Check for initial errors (401, 404, etc.)
+
+                def stream_generator():
+                    try:
+                        for line in response.iter_lines(decode_unicode=True):
+                            if line.strip(): # Ensure line is not empty
+                                yield line + "\n\n" # Pass through the raw SSE line + ensure double newline
+                        # Ensure DONE is sent if loop finishes normally
+                        yield "data: [DONE]\n\n"
+                    except Exception as e:
+                        logging.error(f"OpenAI: Error during stream iteration: {e}", exc_info=True)
+                        # Yield an error chunk if possible, then DONE
+                        error_payload = json.dumps({"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
+                        yield f"data: {error_payload}\n\n"
+                        yield "data: [DONE]\n\n"
+                    finally:
+                        response.close() # Ensure connection is closed
+
+                return stream_generator() # Return the generator
         else:
-            logging.debug("OpenAI: Streaming mode disabled")
-        if not isinstance(streaming, bool):
-            raise ValueError(f"Invalid type for 'streaming': Expected a boolean, got {type(streaming).__name__}")
-
-        # Set Top-P
-        if maxp is None:
-            maxp = loaded_config_data['openai_api']['top_p']
-            maxp = float(maxp)
-
-        # Set model
-        openai_model = model
-        if openai_model is None:
-            openai_model = loaded_config_data['openai_api']['model'] or "gpt-4o"
-            logging.debug(f"OpenAI: Using model: {openai_model}")
-
-
-        logging.debug(f"OpenAI: Custom prompt: {custom_prompt_arg}")
-
-        headers = {
-            'Authorization': f'Bearer {openai_api_key}',
-            'Content-Type': 'application/json'
-        }
-
-        logging.debug(
-            f"OpenAI API Key: {openai_api_key[:5]}...{openai_api_key[-5:] if openai_api_key else None}")
-        logging.debug("openai: Preparing data + prompt for submittal")
-        openai_prompt = f"{input_data} \n\n\n\n{custom_prompt_arg}"
-
-        # Set Temperature
-        if temp is None:
-            temp = loaded_config_data['openai_api']['temperature']
-            temp = float(temp)
-
-        # Set System message
-        if system_message is None:
-            system_message = "You are a helpful AI assistant who does whatever the user requests."
-
-        # Set Max Tokens
-        max_tokens = loaded_config_data['openai_api']['max_tokens']
-        max_tokens = int(max_tokens)
-        logging.debug(f"OpenAI: Using max_tokens: {max_tokens}")
-
-        data = {
-            "model": openai_model,
-            "messages": [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": openai_prompt}
-            ],
-            "max_completion_tokens": max_tokens,
-            "temperature": temp,
-            "stream": streaming,
-            "top_p": maxp
-        }
-        if streaming:
-            logging.debug("OpenAI: Posting request (streaming")
-            response = requests.post(
-                'https://api.openai.com/v1/chat/completions',
-                headers=headers,
-                json=data,
-                stream=True
-            )
-            logging.debug(f"OpenAI: Response text: {response.text}")
-            response.raise_for_status()
-
-            def stream_generator():
-                collected_messages = ""
-                for line in response.iter_lines():
-                    line = line.decode("utf-8").strip()
-
-                    if line == "":
-                        continue
-
-                    if line.startswith("data: "):
-                        data_str = line[len("data: "):]
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            data_json = json.loads(data_str)
-                            chunk = data_json["choices"][0]["delta"].get("content", "")
-                            collected_messages += chunk
-                            yield chunk
-                        except json.JSONDecodeError:
-                            logging.error(f"OpenAI: Error decoding JSON from line: {line}")
-                            continue
-
-            return stream_generator()
-        else:
-            logging.debug("OpenAI: Posting request (non-streaming")
-
-            # Create a session
-            session = requests.Session()
-
-            # Load config values
-            retry_count = loaded_config_data['openai_api']['api_retries']
-            retry_delay = loaded_config_data['openai_api']['api_retry_delay']
-
-            # Configure the retry strategy
+            logging.debug("OpenAI: Posting request (non-streaming)")
+            # Configure retry strategy
+            retry_count = int(openai_config.get('api_retries', 3))
+            retry_delay = float(openai_config.get('api_retry_delay', 1))
             retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
+                total=retry_count,
+                backoff_factor=retry_delay,
+                status_forcelist=[429, 500, 502, 503, 504], # Retry on these statuses
+                allowed_methods=["POST"] # Important: Allow retries for POST
             )
-
-            # Create the adapter
             adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            response = session.post('https://api.openai.com/v1/chat/completions', headers=headers, json=data,
-                                     timeout=30)
-            logging.debug(f"Full API response data: {response}")
-            if response.status_code == 200:
-                response_data = response.json()
-                logging.debug(response_data)
-                if 'choices' in response_data and len(response_data['choices']) > 0:
-                    chat_response = response_data['choices'][0]['message']['content'].strip()
-                    logging.debug("openai: Chat Sent successfully")
-                    logging.debug(f"openai: Chat response: {chat_response}")
-                    return chat_response
-                else:
-                    logging.warning("openai: Chat response not found in the response data")
-                    return "openai: Chat not available"
-            else:
-                logging.error(f"OpenAI: Chat request failed with status code {response.status_code}")
-                logging.error(f"OpenAI: Error response: {response.text}")
-                return f"OpenAI: Failed to process chat response. Status code: {response.status_code}"
-    except json.JSONDecodeError as e:
-        logging.error(f"OpenAI: Error decoding JSON: {str(e)}", exc_info=True)
-        return f"OpenAI: Error decoding JSON input: {str(e)}"
-    except requests.RequestException as e:
-        logging.error(f"OpenAI: Error making API request: {str(e)}", exc_info=True)
-        return f"OpenAI: Error making API request: {str(e)}"
-    except Exception as e:
-        logging.error(f"OpenAI: Unexpected error: {str(e)}", exc_info=True)
-        return f"OpenAI: Unexpected error occurred: {str(e)}"
-
-
-def chat_with_anthropic(api_key, input_data, model, custom_prompt_arg, max_retries=3, retry_delay=5,
-                        system_prompt=None, temp=None, streaming=False, topp=None, topk=None):
-    try:
-        # https://docs.anthropic.com/en/api/messages
-        loaded_config_data = load_and_log_configs()
-
-        # Check if config was loaded successfully
-        if loaded_config_data is None:
-            logging.error("Anthropic Chat: Failed to load configuration data.")
-            return "Anthropic Chat: Failed to load configuration data."
-
-        # Initialize the API key
-        anthropic_api_key = api_key
-
-        # API key validation
-        if not api_key:
-            logging.info("Anthropic Chat: API key not provided as parameter")
-            logging.info("Anthropic Chat: Attempting to use API key from config file")
-            # Ensure 'api_keys' and 'anthropic' keys exist
-            try:
-                anthropic_api_key = loaded_config_data['anthropic_api']['api_key']
-                logging.debug(f"Anthropic: Loaded API Key from config: {anthropic_api_key[:5]}...{anthropic_api_key[-5:]}")
-            except (KeyError, TypeError) as e:
-                logging.error(f"Anthropic Chat: Error accessing API key from config: {str(e)}")
-                return "Anthropic Chat: API Key Not Provided/Found in Config file or is empty"
-
-        if not anthropic_api_key or anthropic_api_key == "":
-            logging.error("Anthropic Chat: API key not found or is empty")
-            return "Anthropic Chat: API Key Not Provided/Found in Config file or is empty"
-
-        if anthropic_api_key:
-            logging.debug(f"Anthropic Chat: Using API Key: {anthropic_api_key[:5]}...{anthropic_api_key[-5:]}")
-        else:
-            logging.debug(f"Anthropic Chat: Using API Key: {api_key[:5]}...{api_key[-5:]}")
-
-        if system_prompt is not None:
-            logging.debug("Anthropic Chat: Using provided system prompt")
-            pass
-        else:
-            system_prompt = "You are a helpful assistant"
-            logging.debug("Anthropic Chat: Using default system prompt")
-
-        logging.debug(f"Anthropic Chat: Loaded data: {input_data}")
-        logging.debug(f"Anthropic Chat: Type of data: {type(input_data)}")
-
-        # Retrieve the model from config if not provided
-        if model is None:
-            try:
-                anthropic_model = loaded_config_data['anthropic_api']['model']
-                logging.debug(f"Anthropic Chat: Loaded model from config: {anthropic_model}")
-            except (KeyError, TypeError) as e:
-                logging.error(f"Anthropic Chat: Error accessing model from config: {str(e)}")
-                return "Anthropic Chat: Model configuration not found."
-        else:
-            anthropic_model = model
-            logging.debug(f"Anthropic Chat: Using provided model: {anthropic_model}")
-
-        # Temperature
-        if not isinstance(temp, float):
-            temp = loaded_config_data['anthropic_api']['temperature']
-            temp = float(temp)
-            logging.debug(f"Anthropic Chat: Using temperature from config.txt: {temp}")
-        elif isinstance(temp, float):
-            temp = float(temp)
-            logging.debug(f"Anthropic Chat: Using provided temperature: {temp}")
-        else:
-            logging.error("Anthropic Chat: Invalid value for temperature")
-            return "Anthropic Chat: Invalid value for temperature"
-
-        # Top-K
-        # if not isinstance(topk, int):
-        #     topk = loaded_config_data['anthropic_api']['top_k']
-        #     top_k = int(topk)
-        #     logging.debug(f"Anthropic Chat: Using Top-K from config.txt: {topk}")
-        # elif isinstance(topk, int):
-        #     top_k = topk
-        #     logging.debug(f"Anthropic Chat: Using provided Top-K: {topk}")
-        # else:
-        #     logging.error("Anthropic Chat: Invalid value for topk")
-        #     return "Anthropic Chat: Invalid value for topk"
-
-        # Top-P
-        if topp is None:
-            topp = loaded_config_data['anthropic_api']['top_p']
-            top_p = float(topp)
-            logging.debug(f"Anthropic Chat: Using max_p from config.txt: {top_p}")
-        else:
-            top_p = 1.0
-            logging.debug(f"Anthropic Chat: Using default maxp: {top_p}")
-
-        # Set max tokens
-        max_tokens = loaded_config_data['anthropic_api']['max_tokens']
-        max_tokens = int(max_tokens)
-
-        headers = {
-            'x-api-key': anthropic_api_key,
-            'anthropic-version': '2023-06-01',
-            'Content-Type': 'application/json'
-        }
-
-        anthropic_user_prompt = custom_prompt_arg if custom_prompt_arg else ""
-        logging.debug(f"Anthropic: User Prompt is '{anthropic_user_prompt}'")
-        user_message = {
-            "role": "user",
-            "content": f"{input_data} \n\n\n\n{anthropic_user_prompt}"
-        }
-
-        # FIXME - add topk only if it's not None
-        data = {
-            "model": anthropic_model,
-            "max_tokens": max_tokens,
-            "messages": [user_message],
-            "stop_sequences": ["\n\nHuman:"],
-            "temperature": temp,
-            #"top_k": top_k,
-            "top_p": top_p,
-            "metadata": {
-                "user_id": "example_user_id",
-            },
-            "stream": streaming,
-            "system": system_prompt
-        }
-
-        for attempt in range(max_retries):
-            try:
-                # Create a session
-                session = requests.Session()
-
-                # Load config values
-                retry_count = loaded_config_data['anthropic_api']['api_retries']
-                retry_delay = loaded_config_data['anthropic_api']['api_retry_delay']
-
-                # Configure the retry strategy
-                retry_strategy = Retry(
-                    total=retry_count,  # Total number of retries
-                    backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                    status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-                )
-
-                # Create the adapter
-                adapter = HTTPAdapter(max_retries=retry_strategy)
-
-                # Mount adapters for both HTTP and HTTPS
-                session.mount("http://", adapter)
+            # Use context manager for session
+            with requests.Session() as session:
                 session.mount("https://", adapter)
+                session.mount("http://", adapter)
+                response = session.post(api_url, headers=headers, json=data, timeout=30) # Add timeout
 
-                response = session.post(
-                    'https://api.anthropic.com/v1/messages',
-                    headers=headers,
-                    json=data
-                )
+            logging.debug(f"Full API response status: {response.status_code}")
+            response.raise_for_status() # Raise HTTPError for 4xx/5xx AFTER retries
 
-                # Check if the status code indicates success
-                if response.status_code == 200:
-                    if streaming:
-                        # Handle streaming response
-                        def stream_generator():
-                            collected_text = ""
-                            event_type = None
-                            for line in response.iter_lines():
-                                line = line.decode('utf-8').strip()
-                                if line == '':
-                                    continue
-                                if line.startswith('event:'):
-                                    event_type = line[len('event:'):].strip()
-                                elif line.startswith('data:'):
-                                    data_str = line[len('data:'):].strip()
-                                    if data_str == '[DONE]':
-                                        break
-                                    try:
-                                        data_json = json.loads(data_str)
-                                        if event_type == 'content_block_delta' and data_json.get(
-                                                'type') == 'content_block_delta':
-                                            delta = data_json.get('delta', {})
-                                            text_delta = delta.get('text', '')
-                                            collected_text += text_delta
-                                            yield text_delta
-                                    except json.JSONDecodeError:
-                                        logging.error(f"Anthropic: Error decoding JSON from line: {line}")
-                                        continue
-                            # Optionally, return the full collected text at the end
-                            # yield collected_text
+            response_data = response.json() # Parse JSON on success
+            logging.debug("OpenAI: Non-streaming request successful.")
+            #logging.debug(f"OpenAI Raw Response Data: {response_data}") # Optional: Log raw response
+            return response_data # Return the full dictionary
 
-                        return stream_generator()
-                    else:
-                        # Non-streaming response
-                        logging.debug("Anthropic: Post submittal successful")
-                        response_data = response.json()
-                        try:
-                            # Extract the assistant's reply from the 'content' field
-                            content_blocks = response_data.get('content', [])
-                            summary = ''
-                            for block in content_blocks:
-                                if block.get('type') == 'text':
-                                    summary += block.get('text', '')
-                            summary = summary.strip()
-                            logging.debug("Anthropic: Summarization successful")
-                            logging.debug(f"Anthropic: Summary (first 500 chars): {summary[:500]}...")
-                            return summary
-                        except Exception as e:
-                            logging.debug("Anthropic: Unexpected data in response")
-                            logging.error(f"Unexpected response format from Anthropic API: {response.text}")
-                            return None
-                elif response.status_code == 500:  # Handle internal server error specifically
-                    logging.debug("Anthropic: Internal server error")
-                    logging.error("Internal server error from API. Retrying may be necessary.")
-                    time.sleep(retry_delay)
-                else:
-                    logging.debug(
-                        f"Anthropic: Failed to summarize, status code {response.status_code}: {response.text}")
-                    logging.error(f"Failed to process summary, status code {response.status_code}: {response.text}")
-                    return None
+    # Let RequestException and HTTPError propagate up to chat_api_call
+    except (ValueError, KeyError, TypeError) as e:
+         logging.error(f"OpenAI: Configuration or data error: {e}", exc_info=True)
+         # Re-raise as ValueError which chat_api_call can map to BadRequest/Config error
+         raise ValueError(f"OpenAI config/data error: {e}") from e
 
-            except requests.RequestException as e:
-                logging.error(f"Anthropic: Network error during attempt {attempt + 1}/{max_retries}: {str(e)}")
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
-                else:
-                    return f"Anthropic: Network error: {str(e)}"
-    except FileNotFoundError as e:
-        logging.error(f"Anthropic: File not found: {input_data}")
-        return f"Anthropic: File not found: {input_data}"
-    except json.JSONDecodeError as e:
-        logging.error(f"Anthropic: Invalid JSON format in file: {input_data}")
-        return f"Anthropic: Invalid JSON format in file: {input_data}"
-    except Exception as e:
-        logging.error(f"Anthropic: Error in processing: {str(e)}")
-        return f"Anthropic: Error occurred while processing summary with Anthropic: {str(e)}"
+
+def chat_with_anthropic(api_key, input_data, model, custom_prompt_arg,
+                        system_prompt=None, temp=None, streaming=False, topp=None, topk=None):
+    # Removed default retry params, handled by requests adapter now
+    loaded_config_data = load_and_log_configs()
+    if loaded_config_data is None:
+        # Should not happen if load_and_log_configs handles its errors
+        raise ValueError("Anthropic Chat: Failed to load configuration data.")
+    anthropic_config = loaded_config_data.get('anthropic_api', {})
+
+    # --- API Key Resolution ---
+    anthropic_api_key = api_key
+    if not anthropic_api_key:
+        logging.info("Anthropic: API key not provided, checking config.")
+        anthropic_api_key = anthropic_config.get('api_key')
+
+    if not anthropic_api_key:
+        logging.error("Anthropic: API key is missing.")
+        raise ValueError("Anthropic API Key is required but not found.")
+
+    log_key = f"{anthropic_api_key[:5]}...{anthropic_api_key[-5:]}" if len(anthropic_api_key) > 9 else "Provided Key"
+    logging.debug(f"Anthropic: Using API Key: {log_key}")
+
+    # --- Parameter Resolution ---
+    if model is None: model = anthropic_config.get('model', 'claude-3-haiku-20240307')
+    if temp is None: temp = float(anthropic_config.get('temperature', 0.7))
+    if topp is None: topp = float(anthropic_config.get('top_p', 0.95)) # Anthropic uses top_p
+    # top_k is less common, handle if provided
+    if topk is not None: topk = int(topk) # Ensure int if passed
+    if system_prompt is None: system_prompt = "You are a helpful assistant."
+    max_tokens = int(anthropic_config.get('max_tokens', 1024))
+
+    if isinstance(streaming, str): streaming = streaming.lower() == "true"
+    elif isinstance(streaming, int): streaming = bool(streaming)
+    if not isinstance(streaming, bool):
+        raise ValueError(f"Invalid type for 'streaming': Expected boolean, got {type(streaming).__name__}")
+
+    logging.debug(f"Anthropic: Streaming: {streaming}, Model: {model}, Temp: {temp}, TopP: {topp}, TopK: {topk}")
+
+    # --- Prepare Request ---
+    headers = {
+        'x-api-key': anthropic_api_key,
+        'anthropic-version': '2023-06-01', # Keep specific version or update as needed
+        'Content-Type': 'application/json'
+    }
+
+    # Handle input_data (assuming similar logic to OpenAI)
+    if isinstance(input_data, list):
+        messages = input_data
+        if custom_prompt_arg and messages and messages[-1].get('role') == 'user':
+             messages[-1]['content'] = f"{messages[-1]['content']}\n\n{custom_prompt_arg}"
+        elif custom_prompt_arg:
+             messages.append({"role": "user", "content": custom_prompt_arg})
+    elif isinstance(input_data, str):
+         messages = [
+             {"role": "user", "content": f"{input_data}\n\n{custom_prompt_arg}" if custom_prompt_arg else input_data}
+         ]
+    else:
+        raise ValueError("Invalid 'input_data' format for Anthropic. Expected list of messages or string.")
+
+    data = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": messages,
+        "temperature": temp,
+        "stream": streaming,
+        "system": system_prompt
+        # Conditionally add top_p and top_k if they are not None
+        # Anthropic API might error if top_p is None, default is often 1.0
+    }
+    if topp is not None:
+        data["top_p"] = topp
+    if topk is not None:
+        data["top_k"] = topk
+
+
+    # --- Execute Request ---
+    api_url = 'https://api.anthropic.com/v1/messages'
+    try:
+        # Configure retry strategy
+        retry_count = int(anthropic_config.get('api_retries', 3))
+        retry_delay = float(anthropic_config.get('api_retry_delay', 1))
+        retry_strategy = Retry(
+            total=retry_count,
+            backoff_factor=retry_delay,
+            status_forcelist=[429, 500, 502, 503, 504], # Retry on these statuses
+            allowed_methods=["POST"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+
+        with requests.Session() as session:
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+            response = session.post(api_url, headers=headers, json=data, stream=streaming, timeout=60)
+
+            response.raise_for_status() # Check status AFTER potential retries
+
+            if streaming:
+                logging.debug("Anthropic: Streaming response received.")
+                def stream_generator():
+                    try:
+                        # Anthropic streaming uses Server-Sent Events format
+                        for line in response.iter_lines(decode_unicode=True):
+                            if line.strip():
+                                yield line + "\n\n" # Pass through raw SSE line
+                        # Anthropic stream ends implicitly when connection closes,
+                        # but sending [DONE] is good practice for client handling.
+                        yield "data: [DONE]\n\n"
+                    except Exception as e:
+                        logging.error(f"Anthropic: Error during stream iteration: {e}", exc_info=True)
+                        error_payload = json.dumps({"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
+                        yield f"data: {error_payload}\n\n"
+                        yield "data: [DONE]\n\n"
+                    finally:
+                         response.close()
+                return stream_generator()
+            else:
+                logging.debug("Anthropic: Non-streaming request successful.")
+                response_data = response.json()
+                #logging.debug(f"Anthropic Raw Response Data: {response_data}") # Optional
+                return response_data # Return the full dictionary
+
+    # Let RequestException and HTTPError propagate up to chat_api_call
+    except (ValueError, KeyError, TypeError) as e:
+         logging.error(f"Anthropic: Configuration or data error: {e}", exc_info=True)
+         raise ValueError(f"Anthropic config/data error: {e}") from e
 
 
 # Summarize with Cohere
 def chat_with_cohere(api_key, input_data, model=None, custom_prompt_arg=None, system_prompt=None, temp=None, streaming=False, topp=None, topk=None):
     loaded_config_data = load_and_log_configs()
-    cohere_api_key = None
-    # https://docs.cohere.com/v2/reference/chat-stream
+    cohere_config = loaded_config_data.get('cohere_api', {})
+
+    # --- API Key ---
+    cohere_api_key = api_key or cohere_config.get('api_key')
+    if not cohere_api_key:
+        logging.error("Cohere: API key is missing.")
+        raise ValueError("Cohere API Key is required but not found.")
+    log_key = f"{cohere_api_key[:3]}...{cohere_api_key[-3:]}" if len(cohere_api_key) > 5 else "Provided Key"
+    logging.debug(f"Cohere: Using API Key: {log_key}")
+
+    # --- Parameters ---
+    if model is None: model = cohere_config.get('model', 'command-r')
+    if temp is None: temp = float(cohere_config.get('temperature', 0.3))
+    # Cohere uses 'k' for top-k and 'p' for top-p (maps from topp)
+    top_k = topk if topk is not None else int(cohere_config.get('top_k', 0)) # Cohere default is 0
+    top_p = topp if topp is not None else float(cohere_config.get('max_p', 0.75)) # Map 'topp' or 'max_p' config
+    if system_prompt is None: system_prompt = "You are a helpful assistant."
+
+    if isinstance(streaming, str): streaming = streaming.lower() == "true"
+    elif isinstance(streaming, int): streaming = bool(streaming)
+    if streaming is None: streaming = cohere_config.get('streaming', False)
+    if not isinstance(streaming, bool):
+        raise ValueError(f"Invalid type for 'streaming': Expected boolean, got {type(streaming).__name__}")
+
+    logging.debug(f"Cohere: Streaming: {streaming}, Model: {model}, Temp: {temp}, P: {top_p}, K: {top_k}")
+
+    # --- Prepare Request ---
+    headers = {
+        'accept': 'application/json',
+        'content-type': 'application/json',
+        'Authorization': f'Bearer {cohere_api_key}'
+    }
+
+    # Cohere uses 'message' for the latest user input and 'chat_history'
+    # We need to adapt the input_data (assuming OpenAI format list)
+    chat_history = []
+    user_message = ""
+    if isinstance(input_data, list):
+        for msg in input_data:
+            role = msg.get('role', '').upper()
+            content = msg.get('content', '')
+            if role == 'USER':
+                 chat_history.append({"role": "USER", "message": content})
+                 user_message = content # Keep track of the last user message
+            elif role == 'ASSISTANT' or role == 'CHATBOT': # Map assistant to CHATBOT
+                 chat_history.append({"role": "CHATBOT", "message": content})
+            # System messages handled separately by Cohere API
+    elif isinstance(input_data, str):
+         user_message = input_data # Treat string input as the user message
+    else:
+        raise ValueError("Invalid 'input_data' format for Cohere. Expected list of messages or string.")
+
+    # Append custom prompt to the latest user message
+    if custom_prompt_arg:
+        user_message += f"\n\n{custom_prompt_arg}"
+
+    # Construct payload - Cohere Chat v2 structure
+    data = {
+        "model": model,
+        "message": user_message, # Latest user message
+        "chat_history": chat_history, # Previous turns
+        "preamble": system_prompt, # System prompt equivalent
+        "temperature": temp,
+        "p": top_p,
+        "k": top_k,
+        # Add other Cohere params if needed e.g., connectors, documents
+    }
+
+    api_url = 'https://api.cohere.com/v1/chat' # Use v1 endpoint for now, v2 might differ slightly
+    stream_param = "?stream=true" if streaming else "" # Cohere uses query param for streaming
+
+    # --- Execute Request ---
     try:
-        # API key validation
-        if api_key:
-            logging.info(f"Cohere Chat: API Key from parameter: {api_key[:3]}...{api_key[-3:]}")
-            cohere_api_key = api_key
-        else:
-            logging.info("Cohere Chat: API key not provided as parameter")
-            logging.info("Cohere Chat: Attempting to use API key from config file")
-            logging.debug(f"Cohere Chat: Cohere API Key from config: {loaded_config_data['cohere_api']['api_key']}")
-            cohere_api_key = loaded_config_data['cohere_api']['api_key']
-            if cohere_api_key:
-                logging.debug(f"Cohere Chat: Cohere API Key from config: {cohere_api_key[:3]}...{cohere_api_key[-3:]}")
-            else:
-                logging.error("Cohere Chat: API key not found or is empty")
-                return "Cohere Chat: API Key Not Provided/Found in Config file or is empty"
+        retry_count = int(cohere_config.get('api_retries', 3))
+        retry_delay = float(cohere_config.get('api_retry_delay', 1))
+        retry_strategy = Retry(total=retry_count, backoff_factor=retry_delay, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["POST"])
+        adapter = HTTPAdapter(max_retries=retry_strategy)
 
-        logging.debug(f"Cohere Chat: Loaded data: {input_data}")
-        logging.debug(f"Cohere Chat: Type of data: {type(input_data)}")
-
-        # Streaming mode
-        if isinstance(streaming, str):
-            streaming = streaming.lower() == "true"
-        elif isinstance(streaming, int):
-            streaming = bool(streaming)  # Convert integers (1/0) to boolean
-        elif streaming is None:
-            streaming = loaded_config_data.get('cohere_api', {}).get('streaming', False)
-            logging.debug("Cohere: Streaming mode enabled")
-        else:
-            logging.debug("Cohere: Streaming mode disabled")
-        if not isinstance(streaming, bool):
-            raise ValueError(f"Invalid type for 'streaming': Expected a boolean, got {type(streaming).__name__}")
-
-        # Top-K
-        if not isinstance(topk, int):
-            top_k = loaded_config_data['cohere_api']['top_k']
-            top_k = int(top_k)
-            logging.debug(f"Cohere Chat: Using top_k from config: {top_k}")
-
-        # Max-P
-        if not isinstance(topp, float):
-            topp = loaded_config_data['cohere_api']['max_p']
-            topp = float(topp)
-            logging.debug(f"Cohere Chat: Using max_p from config: {topp}")
-
-        # Temperature
-        if not isinstance(temp, float):
-            temp = loaded_config_data['cohere_api']['temperature']
-            temp = float(temp)
-            logging.debug(f"Cohere Chat: Using temperature from config: {temp}")
-
-        # Model
-        if not isinstance(model, str):
-            model = loaded_config_data['cohere_api']['model']
-            logging.debug(f"Cohere Chat: Using model from config: {model}")
-
-        headers = {
-            'accept': 'application/json',
-            'content-type': 'application/json',
-            'Authorization': f'Bearer {cohere_api_key}'
-        }
-
-        # Ensure system_prompt is set
-        if not isinstance(system_prompt, str):
-            system_prompt = "You are a helpful assistant"
-        logging.debug(f"Cohere Chat: System Prompt being sent is: '{system_prompt}'")
-
-        cohere_prompt = input_data
-        if custom_prompt_arg:
-            cohere_prompt += f"\n\n{custom_prompt_arg}"
-        logging.debug(f"Cohere Chat: User Prompt being sent is: '{cohere_prompt}'")
-
-        data = {
-            "model" : model,
-            "temperature": temp,
-            "messages": [
-                {
-                    "role": "system",
-                    "content":  system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": cohere_prompt,
-                }
-            ],
-            "k": top_k,
-            "p": topp,
-        }
-        logging.debug(f"Cohere Chat: Request data: {json.dumps(data, indent=2)}")
-
-        logging.debug("cohere chat: Submitting request to API endpoint")
-        logging.info("cohere chat: Submitting request to API endpoint")
-
-        if streaming:
-            logging.debug("Cohere: Submitting streaming request to API endpoint")
-            # Create a session
-            session = requests.Session()
-
-            # Load config values
-            retry_count = loaded_config_data['cohere_api']['api_retries']
-            retry_delay = loaded_config_data['cohere_api']['api_retry_delay']
-
-            # Configure the retry strategy
-            retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-            )
-
-            # Create the adapter
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
-            session.mount("http://", adapter)
+        with requests.Session() as session:
             session.mount("https://", adapter)
-            response = session.post(
-                'https://api.cohere.com/v2/chat',
-                headers=headers,
-                json=data,
-                stream=True  # Enable response streaming
-            )
-            logging.debug(f"Cohere Chat: Raw API response: {response.text}")
-            response.raise_for_status()
+            session.mount("http://", adapter)
+            response = session.post(api_url + stream_param, headers=headers, json=data, stream=streaming, timeout=60)
 
-            def stream_generator():
-                for line in response.iter_lines():
-                    if line:
-                        decoded_line = line.decode('utf-8').strip()
-                        try:
-                            data_json = json.loads(decoded_line)
-                            if 'response' in data_json:
-                                chunk = data_json['response']
-                                yield chunk
-                            elif 'token' in data_json:
-                                # For token-based streaming (if applicable)
-                                chunk = data_json['token']
-                                yield chunk
-                            elif 'text' in data_json:
-                                # For text-based streaming
-                                chunk = data_json['text']
-                                yield chunk
-                            elif 'message' in data_json and 'content' in data_json['message']:
-                                # content is usually an array of blocks [{ "type": "text", "text": ... }, ...]
-                                for block in data_json['message']['content']:
-                                    if block.get('type') == 'text':
-                                        chunk = block.get('text', '')
-                                        if chunk:
-                                            yield chunk
-                            else:
-                                logging.debug(f"Cohere: Unhandled streaming data: {data_json}")
-                        except json.JSONDecodeError:
-                            logging.error(f"Cohere: Error decoding JSON from line: {decoded_line}")
-                            continue
+            response.raise_for_status() # Check status AFTER retries
 
-            return stream_generator()
-        else:
-            try:
-                # Create a session
-                session = requests.Session()
-
-                # Load config values
-                retry_count = loaded_config_data['cohere_api']['api_retries']
-                retry_delay = loaded_config_data['cohere_api']['api_retry_delay']
-
-                # Configure the retry strategy
-                retry_strategy = Retry(
-                    total=retry_count,  # Total number of retries
-                    backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                    status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-                )
-
-                # Create the adapter
-                adapter = HTTPAdapter(max_retries=retry_strategy)
-
-                # Mount adapters for both HTTP and HTTPS
-                session.mount("http://", adapter)
-                session.mount("https://", adapter)
-                response = requests.post('https://api.cohere.com/v2/chat', headers=headers, json=data)
-                logging.debug(f"Cohere Chat: Raw API response: {response.text}")
-            except requests.RequestException as e:
-                logging.error(f"Cohere Chat: Error making API request: {str(e)}")
-                return f"Cohere Chat: Error making API request: {str(e)}"
-
-            if response.status_code == 200:
-                try:
-                    response_data = response.json()
-                except json.JSONDecodeError:
-                    logging.error("Cohere Chat: Failed to decode JSON response")
-                    return "Cohere Chat: Failed to decode JSON response"
-
-                if response_data is None:
-                    logging.error("Cohere Chat: No response data received.")
-                    return "Cohere Chat: No response data received."
-
-                logging.debug(f"cohere chat: Full API response data: {json.dumps(response_data, indent=2)}")
-
-                if 'message' in response_data and 'content' in response_data['message']:
-                    content = response_data['message']['content']
-                    if isinstance(content, list) and len(content) > 0:
-                        # Extract text from the first content block
-                        text = content[0].get('text', '').strip()
-                        if text:
-                            logging.debug("Cohere Chat: Chat request successful")
-                            print("Cohere Chat request processed successfully.")
-                            return text
-                        else:
-                            logging.error("Cohere Chat: 'text' field is empty in response content.")
-                            return "Cohere Chat: 'text' field is empty in response content."
-                    else:
-                        logging.error("Cohere Chat: 'content' field is not a list or is empty.")
-                        return "Cohere Chat: 'content' field is not a list or is empty."
-                else:
-                    logging.error("Cohere Chat: 'message' or 'content' field not found in API response.")
-                    return "Cohere Chat: 'message' or 'content' field not found in API response."
-
-            elif response.status_code == 401:
-                error_message = "Cohere Chat: Unauthorized - Invalid API key"
-                logging.warning(error_message)
-                print(error_message)
-                return error_message
-
+            if streaming:
+                logging.debug("Cohere: Streaming response received.")
+                def stream_generator():
+                    buffer = ""
+                    try:
+                        for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+                             buffer += chunk
+                             # Cohere stream chunks might not be newline-separated JSON, process buffer
+                             while '\n' in buffer:
+                                 line, buffer = buffer.split('\n', 1)
+                                 if line.strip():
+                                     try:
+                                         event = json.loads(line)
+                                         # Determine event type and yield appropriate data
+                                         event_type = event.get('event_type')
+                                         if event_type == 'text-generation':
+                                             yield f"data: {json.dumps(event)}\n\n" # Yield raw event or extracted text
+                                         elif event_type == 'stream-end':
+                                             logging.debug("Cohere stream end event received.")
+                                             # Optionally yield the final response part if needed
+                                             # final_response = event.get('response')
+                                             # if final_response: yield f"data: {json.dumps(final_response)}\n\n"
+                                             break # End the loop
+                                         else:
+                                              logging.debug(f"Cohere: Received event type: {event_type}")
+                                              yield f"data: {json.dumps(event)}\n\n" # Pass other events through
+                                     except json.JSONDecodeError:
+                                         logging.warning(f"Cohere: Could not decode JSON line: {line}")
+                        yield "data: [DONE]\n\n" # Signal end
+                    except Exception as e:
+                         logging.error(f"Cohere: Error during stream iteration: {e}", exc_info=True)
+                         error_payload = json.dumps({"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
+                         yield f"data: {error_payload}\n\n"
+                         yield "data: [DONE]\n\n"
+                    finally:
+                        response.close()
+                return stream_generator()
             else:
-                logging.error(f"Cohere Chat: API request failed with status code {response.status_code}: {response.text}")
-                print(f"Cohere Chat: Failed to process chat response, status code {response.status_code}: {response.text}")
-                return f"Cohere Chat: API request failed: {response.text}"
+                logging.debug("Cohere: Non-streaming request successful.")
+                response_data = response.json()
+                #logging.debug(f"Cohere Raw Response Data: {response_data}")
+                return response_data # Return full dictionary
 
-    except Exception as e:
-        logging.error(f"Cohere Chat: Error in processing: {str(e)}", exc_info=True)
-        return f"Cohere Chat: Error occurred while processing chat request with Cohere: {str(e)}"
+    except (ValueError, KeyError, TypeError) as e:
+         logging.error(f"Cohere: Configuration or data error: {e}", exc_info=True)
+         raise ValueError(f"Cohere config/data error: {e}") from e
+    # Let RequestException and HTTPError propagate
 
 
 # https://console.groq.com/docs/quickstart
 def chat_with_groq(api_key, input_data, custom_prompt_arg, temp=None, system_message=None, streaming=False, maxp=None):
-    logging.debug("Groq: Summarization process starting...")
-    # https://console.groq.com/docs/api-reference#chat-create
-    try:
-        logging.debug("Groq: Loading and validating configurations")
-        loaded_config_data = load_and_log_configs()
-        if loaded_config_data is None:
-            logging.error("Failed to load configuration data")
-            groq_api_key = None
-        else:
-            # Prioritize the API key passed as a parameter
-            if api_key and api_key.strip():
-                groq_api_key = api_key
-                logging.info("Groq: Using API key provided as parameter")
-            else:
-                # If no parameter is provided, use the key from the config
-                groq_api_key = loaded_config_data['groq_api'].get('api_key')
-                if groq_api_key:
-                    logging.info("Groq: Using API key from config file")
-                else:
-                    logging.warning("Groq: No API key found in config file")
-
-        # Final check to ensure we have a valid API key
-        if not groq_api_key or not groq_api_key.strip():
-            logging.error("Anthropic: No valid API key available")
-
-
-        logging.debug(f"Groq: Using API Key: {groq_api_key[:5]}...{groq_api_key[-5:]}")
-
-        if isinstance(streaming, str):
-            streaming = streaming.lower() == "true"
-        elif isinstance(streaming, int):
-            streaming = bool(streaming)  # Convert integers (1/0) to boolean
-        elif streaming is None:
-            streaming = loaded_config_data.get('groq_api', {}).get('streaming', False)
-            logging.debug("Groq: Streaming mode enabled")
-        else:
-            logging.debug("Groq: Streaming mode disabled")
-        if not isinstance(streaming, bool):
-            raise ValueError(f"Invalid type for 'streaming': Expected a boolean, got {type(streaming).__name__}")
-
-        # Transcript data handling & Validation
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("Groq: Loading json data for summarization")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("Groq: Using provided string data for summarization")
-            data = input_data
-
-        # DEBUG - Debug logging to identify sent data
-        logging.debug(f"Groq: Loaded data: {data[:500]}...(snipped to first 500 chars)")
-        logging.debug(f"Groq: Type of data: {type(data)}")
-
-        if isinstance(data, dict) and 'summary' in data:
-            # If the loaded data is a dictionary and already contains a summary, return it
-            logging.debug("Groq: Summary already exists in the loaded data")
-            return data['summary']
-
-        # If the loaded data is a list of segment dictionaries or a string, proceed with summarization
-        if isinstance(data, list):
-            segments = data
-            text = extract_text_from_segments(segments)
-        elif isinstance(data, str):
-            text = data
-        else:
-            raise ValueError("Groq: Invalid input data format")
-
-        # Set the model to be used
-        groq_model = loaded_config_data['groq_api']['model']
-
-        if temp is None:
-            temp = 0.2
-        temp = float(temp)
-        if system_message is None:
-            system_message = "You are a helpful AI assistant who does whatever the user requests."
-
-        headers = {
-            'Authorization': f'Bearer {groq_api_key}',
-            'Content-Type': 'application/json'
-        }
-
-        groq_prompt = f"{text} \n\n\n\n{custom_prompt_arg}"
-        logging.debug("groq: Prompt being sent is {groq_prompt}")
-
-        data = {
-            "messages": [
-                {
-                    "role": "system",
-                    "content": system_message,
-                },
-                {
-                    "role": "user",
-                    "content": groq_prompt,
-                }
-            ],
-            "model": groq_model,
-            "temperature": temp,
-            "stream": streaming,
-            "top_p": maxp
-        }
-
-        logging.debug("groq: Submitting request to API endpoint")
-        print("groq: Submitting request to API endpoint")
-        if streaming:
-            # Create a session
-            session = requests.Session()
-
-            # Load config values
-            retry_count = loaded_config_data['groq_api']['api_retries']
-            retry_delay = loaded_config_data['groq_api']['api_retry_delay']
-
-            # Configure the retry strategy
-            retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-            )
-
-            # Create the adapter
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            response = session.post(
-                'https://api.groq.com/openai/v1/chat/completions',
-                headers=headers,
-                json=data,
-                stream=True  # Enable response streaming
-            )
-            response.raise_for_status()
-
-            def stream_generator():
-                collected_messages = ""
-                for line in response.iter_lines():
-                    line = line.decode("utf-8").strip()
-
-                    if line == "":
-                        continue
-
-                    if line.startswith("data: "):
-                        data_str = line[len("data: "):]
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            data_json = json.loads(data_str)
-                            chunk = data_json["choices"][0]["delta"].get("content", "")
-                            collected_messages += chunk
-                            yield chunk
-                        except json.JSONDecodeError:
-                            logging.error(f"Groq: Error decoding JSON from line: {line}")
-                            continue
-                # Optionally, you can return the full collected message at the end
-                # yield collected_messages
-
-            return stream_generator()
-        else:
-            # Create a session
-            session = requests.Session()
-
-            # Load config values
-            retry_count = loaded_config_data['groq_api']['api_retries']
-            retry_delay = loaded_config_data['groq_api']['api_retry_delay']
-
-            # Configure the retry strategy
-            retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-            )
-
-            # Create the adapter
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            response = session.post(
-                'https://api.groq.com/openai/v1/chat/completions',
-                headers=headers,
-                json=data
-            )
-
-            response_data = response.json()
-            logging.debug(f"API Response Data: {response_data}")
-
-            if response.status_code == 200:
-                if 'choices' in response_data and len(response_data['choices']) > 0:
-                    summary = response_data['choices'][0]['message']['content'].strip()
-                    logging.debug("Groq: Summarization successful")
-                    return summary
-                else:
-                    logging.error("Groq: Expected data not found in API response.")
-                    return "Groq: Expected data not found in API response."
-            else:
-                logging.error(f"Groq: API request failed with status code {response.status_code}: {response.text}")
-                return f"Groq: API request failed: {response.text}"
-
-    except Exception as e:
-        logging.error("Groq: Error in processing: %s", str(e), exc_info=True)
-        return f"Groq: Error occurred while processing summary with Groq: {str(e)}"
-
-
-def chat_with_openrouter(api_key=None, input_data=None, custom_prompt_arg=None, temp=None, system_message=None, streaming=False, top_p=None, top_k=None, minp=None):
-    import requests
-    import json
-    openrouter_system_prompt = "You are a helpful AI assistant who does whatever the user requests."
-    # https://openrouter.ai/docs/requests
-    try:
-        logging.info("OpenRouter: Loading and validating configurations")
-        loaded_config_data = load_and_log_configs()
-        if loaded_config_data is None:
-            logging.error("Failed to load configuration data")
-            return "OpenRouter: Failed to load configuration data"
-
-        # Prioritize the API key passed as a parameter
-        if api_key and isinstance(api_key, str) and api_key.strip():
-            logging.debug(f"OpenRouter: Using API key {api_key[:5]}...{api_key[-5:]} provided as parameter")
-            print(f"API Key: {api_key}")
-            print("FUCK THIS2")
-        else:
-            # Fall back to the API key from the config file
-            api_key = loaded_config_data['openrouter_api'].get('api_key')
-            if api_key:
-                logging.debug(f"OpenRouter: Loaded API Key from config: {api_key[:5]}...{api_key[-5:]}")
-            else:
-                logging.error("OpenRouter: No API key found in config file")
-                return "OpenRouter: No API key found in config file"
-
-        if isinstance(streaming, str):
-            streaming = streaming.lower() == "true"
-        elif isinstance(streaming, int):
-            streaming = bool(streaming)  # Convert integers (1/0) to boolean
-        elif streaming is None:
-            streaming = loaded_config_data.get('openrouter_api', {}).get('streaming', False)
-            logging.debug("OpenRouter: Streaming mode enabled")
-        else:
-            logging.debug("OpenRouter: Streaming mode disabled")
-        if not isinstance(streaming, bool):
-            raise ValueError(f"Invalid type for 'streaming': Expected a boolean, got {type(streaming).__name__}")
-
-        # Model Selection validation
-        openrouter_model = loaded_config_data['openrouter_api']['model']
-        logging.debug(f"OpenRouter: Using model from config file: {openrouter_model}")
-
-        print(f"API Key: {api_key}")
-        print("FUCK THIS3")
-
-        # Top-P
-        if not top_p:
-            logging.debug(f"OpenRouter: Using top_p {top_p} from config file")
-            top_p = loaded_config_data['openrouter_api']['top_p']
-            top_p = float(top_p)
-
-        # Top-K
-        if not top_k:
-            logging.debug(f"OpenRouter: Using top_k {top_k} from config file")
-            top_k = loaded_config_data['openrouter_api']['top_k']
-            top_k = float(top_k)
-
-        # Min-P
-        if not minp:
-            logging.debug(f"OpenRouter: Using min_p {minp} from config file")
-            minp = loaded_config_data['openrouter_api']['min_p']
-            minp = float(minp)
-
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("OpenRouter: Loading json data for summarization")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("OpenRouter: Using provided string data for summarization")
-            data = input_data
-
-        # DEBUG - Debug logging to identify sent data
-        logging.debug(f"OpenRouter: Loaded data: {data[:500]}...(snipped to first 500 chars)")
-        logging.debug(f"OpenRouter: Type of data: {type(data)}")
-
-        if isinstance(data, dict) and 'summary' in data:
-            # If the loaded data is a dictionary and already contains a summary, return it
-            logging.debug("OpenRouter: Summary already exists in the loaded data")
-            return data['summary']
-
-        # If the loaded data is a list of segment dictionaries or a string, proceed with summarization
-        if isinstance(data, list):
-            segments = data
-            text = extract_text_from_segments(segments)
-        elif isinstance(data, str):
-            text = data
-        else:
-            raise ValueError("OpenRouter: Invalid input data format")
-
-        # System Prompt
-        if not isinstance(system_message, str):
-            logging.debug("OpenRouter: Using default system prompt")
-            system_message = openrouter_system_prompt
-        else:
-            logging.debug("OpenRouter: Using provided system prompt")
-
-        openrouter_prompt = f"{input_data} \n\n\n\n{custom_prompt_arg}"
-        logging.debug(f"openrouter: User Prompt being sent is {openrouter_prompt}")
-
-    except Exception as e:
-        logging.error(f"OpenRouter: Error in processing: {str(e)}")
-        return f"OpenRouter: Error occurred while processing config file with OpenRouter: {str(e)}"
-
-    if streaming:
-        try:
-            logging.debug("OpenRouter: Submitting streaming request to API endpoint")
-            print("OpenRouter: Submitting streaming request to API endpoint")
-
-            # Create a session
-            session = requests.Session()
-
-            # Load config values
-            retry_count = loaded_config_data['openrouter_api']['api_retries']
-            retry_delay = loaded_config_data['openrouter_api']['api_retry_delay']
-
-            # Configure the retry strategy
-            retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-            )
-
-            # Create the adapter
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            # Make streaming request
-            response = session.post(
-                url="https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Accept": "text/event-stream",  # Important for streaming
-                },
-                data=json.dumps({
-                    "model": openrouter_model,
-                    "messages": [
-                        {"role": "system", "content": system_message},
-                        {"role": "user", "content": openrouter_prompt}
-                    ],
-                    #"max_tokens": 4096,
-                    "top_p": top_p,
-                    "top_k": top_k,
-                    "min_p": minp,
-                    "temperature": temp,
-                    "stream": True
-                }),
-            )
-            logging.debug(f"Raw API Response Content: {response.text}")
-            if response.status_code == 200:
-                full_response = ""
-                # Process the streaming response
-                for line in response.iter_lines():
-                    if line:
-                        # Remove "data: " prefix and parse JSON
-                        line = line.decode('utf-8')
-                        if line.startswith('data: '):
-                            json_str = line[6:]  # Remove "data: " prefix
-                            if json_str.strip() == '[DONE]':
-                                break
-                            try:
-                                json_data = json.loads(json_str)
-                                if 'choices' in json_data and len(json_data['choices']) > 0:
-                                    delta = json_data['choices'][0].get('delta', {})
-                                    if 'content' in delta:
-                                        content = delta['content']
-                                        print(content, end='', flush=True)  # Print streaming output
-                                        full_response += content
-                            except json.JSONDecodeError as e:
-                                logging.error(f"Error decoding JSON chunk: {e}")
-                                continue
-
-                logging.debug("openrouter: Streaming completed successfully")
-                return full_response.strip()
-            else:
-                error_msg = f"openrouter: Streaming API request failed with status code {response.status_code}: {response.text}"
-                logging.error(error_msg)
-                return error_msg
-
-        except Exception as e:
-            error_msg = f"openrouter: Error occurred while processing stream: {str(e)}"
-            logging.error(error_msg)
-            return error_msg
-    else:
-        try:
-            # Create a session
-            session = requests.Session()
-
-            # Load config values
-            retry_count = loaded_config_data['openrouter_api']['api_retries']
-            retry_delay = loaded_config_data['openrouter_api']['api_retry_delay']
-
-            # Configure the retry strategy
-            retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-            )
-
-            # Create the adapter
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            logging.info("OpenRouter: Submitting request to API endpoint")
-            response = session.post(
-                url="https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                },
-                data=json.dumps({
-                    "model": openrouter_model,
-                    "messages": [
-                        {"role": "system", "content": system_message},
-                        {"role": "user", "content": openrouter_prompt}
-                    ],
-                    "top_p": top_p,
-                    "top_k": top_k,
-                    "min_p": minp,
-                    "temperature": temp,
-                    "stream": False
-                }),
-            )
-            # Log response content
-            logging.debug(f"Raw API Response Content: {response.text}")
-
-            response_data = response.json()
-            logging.debug(f"Full API Response Data: {response_data}")
-
-            if response.status_code == 200:
-                if 'choices' in response_data and len(response_data['choices']) > 0:
-                    summary = response_data['choices'][0]['message']['content'].strip()
-                    logging.debug("openrouter: Chat request successful")
-                    logging.debug("openrouter: Chat request successful.")
-                    return summary
-                else:
-                    logging.error("openrouter: Expected data not found in API response.")
-                    return "openrouter: Expected data not found in API response."
-            else:
-                logging.error(f"openrouter:  API request failed with status code {response.status_code}: {response.text}")
-                return f"openrouter: API request failed: {response.text}"
-        except Exception as e:
-            logging.error(f"openrouter: Error in processing: {str(e)}")
-            return f"openrouter: Error occurred while processing chat request with openrouter: {str(e)}"
-
-
-def chat_with_huggingface(api_key, input_data, custom_prompt_arg, system_prompt=None, temp=None, streaming=False):
-    # https://huggingface.co/docs/api-inference/en/parameters
+    logging.debug("Groq: Chat process starting...")
     loaded_config_data = load_and_log_configs()
-    logging.debug(f"huggingface Chat: Chat request process starting...")
-    try:
-        # API key validation
-        if not api_key or api_key.strip() == "":
-            logging.info("HuggingFace Chat: API key not provided as parameter")
-            logging.info("HuggingFace Chat: Attempting to use API key from config file")
+    if loaded_config_data is None:
+        raise ValueError("Groq: Failed to load configuration data.")
+    groq_config = loaded_config_data.get('groq_api', {})
 
-        huggingface_api_key = loaded_config_data['huggingface_api'].get('api_key')
-        logging.debug(f"HuggingFace Chat: API key from config: {huggingface_api_key[:5]}...{huggingface_api_key[-5:]}")
+    # --- API Key Resolution ---
+    groq_api_key = api_key
+    if not groq_api_key:
+        logging.info("Groq: API key not provided, checking config.")
+        groq_api_key = groq_config.get('api_key')
 
-        if huggingface_api_key is None or huggingface_api_key.strip() == "":
-            logging.error("HuggingFace Chat: API key not found or is empty")
-            return "HuggingFace Chat: API Key Not Provided/Found in Config file or is empty"
-        if huggingface_api_key:
-            logging.info("HuggingFace Chat: Using API key from config file")
-        headers = {
-            "Authorization": f"Bearer {huggingface_api_key}"
-        }
+    if not groq_api_key:
+        logging.error("Groq: API key is missing.")
+        raise ValueError("Groq API Key is required but not found.")
 
-        if isinstance(streaming, str):
-            streaming = streaming.lower() == "true"
-        elif isinstance(streaming, int):
-            streaming = bool(streaming)  # Convert integers (1/0) to boolean
-        elif streaming is None:
-            streaming = loaded_config_data.get('huggingface_api', {}).get('streaming', False)
-            logging.debug("HuggingFace: Streaming mode enabled")
-        else:
-            logging.debug("HuggingFace: Streaming mode disabled")
-        if not isinstance(streaming, bool):
-            raise ValueError(f"Invalid type for 'streaming': Expected a boolean, got {type(streaming).__name__}")
+    log_key = f"{groq_api_key[:5]}...{groq_api_key[-5:]}" if len(groq_api_key) > 9 else "Provided Key"
+    logging.debug(f"Groq: Using API Key: {log_key}")
 
-        # Setup model
-        huggingface_model = loaded_config_data['huggingface_api']['model']
+    # --- Parameter Resolution ---
+    # Groq uses OpenAI compatible API, params similar
+    if temp is None: temp = float(groq_config.get('temperature', 0.2))
+    # Groq uses 'top_p', map 'maxp' to it if provided, else use config 'top_p'
+    top_p = maxp if maxp is not None else float(groq_config.get('top_p', 0.9))
+    model = groq_config.get('model', 'llama3-8b-8192') # Get model from config
+    if system_message is None: system_message = "You are a helpful AI assistant."
 
-        API_URL = f"https://api-inference.huggingface.co/models/{huggingface_model}/v1/chat/completions"
-        if temp is None:
-            temp = 1.0
-        temp = float(temp)
-        huggingface_prompt = f"{custom_prompt_arg}\n\n\n{input_data}"
-        logging.debug(f"HuggingFace chat: Prompt being sent is {huggingface_prompt}")
-        data = {
-            "model": f"{huggingface_model}",
-            "messages": [{"role": "user", "content": f"{huggingface_prompt}"}],
-            "max_tokens": 4096,
-            "stream": False,
-            "temperature": temp
-        }
+    if isinstance(streaming, str): streaming = streaming.lower() == "true"
+    elif isinstance(streaming, int): streaming = bool(streaming)
+    if streaming is None: streaming = groq_config.get('streaming', False)
+    if not isinstance(streaming, bool):
+        raise ValueError(f"Invalid type for 'streaming': Expected boolean, got {type(streaming).__name__}")
 
-        logging.debug("HuggingFace Chat: Submitting request...")
-        if streaming:
-            # Create a session
-            session = requests.Session()
+    logging.debug(f"Groq: Streaming: {streaming}, Model: {model}, Temp: {temp}, TopP: {top_p}")
 
-            # Load config values
-            retry_count = loaded_config_data['huggingface_api']['api_retries']
-            retry_delay = loaded_config_data['huggingface_api']['api_retry_delay']
+    # --- Prepare Request ---
+    headers = {
+        'Authorization': f'Bearer {groq_api_key}',
+        'Content-Type': 'application/json'
+    }
 
-            # Configure the retry strategy
-            retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-            )
+    # Handle input_data (assuming similar logic to OpenAI)
+    # Note: Your original code had text extraction logic here. Adapt if needed.
+    if isinstance(input_data, list):
+        messages = input_data
+        if not any(msg.get('role') == 'system' for msg in messages):
+             messages.insert(0, {"role": "system", "content": system_message})
+        if custom_prompt_arg and messages and messages[-1].get('role') == 'user':
+             messages[-1]['content'] = f"{messages[-1]['content']}\n\n{custom_prompt_arg}"
+        elif custom_prompt_arg:
+             messages.append({"role": "user", "content": custom_prompt_arg})
+    elif isinstance(input_data, str):
+         messages = [
+             {"role": "system", "content": system_message},
+             {"role": "user", "content": f"{input_data}\n\n{custom_prompt_arg}" if custom_prompt_arg else input_data}
+         ]
+    else:
+        raise ValueError("Invalid 'input_data' format for Groq. Expected list of messages or string.")
 
-            # Create the adapter
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            response = session.post(API_URL, headers=headers, json=data, stream=True)
-            response.raise_for_status()
-
-            def stream_generator():
-                for line in response.iter_lines():
-                    if line:
-                        decoded_line = line.decode('utf-8').strip()
-                        if decoded_line.startswith('data:'):
-                            data_str = decoded_line[len('data:'):].strip()
-                            if data_str == '[DONE]':
-                                break
-                            try:
-                                data_json = json.loads(data_str)
-                                if 'token' in data_json:
-                                    token_text = data_json['token'].get('text', '')
-                                    yield token_text
-                                elif 'generated_text' in data_json:
-                                    # Some models may send the full generated text
-                                    generated_text = data_json['generated_text']
-                                    yield generated_text
-                                else:
-                                    logging.debug(f"HuggingFace: Unhandled streaming data: {data_json}")
-                            except json.JSONDecodeError:
-                                logging.error(f"HuggingFace: Error decoding JSON from line: {decoded_line}")
-                                continue
-                # Optionally, yield the final collected text
-                # yield collected_text
-
-            return stream_generator()
-        else:
-            # Create a session
-            session = requests.Session()
-
-            # Load config values
-            retry_count = loaded_config_data['huggingface_api']['api_retries']
-            retry_delay = loaded_config_data['huggingface_api']['api_retry_delay']
-
-            # Configure the retry strategy
-            retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-            )
-
-            # Create the adapter
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            response = session.post(API_URL, headers=headers, json=data)
-            logging.debug(f"Full API response data: {response.text}")
-
-            if response.status_code == 200:
-                response_json = response.json()
-                if "choices" in response_json and len(response_json["choices"]) > 0:
-                    generated_text = response_json["choices"][0]["message"]["content"]
-                    logging.debug("HuggingFace Chat: Chat request successful")
-                    print("HuggingFace Chat: Chat request successful.")
-                    return generated_text.strip()
-                else:
-                    logging.error("HuggingFace Chat: No generated text in the response")
-                    return "HuggingFace Chat: No generated text in the response"
-            else:
-                logging.error(
-                    f"HuggingFace Chat: Chat request failed with status code {response.status_code}: {response.text}")
-                return f"HuggingFace Chat: Failed to process chat request, status code {response.status_code}: {response.text}"
-    except Exception as e:
-        logging.error(f"HuggingFace Chat: Error in processing: {str(e)}")
-        print(f"HuggingFace Chat: Error occurred while processing chat request with huggingface: {str(e)}")
-        return None
-
-
-def chat_with_deepseek(api_key, input_data, custom_prompt_arg, temp=0.1, system_message=None, streaming=False, topp=None):
-    """
-    Interacts with the DeepSeek API to generate summaries based on input data.
-
-    Parameters:
-        api_key (str): DeepSeek API key. If not provided, the key from the config is used.
-        input_data (str or list): The data to summarize. Can be a string or a list of segments.
-        custom_prompt_arg (str): Custom prompt to append to the input data.
-        temp (float, optional): Temperature setting for the model. Defaults to 0.1.
-        system_message (str, optional): System prompt for the assistant. Defaults to a helpful assistant message.
-        max_retries (int, optional): Maximum number of retries for failed API calls. Defaults to 3.
-        retry_delay (int, optional): Delay between retries in seconds. Defaults to 5.
-
-    Returns:
-        str: The summary generated by DeepSeek or an error message.
-    """
-    # https://api-docs.deepseek.com/api/create-chat-completion
-    logging.debug("DeepSeek: Summarization process starting...")
-    max_retries = 3
-    retry_delay = 5
-    try:
-        logging.debug("DeepSeek: Loading and validating configurations")
-        loaded_config_data = load_and_log_configs()
-        if loaded_config_data is None:
-            logging.error("DeepSeek: Failed to load configuration data")
-            return "DeepSeek: Failed to load configuration data."
-
-        # Prioritize the API key passed as a parameter
-        if api_key and api_key.strip():
-            deepseek_api_key = api_key.strip()
-            logging.info("DeepSeek: Using API key provided as parameter")
-        else:
-            # If no parameter is provided, use the key from the config
-            deepseek_api_key = loaded_config_data['deepseek_api'].get('api_key')
-            if deepseek_api_key and deepseek_api_key.strip():
-                deepseek_api_key = deepseek_api_key.strip()
-                logging.info("DeepSeek: Using API key from config file")
-            else:
-                logging.error("DeepSeek: No valid API key available")
-                return "DeepSeek: API Key Not Provided/Found in Config file or is empty"
-
-        logging.debug("DeepSeek: Using API Key")
-
-        if isinstance(streaming, str):
-            streaming = streaming.lower() == "true"
-        elif isinstance(streaming, int):
-            streaming = bool(streaming)  # Convert integers (1/0) to boolean
-        elif streaming is None:
-            streaming = loaded_config_data.get('deepseek_api', {}).get('streaming', False)
-            logging.debug("DeepSeek: Streaming mode enabled")
-        else:
-            logging.debug("DeepSeek: Streaming mode disabled")
-        if not isinstance(streaming, bool):
-            raise ValueError(f"Invalid type for 'streaming': Expected a boolean, got {type(streaming).__name__}")
-
-        # Set default system prompt if not provided
-        if isinstance(system_message, str):
-            logging.debug("DeepSeek: Using provided system prompt")
-            deepseek_system_message = system_message
-        else:
-            deepseek_system_message = "You are a helpful AI assistant who does whatever the user requests."
-            logging.debug("DeepSeek Chat: Using default system prompt")
-
-        # Input data handling
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("DeepSeek: Loading JSON data for summarization")
-            with open(input_data, 'r', encoding='utf-8') as file:
-                try:
-                    data = json.load(file)
-                except json.JSONDecodeError as e:
-                    logging.error(f"DeepSeek: JSON decoding failed: {str(e)}")
-                    data = input_data
-                    pass
-        else:
-            logging.debug("DeepSeek: Using provided string data for summarization")
-            data = input_data
-
-        # DEBUG - Debug logging to identify sent data
-        if isinstance(data, str):
-            snipped_data = data[:500] + "..." if len(data) > 500 else data
-            logging.debug(f"DeepSeek: Loaded data (snipped to first 500 chars): {snipped_data}")
-        elif isinstance(data, list):
-            snipped_data = json.dumps(data[:2], indent=2) + "..." if len(data) > 2 else json.dumps(data, indent=2)
-            logging.debug(f"DeepSeek: Loaded data (snipped to first 2 segments): {snipped_data}")
-        else:
-            logging.debug(f"DeepSeek: Loaded data: {data}")
-
-        logging.debug(f"DeepSeek: Type of data: {type(data)}")
-
-        if isinstance(data, dict) and 'summary' in data:
-            # If the loaded data is a dictionary and already contains a summary, return it
-            logging.debug("DeepSeek: Summary already exists in the loaded data")
-            return data['summary']
-
-        # Text extraction
-        if isinstance(data, list):
-            segments = data
-            try:
-                text = extract_text_from_segments(segments)
-                logging.debug("DeepSeek: Extracted text from segments")
-            except Exception as e:
-                logging.error(f"DeepSeek: Error extracting text from segments: {str(e)}")
-                return f"DeepSeek: Error extracting text from segments: {str(e)}"
-        elif isinstance(data, str):
-            text = data
-            logging.debug("DeepSeek: Using string data directly")
-        else:
-            raise ValueError("DeepSeek: Invalid input data format")
-
-        # Retrieve the model from config if not provided
-        deepseek_model = loaded_config_data['deepseek_api'].get('deepseek', "deepseek-chat")
-        logging.debug(f"DeepSeek: Using model: {deepseek_model}")
-
-        # Ensure temperature is a float within acceptable range
+    data = {
+        "model": model,
+        "messages": messages,
+        "temperature": temp,
+        "stream": streaming,
+        "top_p": top_p
+        # Add other OpenAI compatible params if needed (e.g., max_tokens from config)
+    }
+    max_tokens = groq_config.get('max_tokens') # Check if max_tokens is configured
+    if max_tokens:
         try:
-            temp = float(temp)
-            if not (0.0 <= temp <= 1.0):
-                logging.warning("DeepSeek: Temperature out of bounds (0.0 - 1.0). Setting to default 0.1")
-                temp = 0.1
+            data["max_tokens"] = int(max_tokens)
         except (ValueError, TypeError):
-            logging.warning("DeepSeek: Invalid temperature value. Setting to default 0.1")
-            temp = 0.1
+             logging.warning(f"Groq: Invalid max_tokens value in config: {max_tokens}. Ignoring.")
 
-        headers = {
-            'Authorization': f'Bearer {deepseek_api_key}',
-            'Content-Type': 'application/json'
-        }
 
-        logging.debug("DeepSeek: Preparing data and prompt for submittal")
-        deepseek_prompt = f"{text}\n\n\n\n{custom_prompt_arg}"
-        payload = {
-            "model": deepseek_model,
-            "messages": [
-                {"role": "system", "content": deepseek_system_message},
-                {"role": "user", "content": deepseek_prompt}
-            ],
-            "stream": streaming,
-            "temperature": temp,
-            "top_p": topp
-        }
+    # --- Execute Request ---
+    # Groq uses an OpenAI compatible endpoint path
+    api_url = 'https://api.groq.com/openai/v1/chat/completions'
+    try:
+        # Configure retry strategy
+        retry_count = int(groq_config.get('api_retries', 3))
+        retry_delay = float(groq_config.get('api_retry_delay', 1))
+        retry_strategy = Retry(
+            total=retry_count,
+            backoff_factor=retry_delay,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["POST"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
 
-        logging.debug("DeepSeek: Posting request to API")
+        with requests.Session() as session:
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+            response = session.post(api_url, headers=headers, json=data, stream=streaming, timeout=60)
 
-        try:
+            response.raise_for_status() # Check status AFTER potential retries
+
             if streaming:
-                # Create a session
-                session = requests.Session()
-
-                # Load config values
-                retry_count = loaded_config_data['deepseek_api']['api_retries']
-                retry_delay = loaded_config_data['deepseek_api']['api_retry_delay']
-
-                # Configure the retry strategy
-                retry_strategy = Retry(
-                    total=retry_count,  # Total number of retries
-                    backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                    status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-                )
-
-                # Create the adapter
-                adapter = HTTPAdapter(max_retries=retry_strategy)
-
-                # Mount adapters for both HTTP and HTTPS
-                session.mount("http://", adapter)
-                session.mount("https://", adapter)
-                logging.debug("DeepSeek: Posting streaming request")
-                response = session.post(
-                    'https://api.deepseek.com/chat/completions',
-                    headers=headers,
-                    json=payload,
-                    stream=True
-                )
-                response.raise_for_status()
-
+                logging.debug("Groq: Streaming response received.")
+                # Groq stream is OpenAI compatible (SSE)
                 def stream_generator():
-                    collected_text = ""
-                    for line in response.iter_lines():
-                        if line:
-                            decoded_line = line.decode('utf-8').strip()
-                            if decoded_line == '':
-                                continue
-                            if decoded_line.startswith('data: '):
-                                data_str = decoded_line[len('data: '):]
-                                if data_str == '[DONE]':
-                                    break
-                                try:
-                                    data_json = json.loads(data_str)
-                                    delta_content = data_json['choices'][0]['delta'].get('content', '')
-                                    collected_text += delta_content
-                                    yield delta_content
-                                except json.JSONDecodeError:
-                                    logging.error(f"DeepSeek: Error decoding JSON from line: {decoded_line}")
-                                    continue
-                                except KeyError as e:
-                                    logging.error(f"DeepSeek: Key error: {str(e)} in line: {decoded_line}")
-                                    continue
-                    yield collected_text
-
+                    try:
+                        for line in response.iter_lines(decode_unicode=True):
+                             if line.strip():
+                                 yield line + "\n\n" # Pass through raw SSE line
+                        yield "data: [DONE]\n\n" # Ensure DONE is sent
+                    except Exception as e:
+                        logging.error(f"Groq: Error during stream iteration: {e}", exc_info=True)
+                        error_payload = json.dumps({"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
+                        yield f"data: {error_payload}\n\n"
+                        yield "data: [DONE]\n\n"
+                    finally:
+                         response.close()
                 return stream_generator()
             else:
-                # Create a session
-                session = requests.Session()
+                logging.debug("Groq: Non-streaming request successful.")
+                response_data = response.json()
+                #logging.debug(f"Groq Raw Response Data: {response_data}") # Optional
+                return response_data # Return the full dictionary
 
-                # Load config values
-                retry_count = loaded_config_data['deepseek_api']['api_retries']
-                retry_delay = loaded_config_data['deepseek_api']['api_retry_delay']
+    # Let RequestException and HTTPError propagate up to chat_api_call
+    except (ValueError, KeyError, TypeError) as e:
+         logging.error(f"Groq: Configuration or data error: {e}", exc_info=True)
+         raise ValueError(f"Groq config/data error: {e}") from e
 
-                # Configure the retry strategy
-                retry_strategy = Retry(
-                    total=retry_count,  # Total number of retries
-                    backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                    status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-                )
 
-                # Create the adapter
-                adapter = HTTPAdapter(max_retries=retry_strategy)
+def chat_with_openrouter(api_key=None, input_data=None, custom_prompt_arg=None, temp=None, system_message=None, streaming=False, top_p=None, top_k=None, minp=None, model=None): # Added model arg
+    logging.info("OpenRouter: Chat request started.")
+    loaded_config_data = load_and_log_configs()
+    openrouter_config = loaded_config_data.get('openrouter_api', {})
 
-                # Mount adapters for both HTTP and HTTPS
-                session.mount("http://", adapter)
-                session.mount("https://", adapter)
-                response = session.post('https://api.deepseek.com/chat/completions', headers=headers, json=payload, timeout=30)
-                logging.debug(f"DeepSeek: Full API response: {response.status_code} - {response.text}")
+    # --- API Key ---
+    openrouter_api_key = api_key or openrouter_config.get('api_key')
+    if not openrouter_api_key:
+        logging.error("OpenRouter: API key is missing.")
+        raise ValueError("OpenRouter API Key is required but not found.")
+    log_key = f"{openrouter_api_key[:5]}...{openrouter_api_key[-5:]}" if len(openrouter_api_key) > 9 else "Provided Key"
+    logging.debug(f"OpenRouter: Using API Key: {log_key}")
 
-                if response.status_code == 200:
-                    response_data = response.json()
-                    logging.debug(f"DeepSeek: Response JSON: {json.dumps(response_data, indent=2)}")
+    # --- Parameters ---
+    if model is None: model = openrouter_config.get('model', 'mistralai/mistral-7b-instruct') # Allow model override
+    if temp is None: temp = float(openrouter_config.get('temperature', 0.7))
+    if top_p is None: top_p = float(openrouter_config.get('top_p', 0.9))
+    if top_k is None: top_k = int(openrouter_config.get('top_k', 40))
+    # min_p is specific, handle None carefully
+    if minp is None:
+        minp_config = openrouter_config.get('min_p')
+        minp = float(minp_config) if minp_config is not None else None # Keep None if not in config
 
-                    # Adjust parsing based on actual API response structure
-                    if 'choices' in response_data:
-                        if len(response_data['choices']) > 0:
-                            summary = response_data['choices'][0]['message']['content'].strip()
-                            logging.debug("DeepSeek: Chat request successful")
-                            return summary
-                        else:
-                            logging.error("DeepSeek: 'choices' key is empty in response")
-                    else:
-                        logging.error("DeepSeek: 'choices' key missing in response")
-                    return "DeepSeek: Unexpected response format from API."
-                elif 500 <= response.status_code < 600:
-                    logging.error(f"DeepSeek: Server error (status code {response.status_code})")
-                else:
-                    logging.error(f"DeepSeek: Request failed with status code {response.status_code}. Response: {response.text}")
-                    return f"DeepSeek: Failed to process chat request. Status code: {response.status_code}"
+    if system_message is None: system_message = "You are a helpful AI assistant."
 
-        except requests.Timeout:
-            logging.error(f"DeepSeek: Request timed out.")
-        except requests.RequestException as e:
-            logging.error(f"DeepSeek: Request exception occurred: {str(e)}.")
-    except Exception as e:
-        logging.error(f"DeepSeek: Unexpected error in processing: {str(e)}", exc_info=True)
-        return f"DeepSeek: Error occurred while processing chat request: {str(e)}"
+    if isinstance(streaming, str): streaming = streaming.lower() == "true"
+    elif isinstance(streaming, int): streaming = bool(streaming)
+    if streaming is None: streaming = openrouter_config.get('streaming', False)
+    if not isinstance(streaming, bool):
+        raise ValueError(f"Invalid type for 'streaming': Expected boolean, got {type(streaming).__name__}")
+
+    logging.debug(f"OpenRouter: Streaming: {streaming}, Model: {model}, Temp: {temp}, TopP: {top_p}, TopK: {top_k}, MinP: {minp}")
+
+    # --- Prepare Request (OpenAI Compatible) ---
+    headers = {
+        "Authorization": f"Bearer {openrouter_api_key}",
+        "Content-Type": "application/json",
+        # OpenRouter specific headers (optional)
+        # "HTTP-Referer": $YOUR_SITE_URL, # Optional, for affiliate payments
+        # "X-Title": $YOUR_SITE_NAME, # Optional, shows in OpenRouter UI
+    }
+
+    # Handle input_data format
+    if isinstance(input_data, list):
+        messages = input_data
+        if not any(msg.get('role') == 'system' for msg in messages):
+             messages.insert(0, {"role": "system", "content": system_message})
+        if custom_prompt_arg and messages and messages[-1].get('role') == 'user':
+             messages[-1]['content'] = f"{messages[-1]['content']}\n\n{custom_prompt_arg}"
+        elif custom_prompt_arg:
+             messages.append({"role": "user", "content": custom_prompt_arg})
+    elif isinstance(input_data, str):
+         messages = [
+             {"role": "system", "content": system_message},
+             {"role": "user", "content": f"{input_data}\n\n{custom_prompt_arg}" if custom_prompt_arg else input_data}
+         ]
+    else:
+        raise ValueError("Invalid 'input_data' format for OpenRouter. Expected list of messages or string.")
+
+    data = {
+        "model": model,
+        "messages": messages,
+        "temperature": temp,
+        "stream": streaming,
+        "top_p": top_p,
+        "top_k": top_k,
+        # Only include min_p if it has a value
+    }
+    if minp is not None:
+        data["min_p"] = minp
+
+    api_url = "https://openrouter.ai/api/v1/chat/completions"
+
+    # --- Execute Request ---
+    try:
+        retry_count = int(openrouter_config.get('api_retries', 3))
+        retry_delay = float(openrouter_config.get('api_retry_delay', 1))
+        retry_strategy = Retry(total=retry_count, backoff_factor=retry_delay, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["POST"])
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+
+        with requests.Session() as session:
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+            response = session.post(api_url, headers=headers, json=data, stream=streaming, timeout=60)
+
+            response.raise_for_status() # Check status AFTER retries
+
+            if streaming:
+                logging.debug("OpenRouter: Streaming response received.")
+                # Stream format is OpenAI compatible (SSE)
+                def stream_generator():
+                    try:
+                        for line in response.iter_lines(decode_unicode=True):
+                             if line.strip():
+                                 yield line + "\n\n" # Pass through raw SSE line
+                        yield "data: [DONE]\n\n"
+                    except Exception as e:
+                         logging.error(f"OpenRouter: Error during stream iteration: {e}", exc_info=True)
+                         error_payload = json.dumps({"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
+                         yield f"data: {error_payload}\n\n"
+                         yield "data: [DONE]\n\n"
+                    finally:
+                         response.close()
+                return stream_generator()
+            else:
+                logging.debug("OpenRouter: Non-streaming request successful.")
+                response_data = response.json()
+                #logging.debug(f"OpenRouter Raw Response Data: {response_data}")
+                return response_data # Return full dictionary
+
+    except (ValueError, KeyError, TypeError) as e:
+         logging.error(f"OpenRouter: Configuration or data error: {e}", exc_info=True)
+         raise ValueError(f"OpenRouter config/data error: {e}") from e
+    # Let RequestException and HTTPError propagate
+
+
+def chat_with_huggingface(api_key, input_data, custom_prompt_arg, system_prompt=None, temp=None, streaming=False, model=None): # Added model
+    logging.debug(f"HuggingFace Chat: Chat request process starting...")
+    loaded_config_data = load_and_log_configs()
+    hf_config = loaded_config_data.get('huggingface_api', {})
+
+    # --- API Key ---
+    # Use passed key first, then config
+    huggingface_api_key = api_key or hf_config.get('api_key')
+    if not huggingface_api_key:
+        logging.error("HuggingFace: API key is missing.")
+        raise ValueError("HuggingFace API Key is required but not found.")
+    log_key = f"{huggingface_api_key[:5]}...{huggingface_api_key[-5:]}" if len(huggingface_api_key) > 9 else "Provided Key"
+    logging.debug(f"HuggingFace: Using API Key: {log_key}")
+
+    # --- Parameters ---
+    if model is None: model = hf_config.get('model') # Model ID is critical
+    if not model:
+        raise ValueError("HuggingFace model ID is required but not found in config or arguments.")
+    if temp is None: temp = float(hf_config.get('temperature', 1.0)) # Default temp 1.0 is common
+    if system_prompt is None: system_prompt = "You are a helpful AI assistant." # TGI might ignore this depending on template
+
+    if isinstance(streaming, str): streaming = streaming.lower() == "true"
+    elif isinstance(streaming, int): streaming = bool(streaming)
+    if streaming is None: streaming = hf_config.get('streaming', False)
+    if not isinstance(streaming, bool):
+        raise ValueError(f"Invalid type for 'streaming': Expected boolean, got {type(streaming).__name__}")
+
+    logging.debug(f"HuggingFace: Streaming: {streaming}, Model: {model}, Temp: {temp}")
+
+    # --- Prepare Request (TGI OpenAI compatible endpoint) ---
+    headers = {
+        "Authorization": f"Bearer {huggingface_api_key}",
+        'Content-Type': 'application/json',
+    }
+
+    # Handle input_data format
+    if isinstance(input_data, list):
+        messages = input_data
+        # TGI usually infers system prompt from template, but we can pass it
+        if not any(msg.get('role') == 'system' for msg in messages):
+             messages.insert(0, {"role": "system", "content": system_prompt})
+        if custom_prompt_arg and messages and messages[-1].get('role') == 'user':
+             messages[-1]['content'] = f"{messages[-1]['content']}\n\n{custom_prompt_arg}"
+        elif custom_prompt_arg:
+             messages.append({"role": "user", "content": custom_prompt_arg})
+    elif isinstance(input_data, str):
+         messages = [
+             {"role": "system", "content": system_prompt},
+             {"role": "user", "content": f"{input_data}\n\n{custom_prompt_arg}" if custom_prompt_arg else input_data}
+         ]
+    else:
+        raise ValueError("Invalid 'input_data' format for HuggingFace. Expected list of messages or string.")
+
+    data = {
+        "model": model, # Often ignored by endpoint if model is in URL, but good practice
+        "messages": messages,
+        "max_tokens": int(hf_config.get('max_tokens', 1024)), # Add max_tokens if configurable
+        "stream": streaming,
+        "temperature": temp,
+        # Add other TGI supported params like top_p, top_k if needed
+    }
+    top_p = hf_config.get('top_p')
+    top_k = hf_config.get('top_k')
+    if top_p is not None: data['top_p'] = float(top_p)
+    if top_k is not None: data['top_k'] = int(top_k)
+
+
+    # Construct URL (Assuming TGI endpoint)
+    # NOTE: The base URL might differ for Serverless Inference Endpoints
+    api_url = f"https://api-inference.huggingface.co/models/{model}" # Base for inference API
+    # For TGI compatible chat endpoint, the path is often appended:
+    # api_url = f"https://YOUR-ENDPOINT-URL/v1/chat/completions" # Example if using dedicated endpoint
+    # Using the standard inference API URL, will use the recommended task if available
+    # Let's assume the /v1/chat/completions path for compatibility testing
+    # You might need to adjust this based on EXACTLY which HF API you target
+    api_url = f"https://api-inference.huggingface.co/v1/chat/completions" # More likely endpoint for chat
+
+    # --- Execute Request ---
+    try:
+        retry_count = int(hf_config.get('api_retries', 3))
+        retry_delay = float(hf_config.get('api_retry_delay', 1))
+        retry_strategy = Retry(total=retry_count, backoff_factor=retry_delay, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["POST"])
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+
+        with requests.Session() as session:
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+            response = session.post(api_url, headers=headers, json=data, stream=streaming, timeout=60)
+
+            response.raise_for_status() # Check status AFTER retries
+
+            if streaming:
+                logging.debug("HuggingFace: Streaming response received.")
+                # Stream format is likely OpenAI compatible SSE
+                def stream_generator():
+                    try:
+                        for line in response.iter_lines(decode_unicode=True):
+                             if line.strip():
+                                 yield line + "\n\n" # Pass through raw SSE line
+                        yield "data: [DONE]\n\n"
+                    except Exception as e:
+                         logging.error(f"HuggingFace: Error during stream iteration: {e}", exc_info=True)
+                         error_payload = json.dumps({"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
+                         yield f"data: {error_payload}\n\n"
+                         yield "data: [DONE]\n\n"
+                    finally:
+                         response.close()
+                return stream_generator()
+            else:
+                logging.debug("HuggingFace: Non-streaming request successful.")
+                response_data = response.json()
+                #logging.debug(f"HuggingFace Raw Response Data: {response_data}")
+                # Check if response is list (older Inference API format) or dict (TGI format)
+                if isinstance(response_data, list) and len(response_data) > 0 and 'generated_text' in response_data[0]:
+                     # Adapt older format to OpenAI-like structure for consistency downstream? Or return as is.
+                     # Returning as is for now, endpoint might need to normalize.
+                     logging.warning("HuggingFace: Received older Inference API list format.")
+                elif not isinstance(response_data, dict):
+                     logging.error(f"HuggingFace: Unexpected non-dict response format: {type(response_data)}")
+                     # Treat as an error? Or try to process if possible.
+                     # Raising error for now.
+                     raise ValueError(f"Unexpected response format from HuggingFace API: {type(response_data)}")
+
+                return response_data # Return the full dictionary (or list)
+
+    except (ValueError, KeyError, TypeError) as e:
+         logging.error(f"HuggingFace: Configuration or data error: {e}", exc_info=True)
+         raise ValueError(f"HuggingFace config/data error: {e}") from e
+    # Let RequestException and HTTPError propagate
+
+
+def chat_with_deepseek(api_key, input_data, custom_prompt_arg, temp=None, system_message=None, streaming=False, topp=None, model=None): # Added model
+    logging.debug("DeepSeek: Chat request process starting...")
+    loaded_config_data = load_and_log_configs()
+    deepseek_config = loaded_config_data.get('deepseek_api', {})
+
+    # --- API Key ---
+    deepseek_api_key = api_key or deepseek_config.get('api_key')
+    if not deepseek_api_key:
+        logging.error("DeepSeek: API key is missing.")
+        raise ValueError("DeepSeek API Key is required but not found.")
+    log_key = f"{deepseek_api_key[:5]}...{deepseek_api_key[-5:]}" if len(deepseek_api_key) > 9 else "Provided Key"
+    logging.debug(f"DeepSeek: Using API Key: {log_key}")
+
+    # --- Parameters (OpenAI compatible) ---
+    if model is None: model = deepseek_config.get('model', 'deepseek-chat') # Allow model override
+    if temp is None: temp = float(deepseek_config.get('temperature', 0.1))
+    if topp is None: topp = float(deepseek_config.get('top_p', 0.95))
+    if system_message is None: system_message = "You are a helpful AI assistant."
+
+    if isinstance(streaming, str): streaming = streaming.lower() == "true"
+    elif isinstance(streaming, int): streaming = bool(streaming)
+    if streaming is None: streaming = deepseek_config.get('streaming', False)
+    if not isinstance(streaming, bool):
+        raise ValueError(f"Invalid type for 'streaming': Expected boolean, got {type(streaming).__name__}")
+
+    logging.debug(f"DeepSeek: Streaming: {streaming}, Model: {model}, Temp: {temp}, TopP: {topp}")
+
+    # --- Prepare Request ---
+    headers = {
+        'Authorization': f'Bearer {deepseek_api_key}',
+        'Content-Type': 'application/json'
+    }
+
+    # Handle input_data format
+    if isinstance(input_data, list):
+        messages = input_data
+        if not any(msg.get('role') == 'system' for msg in messages):
+             messages.insert(0, {"role": "system", "content": system_message})
+        if custom_prompt_arg and messages and messages[-1].get('role') == 'user':
+             messages[-1]['content'] = f"{messages[-1]['content']}\n\n{custom_prompt_arg}"
+        elif custom_prompt_arg:
+             messages.append({"role": "user", "content": custom_prompt_arg})
+    elif isinstance(input_data, str):
+         # Attempt to extract text if input_data might be file path or raw text
+         text_content = input_data # Assume raw text initially
+         if os.path.isfile(input_data):
+              try:
+                  # Basic text file reading, adjust if other formats needed
+                  with open(input_data, 'r', encoding='utf-8') as f:
+                      text_content = f.read()
+              except Exception as e:
+                  logging.warning(f"DeepSeek: Could not read file '{input_data}', treating as raw text. Error: {e}")
+         messages = [
+             {"role": "system", "content": system_message},
+             {"role": "user", "content": f"{text_content}\n\n{custom_prompt_arg}" if custom_prompt_arg else text_content}
+         ]
+    else:
+        raise ValueError("Invalid 'input_data' format for DeepSeek. Expected list of messages or string.")
+
+
+    data = {
+        "model": model,
+        "messages": messages,
+        "stream": streaming,
+        "temperature": temp,
+        "top_p": topp
+        # Add other DeepSeek/OpenAI params if needed (e.g., max_tokens)
+    }
+    max_tokens = deepseek_config.get('max_tokens')
+    if max_tokens:
+        try: data["max_tokens"] = int(max_tokens)
+        except: logging.warning(f"DeepSeek: Invalid max_tokens value in config: {max_tokens}")
+
+    api_url = 'https://api.deepseek.com/chat/completions'
+
+    # --- Execute Request ---
+    try:
+        retry_count = int(deepseek_config.get('api_retries', 3))
+        retry_delay = float(deepseek_config.get('api_retry_delay', 1))
+        retry_strategy = Retry(total=retry_count, backoff_factor=retry_delay, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["POST"])
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+
+        with requests.Session() as session:
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+            response = session.post(api_url, headers=headers, json=data, stream=streaming, timeout=60)
+
+            response.raise_for_status() # Check status AFTER retries
+
+            if streaming:
+                logging.debug("DeepSeek: Streaming response received.")
+                # Stream format is OpenAI compatible SSE
+                def stream_generator():
+                    try:
+                        for line in response.iter_lines(decode_unicode=True):
+                             if line.strip():
+                                 yield line + "\n\n" # Pass through raw SSE line
+                        yield "data: [DONE]\n\n"
+                    except Exception as e:
+                         logging.error(f"DeepSeek: Error during stream iteration: {e}", exc_info=True)
+                         error_payload = json.dumps({"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
+                         yield f"data: {error_payload}\n\n"
+                         yield "data: [DONE]\n\n"
+                    finally:
+                         response.close()
+                return stream_generator()
+            else:
+                logging.debug("DeepSeek: Non-streaming request successful.")
+                response_data = response.json()
+                #logging.debug(f"DeepSeek Raw Response Data: {response_data}")
+                return response_data # Return full dictionary
+
+    except (ValueError, KeyError, TypeError) as e:
+         logging.error(f"DeepSeek: Configuration or data error: {e}", exc_info=True)
+         raise ValueError(f"DeepSeek config/data error: {e}") from e
+    # Let RequestException and HTTPError propagate
 
 
 def chat_with_mistral(api_key, input_data, custom_prompt_arg, temp=None, system_message=None, streaming=False, topp=None, model=None):
-    logging.debug("Mistral: Chat request made")
-    try:
-        logging.debug("Mistral: Loading and validating configurations")
-        loaded_config_data = load_and_log_configs()
-        if loaded_config_data is None:
-            logging.error("Failed to load configuration data")
-            mistral_api_key = None
-        else:
-            # Prioritize the API key passed as a parameter
-            if api_key and api_key.strip():
-                mistral_api_key = api_key
-                logging.info("Mistral: Using API key provided as parameter")
-            else:
-                # If no parameter is provided, use the key from the config
-                mistral_api_key = loaded_config_data['mistral_api'].get('api_key')
-                if mistral_api_key:
-                    logging.info("Mistral: Using API key from config file")
-                else:
-                    logging.warning("Mistral: No API key found in config file")
-
-        # Final check to ensure we have a valid API key
-        if not mistral_api_key or not mistral_api_key.strip():
-            logging.error("Mistral: No valid API key available")
-            return "Mistral: API Key Not Provided/Found in Config file or is empty"
-
-        logging.debug(f"Mistral: Using API Key: {mistral_api_key[:5]}...{mistral_api_key[-5:]}")
-
-        # Streaming mode validation
-        if isinstance(streaming, str):
-            streaming = streaming.lower() == "true"
-        elif isinstance(streaming, int):
-            streaming = bool(streaming)  # Convert integers (1/0) to boolean
-        elif streaming is None:
-            streaming = loaded_config_data.get('mistral_api', {}).get('streaming', False)
-            logging.debug("Mistral: Streaming mode enabled")
-        else:
-            logging.debug("Mistral: Streaming mode disabled")
-        if not isinstance(streaming, bool):
-            raise ValueError(f"Invalid type for 'streaming': Expected a boolean, got {type(streaming).__name__}")
-
-        # Model Selection validation
-        if isinstance(model, str):
-            mistral_model = model
-        else:
-            mistral_model = loaded_config_data['mistral_api'].get('model', "mistral-large-latest")
-
-        # Temp validation
-        if isinstance(temp, float):
-            temp = float(temp)
-        else:
-            temp = loaded_config_data['mistral_api'].get('temperature', 0.1)
-            temp = float(temp)
-            logging.debug("Mistral: Using temperature from config file")
-
-        # Top-P validation
-        if isinstance(topp, float):
-            topp = float(topp)
-        else:
-            topp = loaded_config_data['mistral_api'].get('top_p', 0.95)
-            topp = float(topp)
-            logging.debug(f"Mistral: Using Top-P: {topp} from config file")
-
-        # System message validation
-        if system_message is None:
-            mistral_system_message = "You are a helpful AI assistant who does whatever the user requests."
-            system_message = mistral_system_message
-
-        # Input data handling
-        logging.debug("Mistral: Using provided string data")
-        data = input_data
-
-        # Text extraction
-        if isinstance(input_data, list):
-            text = extract_text_from_segments(input_data)
-        elif isinstance(input_data, str):
-            text = input_data
-        else:
-            raise ValueError("Mistral: Invalid input data format")
-
-        headers = {
-            'Authorization': f'Bearer {mistral_api_key}',
-            'Content-Type': 'application/json'
-        }
-
-        logging.debug(
-            f"Deepseek API Key: {mistral_api_key[:5]}...{mistral_api_key[-5:] if mistral_api_key else None}")
-        logging.debug("Mistral: Preparing data + prompt for submittal")
-        mistral_prompt = f"{custom_prompt_arg}\n\n\n\n{text} "
-        data = {
-            "model": mistral_model,
-            "messages": [
-                {"role": "system",
-                 "content": system_message},
-                {"role": "user",
-                "content": mistral_prompt}
-            ],
-            "temperature": temp,
-            "top_p": topp,
-            # FIXME - Add global max tokens variable
-            "max_tokens": 4096,
-            "stream": streaming,
-            "safe_prompt": False
-        }
-
-        if streaming:
-            # Create a session
-            session = requests.Session()
-
-            # Load config values
-            retry_count = loaded_config_data['mistral_api']['api_retries']
-            retry_delay = loaded_config_data['mistral_api']['api_retry_delay']
-
-            # Configure the retry strategy
-            retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-            )
-
-            # Create the adapter
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            logging.debug("Mistral: Posting streaming request")
-            response = session.post(
-                'https://api.mistral.ai/v1/chat/completions',
-                headers=headers,
-                json=data,
-                stream=True
-            )
-            response.raise_for_status()
-
-            def stream_generator():
-                collected_text = ""
-                for line in response.iter_lines():
-                    if line:
-                        decoded_line = line.decode('utf-8').strip()
-                        if decoded_line == '':
-                            continue
-                        try:
-                            # Assuming the response is in SSE format
-                            if decoded_line.startswith('data:'):
-                                data_str = decoded_line[len('data:'):].strip()
-                                if data_str == '[DONE]':
-                                    break
-                                data_json = json.loads(data_str)
-                                if 'choices' in data_json and len(data_json['choices']) > 0:
-                                    delta_content = data_json['choices'][0]['delta'].get('content', '')
-                                    collected_text += delta_content
-                                    yield delta_content
-                                else:
-                                    logging.error(f"Mistral: Unexpected data format: {data_json}")
-                                    continue
-                            else:
-                                # Handle other event types if necessary
-                                continue
-                        except json.JSONDecodeError:
-                            logging.error(f"Mistral: Error decoding JSON from line: {decoded_line}")
-                            continue
-                        except KeyError as e:
-                            logging.error(f"Mistral: Key error: {str(e)} in line: {decoded_line}")
-                            continue
-                # Optionally, you can return the full collected text at the end
-                # yield collected_text
-            return stream_generator()
-        else:
-            # Create a session
-            session = requests.Session()
-
-            # Load config values
-            retry_count = loaded_config_data['mistral_api']['api_retries']
-            retry_delay = loaded_config_data['mistral_api']['api_retry_delay']
-
-            # Configure the retry strategy
-            retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-            )
-
-            # Create the adapter
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            logging.debug("Mistral: Posting non-streaming request")
-            response = session.post(
-                'https://api.mistral.ai/v1/chat/completions',
-                headers=headers,
-                json=data
-            )
-
-            if response.status_code == 200:
-                response_data = response.json()
-                if 'choices' in response_data and len(response_data['choices']) > 0:
-                    summary = response_data['choices'][0]['message']['content'].strip()
-                    logging.debug("Mistral: Chat Request successful")
-                    return summary
-                else:
-                    logging.warning("Mistral: Chat response not found in the response data")
-                    return "Mistral: Chat response not available"
-            else:
-                logging.error(f"Mistral: Chat request failed with status code {response.status_code}")
-                logging.error(f"Mistral: Error response: {response.text}")
-                return f"Mistral: Failed to process Chat response. Status code: {response.status_code}"
-    except Exception as e:
-        logging.error(f"Mistral: Error in processing: {str(e)}", exc_info=True)
-        return f"Mistral: Error occurred while processing Chat: {str(e)}"
-
-
-def chat_with_google(api_key, input_data, custom_prompt_arg, temp=None, system_message=None, streaming=False, topp=None, topk=None):
-    # https://ai.google.dev/api/generate-content#v1beta.GenerationConfig
+    logging.debug("Mistral: Chat request started")
     loaded_config_data = load_and_log_configs()
-    google_api_key = api_key
+    mistral_config = loaded_config_data.get('mistral_api', {})
+
+    # --- API Key ---
+    mistral_api_key = api_key or mistral_config.get('api_key')
+    if not mistral_api_key:
+        logging.error("Mistral: API key is missing.")
+        raise ValueError("Mistral API Key is required but not found.")
+    log_key = f"{mistral_api_key[:5]}...{mistral_api_key[-5:]}" if len(mistral_api_key) > 9 else "Provided Key"
+    logging.debug(f"Mistral: Using API Key: {log_key}")
+
+    # --- Parameters (OpenAI compatible) ---
+    if model is None: model = mistral_config.get('model', 'mistral-large-latest')
+    if temp is None: temp = float(mistral_config.get('temperature', 0.1))
+    if topp is None: topp = float(mistral_config.get('top_p', 0.95))
+    # Mistral uses 'safe_prompt' - get from config or default
+    safe_prompt = bool(mistral_config.get('safe_prompt', False))
+    if system_message is None: system_message = "You are a helpful AI assistant." # System message is part of messages list
+
+    if isinstance(streaming, str): streaming = streaming.lower() == "true"
+    elif isinstance(streaming, int): streaming = bool(streaming)
+    if streaming is None: streaming = mistral_config.get('streaming', False)
+    if not isinstance(streaming, bool):
+        raise ValueError(f"Invalid type for 'streaming': Expected boolean, got {type(streaming).__name__}")
+
+    logging.debug(f"Mistral: Streaming: {streaming}, Model: {model}, Temp: {temp}, TopP: {topp}, SafePrompt: {safe_prompt}")
+
+    # --- Prepare Request ---
+    headers = {
+        'Authorization': f'Bearer {mistral_api_key}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json' # Good practice
+    }
+
+    # Handle input_data format
+    if isinstance(input_data, list):
+        messages = input_data
+        # Ensure system message is first if provided
+        if system_message and not any(msg.get('role') == 'system' for msg in messages):
+             messages.insert(0, {"role": "system", "content": system_message})
+        if custom_prompt_arg and messages and messages[-1].get('role') == 'user':
+             messages[-1]['content'] = f"{messages[-1]['content']}\n\n{custom_prompt_arg}"
+        elif custom_prompt_arg:
+             messages.append({"role": "user", "content": custom_prompt_arg})
+    elif isinstance(input_data, str):
+         # Extract text if needed (assuming simple text or list extraction)
+         text_content = extract_text_from_segments(input_data) if isinstance(input_data, list) else input_data
+         messages = [
+             #{"role": "system", "content": system_message}, # Mistral often prefers system in user msg or no system
+             {"role": "user", "content": f"{system_message}\n\n{text_content}\n\n{custom_prompt_arg}" if custom_prompt_arg else f"{system_message}\n\n{text_content}"}
+         ]
+    else:
+        raise ValueError("Invalid 'input_data' format for Mistral. Expected list of messages or string.")
+
+    data = {
+        "model": model,
+        "messages": messages,
+        "temperature": temp,
+        "top_p": topp,
+        "stream": streaming,
+        "safe_prompt": safe_prompt
+    }
+    max_tokens = mistral_config.get('max_tokens')
+    if max_tokens:
+        try: data["max_tokens"] = int(max_tokens)
+        except: logging.warning(f"Mistral: Invalid max_tokens value in config: {max_tokens}")
+
+    api_url = 'https://api.mistral.ai/v1/chat/completions'
+
+    # --- Execute Request ---
     try:
-        # API key validation
-        if not google_api_key:
-            logging.info("Google: API key not provided as parameter")
-            logging.info("Google: Attempting to use API key from config file")
-            google_api_key = loaded_config_data['google_api']['api_key']
+        retry_count = int(mistral_config.get('api_retries', 3))
+        retry_delay = float(mistral_config.get('api_retry_delay', 1))
+        retry_strategy = Retry(total=retry_count, backoff_factor=retry_delay, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["POST"])
+        adapter = HTTPAdapter(max_retries=retry_strategy)
 
-        if not google_api_key:
-            logging.error("Google: API key not found or is empty")
-            return "Google: API Key Not Provided/Found in Config file or is empty"
-
-        logging.debug(f"Google: Using API Key: {google_api_key[:5]}...{google_api_key[-5:]}")
-
-        if isinstance(streaming, str):
-            streaming = streaming.lower() == "true"
-        elif isinstance(streaming, int):
-            streaming = bool(streaming)  # Convert integers (1/0) to boolean
-        elif streaming is None:
-            streaming = loaded_config_data.get('google_api', {}).get('streaming', False)
-            logging.debug("Google: Streaming mode enabled")
-        else:
-            logging.debug("Google: Streaming mode disabled")
-        if not isinstance(streaming, bool):
-            raise ValueError(f"Invalid type for 'streaming': Expected a boolean, got {type(streaming).__name__}")
-
-        if isinstance(temp, float):
-            temp = float(temp)
-        else:
-            temp = loaded_config_data['google_api'].get('temperature', 0.1)
-
-        if isinstance(system_message, str):
-            logging.debug("Google: Using provided system message")
-            system_message = system_message
-        else:
-            google_system_message = "You are a helpful AI assistant who does whatever the user requests."
-            logging.debug("Google: Using default system message")
-            system_message = google_system_message
-
-        if isinstance(topp, float):
-            topp = float(topp)
-            logging.debug(f"Google: Using top_p {topp} from parameter")
-        else:
-            topp = loaded_config_data['google_api'].get('top_p', 0.9)
-            logging.debug(f"Google: Using top_p {topp} from config file")
-
-        if isinstance(topk, int):
-            topk = int(topk)
-        else:
-            topk = loaded_config_data['google_api'].get('top_k', 100)
-
-
-
-        # Model selection
-        google_model = loaded_config_data['google_api']['model'] or "gemini-1.5-pro"
-        logging.debug(f"Google: Using model: {google_model}")
-
-        # Input data handling
-        logging.debug(f"Google: Raw input data type: {type(input_data)}")
-        logging.debug(f"Google: Raw input data (first 500 chars): {str(input_data)[:500]}...")
-
-        if isinstance(input_data, str):
-            if input_data.strip().startswith('{'):
-                # It's likely a JSON string
-                logging.debug("Google: Parsing provided JSON string data for chat message")
-                try:
-                    data = json.loads(input_data)
-                except json.JSONDecodeError as e:
-                    logging.error(f"Google: Error parsing JSON string: {str(e)}")
-                    data = input_data
-                    pass
-            elif os.path.isfile(input_data):
-                logging.debug("Google: Loading JSON data from file for chat message")
-                with open(input_data, 'r') as file:
-                    data = json.load(file)
-            else:
-                logging.debug("Google: Using provided string data for chat message")
-                data = input_data
-        else:
-            data = input_data
-
-        logging.debug(f"Google: Processed data type: {type(data)}")
-        logging.debug(f"Google: Processed data (first 500 chars): {str(data)[:500]}...")
-
-        # Text extraction
-        if isinstance(data, dict):
-            if 'summary' in data:
-                logging.debug("Google: Summary already exists in the loaded data")
-                return data['summary']
-            elif 'segments' in data:
-                text = extract_text_from_segments(data['segments'])
-            else:
-                text = json.dumps(data)  # Convert dict to string if no specific format
-        elif isinstance(data, list):
-            text = extract_text_from_segments(data)
-        elif isinstance(data, str):
-            text = data
-        else:
-            raise ValueError(f"Google: Invalid input data format: {type(data)}")
-
-        logging.debug(f"Google: Extracted text (first 500 chars): {text[:500]}...")
-        logging.debug(f"Google: Custom prompt: {custom_prompt_arg}")
-
-
-        headers = {
-            'Authorization': f'Bearer {google_api_key}',
-            'Content-Type': 'application/json',
-            "Accept": "text/event-stream" if streaming else "application/json"
-
-        }
-
-        logging.debug(
-            f"Google API Key: {google_api_key[:5]}...{google_api_key[-5:] if google_api_key else None}")
-        logging.debug("Google: Preparing data + prompt for submittal")
-        google_prompt = f"{text} \n\n\n\n{custom_prompt_arg}"
-
-        google_max_tokens = 4096
-
-        data = {
-            "model": google_model,
-            "messages": [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": google_prompt}
-            ],
-            "temperature": temp,
-            "topP": topp,
-            #"topK": topk,
-            #"maxOutputTokens": google_max_tokens,
-        }
-
-        if streaming:
-            # Create a session
-            session = requests.Session()
-
-            # Load config values
-            retry_count = loaded_config_data['google_api']['api_retries']
-            retry_delay = loaded_config_data['google_api']['api_retry_delay']
-
-            # Configure the retry strategy
-            retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-            )
-
-            # Create the adapter
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
-            session.mount("http://", adapter)
+        with requests.Session() as session:
             session.mount("https://", adapter)
-            logging.debug("Google: Posting streaming request")
-            response = session.post(
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                headers=headers,
-                json=data,
-                stream=True
-            )
-            response.raise_for_status()
-
-            def stream_generator():
-                for line in response.iter_lines():
-                    if line:
-                        decoded_line = line.decode('utf-8').strip()
-                        if decoded_line == '':
-                            continue
-                        if decoded_line.startswith('data: '):
-                            data_str = decoded_line[len('data: '):]
-                            if data_str == '[DONE]':
-                                break
-                            try:
-                                data_json = json.loads(data_str)
-                                chunk = data_json["choices"][0]["delta"].get("content", "")
-                                yield chunk
-                            except json.JSONDecodeError:
-                                logging.error(f"Google: Error decoding JSON from line: {decoded_line}")
-                                continue
-                            except KeyError as e:
-                                logging.error(f"Google: Key error: {str(e)} in line: {decoded_line}")
-                                continue
-            return stream_generator()
-        else:
-            # Create a session
-            session = requests.Session()
-
-            # Load config values
-            retry_count = loaded_config_data['google_api']['api_retries']
-            retry_delay = loaded_config_data['google_api']['api_retry_delay']
-
-            # Configure the retry strategy
-            retry_strategy = Retry(
-                total=retry_count,  # Total number of retries
-                backoff_factor=retry_delay,  # A delay factor (exponential backoff)
-                status_forcelist=[429, 502, 503, 504],  # Status codes to retry on
-            )
-
-            # Create the adapter
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-
-            # Mount adapters for both HTTP and HTTPS
             session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            logging.debug("Google: Posting request")
-            response = session.post('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', headers=headers, json=data)
-            logging.debug(f"Full API response data: {response}")
-            if response.status_code == 200:
+            response = session.post(api_url, headers=headers, json=data, stream=streaming, timeout=60)
+
+            response.raise_for_status() # Check status AFTER retries
+
+            if streaming:
+                logging.debug("Mistral: Streaming response received.")
+                # Stream format is OpenAI compatible SSE
+                def stream_generator():
+                    try:
+                        for line in response.iter_lines(decode_unicode=True):
+                             if line.strip():
+                                 yield line + "\n\n" # Pass through raw SSE line
+                        yield "data: [DONE]\n\n"
+                    except Exception as e:
+                         logging.error(f"Mistral: Error during stream iteration: {e}", exc_info=True)
+                         error_payload = json.dumps({"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
+                         yield f"data: {error_payload}\n\n"
+                         yield "data: [DONE]\n\n"
+                    finally:
+                         response.close()
+                return stream_generator()
+            else:
+                logging.debug("Mistral: Non-streaming request successful.")
                 response_data = response.json()
-                logging.debug(response_data)
-                if 'choices' in response_data and len(response_data['choices']) > 0:
-                    chat_response = response_data['choices'][0]['message']['content'].strip()
-                    logging.debug("Google: Chat Sent successfully")
-                    logging.debug(f"Google: Chat response: {chat_response}")
-                    return chat_response
-                else:
-                    logging.warning("Google: Chat response not found in the response data")
-                    return "Google: Chat not available"
+                #logging.debug(f"Mistral Raw Response Data: {response_data}")
+                return response_data # Return full dictionary
+
+    except (ValueError, KeyError, TypeError) as e:
+         logging.error(f"Mistral: Configuration or data error: {e}", exc_info=True)
+         raise ValueError(f"Mistral config/data error: {e}") from e
+    # Let RequestException and HTTPError propagate
+
+
+def chat_with_google(api_key, input_data, custom_prompt_arg, temp=None, system_message=None, streaming=False, topp=None, topk=None, model=None): # Added model
+    logging.debug("Google Gemini: Chat request process starting...")
+    loaded_config_data = load_and_log_configs()
+    google_config = loaded_config_data.get('google_api', {})
+
+    # --- API Key ---
+    google_api_key = api_key or google_config.get('api_key')
+    if not google_api_key:
+        logging.error("Google: API key is missing.")
+        raise ValueError("Google API Key is required but not found.")
+    log_key = f"{google_api_key[:5]}...{google_api_key[-5:]}" if len(google_api_key) > 9 else "Provided Key"
+    logging.debug(f"Google: Using API Key: {log_key}")
+
+    # --- Parameters ---
+    if model is None: model = google_config.get('model', 'gemini-1.5-flash-latest')
+    if temp is None: temp = float(google_config.get('temperature', 0.7))
+    if topp is None: topp = float(google_config.get('top_p', 0.9)) # Gemini uses topP
+    if topk is None: topk = int(google_config.get('top_k', 100)) # Gemini uses topK
+    # System message handled via 'system_instruction' in Gemini API
+    if system_message is None: system_message = google_config.get('system_prompt', "You are a helpful AI assistant.")
+
+    if isinstance(streaming, str): streaming = streaming.lower() == "true"
+    elif isinstance(streaming, int): streaming = bool(streaming)
+    if streaming is None: streaming = google_config.get('streaming', False)
+    if not isinstance(streaming, bool):
+        raise ValueError(f"Invalid type for 'streaming': Expected boolean, got {type(streaming).__name__}")
+
+    logging.debug(f"Google: Streaming: {streaming}, Model: {model}, Temp: {temp}, TopP: {topp}, TopK: {topk}")
+
+    # --- Prepare Request (Native Gemini API format) ---
+    # Convert OpenAI message format to Gemini 'contents' format
+    contents = []
+    current_user_parts = []
+
+    # Function to add user parts to contents
+    def flush_user_parts():
+        nonlocal current_user_parts
+        if current_user_parts:
+            contents.append({"role": "user", "parts": current_user_parts})
+            current_user_parts = []
+
+    if isinstance(input_data, list):
+        for msg in input_data:
+            role = msg.get('role', '').lower()
+            content = msg.get('content', '')
+            if role == 'user':
+                flush_user_parts() # Add previous assistant message if any
+                current_user_parts.append({"text": content})
+            elif role == 'assistant' or role == 'model': # Gemini uses 'model' role
+                flush_user_parts() # Add user message first
+                contents.append({"role": "model", "parts": [{"text": content}]})
+            # System messages handled separately
+    elif isinstance(input_data, str):
+        # Assume input_data is the user prompt if it's just a string
+        current_user_parts.append({"text": input_data})
+    else:
+         raise ValueError("Invalid 'input_data' format for Google. Expected list of messages or string.")
+
+    # Append custom prompt to the last user part
+    if custom_prompt_arg:
+        if current_user_parts:
+            current_user_parts[-1]["text"] += f"\n\n{custom_prompt_arg}"
+        else: # If input_data was empty or only assistant messages
+            current_user_parts.append({"text": custom_prompt_arg})
+
+    flush_user_parts() # Add the last user message
+
+    generation_config = {
+        "temperature": temp,
+        "topP": topp,
+        "topK": topk,
+        # "maxOutputTokens": 4096, # Optional: Get from config if needed
+        # "stopSequences": ["\n"] # Optional
+    }
+    max_tokens_cfg = google_config.get('max_tokens')
+    if max_tokens_cfg:
+        try: generation_config["maxOutputTokens"] = int(max_tokens_cfg)
+        except: logging.warning(f"Google: Invalid max_tokens in config: {max_tokens_cfg}")
+
+
+    payload = {
+        "contents": contents,
+        "generationConfig": generation_config,
+    }
+    # Add system instruction if provided
+    if system_message:
+        payload["system_instruction"] = {"parts": [{"text": system_message}]}
+
+
+    # Construct API URL
+    stream_suffix = ":streamGenerateContent?alt=sse" if streaming else ":generateContent"
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}{stream_suffix}"
+    headers = {
+        'x-goog-api-key': google_api_key, # Google uses x-goog-api-key header
+        'Content-Type': 'application/json',
+    }
+
+     # --- Execute Request ---
+    try:
+        retry_count = int(google_config.get('api_retries', 3))
+        retry_delay = float(google_config.get('api_retry_delay', 1))
+        # Note: Google API might return 400 for quota instead of 429 sometimes
+        retry_strategy = Retry(total=retry_count, backoff_factor=retry_delay, status_forcelist=[429, 500, 503], allowed_methods=["POST"])
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+
+        with requests.Session() as session:
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+            response = session.post(api_url, headers=headers, json=payload, stream=streaming, timeout=60)
+
+            response.raise_for_status() # Check status AFTER retries
+
+            if streaming:
+                logging.debug("Google: Streaming response received.")
+                # Stream format is SSE, but content needs parsing
+                def stream_generator():
+                    try:
+                        full_text_response = ""
+                        for line in response.iter_lines(decode_unicode=True):
+                             if line.strip().startswith('data:'):
+                                 json_str = line.strip()[len('data:'):]
+                                 try:
+                                     data_chunk = json.loads(json_str)
+                                     # Extract text from Gemini stream structure
+                                     candidates = data_chunk.get('candidates', [])
+                                     chunk_text = ""
+                                     if candidates:
+                                         content = candidates[0].get('content', {})
+                                         parts = content.get('parts', [])
+                                         if parts:
+                                             chunk_text = parts[0].get('text', '')
+                                     if chunk_text:
+                                         full_text_response += chunk_text
+                                         # Yield raw JSON chunk or just the text?
+                                         # Yielding text for simplicity, like OpenAI delta
+                                         yield f"data: {json.dumps({'choices': [{'delta': {'content': chunk_text}}]})}\n\n"
+                                 except json.JSONDecodeError:
+                                     logging.warning(f"Google: Could not decode JSON line: {line}")
+                        logging.debug("Google Stream finished.")
+                        yield "data: [DONE]\n\n" # Signal end
+                    except Exception as e:
+                         logging.error(f"Google: Error during stream iteration: {e}", exc_info=True)
+                         error_payload = json.dumps({"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
+                         yield f"data: {error_payload}\n\n"
+                         yield "data: [DONE]\n\n"
+                    finally:
+                         response.close()
+                return stream_generator()
             else:
-                logging.error(f"Google: Chat request failed with status code {response.status_code}")
-                logging.error(f"Google: Error response: {response.text}")
-                return f"Google: Failed to process chat response. Status code: {response.status_code}"
-    except json.JSONDecodeError as e:
-        logging.error(f"Google: Error decoding JSON: {str(e)}", exc_info=True)
-        return f"Google: Error decoding JSON input: {str(e)}"
-    except requests.RequestException as e:
-        logging.error(f"Google: Error making API request: {str(e)}", exc_info=True)
-        return f"Google: Error making API request: {str(e)}"
-    except Exception as e:
-        logging.error(f"Google: Unexpected error: {str(e)}", exc_info=True)
-        return f"Google: Unexpected error occurred: {str(e)}"
+                logging.debug("Google: Non-streaming request successful.")
+                response_data = response.json()
+                #logging.debug(f"Google Raw Response Data: {response_data}")
+                # Need to normalize Gemini response to OpenAI-like structure for consistency?
+                # Or return the raw Gemini response. Returning raw for now.
+                return response_data # Return full dictionary
+
+    except (ValueError, KeyError, TypeError) as e:
+         logging.error(f"Google: Configuration or data error: {e}", exc_info=True)
+         raise ValueError(f"Google config/data error: {e}") from e
+    # Let RequestException and HTTPError propagate
 
 #
 #

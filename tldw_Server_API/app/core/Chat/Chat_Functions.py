@@ -12,6 +12,9 @@ import time
 import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
+
+import requests
+
 #
 # External Imports
 #
@@ -83,7 +86,10 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
         else:
              logging.info(f"Debug - Chat API Call - API Key: Not Provided")
 
-        # --- Routing Logic ---
+        # --- Routing Logic (Calls to backend functions) ---
+        # The backend functions (chat_with_...) are now expected to raise exceptions
+        # (like requests.exceptions.HTTPError, SDK errors, or potentially our custom ones)
+        # on failure.
         if endpoint_lower == 'openai':
             response = chat_with_openai(
                 api_key=api_key,
@@ -344,16 +350,77 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
              logging.debug(f"Debug - Chat API Call - Response: Streaming Generator")
         else:
              logging.debug(f"Debug - Chat API Call - Response Type: {type(response)}")
-        return response
 
+        return response # Return successful response
+
+    # --- Exception Mapping ---
+    except requests.exceptions.HTTPError as e:
+        status_code = getattr(e.response, 'status_code', 500)
+        error_text = getattr(e.response, 'text', str(e))
+        log_message_base = f"{endpoint_lower} API call failed with status {status_code}"
+
+        # Log safely first
+        try:
+            # Use % formatting for safety if loguru + f-string + json is problematic
+            logging.error("%s. Details: %s", log_message_base, error_text[:500], exc_info=False)
+            # Alternatively, keep f-string but be mindful:
+            # logging.error(f"{log_message_base}. Details: {error_text[:500]}...", exc_info=False)
+        except Exception as log_e:
+            logging.error(f"Error during logging HTTPError details: {log_e}")  # Log the logging error itself
+
+        # Now, raise the appropriate custom exception based on status code
+        detail_message = f"API call to {endpoint_lower} failed with status {status_code}. Response: {error_text[:200]}"  # Truncate details
+
+        if status_code == 401:
+            raise ChatAuthenticationError(provider=endpoint_lower,
+                                          message=f"Authentication failed for {endpoint_lower}. Check API key. Detail: {error_text[:200]}")
+        elif status_code == 429:
+            raise ChatRateLimitError(provider=endpoint_lower,
+                                     message=f"Rate limit exceeded for {endpoint_lower}. Detail: {error_text[:200]}")
+        elif 400 <= status_code < 500:
+            raise ChatBadRequestError(provider=endpoint_lower,
+                                      message=f"Bad request to {endpoint_lower} (Status {status_code}). Detail: {error_text[:200]}")
+        # Consider 5xx errors as provider errors
+        elif 500 <= status_code < 600:
+            raise ChatProviderError(provider=endpoint_lower,
+                                    message=f"Error from {endpoint_lower} server (Status {status_code}). Detail: {error_text[:200]}",
+                                    status_code=status_code)
+        else:  # Catch-all for unexpected HTTP statuses
+            raise ChatAPIError(provider=endpoint_lower,
+                               message=f"Unexpected HTTP status {status_code} from {endpoint_lower}. Detail: {error_text[:200]}",
+                               status_code=status_code)
+        # REMOVE the old return {"__error__": True, ...} dictionary
+
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Network error connecting to {endpoint_lower}: {e}", exc_info=False)
+        # Raise a custom exception for network errors too
+        raise ChatProviderError(provider=endpoint_lower, message=f"Network error contacting {endpoint_lower}: {e}",
+                                status_code=504)  # Use 504 Gateway Timeout
+        # REMOVE the old return {"__error__": True, ...} dictionary
+
+    except (ValueError, TypeError, KeyError) as e:
+        logging.error(f"Value/Type/Key error during chat API call setup for {endpoint_lower}: {e}", exc_info=True)
+        # Raise a configuration or bad request error
+        error_type = "Configuration/Parameter Error"
+        status = 400
+        if "Unsupported API endpoint" in str(e):
+            error_type = "Unsupported API"
+            status = 501  # Not Implemented might be better? Or 400 still ok.
+            raise ChatConfigurationError(provider=endpoint_lower, message=f"Unsupported API endpoint: {endpoint_lower}")
+        else:
+            raise ChatBadRequestError(provider=endpoint_lower, message=f"{error_type} for {endpoint_lower}: {e}")
+        # REMOVE the old return {"__error__": True, ...} dictionary
+
+    # --- Final Catch-all ---
     except Exception as e:
-        # --- Error Logging and Return ---
-        call_duration = time.time() - start_time
-        log_histogram("chat_api_call_duration", call_duration, labels={"api_endpoint": endpoint_lower}) # Log duration even on error
-        log_counter("chat_api_call_error", labels={"api_endpoint": endpoint_lower, "error_type": type(e).__name__, "error_message": str(e)})
-        logging.error(f"Error in chat_api_call for endpoint '{endpoint_lower}': {str(e)}", exc_info=True) # Include traceback
-        # Return a user-friendly error message
-        return f"An error occurred while calling the '{endpoint_lower}' API: {str(e)}"
+        # Log the unexpected error
+        logging.exception(
+            f"Unexpected internal error in chat_api_call for {endpoint_lower}: {e}")  # Use logging.exception to include traceback
+        # Raise a generic ChatAPIError
+        raise ChatAPIError(provider=endpoint_lower,
+                           message=f"An unexpected internal error occurred in chat_api_call for {endpoint_lower}: {str(e)}",
+                           status_code=500)
 
 
 def chat(message, history, media_content, selected_parts, api_endpoint, api_key, custom_prompt, temperature,
@@ -432,6 +499,47 @@ def chat(message, history, media_content, selected_parts, api_endpoint, api_key,
         log_counter("chat_error", labels={"api_endpoint": api_endpoint, "error": str(e)})
         logging.error(f"Error in chat function: {str(e)}")
         return f"An error occurred: {str(e)}"
+
+
+# ---------------- Exceptions ----------------------------
+class ChatAPIError(Exception):
+    """Base exception for chat API call errors."""
+    def __init__(self, message="An error occurred during the chat API call.", status_code=500, provider=None):
+        self.message = message
+        self.status_code = status_code # Suggested HTTP status code for the endpoint
+        self.provider = provider
+        super().__init__(self.message)
+
+class ChatAuthenticationError(ChatAPIError):
+    """Exception for authentication issues (e.g., invalid API key)."""
+    def __init__(self, message="Authentication failed with the chat provider.", provider=None):
+        super().__init__(message, status_code=401, provider=provider) # Default to 401
+
+class ChatConfigurationError(ChatAPIError):
+    """Exception for configuration issues (e.g., missing key, invalid model)."""
+    def __init__(self, message="Chat provider configuration error.", provider=None):
+        super().__init__(message, status_code=500, provider=provider) # Default to 500
+
+class ChatBadRequestError(ChatAPIError):
+    """Exception for bad requests sent to the chat provider (e.g., invalid params)."""
+    def __init__(self, message="Invalid request sent to the chat provider.", provider=None):
+        super().__init__(message, status_code=400, provider=provider) # Default to 400
+
+class ChatRateLimitError(ChatAPIError):
+    """Exception for rate limit errors from the chat provider."""
+    def __init__(self, message="Rate limit exceeded with the chat provider.", provider=None):
+        super().__init__(message, status_code=429, provider=provider) # Default to 429
+
+class ChatProviderError(ChatAPIError):
+    """Exception for general errors reported by the chat provider API."""
+    def __init__(self, message="Error received from the chat provider API.", status_code=502, provider=None, details=None):
+        # 502 Bad Gateway often suitable for upstream errors
+        self.details = details # Store original error if available
+        super().__init__(message, status_code=status_code, provider=provider)
+
+# ---------------- End of Exceptions ----------------------------
+
+
 
 
 def save_chat_history_to_db_wrapper(chatbot, conversation_id, media_content, media_name=None):
@@ -575,7 +683,7 @@ def extract_media_name(media_content):
     return None
 
 
-def update_chat_content(selected_item, use_content, use_summary, use_prompt, item_mapping):
+def update_chat_content(selected_item, use_content, use_summary, use_prompt, item_mapping, db_instance):
     log_counter("update_chat_content_attempt")
     start_time = time.time()
     logging.debug(f"Debug - Update Chat Content - Selected Item: {selected_item}\n")
@@ -586,7 +694,7 @@ def update_chat_content(selected_item, use_content, use_summary, use_prompt, ite
 
     if selected_item and selected_item in item_mapping:
         media_id = item_mapping[selected_item]
-        content = load_media_content(media_id)
+        content = load_media_content(media_id, db_instance=db_instance)
         selected_parts = []
         if use_content and "content" in content:
             selected_parts.append("content")

@@ -185,6 +185,7 @@ def ensure_directory_exists(path):
     os.makedirs(path, exist_ok=True)
 
 # FIXME - update to include prompt path in return statement
+# FIXME - remove api Key checks from config file and instead check .env file
 def load_and_log_configs():
     logging.debug("load_and_log_configs(): Loading and logging configurations...")
     try:

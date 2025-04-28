@@ -4,6 +4,9 @@
 # Imports
 import os
 from typing import Optional, Dict, Any, Literal, Union, List
+
+import toml
+from dotenv import load_dotenv
 #
 # 3rd-party imports
 from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
@@ -17,39 +20,66 @@ from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 # --- Pydantic Models for OpenAI Chat Completion Request ---
 # Based on https://platform.openai.com/docs/api-reference/chat/create
 
-
-SUPPORTED_API_ENDPOINTS = Literal[
-    "openai", "anthropic", "cohere", "groq", "openrouter",
-    "deepseek", "mistral", "google", "huggingface", "llama.cpp",
-    "kobold", "ollama", "ooba", "tabbyapi", "vllm", "local-llm",
-    "custom-openai-api", "custom-openai-api-2"
-]
 DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER", "openai") # Default if not set
 
+# Config Loading
+load_dotenv()
+try:
+    _config = toml.load("config.toml")
+except FileNotFoundError:
+    _config = {}
 
-# --- API Key Management ---
-# Load keys for all supported providers securely (e.g., from environment)
-# IMPORTANT: Never hardcode keys! lol
+def _get_setting(env_var, section, key, default=None):
+    return os.getenv(env_var) or _config.get(section, {}).get(key, default)
+
 API_KEYS = {
-    "openai": os.getenv("OPENAI_API_KEY"),
-    "anthropic": os.getenv("ANTHROPIC_API_KEY"),
-    "cohere": os.getenv("COHERE_API_KEY"),
-    "groq": os.getenv("GROQ_API_KEY"),
-    "openrouter": os.getenv("OPENROUTER_API_KEY"),
-    "deepseek": os.getenv("DEEPSEEK_API_KEY"),
-    "mistral": os.getenv("MISTRAL_API_KEY"),
-    "google": os.getenv("GOOGLE_API_KEY"),
-    "huggingface": os.getenv("HUGGINGFACE_API_KEY"),
-    "llama.cpp": os.getenv("LLAMA_CPP_API_KEY"), # Often None if local
-    "kobold": os.getenv("KOBOLD_API_KEY"), # Or might use URL only
-    "ooba": os.getenv("OOBA_API_KEY"), # Or might use URL only
-    "tabbyapi": os.getenv("TABBYAPI_API_KEY"), # Or might use URL only
-    "vllm": os.getenv("VLLM_API_KEY"), # Or might use URL only
-    "local-llm": os.getenv("LOCAL_LLM_API_KEY"), # Often None
-    "custom-openai-api": os.getenv("CUSTOM_OPENAI_API_KEY"),
-    "custom-openai-api-2": os.getenv("CUSTOM_OPENAI_API_KEY_2"),
-    # Add other providers as needed
+    name: _get_setting(
+        f"{name.upper().replace('.', '_')}_API_KEY",
+        "api_keys",
+        name
+    )
+    for name in [
+        "openai",
+        "anthropic",
+        "cohere",
+        "groq",
+        "openrouter",
+        "deepseek",
+        "mistral",
+        "google",
+        "huggingface",
+        "llama.cpp",
+        "kobold",
+        "ooba",
+        "tabbyapi",
+        "vllm",
+        "local-llm",
+        "custom-openai-api",
+        "custom-openai-api-2"
+    ]
 }
+
+SUPPORTED_API_ENDPOINTS = Literal[
+    "anthropic",
+    "cohere",
+    "deepseek",
+    "google",
+    "groq",
+    "huggingface",
+    "mistral",
+    "openai",
+    "openrouter",
+    "llama.cpp",
+    "kobold",
+    "ollama",
+    "ooba",
+    "tabbyapi",
+    "vllm",
+    "local-llm",
+    "custom-openai-api",
+    "custom-openai-api-2"
+]
+
 
 # --- Tool Definitions ---
 class FunctionDefinition(BaseModel):
