@@ -29,6 +29,9 @@ from typing import List, Any
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from tldw_Server_API.app.core.Chat.Chat_Functions import ChatAuthenticationError, ChatRateLimitError, \
+    ChatBadRequestError, ChatProviderError, ChatConfigurationError
 #
 # Import Local libraries
 from tldw_Server_API.app.core.Utils.Utils import load_and_log_configs, logging
@@ -648,7 +651,13 @@ def chat_with_groq(api_key, input_data, custom_prompt_arg, temp=None, system_mes
          raise ValueError(f"Groq config/data error: {e}") from e
 
 
-def chat_with_openrouter(api_key=None, input_data=None, custom_prompt_arg=None, temp=None, system_message=None, streaming=False, top_p=None, top_k=None, minp=None, model=None): # Added model arg
+def chat_with_openrouter(api_key=None, input_data=None, custom_prompt_arg=None, temp=None, system_message=None, streaming=False, top_p=None, top_k=None, minp=None, model=None):
+    """
+    Sends a chat request to the OpenRouter API.
+
+    Handles OpenAI-compatible message format and OpenRouter-specific parameters.
+    Checks for errors reported within the JSON payload even on 200 OK responses.
+    """
     logging.info("OpenRouter: Chat request started.")
     loaded_config_data = load_and_log_configs()
     openrouter_config = loaded_config_data.get('openrouter_api', {})
@@ -657,15 +666,17 @@ def chat_with_openrouter(api_key=None, input_data=None, custom_prompt_arg=None, 
     openrouter_api_key = api_key or openrouter_config.get('api_key')
     if not openrouter_api_key:
         logging.error("OpenRouter: API key is missing.")
-        raise ValueError("OpenRouter API Key is required but not found.")
+        # Raise ChatConfigurationError for missing key on server-side config
+        raise ChatConfigurationError(provider='openrouter', message="OpenRouter API Key is required but not configured on the server.")
     log_key = f"{openrouter_api_key[:5]}...{openrouter_api_key[-5:]}" if len(openrouter_api_key) > 9 else "Provided Key"
     logging.debug(f"OpenRouter: Using API Key: {log_key}")
 
     # --- Parameters ---
-    if model is None: model = openrouter_config.get('model', 'mistralai/mistral-7b-instruct') # Allow model override
+    if model is None: model = openrouter_config.get('model', 'mistralai/mistral-7b-instruct:free') # Use a free model as default for safety
     if temp is None: temp = float(openrouter_config.get('temperature', 0.7))
-    if top_p is None: top_p = float(openrouter_config.get('top_p', 0.9))
-    if top_k is None: top_k = int(openrouter_config.get('top_k', 40))
+    # Map the 'topp' from chat_api_call (Pydantic 'top_p') to OpenRouter's 'top_p'
+    if top_p is None: top_p = float(openrouter_config.get('top_p', 0.95)) # Use 0.95 default if None
+    if top_k is None: top_k = int(openrouter_config.get('top_k', 100)) # Use default if None
     # min_p is specific, handle None carefully
     if minp is None:
         minp_config = openrouter_config.get('min_p')
@@ -673,11 +684,13 @@ def chat_with_openrouter(api_key=None, input_data=None, custom_prompt_arg=None, 
 
     if system_message is None: system_message = "You are a helpful AI assistant."
 
+    # --- Streaming Parameter Handling ---
     if isinstance(streaming, str): streaming = streaming.lower() == "true"
     elif isinstance(streaming, int): streaming = bool(streaming)
     if streaming is None: streaming = openrouter_config.get('streaming', False)
     if not isinstance(streaming, bool):
-        raise ValueError(f"Invalid type for 'streaming': Expected boolean, got {type(streaming).__name__}")
+        # Raise config error if streaming type is wrong
+        raise ChatConfigurationError(provider='openrouter', message=f"Invalid type for 'streaming': Expected boolean, got {type(streaming).__name__}")
 
     logging.debug(f"OpenRouter: Streaming: {streaming}, Model: {model}, Temp: {temp}, TopP: {top_p}, TopK: {top_k}, MinP: {minp}")
 
@@ -686,27 +699,44 @@ def chat_with_openrouter(api_key=None, input_data=None, custom_prompt_arg=None, 
         "Authorization": f"Bearer {openrouter_api_key}",
         "Content-Type": "application/json",
         # OpenRouter specific headers (optional)
-        # "HTTP-Referer": $YOUR_SITE_URL, # Optional, for affiliate payments
-        # "X-Title": $YOUR_SITE_NAME, # Optional, shows in OpenRouter UI
+        "HTTP-Referer": openrouter_config.get("site_url", "http://localhost"), # Example default
+        "X-Title": openrouter_config.get("site_name", "TLDW-API"), # Example default
     }
 
-    # Handle input_data format
+    # --- Message Formatting ---
+    messages = []
+    # Add system message if provided and not already present
+    has_system = False
     if isinstance(input_data, list):
-        messages = input_data
-        if not any(msg.get('role') == 'system' for msg in messages):
+        for msg in input_data:
+            if isinstance(msg, dict) and msg.get('role') == 'system':
+                has_system = True
+                # Use provided system message if needed, otherwise keep the one from input_data
+                messages.append({"role": "system", "content": msg.get("content", system_message)})
+            elif isinstance(msg, dict) and msg.get('role'):
+                messages.append(msg)
+        if not has_system and system_message:
              messages.insert(0, {"role": "system", "content": system_message})
-        if custom_prompt_arg and messages and messages[-1].get('role') == 'user':
-             messages[-1]['content'] = f"{messages[-1]['content']}\n\n{custom_prompt_arg}"
-        elif custom_prompt_arg:
-             messages.append({"role": "user", "content": custom_prompt_arg})
     elif isinstance(input_data, str):
-         messages = [
-             {"role": "system", "content": system_message},
-             {"role": "user", "content": f"{input_data}\n\n{custom_prompt_arg}" if custom_prompt_arg else input_data}
-         ]
+         if system_message:
+             messages.append({"role": "system", "content": system_message})
+         messages.append({"role": "user", "content": input_data})
     else:
-        raise ValueError("Invalid 'input_data' format for OpenRouter. Expected list of messages or string.")
+        raise ChatBadRequestError(provider='openrouter', message="Invalid 'input_data' format for OpenRouter. Expected list of messages or string.")
 
+    # Append custom_prompt_arg if provided
+    if custom_prompt_arg:
+        if messages and messages[-1].get('role') == 'user':
+             messages[-1]['content'] = f"{messages[-1]['content']}\n\n{custom_prompt_arg}"
+        else:
+             messages.append({"role": "user", "content": custom_prompt_arg})
+
+    # Ensure there's at least one user message
+    if not any(msg.get('role') == 'user' for msg in messages):
+         raise ChatBadRequestError(provider='openrouter', message="No user message found in the request for OpenRouter.")
+
+
+    # --- Request Payload ---
     data = {
         "model": model,
         "messages": messages,
@@ -725,43 +755,108 @@ def chat_with_openrouter(api_key=None, input_data=None, custom_prompt_arg=None, 
     try:
         retry_count = int(openrouter_config.get('api_retries', 3))
         retry_delay = float(openrouter_config.get('api_retry_delay', 1))
-        retry_strategy = Retry(total=retry_count, backoff_factor=retry_delay, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["POST"])
+        retry_strategy = Retry(
+            total=retry_count,
+            backoff_factor=retry_delay,
+            status_forcelist=[429, 500, 502, 503, 504], # Retry on these direct HTTP statuses
+            allowed_methods=["POST"]
+        )
         adapter = HTTPAdapter(max_retries=retry_strategy)
 
         with requests.Session() as session:
             session.mount("https://", adapter)
-            session.mount("http://", adapter)
-            response = session.post(api_url, headers=headers, json=data, stream=streaming, timeout=60)
+            response = session.post(
+                api_url,
+                headers=headers,
+                json=data,
+                stream=streaming,
+                timeout=int(openrouter_config.get('api_timeout', 60)) # Configurable timeout
+            )
 
-            response.raise_for_status() # Check status AFTER retries
+            # Check for direct HTTP errors first (after retries)
+            response.raise_for_status()
 
+            # --- Handle Response ---
             if streaming:
-                logging.debug("OpenRouter: Streaming response received.")
-                # Stream format is OpenAI compatible (SSE)
+                logging.debug("OpenRouter: Streaming response received (Status %s).", response.status_code)
+                # Check header before starting iteration? OpenRouter usually sends errors before stream starts.
+                # Let's assume for now errors come via non-200 or JSON payload before stream starts.
+                # If errors *can* appear mid-stream, the generator needs more logic.
+
                 def stream_generator():
                     try:
                         for line in response.iter_lines(decode_unicode=True):
-                             if line.strip():
-                                 yield line + "\n\n" # Pass through raw SSE line
-                        yield "data: [DONE]\n\n"
+                             if line and line.startswith("data:"): # Check if line is not empty and starts with data:
+                                 content = line[len("data:"):].strip()
+                                 if content == "[DONE]":
+                                     yield f"{line}\n\n" # Pass through DONE marker
+                                     break
+                                 # Potentially check for error structures within the stream data here if necessary
+                                 yield f"{line}\n\n" # Pass through raw SSE line
+                             elif line: # Log unexpected lines
+                                  logging.warning("OpenRouter Stream: Received unexpected line: %s", line)
+
+                        # Ensure DONE is yielded if loop finishes without seeing it (though unlikely for OpenAI format)
+                        # yield "data: [DONE]\n\n" # Might be redundant if always broken above
+
+                    except requests.exceptions.ChunkedEncodingError as chunk_err:
+                         logging.error("OpenRouter: Stream connection error: %s", chunk_err, exc_info=True)
+                         error_payload = json.dumps({"error": {"message": f"Stream connection error: {str(chunk_err)}", "type": "stream_error"}})
+                         yield f"data: {error_payload}\n\n"
+                         yield "data: [DONE]\n\n"
                     except Exception as e:
-                         logging.error(f"OpenRouter: Error during stream iteration: {e}", exc_info=True)
+                         logging.error("OpenRouter: Error during stream iteration: %s", e, exc_info=True)
                          error_payload = json.dumps({"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
                          yield f"data: {error_payload}\n\n"
                          yield "data: [DONE]\n\n"
                     finally:
-                         response.close()
+                         response.close() # Ensure connection is closed
+
                 return stream_generator()
             else:
-                logging.debug("OpenRouter: Non-streaming request successful.")
+                # Non-streaming: Get JSON and check for 'error' key INSIDE the payload
                 response_data = response.json()
-                #logging.debug(f"OpenRouter Raw Response Data: {response_data}")
-                return response_data # Return full dictionary
+
+                if isinstance(response_data, dict) and 'error' in response_data:
+                     error_info = response_data['error']
+                     error_code = error_info.get('code') # Could be HTTP status or OpenRouter specific code
+                     error_message = error_info.get('message', 'Unknown OpenRouter error')
+                     provider_message = f"OpenRouter reported error: {error_message}"
+
+                     # Attempt to extract more detail
+                     raw_detail = error_info.get('metadata', {}).get('raw', '')
+                     if raw_detail: provider_message += f" (Raw Detail: {str(raw_detail)[:150]})" # Truncate raw detail
+
+                     logging.error("OpenRouter: API call failed (reported in JSON payload): Code %s, Message: %s", error_code, provider_message)
+
+                     # Map internal code to custom exceptions (best effort)
+                     # OpenRouter often uses HTTP status codes here
+                     if error_code == 401:
+                         raise ChatAuthenticationError(provider='openrouter', message=provider_message)
+                     elif error_code == 429:
+                         raise ChatRateLimitError(provider='openrouter', message=provider_message)
+                     elif error_code and 400 <= error_code < 500:
+                          raise ChatBadRequestError(provider='openrouter', message=provider_message)
+                     elif error_code and 500 <= error_code < 600:
+                          raise ChatProviderError(provider='openrouter', message=provider_message, status_code=error_code)
+                     else: # Default to provider error if code is missing or unhandled
+                          # Use 502 Bad Gateway as a general "proxy received bad response" status
+                          raise ChatProviderError(provider='openrouter', message=provider_message, status_code=502)
+
+                # If no 'error' key, assume success
+                logging.debug("OpenRouter: Non-streaming request successful.")
+                # logging.debug(f"OpenRouter Raw Response Data: {response_data}")
+                return response_data # Return successful dictionary
 
     except (ValueError, KeyError, TypeError) as e:
-         logging.error(f"OpenRouter: Configuration or data error: {e}", exc_info=True)
-         raise ValueError(f"OpenRouter config/data error: {e}") from e
-    # Let RequestException and HTTPError propagate
+         # Catch config/data errors before the request
+         logging.error("OpenRouter: Configuration or data error before request: %s", e, exc_info=True)
+         # Raise as BadRequest or Configuration error depending on context (can be tricky)
+         # Let's map most of these to BadRequest for simplicity during call setup
+         raise ChatBadRequestError(provider='openrouter', message=f"Configuration/Data error for OpenRouter: {e}") from e
+
+    # Let HTTPError and RequestException raised by session.post or raise_for_status propagate
+    # These will be caught by the generic handlers in chat_api_call
 
 
 def chat_with_huggingface(api_key, input_data, custom_prompt_arg, system_prompt=None, temp=None, streaming=False, model=None): # Added model
