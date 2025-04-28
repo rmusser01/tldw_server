@@ -20,7 +20,7 @@ from starlette.staticfiles import StaticFiles
 from tldw_Server_API.app.api.v1.endpoints.media import router as media_router
 #
 # RAG Endpoint
-from tldw_Server_API.app.api.v1.endpoints.rag import router as rag_router
+#from tldw_Server_API.app.api.v1.endpoints.rag import router as rag_router
 #
 # Chat Endpoint
 from tldw_Server_API.app.api.v1.endpoints.chat import router as chat_router
@@ -141,7 +141,7 @@ app.include_router(media_router, prefix="/api/v1/media", tags=["media"])
 
 
 # Router for RAG endpoints
-app.include_router(rag_router, prefix="/api/v1/rag", tags=["rag"])
+#app.include_router(rag_router, prefix="/api/v1/rag", tags=["rag"])
 
 
 # Router for chat endpoints/chat temp-file handling

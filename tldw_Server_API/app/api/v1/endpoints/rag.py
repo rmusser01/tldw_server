@@ -31,9 +31,9 @@ from loguru import logger
 from starlette.responses import JSONResponse
 #
 # Local Imports
-from tldw_Server_API.app.core.RAG.RAG_Library_2 import (
-    search_functions
-)
+#from tldw_Server_API.app.core.RAG.RAG_Library_2 import (
+#    search_functions
+#)
 #
 # DB Mgmt
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
@@ -49,7 +49,7 @@ from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
 #
 # The router is a FastAPI object that allows us to define multiple endpoints under a single prefix.
 # Create a new router instance
-router = APIRouter()
+#router = APIRouter()
 
 
 #
