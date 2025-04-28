@@ -51,7 +51,7 @@ async def test_chat_integration_roundtrip(provider):
         "api_provider": provider,
         # use a minimal model name – most back‑ends fall back to default if the
         # exact model is not available; adjust per provider if needed.
-        "model": "gpt-4o-mini" if provider == "openai" else "claude-3-haiku-20240307" if provider == "anthropic" else "llama3-8b-8192",
+        "model": "gpt-4o-mini" if provider == "openai" else "claude-3-haiku-20240307" if provider == "anthropic" else "command-r7b-12-2024" if provider == "cohere" else "mistral-large-latest" if provider == "mistral" else "llama3-8b-8192",
         "messages": [{"role": "user", "content": "Say 'Hello {0}!'".format(provider.capitalize())}],
         "stream": False,
     }
@@ -90,7 +90,7 @@ async def test_chat_integration_invalid_key(provider, monkeypatch):
 
     request_body = {
         "api_provider": provider,
-        "model": "gpt-4o-mini" if provider == "openai" else "claude-3-haiku-20240307" if provider == "anthropic" else "command-r7b-12-2024" if provider == "cohere" else "llama3-8b-8192",
+        "model": "gpt-4o-mini" if provider == "openai" else "claude-3-haiku-20240307" if provider == "anthropic" else "command-r7b-12-2024" if provider == "cohere" else "mistral-large-latest" if provider == "mistral" else "llama3-8b-8192",
         "messages": [{"role": "user", "content": "Trigger invalid key path"}],
     }
 

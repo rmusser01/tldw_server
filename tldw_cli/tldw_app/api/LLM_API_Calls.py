@@ -1030,7 +1030,7 @@ def chat_with_openrouter(api_key=None, input_data=None, custom_prompt_arg=None, 
         # Model: Priority -> argument > config default
         openrouter_model = model
         if not openrouter_model:
-            openrouter_model = get_setting("api_settings", f"{provider_section_key}.model", "meta-llama/llama-3-70b-instruct") # Default from your config
+            openrouter_model = get_setting("api_settings", f"{provider_section_key}.model", "meta-llama/Llama-3.1-8B-Instruct")
         logging.debug(f"OpenRouter: Using model: {openrouter_model}")
 
         # Streaming: Priority -> argument > config default

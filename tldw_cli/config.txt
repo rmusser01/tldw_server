@@ -191,7 +191,7 @@ groq_api_retry = 3
 groq_api_retry_delay = 1
 #
 huggingface_api_key = <huggingface_api_key>
-huggingface_model = meta-llama/Llama-3.1-70B-Instruct
+huggingface_model = meta-llama/Llama-3.1-8B-Instruct
 huggingface_streaming = True
 huggingface_temperature = 0.7
 huggingface_max_tokens = 4096

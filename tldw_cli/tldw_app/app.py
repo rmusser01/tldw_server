@@ -130,7 +130,7 @@ LOCAL_PROVIDERS = {
     "Ollama": ["ollama/llama3:latest", "ollama/mistral:latest"], "vLLM": ["vllm-model-z"],
     "TabbyAPI": ["tabby-model"], "Aphrodite": ["aphrodite-engine"], "Custom-2": ["custom-model-gamma"],
     "Groq": ["llama3-70b-8192", "mixtral-8x7b-32768"], "Cohere": ["command-r-plus", "command-r"],
-    "OpenRouter": ["meta-llama/llama-3-70b-instruct"], "HuggingFace": ["mistralai/Mixtral-8x7B-Instruct-v0.1"],
+    "OpenRouter": ["meta-llama/Llama-3.1-8B-Instruct"], "HuggingFace": ["mistralai/Mixtral-8x7B-Instruct-v0.1"],
     "DeepSeek": ["deepseek-chat"],
 }
 ALL_API_MODELS = {**API_MODELS_BY_PROVIDER, **LOCAL_PROVIDERS}
