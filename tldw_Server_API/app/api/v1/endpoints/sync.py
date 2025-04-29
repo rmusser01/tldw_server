@@ -33,7 +33,8 @@ from slowapi.util import get_remote_address
 from loguru import logger
 from starlette.responses import JSONResponse
 
-from tldw_Server_API.app.api.v1.schemas.sync_server_models import ClientChangesPayload, ServerChangesResponse
+from tldw_Server_API.app.api.v1.schemas.sync_server_models import ClientChangesPayload, ServerChangesResponse, \
+    SyncLogEntry
 #
 # Local Imports
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_db_for_user, verify_token_and_get_user
@@ -109,7 +110,14 @@ async def receive_changes_from_client(
     # --- Process Changes ---
     # Use a helper class or function to encapsulate the processing logic
     processor = ServerSyncProcessor(db=db, user_id=user_id, requesting_client_id=requesting_client_id)
-    success, errors = await processor.apply_client_changes_batch(payload.changes)
+    # Use .model_dump() for Pydantic v2+, or .dict() for v1
+    try:
+        # Assuming Pydantic v2+
+         changes_as_dicts: List[Dict] = [change.model_dump() for change in payload.changes]
+    except AttributeError:
+         # Fallback for Pydantic v1
+         changes_as_dicts: List[Dict] = [change.dict() for change in payload.changes]
+    success, errors = await processor.apply_client_changes_batch(changes_as_dicts)
 
     if success:
         logger.info(f"Successfully processed batch from client {requesting_client_id} for user {user_id}.")
@@ -155,17 +163,28 @@ async def send_changes_to_client(
         params = (since_change_id, client_id, SYNC_BATCH_SIZE)
         cursor = db.execute_query(query, params)
         changes_raw = cursor.fetchall()
-        # Convert rows to SyncLogEntry model compatible dicts
-        changes_list = [dict(row) for row in changes_raw]
+
+        changes_models: List[SyncLogEntry] = []
+        for row in changes_raw:
+            try:
+                # Pydantic automatically handles the conversion if dict keys match model fields
+                entry = SyncLogEntry(**dict(row))
+                changes_models.append(entry)
+            except Exception as pydantic_err: # Catch potential validation errors during conversion
+                logger.error(f"Error validating sync log entry data (ID: {row['change_id'] if row else 'N/A'}) against model: {pydantic_err}", exc_info=True)
+                # Decide how to handle bad data - skip? Raise error?
+                # For now, let's skip the bad entry and continue
+                # FIXME: This should be logged and handled more gracefully
+                continue
 
         # Get the overall latest change ID in this user's log on the server
         cursor_latest = db.execute_query("SELECT MAX(change_id) FROM sync_log")
         latest_server_id = cursor_latest.fetchone()[0] or 0 # fetchone() returns tuple or None
 
-        logger.info(f"Sending {len(changes_list)} changes to client '{client_id}'. Server latest ID for user '{user_id}' is {latest_server_id}.")
+        logger.info(f"Sending {len(changes_models)} changes to client '{client_id}'. Server latest ID for user '{user_id}' is {latest_server_id}.")
 
         return ServerChangesResponse(
-            changes=changes_list,
+            changes=changes_models,
             latest_change_id=latest_server_id
         )
 
