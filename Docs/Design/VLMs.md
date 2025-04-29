@@ -4,8 +4,7 @@
 
 
 ### Link Dump:
-
-
+https://www.bespokelabs.ai/blog/bespoke-minichart-7b
 https://careersatdoordash.com/blog/doordash-llm-transcribe-menu/
 MAMBA
     https://ivy-lvlm.github.io/Video-MA2MBA/

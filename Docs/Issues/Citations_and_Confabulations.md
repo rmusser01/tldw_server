@@ -29,7 +29,7 @@ https://arxiv.org/abs/2504.07527
 https://arxiv.org/abs/2504.00824
 https://arxiv.org/abs/2503.22216
 https://allenai.org/blog/olmotrace
-
+https://arxiv.org/abs/2504.18114
 
 RAG
   https://www.lycee.ai/blog/rag-ragallucinations-and-how-to-fight-them

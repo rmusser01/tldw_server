@@ -64,6 +64,7 @@ https://docs.replit.com/replitai/agent
 https://uxplanet.org/ui-design-with-chatgpt-4o-4d79b2a32008
 https://bolt.new/
 https://github.com/rmusser01/agentic_rag/tree/main
+https://www.bloomberg.com/ux/2021/10/14/designing-the-terminal-for-color-accessibility/
 https://github.com/astramind-ai/Pulsar
 https://github.com/CodeUpdaterBot/ClickUi
 https://github.com/woshixiaobai2019/mirau-chat-ui

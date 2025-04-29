@@ -10,6 +10,8 @@ https://github.com/hmrishavbandy/FlipSketch
 https://news.ycombinator.com/item?id=42647668
 https://kroki.io/
 
-
+https://ratfactor.com/minslides/
+https://nbd.neocities.org/slidepresentation/Slide%20presentation%20about%20slides
+https://xosh.org/text-to-diagram/
 
 

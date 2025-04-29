@@ -21,7 +21,7 @@ https://jordandarefsky.com/blog/2024/parakeet/
 https://github.com/collabora/WhisperLive
 https://github.com/Lex-au/Vocalis?tab=readme-ov-file
 https://huggingface.co/moonshotai/Kimi-Audio-7B-Instruct
-
+https://github.com/devnen/Dia-TTS-Server
 https://github.com/Lex-au/Orpheus-FastAPI
 https://huggingface.co/collections/stepfun-ai/step-audio-67b33accf45735bb21131b0b
 https://github.com/mbzuai-oryx/LLMVoX

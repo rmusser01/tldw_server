@@ -56,7 +56,7 @@ https://github.com/dylanashley/story-distiller
 https://ieeexplore.ieee.org/document/10734853
 https://towardsdatascience.com/agentic-chunking-for-rags-091beccd94b1
 https://www.youtube.com/watch?v=NVp9jiMDdXc
-
+https://github.com/n8n-io/n8n-docs
 https://huggingface.co/NeuML/pubmedbert-base-embeddings
 https://huggingface.co/datasets/qiaojin/PubMedQA
 https://huggingface.co/datasets/armanc/scientific_papers

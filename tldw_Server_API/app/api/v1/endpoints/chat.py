@@ -81,6 +81,7 @@ async def create_chat_completion(
     request_data: ChatCompletionRequest = Body(...),
     db: Database = Depends(get_db_for_user), # Your existing auth dependency
 ):
+    # FIXME - Add auth checks here
     """
     Acts as a proxy to various chat completion APIs via the `chat_api_call` shim.
 
