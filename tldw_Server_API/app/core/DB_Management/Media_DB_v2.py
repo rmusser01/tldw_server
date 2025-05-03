@@ -352,6 +352,12 @@ class Database:
         content_rowid='id'  -- Link to Keywords.id
     );
     """
+    _SCHEMA_AND_FTS_SQL_V1 = _SCHEMA_SQL_V1 + _FTS_TABLES_SQL + """
+        -- Final step: Update schema version after applying V1 schema
+        UPDATE schema_version \
+        SET version = 1 \
+        WHERE version = 0; \
+        """
 
     def __init__(self, db_path: str, client_id: str):
         self.is_memory_db = (db_path == ':memory:')
@@ -517,18 +523,23 @@ class Database:
         conn = self.get_connection()
         try:
             current_db_version = self._get_db_version(conn)
-            logger.info(
-                f"Current DB schema version: {current_db_version}. Code supports version: {self._CURRENT_SCHEMA_VERSION}")
+            logger.info(f"Current DB schema version: {current_db_version}. Code supports version: {self._CURRENT_SCHEMA_VERSION}")
 
             if current_db_version == self._CURRENT_SCHEMA_VERSION:
                 logger.info("Database schema is up to date.")
+                # Ensure FTS tables exist even if schema is current
+                try:
+                     # Use executescript for potentially multiple statements
+                     conn.executescript(self._FTS_TABLES_SQL)
+                     conn.commit() # Commit FTS check/creation separately
+                except sqlite3.Error as fts_check_err:
+                     logger.error(f"Failed to ensure FTS tables exist on up-to-date schema: {fts_check_err}", exc_info=True)
                 return
 
             if current_db_version > self._CURRENT_SCHEMA_VERSION:
-                raise SchemaError(
-                    f"Database schema version ({current_db_version}) is newer than supported by code ({self._CURRENT_SCHEMA_VERSION}). Please update the application.")
+                raise SchemaError(f"Database schema version ({current_db_version}) is newer than supported by code ({self._CURRENT_SCHEMA_VERSION}). Please update the application.")
 
-            # Apply Schema/Migrations within a single transaction
+            # Apply Schema V1 (including FTS and version update) within a single transaction
             with self.transaction() as tx_conn:
                 if current_db_version == 0:
                     logger.info("Applying initial schema (Version 1)...")
@@ -536,8 +547,8 @@ class Database:
                     tx_conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY NOT NULL);")
                     tx_conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (0);")
 
-                    # Run the main schema script (tables, indices, triggers)
-                    tx_conn.executescript(self._SCHEMA_SQL_V1) # Without schema_version management
+                    # Run the main schema script (tables, indices, triggers - NO version update)
+                    tx_conn.executescript(self._SCHEMA_SQL_V1) # Without schema_version commands
                     logger.info("Main schema objects created.")
 
                     # Run the FTS table creation script
@@ -545,29 +556,37 @@ class Database:
                     tx_conn.executescript(self._FTS_TABLES_SQL)
                     logger.info("FTS virtual tables created.")
 
-                    # Set the final version *within the transaction*
-                    self._set_db_version(tx_conn, 1)
-                    logger.info("Initial schema V1 application complete.")
+                    # <<< Explicitly set the version using execute() within the transaction >>>
+                    logger.info("Setting database schema version to 1...")
+                    tx_conn.execute("UPDATE schema_version SET version = 1 WHERE version = 0")
+                    # Check rows affected (should be 1)
+                    cursor_check = tx_conn.cursor() # Create a temporary cursor
+                    if cursor_check.rowcount == 0:
+                        # Maybe it was already 1 somehow? Or the insert failed earlier?
+                        # Try replacing just in case.
+                        logger.warning("UPDATE schema_version affected 0 rows, attempting REPLACE.")
+                        tx_conn.execute("REPLACE INTO schema_version (version) VALUES (1)")
+
+                    logger.info("Initial schema V1 application complete (pending commit).")
                 else:
-                    # Placeholder for Future Migrations
+                    # --- Placeholder for Future Migrations ---
                     logger.warning(f"Migration path from version {current_db_version} to {self._CURRENT_SCHEMA_VERSION} not implemented yet.")
                     raise SchemaError(f"Migration needed from version {current_db_version}, but no migration path is defined.")
 
-                # # --- Final Verification (Optional but good) ---
-                # final_db_version = self._get_db_version(conn)
-                # if final_db_version != self._CURRENT_SCHEMA_VERSION:
-                #     raise SchemaError(
-                #         f"Schema initialization/migration finished, but DB version is {final_db_version}, expected {self._CURRENT_SCHEMA_VERSION}.")
+            # Get version *after* transaction commit for verification
+            final_db_version = self._get_db_version(conn)
+            if final_db_version != self._CURRENT_SCHEMA_VERSION:
+                 raise SchemaError(f"Schema application committed, but DB version check shows {final_db_version}, expected {self._CURRENT_SCHEMA_VERSION}.")
+            logger.info("Schema verified after commit.")
 
         except sqlite3.Error as e:
             logger.error(f"Schema initialization/migration failed: {e}", exc_info=True)
-            # Rollback is handled by the transaction context
             raise DatabaseError(f"DB schema setup/migration failed: {e}") from e
-        except SchemaError:  # Re-raise SchemaErrors
-            raise
-        except Exception as e:  # Catch unexpected errors during schema application
-            logger.error(f"Unexpected error during schema application: {e}", exc_info=True)
-            raise DatabaseError(f"Unexpected error applying schema: {e}") from e
+        except SchemaError:
+             raise
+        except Exception as e:
+             logger.error(f"Unexpected error during schema application: {e}", exc_info=True)
+             raise DatabaseError(f"Unexpected error applying schema: {e}") from e
 
     # --- Internal Helpers (Unchanged) ---
     def _get_current_utc_timestamp_str(self) -> str:
