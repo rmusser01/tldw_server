@@ -1979,5 +1979,5 @@ def search_media_db(
         raise DatabaseError(f"An unexpected error occurred during media search: {e}") from e
 
 #
-# End of Media_DB_v2.py
+# End of Client_Media_DB_v2.py
 #######################################################################################################################

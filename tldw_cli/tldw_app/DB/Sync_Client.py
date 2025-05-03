@@ -761,3 +761,7 @@ if __name__ == "__main__":
                   logger.error(f"Error closing DB connection: {close_err}")
         else:
             logger.warning("DB object was not successfully initialized, no connection to close.")
+
+#
+# End of Sync_Client.py
+#######################################################################################################################

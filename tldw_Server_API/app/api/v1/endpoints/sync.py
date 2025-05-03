@@ -1,4 +1,4 @@
-# Server_API/app/api/v1/endpoints/sync.py
+# Server_API/app/api/v1/endpoints/sync-endpoint.py
 # Description: This code provides a FastAPI endpoint for all Sync operations.
 #
 # Imports
@@ -684,5 +684,5 @@ class ServerSyncProcessor:
                  else: logger.warning(f"[{self.user_id}] Cannot update keyword_fts (Sync): Keyword record not found for UUID {uuid}")
 
 #
-# End of sync.py
+# End of sync-endpoint.py
 #######################################################################################################################
