@@ -463,21 +463,25 @@ class TestDatabaseCRUDAndSync:
         kw_id, kw_uuid = db_instance.add_keyword("clientid_test")
         current_version = get_entity_version(db_instance, "Keywords", kw_uuid)
 
-        # Try to update with NULL client_id
-        with pytest.raises(sqlite3.IntegrityError, match="Sync Error \(Keywords\): Client ID cannot be NULL or empty"):
-             db_instance.execute_query(
-                 "UPDATE Keywords SET version = ?, client_id = NULL WHERE id = ?",
-                 (current_version + 1, kw_id),
-                 commit=True
-             )
+        # Test the EMPTY STRING case handled by the trigger
+        # Use raw string for regex match safety
+        with pytest.raises(sqlite3.IntegrityError, match=r"Sync Error \(Keywords\): Client ID cannot be NULL or empty"):
+            db_instance.execute_query(
+                # Update version correctly, but set client_id to ''
+                "UPDATE Keywords SET version = ?, client_id = '' WHERE id = ?",
+                (current_version + 1, kw_id),
+                commit=True
+            )
 
-        # Try to update with empty client_id
-        with pytest.raises(sqlite3.IntegrityError, match="Sync Error \(Keywords\): Client ID cannot be NULL or empty"):
-             db_instance.execute_query(
-                 "UPDATE Keywords SET version = ?, client_id = '' WHERE id = ?",
-                 (current_version + 1, kw_id),
-                 commit=True
-             )
+        # Optional: Test the NULL case separately, expecting the NOT NULL constraint error
+        # This confirms the underlying table constraint works, though not the trigger message.
+        with pytest.raises(DatabaseError,
+                           match="Integrity constraint violation: NOT NULL constraint failed: Keywords.client_id"):
+            db_instance.execute_query(
+                "UPDATE Keywords SET version = ?, client_id = NULL WHERE id = ?",
+                (current_version + 1, kw_id),  # Still try to increment version
+                commit=True
+            )
 
 
 class TestSyncLogManagement:

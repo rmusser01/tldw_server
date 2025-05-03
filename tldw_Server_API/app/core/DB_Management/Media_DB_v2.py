@@ -80,286 +80,277 @@ class Database:
     # - REMOVED FTS Triggers
     # - ADDED schema_version table
     _SCHEMA_SQL_V1 = """
-PRAGMA foreign_keys = ON;
+    PRAGMA foreign_keys = ON;
 
--- Schema Version Table --
-CREATE TABLE IF NOT EXISTS schema_version (
-    version INTEGER PRIMARY KEY NOT NULL
-);
--- Initialize version if table is newly created
-INSERT OR IGNORE INTO schema_version (version) VALUES (0);
+    -- Schema Version Table --
+    CREATE TABLE IF NOT EXISTS schema_version (
+        version INTEGER PRIMARY KEY NOT NULL
+    );
+    -- Initialize version if table is newly created
+    INSERT OR IGNORE INTO schema_version (version) VALUES (0);
 
--- Media Table --
-CREATE TABLE IF NOT EXISTS Media (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    url TEXT UNIQUE,
-    title TEXT NOT NULL,
-    type TEXT NOT NULL,
-    content TEXT,
-    author TEXT,
-    ingestion_date DATETIME,
-    transcription_model TEXT,
-    is_trash BOOLEAN DEFAULT 0 NOT NULL,
-    trash_date DATETIME,
-    vector_embedding BLOB,
-    chunking_status TEXT DEFAULT 'pending' NOT NULL,
-    vector_processing INTEGER DEFAULT 0 NOT NULL,
-    content_hash TEXT UNIQUE NOT NULL,
-    uuid TEXT UNIQUE NOT NULL,
-    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    version INTEGER NOT NULL DEFAULT 1,
-    client_id TEXT NOT NULL,
-    deleted BOOLEAN NOT NULL DEFAULT 0,
-    prev_version INTEGER,
-    merge_parent_uuid TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_media_title ON Media(title);
-CREATE INDEX IF NOT EXISTS idx_media_type ON Media(type);
-CREATE INDEX IF NOT EXISTS idx_media_author ON Media(author);
-CREATE INDEX IF NOT EXISTS idx_media_ingestion_date ON Media(ingestion_date);
-CREATE INDEX IF NOT EXISTS idx_media_chunking_status ON Media(chunking_status);
-CREATE INDEX IF NOT EXISTS idx_media_vector_processing ON Media(vector_processing);
-CREATE INDEX IF NOT EXISTS idx_media_is_trash ON Media(is_trash);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_media_content_hash ON Media(content_hash);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_media_uuid ON Media(uuid);
-CREATE INDEX IF NOT EXISTS idx_media_last_modified ON Media(last_modified);
-CREATE INDEX IF NOT EXISTS idx_media_deleted ON Media(deleted);
-CREATE INDEX IF NOT EXISTS idx_media_prev_version ON Media(prev_version);
-CREATE INDEX IF NOT EXISTS idx_media_merge_parent_uuid ON Media(merge_parent_uuid);
+    -- Media Table --
+    CREATE TABLE IF NOT EXISTS Media (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        url TEXT UNIQUE,
+        title TEXT NOT NULL,
+        type TEXT NOT NULL,
+        content TEXT,
+        author TEXT,
+        ingestion_date DATETIME,
+        transcription_model TEXT,
+        is_trash BOOLEAN DEFAULT 0 NOT NULL,
+        trash_date DATETIME,
+        vector_embedding BLOB,
+        chunking_status TEXT DEFAULT 'pending' NOT NULL,
+        vector_processing INTEGER DEFAULT 0 NOT NULL,
+        content_hash TEXT UNIQUE NOT NULL,
+        uuid TEXT UNIQUE NOT NULL,
+        last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        version INTEGER NOT NULL DEFAULT 1,
+        client_id TEXT NOT NULL,
+        deleted BOOLEAN NOT NULL DEFAULT 0,
+        prev_version INTEGER,
+        merge_parent_uuid TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_media_title ON Media(title);
+    CREATE INDEX IF NOT EXISTS idx_media_type ON Media(type);
+    CREATE INDEX IF NOT EXISTS idx_media_author ON Media(author);
+    CREATE INDEX IF NOT EXISTS idx_media_ingestion_date ON Media(ingestion_date);
+    CREATE INDEX IF NOT EXISTS idx_media_chunking_status ON Media(chunking_status);
+    CREATE INDEX IF NOT EXISTS idx_media_vector_processing ON Media(vector_processing);
+    CREATE INDEX IF NOT EXISTS idx_media_is_trash ON Media(is_trash);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_media_content_hash ON Media(content_hash);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_media_uuid ON Media(uuid);
+    CREATE INDEX IF NOT EXISTS idx_media_last_modified ON Media(last_modified);
+    CREATE INDEX IF NOT EXISTS idx_media_deleted ON Media(deleted);
+    CREATE INDEX IF NOT EXISTS idx_media_prev_version ON Media(prev_version);
+    CREATE INDEX IF NOT EXISTS idx_media_merge_parent_uuid ON Media(merge_parent_uuid);
 
--- Keywords Table --
-CREATE TABLE IF NOT EXISTS Keywords (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    keyword TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    uuid TEXT UNIQUE NOT NULL,
-    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    version INTEGER NOT NULL DEFAULT 1,
-    client_id TEXT NOT NULL,
-    deleted BOOLEAN NOT NULL DEFAULT 0,
-    prev_version INTEGER,
-    merge_parent_uuid TEXT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_uuid ON Keywords(uuid);
-CREATE INDEX IF NOT EXISTS idx_keywords_last_modified ON Keywords(last_modified);
-CREATE INDEX IF NOT EXISTS idx_keywords_deleted ON Keywords(deleted);
-CREATE INDEX IF NOT EXISTS idx_keywords_prev_version ON Keywords(prev_version);
-CREATE INDEX IF NOT EXISTS idx_keywords_merge_parent_uuid ON Keywords(merge_parent_uuid);
+    -- Keywords Table --
+    CREATE TABLE IF NOT EXISTS Keywords (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        keyword TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        uuid TEXT UNIQUE NOT NULL,
+        last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        version INTEGER NOT NULL DEFAULT 1,
+        client_id TEXT NOT NULL,
+        deleted BOOLEAN NOT NULL DEFAULT 0,
+        prev_version INTEGER,
+        merge_parent_uuid TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_uuid ON Keywords(uuid);
+    CREATE INDEX IF NOT EXISTS idx_keywords_last_modified ON Keywords(last_modified);
+    CREATE INDEX IF NOT EXISTS idx_keywords_deleted ON Keywords(deleted);
+    CREATE INDEX IF NOT EXISTS idx_keywords_prev_version ON Keywords(prev_version);
+    CREATE INDEX IF NOT EXISTS idx_keywords_merge_parent_uuid ON Keywords(merge_parent_uuid);
 
--- MediaKeywords Table (Junction Table) --
-CREATE TABLE IF NOT EXISTS MediaKeywords (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    media_id INTEGER NOT NULL,
-    keyword_id INTEGER NOT NULL,
-    UNIQUE (media_id, keyword_id),
-    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
-    FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_mediakeywords_media_id ON MediaKeywords(media_id);
-CREATE INDEX IF NOT EXISTS idx_mediakeywords_keyword_id ON MediaKeywords(keyword_id);
+    -- MediaKeywords Table (Junction Table) --
+    CREATE TABLE IF NOT EXISTS MediaKeywords (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_id INTEGER NOT NULL,
+        keyword_id INTEGER NOT NULL,
+        UNIQUE (media_id, keyword_id),
+        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
+        FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_mediakeywords_media_id ON MediaKeywords(media_id);
+    CREATE INDEX IF NOT EXISTS idx_mediakeywords_keyword_id ON MediaKeywords(keyword_id);
 
--- Transcripts Table --
-CREATE TABLE IF NOT EXISTS Transcripts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    media_id INTEGER NOT NULL,
-    whisper_model TEXT,
-    transcription TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    uuid TEXT UNIQUE NOT NULL,
-    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    version INTEGER NOT NULL DEFAULT 1,
-    client_id TEXT NOT NULL,
-    deleted BOOLEAN NOT NULL DEFAULT 0,
-    prev_version INTEGER,
-    merge_parent_uuid TEXT,
-    UNIQUE (media_id, whisper_model),
-    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_transcripts_media_id ON Transcripts(media_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_transcripts_uuid ON Transcripts(uuid);
-CREATE INDEX IF NOT EXISTS idx_transcripts_last_modified ON Transcripts(last_modified);
-CREATE INDEX IF NOT EXISTS idx_transcripts_deleted ON Transcripts(deleted);
-CREATE INDEX IF NOT EXISTS idx_transcripts_prev_version ON Transcripts(prev_version);
-CREATE INDEX IF NOT EXISTS idx_transcripts_merge_parent_uuid ON Transcripts(merge_parent_uuid);
+    -- Transcripts Table --
+    CREATE TABLE IF NOT EXISTS Transcripts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_id INTEGER NOT NULL,
+        whisper_model TEXT,
+        transcription TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        uuid TEXT UNIQUE NOT NULL,
+        last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        version INTEGER NOT NULL DEFAULT 1,
+        client_id TEXT NOT NULL,
+        deleted BOOLEAN NOT NULL DEFAULT 0,
+        prev_version INTEGER,
+        merge_parent_uuid TEXT,
+        UNIQUE (media_id, whisper_model),
+        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_transcripts_media_id ON Transcripts(media_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_transcripts_uuid ON Transcripts(uuid);
+    CREATE INDEX IF NOT EXISTS idx_transcripts_last_modified ON Transcripts(last_modified);
+    CREATE INDEX IF NOT EXISTS idx_transcripts_deleted ON Transcripts(deleted);
+    CREATE INDEX IF NOT EXISTS idx_transcripts_prev_version ON Transcripts(prev_version);
+    CREATE INDEX IF NOT EXISTS idx_transcripts_merge_parent_uuid ON Transcripts(merge_parent_uuid);
 
--- MediaChunks Table --
-CREATE TABLE IF NOT EXISTS MediaChunks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    media_id INTEGER NOT NULL,
-    chunk_text TEXT NOT NULL,
-    start_index INTEGER,
-    end_index INTEGER,
-    chunk_id TEXT UNIQUE,
-    uuid TEXT UNIQUE NOT NULL,
-    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    version INTEGER NOT NULL DEFAULT 1,
-    client_id TEXT NOT NULL,
-    deleted BOOLEAN NOT NULL DEFAULT 0,
-    prev_version INTEGER,
-    merge_parent_uuid TEXT,
-    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_mediachunks_media_id ON MediaChunks(media_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mediachunks_uuid ON MediaChunks(uuid);
-CREATE INDEX IF NOT EXISTS idx_mediachunks_last_modified ON MediaChunks(last_modified);
-CREATE INDEX IF NOT EXISTS idx_mediachunks_deleted ON MediaChunks(deleted);
-CREATE INDEX IF NOT EXISTS idx_mediachunks_prev_version ON MediaChunks(prev_version);
-CREATE INDEX IF NOT EXISTS idx_mediachunks_merge_parent_uuid ON MediaChunks(merge_parent_uuid);
+    -- MediaChunks Table --
+    CREATE TABLE IF NOT EXISTS MediaChunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_id INTEGER NOT NULL,
+        chunk_text TEXT NOT NULL,
+        start_index INTEGER,
+        end_index INTEGER,
+        chunk_id TEXT UNIQUE,
+        uuid TEXT UNIQUE NOT NULL,
+        last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        version INTEGER NOT NULL DEFAULT 1,
+        client_id TEXT NOT NULL,
+        deleted BOOLEAN NOT NULL DEFAULT 0,
+        prev_version INTEGER,
+        merge_parent_uuid TEXT,
+        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_mediachunks_media_id ON MediaChunks(media_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_mediachunks_uuid ON MediaChunks(uuid);
+    CREATE INDEX IF NOT EXISTS idx_mediachunks_last_modified ON MediaChunks(last_modified);
+    CREATE INDEX IF NOT EXISTS idx_mediachunks_deleted ON MediaChunks(deleted);
+    CREATE INDEX IF NOT EXISTS idx_mediachunks_prev_version ON MediaChunks(prev_version);
+    CREATE INDEX IF NOT EXISTS idx_mediachunks_merge_parent_uuid ON MediaChunks(merge_parent_uuid);
 
--- UnvectorizedMediaChunks Table --
-CREATE TABLE IF NOT EXISTS UnvectorizedMediaChunks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    media_id INTEGER NOT NULL,
-    chunk_text TEXT NOT NULL,
-    chunk_index INTEGER NOT NULL,
-    start_char INTEGER,
-    end_char INTEGER,
-    chunk_type TEXT,
-    creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_modified_orig TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- Keep original name for now
-    is_processed BOOLEAN DEFAULT FALSE NOT NULL, -- Keep original name for now
-    metadata TEXT,
-    uuid TEXT UNIQUE NOT NULL,
-    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    version INTEGER NOT NULL DEFAULT 1,
-    client_id TEXT NOT NULL,
-    deleted BOOLEAN NOT NULL DEFAULT 0,
-    prev_version INTEGER,
-    merge_parent_uuid TEXT,
-    UNIQUE (media_id, chunk_index, chunk_type),
-    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_media_id ON UnvectorizedMediaChunks(media_id);
-CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_is_processed ON UnvectorizedMediaChunks(is_processed);
-CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_chunk_type ON UnvectorizedMediaChunks(chunk_type);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_uuid ON UnvectorizedMediaChunks(uuid);
-CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_last_modified ON UnvectorizedMediaChunks(last_modified);
-CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_deleted ON UnvectorizedMediaChunks(deleted);
-CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_prev_version ON UnvectorizedMediaChunks(prev_version);
-CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_merge_parent_uuid ON UnvectorizedMediaChunks(merge_parent_uuid);
+    -- UnvectorizedMediaChunks Table --
+    CREATE TABLE IF NOT EXISTS UnvectorizedMediaChunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_id INTEGER NOT NULL,
+        chunk_text TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        start_char INTEGER,
+        end_char INTEGER,
+        chunk_type TEXT,
+        creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_modified_orig TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_processed BOOLEAN DEFAULT FALSE NOT NULL,
+        metadata TEXT,
+        uuid TEXT UNIQUE NOT NULL,
+        last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        version INTEGER NOT NULL DEFAULT 1,
+        client_id TEXT NOT NULL,
+        deleted BOOLEAN NOT NULL DEFAULT 0,
+        prev_version INTEGER,
+        merge_parent_uuid TEXT,
+        UNIQUE (media_id, chunk_index, chunk_type),
+        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_media_id ON UnvectorizedMediaChunks(media_id);
+    CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_is_processed ON UnvectorizedMediaChunks(is_processed);
+    CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_chunk_type ON UnvectorizedMediaChunks(chunk_type);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_uuid ON UnvectorizedMediaChunks(uuid);
+    CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_last_modified ON UnvectorizedMediaChunks(last_modified);
+    CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_deleted ON UnvectorizedMediaChunks(deleted);
+    CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_prev_version ON UnvectorizedMediaChunks(prev_version);
+    CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_merge_parent_uuid ON UnvectorizedMediaChunks(merge_parent_uuid);
 
--- DocumentVersions Table --
-CREATE TABLE IF NOT EXISTS DocumentVersions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    media_id INTEGER NOT NULL,
-    version_number INTEGER NOT NULL,
-    prompt TEXT,
-    analysis_content TEXT,
-    content TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    uuid TEXT UNIQUE NOT NULL,
-    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    version INTEGER NOT NULL DEFAULT 1,
-    client_id TEXT NOT NULL,
-    deleted BOOLEAN NOT NULL DEFAULT 0,
-    prev_version INTEGER,
-    merge_parent_uuid TEXT,
-    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
-    UNIQUE (media_id, version_number)
-);
-CREATE INDEX IF NOT EXISTS idx_document_versions_media_id ON DocumentVersions(media_id);
-CREATE INDEX IF NOT EXISTS idx_document_versions_version_number ON DocumentVersions(version_number);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_documentversions_uuid ON DocumentVersions(uuid);
-CREATE INDEX IF NOT EXISTS idx_documentversions_last_modified ON DocumentVersions(last_modified);
-CREATE INDEX IF NOT EXISTS idx_documentversions_deleted ON DocumentVersions(deleted);
-CREATE INDEX IF NOT EXISTS idx_documentversions_prev_version ON DocumentVersions(prev_version);
-CREATE INDEX IF NOT EXISTS idx_documentversions_merge_parent_uuid ON DocumentVersions(merge_parent_uuid);
+    -- DocumentVersions Table --
+    CREATE TABLE IF NOT EXISTS DocumentVersions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_id INTEGER NOT NULL,
+        version_number INTEGER NOT NULL,
+        prompt TEXT,
+        analysis_content TEXT,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        uuid TEXT UNIQUE NOT NULL,
+        last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        version INTEGER NOT NULL DEFAULT 1,
+        client_id TEXT NOT NULL,
+        deleted BOOLEAN NOT NULL DEFAULT 0,
+        prev_version INTEGER,
+        merge_parent_uuid TEXT,
+        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
+        UNIQUE (media_id, version_number)
+    );
+    CREATE INDEX IF NOT EXISTS idx_document_versions_media_id ON DocumentVersions(media_id);
+    CREATE INDEX IF NOT EXISTS idx_document_versions_version_number ON DocumentVersions(version_number);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_documentversions_uuid ON DocumentVersions(uuid);
+    CREATE INDEX IF NOT EXISTS idx_documentversions_last_modified ON DocumentVersions(last_modified);
+    CREATE INDEX IF NOT EXISTS idx_documentversions_deleted ON DocumentVersions(deleted);
+    CREATE INDEX IF NOT EXISTS idx_documentversions_prev_version ON DocumentVersions(prev_version);
+    CREATE INDEX IF NOT EXISTS idx_documentversions_merge_parent_uuid ON DocumentVersions(merge_parent_uuid);
 
+    -- Sync Log Table & Indices --
+    CREATE TABLE IF NOT EXISTS sync_log (
+        change_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity TEXT NOT NULL,
+        entity_uuid TEXT NOT NULL,
+        operation TEXT NOT NULL CHECK(operation IN ('create','update','delete', 'link', 'unlink')),
+        timestamp DATETIME NOT NULL,
+        client_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        payload TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sync_log_ts ON sync_log(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_sync_log_entity_uuid ON sync_log(entity_uuid);
+    CREATE INDEX IF NOT EXISTS idx_sync_log_client_id ON sync_log(client_id);
 
--- FTS Tables (NO Triggers) --
-CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
-    title,
-    content,
-    content='Media',    -- Keep reference to source table
-    content_rowid='id' -- Link to Media.id
-);
+    -- Validation Triggers --
+    DROP TRIGGER IF EXISTS media_validate_sync_update;
+    CREATE TRIGGER media_validate_sync_update BEFORE UPDATE ON Media
+    BEGIN
+        SELECT RAISE(ABORT, 'Sync Error (Media): Version must increment by exactly 1.')
+        WHERE NEW.version IS NOT OLD.version + 1 AND NEW.version IS NOT OLD.version;
+        SELECT RAISE(ABORT, 'Sync Error (Media): Client ID cannot be NULL or empty.')
+        WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+    END;
 
-CREATE VIRTUAL TABLE IF NOT EXISTS keyword_fts USING fts5(
-    keyword,
-    content='Keywords',    -- Keep reference to source table
-    content_rowid='id'  -- Link to Keywords.id
-);
+    DROP TRIGGER IF EXISTS keywords_validate_sync_update;
+    CREATE TRIGGER keywords_validate_sync_update BEFORE UPDATE ON Keywords
+    BEGIN
+        SELECT RAISE(ABORT, 'Sync Error (Keywords): Version must increment by exactly 1.')
+        WHERE NEW.version IS NOT OLD.version + 1 AND NEW.version IS NOT OLD.version;
+        SELECT RAISE(ABORT, 'Sync Error (Keywords): Client ID cannot be NULL or empty.')
+        WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+    END;
 
--- Sync Log Table & Indices (No changes needed here) --
-CREATE TABLE IF NOT EXISTS sync_log (
-    change_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity TEXT NOT NULL,
-    entity_uuid TEXT NOT NULL,
-    operation TEXT NOT NULL CHECK(operation IN ('create','update','delete', 'link', 'unlink')),
-    timestamp DATETIME NOT NULL,
-    client_id TEXT NOT NULL,
-    version INTEGER NOT NULL,
-    payload TEXT -- Store payload as JSON text
-);
-CREATE INDEX IF NOT EXISTS idx_sync_log_ts ON sync_log(timestamp);
-CREATE INDEX IF NOT EXISTS idx_sync_log_entity_uuid ON sync_log(entity_uuid);
-CREATE INDEX IF NOT EXISTS idx_sync_log_client_id ON sync_log(client_id);
+    DROP TRIGGER IF EXISTS transcripts_validate_sync_update;
+    CREATE TRIGGER transcripts_validate_sync_update BEFORE UPDATE ON Transcripts
+    BEGIN
+        SELECT RAISE(ABORT, 'Sync Error (Transcripts): Version must increment by exactly 1.')
+        WHERE NEW.version IS NOT OLD.version + 1 AND NEW.version IS NOT OLD.version;
+        SELECT RAISE(ABORT, 'Sync Error (Transcripts): Client ID cannot be NULL or empty.')
+        WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+    END;
 
--- Validation Triggers (Keep these, they enforce sync rules) --
-DROP TRIGGER IF EXISTS media_validate_sync_update;
-CREATE TRIGGER media_validate_sync_update BEFORE UPDATE ON Media
-WHEN NEW.version IS NOT OLD.version + 1 -- Only trigger if version changes incorrectly
-BEGIN
-    SELECT RAISE(ABORT, 'Sync Error (Media): Version must increment by exactly 1.')
-    WHERE NEW.version IS NOT OLD.version + 1;
+    DROP TRIGGER IF EXISTS mediachunks_validate_sync_update;
+    CREATE TRIGGER mediachunks_validate_sync_update BEFORE UPDATE ON MediaChunks
+    BEGIN
+        SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Version must increment by exactly 1.')
+        WHERE NEW.version IS NOT OLD.version + 1 AND NEW.version IS NOT OLD.version;
+        SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Client ID cannot be NULL or empty.')
+        WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+    END;
 
-    SELECT RAISE(ABORT, 'Sync Error (Media): Client ID cannot be NULL or empty.')
-    WHERE NEW.client_id IS NULL OR NEW.client_id = '';
-END;
+    DROP TRIGGER IF EXISTS unvectorizedmediachunks_validate_sync_update;
+    CREATE TRIGGER unvectorizedmediachunks_validate_sync_update BEFORE UPDATE ON UnvectorizedMediaChunks
+    BEGIN
+        SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Version must increment by exactly 1.')
+        WHERE NEW.version IS NOT OLD.version + 1 AND NEW.version IS NOT OLD.version;
+        SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Client ID cannot be NULL or empty.')
+        WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+    END;
 
--- Add similar triggers for Keywords, Transcripts, MediaChunks, UnvectorizedMediaChunks, DocumentVersions
--- (Ensure client_id checks are also included)
-DROP TRIGGER IF EXISTS keywords_validate_sync_update;
-CREATE TRIGGER keywords_validate_sync_update BEFORE UPDATE ON Keywords
-WHEN NEW.version IS NOT OLD.version + 1
-BEGIN
-    SELECT RAISE(ABORT, 'Sync Error (Keywords): Version must increment by exactly 1.')
-    WHERE NEW.version IS NOT OLD.version + 1;
-    SELECT RAISE(ABORT, 'Sync Error (Keywords): Client ID cannot be NULL or empty.')
-    WHERE NEW.client_id IS NULL OR NEW.client_id = '';
-END;
+    DROP TRIGGER IF EXISTS documentversions_validate_sync_update;
+    CREATE TRIGGER documentversions_validate_sync_update BEFORE UPDATE ON DocumentVersions
+    BEGIN
+        SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): Version must increment by exactly 1.')
+        WHERE NEW.version IS NOT OLD.version + 1 AND NEW.version IS NOT OLD.version;
+        SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): Client ID cannot be NULL or empty.')
+        WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+    END;
 
-DROP TRIGGER IF EXISTS transcripts_validate_sync_update;
-CREATE TRIGGER transcripts_validate_sync_update BEFORE UPDATE ON Transcripts
-WHEN NEW.version IS NOT OLD.version + 1
-BEGIN
-    SELECT RAISE(ABORT, 'Sync Error (Transcripts): Version must increment by exactly 1.')
-    WHERE NEW.version IS NOT OLD.version + 1;
-    SELECT RAISE(ABORT, 'Sync Error (Transcripts): Client ID cannot be NULL or empty.')
-    WHERE NEW.client_id IS NULL OR NEW.client_id = '';
-END;
+    -- DO NOT UPDATE schema_version here, do it in Python code after script success
+    """
 
-DROP TRIGGER IF EXISTS mediachunks_validate_sync_update;
-CREATE TRIGGER mediachunks_validate_sync_update BEFORE UPDATE ON MediaChunks
-WHEN NEW.version IS NOT OLD.version + 1
-BEGIN
-    SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Version must increment by exactly 1.')
-    WHERE NEW.version IS NOT OLD.version + 1;
-    SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Client ID cannot be NULL or empty.')
-    WHERE NEW.client_id IS NULL OR NEW.client_id = '';
-END;
+    _FTS_TABLES_SQL = """
+    -- FTS Tables (Executed Separately) --
+    CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
+        title,
+        content,
+        content='Media',    -- Keep reference to source table
+        content_rowid='id' -- Link to Media.id
+    );
 
-DROP TRIGGER IF EXISTS unvectorizedmediachunks_validate_sync_update;
-CREATE TRIGGER unvectorizedmediachunks_validate_sync_update BEFORE UPDATE ON UnvectorizedMediaChunks
-WHEN NEW.version IS NOT OLD.version + 1
-BEGIN
-    SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Version must increment by exactly 1.')
-    WHERE NEW.version IS NOT OLD.version + 1;
-    SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Client ID cannot be NULL or empty.')
-    WHERE NEW.client_id IS NULL OR NEW.client_id = '';
-END;
-
-DROP TRIGGER IF EXISTS documentversions_validate_sync_update;
-CREATE TRIGGER documentversions_validate_sync_update BEFORE UPDATE ON DocumentVersions
-WHEN NEW.version IS NOT OLD.version + 1
-BEGIN
-    SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): Version must increment by exactly 1.')
-    WHERE NEW.version IS NOT OLD.version + 1;
-    SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): Client ID cannot be NULL or empty.')
-    WHERE NEW.client_id IS NULL OR NEW.client_id = '';
-END;
-
--- Final step: Update schema version after applying V1 schema
-UPDATE schema_version SET version = 1 WHERE version = 0;
+    CREATE VIRTUAL TABLE IF NOT EXISTS keyword_fts USING fts5(
+        keyword,
+        content='Keywords',    -- Keep reference to source table
+        content_rowid='id'  -- Link to Keywords.id
+    );
     """
 
     def __init__(self, db_path: str, client_id: str):
@@ -525,54 +516,58 @@ UPDATE schema_version SET version = 1 WHERE version = 0;
         """Checks schema version and applies initial schema or migrations."""
         conn = self.get_connection()
         try:
-            with self.transaction(): # Use transaction for schema changes
-                current_db_version = self._get_db_version(conn)
-                logger.info(f"Current DB schema version: {current_db_version}. Code supports version: {self._CURRENT_SCHEMA_VERSION}")
+            current_db_version = self._get_db_version(conn)
+            logger.info(
+                f"Current DB schema version: {current_db_version}. Code supports version: {self._CURRENT_SCHEMA_VERSION}")
 
-                if current_db_version == self._CURRENT_SCHEMA_VERSION:
-                    logger.info("Database schema is up to date.")
-                    return # Nothing to do
+            if current_db_version == self._CURRENT_SCHEMA_VERSION:
+                logger.info("Database schema is up to date.")
+                return
 
-                if current_db_version > self._CURRENT_SCHEMA_VERSION:
-                    raise SchemaError(f"Database schema version ({current_db_version}) is newer than supported by code ({self._CURRENT_SCHEMA_VERSION}). Please update the application.")
+            if current_db_version > self._CURRENT_SCHEMA_VERSION:
+                raise SchemaError(
+                    f"Database schema version ({current_db_version}) is newer than supported by code ({self._CURRENT_SCHEMA_VERSION}). Please update the application.")
 
+            # Apply Schema/Migrations within a single transaction
+            with self.transaction() as tx_conn:
                 if current_db_version == 0:
-                    # Apply the initial V1 schema
                     logger.info("Applying initial schema (Version 1)...")
-                    conn.executescript(self._SCHEMA_SQL_V1)
-                    # The script itself updates the version to 1
-                    logger.info("Initial schema applied successfully.")
-                else:
-                    # --- Placeholder for Future Migrations ---
-                    logger.info(f"Running migrations from version {current_db_version} to {self._CURRENT_SCHEMA_VERSION}...")
-                    # Example:
-                    # if current_db_version < 2:
-                    #     logger.info("Applying migration to version 2...")
-                    #     # conn.executescript(_SCHEMA_MIGRATION_1_TO_2)
-                    #     self._set_db_version(conn, 2)
-                    #     logger.info("Migration to version 2 successful.")
-                    # if current_db_version < 3:
-                    #     # ... apply migration 2 to 3 ...
-                    #     pass
-                    # --- End Placeholder ---
-                    # For now, if current_db_version is < _CURRENT_SCHEMA_VERSION but not 0, it's an error
-                    # because we only have V1 defined.
-                    if current_db_version < self._CURRENT_SCHEMA_VERSION:
-                         logger.warning(f"Migration path from version {current_db_version} to {self._CURRENT_SCHEMA_VERSION} not implemented yet.")
-                         # Depending on policy, either raise Error or try applying V1 again?
-                         # Let's raise for now to prevent unexpected states.
-                         raise SchemaError(f"Migration needed from version {current_db_version}, but no migration path is defined.")
+                    # Ensure schema_version table exists and version is 0
+                    tx_conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY NOT NULL);")
+                    tx_conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (0);")
 
-                # Verify final version
-                final_db_version = self._get_db_version(conn)
-                if final_db_version != self._CURRENT_SCHEMA_VERSION:
-                     # This should not happen if logic is correct
-                     raise SchemaError(f"Schema initialization/migration finished, but DB version is {final_db_version}, expected {self._CURRENT_SCHEMA_VERSION}.")
+                    # Run the main schema script (tables, indices, triggers)
+                    tx_conn.executescript(self._SCHEMA_SQL_V1) # Without schema_version management
+                    logger.info("Main schema objects created.")
+
+                    # Run the FTS table creation script
+                    logger.info("Creating FTS virtual tables...")
+                    tx_conn.executescript(self._FTS_TABLES_SQL)
+                    logger.info("FTS virtual tables created.")
+
+                    # Set the final version *within the transaction*
+                    self._set_db_version(tx_conn, 1)
+                    logger.info("Initial schema V1 application complete.")
+                else:
+                    # Placeholder for Future Migrations
+                    logger.warning(f"Migration path from version {current_db_version} to {self._CURRENT_SCHEMA_VERSION} not implemented yet.")
+                    raise SchemaError(f"Migration needed from version {current_db_version}, but no migration path is defined.")
+
+                # # --- Final Verification (Optional but good) ---
+                # final_db_version = self._get_db_version(conn)
+                # if final_db_version != self._CURRENT_SCHEMA_VERSION:
+                #     raise SchemaError(
+                #         f"Schema initialization/migration finished, but DB version is {final_db_version}, expected {self._CURRENT_SCHEMA_VERSION}.")
 
         except sqlite3.Error as e:
             logger.error(f"Schema initialization/migration failed: {e}", exc_info=True)
-            # Rollback is handled by the transaction context manager
+            # Rollback is handled by the transaction context
             raise DatabaseError(f"DB schema setup/migration failed: {e}") from e
+        except SchemaError:  # Re-raise SchemaErrors
+            raise
+        except Exception as e:  # Catch unexpected errors during schema application
+            logger.error(f"Unexpected error during schema application: {e}", exc_info=True)
+            raise DatabaseError(f"Unexpected error applying schema: {e}") from e
 
     # --- Internal Helpers (Unchanged) ---
     def _get_current_utc_timestamp_str(self) -> str:
@@ -627,13 +622,13 @@ UPDATE schema_version SET version = 1 WHERE version = 0;
 
     # --- NEW: Internal FTS Helper Methods ---
     def _update_fts_media(self, conn: sqlite3.Connection, media_id: int, title: str, content: Optional[str]):
-        """Updates or inserts into the media_fts table within the current transaction."""
-        content = content or "" # Ensure content is not None for FTS
+        """Updates or inserts into the media_fts table using INSERT OR REPLACE."""
+        content = content or ""
         try:
-            # Use INSERT OR REPLACE for simplicity: replaces if rowid exists, inserts otherwise
+            # Use INSERT OR REPLACE
             conn.execute("INSERT OR REPLACE INTO media_fts (rowid, title, content) VALUES (?, ?, ?)",
                            (media_id, title, content))
-            logging.debug(f"Updated FTS for Media ID {media_id}")
+            logging.debug(f"Updated FTS (insert or replace) for Media ID {media_id}")
         except sqlite3.Error as e:
             logging.error(f"Failed to update media_fts for Media ID {media_id}: {e}", exc_info=True)
             raise DatabaseError(f"Failed to update FTS for Media ID {media_id}: {e}") from e
@@ -649,11 +644,12 @@ UPDATE schema_version SET version = 1 WHERE version = 0;
             raise DatabaseError(f"Failed to delete FTS for Media ID {media_id}: {e}") from e
 
     def _update_fts_keyword(self, conn: sqlite3.Connection, keyword_id: int, keyword: str):
-        """Updates or inserts into the keyword_fts table within the current transaction."""
+        """Updates or inserts into the keyword_fts table using INSERT OR REPLACE."""
         try:
+            # Use INSERT OR REPLACE
             conn.execute("INSERT OR REPLACE INTO keyword_fts (rowid, keyword) VALUES (?, ?)",
                            (keyword_id, keyword))
-            logging.debug(f"Updated FTS for Keyword ID {keyword_id}")
+            logging.debug(f"Updated FTS (insert or replace) for Keyword ID {keyword_id}")
         except sqlite3.Error as e:
             logging.error(f"Failed to update keyword_fts for Keyword ID {keyword_id}: {e}", exc_info=True)
             raise DatabaseError(f"Failed to update FTS for Keyword ID {keyword_id}: {e}") from e
