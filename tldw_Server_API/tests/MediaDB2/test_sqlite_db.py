@@ -71,12 +71,12 @@ class TestDatabaseInitialization:
         with pytest.raises(ValueError, match="Client ID cannot be empty"):
             Database(db_path=":memory:", client_id=None)
 
-    def test_schema_versioning_new_file_db(file_db): # Use the file_db fixture
-        """Test that a new file DB gets the correct schema version."""
-        # Initialization happened in the fixture
-        cursor = file_db.execute_query("SELECT version FROM schema_version")
-        version = cursor.fetchone()['version']
-        assert version == Database._CURRENT_SCHEMA_VERSION
+def test_schema_versioning_new_file_db(file_db): # Use the file_db fixture
+    """Test that a new file DB gets the correct schema version."""
+    # Initialization happened in the fixture
+    cursor = file_db.execute_query("SELECT version FROM schema_version")
+    version = cursor.fetchone()['version']
+    assert version == Database._CURRENT_SCHEMA_VERSION
 
 class TestDatabaseTransactions:
     def test_transaction_commit(self, memory_db_factory):
