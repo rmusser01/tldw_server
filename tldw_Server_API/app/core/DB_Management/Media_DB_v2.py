@@ -262,10 +262,12 @@ CREATE INDEX IF NOT EXISTS idx_documentversions_merge_parent_uuid ON DocumentVer
 CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(title, content, content='Media', content_rowid='id');
 CREATE TRIGGER IF NOT EXISTS media_ai AFTER INSERT ON Media BEGIN INSERT INTO media_fts (rowid, title, content) VALUES (new.id, new.title, new.content); END;
 CREATE TRIGGER IF NOT EXISTS media_ad AFTER DELETE ON Media BEGIN DELETE FROM media_fts WHERE rowid = old.id; END;
+-- CREATE TRIGGER IF NOT EXISTS media_au AFTER UPDATE ON Media BEGIN UPDATE media_fts SET title = new.title, content = new.content WHERE rowid = old.id; END; -- <<< Keep this disabled from previous step
+
 CREATE VIRTUAL TABLE IF NOT EXISTS keyword_fts USING fts5(keyword, content='Keywords', content_rowid='id');
 CREATE TRIGGER IF NOT EXISTS keywords_fts_ai AFTER INSERT ON Keywords BEGIN INSERT INTO keyword_fts(rowid, keyword) VALUES (new.id, new.keyword); END;
 CREATE TRIGGER IF NOT EXISTS keywords_fts_ad AFTER DELETE ON Keywords BEGIN DELETE FROM keyword_fts WHERE rowid = old.id; END;
-CREATE TRIGGER IF NOT EXISTS keywords_fts_au AFTER UPDATE ON Keywords BEGIN UPDATE keyword_fts SET keyword = new.keyword WHERE rowid = old.id; END;
+-- CREATE TRIGGER IF NOT EXISTS keywords_fts_au AFTER UPDATE ON Keywords BEGIN UPDATE keyword_fts SET keyword = new.keyword WHERE rowid = old.id; END; -- <<< DISABLE
 
 -- Sync Log Table & Indices --
 CREATE TABLE IF NOT EXISTS sync_log (
@@ -509,8 +511,7 @@ CREATE TRIGGER media_validate_sync_update BEFORE UPDATE ON Media BEGIN SELECT RA
 DROP TRIGGER IF EXISTS keywords_validate_sync_update;
 CREATE TRIGGER keywords_validate_sync_update BEFORE UPDATE ON Keywords BEGIN SELECT RAISE(ABORT, 'Sync Error (Keywords): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (Keywords): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
 DROP TRIGGER IF EXISTS transcripts_validate_sync_update;
-CREATE TRIGGER transcripts_validate_sync_update BEFORE UPDATE ON Transcripts BEGIN SELECT RAISE(ABORT, 'Sync Error (Transcripts): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (Transcripts): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
-DROP TRIGGER IF EXISTS mediachunks_validate_sync_update;
+CREATE TRIGGER transcripts_validate_sync_update BEFORE UPDATE ON Transcripts BEGIN SELECT RAISE(ABORT, 'Sync Error (Transcripts): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (Transcripts): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;DROP TRIGGER IF EXISTS mediachunks_validate_sync_update;
 CREATE TRIGGER mediachunks_validate_sync_update BEFORE UPDATE ON MediaChunks BEGIN SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
 DROP TRIGGER IF EXISTS unvectorizedmediachunks_validate_sync_update;
 CREATE TRIGGER unvectorizedmediachunks_validate_sync_update BEFORE UPDATE ON UnvectorizedMediaChunks BEGIN SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;

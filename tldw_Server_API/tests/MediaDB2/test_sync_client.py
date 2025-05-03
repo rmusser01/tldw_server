@@ -391,11 +391,13 @@ class TestClientSyncEngineConflict:
 
           # 5. Assertions
           # Conflict should be detected, LWW resolution should apply server change
-          cursor = client_db.execute_query("SELECT keyword, version, last_modified FROM Keywords WHERE uuid = ?", (kw_uuid,))
+          cursor = client_db.execute_query("SELECT keyword, version, last_modified FROM Keywords WHERE uuid = ?",
+                                           (kw_uuid,))
           row = cursor.fetchone()
-          assert row['keyword'] == "server_v2_wins" # Server change applied
-          assert row['version'] == 2 # Version remains 2 (force apply doesn't bump again here)
-          assert row['last_modified'] == ts_server_v2 # Server timestamp applied
+          assert row['keyword'] == "server_v2_wins"  # Server change applied
+          # assert row['version'] == 2 # OLD Assertion: Expects version to stay 2
+          assert row['version'] == 3  # NEW Assertion: Expects version to be incremented by force_apply logic
+          assert row['last_modified'] == ts_server_v2  # Server timestamp applied
           assert sync_engine.last_server_log_id_processed == 102
 
 

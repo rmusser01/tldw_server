@@ -385,18 +385,20 @@ class ClientSyncEngine:
             return False # Resolution failed
 
     def _execute_change_sql(self, cursor: sqlite3.Cursor, entity: str, operation: str, payload: Dict, uuid: str,
-                            version: int, client_id: str, timestamp: str, force_apply: bool = False):
+                            remote_version: int, client_id: str, timestamp: str, force_apply: bool = False):
         """
         Generates and executes SQL to apply a single change operation locally.
+        Handles manual FTS updates for relevant tables as their triggers are disabled.
         Raises ConflictError if optimistic lock fails (when force_apply=False).
         Raises DatabaseError or sqlite3.Error on other DB issues.
         Raises ValueError for invalid operations or missing data.
         """
         logger.debug(
-            f"Executing SQL for: Op='{operation}', Entity='{entity}', UUID='{uuid}', Ver='{version}', Force='{force_apply}'")
+            f"Executing SQL for: Op='{operation}', Entity='{entity}', UUID='{uuid}', RemoteVer='{remote_version}', Force='{force_apply}'")
 
         # --- Special handling for MediaKeywords junction table ---
         if entity == "MediaKeywords":
+            # This function handles the specific INSERT/DELETE for the junction
             return self._execute_media_keyword_sql(cursor, operation, payload)
 
         # --- Standard handling for main entities ---
@@ -405,139 +407,221 @@ class ClientSyncEngine:
             # Error logged in helper
             raise DatabaseError(f"Cannot proceed: Failed to get columns for entity '{entity}'.")
 
-        # Base optimistic lock clause (used for update/delete unless forcing)
+        # --- Version Calculation Logic ---
+        current_db_version = 0  # Default if record doesn't exist yet
+        # Read current version if updating/deleting or forcing (needed for calculating next version if forcing)
+        if operation in ['update', 'delete'] or force_apply:
+            try:
+                # Use try-except as the record might not exist yet during a forced 'create' or 'update' after delete
+                cursor.execute(f"SELECT version FROM `{entity}` WHERE uuid = ?", (uuid,))
+                current_rec = cursor.fetchone()
+                if current_rec:
+                    current_db_version = current_rec[0]
+            except sqlite3.Error as e:
+                logger.error(f"Error fetching current version for {entity} {uuid}: {e}", exc_info=True)
+                # Depending on strategy, either raise or default to 0 and proceed carefully
+                raise DatabaseError(f"Could not fetch current version for {entity} {uuid}") from e
+
+        # Determine the target version to SET in the SQL statement
+        target_sql_version = remote_version  # Default: use remote version if not forcing
+        if force_apply:
+            # If forcing, set version to current_db_version + 1 to ensure any *active* validation trigger passes.
+            # Since Keywords validation trigger is disabled, this primarily ensures logical progression.
+            target_sql_version = current_db_version + 1
+            logger.debug(f"Forcing apply: Setting target SQL version to current_db_version + 1 = {target_sql_version}")
+        # --- End Version Calculation ---
+
+        # --- Optimistic Lock SQL Preparation (only applied if NOT forcing) ---
         optimistic_lock_sql = ""
         optimistic_lock_param = []
-        expected_base_version = version - 1
+        # The version we expect the DB record to be at *before* this change is applied
+        expected_base_version = remote_version - 1
+
+        # Apply lock ONLY if NOT forcing and operation is update/delete
         if not force_apply and operation in ['update', 'delete']:
-            # Only apply lock if the expected base version is > 0 (i.e., not creating)
+            # Only apply lock if the expected base version is > 0 (i.e., not a 'create' transition)
             if expected_base_version > 0:
                 optimistic_lock_sql = " AND version = ?"
                 optimistic_lock_param = [expected_base_version]
-            elif operation == 'update':
-                # This is an update targeting version 1 - means it should be an insert or was already created
-                # If forcing, we proceed. If not forcing, this state is unusual but might occur if
-                # a 'create' was missed. We'll allow the UPDATE WHERE uuid=? to proceed,
-                # but it might affect 0 rows if the record truly doesn't exist.
-                logger.debug(f"Applying update for version 1 (no prior version lock) for {entity} {uuid}")
-            # Delete operations inherently target existing records, so the lock applies if expected_base > 0
+            else:
+                # Don't apply version lock for updates/deletes coming from remote V1 (no prior version)
+                logger.debug(
+                    f"Applying {operation} based on remote version {remote_version} (no prior version lock needed) for {entity} {uuid}")
+        # --- End Optimistic Lock SQL ---
 
-        sql = ""
-        params_tuple = tuple()
+        main_sql = ""
+        main_params_tuple = tuple()
+        execute_main_sql = False  # Flag to control execution flow
 
-        # --- Handle Create ---
+        # --- Prepare SQL for main operation ---
         if operation == 'create':
             cols_sql = []
             placeholders_sql = []
             params_list = []
-            # Merge payload with core sync metadata that needs to be explicitly inserted
-            core_sync_meta = {'uuid': uuid, 'last_modified': timestamp, 'version': version, 'client_id': client_id}
-            # Default 'deleted' to 0 for creates if not specified otherwise
+            core_sync_meta = {'uuid': uuid, 'last_modified': timestamp, 'version': remote_version,
+                              'client_id': client_id}
             all_data = {**payload, **core_sync_meta, 'deleted': payload.get('deleted', 0)}
 
             for col in table_columns:
-                if col == 'id': continue  # Skip auto-increment primary key
-
+                if col == 'id': continue
                 if col in all_data:
                     value = all_data[col]
-                    # Handle boolean conversion for SQLite (stores as 0/1)
-                    if isinstance(value, bool):
-                        value = 1 if value else 0
-                    cols_sql.append(f"`{col}`")  # Use backticks for safety
+                    if isinstance(value, bool): value = 1 if value else 0
+                    cols_sql.append(f"`{col}`")
                     placeholders_sql.append("?")
                     params_list.append(value)
-                # Add default handling here if certain columns MUST have a value
-                # elif col == 'some_required_col':
-                #    cols_sql.append(f"`{col}`"); placeholders_sql.append("?"); params_list.append(DEFAULT_VALUE)
 
             if not cols_sql:
                 raise ValueError(
                     f"Cannot build INSERT for {entity} {uuid}: No columns determined from payload and schema.")
 
-            sql = f"INSERT INTO `{entity}` ({', '.join(cols_sql)}) VALUES ({', '.join(placeholders_sql)})"
-            params_tuple = tuple(params_list)
+            main_sql = f"INSERT OR IGNORE INTO `{entity}` ({', '.join(cols_sql)}) VALUES ({', '.join(placeholders_sql)})"
+            main_params_tuple = tuple(params_list)
+            execute_main_sql = True
 
-        # --- Handle Update ---
         elif operation == 'update':
             set_clauses = []
             params_list = []
             for col in table_columns:
-                # Update only fields present in the payload, excluding keys/uuid
                 if col in payload and col not in ['id', 'uuid']:
                     value = payload[col]
                     if isinstance(value, bool): value = 1 if value else 0
                     set_clauses.append(f"`{col}` = ?")
                     params_list.append(value)
 
-            # Always update core sync metadata and deleted status on any update operation
             set_clauses.extend([
-                "`last_modified` = ?", "`version` = ?", "`client_id` = ?",
-                "`deleted` = ?"  # Explicitly set deleted status based on payload
+                "`last_modified` = ?", "`version` = ?", "`client_id` = ?", "`deleted` = ?"
             ])
             params_list.extend([
-                timestamp, version, client_id,
-                1 if payload.get('deleted', False) else 0  # Default to not deleted if key missing
+                timestamp, target_sql_version, client_id,
+                1 if payload.get('deleted', False) else 0
             ])
 
             if not set_clauses:
-                # This condition should ideally not be met because metadata always updates
-                logger.warning(f"Update operation for {entity} {uuid} resulted in no SET clauses (unexpected).")
-                # We might just return here, effectively skipping the update if only metadata changed
-                # but the payload was empty. Or proceed to just update metadata. Let's proceed.
-                # This warning indicates potential upstream issue where empty payloads are sent for updates.
-                # raise ValueError(f"Cannot build UPDATE for {entity} {uuid}: No fields to update.")
-                pass  # Proceed to execute metadata-only update
+                logger.warning(
+                    f"Update operation for {entity} {uuid} resulted in no data SET clauses (only metadata). Skipping DB execute.")
+                execute_main_sql = False
+            else:
+                where_clause = " WHERE uuid = ?"
+                where_params = [uuid]
+                if not force_apply:
+                    where_clause += optimistic_lock_sql
+                    where_params.extend(optimistic_lock_param)
 
-            sql = f"UPDATE `{entity}` SET {', '.join(set_clauses)} WHERE uuid = ?"
-            params_list.append(uuid)
-            sql += optimistic_lock_sql
-            params_list.extend(optimistic_lock_param)
-            params_tuple = tuple(params_list)
+                main_sql = f"UPDATE `{entity}` SET {', '.join(set_clauses)}{where_clause}"
+                main_params_tuple = tuple(params_list + where_params)
+                execute_main_sql = True
 
-        # --- Handle Delete (Soft Delete) ---
         elif operation == 'delete':
-            # Delete is an update setting the deleted flag and sync meta
-            sql = f"UPDATE `{entity}` SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE uuid = ?"
-            params_list = [timestamp, version, client_id, uuid]
-            sql += optimistic_lock_sql
-            params_list.extend(optimistic_lock_param)
-            params_tuple = tuple(params_list)
+            where_clause = " WHERE uuid = ?"
+            where_params = [uuid]
+            if not force_apply:
+                where_clause += optimistic_lock_sql
+                where_params.extend(optimistic_lock_param)
 
-        # --- Invalid Operation ---
-        else:
+            main_sql = f"UPDATE `{entity}` SET deleted = 1, last_modified = ?, version = ?, client_id = ?{where_clause}"
+            main_params_tuple = tuple([timestamp, target_sql_version, client_id] + where_params)
+            execute_main_sql = True
+
+        else:  # Invalid Operation
             raise ValueError(f"Unsupported operation '{operation}' received for entity '{entity}'")
 
-        # --- Execute SQL ---
-        try:
-            logger.debug(f"Executing SQL: {sql} | Params: {params_tuple}")
-            cursor.execute(sql, params_tuple)
+        # --- Determine Manual FTS Operations Needed ---
+        fts_update_sql = None
+        fts_update_params = tuple()
+        fts_delete_sql = None
+        fts_delete_params = tuple()
+        fts_insert_sql = None
+        fts_insert_params = tuple()
 
-            # --- Check Row Count for Optimistic Lock Failures (Update/Delete only) ---
-            # Only check if we expected to apply a lock (not forcing, not creating)
-            if operation in ['update', 'delete'] and not force_apply and optimistic_lock_sql:
-                if cursor.rowcount == 0:
-                    # If rowcount is 0, the WHERE clause (uuid + version lock) didn't match.
+        if entity == 'Media':
+            if operation == 'create' and ('title' in payload or 'content' in payload):
+                fts_title = payload.get('title', '')
+                fts_content = payload.get('content', '')
+                fts_insert_sql = "INSERT INTO media_fts (rowid, title, content) SELECT id, ?, ? FROM Media WHERE uuid = ?"
+                fts_insert_params = (fts_title, fts_content, uuid)
+            elif operation == 'update' and ('title' in payload or 'content' in payload):
+                # Prepare FTS update; actual values fetched later if needed
+                fts_update_sql = "UPDATE media_fts SET title = ?, content = ? WHERE rowid = (SELECT id FROM Media WHERE uuid = ?)"
+                # Params will be set after fetching current state if needed
+            elif operation == 'delete':
+                # Optional: Delete from FTS on soft delete
+                # fts_delete_sql = "DELETE FROM media_fts WHERE rowid = (SELECT id FROM Media WHERE uuid = ?)"
+                # fts_delete_params = (uuid,)
+                pass  # Currently not deleting FTS on soft delete
+
+        elif entity == 'Keywords':
+            if operation == 'create' and 'keyword' in payload:
+                fts_keyword = payload.get('keyword', '')
+                fts_insert_sql = "INSERT INTO keyword_fts (rowid, keyword) SELECT id, ? FROM Keywords WHERE uuid = ?"
+                fts_insert_params = (fts_keyword, uuid)
+            elif operation == 'update' and 'keyword' in payload:
+                fts_keyword = payload.get('keyword', '')
+                fts_update_sql = "UPDATE keyword_fts SET keyword = ? WHERE rowid = (SELECT id FROM Keywords WHERE uuid = ?)"
+                fts_update_params = (fts_keyword, uuid)  # Params are known here
+            elif operation == 'delete':
+                fts_delete_sql = "DELETE FROM keyword_fts WHERE rowid = (SELECT id FROM Keywords WHERE uuid = ?)"
+                fts_delete_params = (uuid,)
+
+        # --- Execute SQL Statements ---
+        if execute_main_sql and main_sql:
+            try:
+                # --- Execute FTS Update/Delete BEFORE Main Operation ---
+                fts_cursor = cursor.connection.cursor()  # Use same transaction
+                if fts_update_sql and entity == 'Keywords':  # Keyword FTS params are known
+                    logger.debug(f"Executing FTS Update SQL FIRST: {fts_update_sql} | Params: {fts_update_params}")
+                    fts_cursor.execute(fts_update_sql, fts_update_params)
+                    logger.debug(f"{entity} FTS UPDATE rowcount: {fts_cursor.rowcount}")
+                elif fts_update_sql and entity == 'Media':  # Media FTS needs values potentially from DB
+                    current_media_values = self._get_current_media_for_fts(cursor, uuid)
+                    final_title = payload.get('title', current_media_values.get('title', ''))
+                    final_content = payload.get('content', current_media_values.get('content', ''))
+                    fts_media_update_params = (final_title, final_content, uuid)
+                    logger.debug(
+                        f"Executing FTS Update SQL FIRST: {fts_update_sql} | Params: {fts_media_update_params}")
+                    fts_cursor.execute(fts_update_sql, fts_media_update_params)
+                    logger.debug(f"{entity} FTS UPDATE rowcount: {fts_cursor.rowcount}")
+
+                if fts_delete_sql:
+                    logger.debug(f"Executing FTS Delete SQL FIRST: {fts_delete_sql} | Params: {fts_delete_params}")
+                    fts_cursor.execute(fts_delete_sql, fts_delete_params)
+                    logger.debug(f"{entity} FTS DELETE rowcount: {fts_cursor.rowcount}")
+
+                # --- Execute Main SQL Operation ---
+                logger.debug(f"Executing Main SQL: {main_sql} | Params: {main_params_tuple}")
+                cursor.execute(main_sql, main_params_tuple)
+                rows_affected = cursor.rowcount
+
+                # --- Optimistic Lock Check ---
+                if not force_apply and operation in ['update', 'delete'] and optimistic_lock_sql and rows_affected == 0:
                     logger.warning(
                         f"Optimistic lock failed for {entity} UUID {uuid} (Op: {operation}, Expected Base Ver: {expected_base_version}). Rowcount 0.")
-                    # Raise ConflictError to be caught by _apply_single_change or _resolve_conflict
-                    raise ConflictError(
-                        f"Optimistic lock failed applying change.",
-                        entity=entity,
-                        identifier=uuid
-                    )
-                else:
-                    logger.debug(
-                        f"Optimistic lock successful for {entity} {uuid} (Op: {operation}). Rowcount {cursor.rowcount}.")
+                    raise ConflictError(f"Optimistic lock failed applying change.", entity=entity, identifier=uuid)
+                elif not force_apply and operation == 'create' and rows_affected == 0:
+                    logger.warning(
+                        f"'Create' operation for {entity} UUID {uuid} affected 0 rows (INSERT OR IGNORE). Likely benign duplicate.")
 
-        except sqlite3.IntegrityError as ie:
-            # Could be unique constraint violation (e.g., trying to create duplicate UUID/hash,
-            # or update fails FK constraint if a parent was deleted unexpectedly)
-            logger.error(f"Integrity error applying change for {entity} {uuid}: {ie}", exc_info=True)
-            raise DatabaseError(f"Integrity error applying change: {ie}") from ie
-        except sqlite3.Error as e:
-            # Catch other specific SQLite errors
-            logger.error(f"SQLite error applying change for {entity} {uuid}: {e}", exc_info=True)
-            raise  # Re-raise to be caught as DatabaseError or sqlite3.Error upstream
+                # --- Execute FTS INSERT (AFTER main operation succeeds) ---
+                if operation == 'create' and rows_affected > 0 and fts_insert_sql:
+                    logger.debug(
+                        f"Executing FTS Insert SQL AFTER main insert: {fts_insert_sql} | Params: {fts_insert_params}")
+                    fts_cursor.execute(fts_insert_sql, fts_insert_params)
+                    logger.debug(f"{entity} FTS INSERT rowcount: {fts_cursor.rowcount}")
+
+
+            except sqlite3.IntegrityError as ie:
+                logger.error(f"Integrity error applying change for {entity} {uuid}: {ie}", exc_info=True)
+                # Check specifically for the version trigger error during force_apply (though trigger is disabled now)
+                if force_apply and "Version must increment by exactly 1" in str(ie):
+                    logger.error(
+                        f"DISABLED Validation Trigger Error DURING FORCE_APPLY? THIS SHOULD NOT HAPPEN. CurrentDBVer:{current_db_version}, TargetSQLVer:{target_sql_version}. SQL: {main_sql} PARAMS: {main_params_tuple}")
+                raise DatabaseError(f"Integrity error applying change: {ie}") from ie
+            except sqlite3.Error as e:
+                logger.error(f"SQLite error applying change or FTS for {entity} {uuid}: {e}", exc_info=True)
+                raise  # Re-raise original SQLite error
+
+        elif not main_sql:
+            logger.debug(f"No Main SQL generated or needed execution for {entity} {uuid} (Op: {operation})")
 
     def _execute_media_keyword_sql(self, cursor: sqlite3.Cursor, operation: str, payload: Dict):
         """Handles SQL execution specifically for the MediaKeywords junction table."""
