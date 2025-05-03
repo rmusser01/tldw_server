@@ -13,7 +13,7 @@ import requests
 #
 # Local Imports
 from tldw_Server_API.tests.MediaDB2.test_sqlite_db import get_entity_version
-from tldw_cli.tldw_app.DB.Sync_Client import ClientSyncEngine
+from tldw_Server_API.app.core.Sync.Sync_Client import ClientSyncEngine
 #
 #######################################################################################################################
 #
@@ -109,14 +109,14 @@ class TestClientSyncEngineState:
 
 class TestClientSyncEnginePush:
 
-    @patch('sync_client.requests.post') # Mock the post method used in sync_client
+    @patch('tldw_Server_API.app.core.Sync.Sync_Client.requests.post') # Mock the post method used in sync_client
     def test_push_no_local_changes(self, mock_post, sync_engine):
         """Test push phase when there are no local changes."""
         sync_engine._push_local_changes()
         mock_post.assert_not_called() # Network call should not happen
         assert sync_engine.last_local_log_id_sent == 0 # State unchanged
 
-    @patch('sync_client.requests.post')
+    @patch('tldw_Server_API.app.core.Sync.Sync_Client.requests.post')
     def test_push_successful(self, mock_post, sync_engine, client_db):
         """Test successful push of local changes."""
         # 1. Create local changes
@@ -144,15 +144,21 @@ class TestClientSyncEnginePush:
         # State should be updated
         assert sync_engine.last_local_log_id_sent == 1
 
-    @patch('sync_client.requests.post')
+    @patch('tldw_Server_API.app.core.Sync.Sync_Client.requests.post')
     def test_push_http_error(self, mock_post, sync_engine, client_db):
         """Test push phase when server returns an HTTP error."""
-        client_db.add_keyword("push_fail_kw") # Log entry 1
+        client_db.add_keyword("push_fail_kw")  # Log entry 1
 
-        # Configure mock to raise HTTPError
-        mock_response = MagicMock()
-        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("Server Error")
-        mock_post.return_value = mock_response
+        mock_http_response = MagicMock(spec=requests.Response)  # Mock the actual response object
+        mock_http_response.status_code = 500
+        mock_http_response.text = "Internal Server Error Text"
+        mock_http_error = requests.exceptions.HTTPError("Server Error", response=mock_http_response)
+
+        # Configure the mock post *return value* (the response obj)
+        # Then configure its raise_for_status method to raise the error we just created
+        mock_post_response = MagicMock()
+        mock_post_response.raise_for_status.side_effect = mock_http_error
+        mock_post.return_value = mock_post_response
 
         # Run push - expect it to catch the error internally and log
         sync_engine._push_local_changes()
@@ -164,7 +170,7 @@ class TestClientSyncEnginePush:
 
 class TestClientSyncEnginePullApply:
 
-    @patch('sync_client.requests.get')
+    @patch('tldw_Server_API.app.core.Sync.Sync_Client.requests.get')
     def test_pull_no_remote_changes(self, mock_get, sync_engine):
         """Test pull phase when server has no new changes."""
         # Configure mock response
@@ -182,7 +188,7 @@ class TestClientSyncEnginePullApply:
         # State should fast-forward to server's latest known ID
         assert sync_engine.last_server_log_id_processed == 50
 
-    @patch('sync_client.requests.get')
+    @patch('tldw_Server_API.app.core.Sync.Sync_Client.requests.get')
     def test_pull_and_apply_create_success(self, mock_get, sync_engine, client_db):
         """Test pulling and applying a 'create' change successfully."""
         kw_uuid = "uuid-from-server-create"
@@ -217,7 +223,7 @@ class TestClientSyncEnginePullApply:
         # Verify state update
         assert sync_engine.last_server_log_id_processed == 101
 
-    @patch('sync_client.requests.get')
+    @patch('tldw_Server_API.app.core.Sync.Sync_Client.requests.get')
     def test_pull_and_apply_update_success(self, mock_get, sync_engine, client_db):
         """Test pulling and applying an 'update' change successfully."""
         # 1. Setup initial state locally
@@ -253,7 +259,7 @@ class TestClientSyncEnginePullApply:
         assert row['last_modified'] == "2023-10-28T11:00:00Z"
         assert sync_engine.last_server_log_id_processed == 102
 
-    @patch('sync_client.requests.get')
+    @patch('tldw_Server_API.app.core.Sync.Sync_Client.requests.get')
     def test_pull_and_apply_delete_success(self, mock_get, sync_engine, client_db):
         """Test pulling and applying a 'delete' change successfully."""
         # 1. Setup initial state locally
@@ -286,7 +292,7 @@ class TestClientSyncEnginePullApply:
         assert row['last_modified'] == "2023-10-28T12:00:00Z"
         assert sync_engine.last_server_log_id_processed == 103
 
-    @patch('sync_client.requests.get')
+    @patch('tldw_Server_API.app.core.Sync.Sync_Client.requests.get')
     def test_apply_idempotency(self, mock_get, sync_engine, client_db):
         """Test that applying the same change twice has no adverse effect."""
         # 1. Apply a change once
@@ -314,15 +320,17 @@ class TestClientSyncEnginePullApply:
         assert sync_engine.last_server_log_id_processed == 101 # Should not advance
 
 
-    @patch('sync_client.requests.get')
-    def test_apply_old_change(self, mock_get, sync_engine, client_db, db_instance=None):
+    @patch('tldw_Server_API.app.core.Sync.Sync_Client.requests.get')
+    def test_apply_old_change(self, mock_get, sync_engine, client_db):
         """Test that applying a change older than local state is skipped."""
-         # 1. Setup local state (V2)
+        # 1. Setup local state (V2)
         kw_uuid = "uuid-old-change"
-        client_db.add_keyword("v1") # Create V1
+        client_db.add_keyword("v1")  # Create V1
         kw_uuid = client_db.execute_query("SELECT uuid FROM Keywords WHERE keyword=?", ("v1",)).fetchone()['uuid']
-        # Manually update to V2 locally
-        client_db.execute_query("UPDATE Keywords SET keyword='v2', version=2, last_modified=? WHERE uuid=?", (db_instance._get_current_utc_timestamp_str(), kw_uuid), commit=True)
+        # Manually update to V2 locally - Use client_db here:
+        client_db.execute_query("UPDATE Keywords SET keyword='v2', version=2, last_modified=? WHERE uuid=?",
+                                (client_db._get_current_utc_timestamp_str(), kw_uuid),  # Use client_db
+                                commit=True)
         assert get_entity_version(client_db, "Keywords", kw_uuid) == 2
 
          # 2. Prepare server change (representing V1 state)
@@ -346,7 +354,7 @@ class TestClientSyncEnginePullApply:
 
 class TestClientSyncEngineConflict:
 
-     @patch('sync_client.requests.get')
+     @patch('tldw_Server_API.app.core.Sync.Sync_Client.requests.get')
      def test_conflict_detected_and_remote_wins_lww(self, mock_get, sync_engine, client_db):
           """Test conflict where remote change wins based on LWW timestamp."""
           # 1. Setup initial synced state (V1)
@@ -391,7 +399,7 @@ class TestClientSyncEngineConflict:
           assert sync_engine.last_server_log_id_processed == 102
 
 
-     @patch('sync_client.requests.get')
+     @patch('tldw_Server_API.app.core.Sync.Sync_Client.requests.get')
      def test_conflict_detected_and_local_wins_lww(self, mock_get, sync_engine, client_db):
            """Test conflict where local change wins based on LWW timestamp."""
            # 1. Setup initial synced state (V1)

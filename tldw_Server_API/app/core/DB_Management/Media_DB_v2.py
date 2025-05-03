@@ -1166,7 +1166,7 @@ CREATE TRIGGER documentversions_validate_sync_update BEFORE UPDATE ON DocumentVe
         if not isinstance(target_version_number, int) or target_version_number < 1: raise ValueError("Target version invalid.")
         client_id = self.client_id; current_time = self._get_current_utc_timestamp_str(); logger.debug(f"Rolling back media {media_id} to doc version {target_version_number}.")
         try:
-            with self.transaction() as conn:
+            with self.transaction() as conn: # Uses the transaction context
                 cursor = conn.cursor()
                 version_info = self._get_next_version(conn, "Media", "id", media_id)
                 if version_info is None: return {'error': f'Media {media_id} not found/deleted.'}
@@ -1182,10 +1182,34 @@ CREATE TRIGGER documentversions_validate_sync_update BEFORE UPDATE ON DocumentVe
                 new_version_info = self.create_document_version(media_id=media_id, content=target_content, prompt=target_prompt, analysis_content=target_analysis)
                 new_doc_version_number = new_version_info.get('version_number')
                 new_content_hash = hashlib.sha256(target_content.encode()).hexdigest()
+
+                # --- Main Media Update ---
                 cursor.execute('UPDATE Media SET content=?, content_hash=?, last_modified=?, version=?, client_id=?, chunking_status="pending", vector_processing=0 WHERE id=? AND version=?', (target_content, new_content_hash, current_time, new_media_version, client_id, media_id, current_media_version))
                 if cursor.rowcount == 0: raise ConflictError("Media", media_id)
+
+                logger.debug(f"Explicitly updating FTS after rollback for Media ID {media_id}")
+                try:
+                    # Get the title from the Media row we just updated (it wasn't changed by rollback)
+                    title_cursor = conn.cursor()
+                    title_cursor.execute("SELECT title FROM Media WHERE id = ?", (media_id,))
+                    current_title_row = title_cursor.fetchone()
+                    if current_title_row:
+                         current_title = current_title_row['title']
+                         fts_cursor = conn.cursor() # Use same connection from transaction
+                         fts_cursor.execute(
+                             "UPDATE media_fts SET title = ?, content = ? WHERE rowid = ?",
+                             (current_title, target_content, media_id) # Use current title and rolled-back content
+                         )
+                         logger.debug(f"FTS UPDATE rowcount after rollback: {fts_cursor.rowcount}")
+                    else:
+                        logger.warning(f"Could not retrieve title for Media ID {media_id} during FTS update in rollback.")
+                except Exception as fts_err:
+                     logger.error(f"Explicit FTS UPDATE failed during rollback for Media ID {media_id}: {fts_err}", exc_info=True)
+                     # Decide if this should halt the transaction? Maybe just log.
+
             logger.info(f"Rolled back media {media_id} to state of doc ver {target_version_number}. New DocVer: {new_doc_version_number}, New MediaVer: {new_media_version}")
             return {'success': f'Rolled back to version {target_version_number}. State saved as new version {new_doc_version_number}.', 'new_version_number': new_doc_version_number, 'new_media_version': new_media_version}
+        # Keep existing exception handling
         except (InputError, ValueError, ConflictError, DatabaseError, sqlite3.Error, TypeError) as e: logger.error(f"Rollback error media {media_id}: {e}"); raise e if isinstance(e, (InputError, ValueError, ConflictError, DatabaseError, TypeError)) else DatabaseError(f"DB error during rollback: {e}") from e
         except Exception as e: logger.error(f"Unexpected rollback error media {media_id}: {e}"); raise DatabaseError(f"Unexpected rollback error: {e}") from e
 
