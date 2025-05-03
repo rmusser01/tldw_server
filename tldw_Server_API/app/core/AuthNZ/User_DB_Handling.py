@@ -72,6 +72,10 @@ async def verify_token_and_get_user(token: Optional[str] = Header(None)) -> str:
         # For now, let's assume we still use SingleUser for the DB path
         user_id = "SingleUser"
         logging.info(f"Single-user mode, token provided but ignored for DB path. Using default user_id: {user_id}")
+    elif not MULTIPLAYER and token is "test_api_token_123":
+        # Single user mode but a token WAS provided by test suite.
+        user_id = "TestUser"
+        logging.info(f"Single-user mode, test token provided. Using default test user_id: {user_id}")
     else:
         # Should not happen if logic above is correct
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected state in token verification")

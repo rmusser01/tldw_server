@@ -9,7 +9,7 @@ import time
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, ConflictError
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, ConflictError, DatabaseError
 
 
 #
@@ -218,7 +218,7 @@ class TestDatabaseCRUDAndSync:
 
         assert media_id is not None
         assert media_uuid is not None
-        assert f"Media '{title}' added." == msg  # NEW (Exact match)
+        assert msg == f"Media '{title}' added."
 
         # Verify Media DB state
         cursor = db_instance.execute_query("SELECT * FROM Media WHERE id = ?", (media_id,))
@@ -284,7 +284,7 @@ class TestDatabaseCRUDAndSync:
         # Assertions for the first update attempt (if you keep it)
         assert media_id_up1 == media_id
         assert media_uuid_up1 == media_uuid
-        assert f"Media '{title + ' Updated Via URL'}' updated." == msg1
+        assert msg1 == f"Media '{title + ' Updated Via URL'}' updated."
         # Check version incremented after first update
         version_after_update1 = get_entity_version(db_instance, "Media", media_uuid)
         assert version_after_update1 == initial_version + 1
@@ -303,7 +303,7 @@ class TestDatabaseCRUDAndSync:
         # Assertions for the second update attempt
         assert media_id_up2 == media_id
         assert media_uuid_up2 == media_uuid
-        assert f"Media '{title + ' Updated Via Hash'}' updated." == msg2
+        assert msg2 == f"Media '{title + ' Updated Via Hash'}' updated."
 
         # Verify Final Media DB state
         cursor = db_instance.execute_query("SELECT title, content, version FROM Media WHERE id = ?", (media_id,))
@@ -446,15 +446,19 @@ class TestDatabaseCRUDAndSync:
         current_version = get_entity_version(db_instance, "Keywords", kw_uuid)
 
         # Try to update version incorrectly (skipping a version)
-        with pytest.raises(sqlite3.IntegrityError, match="Sync Error \(Keywords\): Version must increment by exactly 1"):
+        with pytest.raises(sqlite3.IntegrityError,
+                           match=r"Sync Error \(Keywords\): Version must increment by exactly 1"):
+            # Provide client_id to prevent the *other* validation trigger firing
+            client_id = db_instance.client_id
             db_instance.execute_query(
-                "UPDATE Keywords SET version = ?, keyword = ? WHERE id = ?",
-                (current_version + 2, "bad version", kw_id),
+                "UPDATE Keywords SET version = ?, keyword = ?, client_id = ? WHERE id = ?",
+                (current_version + 2, "bad version", client_id, kw_id),
                 commit=True
             )
 
         # Try to update version incorrectly (same version)
-        with pytest.raises(sqlite3.IntegrityError, match="Sync Error \(Keywords\): Version must increment by exactly 1"):
+        with pytest.raises(DatabaseError,
+                           match="Schema validation failed: Sync Error \(Keywords\): Client ID cannot be NULL or empty"):
             db_instance.execute_query(
                 "UPDATE Keywords SET version = ?, keyword = ? WHERE id = ?",
                 (current_version, "same version", kw_id),

@@ -10,9 +10,12 @@ from unittest.mock import patch, MagicMock, AsyncMock # Refined imports
 # 3rd-party Libraries
 import pytest
 import httpx # Keep for mocking specific download errors
-from fastapi import status
+from fastapi import status, Header
 from fastapi.testclient import TestClient
 from loguru import logger
+
+from tldw_Server_API.tests.test_utils import temp_db
+
 #
 ######################################################################################################################
 #
@@ -60,6 +63,51 @@ URL_404 = "https://httpbin.org/status/404" # Reliable 404
 
 # --- Fixtures ---
 
+# Mock Database Setup (Using test_utils.temp_db pattern from test_media_versions)
+@pytest.fixture(scope="session")
+def db_instance_session():
+    """Session-scoped temporary database."""
+    try:
+        with temp_db() as db:
+            yield db
+    finally:
+        if db and hasattr(db, 'close_all_connections'):
+            print(f"--- Closing ALL session DB connections for test_add_media_endpoint: {db.db_path_str} ---")
+            db.close_all_connections()
+
+@pytest.fixture(scope="function")
+def db_session(db_instance_session):
+     """Function-scoped access to the session DB with cleanup."""
+     yield db_instance_session
+     # Cleanup after test
+     try:
+        with db_instance_session.transaction():
+            db_instance_session.execute_query("DELETE FROM MediaKeywords;", commit=False)
+            db_instance_session.execute_query("DELETE FROM DocumentVersions;", commit=False)
+            db_instance_session.execute_query("DELETE FROM Media;", commit=False)
+            db_instance_session.execute_query("DELETE FROM Keywords;", commit=False)
+        try:
+            db_instance_session.execute_query("DELETE FROM sqlite_sequence WHERE name IN ('Media', 'Keywords', 'DocumentVersions');", commit=True)
+        except Exception: pass
+     except Exception as e:
+         print(f"Error during DB cleanup in test_add_media_endpoint: {e}")
+
+# Override verify_api_key for testing
+# This dummy function bypasses the actual key check
+async def override_verify_api_key(x_api_key: str = Header(..., alias="X-API-KEY")):
+    """Dummy override for API key verification during tests."""
+    logger.debug(f"Auth Override: Bypassing API key check for key starting with: {x_api_key[:4]}...")
+    # You could return mock user/permissions here if needed downstream
+    return {"user_id": "test_user", "permissions": ["*"]}
+
+# Override get_db_for_user to use the temp test DB
+def override_get_db_for_user_add_media(db_session):
+    """Dependency override to provide the test DB session."""
+    def _override():
+        # print(f"--- OVERRIDING get_db_for_user for test_add_media with: {db_session.db_path_str} ---")
+        yield db_session
+    return _override
+
 @pytest.fixture(scope="module")
 def client():
     """Provides a TestClient instance for the main app."""
@@ -77,10 +125,9 @@ def client():
 @pytest.fixture
 def auth_headers():
     """Provides authentication/required headers."""
-    # Add any other required headers like X-API-KEY
     return {
-        "token": "YOUR_TEST_TOKEN", # Keep if needed for user auth
-        "X-API-KEY": "YOUR_TEST_API_KEY" # Add required API key
+        "token": "test_api_token_123",
+        #"X-API-KEY": "test_api_key_123"
     }
 
 @pytest.fixture
