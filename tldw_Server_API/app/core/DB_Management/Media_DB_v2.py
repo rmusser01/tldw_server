@@ -257,11 +257,11 @@ CREATE INDEX IF NOT EXISTS idx_documentversions_deleted ON DocumentVersions(dele
 CREATE INDEX IF NOT EXISTS idx_documentversions_prev_version ON DocumentVersions(prev_version);
 CREATE INDEX IF NOT EXISTS idx_documentversions_merge_parent_uuid ON DocumentVersions(merge_parent_uuid); -- <<< Ensure semicolon (FIXED)
 
+
 -- FTS Tables & Triggers --
 CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(title, content, content='Media', content_rowid='id');
 CREATE TRIGGER IF NOT EXISTS media_ai AFTER INSERT ON Media BEGIN INSERT INTO media_fts (rowid, title, content) VALUES (new.id, new.title, new.content); END;
 CREATE TRIGGER IF NOT EXISTS media_ad AFTER DELETE ON Media BEGIN DELETE FROM media_fts WHERE rowid = old.id; END;
-CREATE TRIGGER IF NOT EXISTS media_au AFTER UPDATE ON Media BEGIN UPDATE media_fts SET title = new.title, content = new.content WHERE rowid = old.id; END;
 CREATE VIRTUAL TABLE IF NOT EXISTS keyword_fts USING fts5(keyword, content='Keywords', content_rowid='id');
 CREATE TRIGGER IF NOT EXISTS keywords_fts_ai AFTER INSERT ON Keywords BEGIN INSERT INTO keyword_fts(rowid, keyword) VALUES (new.id, new.keyword); END;
 CREATE TRIGGER IF NOT EXISTS keywords_fts_ad AFTER DELETE ON Keywords BEGIN DELETE FROM keyword_fts WHERE rowid = old.id; END;
@@ -879,36 +879,146 @@ CREATE TRIGGER documentversions_validate_sync_update BEFORE UPDATE ON DocumentVe
              logger.error(f"Unexpected error soft deleting media ID {media_id}: {e}", exc_info=True)
              raise DatabaseError(f"Unexpected error during soft delete: {e}") from e
 
-    def add_media_with_keywords(self, *, url: Optional[str] = None, title: Optional[str], media_type: Optional[str], content: Optional[str], keywords: Optional[List[str]] = None, prompt: Optional[str] = None, analysis_content: Optional[str] = None, transcription_model: Optional[str] = None, author: Optional[str] = None, ingestion_date: Optional[str] = None, overwrite: bool = False, chunk_options: Optional[Dict] = None, segments: Optional[Any] = None) -> Tuple[Optional[int], Optional[str], str]:
+    def add_media_with_keywords(self, *, url: Optional[str] = None, title: Optional[str], media_type: Optional[str],
+                                content: Optional[str], keywords: Optional[List[str]] = None,
+                                prompt: Optional[str] = None, analysis_content: Optional[str] = None,
+                                transcription_model: Optional[str] = None, author: Optional[str] = None,
+                                ingestion_date: Optional[str] = None, overwrite: bool = False,
+                                chunk_options: Optional[Dict] = None, segments: Optional[Any] = None) -> Tuple[
+        Optional[int], Optional[str], str]:
         if content is None: raise InputError("Content cannot be None.")
-        title = title or 'Untitled'; media_type = media_type or 'unknown'; keywords_list = [k.strip().lower() for k in keywords if k and k.strip()] if keywords else []
-        ingestion_date_str = ingestion_date or self._get_current_utc_timestamp_str().split(" ")[0] # Default today
-        content_hash = hashlib.sha256(content.encode()).hexdigest(); current_time = self._get_current_utc_timestamp_str(); client_id = self.client_id
+        title = title or 'Untitled';
+        media_type = media_type or 'unknown';
+        keywords_list = [k.strip().lower() for k in keywords if k and k.strip()] if keywords else []
+        ingestion_date_str = ingestion_date or self._get_current_utc_timestamp_str().split(" ")[0]  # Default today
+        content_hash = hashlib.sha256(content.encode()).hexdigest();
+        current_time = self._get_current_utc_timestamp_str();
+        client_id = self.client_id
         if not url: url = f"local://{media_type}/{content_hash}"
         logging.info(f"Processing add/update for: URL='{url}', Title='{title}', Client='{client_id}'")
         try:
             with self.transaction() as conn:
-                cursor = conn.cursor(); cursor.execute('SELECT id, uuid, version FROM Media WHERE (url = ? OR content_hash = ?) AND deleted = 0 LIMIT 1', (url, content_hash)); existing_media = cursor.fetchone()
+                cursor = conn.cursor();
+                cursor.execute(
+                    'SELECT id, uuid, version FROM Media WHERE (url = ? OR content_hash = ?) AND deleted = 0 LIMIT 1',
+                    (url, content_hash));
+                existing_media = cursor.fetchone()
                 media_id, media_uuid, action = None, None, "skipped"
                 if existing_media:
-                    media_id, media_uuid, current_version = existing_media['id'], existing_media['uuid'], existing_media['version']
+                    media_id, media_uuid, current_version = existing_media['id'], existing_media['uuid'], \
+                    existing_media['version']
                     if overwrite:
-                        action = "updated"; new_version = current_version + 1; logger.info(f"Updating media ID {media_id} to version {new_version}.")
-                        cursor.execute('UPDATE Media SET url=?, title=?, type=?, content=?, author=?, ingestion_date=?, transcription_model=?, content_hash=?, is_trash=0, trash_date=NULL, chunking_status="pending", vector_processing=0, last_modified=?, version=?, client_id=?, deleted=0 WHERE id=? AND version=?', (url, title, media_type, content, author, ingestion_date_str, transcription_model, content_hash, current_time, new_version, client_id, media_id, current_version))
-                        if cursor.rowcount == 0: raise ConflictError("Media", media_id)
-                        self.update_keywords_for_media(media_id, keywords_list); self.create_document_version(media_id=media_id, content=content, prompt=prompt, analysis_content=analysis_content)
-                    else: action = "already_exists_skipped"
+                        action = "updated";
+                        new_version = current_version + 1;
+                        logger.info(f"Updating media ID {media_id} to version {new_version}.")
+
+                        logger.debug(
+                            f"Attempting Media UPDATE for ID {media_id} from version {current_version} to {new_version}")
+                        try:
+                            cursor.execute(
+                                'UPDATE Media SET url=?, title=?, type=?, content=?, author=?, ingestion_date=?, transcription_model=?, content_hash=?, is_trash=0, trash_date=NULL, chunking_status="pending", vector_processing=0, last_modified=?, version=?, client_id=?, deleted=0 WHERE id=? AND version=?',
+                                (url, title, media_type, content, author, ingestion_date_str, transcription_model,
+                                 content_hash, current_time, new_version, client_id, media_id, current_version))
+                            logger.debug(f"Media UPDATE rowcount: {cursor.rowcount}")
+                        except Exception as update_err:
+                            logger.error(f"Direct Media UPDATE failed: {update_err}", exc_info=True)
+                            raise update_err
+
+                        if cursor.rowcount == 0:
+                            # Check if the record *still* exists with the old version, indicating a genuine conflict
+                            conflict_check_cursor = conn.cursor()
+                            conflict_check_cursor.execute("SELECT version FROM Media WHERE id = ?", (media_id,))
+                            final_state = conflict_check_cursor.fetchone()
+                            logger.warning(
+                                f"Conflict suspected after UPDATE returned 0 rows. Media ID {media_id} final state before potential ConflictError: {final_state}")
+                            raise ConflictError("Media", media_id)
+
+                        logger.debug(f"Explicitly updating FTS for Media ID {media_id}")
+                        try:
+                            fts_cursor = conn.cursor()  # Use same connection from transaction
+                            fts_cursor.execute(
+                                "UPDATE media_fts SET title = ?, content = ? WHERE rowid = ?",
+                                (title, content, media_id)  # Use the updated title/content
+                            )
+                            logger.debug(f"FTS UPDATE rowcount: {fts_cursor.rowcount}")
+                            # Handle case where FTS row might be missing? Optional.
+                            # if fts_cursor.rowcount == 0:
+                            #    logger.warning(f"FTS row not found for media ID {media_id} during explicit update.")
+                        except Exception as fts_err:
+                            logger.error(f"Explicit FTS UPDATE failed for Media ID {media_id}: {fts_err}",
+                                         exc_info=True)
+                            # Decide if this should halt the transaction? Maybe just log.
+
+                        logger.debug(f"TEMP: Calling update_keywords_for_media for ID {media_id}")
+                        self.update_keywords_for_media(media_id, keywords_list)
+                        logger.debug(f"TEMP: Calling create_document_version for ID {media_id}")
+                        self.create_document_version(media_id=media_id, content=content, prompt=prompt, analysis_content=analysis_content)
+                        logger.debug(f"TEMP: Finished subsequent calls")
+                    else:
+                        action = "already_exists_skipped"
                 else:
-                    action = "added"; media_uuid = self._generate_uuid(); logger.info(f"Inserting new media UUID {media_uuid}.")
-                    cursor.execute('INSERT INTO Media (url, title, type, content, author, ingestion_date, transcription_model, content_hash, is_trash, chunking_status, vector_processing, uuid, last_modified, version, client_id, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, "pending", 0, ?, ?, 1, ?, 0)', (url, title, media_type, content, author, ingestion_date_str, transcription_model, content_hash, media_uuid, current_time, client_id)); media_id = cursor.lastrowid
-                    self.update_keywords_for_media(media_id, keywords_list); self.create_document_version(media_id=media_id, content=content, prompt=prompt, analysis_content=analysis_content)
-            if action in ["added", "updated"] and chunk_options: logger.info(f"Scheduling chunking for media {media_id}") # Placeholder
-            if action == "updated": message = f"Media '{title}' updated."
-            elif action == "added": message = f"Media '{title}' added."
-            else: message = f"Media '{title}' exists, not overwritten."
+                    # This is the 'create' path, keep as is
+                    action = "added";
+                    media_uuid = self._generate_uuid();
+                    logger.info(f"Inserting new media UUID {media_uuid}.")
+                    cursor.execute(
+                        'INSERT INTO Media (url, title, type, content, author, ingestion_date, transcription_model, content_hash, is_trash, chunking_status, vector_processing, uuid, last_modified, version, client_id, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, "pending", 0, ?, ?, 1, ?, 0)',
+                        (url, title, media_type, content, author, ingestion_date_str, transcription_model, content_hash,
+                         media_uuid, current_time, client_id));
+                    media_id = cursor.lastrowid
+                    # Still call helpers on create
+                    self.update_keywords_for_media(media_id, keywords_list)
+                    self.create_document_version(media_id=media_id, content=content, prompt=prompt,
+                                                 analysis_content=analysis_content)
+
+            # Message generation and return
+            if action == "updated":
+                message = f"Media '{title}' updated."
+            elif action == "added":
+                message = f"Media '{title}' added."
+            else:
+                message = f"Media '{title}' exists, not overwritten."
             return media_id, media_uuid, message
-        except (InputError, ConflictError, sqlite3.Error) as e: logger.error(f"Error add/update media {url}: {e}"); raise e if isinstance(e, (InputError, ConflictError, DatabaseError)) else DatabaseError(f"Failed add/update media: {e}") from e
-        except Exception as e: logger.error(f"Unexpected error add/update media {url}: {e}"); raise DatabaseError(f"Unexpected error add/update media: {e}") from e
+        # Keep existing exception handling
+        except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e:
+            logger.error(f"Error add/update media {url}: {e}", exc_info=True)  # Log with traceback for DB errors
+            if isinstance(e, (InputError, ConflictError, DatabaseError)):
+                raise e
+            else:
+                raise DatabaseError(f"Failed add/update media: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error add/update media {url}: {e}", exc_info=True)
+            raise DatabaseError(f"Unexpected error add/update media: {e}") from e
+    # def add_media_with_keywords(self, *, url: Optional[str] = None, title: Optional[str], media_type: Optional[str], content: Optional[str], keywords: Optional[List[str]] = None, prompt: Optional[str] = None, analysis_content: Optional[str] = None, transcription_model: Optional[str] = None, author: Optional[str] = None, ingestion_date: Optional[str] = None, overwrite: bool = False, chunk_options: Optional[Dict] = None, segments: Optional[Any] = None) -> Tuple[Optional[int], Optional[str], str]:
+    #     if content is None: raise InputError("Content cannot be None.")
+    #     title = title or 'Untitled'; media_type = media_type or 'unknown'; keywords_list = [k.strip().lower() for k in keywords if k and k.strip()] if keywords else []
+    #     ingestion_date_str = ingestion_date or self._get_current_utc_timestamp_str().split(" ")[0] # Default today
+    #     content_hash = hashlib.sha256(content.encode()).hexdigest(); current_time = self._get_current_utc_timestamp_str(); client_id = self.client_id
+    #     if not url: url = f"local://{media_type}/{content_hash}"
+    #     logging.info(f"Processing add/update for: URL='{url}', Title='{title}', Client='{client_id}'")
+    #     try:
+    #         with self.transaction() as conn:
+    #             cursor = conn.cursor(); cursor.execute('SELECT id, uuid, version FROM Media WHERE (url = ? OR content_hash = ?) AND deleted = 0 LIMIT 1', (url, content_hash)); existing_media = cursor.fetchone()
+    #             media_id, media_uuid, action = None, None, "skipped"
+    #             if existing_media:
+    #                 media_id, media_uuid, current_version = existing_media['id'], existing_media['uuid'], existing_media['version']
+    #                 if overwrite:
+    #                     action = "updated"; new_version = current_version + 1; logger.info(f"Updating media ID {media_id} to version {new_version}.")
+    #                     cursor.execute('UPDATE Media SET url=?, title=?, type=?, content=?, author=?, ingestion_date=?, transcription_model=?, content_hash=?, is_trash=0, trash_date=NULL, chunking_status="pending", vector_processing=0, last_modified=?, version=?, client_id=?, deleted=0 WHERE id=? AND version=?', (url, title, media_type, content, author, ingestion_date_str, transcription_model, content_hash, current_time, new_version, client_id, media_id, current_version))
+    #                     if cursor.rowcount == 0: raise ConflictError("Media", media_id)
+    #                     self.update_keywords_for_media(media_id, keywords_list); self.create_document_version(media_id=media_id, content=content, prompt=prompt, analysis_content=analysis_content)
+    #                 else: action = "already_exists_skipped"
+    #             else:
+    #                 action = "added"; media_uuid = self._generate_uuid(); logger.info(f"Inserting new media UUID {media_uuid}.")
+    #                 cursor.execute('INSERT INTO Media (url, title, type, content, author, ingestion_date, transcription_model, content_hash, is_trash, chunking_status, vector_processing, uuid, last_modified, version, client_id, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, "pending", 0, ?, ?, 1, ?, 0)', (url, title, media_type, content, author, ingestion_date_str, transcription_model, content_hash, media_uuid, current_time, client_id)); media_id = cursor.lastrowid
+    #                 self.update_keywords_for_media(media_id, keywords_list); self.create_document_version(media_id=media_id, content=content, prompt=prompt, analysis_content=analysis_content)
+    #         if action in ["added", "updated"] and chunk_options: logger.info(f"Scheduling chunking for media {media_id}") # Placeholder
+    #         if action == "updated": message = f"Media '{title}' updated."
+    #         elif action == "added": message = f"Media '{title}' added."
+    #         else: message = f"Media '{title}' exists, not overwritten."
+    #         return media_id, media_uuid, message
+    #     except (InputError, ConflictError, sqlite3.Error) as e: logger.error(f"Error add/update media {url}: {e}"); raise e if isinstance(e, (InputError, ConflictError, DatabaseError)) else DatabaseError(f"Failed add/update media: {e}") from e
+    #     except Exception as e: logger.error(f"Unexpected error add/update media {url}: {e}"); raise DatabaseError(f"Unexpected error add/update media: {e}") from e
 
     def create_document_version(self, media_id: int, content: str, prompt: Optional[str] = None, analysis_content: Optional[str] = None) -> Dict[str, Any]:
         if content is None: raise InputError("Content required for doc version.")

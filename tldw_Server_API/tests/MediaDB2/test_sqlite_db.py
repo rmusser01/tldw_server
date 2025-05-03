@@ -284,7 +284,7 @@ class TestDatabaseCRUDAndSync:
         # Assertions for the first update attempt (if you keep it)
         assert media_id_up1 == media_id
         assert media_uuid_up1 == media_uuid
-        assert "updated successfully" in msg1
+        assert f"Media '{title + ' Updated Via URL'}' updated." == msg1
         # Check version incremented after first update
         version_after_update1 = get_entity_version(db_instance, "Media", media_uuid)
         assert version_after_update1 == initial_version + 1
@@ -303,7 +303,7 @@ class TestDatabaseCRUDAndSync:
         # Assertions for the second update attempt
         assert media_id_up2 == media_id
         assert media_uuid_up2 == media_uuid
-        assert "updated successfully" in msg2
+        assert f"Media '{title + ' Updated Via Hash'}' updated." == msg2
 
         # Verify Final Media DB state
         cursor = db_instance.execute_query("SELECT title, content, version FROM Media WHERE id = ?", (media_id,))
