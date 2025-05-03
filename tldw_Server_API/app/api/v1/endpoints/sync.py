@@ -353,7 +353,8 @@ class ServerSyncProcessor:
     # --- SYNCHRONOUS CONFLICT RESOLUTION ---
     def _resolve_server_conflict_sync(self, cursor: sqlite3.Cursor, client_change: Dict, server_record_info: Optional[tuple], current_server_time_str: str) -> Tuple[bool, Optional[str]]:
         """
-        Resolves conflict synchronously. Returns (resolved_successfully, error_message).
+        Resolves conflict synchronously using LWW based on parsed timestamps.
+        Returns (resolved_successfully, error_message).
         """
         entity = client_change['entity']
         entity_uuid = client_change['entity_uuid']
@@ -362,36 +363,92 @@ class ServerSyncProcessor:
         originating_client_id = client_change['client_id']
         payload_str = client_change.get('payload')
         payload = json.loads(payload_str) if payload_str else {}
+        error_msg = None # Initialize
 
         if server_record_info is None:
-             logger.error(f"[{self.user_id}] Cannot resolve conflict for {entity} {entity_uuid}: server record info is missing.")
-             return False, "Cannot resolve conflict without server record state."
+            logger.error(f"[{self.user_id}] Cannot resolve conflict for {entity} {entity_uuid}: server record info is missing.")
+            return False, "Cannot resolve conflict without server record state."
 
         server_version = server_record_info[0]
-        # Ensure index 2 exists before accessing for last_modified
-        server_last_modified = server_record_info[2] if len(server_record_info) > 2 else '1970-01-01T00:00:00Z'
+        server_last_modified_str = server_record_info[2] if len(server_record_info) > 2 and isinstance(
+            server_record_info[2], str) else '1970-01-01T00:00:00Z'
 
-        # LWW Resolution
-        if server_last_modified >= current_server_time_str:
-             logger.warning(f"[{self.user_id}] Resolving Conflict (LWW): Server wins (ServerTS {server_last_modified} >= AuthoritativeTS {current_server_time_str}). Skipping client change.")
-             return True, None
+        # --- LWW Resolution (using datetime objects) ---
+        try:
+            # Define potential formats (adjust if your storage format differs)
+            possible_formats = [
+                '%Y-%m-%d %H:%M:%S.%f',  # Format with fractional seconds (used by code)
+                '%Y-%m-%dT%H:%M:%SZ',  # ISO format without fractional seconds (used by test mock originally)
+                '%Y-%m-%d %H:%M:%SZ',  # Space instead of T
+                '%Y-%m-%d %H:%M:%S'  # Format without Z or fractional
+            ]
+
+            server_dt = None
+            authoritative_dt = None
+
+            # Try parsing server timestamp
+            for fmt in possible_formats:
+                try:
+                    # Remove 'Z' for parsing if present
+                    ts_to_parse = server_last_modified_str.rstrip('Z')
+                    server_dt = datetime.strptime(ts_to_parse, fmt)
+                    # Assume UTC if 'Z' was present or if timezone is otherwise known
+                    server_dt = server_dt.replace(tzinfo=timezone.utc)  # Make timezone-aware
+                    break  # Stop on first successful parse
+                except ValueError:
+                    continue  # Try next format
+            if server_dt is None:
+                raise ValueError(f"Could not parse server timestamp: {server_last_modified_str}")
+
+            # Try parsing authoritative timestamp
+            for fmt in possible_formats:
+                try:
+                    ts_to_parse = current_server_time_str.rstrip('Z')
+                    authoritative_dt = datetime.strptime(ts_to_parse, fmt)
+                    authoritative_dt = authoritative_dt.replace(tzinfo=timezone.utc)  # Make timezone-aware
+                    break
+                except ValueError:
+                    continue
+            if authoritative_dt is None:
+                raise ValueError(f"Could not parse authoritative timestamp: {current_server_time_str}")
+
+
+        except ValueError as parse_err:
+            error_msg = f"Timestamp parsing error during conflict resolution: {parse_err}"
+            logger.error(
+                f"[{self.user_id}] {error_msg} (Server='{server_last_modified_str}', Authoritative='{current_server_time_str}')",
+                exc_info=True)
+            return False, error_msg
+
+        # Compare datetime objects
+        if server_dt >= authoritative_dt:
+            logger.warning(
+                f"[{self.user_id}] Resolving Conflict (LWW): Server wins (ServerDT {server_dt} >= AuthoritativeDT {authoritative_dt}). Skipping client change.")
+            return True, None  # Resolved by skipping client change
         else:
-             logger.warning(f"[{self.user_id}] Resolving Conflict (LWW): Client change wins (ServerTS {server_last_modified} < AuthoritativeTS {current_server_time_str}). Forcing apply.")
-             try:
-                  self._execute_server_change_sql_sync( # Call sync version
-                        cursor, entity, operation, payload, entity_uuid,
-                        client_version, originating_client_id, current_server_time_str,
-                        force_apply=True
-                  )
-                  return True, None
-             except (DatabaseError, sqlite3.Error, ValueError) as e:
-                  error_msg = f"Failed to force apply winning change: {e}"
-                  logger.error(f"[{self.user_id}] Error forcing update during LWW conflict resolution for {entity} {entity_uuid}: {e}", exc_info=True)
-                  return False, error_msg
-             except Exception as e:
-                  error_msg = f"Unexpected server error during resolution: {e}"
-                  logger.critical(f"[{self.user_id}] Unexpected error during conflict resolution force apply: {e}", exc_info=True)
-                  return False, error_msg
+            # Client wins - proceed with force apply
+            logger.warning(
+                f"[{self.user_id}] Resolving Conflict (LWW): Client change wins (ServerDT {server_dt} < AuthoritativeDT {authoritative_dt}). Forcing apply.")
+            try:
+                # Call sync version of execute, passing original string timestamp
+                self._execute_server_change_sql_sync(
+                    cursor, entity, operation, payload, entity_uuid,
+                    client_version, originating_client_id, current_server_time_str,
+                    force_apply=True
+                )
+                return True, None
+            # Keep existing except blocks for force apply errors
+            except (DatabaseError, sqlite3.Error, ValueError) as e:
+                error_msg = f"Failed to force apply winning change: {e}"
+                logger.error(
+                    f"[{self.user_id}] Error forcing update during LWW conflict resolution for {entity} {entity_uuid}: {e}",
+                    exc_info=True)
+                return False, error_msg
+            except Exception as e:
+                error_msg = f"Unexpected server error during resolution: {e}"
+                logger.critical(f"[{self.user_id}] Unexpected error during conflict resolution force apply: {e}",
+                                exc_info=True)
+                return False, error_msg
 
     # --- SYNCHRONOUS SQL EXECUTION ---
     def _execute_server_change_sql_sync(self, cursor: sqlite3.Cursor, entity: str, operation: str, payload: Dict, uuid: str,
