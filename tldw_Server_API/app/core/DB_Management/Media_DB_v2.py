@@ -72,17 +72,27 @@ PRAGMA foreign_keys = ON;
 
 -- Media Table --
 CREATE TABLE IF NOT EXISTS Media (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT UNIQUE, title TEXT NOT NULL, type TEXT NOT NULL, content TEXT,
-    author TEXT, ingestion_date DATETIME, transcription_model TEXT, is_trash BOOLEAN DEFAULT 0 NOT NULL,
-    trash_date DATETIME, vector_embedding BLOB, chunking_status TEXT DEFAULT 'pending' NOT NULL,
-    vector_processing INTEGER DEFAULT 0 NOT NULL, content_hash TEXT UNIQUE NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url TEXT UNIQUE,
+    title TEXT NOT NULL,
+    type TEXT NOT NULL,
+    content TEXT,
+    author TEXT,
+    ingestion_date DATETIME,
+    transcription_model TEXT,
+    is_trash BOOLEAN DEFAULT 0 NOT NULL,
+    trash_date DATETIME,
+    vector_embedding BLOB,
+    chunking_status TEXT DEFAULT 'pending' NOT NULL,
+    vector_processing INTEGER DEFAULT 0 NOT NULL,
+    content_hash TEXT UNIQUE NOT NULL,
     uuid TEXT UNIQUE NOT NULL,
     last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version INTEGER NOT NULL DEFAULT 1,
     client_id TEXT NOT NULL,
     deleted BOOLEAN NOT NULL DEFAULT 0,
-    prev_version INTEGER, -- Added for conflict resolution
-    merge_parent_uuid TEXT -- Added for conflict resolution (e.g., 3-way merge)
+    prev_version INTEGER,
+    merge_parent_uuid TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_media_title ON Media(title);
 CREATE INDEX IF NOT EXISTS idx_media_type ON Media(type);
@@ -95,29 +105,32 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_media_content_hash ON Media(content_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_media_uuid ON Media(uuid);
 CREATE INDEX IF NOT EXISTS idx_media_last_modified ON Media(last_modified);
 CREATE INDEX IF NOT EXISTS idx_media_deleted ON Media(deleted);
-CREATE INDEX IF NOT EXISTS idx_media_prev_version ON Media(prev_version); -- Index for new column
-CREATE INDEX IF NOT EXISTS idx_media_merge_parent_uuid ON Media(merge_parent_uuid); -- Index for new column
+CREATE INDEX IF NOT EXISTS idx_media_prev_version ON Media(prev_version);
+CREATE INDEX IF NOT EXISTS idx_media_merge_parent_uuid ON Media(merge_parent_uuid);
 
 -- Keywords Table --
 CREATE TABLE IF NOT EXISTS Keywords (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, keyword TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    keyword TEXT NOT NULL UNIQUE COLLATE NOCASE,
     uuid TEXT UNIQUE NOT NULL,
     last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version INTEGER NOT NULL DEFAULT 1,
     client_id TEXT NOT NULL,
     deleted BOOLEAN NOT NULL DEFAULT 0,
-    prev_version INTEGER, -- Added
-    merge_parent_uuid TEXT -- Added
+    prev_version INTEGER,
+    merge_parent_uuid TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_uuid ON Keywords(uuid);
 CREATE INDEX IF NOT EXISTS idx_keywords_last_modified ON Keywords(last_modified);
 CREATE INDEX IF NOT EXISTS idx_keywords_deleted ON Keywords(deleted);
-CREATE INDEX IF NOT EXISTS idx_keywords_prev_version ON Keywords(prev_version); -- Index for new column
-CREATE INDEX IF NOT EXISTS idx_keywords_merge_parent_uuid ON Keywords(merge_parent_uuid); -- Index for new column
+CREATE INDEX IF NOT EXISTS idx_keywords_prev_version ON Keywords(prev_version);
+CREATE INDEX IF NOT EXISTS idx_keywords_merge_parent_uuid ON Keywords(merge_parent_uuid);
 
 -- MediaKeywords Table (Junction Table - No sync metadata needed here usually) --
 CREATE TABLE IF NOT EXISTS MediaKeywords (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, media_id INTEGER NOT NULL, keyword_id INTEGER NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    keyword_id INTEGER NOT NULL,
     UNIQUE (media_id, keyword_id),
     FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
     FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
@@ -127,86 +140,122 @@ CREATE INDEX IF NOT EXISTS idx_mediakeywords_keyword_id ON MediaKeywords(keyword
 
 -- Transcripts Table --
 CREATE TABLE IF NOT EXISTS Transcripts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, media_id INTEGER NOT NULL, whisper_model TEXT, transcription TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (media_id, whisper_model),
-    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    whisper_model TEXT,
+    transcription TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     uuid TEXT UNIQUE NOT NULL,
     last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version INTEGER NOT NULL DEFAULT 1,
     client_id TEXT NOT NULL,
     deleted BOOLEAN NOT NULL DEFAULT 0,
-    prev_version INTEGER, -- Added
-    merge_parent_uuid TEXT -- Added
-);
+    prev_version INTEGER,
+    merge_parent_uuid TEXT, -- <<< NO comma after the last column definition
+    -- Table-level constraints start here, separated by commas:
+    UNIQUE (media_id, whisper_model),     -- <<< COMMA ADDED HERE
+    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
+); -- <<< Ensure semicolon
 CREATE INDEX IF NOT EXISTS idx_transcripts_media_id ON Transcripts(media_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_transcripts_uuid ON Transcripts(uuid);
 CREATE INDEX IF NOT EXISTS idx_transcripts_last_modified ON Transcripts(last_modified);
 CREATE INDEX IF NOT EXISTS idx_transcripts_deleted ON Transcripts(deleted);
-CREATE INDEX IF NOT EXISTS idx_transcripts_prev_version ON Transcripts(prev_version); -- Index for new column
-CREATE INDEX IF NOT EXISTS idx_transcripts_merge_parent_uuid ON Transcripts(merge_parent_uuid); -- Index for new column
+CREATE INDEX IF NOT EXISTS idx_transcripts_prev_version ON Transcripts(prev_version);
+CREATE INDEX IF NOT EXISTS idx_transcripts_merge_parent_uuid ON Transcripts(merge_parent_uuid);
 
 -- MediaChunks Table --
 CREATE TABLE IF NOT EXISTS MediaChunks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, media_id INTEGER NOT NULL, chunk_text TEXT, start_index INTEGER, end_index INTEGER,
-    chunk_id TEXT UNIQUE, FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    chunk_text TEXT NOT NULL,
+    start_index INTEGER,
+    end_index INTEGER,
+    chunk_id TEXT UNIQUE, -- Example: Needs a unique ID for chunks if different from rowid/index
+    -- chunk_index INTEGER NOT NULL, -- Alternative if using index within media_id
+    -- start_char INTEGER, -- Alternative naming
+    -- end_char INTEGER, -- Alternative naming
+    -- chunk_type TEXT, -- Alternative column
+    -- creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- Alternative column
+    -- last_modified_orig TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- Alternative column
+    -- is_processed BOOLEAN DEFAULT FALSE NOT NULL, -- Alternative column
+    -- metadata TEXT, -- Alternative column
     uuid TEXT UNIQUE NOT NULL,
     last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version INTEGER NOT NULL DEFAULT 1,
     client_id TEXT NOT NULL,
     deleted BOOLEAN NOT NULL DEFAULT 0,
-    prev_version INTEGER, -- Added
-    merge_parent_uuid TEXT -- Added
-);
+    prev_version INTEGER,
+    merge_parent_uuid TEXT, -- <<< NO comma after the last column definition
+    -- Table-level constraints start here, separated by commas:
+    -- UNIQUE (media_id, chunk_index, chunk_type), -- Example constraint if using index/type
+    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
+); -- <<< Ensure semicolon
 CREATE INDEX IF NOT EXISTS idx_mediachunks_media_id ON MediaChunks(media_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mediachunks_uuid ON MediaChunks(uuid);
 CREATE INDEX IF NOT EXISTS idx_mediachunks_last_modified ON MediaChunks(last_modified);
 CREATE INDEX IF NOT EXISTS idx_mediachunks_deleted ON MediaChunks(deleted);
-CREATE INDEX IF NOT EXISTS idx_mediachunks_prev_version ON MediaChunks(prev_version); -- Index for new column
-CREATE INDEX IF NOT EXISTS idx_mediachunks_merge_parent_uuid ON MediaChunks(merge_parent_uuid); -- Index for new column
+CREATE INDEX IF NOT EXISTS idx_mediachunks_prev_version ON MediaChunks(prev_version);
+CREATE INDEX IF NOT EXISTS idx_mediachunks_merge_parent_uuid ON MediaChunks(merge_parent_uuid); -- <<< Ensure semicolon (FIXED)
 
 -- UnvectorizedMediaChunks Table --
 CREATE TABLE IF NOT EXISTS UnvectorizedMediaChunks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, media_id INTEGER NOT NULL, chunk_text TEXT NOT NULL, chunk_index INTEGER NOT NULL,
-    start_char INTEGER, end_char INTEGER, chunk_type TEXT, creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_modified_orig TIMESTAMP DEFAULT CURRENT_TIMESTAMP, is_processed BOOLEAN DEFAULT FALSE NOT NULL, metadata TEXT,
-    UNIQUE (media_id, chunk_index, chunk_type), FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    chunk_text TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    start_char INTEGER,
+    end_char INTEGER,
+    chunk_type TEXT,
+    creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_modified_orig TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_processed BOOLEAN DEFAULT FALSE NOT NULL,
+    metadata TEXT,
     uuid TEXT UNIQUE NOT NULL,
     last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version INTEGER NOT NULL DEFAULT 1,
     client_id TEXT NOT NULL,
     deleted BOOLEAN NOT NULL DEFAULT 0,
-    prev_version INTEGER, -- Added
-    merge_parent_uuid TEXT -- Added
-);
+    prev_version INTEGER,
+    merge_parent_uuid TEXT, -- <<< NO comma after last column def
+    -- Table-level constraints start here, separated by commas:
+    UNIQUE (media_id, chunk_index, chunk_type),       -- <<< Comma needed and present
+    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
+); -- <<< Ensure semicolon
 CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_media_id ON UnvectorizedMediaChunks(media_id);
 CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_is_processed ON UnvectorizedMediaChunks(is_processed);
 CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_chunk_type ON UnvectorizedMediaChunks(chunk_type);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_uuid ON UnvectorizedMediaChunks(uuid);
 CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_last_modified ON UnvectorizedMediaChunks(last_modified);
 CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_deleted ON UnvectorizedMediaChunks(deleted);
-CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_prev_version ON UnvectorizedMediaChunks(prev_version); -- Index for new column
-CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_merge_parent_uuid ON UnvectorizedMediaChunks(merge_parent_uuid); -- Index for new column
+CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_prev_version ON UnvectorizedMediaChunks(prev_version);
+CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_merge_parent_uuid ON UnvectorizedMediaChunks(merge_parent_uuid); -- <<< Ensure semicolon (FIXED)
 
 -- DocumentVersions Table --
 CREATE TABLE IF NOT EXISTS DocumentVersions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, media_id INTEGER NOT NULL, version_number INTEGER NOT NULL, prompt TEXT,
-    analysis_content TEXT, content TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE, UNIQUE (media_id, version_number),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    version_number INTEGER NOT NULL,
+    prompt TEXT,
+    analysis_content TEXT,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     uuid TEXT UNIQUE NOT NULL,
     last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version INTEGER NOT NULL DEFAULT 1,
     client_id TEXT NOT NULL,
     deleted BOOLEAN NOT NULL DEFAULT 0,
-    prev_version INTEGER, -- Added
-    merge_parent_uuid TEXT -- Added
-);
+    prev_version INTEGER,
+    merge_parent_uuid TEXT, -- <<< ADDED COMMA HERE before constraints
+    FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE, -- <<< Comma needed and present
+    UNIQUE (media_id, version_number)
+); -- <<< Ensure semicolon
 CREATE INDEX IF NOT EXISTS idx_document_versions_media_id ON DocumentVersions(media_id);
 CREATE INDEX IF NOT EXISTS idx_document_versions_version_number ON DocumentVersions(version_number);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_documentversions_uuid ON DocumentVersions(uuid);
 CREATE INDEX IF NOT EXISTS idx_documentversions_last_modified ON DocumentVersions(last_modified);
 CREATE INDEX IF NOT EXISTS idx_documentversions_deleted ON DocumentVersions(deleted);
-CREATE INDEX IF NOT EXISTS idx_documentversions_prev_version ON DocumentVersions(prev_version); -- Index for new column
-CREATE INDEX IF NOT EXISTS idx_documentversions_merge_parent_uuid ON DocumentVersions(merge_parent_uuid); -- Index for new column
+CREATE INDEX IF NOT EXISTS idx_documentversions_prev_version ON DocumentVersions(prev_version);
+CREATE INDEX IF NOT EXISTS idx_documentversions_merge_parent_uuid ON DocumentVersions(merge_parent_uuid); -- <<< Ensure semicolon (FIXED)
 
 -- FTS Tables & Triggers --
 CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(title, content, content='Media', content_rowid='id');
@@ -220,15 +269,18 @@ CREATE TRIGGER IF NOT EXISTS keywords_fts_au AFTER UPDATE ON Keywords BEGIN UPDA
 
 -- Sync Log Table & Indices --
 CREATE TABLE IF NOT EXISTS sync_log (
-    change_id INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT NOT NULL, entity_uuid TEXT NOT NULL,
+    change_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity TEXT NOT NULL,
+    entity_uuid TEXT NOT NULL,
     operation TEXT NOT NULL CHECK(operation IN ('create','update','delete', 'link', 'unlink')),
-    timestamp DATETIME NOT NULL, client_id TEXT NOT NULL, version INTEGER NOT NULL, payload TEXT
-);
+    timestamp DATETIME NOT NULL,
+    client_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    payload TEXT
+); -- <<< Ensure semicolon
 CREATE INDEX IF NOT EXISTS idx_sync_log_ts ON sync_log(timestamp);
 CREATE INDEX IF NOT EXISTS idx_sync_log_entity_uuid ON sync_log(entity_uuid);
-CREATE INDEX IF NOT EXISTS idx_sync_log_client_id ON sync_log(client_id);
-
--- Sync Log Triggers (Payloads updated to include prev_version, merge_parent_uuid) --
+CREATE INDEX IF NOT EXISTS idx_sync_log_client_id ON sync_log(client_id); -- <<< Ensure semicolon (FIXED)
 
 -- Media Triggers --
 DROP TRIGGER IF EXISTS media_sync_create;
@@ -253,14 +305,14 @@ DROP TRIGGER IF EXISTS media_sync_delete;
 CREATE TRIGGER media_sync_delete AFTER UPDATE ON Media WHEN OLD.deleted=0 AND NEW.deleted=1 BEGIN
     INSERT INTO sync_log(entity, entity_uuid, operation, timestamp, client_id, version, payload)
     VALUES ('Media', NEW.uuid, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
-            json_object('uuid',NEW.uuid,'last_modified',NEW.last_modified,'version',NEW.version,'client_id',NEW.client_id)); -- Delete payload is minimal
+            json_object('uuid',NEW.uuid,'last_modified',NEW.last_modified,'version',NEW.version,'client_id',NEW.client_id));
 END;
 
 DROP TRIGGER IF EXISTS media_sync_undelete;
 CREATE TRIGGER media_sync_undelete AFTER UPDATE ON Media WHEN OLD.deleted=1 AND NEW.deleted=0 BEGIN
     INSERT INTO sync_log(entity, entity_uuid, operation, timestamp, client_id, version, payload)
     VALUES ('Media', NEW.uuid, 'update', NEW.last_modified, NEW.client_id, NEW.version,
-            json_object('uuid', NEW.uuid, 'url', NEW.url, 'title', NEW.title, 'type', NEW.type,'content', NEW.content, 'author', NEW.author, 'ingestion_date', NEW.ingestion_date,'transcription_model', NEW.transcription_model, 'is_trash', NEW.is_trash, 'trash_date', NEW.trash_date,'content_hash', NEW.content_hash, 'last_modified', NEW.last_modified,'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted, 'prev_version', NEW.prev_version, 'merge_parent_uuid', NEW.merge_parent_uuid)); -- Undelete is an 'update' with full payload
+            json_object('uuid', NEW.uuid, 'url', NEW.url, 'title', NEW.title, 'type', NEW.type,'content', NEW.content, 'author', NEW.author, 'ingestion_date', NEW.ingestion_date,'transcription_model', NEW.transcription_model, 'is_trash', NEW.is_trash, 'trash_date', NEW.trash_date,'content_hash', NEW.content_hash, 'last_modified', NEW.last_modified,'version', NEW.version, 'client_id', NEW.client_id, 'deleted', NEW.deleted, 'prev_version', NEW.prev_version, 'merge_parent_uuid', NEW.merge_parent_uuid));
 END;
 
 -- Keywords Triggers --
@@ -301,9 +353,6 @@ DROP TRIGGER IF EXISTS mediakeywords_sync_link;
 CREATE TRIGGER mediakeywords_sync_link AFTER INSERT ON MediaKeywords BEGIN
     SELECT RAISE(ABORT, 'Cannot link keyword: Media record not found or missing UUID') WHERE NOT EXISTS (SELECT 1 FROM Media WHERE id = NEW.media_id AND uuid IS NOT NULL);
     SELECT RAISE(ABORT, 'Cannot link keyword: Keyword record not found or missing UUID') WHERE NOT EXISTS (SELECT 1 FROM Keywords WHERE id = NEW.keyword_id AND uuid IS NOT NULL);
-    -- Link payload needs info about both sides. Use the *parent* record's sync meta if available?
-    -- Using strftime('now') is simpler but less precise than parent last_modified.
-    -- Choosing a client_id/version for the link is tricky. Using Media's seems reasonable.
     INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
     SELECT 'MediaKeywords', m.uuid || '_' || k.uuid, 'link', strftime('%Y-%m-%d %H:%M:%S.%f', 'now', 'utc'), m.client_id, m.version,
            json_object('media_uuid', m.uuid, 'keyword_uuid', k.uuid)
@@ -312,8 +361,6 @@ END;
 
 DROP TRIGGER IF EXISTS mediakeywords_sync_unlink;
 CREATE TRIGGER mediakeywords_sync_unlink AFTER DELETE ON MediaKeywords BEGIN
-    -- Unlink payload needs info about both sides. Try to get UUIDs even if parents might be deleted later.
-    -- Use strftime('now') for timestamp. Client/Version are problematic here. Use 'unknown' or maybe last known Media info?
     INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
     SELECT 'MediaKeywords', ifnull(m.uuid, 'unknown_media_' || OLD.media_id) || '_' || ifnull(k.uuid, 'unknown_keyword_' || OLD.keyword_id),
            'unlink', strftime('%Y-%m-%d %H:%M:%S.%f', 'now', 'utc'), ifnull(m.client_id, 'unknown'), ifnull(m.version, 0),
@@ -457,12 +504,18 @@ CREATE TRIGGER documentversions_sync_undelete AFTER UPDATE ON DocumentVersions W
 END;
 
 -- Validation Triggers (Do not validate prev_version or merge_parent_uuid yet) --
-DROP TRIGGER IF EXISTS media_validate_sync_update; CREATE TRIGGER media_validate_sync_update BEFORE UPDATE ON Media BEGIN SELECT RAISE(ABORT, 'Sync Error (Media): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (Media): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
-DROP TRIGGER IF EXISTS keywords_validate_sync_update; CREATE TRIGGER keywords_validate_sync_update BEFORE UPDATE ON Keywords BEGIN SELECT RAISE(ABORT, 'Sync Error (Keywords): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (Keywords): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
-DROP TRIGGER IF EXISTS transcripts_validate_sync_update; CREATE TRIGGER transcripts_validate_sync_update BEFORE UPDATE ON Transcripts BEGIN SELECT RAISE(ABORT, 'Sync Error (Transcripts): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (Transcripts): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
-DROP TRIGGER IF EXISTS mediachunks_validate_sync_update; CREATE TRIGGER mediachunks_validate_sync_update BEFORE UPDATE ON MediaChunks BEGIN SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
-DROP TRIGGER IF EXISTS unvectorizedmediachunks_validate_sync_update; CREATE TRIGGER unvectorizedmediachunks_validate_sync_update BEFORE UPDATE ON UnvectorizedMediaChunks BEGIN SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
-DROP TRIGGER IF EXISTS documentversions_validate_sync_update; CREATE TRIGGER documentversions_validate_sync_update BEFORE UPDATE ON DocumentVersions BEGIN SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
+DROP TRIGGER IF EXISTS media_validate_sync_update;
+CREATE TRIGGER media_validate_sync_update BEFORE UPDATE ON Media BEGIN SELECT RAISE(ABORT, 'Sync Error (Media): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (Media): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
+DROP TRIGGER IF EXISTS keywords_validate_sync_update;
+CREATE TRIGGER keywords_validate_sync_update BEFORE UPDATE ON Keywords BEGIN SELECT RAISE(ABORT, 'Sync Error (Keywords): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (Keywords): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
+DROP TRIGGER IF EXISTS transcripts_validate_sync_update;
+CREATE TRIGGER transcripts_validate_sync_update BEFORE UPDATE ON Transcripts BEGIN SELECT RAISE(ABORT, 'Sync Error (Transcripts): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (Transcripts): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
+DROP TRIGGER IF EXISTS mediachunks_validate_sync_update;
+CREATE TRIGGER mediachunks_validate_sync_update BEFORE UPDATE ON MediaChunks BEGIN SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
+DROP TRIGGER IF EXISTS unvectorizedmediachunks_validate_sync_update;
+CREATE TRIGGER unvectorizedmediachunks_validate_sync_update BEFORE UPDATE ON UnvectorizedMediaChunks BEGIN SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
+DROP TRIGGER IF EXISTS documentversions_validate_sync_update;
+CREATE TRIGGER documentversions_validate_sync_update BEFORE UPDATE ON DocumentVersions BEGIN SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): Version must increment by exactly 1.') WHERE NEW.version IS NOT OLD.version + 1; SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): Client ID cannot be NULL or empty.') WHERE NEW.client_id IS NULL OR NEW.client_id = ''; END;
 """
 
     def __init__(self, db_path: str, client_id: str):

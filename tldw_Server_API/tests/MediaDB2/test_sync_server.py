@@ -36,14 +36,21 @@ def get_entity_state(db: Database, entity: str, uuid: str) -> dict | None:
      row = cursor.fetchone()
      return dict(row) if row else None
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def server_user_db(memory_db_factory):
     """Provides a fresh DB instance representing a user's DB on the server."""
-    return memory_db_factory("SERVER") # Use server's client ID when acting
+    db = memory_db_factory("SERVER") # Use server's client ID when acting
+    yield db # Use yield to allow for potential cleanup if needed
+    # Optional cleanup: ensure connection is closed after test
+    try:
+        db.close_connection()
+    except Exception as e:
+        print(f"Warning: Error closing DB connection in fixture teardown: {e}")
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def server_processor(server_user_db):
     """Provides an initialized ServerSyncProcessor instance."""
+    # Ensure the server_user_db passed here is the fresh, function-scoped one
     return ServerSyncProcessor(db=server_user_db, user_id="test_user_1", requesting_client_id="client_sender_1")
 
 
@@ -185,20 +192,23 @@ class TestServerSyncProcessorConflict:
           )
 
           # 4. Process - Mock server time to be AFTER server_db_timestamp (ts_server_v2)
-          with patch('sync_server_api.datetime') as mock_dt:
-               mock_dt.now.return_value.strftime.return_value = "2023-11-01T12:00:20Z" # Server time is latest
+          with patch('tldw_Server_API.app.api.v1.endpoints.sync.datetime') as mock_dt:
+                # Ensure the mocked datetime object behaves like the real one enough
+                mock_now = MagicMock()
+                mock_now.strftime.return_value = "2023-11-01T12:00:20Z"  # The desired server authoritative timestamp
+                mock_dt.now.return_value = mock_now
 
-               success, errors = await server_processor.apply_client_changes_batch([client_change])
+                success, errors = await server_processor.apply_client_changes_batch([client_change])
 
-               assert success is True # Conflict resolved successfully
-               assert not errors
+                assert success is True # Conflict resolved successfully
+                assert not errors
 
-               # 5. Verify state - Client change was forcefully applied
-               state = get_entity_state(server_user_db, "Keywords", kw_uuid)
-               assert state['keyword'] == "client_v2_conflicting"
-               assert state['version'] == 2 # Version from client change applied
-               assert state['client_id'] == "client_sender_1"
-               assert state['last_modified'] == "2023-11-01T12:00:20Z" # Server authoritative time
+                # 5. Verify state - Client change was forcefully applied
+                state = get_entity_state(server_user_db, "Keywords", kw_uuid)
+                assert state['keyword'] == "client_v2_conflicting"
+                assert state['version'] == 2 # Version from client change applied
+                assert state['client_id'] == "client_sender_1"
+                assert state['last_modified'] == "2023-11-01T12:00:20Z" # Server authoritative time
 
      @pytest.mark.asyncio
      async def test_server_conflict_server_wins_lww(self, server_processor, server_user_db):
@@ -228,21 +238,22 @@ class TestServerSyncProcessorConflict:
           )
 
           # 4. Process - Mock server time to be BEFORE the winning server state's timestamp
-          with patch('sync_server_api.datetime') as mock_dt:
-               # Simulate server processing this slightly later, but still before ts_server_v2
-               mock_dt.now.return_value.strftime.return_value = "2023-11-01T13:00:15Z"
+          with patch('tldw_Server_API.app.api.v1.endpoints.sync.datetime') as mock_dt:
+                mock_now = MagicMock()
+                mock_now.strftime.return_value = "2023-11-01T13:00:15Z"  # The desired server authoritative timestamp
+                mock_dt.now.return_value = mock_now
 
-               success, errors = await server_processor.apply_client_changes_batch([client_change])
+                success, errors = await server_processor.apply_client_changes_batch([client_change])
 
-               assert success is True # Conflict resolved successfully (by skipping)
-               assert not errors
+                assert success is True # Conflict resolved successfully (by skipping)
+                assert not errors
 
-               # 5. Verify state - Server state remains unchanged
-               state = get_entity_state(server_user_db, "Keywords", kw_uuid)
-               assert state['keyword'] == "server_v2_wins_concurrent" # Existing server state kept
-               assert state['version'] == 2
-               assert state['client_id'] == "other_client" # From the winning server update
-               assert state['last_modified'] == ts_server_v2
+                # 5. Verify state - Server state remains unchanged
+                state = get_entity_state(server_user_db, "Keywords", kw_uuid)
+                assert state['keyword'] == "server_v2_wins_concurrent" # Existing server state kept
+                assert state['version'] == 2
+                assert state['client_id'] == "other_client" # From the winning server update
+                assert state['last_modified'] == ts_server_v2
 
 #
 # End of test_sync_server.py

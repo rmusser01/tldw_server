@@ -362,15 +362,28 @@ class ServerSyncProcessor:
         # because the schema and library are shared. We just need to ensure the
         # correct parameters (especially server timestamp) are passed down.
 
-        logger.debug(f"Server Executing SQL: Op='{operation}', Entity='{entity}', UUID='{uuid}', Ver='{version}', OrigClient='{client_id}', ServerTS='{timestamp}', Force='{force_apply}'")
+        """
+        Generates and executes SQL to apply a single change operation on the server DB.
+        ...
+        """
+        SYNCABLE_ENTITIES = {
+            'Media', 'Keywords', 'Transcripts', 'MediaChunks',
+            'UnvectorizedMediaChunks', 'DocumentVersions', 'MediaKeywords'
+            # Add all tables that should be syncable
+        }
+        # --- Entity Validation --- ADD THIS BLOCK ---
+        if entity not in SYNCABLE_ENTITIES:
+            logger.error(f"Server received change for unsupported entity: '{entity}'")
+            raise ValueError(f"Sync operation attempted on non-syncable entity: {entity}")
+        # -----------------------------------------
+
+        logger.debug(
+            f"Server Executing SQL: Op='{operation}', Entity='{entity}', UUID='{uuid}', Ver='{version}', OrigClient='{client_id}', ServerTS='{timestamp}', Force='{force_apply}'")
 
         # --- Special handling for MediaKeywords junction table ---
         if entity == "MediaKeywords":
-            # Re-use the MediaKeyword helper logic
-            # Note: This helper needs to be adapted or duplicated if it's not async,
-            # or called using run_in_executor if the DB library is synchronous.
-            # Assuming helper is synchronous for now:
-            self._execute_media_keyword_sql_sync(cursor, operation, payload) # Use sync version
+            # The check above handles MediaKeywords being in the set
+            self._execute_media_keyword_sql_sync(cursor, operation, payload)  # Use sync version
             return
 
         # --- Standard handling for main entities ---

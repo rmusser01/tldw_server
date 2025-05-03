@@ -10,6 +10,7 @@ from typing import List, Dict, Optional, Tuple
 # Third-Party Imports
 #
 # Local Imports
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, ConflictError, DatabaseError, InputError
 try:
     from Media_DB import Database, ConflictError, DatabaseError, InputError
 except ImportError:
