@@ -158,12 +158,13 @@ class TestServerSyncProcessorConflict:
     def test_server_conflict_client_wins_lww(self, server_processor, server_user_db):
         """Server detects conflict, incoming client change wins LWW."""
         kw_uuid = "server-conflict-client-wins"
-        ts_v1 = "2023-11-01T12:00:00Z"
+        ts_v1 = "2023-11-01T12:00:00.000Z"
         server_processor.db.execute_query(
           "INSERT INTO Keywords (uuid, keyword, version, client_id, last_modified, deleted) VALUES (?, ?, 1, ?, ?, 0)",
           (kw_uuid, "server_v1", "other_client", ts_v1), commit=True
         )
-        ts_server_v2 = "2023-11-01T12:00:10Z"
+        # USE CONSISTENT ISO FORMAT
+        ts_server_v2 = "2023-11-01T12:00:10.000Z"
         server_processor.db.execute_query(
           "UPDATE Keywords SET keyword='server_v2_concurrent', version=2, last_modified=? WHERE uuid=?",
           (ts_server_v2, kw_uuid), commit=True
@@ -171,44 +172,53 @@ class TestServerSyncProcessorConflict:
         assert get_entity_state(server_user_db, "Keywords", kw_uuid)['version'] == 2
 
         client_change = create_mock_log_entry(
-          change_id=10, entity="Keywords", uuid=kw_uuid, op="update",
-          client="client_sender_1", version=2,
-          payload_dict={"keyword": "client_v2_conflicting"},
+            change_id=10, entity="Keywords", uuid=kw_uuid, op="update",
+            client="client_sender_1", version=2,
+            payload_dict={"keyword": "client_v2_conflicting"},
+            ts="2023-11-01T12:00:15.000Z"  # Consistent format
         )
 
-        # --- Mock Setup using 'with patch' inside the test ---
-        server_authoritative_time_str = "2023-11-01 12:00:20.123"  # String for parsing later
-        mock_now_dt_object = datetime.strptime(server_authoritative_time_str, '%Y-%m-%d %H:%M:%S.%f').replace(
-          tzinfo=timezone.utc)
+        # --- Mock Setup ---
+        # Generate mock datetime object
+        mock_now_dt_object = datetime.now(timezone.utc).replace(year=2023, month=11, day=1, hour=12, minute=0,
+                                                                second=20, microsecond=123000)
+        # Format it using the *exact same* strftime as the main code
+        server_authoritative_time_str = mock_now_dt_object.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        # server_authoritative_time_str should be "2023-11-01T12:00:20.123Z"
 
-        # Use 'with patch' targeting the specific attribute within the sync module
-        with patch('tldw_Server_API.app.api.v1.endpoints.sync.datetime.now') as mock_dt_now:
-          mock_dt_now.return_value = mock_now_dt_object  # Mock now() to return a real dt object
+        # Patching logic remains the same
+        with patch('tldw_Server_API.app.api.v1.endpoints.sync.datetime') as mock_datetime_module:
+            mock_datetime_module.now.return_value = mock_now_dt_object
+            # Provide strptime if needed (the code *does* use it now for parsing)
+            mock_datetime_module.strptime = datetime.strptime
 
-        # Call synchronous method INSIDE the patch context
-        success, errors = server_processor.apply_client_changes_batch([client_change])
+            # Call synchronous method INSIDE the patch context
+            success, errors = server_processor.apply_client_changes_batch([client_change])
         # --- End patch context ---
 
         # --- Assertions ---
-        assert success is True
+        assert success is True, f"Expected success=True, got False. Errors: {errors}"
         assert not errors
 
         state = get_entity_state(server_user_db, "Keywords", kw_uuid)
+        assert state is not None
         assert state['keyword'] == "client_v2_conflicting"
-        assert state['version'] == 3
+        assert state['version'] == 3  # Incremented because client won (forced update)
         assert state['client_id'] == "client_sender_1"
-        expected_stored_time = mock_now_dt_object.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] + 'Z'
-        assert state['last_modified'] == expected_stored_time
+        # Timestamp should match the mocked authoritative *string*
+        assert state['last_modified'] == server_authoritative_time_str
 
     def test_server_conflict_server_wins_lww(self, server_processor, server_user_db):
          """Server detects conflict, existing server state wins LWW."""
          kw_uuid = "server-conflict-server-wins"
-         ts_v1 = "2023-11-01T13:00:00Z"
+         # USE CONSISTENT ISO FORMAT
+         ts_v1 = "2023-11-01T13:00:00.000Z"
          server_processor.db.execute_query(
              "INSERT INTO Keywords (uuid, keyword, version, client_id, last_modified, deleted) VALUES (?, ?, 1, ?, ?, 0)",
              (kw_uuid, "server_v1_sw", "other_client", ts_v1), commit=True
          )
-         ts_server_v2 = "2023-11-01T13:00:20Z"  # Server's winning timestamp
+         # USE CONSISTENT ISO FORMAT (Server's winning timestamp)
+         ts_server_v2 = "2023-11-01T13:00:20.000Z"
          server_processor.db.execute_query(
              "UPDATE Keywords SET keyword='server_v2_wins_concurrent', version=2, client_id='server_updater', last_modified=? WHERE uuid=?",
              (ts_server_v2, kw_uuid), commit=True
@@ -219,26 +229,37 @@ class TestServerSyncProcessorConflict:
              change_id=11, entity="Keywords", uuid=kw_uuid, op="update",
              client="client_sender_1", version=2,
              payload_dict={"keyword": "client_v2_loses"},
+             ts="2023-11-01T13:00:10.000Z"  # Consistent format
          )
 
-         # --- Mock Setup using 'with patch' inside the test ---
-         server_authoritative_time_str = "2023-11-01 13:00:15.456"
-         mock_now_dt_object = datetime.strptime(server_authoritative_time_str, '%Y-%m-%d %H:%M:%S.%f').replace(
-             tzinfo=timezone.utc)
+         # --- Mock Setup ---
+         # Mocked time is *earlier* than ts_server_v2
+         mock_now_dt_object = datetime.now(timezone.utc).replace(year=2023, month=11, day=1, hour=13, minute=0,
+                                                                 second=15, microsecond=456000)
+         # Format it using the *exact same* strftime as the main code
+         server_authoritative_time_str = mock_now_dt_object.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+         # server_authoritative_time_str should be "2023-11-01T13:00:15.456Z"
 
-         with patch('tldw_Server_API.app.api.v1.endpoints.sync.datetime.now') as mock_dt_now:
-             mock_dt_now.return_value = mock_now_dt_object
+         # Patching logic remains the same
+         with patch('tldw_Server_API.app.api.v1.endpoints.sync.datetime') as mock_datetime_module:
+             mock_datetime_module.now.return_value = mock_now_dt_object
+             mock_datetime_module.strptime = datetime.strptime
+
+             # Call synchronous method INSIDE the patch context
              success, errors = server_processor.apply_client_changes_batch([client_change])
          # --- End patch context ---
 
          # --- Assertions ---
-         assert success is True
-         assert not errors
+         assert success is True, f"Expected success=True, got False. Errors: {errors}"
+         assert not errors  # Should succeed by skipping the client change
 
          state = get_entity_state(server_user_db, "Keywords", kw_uuid)
+         assert state is not None
+         # State should remain unchanged because server won LWW
          assert state['keyword'] == "server_v2_wins_concurrent"
          assert state['version'] == 2
          assert state['client_id'] == "server_updater"
+         # Timestamp should be the server's winning timestamp string
          assert state['last_modified'] == ts_server_v2
 
 #
