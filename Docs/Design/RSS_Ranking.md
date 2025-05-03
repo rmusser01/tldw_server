@@ -41,6 +41,7 @@ https://rss-bridge.org/
 https://www.zacusca.net/
 https://scour.ing/about
 https://feeds.fun/
+https://towardsdatascience.com/techniques-for-chat-data-analytics-with-python-cfdbea358123/
 https://andregarzia.com/2025/04/rss-doesnt-necessarily-means-firehose.html
 
 

@@ -25,7 +25,7 @@ https://medium.com/wrenai/how-uber-is-saving-140-000-hours-each-month-using-text
 https://github.com/Sauradip07/NLToSQL/tree/main
 https://medium.com/firebird-technologies/building-a-reliable-text-to-sql-pipeline-a-step-by-step-guide-pt-1-9041b0777a77
 https://huggingface.co/papers/2503.24364
-
+https://engineering.salesforce.com/bridging-natural-language-and-sql-with-generative-ai/
 
 
 

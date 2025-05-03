@@ -21,6 +21,7 @@ https://www.lennysnewsletter.com/p/beyond-vibe-checks-a-pms-complete
 https://arxiv.org/abs/2504.03352
 https://arxiv.org/html/2411.12990v1
 https://github.com/knoveleng/rainbowplus
+https://github.com/jd-3d/SOLOBench
 https://github.com/salman-lui/x-teaming
 https://arxiv.org/abs/2504.15909
 https://huggingface.co/spaces/lmgame/game_arena_bench

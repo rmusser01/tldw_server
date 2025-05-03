@@ -6,6 +6,9 @@
 ### Link Dump:
 https://www.bespokelabs.ai/blog/bespoke-minichart-7b
 https://careersatdoordash.com/blog/doordash-llm-transcribe-menu/
+https://huggingface.co/Qwen/Qwen2.5-Omni-3B
+
+
 MAMBA
     https://ivy-lvlm.github.io/Video-MA2MBA/
 

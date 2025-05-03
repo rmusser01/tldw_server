@@ -21,7 +21,10 @@ https://github.com/matthsena/AlcheMark
   https://github.com/run-llama/llama_cloud_services
 
 
-
+https://github.com/QwenLM/Qwen-Agent
+  https://qwenlm.github.io/blog/qwen-agent-2405/
+  https://github.com/QwenLM/Qwen-Agent/blob/main/examples/assistant_rag.py
+  https://github.com/QwenLM/Qwen-Agent/blob/main/examples/parallel_doc_qa.py
 
 
 

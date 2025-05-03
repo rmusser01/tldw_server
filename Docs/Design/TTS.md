@@ -23,6 +23,7 @@ https://github.com/Lex-au/Vocalis?tab=readme-ov-file
 https://huggingface.co/moonshotai/Kimi-Audio-7B-Instruct
 https://github.com/devnen/Dia-TTS-Server
 https://github.com/Lex-au/Orpheus-FastAPI
+https://github.com/MoonshotAI/Kimi-Audio
 https://huggingface.co/collections/stepfun-ai/step-audio-67b33accf45735bb21131b0b
 https://github.com/mbzuai-oryx/LLMVoX
 https://github.com/abus-aikorea/voice-pro
@@ -31,9 +32,13 @@ https://github.com/santinic/audiblez
 https://github.com/Lex-au/Vocalis
     https://www.reddit.com/r/LocalLLaMA/comments/1jy1x1b/comment/mmvm73e/
 https://pypi.org/project/pvporcupine/
+https://github.com/EvolvingLMMs-Lab/Aero-1
+https://github.com/kunwar-vikrant/aivy
+https://huggingface.co/lmms-lab/Aero-1-Audio
 https://github.com/davidbrowne17/csm-streaming
 https://github.com/senstella/csm-mlx
 https://github.com/davidbrowne17/csm-streaming
+https://docs.nvidia.com/nemo-framework/user-guide/latest/nemotoolkit/core/export.html
 https://github.com/yukiarimo/hanasu
 https://codingwithcody.com/2025/04/02/containerized-voice-identification/
 https://github.com/NullMagic2/SoftWhisper

@@ -28,6 +28,10 @@ https://mode-rag.readthedocs.io/en/latest/
 https://huggingface.co/posts/Kseniase/836565977783893
 https://github.com/nishchaljs/MobiRAG
 https://huggingface.co/PleIAs/Pleias-RAG-1B-gguf
+https://huggingface.co/PleIAs/Pleias-RAG-1B
+https://medium.com/ai-exploration-journey/how-hirag-turns-data-chaos-into-structured-knowledge-magic-ai-innovations-and-insights-35-d637b9a58d80
+https://universalrag.github.io/
+https://github.com/Terry-Xu-666/NodeRAG
 https://arxiv.org/abs/2504.13587
 https://patann.dev/
 https://substack.com/home/post/p-161922553
