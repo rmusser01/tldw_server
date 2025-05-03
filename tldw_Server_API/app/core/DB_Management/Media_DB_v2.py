@@ -631,11 +631,16 @@ CREATE TRIGGER documentversions_validate_sync_update BEFORE UPDATE ON DocumentVe
             if not in_outer: conn.commit()
         except Exception as e:
             if not in_outer:
+                # Attempt rollback only if this is the outermost transaction block
                 logging.error(f"Transaction failed, rolling back: {type(e).__name__} - {e}", exc_info=False)
-                try: conn.rollback(); logging.debug("Rollback successful.")
-                except sqlite3.Error as rb_err: logging.error(f"Rollback FAILED: {rb_err}", exc_info=True)
-            if isinstance(e, (ConflictError, InputError, DatabaseError, sqlite3.Error)): raise e
-            else: raise DatabaseError(f"Transaction failed unexpectedly: {e}") from e
+                try:
+                    conn.rollback()
+                    logging.debug("Rollback successful.")
+                except sqlite3.Error as rb_err:
+                    # Log failure but don't prevent original error propagation
+                    logging.error(f"Rollback FAILED: {rb_err}", exc_info=True)
+            # Always re-raise the original exception after attempting rollback
+            raise e
 
     # --- Schema Setup ---
     def _ensure_schema(self):
@@ -918,33 +923,68 @@ CREATE TRIGGER documentversions_validate_sync_update BEFORE UPDATE ON DocumentVe
             if "foreign key constraint failed" in str(e).lower(): logger.error(f"FK fail: Media ID {media_id} not found."); raise DatabaseError(f"Media ID {media_id} not found.") from e
             logger.error(f"DB error creating doc version for media {media_id}: {e}"); raise DatabaseError(f"Failed create doc version: {e}") from e
 
+    # FIXME - Update logic/functions that call this
     def update_keywords_for_media(self, media_id: int, keywords: List[str]):
         valid_keywords = sorted(list(set([k.strip().lower() for k in keywords if k and k.strip()])))
-        current_time = self._get_current_utc_timestamp_str(); client_id = self.client_id
+        # Remove current_time and client_id definitions if only used for Media update
         try:
             with self.transaction() as conn:
                 cursor = conn.cursor()
-                version_info = self._get_next_version(conn, "Media", "id", media_id)
-                if version_info is None: raise DatabaseError(f"Cannot update keywords: Media {media_id} not found/deleted.")
-                current_media_version, new_media_version = version_info
-                cursor.execute('SELECT k.id FROM Keywords k JOIN MediaKeywords mk ON k.id = mk.keyword_id WHERE mk.media_id = ?', (media_id,)); current_keyword_ids = {row['id'] for row in cursor.fetchall()}
+                # --- START REMOVAL ---
+                # Remove the entire block that checks Media version and prepares to update it
+                # version_info = self._get_next_version(conn, "Media", "id", media_id)
+                # if version_info is None: raise DatabaseError(...)
+                # current_media_version, new_media_version = version_info
+                # --- END REMOVAL ---
+
+                # Keep the logic to find current/target keyword IDs
+                cursor.execute(
+                    'SELECT k.id FROM Keywords k JOIN MediaKeywords mk ON k.id = mk.keyword_id WHERE mk.media_id = ?',
+                    (media_id,));
+                current_keyword_ids = {row['id'] for row in cursor.fetchall()}
                 target_keyword_ids = set()
                 if valid_keywords:
-                     for kw in valid_keywords:
-                         kw_id, _ = self.add_keyword(kw) # Handles internal meta
-                         if kw_id: target_keyword_ids.add(kw_id)
-                         else: raise DatabaseError(f"Failed get/add keyword '{kw}'")
-                ids_to_add = target_keyword_ids - current_keyword_ids; ids_to_remove = current_keyword_ids - target_keyword_ids
-                if ids_to_remove: cursor.execute(f"DELETE FROM MediaKeywords WHERE media_id = ? AND keyword_id IN ({','.join('?'*len(ids_to_remove))})", (media_id, *list(ids_to_remove)))
-                if ids_to_add: cursor.executemany("INSERT OR IGNORE INTO MediaKeywords (media_id, keyword_id) VALUES (?, ?)", [(media_id, kid) for kid in ids_to_add])
+                    for kw in valid_keywords:
+                        kw_id, _ = self.add_keyword(kw)  # Handles internal meta
+                        if kw_id:
+                            target_keyword_ids.add(kw_id)
+                        else:
+                            raise DatabaseError(f"Failed get/add keyword '{kw}'")
+                ids_to_add = target_keyword_ids - current_keyword_ids;
+                ids_to_remove = current_keyword_ids - target_keyword_ids
+
+                # Keep the logic to update MediaKeywords table
+                if ids_to_remove: cursor.execute(
+                    f"DELETE FROM MediaKeywords WHERE media_id = ? AND keyword_id IN ({','.join('?' * len(ids_to_remove))})",
+                    (media_id, *list(ids_to_remove)))
+                if ids_to_add: cursor.executemany(
+                    "INSERT OR IGNORE INTO MediaKeywords (media_id, keyword_id) VALUES (?, ?)",
+                    [(media_id, kid) for kid in ids_to_add])
+
+                # --- START REMOVAL ---
+                # Remove the entire block that updates the Media record's version
+                # if ids_to_add or ids_to_remove:
+                #      logger.debug(f"Updating parent Media {media_id} version for keyword changes.")
+                #      cursor.execute("UPDATE Media SET last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ?", ...)
+                #      if cursor.rowcount == 0: raise ConflictError("Media", media_id)
+                # else: logger.debug(f"No keyword changes for media {media_id}.")
+                # --- END REMOVAL ---
+
+                # Optionally log the keyword changes
                 if ids_to_add or ids_to_remove:
-                     logger.debug(f"Updating parent Media {media_id} version for keyword changes.")
-                     cursor.execute("UPDATE Media SET last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ?", (current_time, new_media_version, client_id, media_id, current_media_version))
-                     if cursor.rowcount == 0: raise ConflictError("Media", media_id)
-                else: logger.debug(f"No keyword changes for media {media_id}.")
+                    logger.debug(
+                        f"Updated keywords for media {media_id}. Added: {len(ids_to_add)}, Removed: {len(ids_to_remove)}.")
+                else:
+                    logger.debug(f"No keyword changes needed for media {media_id}.")
+
             return True
-        except (ConflictError, sqlite3.Error) as e: logger.error(f"Error updating keywords media {media_id}: {e}"); raise e if isinstance(e, (ConflictError, DatabaseError)) else DatabaseError(f"Keyword update failed: {e}") from e
-        except Exception as e: logger.error(f"Unexpected keywords error media {media_id}: {e}"); raise DatabaseError(f"Unexpected keyword update error: {e}") from e
+        except (ConflictError, sqlite3.Error) as e:
+            logger.error(f"Error updating keywords media {media_id}: {e}"); raise e if isinstance(e, (ConflictError,
+                                                                                                      DatabaseError)) else DatabaseError(
+                f"Keyword update failed: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected keywords error media {media_id}: {e}"); raise DatabaseError(
+                f"Unexpected keyword update error: {e}") from e
 
     def soft_delete_keyword(self, keyword: str) -> bool:
         if not keyword or not keyword.strip(): raise InputError("Keyword cannot be empty.")
