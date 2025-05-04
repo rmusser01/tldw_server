@@ -2872,20 +2872,33 @@ async def process_audios_endpoint(
     file_errors: List[Dict[str, Any]] = []
     # Initialize batch result structure
     batch_result: Dict[str, Any] = {"processed_count": 0, "errors_count": 0, "errors": [], "results": []}
+    temp_path_to_original_name: Dict[str, str] = {}
 
     # ── 1) temp dir + uploads ────────────────────────────────────────────────
     with TempDirManager(cleanup=True, prefix="process_audio_") as temp_dir:
         temp_dir_path = Path(temp_dir)
-        saved_files, file_errors = await _save_uploaded_files(files or [], temp_dir_path)
+        ALLOWED_AUDIO_EXTENSIONS = ['.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a'] # Define allowed extensions
+        saved_files, file_errors_raw = await _save_uploaded_files(
+            files or [],
+            temp_dir_path,
+            allowed_extensions=ALLOWED_AUDIO_EXTENSIONS # Pass allowed extensions
+        )
+
+        for sf in saved_files:
+            if sf.get("path") and sf.get("original_filename"):
+                temp_path_to_original_name[str(sf["path"])] = sf["original_filename"]
+            else:
+                logger.warning(f"Missing path or original_filename in saved_files_info item for audio: {sf}")
 
         # --- Adapt File Errors to Response Structure ---
         if file_errors:
             adapted_file_errors = []
             for err in file_errors:
                  # Ensure all necessary keys are present for consistency
+                 original_filename = err.get("original_filename") or err.get("input", "Unknown Upload")
                  adapted_file_errors.append({
                      "status": "Error",
-                     "input_ref": err.get("original_filename", "Unknown Upload"),
+                     "input_ref": original_filename,
                      "processing_source": err.get("input", "Unknown Filename"),
                      "media_type": "audio",
                      "metadata": {},
@@ -2911,13 +2924,12 @@ async def process_audios_endpoint(
         # Check if there are any valid inputs *after* attempting saves
         if not all_inputs:
             # If only file errors occurred, return 207, otherwise 400
-            status_code = status.HTTP_207_MULTI_STATUS if file_errors else status.HTTP_400_BAD_REQUEST
+            status_code = status.HTTP_207_MULTI_STATUS if file_errors_raw else status.HTTP_400_BAD_REQUEST
             detail = "No valid audio sources supplied (or all uploads failed)."
             logger.warning(f"Request processing stopped: {detail}")
             if status_code == status.HTTP_400_BAD_REQUEST:
                  raise HTTPException(status_code=status_code, detail=detail)
             else:
-                 # We already added adapted file errors to batch_result['results']
                  return JSONResponse(status_code=status_code, content=batch_result)
 
 
@@ -2928,7 +2940,7 @@ async def process_audios_endpoint(
             "transcription_model": form_data.transcription_model,
             "transcription_language": form_data.transcription_language,
             "perform_chunking": form_data.perform_chunking,
-            "chunk_method": form_data.chunk_method.value if form_data.chunk_method else None, # Pass enum value
+            "chunk_method": form_data.chunk_method if form_data.chunk_method else None, # Pass enum value
             "max_chunk_size": form_data.chunk_size, # Correct mapping
             "chunk_overlap": form_data.chunk_overlap,
             "use_adaptive_chunking": form_data.use_adaptive_chunking,
@@ -2963,22 +2975,35 @@ async def process_audios_endpoint(
             # Catch errors during the execution setup or within the library if it raises unexpectedly
             logging.error(f"Error executing process_audio_files: {exec_err}", exc_info=True)
             error_msg = f"Error during audio processing execution: {type(exec_err).__name__}"
-            batch_result["errors_count"] += len(all_inputs) # Assume all failed if executor errored
+            # Calculate errors based on *attempted* inputs for this batch
+            num_attempted = len(all_inputs)
+            batch_result["errors_count"] += num_attempted # Assume all failed if executor errored
             batch_result["errors"].append(error_msg)
             # Create error entries for all inputs attempted in this batch
             error_results = []
             for input_src in all_inputs:
-                original_ref = input_src
+                original_ref = temp_path_to_original_name.get(str(input_src), str(input_src))
                 if input_src in uploaded_paths:
                     for sf in saved_files:
                          if str(sf["path"]) == input_src:
                               original_ref = sf.get("original_filename", input_src)
                               break
                 error_results.append({
-                    "status": "Error", "input_ref": original_ref, "processing_source": input_src,
-                    "media_type": "audio", "error": error_msg, "db_id": None, "db_message": "Processing only endpoint.",
-                    "metadata": {}, "content": "", "segments": None, "chunks": None, "analysis": None,
-                    "analysis_details": {}, "warnings": None, "message": "Processing execution failed."
+                    "status": "Error",
+                    "input_ref": original_ref,
+                    "processing_source": input_src,
+                    "media_type": "audio",
+                    "error": error_msg,
+                    "db_id": None,
+                    "db_message": "Processing only endpoint.",
+                    "metadata": {},
+                    "content": "",
+                    "segments": None,
+                    "chunks": None,
+                    "analysis": None,
+                    "analysis_details": {},
+                    "warnings": None,
+                    "message": "Processing execution failed."
                 })
             # Combine these errors with any previous file errors
             batch_result["results"].extend(error_results)
@@ -2995,6 +3020,13 @@ async def process_audios_endpoint(
             processed_items = processing_output.get("results", [])
             adapted_processed_items = []
             for item in processed_items:
+
+                 identifier_from_lib = item.get("input_ref") or item.get("processing_source")
+                 original_ref = temp_path_to_original_name.get(str(identifier_from_lib), str(identifier_from_lib))
+                 item["input_ref"] = original_ref
+                 # Keep processing_source as what library used
+                 item["processing_source"] = identifier_from_lib or original_ref
+
                  # Ensure DB fields are set correctly and all expected fields exist
                  item["db_id"] = None
                  item["db_message"] = "Processing only endpoint."
@@ -3023,13 +3055,14 @@ async def process_audios_endpoint(
             # Handle unexpected output format from the library function more gracefully
             logging.error(f"process_audio_files returned unexpected format: Type={type(processing_output)}")
             error_msg = "Audio processing library returned invalid data."
-            batch_result["errors_count"] += len(all_inputs) # Assume all failed
+            num_attempted = len(all_inputs)
+            batch_result["errors_count"] += num_attempted
             batch_result["errors"].append(error_msg)
             # Create error results for inputs if not already present
             existing_refs = {res.get("input_ref") for res in batch_result["results"]}
             error_results = []
             for input_src in all_inputs:
-                original_ref = input_src
+                original_ref = temp_path_to_original_name.get(str(input_src), str(input_src))
                 if input_src in uploaded_paths:
                     for sf in saved_files:
                          if str(sf["path"]) == input_src:
@@ -3037,20 +3070,38 @@ async def process_audios_endpoint(
                               break
                 if original_ref not in existing_refs: # Only add errors for inputs not already covered (e.g., by file errors)
                     error_results.append({
-                        "status": "Error", "input_ref": original_ref, "processing_source": input_src,
-                        "media_type": "audio", "error": error_msg, "db_id": None, "db_message": "Processing only endpoint.",
-                        "metadata": {}, "content": "", "segments": None, "chunks": None, "analysis": None,
-                        "analysis_details": {}, "warnings": None, "message": "Invalid processing result."
+                        "status": "Error",
+                        "input_ref": original_ref,
+                        "processing_source": input_src,
+                        "media_type": "audio",
+                        "error": error_msg,
+                        "db_id": None,
+                        "db_message": "Processing only endpoint.",
+                        "metadata": {}, "content": "",
+                        "segments": None,
+                        "chunks": None,
+                        "analysis": None,
+                        "analysis_details": {},
+                        "warnings": None,
+                        "message": "Invalid processing result."
                     })
             batch_result["results"].extend(error_results)
 
     # TempDirManager cleans up the directory automatically here (unless keep_original=True passed to it)
     # ── 4) Determine Final Status Code ───────────────────────────────────────
     # Base final status on whether *any* errors occurred (file saving or processing)
-    # Check the final errors_count AFTER merging results
+    final_processed_count = sum(1 for r in batch_result["results"] if r.get("status") == "Success")
+    final_error_count = sum(1 for r in batch_result["results"] if r.get("status") == "Error")
+    batch_result["processed_count"] = final_processed_count
+    batch_result["errors_count"] = final_error_count
+    # Update errors list to avoid duplicates (optional)
+    unique_errors = list(set(str(e) for e in batch_result["errors"] if e))
+    batch_result["errors"] = unique_errors
+
     final_status_code = (
-        status.HTTP_200_OK if batch_result.get("errors_count", 0) == 0
-        else status.HTTP_207_MULTI_STATUS
+        status.HTTP_200_OK if batch_result.get("errors_count", 0) == 0 and batch_result.get("processed_count", 0) > 0
+        else status.HTTP_207_MULTI_STATUS if batch_result.get("results") # Return 207 if there are *any* results (success, warning, or error)
+        else status.HTTP_400_BAD_REQUEST # Only 400 if no inputs were ever processed (e.g., invalid initial request)
     )
 
     # --- Return Combined Results ---
@@ -4121,25 +4172,51 @@ async def _single_pdf_worker(
         return {"input": str(pdf_path), "status": "Error", "error": str(e)}
 
 def normalise_pdf_result(item: dict, original_ref: str) -> dict:
-    """Ensure every required key is present and correctly typed."""
-    item.setdefault("status", "Error")
-    item.setdefault("input_ref", original_ref)
-    item.setdefault("processing_source", original_ref)        # <‑‑ NEW
+    """Ensure every required key is present and correctly typed for PDF results."""
+    # Ensure base keys are present
+    item.setdefault("status", "Error") # Default to Error if not set
+    item["input_ref"] = original_ref   # Use the passed original ref
+    # Add processing_source if missing, default to original ref
+    item.setdefault("processing_source", original_ref)
     item.setdefault("media_type", "pdf")
 
-    # Always give the test a dict, even when there is no real metadata
+    # Ensure metadata is a dict (can be empty)
     item["metadata"] = item.get("metadata") or {}
+    if not isinstance(item["metadata"], dict):
+        logger.warning(f"Normalizing non-dict metadata for {original_ref}: {item['metadata']}")
+        item["metadata"] = {"original_metadata": item["metadata"]} # Wrap non-dict metadata
 
-    # Keys that may legitimately be empty
-    for key in ("content", "chunks", "analysis", "warnings", "error"):
-        item.setdefault(key, None)
+    # Keys that can be None
+    item.setdefault("content", None)
+    item.setdefault("chunks", None)
+    item.setdefault("analysis", None)
+    item.setdefault("warnings", None)
+    item.setdefault("error", None)
+    item.setdefault("segments", None) # Add segments default
 
-    # Always a dict
+    # Analysis details should be a dict
     item["analysis_details"] = item.get("analysis_details") or {}
+    if not isinstance(item["analysis_details"], dict):
+         logger.warning(f"Normalizing non-dict analysis_details for {original_ref}: {item['analysis_details']}")
+         item["analysis_details"] = {"original_details": item["analysis_details"]}
+
+    # Ensure keywords is a list (can be empty) - Use metadata keywords if present
+    item.setdefault("keywords", item.get("metadata", {}).get("keywords"))
+    if item["keywords"] is None:
+        item["keywords"] = []
+    elif not isinstance(item["keywords"], list):
+        logger.warning(f"Normalizing non-list keywords for {original_ref}: {item['keywords']}")
+        # Attempt to split if it's a comma-separated string, else wrap in list
+        if isinstance(item["keywords"], str):
+            item["keywords"] = [k.strip() for k in item["keywords"].split(',') if k.strip()]
+        else:
+            item["keywords"] = [str(item["keywords"])]
+
 
     # No persistence on this endpoint
     item["db_id"] = None
     item["db_message"] = "Processing only endpoint."
+
     return item
 
 # ───────────────────────────── endpoint ──────────────────────────────────────
@@ -4160,6 +4237,7 @@ async def process_pdfs_endpoint(
 ):
     """Process PDFs (No Persistence)"""
     logger.info("Request received for /process-pdfs (no persistence).")
+    ALLOWED_PDF_EXTENSIONS = ['.pdf']
     _validate_inputs("pdf", form_data.urls, files)
 
     batch_result: Dict[str, Any] = {
@@ -4174,38 +4252,48 @@ async def process_pdfs_endpoint(
 
     # We need bytes for process_pdf_task, so handle uploads/downloads differently
     pdf_inputs_to_process: List[Tuple[str, bytes]] = [] # (original_ref, file_bytes)
+    # Let's store tasks along with their original refs
+    tasks_with_refs: List[Tuple[str, asyncio.Task]] = []
     source_to_ref_map = {} # original_ref -> temp_path (if created) or URL
     file_errors = []
+    file_errors_encountered = False # Track if any file/download errors happened
 
     with temp_dir_manager as temp_dir: # Temp dir needed only if downloading URLs first
         # Handle Uploads (read bytes directly)
         if files:
-             for file in files:
-                 original_ref = file.filename or f"upload_{uuid.uuid4()}"
-                 try:
-                     file_bytes = await file.read()
-                     pdf_inputs_to_process.append((original_ref, file_bytes))
-                     # No need to store path map for uploads if using bytes
-                 except Exception as read_err:
-                     logger.error(f"Failed to read uploaded file {original_ref}: {read_err}")
-                     # --- Add upload errors to batch_result ---
-                     error_detail = f"Failed to read file: {read_err}"
-                     batch_result["results"].append({
-                         "status": "Error",
-                         "input_ref": original_ref,
-                         "error": error_detail,
-                         "media_type": "pdf",
-                         "db_id": None,
-                         "db_message": "Processing only endpoint.",
-                         # Add other default fields if your test checks for them
-                         "metadata": None, "content": None, "chunks": None,
-                         "analysis": None, "keywords": None, "warnings": None,
-                         "analysis_details": {}
-                     })
-                     batch_result["errors_count"] += 1
-                     batch_result["errors"].append(error_detail)
-                     # --- f ---
+            saved_files, upload_errors = await _save_uploaded_files(
+                files,
+                Path(temp_dir),  # Need Path object
+                allowed_extensions=ALLOWED_PDF_EXTENSIONS
+            )
 
+            for err_info in upload_errors:
+                file_errors_encountered = True
+                original_filename = err_info.get("original_filename") or err_info.get("input", "Unknown Upload")
+                error_detail = f"Upload error: {err_info['error']}"
+                # Add formatted error to results
+                batch_result["results"].append(normalise_pdf_result({
+                    "status": "Error", "error": error_detail, "processing_source": original_filename
+                }, original_ref=original_filename))  # Use normalise for consistency
+                batch_result["errors_count"] += 1
+                batch_result["errors"].append(f"{original_filename}: {error_detail}")
+
+            # Now read bytes for successfully saved files
+            for info in saved_files:
+                original_ref = info["original_filename"]
+                local_path = Path(info["path"])
+                try:
+                    file_bytes = local_path.read_bytes()
+                    pdf_inputs_to_process.append((original_ref, file_bytes))
+                except Exception as read_err:
+                    logger.error(f"Failed to read prepared PDF file {original_ref} from {local_path}: {read_err}")
+                    file_errors_encountered = True
+                    error_detail = f"Failed to read prepared file: {read_err}"
+                    batch_result["results"].append(normalise_pdf_result({
+                        "status": "Error", "error": error_detail, "processing_source": original_ref
+                    }, original_ref=original_ref))
+                    batch_result["errors_count"] += 1
+                    batch_result["errors"].append(f"{original_ref}: {error_detail}")
 
         # Handle URLs (download bytes)
         if form_data.urls:
@@ -4221,9 +4309,14 @@ async def process_pdfs_endpoint(
                      if isinstance(res, httpx.Response):
                          try:
                              res.raise_for_status()
-                             file_bytes = res.content
-                             pdf_inputs_to_process.append((url, file_bytes))
-                             source_to_ref_map[url] = url # Map URL to itself
+                             content_type = res.headers.get('content-type', '').lower()
+                             # Basic check for PDF content type or .pdf extension in final URL
+                             final_url_path = Path(str(res.url)).name # Get filename from final redirected URL
+                             if 'application/pdf' in content_type or final_url_path.endswith('.pdf'):
+                                 file_bytes = res.content
+                                 pdf_inputs_to_process.append((url, file_bytes)) # Use original URL as ref
+                             else:
+                                 raise ValueError(f"Downloaded content from {url} is not a PDF (Content-Type: {content_type}, Final URL: {res.url})")
                          except httpx.HTTPStatusError as status_err:
                              logger.error(f"HTTP error downloading {url}: {status_err}")
                              error_detail = f"Download failed (HTTP {status_err.response.status_code})"
@@ -4287,8 +4380,9 @@ async def process_pdfs_endpoint(
              }
              logger.debug(
                  f"ENDPOINT: #2 Passing to task -> api_name='{form_data.api_name}', api_key='{form_data.api_key}'")
-             tasks.append(
-                 process_pdf_task( # Call the async task directly
+             # Create the async task
+             task = asyncio.create_task(
+                 process_pdf_task(
                      file_bytes=file_bytes,
                      filename=original_ref, # Use original ref as filename hint
                      parser=str(form_data.pdf_parsing_engine) or "pymupdf4llm",
@@ -4309,76 +4403,76 @@ async def process_pdfs_endpoint(
                      summarize_recursively=form_data.summarize_recursively,
                  )
              )
+             tasks_with_refs.append((original_ref, task))
 
         # Gather results from processing tasks
-        processing_results = await asyncio.gather(*tasks) # Exceptions are returned by gather
+        gathered_results = await asyncio.gather(*[task for _, task in tasks_with_refs], return_exceptions=True)
 
         # Add processing results, ensuring no DB fields
-        for res in processing_results:
+        for i, (original_ref, _) in enumerate(tasks_with_refs):
+            res = gathered_results[i]  # Get corresponding result/exception
+
             if isinstance(res, dict):
-                res["db_id"] = None
-                res["db_message"] = "Processing only endpoint."
-                # Ensure basic fields exist even if task errored internally
-                res.setdefault("status", "Error") # Default if missing
-                res.setdefault("input_ref", "Unknown") # Default if missing
-                res.setdefault("media_type", "pdf")
-                res.setdefault("error", None)
-                res.setdefault("warnings", None)
-                res.setdefault("metadata", None)
-                res.setdefault("content", None)
-                res.setdefault("chunks", None)
-                res.setdefault("analysis", None)
-                res.setdefault("keywords", None)
-                res.setdefault("analysis_details", {})
+                # Normalize the result dictionary using the correct original_ref
+                normalized_res = normalise_pdf_result(res, original_ref=original_ref)
+                batch_result["results"].append(normalized_res)
 
-                batch_result["results"].append(
-                    normalise_pdf_result(res, original_ref=res.get("input_ref", "Unknown"))
-                ) # Add to results list
+                # Update counts based on normalized status
+                if normalized_res["status"] in ["Success", "Warning"]:
+                    batch_result["processed_count"] += 1
+                    if normalized_res["status"] == "Warning" and normalized_res.get("warnings"):
+                        for warn in normalized_res["warnings"]:
+                            batch_result["errors"].append(f"{original_ref}: [Warning] {warn}")
+                else:  # Status is Error
+                    batch_result["errors_count"] += 1
+                    error_msg = f"{original_ref}: {normalized_res.get('error', 'Unknown processing error')}"
+                    if error_msg not in batch_result["errors"]:
+                        batch_result["errors"].append(error_msg)
 
-                # Update counts based on status
-                if res["status"] == "Success" or res["status"] == "Warning":
-                     batch_result["processed_count"] += 1
-                     # Optionally add warnings to the main errors list or keep separate?
-                     # if res["status"] == "Warning" and res.get("warnings"):
-                     #     batch_result["errors"].extend(res["warnings"]) # Or handle warnings differently
-                else: # Status is Error
-                     batch_result["errors_count"] += 1
-                     if res.get("error"):
-                         batch_result["errors"].append(f"{res.get('input_ref', 'Unknown')}: {res['error']}")
-                     else:
-                         batch_result["errors"].append(f"{res.get('input_ref', 'Unknown')}: Unknown processing error")
-
-            else: # Should not happen if task wrapper catches errors, but handle defensively
-                 logger.error(f"Received unexpected result type from PDF worker: {type(res)}")
-                 error_detail = "Invalid result from PDF worker."
-                 batch_result["results"].append({
-                     "status": "Error", "input_ref": "Unknown Task", "error": error_detail,
-                     "media_type": "pdf", "db_id": None, "db_message": "Processing only endpoint.",
-                     "metadata": None, "content": None, "chunks": None,
-                     "analysis": None, "keywords": None, "warnings": None,
-                     "analysis_details": {},
-                     "processing_source": original_ref,
-                 })
-                 batch_result["errors_count"] += 1
-                 batch_result["errors"].append(error_detail)
-        # --- END MODIFICATION ---
+            elif isinstance(res, Exception):  # Handle exceptions returned by gather
+                logger.error(f"PDF processing task for {original_ref} failed with exception: {res}", exc_info=res)
+                error_detail = f"Task execution failed: {type(res).__name__}: {str(res)}"
+                # Normalize the error result
+                normalized_err = normalise_pdf_result({
+                    "status": "Error", "error": error_detail, "processing_source": original_ref
+                }, original_ref=original_ref)
+                batch_result["results"].append(normalized_err)
+                batch_result["errors_count"] += 1
+                error_msg = f"{original_ref}: {error_detail}"
+                if error_msg not in batch_result["errors"]:
+                    batch_result["errors"].append(error_msg)
+            else:  # Should not happen
+                logger.error(f"Received unexpected result type from PDF worker task for {original_ref}: {type(res)}")
+                error_detail = "Invalid result type from PDF worker."
+                normalized_err = normalise_pdf_result({
+                    "status": "Error", "error": error_detail, "processing_source": original_ref
+                }, original_ref=original_ref)
+                batch_result["results"].append(normalized_err)
+                batch_result["errors_count"] += 1
+                error_msg = f"{original_ref}: {error_detail}"
+                if error_msg not in batch_result["errors"]:
+                    batch_result["errors"].append(error_msg)
 
     # --- Determine Final Status Code & Return ---
-    # --- MODIFICATION: Use batch_result counts to determine status ---
+    final_processed_count = sum(1 for r in batch_result["results"] if r.get("status") == "Success")
+    final_error_count = sum(1 for r in batch_result["results"] if r.get("status") == "Error")
+    batch_result["processed_count"] = final_processed_count
+    batch_result["errors_count"] = final_error_count
+    # Update errors list to avoid duplicates (optional)
+    unique_errors = list(set(str(e) for e in batch_result["errors"] if e))
+    batch_result["errors"] = unique_errors
+
     if batch_result["errors_count"] == 0 and batch_result["processed_count"] > 0:
         final_status_code = status.HTTP_200_OK
-    elif batch_result["errors_count"] > 0 and batch_result["processed_count"] > 0:
+    elif batch_result.get("results"): # Any result (success, warning, error) -> 207
         final_status_code = status.HTTP_207_MULTI_STATUS
-    elif batch_result["errors_count"] > 0 and batch_result["processed_count"] == 0:
-         # All inputs resulted in an error (either download/read or processing)
-         # Could argue for 400 if it was *input* validation, but 207 reflects partial *processing attempts*
-         final_status_code = status.HTTP_207_MULTI_STATUS
-    else: # No errors, no processed items (e.g., empty input list initially handled) - likely 400
-        final_status_code = status.HTTP_400_BAD_REQUEST # Or revert to initial check's status
+    else: # No results -> likely means no valid input provided
+        final_status_code = status.HTTP_400_BAD_REQUEST
 
-    logger.log("INFO" if final_status_code == status.HTTP_200_OK else "WARNING",
+    log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
+    logger.log(log_level,
                f"/process-pdfs request finished with status {final_status_code}. "
-               f"Processed: {batch_result['processed_count']}, Errors: {batch_result['errors_count']}")
+               f"Results: {len(batch_result['results'])}, Processed: {batch_result['processed_count']}, Errors: {batch_result['errors_count']}")
 
     return JSONResponse(status_code=final_status_code, content=batch_result)
 

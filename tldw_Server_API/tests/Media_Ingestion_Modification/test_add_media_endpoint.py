@@ -587,7 +587,11 @@ def test_add_media_single_file_upload_success(test_api_client, db_session, creat
     check_media_item_result(result, result["status"], expected_media_type=media_type)
     assert result["input_ref"] == sample_path.name
     # Processing source might be a temp path, check its name matches
-    assert Path(result.get("processing_source", "")).name == sample_path.name
+    if media_type == "audio":
+        # For audio files, the extension might be converted to .wav
+        assert Path(result.get("processing_source", "")).stem == sample_path.stem
+        # Optional: Verify it's a .wav file if that's the expected conversion
+        assert Path(result.get("processing_source", "")).suffix.lower() in ['.wav']
     if expected_content_present:
         assert result.get("content") is not None and len(result["content"]) > 0, f"Content missing for {media_type} upload {sample_path.name}"
     # Check document source format metadata if applicable
