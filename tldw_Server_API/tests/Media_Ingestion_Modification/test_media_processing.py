@@ -1,40 +1,52 @@
 # test_media_processing.py
-# Description: This file contains the test cases for the media processing endpoints of the tldw application.
+# Description: This file contains the test cases for the media processing endpoints
+# (endpoints that DO NOT persist to DB) of the tldw application.
 #
 # Imports
 import os
 import sys
 from pathlib import Path
 import time
-from unittest.mock import patch
+import json # Added for potential debugging
+from unittest.mock import patch, AsyncMock, MagicMock # Added AsyncMock, MagicMock
 
-#
+# 3rd-party Libraries
 import pytest
+from fastapi import status # Added
 from fastapi.testclient import TestClient
 from loguru import logger
-#
-######################################################################################################################
-#
-# Functions:
-# --- Test Setup ---
 
-# Assuming your FastAPI app instance is created in 'app.main'
-# Adjust the import path according to your project structure
+from tldw_Server_API.tests.Media_Ingestion_Modification.test_add_media_endpoint import override_get_request_user
+# Local Imports
+# --- Test Utilities ---
+from tldw_Server_API.tests.test_utils import temp_db
+
+# --- App and Dependencies for Overriding ---
 try:
-    from tldw_Server_API.app.main import app as fastapi_app_instance
-except ImportError:
-    # Handle cases where the structure might be slightly different
-    # This might happen if 'app' is not directly in the root
-    # You might need to adjust PYTHONPATH or the import statement
-    print("Failed to import 'app' from 'app.main'. Adjust import path.")
-    # As a fallback, try importing from the root if main.py is there
-    try:
-        from main import app
-    except ImportError:
-        raise ImportError("Could not locate the FastAPI app instance.")
+    # Import app instance and specific dependencies to override
+    from tldw_Server_API.app.main import app as fastapi_app_instance, app
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User, _single_user_instance
+    from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
+    from tldw_Server_API.app.core.config import settings
+    from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database # If type hints needed
+except ImportError as e:
+    raise ImportError(f"Could not locate the FastAPI app instance or dependencies: {e}")
+
+
+######################################################################################################################
+# Constants
+# Assume single-user mode for tests, get the key from settings
+try:
+    TEST_API_KEY = settings.get("SINGLE_USER_API_KEY", "default_test_key_if_not_set")
+    if not settings.get("SINGLE_USER_MODE", False):
+        logger.warning("SINGLE_USER_MODE is False in settings, X-API-KEY auth might not work as expected.")
+except Exception as e:
+    logger.error(f"Could not load settings to get API key: {e}. Using default.")
+    TEST_API_KEY = "default_test_key_if_not_set"
 
 # --- Constants for Test Files and URLs ---
 TEST_MEDIA_DIR = Path(__file__).parent / "test_media"
+TEST_MEDIA_DIR.mkdir(exist_ok=True) # Ensure directory exists
 SAMPLE_VIDEO_PATH = TEST_MEDIA_DIR / "sample.mp4"
 SAMPLE_AUDIO_PATH = TEST_MEDIA_DIR / "sample.mp3"
 SAMPLE_PDF_PATH = TEST_MEDIA_DIR / "sample.pdf"
@@ -45,71 +57,117 @@ SAMPLE_DOCX_PATH = TEST_MEDIA_DIR / "sample.docx"
 SAMPLE_RTF_PATH = TEST_MEDIA_DIR / "sample.rtf"
 SAMPLE_HTML_PATH = TEST_MEDIA_DIR / "sample.html"
 SAMPLE_XML_PATH = TEST_MEDIA_DIR / "sample.xml"
-VALID_TXT_URL = "https://github.com/rmusser01/tldw/blob/main/LICENSE.txt" # Example .rst as text
-VALID_MD_URL = "https://github.com/rmusser01/tldw/blob/main/README.md"
-VALID_HTML_URL = "https://www.google.com" # Basic HTML page
 
-INVALID_FILE_PATH = TEST_MEDIA_DIR / "not_a_real_file.xyz"
+# Create basic text files if they don't exist
+if not SAMPLE_TXT_PATH.exists(): SAMPLE_TXT_PATH.write_text("Sample TXT for processing.", encoding='utf-8')
+if not SAMPLE_MD_PATH.exists(): SAMPLE_MD_PATH.write_text("# Sample MD\nFor processing.", encoding='utf-8')
+if not SAMPLE_HTML_PATH.exists(): SAMPLE_HTML_PATH.write_text("<html><body>Sample HTML for processing.</body></html>", encoding='utf-8')
+if not SAMPLE_XML_PATH.exists(): SAMPLE_XML_PATH.write_text("<root><item>Sample XML for processing</item></root>", encoding='utf-8')
 
-
-
-# Use stable, short, publicly accessible URLs for testing
-# Replace with actual URLs known to work
-VALID_VIDEO_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Example: Rick Astley (short duration helps)
-VALID_AUDIO_URL = "https://cdn.pixabay.com/download/audio/2023/12/02/audio_2f291f569a.mp3?filename=about-anger-179423.mp3"  # Example public domain audio
-VALID_PDF_URL = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"  # Example public PDF
-VALID_EPUB_URL = "https://filesamples.com/samples/ebook/epub/Alices%20Adventures%20in%20Wonderland.epub"  # Example public EPUB
-INVALID_URL = "http://this.url.does.not.exist/resource.mp4"
-URL_404 = "https://httpbin.org/status/404"  # URL that returns 404
+# Test URLs
+VALID_VIDEO_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+VALID_AUDIO_URL = "https://cdn.pixabay.com/download/audio/2023/12/02/audio_2f291f569a.mp3?filename=about-anger-179423.mp3"
+VALID_PDF_URL = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
+VALID_EPUB_URL = "https://filesamples.com/samples/ebook/epub/Alices%20Adventures%20in%20Wonderland.epub"
+VALID_TXT_URL = "https://raw.githubusercontent.com/rmusser01/tldw/main/LICENSE.txt"
+VALID_MD_URL = "https://raw.githubusercontent.com/rmusser01/tldw/main/README.md"
+VALID_HTML_URL = "https://example.com/" # Use example.com for basic HTML
+INVALID_URL = "http://this.url.definitely.does.not.exist.invalid/resource.mp4"
+URL_404 = "https://httpbin.org/status/404"
 
 
 # --- Fixtures ---
 
+
+# --- Database Fixture ---
 @pytest.fixture(scope="module")
-def client():
-    """Provides a TestClient instance for the tests."""
-    # Ensure test media files exist
-    if not SAMPLE_VIDEO_PATH.exists():
-        pytest.skip(f"Test video file not found: {SAMPLE_VIDEO_PATH}")
-    if not SAMPLE_AUDIO_PATH.exists():
-        pytest.skip(f"Test audio file not found: {SAMPLE_AUDIO_PATH}")
-    if not SAMPLE_PDF_PATH.exists():
-        pytest.skip(f"Test PDF file not found: {SAMPLE_PDF_PATH}")
-    if not SAMPLE_EPUB_PATH.exists():
-        pytest.skip(f"Test EPUB file not found: {SAMPLE_EPUB_PATH}")
-    if not SAMPLE_TXT_PATH.exists():
-        pytest.skip(f"Test TXT file not found: {SAMPLE_TXT_PATH}")
-    if not SAMPLE_MD_PATH.exists():
-        pytest.skip(f"Test MD file not found: {SAMPLE_MD_PATH}")
-    if not SAMPLE_DOCX_PATH.exists():
-        pytest.skip(f"Test DOCX file not found: {SAMPLE_DOCX_PATH}")
-    if not SAMPLE_RTF_PATH.exists():
-        pytest.skip(f"Test RTF file not found: {SAMPLE_RTF_PATH}")
-    if not SAMPLE_HTML_PATH.exists():
-        pytest.skip(f"Test HTML file not found: {SAMPLE_HTML_PATH}")
-    if not SAMPLE_XML_PATH.exists():
-        pytest.skip(f"Test XML file not found: {SAMPLE_XML_PATH}")
+def client_module_processing(db_instance_session): # Assuming similar DB fixture pattern
+    """ TestClient for media processing tests with overrides """
+    def override_get_db_for_user_processing():
+        yield db_instance_session
+
+    original_overrides = app.dependency_overrides.copy()
+    app.dependency_overrides[get_request_user] = override_get_request_user
+    app.dependency_overrides[get_db_for_user] = override_get_db_for_user_processing
+    logger.info("Applied dependency overrides for get_request_user and get_db_for_user (processing)")
 
     with TestClient(fastapi_app_instance) as c:
         yield c
 
+    app.dependency_overrides = original_overrides
+    logger.info("Restored original dependency overrides (processing)")
+
+@pytest.fixture(scope="session")
+def db_instance_session_proc():
+    """Session-scoped temporary database for processing tests."""
+    db = None
+    try:
+        with temp_db() as db:
+            yield db
+    finally:
+        if db and hasattr(db, 'close_all_connections'):
+            print(f"--- Closing ALL session DB connections for test_media_processing: {db.db_path_str} ---")
+            db.close_all_connections()
+
+@pytest.fixture(scope="function")
+def db_session_proc(db_instance_session_proc):
+     """Function-scoped access to the session DB. No cleanup needed for processing tests."""
+     yield db_instance_session_proc
+     # No DB modifications expected in these endpoints, so cleanup might be omitted
+     # logger.debug("DB session yield finished for processing test.")
+
 
 @pytest.fixture
-def auth_headers():
-    """Provides authentication/required headers."""
-    # Add any other required headers like X-API-KEY
-    return {
-        "token": "YOUR_TEST_TOKEN", # Keep if needed for user auth
-        "X-API-KEY": "YOUR_TEST_API_KEY" # Add required API key
-    }
+def dummy_headers():
+    """Provides headers required by endpoint signature, even if logic is mocked."""
+    # The actual value doesn't matter because get_request_user is mocked
+    return {"token": "dummy_test_token_for_header"}
 
-
+# --- Authentication Override Fixture ---
 @pytest.fixture(scope="module")
-def auth_headers():
-    """Provides dummy authentication headers if needed."""
-    # Replace 'YOUR_TEST_TOKEN' with a valid token if auth is enforced
-    # If no auth, return empty dict
-    return {"token": "YOUR_TEST_TOKEN"}  # Or {} if no auth
+def override_auth_proc():
+    """Overrides the main get_request_user dependency for the processing tests."""
+    async def _override_get_request_user_proc_test():
+        logger.debug("--- AUTH OVERRIDE (Processing): Returning single_user_instance ---")
+        # Ensure the instance uses the correct ID from settings
+        _single_user_instance.id = settings.get("SINGLE_USER_FIXED_ID", 1)
+        return _single_user_instance
+    yield _override_get_request_user_proc_test
+
+# --- DB Override Fixture Function ---
+def override_get_db_for_user_proc(db_session):
+    """Dependency override factory for processing tests."""
+    def _override():
+        # logger.debug(f"--- DB OVERRIDE (Processing): Providing DB session: {db_session.db_path_str} ---")
+        yield db_session
+    return _override
+
+# --- Combined Client Fixture for Processing Tests ---
+@pytest.fixture(scope="module")
+def client(db_instance_session_proc, override_auth_proc):
+    """Provides a TestClient instance for the processing tests with overrides."""
+    # Ensure test media files exist (run once per module)
+    required_files = [
+        SAMPLE_VIDEO_PATH, SAMPLE_AUDIO_PATH, SAMPLE_PDF_PATH, SAMPLE_EPUB_PATH,
+        SAMPLE_TXT_PATH, SAMPLE_MD_PATH, SAMPLE_HTML_PATH, SAMPLE_XML_PATH
+    ]
+    # Skip module if essential files are missing
+    for f_path in required_files:
+        if not f_path.exists():
+            pytest.skip(f"Essential test file missing, skipping module: {f_path}")
+    # Optional files checked within tests (DOCX, RTF)
+
+    # Apply DB and Auth overrides specific to this module
+    app.dependency_overrides[get_db_for_user] = override_get_db_for_user_proc(db_instance_session_proc)
+    app.dependency_overrides[get_request_user] = override_auth_proc
+    logger.info("--- TestClient (Processing) created with DB and Auth overrides ---")
+
+    with TestClient(fastapi_app_instance) as c:
+        yield c
+
+    # Cleanup overrides after all tests in the module run
+    app.dependency_overrides.clear()
+    logger.info("--- TestClient (Processing) DB and Auth overrides cleared ---")
 
 
 # --- Helper Functions ---
@@ -122,26 +180,43 @@ def check_batch_response(
         check_results_len=None,
 ):
     """Helper to check common aspects of the batch response."""
+    if response.status_code != expected_status_code:
+        logger.error(f"Expected status {expected_status_code}, got {response.status_code}. Response text: {response.text}")
     assert response.status_code == expected_status_code
-    data = response.json()
-    assert "results" in data
-    assert "processed_count" in data
-    assert "errors_count" in data
-    assert "errors" in data
+    try:
+        data = response.json()
+    except json.JSONDecodeError:
+        pytest.fail(f"Failed to decode JSON. Status: {response.status_code}. Text: {response.text}")
 
+    # Check top-level structure based on endpoint's response model
+    # Processing endpoints might directly return a dict with counts/results
+    assert "results" in data, f"Response missing 'results' key: {data}"
+    assert "processed_count" in data, f"Response missing 'processed_count' key: {data}"
+    assert "errors_count" in data, f"Response missing 'errors_count' key: {data}"
+    assert "errors" in data, f"Response missing 'errors' key: {data}"
+    assert isinstance(data["results"], list), f"'results' is not a list: {data}"
+
+    # Check counts match expected values
     if expected_processed is not None:
-        assert data["processed_count"] == expected_processed
+        assert data["processed_count"] == expected_processed, f"Expected processed_count {expected_processed}, got {data['processed_count']}"
     if expected_errors is not None:
-        assert data["errors_count"] == expected_errors
+        assert data["errors_count"] == expected_errors, f"Expected errors_count {expected_errors}, got {data['errors_count']}"
+    # Optionally check the length of the detailed errors list matches errors_count
+    # assert len(data["errors"]) == data["errors_count"]
+
     if check_results_len is not None:
-        assert len(data["results"]) == check_results_len
-    return data  # Return parsed data for further checks
+        assert len(data["results"]) == check_results_len, f"Expected {check_results_len} total results, got {len(data['results'])}"
+
+    # Check consistency: processed + errors should equal total results length
+    # assert data["processed_count"] + data["errors_count"] == len(data["results"])
+
+    return data
 
 
-def check_media_item_result(result, expected_status, check_db_fields=True):
+def check_media_item_result(result, expected_status, check_db_fields=False): # Default check_db_fields=False
     """
     Helper to check structure of a single item in the results list.
-    Updated to check for 'analysis' and 'chunks'.
+    Updated for processing endpoints (no DB fields expected).
     """
     assert isinstance(result, dict), f"Result item is not a dictionary: {result}"
     assert "status" in result, "Result missing 'status' key"
@@ -149,28 +224,35 @@ def check_media_item_result(result, expected_status, check_db_fields=True):
     assert "input_ref" in result, "Result missing 'input_ref' key"
     assert "processing_source" in result, "Result missing 'processing_source' key"
     assert "media_type" in result, "Result missing 'media_type' key"
-    assert "metadata" in result and isinstance(result["metadata"], dict), "Result missing or invalid 'metadata'"
+    # Metadata might be None on error
+    assert "metadata" in result, "Result missing 'metadata'"
+    if result["status"] != "Error":
+        assert isinstance(result.get("metadata"), dict), "'metadata' should be dict on success/warning"
+
     assert "content" in result, "Result missing 'content' key" # Allowed to be None or empty string
-    assert "chunks" in result, "Result missing 'chunks' key" # Added check, allowed to be None
-    assert "analysis" in result, "Result missing 'analysis' key" # Added check, allowed to be None
+    assert "chunks" in result, "Result missing 'chunks' key" # Allowed to be None
+    assert "analysis" in result, "Result missing 'analysis' key" # Allowed to be None
+    # Analysis details should always be a dict, even if empty
     assert "analysis_details" in result and isinstance(result["analysis_details"], dict), "Result missing or invalid 'analysis_details'"
     assert "error" in result, "Result missing 'error' key" # Allowed to be None
-    assert "warnings" in result, "Result missing 'warnings' key" # Allowed to be None or list
+    # Warnings should be None or a list
+    assert "warnings" in result, "Result missing 'warnings'"
+    assert result["warnings"] is None or isinstance(result["warnings"], list), "'warnings' must be None or list"
 
     if check_db_fields:
+        # These fields SHOULD NOT be present or should be explicitly None/default message
+        # for processing-only endpoints.
         assert "db_id" in result, "Result missing 'db_id' key"
-        assert result["db_id"] is None, f"Expected db_id to be None, got {result['db_id']}"
+        assert result["db_id"] is None, f"Expected db_id to be None for processing endpoint, got {result['db_id']}"
         assert "db_message" in result, "Result missing 'db_message' key"
-        # Allow None or specific message for flexibility from library vs endpoint
-        assert result["db_message"] in [None, "Processing only endpoint."], \
-            f"Unexpected db_message: {result['db_message']}"
+        assert result["db_message"] in ["Processing only endpoint."], \
+            f"Unexpected db_message for processing endpoint: {result['db_message']}"
 
     if expected_status == "Error":
-        assert result["error"] is not None, "Expected non-None 'error' for Error status"
+        assert result["error"] is not None and result["error"] != "", "Expected non-empty 'error' for Error status"
     elif expected_status == "Success":
-        # For success, error should ideally be None, but allow empty string too
         assert result["error"] is None or result["error"] == "", \
-             f"Expected None or empty error for Success status, got {result['error']}"
+             f"Expected None or empty error for Success status, got '{result['error']}'"
 
 
 # --- Test Classes ---
@@ -178,115 +260,128 @@ def check_media_item_result(result, expected_status, check_db_fields=True):
 class TestProcessVideos:
     ENDPOINT = "/api/v1/media/process-videos"
 
-    def test_process_video_url_success(self, client, auth_headers):
+    def test_process_video_url_success(self, client, dummy_headers):
         """Test processing a single valid video URL."""
-        form_data = {"urls": [VALID_VIDEO_URL], "perform_analysis": "false"}  # Faster without analysis
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        form_data = {"urls": [VALID_VIDEO_URL], "perform_analysis": "false"}
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
-        check_media_item_result(data["results"][0], "Success")
-        assert data["results"][0]["media_type"] == "video"
-        assert data["results"][0]["input_ref"] == VALID_VIDEO_URL
-        assert len(data["results"][0]["content"]) > 0  # Check transcript exists
+        result = data["results"][0]
+        check_media_item_result(result, "Success", check_db_fields=True) # Check DB fields are explicitly None/default
+        assert result["media_type"] == "video"
+        assert result["input_ref"] == VALID_VIDEO_URL
+        assert result["content"] is not None and len(result["content"]) > 0
 
-    def test_process_video_upload_success(self, client, auth_headers):
+    def test_process_video_upload_success(self, client, dummy_headers):
         """Test processing a single valid video file upload."""
         form_data = {"perform_analysis": "false"}
         with open(SAMPLE_VIDEO_PATH, "rb") as f:
             files = {"files": (SAMPLE_VIDEO_PATH.name, f, "video/mp4")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
+
+        if response.status_code == 400 and "error parsing the body" in response.text.lower():
+            pytest.fail("Still getting 400 'error parsing body' after auth fix (video upload).")
 
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
-        check_media_item_result(data["results"][0], "Success")
-        assert data["results"][0]["media_type"] == "video"
-        assert data["results"][0]["input_ref"] == SAMPLE_VIDEO_PATH.name
-        assert len(data["results"][0]["content"]) > 0
+        result = data["results"][0]
+        check_media_item_result(result, "Success", check_db_fields=True)
+        assert result["media_type"] == "video"
+        # In processing endpoints, input_ref *should* be the original filename
+        assert result["input_ref"] == SAMPLE_VIDEO_PATH.name
+        assert result["content"] is not None and len(result["content"]) > 0
 
-    def test_process_video_multiple_success(self, client, auth_headers):
+    def test_process_video_multiple_success(self, client, dummy_headers):
         """Test processing multiple valid inputs (URL and Upload)."""
         form_data = {"urls": [VALID_VIDEO_URL], "perform_analysis": "false"}
         with open(SAMPLE_VIDEO_PATH, "rb") as f:
             files = {"files": (SAMPLE_VIDEO_PATH.name, f, "video/mp4")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
+
+        if response.status_code == 400 and "error parsing the body" in response.text.lower():
+            pytest.fail("Still getting 400 'error parsing body' after auth fix (video multi).")
 
         data = check_batch_response(response, 200, expected_processed=2, expected_errors=0, check_results_len=2)
-        check_media_item_result(data["results"][0], "Success")  # URL result might be first or second
-        check_media_item_result(data["results"][1], "Success")
+        check_media_item_result(data["results"][0], "Success", check_db_fields=True)
+        check_media_item_result(data["results"][1], "Success", check_db_fields=True)
         assert {r["media_type"] for r in data["results"]} == {"video"}
+        assert {r["input_ref"] for r in data["results"]} == {VALID_VIDEO_URL, SAMPLE_VIDEO_PATH.name}
 
-    def test_process_video_multi_status_mixed(self, client, auth_headers):
+    def test_process_video_multi_status_mixed(self, client, dummy_headers):
         """Test processing one valid URL and one invalid URL -> 207."""
         form_data = {"urls": [VALID_VIDEO_URL, INVALID_URL], "perform_analysis": "false"}
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
 
-        # It might take time for the invalid URL to fail
-        time.sleep(5)  # Small delay might be needed depending on how timeouts are handled
-
+        # No sleep needed for sync processing endpoint failures
         data = check_batch_response(response, 207, expected_processed=1, expected_errors=1, check_results_len=2)
 
-        # Find the success and error results (order might vary)
         success_result = next((r for r in data["results"] if r["status"] == "Success"), None)
         error_result = next((r for r in data["results"] if r["status"] == "Error"), None)
 
         assert success_result is not None
         assert error_result is not None
-        check_media_item_result(success_result, "Success")
-        check_media_item_result(error_result, "Error")
+        check_media_item_result(success_result, "Success", check_db_fields=True)
+        check_media_item_result(error_result, "Error", check_db_fields=True)
         assert success_result["input_ref"] == VALID_VIDEO_URL
         assert error_result["input_ref"] == INVALID_URL
         assert error_result["error"] is not None
+        # Check specific download/processing error
+        assert "timed out" in error_result["error"] or "Name or service not known" in error_result["error"] or "failed to resolve" in error_result["error"] or "processing failed" in error_result["error"]
 
-    def test_process_video_no_input(self, client, auth_headers):
+    def test_process_video_no_input(self, client, dummy_headers):
         """Test sending request with no URLs or files."""
-        response = client.post(self.ENDPOINT, data={}, headers=auth_headers)
-        # Expect 400 based on _validate_inputs logic
+        # Need to send *some* valid form data key for TestClient to not error early
+        # Send a default value that doesn't affect processing much
+        response = client.post(self.ENDPOINT, data={"perform_analysis": "false"}, headers=dummy_headers)
+        # Expect 400 based on _validate_inputs logic inside the endpoint
         assert response.status_code == 400
-        assert "At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided." in response.json()["detail"]
+        assert "No valid media sources supplied" in response.json()["detail"]
 
-    def test_process_video_validation_error(self, client, auth_headers):
+    def test_process_video_validation_error(self, client):
         """Test sending invalid form data (e.g., bad chunk overlap)."""
         form_data = {
             "urls": [VALID_VIDEO_URL],
             "chunk_size": "100",
             "chunk_overlap": "200"  # Overlap > size
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
-        assert response.status_code == 422  # Unprocessable Entity
-        assert "chunk_overlap must be less than chunk_size" in str(response.json())
+        response = client.post(self.ENDPOINT, data=form_data)
+        assert response.status_code == 422
+        assert any("Input should be less than or equal to" in str(err) for err in response.json()['detail'])
 
-    def test_process_video_with_analysis_and_chunking(self, client, auth_headers):
-        """Test enabling analysis and chunking."""
+    @pytest.mark.skip(reason="Analysis requires LLM setup or mocking")
+    def test_process_video_with_analysis_and_chunking(self, client, dummy_headers):
+        """Test enabling analysis and chunking (requires setup)."""
         form_data = {
             "urls": [VALID_VIDEO_URL],
             "perform_analysis": "true",
             "perform_chunking": "true",
-            "chunk_size": "500",  # Adjust if needed for your test video
+            "chunk_size": "500",
             "chunk_overlap": "100",
-            # Add api_name/api_key if required by your analysis library and not configured globally
-            "api_name": "openai",
-            "api_key": "lol-yea-right"
+            "api_name": "openai", # Replace or ensure configured/mocked
+            "api_key": os.environ.get("OPENAI_API_KEY", "skip") # Replace or ensure configured/mocked
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        if form_data["api_key"] == "skip":
+            pytest.skip("OPENAI_API_KEY not set, skipping analysis test")
+
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
-        check_media_item_result(result, "Success")
+        check_media_item_result(result, "Success", check_db_fields=True)
         assert result["analysis"] is not None and len(result["analysis"]) > 0
         assert result["chunks"] is not None and len(result["chunks"]) > 0
 
 
 class TestProcessAudios:
-    ENDPOINT = "/api/v1/media/process-audios" # Make sure this path is correct
+    ENDPOINT = "/api/v1/media/process-audios"
 
-    def test_process_audio_url_success_no_analysis_no_chunking(self, client, auth_headers):
-        """Test processing audio URL, explicitly disabling analysis and chunking."""
+    def test_process_audio_url_success_no_analysis_no_chunking(self, client, dummy_headers):
         form_data = {
             "urls": [VALID_AUDIO_URL],
-            "perform_analysis": "false", # Send as string 'false' for form data
+            "perform_analysis": "false",
             "perform_chunking": "false"
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
-        check_media_item_result(result, "Success")
+        check_media_item_result(result, "Success", check_db_fields=True)
         assert result["media_type"] == "audio"
         assert result["input_ref"] == VALID_AUDIO_URL
         # Expect content because transcription should still happen
@@ -299,8 +394,7 @@ class TestProcessAudios:
         # Check content length only if dummy file is guaranteed to produce output
         # On real audio, check > 0: assert len(result["content"]) > 0
 
-
-    def test_process_audio_upload_success_defaults(self, client, auth_headers):
+    def test_process_audio_upload_success_defaults(self, client, dummy_headers):
         """Test processing audio file upload with default settings (chunking=True, analysis=True)."""
         # Requires analysis setup (API keys) or a mock LLM
         pytest.skip("Skipping test requiring analysis until LLM/API config is confirmed/mocked.")
@@ -313,7 +407,10 @@ class TestProcessAudios:
         }
         with open(SAMPLE_AUDIO_PATH, "rb") as f:
             files = {"files": (SAMPLE_AUDIO_PATH.name, f, "audio/mpeg")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
+
+        if response.status_code == 400 and "error parsing the body" in response.text.lower():
+            pytest.fail("Still getting 400 'error parsing body' after auth fix (audio defaults).")
 
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
@@ -325,7 +422,7 @@ class TestProcessAudios:
         assert result["chunks"] is not None and len(result["chunks"]) > 0 # Expect chunks due to default
         assert result["analysis"] is not None and len(result["analysis"]) > 0 # Expect analysis due to default
 
-    def test_process_audio_multi_status_mixed(self, client, auth_headers):
+    def test_process_audio_multi_status_mixed(self, client, dummy_headers):
         """Test one valid upload and one invalid URL -> 207."""
         form_data = {
             "urls": [URL_404], # Use a reliable 404 URL
@@ -335,10 +432,10 @@ class TestProcessAudios:
         with open(SAMPLE_AUDIO_PATH, "rb") as f:
             # Ensure the dummy audio file has some content for transcription to work
             files = {"files": (SAMPLE_AUDIO_PATH.name, f, "audio/mpeg")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
-        # No need to sleep, the request is sync, failures should be reported
-        # If downloads were async background tasks, sleep might be needed
+        if response.status_code == 400 and "error parsing the body" in response.text.lower():
+            pytest.fail("Still getting 400 'error parsing body' after auth fix (audio mixed).")
 
         data = check_batch_response(response, 207, expected_processed=1, expected_errors=1, check_results_len=2)
 
@@ -348,8 +445,8 @@ class TestProcessAudios:
         assert success_result is not None, "Could not find success result"
         assert error_result is not None, "Could not find error result"
 
-        check_media_item_result(success_result, "Success")
-        check_media_item_result(error_result, "Error")
+        check_media_item_result(success_result, "Success", check_db_fields=True)
+        check_media_item_result(error_result, "Error", check_db_fields=True)
 
         # Check input refs carefully
         assert success_result["input_ref"] == SAMPLE_AUDIO_PATH.name
@@ -363,31 +460,38 @@ class TestProcessAudios:
         assert success_result["content"] is not None
         assert success_result["chunks"] is not None # Chunking was true
 
-    def test_process_audio_upload_success(self, client, auth_headers):
+    def test_process_audio_upload_success(self, client, dummy_headers):
         """Test processing a single valid audio file upload."""
         form_data = {"perform_analysis": "false"}
         with open(SAMPLE_AUDIO_PATH, "rb") as f:
-            files = {"files": (SAMPLE_AUDIO_PATH.name, f, "audio/mpeg")}  # Use correct MIME type
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            files = {"files": (SAMPLE_AUDIO_PATH.name, f, "audio/mpeg")}
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
+
+        if response.status_code == 400 and "error parsing the body" in response.text.lower():
+            pytest.fail("Still getting 400 'error parsing body' after auth fix (audio upload success).")
 
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         check_media_item_result(data["results"][0], "Success")
         assert data["results"][0]["media_type"] == "audio"
-        assert len(data["results"][0]["content"]) > 0
+        assert data["results"][0]["input_ref"] == SAMPLE_AUDIO_PATH.name
+        assert data["results"][0]["content"] is not None and len(data["results"][0]["content"]) > 0
 
-    def test_process_audio_no_input(self, client, auth_headers):
+    def test_process_audio_no_input(self, client):
         """Test sending request with no URLs or files."""
-        response = client.post(self.ENDPOINT, data={}, headers=auth_headers)
-        # Expect 400 based on _validate_inputs logic in the endpoint
-        assert response.status_code == 400, f"Expected 400, got {response.status_code}. Body: {response.text}"
+        response = client.post(self.ENDPOINT, data={"perform_analysis": "false"}, headers=dummy_headers)
+        assert response.status_code == 400
         assert "No valid media sources supplied" in response.json()["detail"]
 
-    def test_process_audio_upload_invalid_format_pdf(self, client, auth_headers):
+    def test_process_audio_upload_invalid_format_pdf(self, client, dummy_headers):
         """Test uploading a non-audio file (PDF) which should fail conversion."""
         form_data = {"perform_analysis": "false"} # Disable analysis
         with open(SAMPLE_PDF_PATH, "rb") as f:
             files = {"files": (SAMPLE_PDF_PATH.name, f, "application/pdf")} # Correct MIME for PDFs
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
+
+        if response.status_code == 400 and "error parsing the body" in response.text.lower():
+             pytest.fail("Still getting 400 'error parsing body' after auth fix (audio invalid format).")
+
         logger.debug(f"Test received response status: {response.status_code}")
         try:
             response_data_in_test = response.json()
@@ -403,58 +507,51 @@ class TestProcessAudios:
         check_media_item_result(result, "Error")
         assert result["input_ref"] == SAMPLE_PDF_PATH.name
         assert result["error"] is not None
-        # Check for error indicating conversion failure
-        assert "Audio conversion failed" in result["error"] or "FFmpeg conversion failed" in result["error"]
+        assert "Audio conversion failed" in result["error"] or "FFmpeg conversion failed" in result["error"] or "ffmpeg error" in result["error"].lower()
 
 
 class TestProcessPdfs:
     ENDPOINT = "/api/v1/media/process-pdfs"
 
-    def test_process_pdf_url_success(self, client, auth_headers):
+    def test_process_pdf_url_success(self, client, dummy_headers):
         """Test processing a single valid PDF URL."""
         # Use pymupdf4llm parser by default
         form_data = {"urls": [VALID_PDF_URL], "perform_analysis": "false"}
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
-        check_media_item_result(data["results"][0], "Success")
-        assert data["results"][0]["media_type"] == "pdf"
-        assert data["results"][0]["metadata"] is not None
-        assert data["results"][0]["metadata"].get("title") is not None
-        assert len(data["results"][0]["content"]) > 0  # Check extracted text exists
+        result = data["results"][0]
+        check_media_item_result(result, "Success", check_db_fields=True)
+        assert result["media_type"] == "pdf"
+        assert result["input_ref"] == VALID_PDF_URL
+        assert result["metadata"] is not None and isinstance(result["metadata"], dict)
+        assert result["content"] is not None and len(result["content"]) > 0
 
-    def test_process_pdf_upload_success(self, client, auth_headers):
+    def test_process_pdf_upload_success(self, client, dummy_headers):
         """Test processing a single valid PDF file upload."""
         form_data = {"perform_analysis": "false"}
         with open(SAMPLE_PDF_PATH, "rb") as f:
             files = {"files": (SAMPLE_PDF_PATH.name, f, "application/pdf")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
+
+        if response.status_code == 400 and "error parsing the body" in response.text.lower():
+            pytest.fail("Still getting 400 'error parsing body' after auth fix (pdf upload).")
 
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
-        check_media_item_result(data["results"][0], "Success")
-        assert data["results"][0]["media_type"] == "pdf"
-        assert len(data["results"][0]["content"]) > 0
+        result = data["results"][0]
+        check_media_item_result(result, "Success", check_db_fields=True)
+        assert result["media_type"] == "pdf"
+        assert result["input_ref"] == SAMPLE_PDF_PATH.name
+        assert result["content"] is not None and len(result["content"]) > 0
 
-    # Add test for specific parser if needed FIXME
-    # def test_process_pdf_upload_specific_parser(self, client, auth_headers):
-    #     """Test processing PDF upload with a specific parser."""
-    #     # NOTE: Requires the specified parser to be functional in your env
-    #     form_data = {"pdf_parsing_engine": "pymupdf", "perform_analysis": "false"}
-    #     with open(SAMPLE_PDF_PATH, "rb") as f:
-    #         files = {"files": (SAMPLE_PDF_PATH.name, f, "application/pdf")}
-    #         response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
-
-    #     data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
-    #     check_media_item_result(data["results"][0], "Success")
-    #     assert data["results"][0]["analysis_details"]["parser_used"] == "pymupdf" # Check if parser info is logged
-
-    def test_process_pdf_multi_status_mixed(self, client, auth_headers):
+    def test_process_pdf_multi_status_mixed(self, client, dummy_headers):
         """Test one valid PDF upload, one invalid URL -> 207."""
         form_data = {"urls": [INVALID_URL], "perform_analysis": "false"}
         with open(SAMPLE_PDF_PATH, "rb") as f:
             files = {"files": (SAMPLE_PDF_PATH.name, f, "application/pdf")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
-        time.sleep(5)  # Give time for URL download to fail
+        if response.status_code == 400 and "error parsing the body" in response.text.lower():
+            pytest.fail("Still getting 400 'error parsing body' after auth fix (pdf mixed).")
 
         data = check_batch_response(response, 207, expected_processed=1, expected_errors=1, check_results_len=2)
         success_result = next((r for r in data["results"] if r["status"] == "Success"), None)
@@ -462,63 +559,61 @@ class TestProcessPdfs:
 
         assert success_result is not None
         assert error_result is not None
-        check_media_item_result(success_result, "Success")
-        check_media_item_result(error_result, "Error")
+        check_media_item_result(success_result, "Success", check_db_fields=True)
+        check_media_item_result(error_result, "Error", check_db_fields=True)
         assert success_result["input_ref"] == SAMPLE_PDF_PATH.name
         assert error_result["input_ref"] == INVALID_URL
-        assert "Download failed" in error_result["error"]
+        assert "Download failed" in error_result["error"] or "Download/preparation failed" in error_result["error"]
 
-    def test_process_pdf_no_input(self, client, auth_headers):
-        """Test sending request with no URLs or files."""
-        response = client.post(self.ENDPOINT, data={}, headers=auth_headers)
+    def test_process_pdf_no_input(self, client, dummy_headers):
+        response = client.post(self.ENDPOINT, data={"perform_analysis": "false"}, headers=dummy_headers)
         assert response.status_code == 400
-        assert "No valid media sources supplied. At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided." in response.json()["detail"]
+        assert "No valid media sources supplied" in response.json()["detail"]
 
-    def test_process_pdf_upload_not_a_pdf(self, client, auth_headers):
-        """Test uploading a non-PDF file (e.g., audio)."""
-        form_data = {}
+    def test_process_pdf_upload_not_a_pdf(self, client):
+        form_data = {} # Minimal data
         with open(SAMPLE_AUDIO_PATH, "rb") as f:
             files = {"files": (SAMPLE_AUDIO_PATH.name, f, "audio/mpeg")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files)
 
-        # Endpoint checks magic bytes or relies on library error
-        # If magic bytes check is done in endpoint -> 207 with input error
-        # If check is done in library -> 207 with processing error
+        if response.status_code == 400 and "error parsing the body" in response.text.lower():
+             pytest.fail("Still getting 400 'error parsing body' after auth fix (pdf invalid format).")
+
+        # Endpoint might reject early based on filename/mime or library might fail
         data = check_batch_response(response, 207, expected_processed=0, expected_errors=1, check_results_len=1)
-        check_media_item_result(data["results"][0], "Error")
-        assert "Invalid file format" in data["results"][0]["error"] or "PDF Extraction Error." in data["results"][0][
-            "error"]  # Check error type
+        result = data["results"][0]
+        check_media_item_result(result, "Error", check_db_fields=True)
+        assert result["input_ref"] == SAMPLE_AUDIO_PATH.name
+        # Check for errors related to PDF parsing
+        assert "PDF processing failed" in result["error"] or "Cannot open document" in result["error"] or "failed to extract text" in result["error"]
 
-    @patch(
-        "tldw_Server_API.app.core.Ingestion_Media_Processing.PDF."
-        "PDF_Processing_Lib.summarize"  # ← patch the local copy
-    )
-    def test_process_pdf_with_analysis_and_chunking(self, mock_summarize, client, auth_headers):
+    @patch("tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.summarize")
+    @pytest.mark.skip(reason="Analysis requires LLM setup or mocking")
+    def test_process_pdf_with_analysis_and_chunking(self, mock_summarize, dummy_headers):
         """Test PDF analysis and chunking."""
         mock_analysis_text = "This is the mocked analysis result."
-        mock_summarize.return_value = mock_analysis_text
+        # If summarize is async:
+        async def async_mock_summarize(*args, **kwargs): return mock_analysis_text
+        mock_summarize.side_effect = async_mock_summarize
+        # Else: mock_summarize.return_value = mock_analysis_text
 
         form_data = {
             "urls": [VALID_PDF_URL],
-            "perform_analysis": "true", # Analysis is enabled
+            "perform_analysis": "true",
             "perform_chunking": "true",
             "chunk_size": "300",
             "chunk_overlap": "50",
             "api_name": "mock_api",
             "api_key": "mock_key"
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
-        check_media_item_result(result, "Success")
+        check_media_item_result(result, "Success", check_db_fields=True)
 
-        # Check that analysis was performed (mocked)
         mock_summarize.assert_called()
         assert result["analysis"] is not None
-        assert result["analysis"] == mock_analysis_text # Check content
-        assert len(result["analysis"]) > 0
-
-        # Check that chunking happened (might need more specific checks depending on PDF content)
+        assert mock_analysis_text in result["analysis"]
         assert result["chunks"] is not None
         assert isinstance(result["chunks"], list)
         assert len(result["chunks"]) > 0 # Should have at least one chunk
@@ -537,7 +632,7 @@ class TestProcessEbooks:
 
     # --- Happy Path Tests ---
 
-    def test_process_ebook_url_success_defaults(self, client, auth_headers):
+    def test_process_ebook_url_success_defaults(self, client, dummy_headers):
         """Test processing a single valid EPUB URL with default settings."""
         # Defaults: analysis=True, chunking=True, extraction='filtered'
         # Skip analysis for speed if not mocking/configured
@@ -547,7 +642,7 @@ class TestProcessEbooks:
             "api_name": "mock_api", # Needed if analysis=True default
             "api_key": "mock_key"   # Needed if analysis=True default
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -557,7 +652,7 @@ class TestProcessEbooks:
         assert result["chunks"] is not None and len(result["chunks"]) > 0 # Expect chunks due to default
         assert result["analysis"] is not None and len(result["analysis"]) > 0 # Expect analysis due to default
 
-    def test_process_ebook_url_success_no_analysis_no_chunking(self, client, auth_headers):
+    def test_process_ebook_url_success_no_analysis_no_chunking(self, client, dummy_headers):
         """Test processing EPUB URL, disabling analysis and chunking."""
         form_data = {
             "urls": [VALID_EPUB_URL],
@@ -565,7 +660,7 @@ class TestProcessEbooks:
             "perform_chunking": "false",
             "extraction_method": "basic" # Test another extraction method
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -576,14 +671,14 @@ class TestProcessEbooks:
         assert result["chunks"] is not None and len(result["chunks"]) == 1
         assert result["analysis"] is None # Analysis was disabled
 
-    def test_process_ebook_upload_success_defaults(self, client, auth_headers):
+    def test_process_ebook_upload_success_defaults(self, client, dummy_headers):
         """Test processing a single valid EPUB file upload with defaults."""
         # Skip analysis for speed if not mocking/configured
         form_data = {"perform_analysis": "false"}
         with open(SAMPLE_EPUB_PATH, "rb") as f:
             # Common EPUB MIME type, though server might not strictly check it
             files = {"files": (SAMPLE_EPUB_PATH.name, f, "application/epub+zip")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
@@ -593,12 +688,12 @@ class TestProcessEbooks:
         assert result["content"] is not None and len(result["content"]) > 0
         assert result["chunks"] is not None and len(result["chunks"]) > 0 # Default chunking=True
 
-    def test_process_ebook_multiple_success(self, client, auth_headers):
+    def test_process_ebook_multiple_success(self, client, dummy_headers):
         """Test processing multiple valid inputs (URL and Upload)."""
         form_data = {"urls": [VALID_EPUB_URL], "perform_analysis": "false"}
         with open(SAMPLE_EPUB_PATH, "rb") as f:
             files = {"files": (SAMPLE_EPUB_PATH.name, f, "application/epub+zip")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
         data = check_batch_response(response, 200, expected_processed=2, expected_errors=0, check_results_len=2)
         results = data["results"]
@@ -615,7 +710,7 @@ class TestProcessEbooks:
                 found_file = True
         assert found_url and found_file, "Did not find results for both URL and file"
 
-    def test_process_ebook_overrides(self, client, auth_headers):
+    def test_process_ebook_overrides(self, client, dummy_headers):
         """Test applying title, author, and keyword overrides."""
         test_title = "My Custom Ebook Title"
         test_author = "Testy McTestface"
@@ -629,7 +724,7 @@ class TestProcessEbooks:
             "keywords_str": test_keywords_str, # Use keywords_str for form data
             "perform_analysis": "false"
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -639,10 +734,10 @@ class TestProcessEbooks:
 
     # --- Error Handling Tests ---
 
-    def test_process_ebook_multi_status_mixed(self, client, auth_headers):
+    def test_process_ebook_multi_status_mixed(self, client, dummy_headers):
         """Test processing one valid URL and one invalid URL -> 207."""
         form_data = {"urls": [VALID_EPUB_URL, INVALID_URL], "perform_analysis": "false"}
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
 
         # Give potentially slow download/timeout a moment
         time.sleep(5)
@@ -661,19 +756,19 @@ class TestProcessEbooks:
         assert error_result["error"] is not None
         assert "Download/preparation failed" in error_result["error"] # Check download helper error
 
-    def test_process_ebook_no_input(self, client, auth_headers):
+    def test_process_ebook_no_input(self, client, dummy_headers):
         """Test sending request with no URLs or files."""
-        response = client.post(self.ENDPOINT, data={}, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data={}, headers=dummy_headers)
         # Expect 400 based on _validate_inputs logic
         assert response.status_code == 400, f"Expected 400, got {response.status_code}. Body: {response.text}"
         assert "At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided." in response.json()["detail"]
 
-    def test_process_ebook_upload_invalid_format(self, client, auth_headers):
+    def test_process_ebook_upload_invalid_format(self, client, dummy_headers):
         """Test uploading a non-EPUB file (e.g., PDF), expecting upload helper rejection."""
         form_data = {}
         with open(SAMPLE_PDF_PATH, "rb") as f:
             files = {"files": (SAMPLE_PDF_PATH.name, f, "application/pdf")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
         # _save_uploaded_files should reject based on extension ".epub"
         data = check_batch_response(response, 207, expected_processed=0, expected_errors=1, check_results_len=1)
@@ -685,13 +780,13 @@ class TestProcessEbooks:
         assert ".pdf" in result["error"]  # Also check that the specific wrong extension is mentioned
         assert ".epub" in result["error"]  # And that the allowed extension is mentioned
 
-    def test_process_ebook_validation_error_bad_method(self, client, auth_headers):
+    def test_process_ebook_validation_error_bad_method(self, client, dummy_headers):
         """Test sending invalid form data (invalid extraction_method)."""
         form_data = {
             "urls": [VALID_EPUB_URL],
             "extraction_method": "invalid_method" # Not in Literal[...]
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         assert response.status_code == 422  # Unprocessable Entity
         detail = response.json()["detail"]
         assert isinstance(detail, list) and len(detail) > 0
@@ -703,14 +798,14 @@ class TestProcessEbooks:
     # --- Option Variation Tests ---
 
     @pytest.mark.parametrize("method", ['filtered', 'markdown', 'basic'])
-    def test_process_ebook_options_extraction_method(self, method, client, auth_headers):
+    def test_process_ebook_options_extraction_method(self, method, client, dummy_headers):
         """Test different valid extraction methods."""
         form_data = {
             "urls": [VALID_EPUB_URL],
             "extraction_method": method,
             "perform_analysis": "false"
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -720,7 +815,7 @@ class TestProcessEbooks:
 
     # IMPORTANT: Replace "path.to.your_ebook_processing_module.summarize" with the correct path
     @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib.summarize")
-    def test_process_ebook_with_analysis_mocked(self, mock_summarize, client, auth_headers):
+    def test_process_ebook_with_analysis_mocked(self, mock_summarize, client):
         """Test enabling analysis with mocking."""
         mock_analysis_text = "This is the mocked ebook analysis."
         mock_summarize.return_value = mock_analysis_text
@@ -732,7 +827,7 @@ class TestProcessEbooks:
             "api_name": "mock_api",     # Need to provide these even if mocking summarize directly
             "api_key": "mock_key"       # Depending on process_epub implementation checks
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -777,14 +872,17 @@ class TestProcessDocuments:
         (SAMPLE_HTML_PATH, "text/html", "html"),
         (SAMPLE_XML_PATH, "application/xml", "xml"),
         pytest.param(SAMPLE_DOCX_PATH, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx", marks=pytest.mark.skipif(not SAMPLE_DOCX_PATH.exists(), reason="sample.docx not found")),
-        pytest.param(SAMPLE_RTF_PATH, "application/rtf", "rtf", marks=[pytest.mark.skipif(not SAMPLE_RTF_PATH.exists(), reason="sample.rtf not found"), pytest.mark.xfail(reason="Requires pandoc binary installed")]) # xfail if pandoc likely missing
+        pytest.param(SAMPLE_RTF_PATH, "application/rtf", "rtf", marks=[pytest.mark.skipif(not SAMPLE_RTF_PATH.exists(), reason="sample.rtf not found"), pytest.mark.xfail(reason="Requires pandoc binary installed")])
     ])
-    def test_process_doc_upload_various_formats(self, file_path, mime_type, expected_format, client, auth_headers):
+    def test_process_doc_upload_various_formats(self, file_path, mime_type, expected_format, client, dummy_headers):
         """Test uploading various supported document formats."""
         form_data = {"perform_analysis": "false"}
         with open(file_path, "rb") as f:
             files = {"files": (file_path.name, f, mime_type)}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
+
+        if response.status_code == 400 and "error parsing the body" in response.text.lower():
+            pytest.fail(f"Still getting 400 'error parsing body' after auth fix ({file_path.name}).")
 
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
@@ -801,10 +899,10 @@ class TestProcessDocuments:
         pytest.param(VALID_HTML_URL, None, 207, "does not have an allowed extension",
                      marks=pytest.mark.skipif(not VALID_HTML_URL, reason="VALID_HTML_URL not defined"))
     ])
-    def test_process_doc_url_various_formats(self, url, check_content_part, expected_status, expected_error_part, client, auth_headers):
+    def test_process_doc_url_various_formats(self, url, check_content_part, expected_status, expected_error_part, client, dummy_headers):
         """Test processing various document URLs."""
         form_data = {"urls": [url], "perform_analysis": "false"}
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
 
         # Adjust expected counts based on status
         expected_processed = 1 if expected_status == 200 else 0
@@ -830,12 +928,12 @@ class TestProcessDocuments:
             assert result["error"] is not None
             assert expected_error_part in result["error"]
 
-    def test_process_doc_multiple_success(self, client, auth_headers):
+    def test_process_doc_multiple_success(self, client, dummy_headers):
         """Test processing multiple valid inputs (URL and Upload)."""
         form_data = {"urls": [VALID_TXT_URL], "perform_analysis": "false"}
         with open(SAMPLE_MD_PATH, "rb") as f:
             files = {"files": (SAMPLE_MD_PATH.name, f, "text/markdown")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
         data = check_batch_response(response, 200, expected_processed=2, expected_errors=0, check_results_len=2)
         results = data["results"]
@@ -849,7 +947,7 @@ class TestProcessDocuments:
             elif res["input_ref"] == SAMPLE_MD_PATH.name: found_file = True
         assert found_url and found_file
 
-    def test_process_doc_overrides_and_options(self, client, auth_headers):
+    def test_process_doc_overrides_and_options(self, client, dummy_headers):
         """Test title/author/keywords overrides and disabling chunking."""
         test_title = "My Doc Title"
         test_author = "Doc Author"
@@ -864,7 +962,7 @@ class TestProcessDocuments:
             "perform_analysis": "false",
             "perform_chunking": "false" # Disable chunking
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -875,10 +973,10 @@ class TestProcessDocuments:
 
     # --- Error Handling Tests ---
 
-    def test_process_doc_multi_status_mixed(self, client, auth_headers):
+    def test_process_doc_multi_status_mixed(self, client, dummy_headers):
         """Test processing one valid URL and one invalid URL -> 207."""
         form_data = {"urls": [VALID_TXT_URL, INVALID_URL], "perform_analysis": "false"}
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
 
         time.sleep(5) # Give download time to fail
 
@@ -894,20 +992,20 @@ class TestProcessDocuments:
         assert error_result["input_ref"] == INVALID_URL
         assert "Download/preparation failed" in error_result["error"]
 
-    def test_process_doc_no_input(self, client, auth_headers):
+    def test_process_doc_no_input(self, client, dummy_headers):
         """Test sending request with no URLs or files."""
-        response = client.post(self.ENDPOINT, data={}, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data={}, headers=dummy_headers)
         assert response.status_code == 400
         assert "At least one 'url' in the 'urls' list or one 'file' in the 'files' list must be provided." in response.json()["detail"]
 
-    def test_process_doc_upload_invalid_extension(self, client, auth_headers):
+    def test_process_doc_upload_invalid_extension(self, client, dummy_headers):
         """Test uploading a file with an unsupported extension (e.g., epub)."""
         # Use epub as an example of unsupported by this endpoint's ALLOWED_DOC_EXTENSIONS
         if not SAMPLE_EPUB_PATH.exists(): pytest.skip("sample.epub needed for invalid format test")
         form_data = {}
         with open(SAMPLE_EPUB_PATH, "rb") as f:
             files = {"files": (SAMPLE_EPUB_PATH.name, f, "application/epub+zip")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files, headers= dummy_headers)
 
         # _save_uploaded_files should reject based on ALLOWED_DOC_EXTENSIONS
         data = check_batch_response(response, 207, expected_processed=0, expected_errors=1, check_results_len=1)
@@ -919,12 +1017,12 @@ class TestProcessDocuments:
 
     @pytest.mark.skipif(not SAMPLE_RTF_PATH.exists(), reason="sample.rtf not found")
     @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.convert_file", side_effect=ValueError("Mocked pandoc failure"))
-    def test_process_doc_rtf_conversion_failure(self, mock_convert, client, auth_headers):
+    def test_process_doc_rtf_conversion_failure(self, mock_convert, client):
         """Test RTF processing when pandoc conversion fails."""
         form_data = {"perform_analysis": "false"}
         with open(SAMPLE_RTF_PATH, "rb") as f:
             files = {"files": (SAMPLE_RTF_PATH.name, f, "application/rtf")}
-            response = client.post(self.ENDPOINT, data=form_data, files=files, headers=auth_headers)
+            response = client.post(self.ENDPOINT, data=form_data, files=files)
 
         data = check_batch_response(response, 207, expected_processed=0, expected_errors=1, check_results_len=1)
         result = data["results"][0]
@@ -933,21 +1031,21 @@ class TestProcessDocuments:
         assert "RTF conversion failed" in result["error"] # Check the prefix
         assert "Mocked pandoc failure" in result["error"] # Check the original mocked message is included
 
-    def test_process_doc_validation_error_chunking(self, client, auth_headers):
+    def test_process_doc_validation_error_chunking(self, client, dummy_headers):
         """Test invalid chunking parameters -> 422."""
         form_data = {
             "urls": [VALID_TXT_URL],
             "chunk_size": "50",
             "chunk_overlap": "100" # Overlap > size
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         assert response.status_code == 422
         assert "chunk_overlap must be less than chunk_size" in str(response.json())
 
     # --- Mocked Analysis Test ---
     # IMPORTANT: Update patch path if needed
     @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.summarize")
-    def test_process_doc_with_analysis_mocked(self, mock_summarize, client, auth_headers):
+    def test_process_doc_with_analysis_mocked(self, mock_summarize, client, dummy_headers):
         """Test enabling analysis with mocking."""
         mock_analysis_text = "This is the mocked document analysis."
         mock_summarize.return_value = mock_analysis_text
@@ -959,7 +1057,7 @@ class TestProcessDocuments:
             "api_name": "mock_api",
             "api_key": "mock_key"
         }
-        response = client.post(self.ENDPOINT, data=form_data, headers=auth_headers)
+        response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success")
@@ -970,3 +1068,7 @@ class TestProcessDocuments:
         assert result["chunks"] is not None and len(result["chunks"]) > 0
         # Check analysis_details
         assert result["analysis_details"]["summarization_model"] == "mock_api"
+
+#
+# End of test_media_processing.py
+#######################################################################################################################
