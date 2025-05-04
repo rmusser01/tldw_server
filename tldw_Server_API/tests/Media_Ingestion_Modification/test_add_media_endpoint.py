@@ -4,6 +4,7 @@
 #
 # Imports
 import asyncio # Added
+import random
 import time
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional  # Added Tuple
@@ -93,69 +94,52 @@ URL_404 = "https://httpbin.org/status/404" # Reliable 404
 # --- Fixtures ---
 
 # Mock Database Setup (Using test_utils.temp_db pattern from test_media_versions)
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function") # <<< CHANGED HERE
 def db_session_scope():
-    """RENAMED: Session-scoped temporary database with explicit connection closing."""
+    """RENAMED: FUNCTION-scoped temporary database with explicit connection closing."""
     db: Optional[Database] = None
+    db_path_str_for_log = "UNKNOWN_DB_PATH_FUNC_SCOPE" # Initialize for logging
     try:
+        # temp_db() creates a new DB file each time this fixture runs (per function)
         with temp_db() as db_context:
             db = db_context
+            db_path_str_for_log = db.db_path_str # Capture path for logging
+            # No need to manually set client_id here if temp_db handles it,
+            # but we keep the check for safety.
             if not hasattr(db, 'client_id') or not db.client_id:
-                db.client_id = settings.get("SERVER_CLIENT_ID", "test_client_id") # Use .get() for safety
-                logger.warning("Manually set client_id on Database instance from temp_db")
+                db.client_id = settings.get("SERVER_CLIENT_ID", f"test_client_{random.randint(1000,9999)}") # Ensure unique client ID per test if needed
+                logger.warning(f"Manually set client_id on FUNCTION-SCOPED Database instance from temp_db: {db_path_str_for_log}")
 
-            logger.info(f"--- Using session DB from temp_db: {db.db_path_str} ---")
+            logger.info(f"--- Using FUNCTION DB from temp_db: {db_path_str_for_log} ---")
             try:
-                db.execute_query("PRAGMA foreign_keys=ON;")
+                conn = db.get_connection()
+                conn.execute("PRAGMA foreign_keys=ON;")
+                logger.debug(f"Foreign keys enabled for {db_path_str_for_log}")
             except Exception as fk_e:
-                logger.warning(f"Could not enable foreign keys on session DB: {fk_e}")
+                logger.warning(f"Could not enable foreign keys on function DB {db_path_str_for_log}: {fk_e}")
             yield db
     finally:
+        # --- Cleanup for Function Scope ---
         if db:
-            db_path_str_for_log = getattr(db, 'db_path_str', 'UNKNOWN_DB_PATH') # Get path safely
-            logger.info(f"--- Attempting to close DB connection for test session teardown: {db_path_str_for_log} ---")
+            db_path_str_for_log = getattr(db, 'db_path_str', 'UNKNOWN_DB_PATH_FUNC_SCOPE')
+            logger.info(f"--- Attempting to close DB connection for test function teardown: {db_path_str_for_log} ---")
             try:
-                # Explicitly close the connection potentially held by the main test thread
+                gc.collect() # Keep GC call
+                logger.debug(f"--- Ran garbage collection before closing DB connection ({db_path_str_for_log}) ---")
                 db.close_connection()
-                logger.info(f"--- Connection closed (or was already closed) for main test thread: {db_path_str_for_log} ---")
+                logger.info(f"--- Connection closed (or was already closed) for test function thread: {db_path_str_for_log} ---")
             except Exception as close_err:
-                logger.warning(f"Error closing DB connection during session teardown for {db_path_str_for_log}: {close_err}")
+                logger.warning(f"Error closing DB connection during function teardown for {db_path_str_for_log}: {close_err}")
         else:
-            logger.warning("--- DB instance was None during session teardown ---")
+            logger.warning("--- DB instance was None during function teardown ---")
+        # The TemporaryDirectory context manager in temp_db will handle file deletion
         logger.info(f"--- Teardown complete for db_session_scope ({db_path_str_for_log}) ---")
 
 
 @pytest.fixture(scope="function")
 def db_session(db_session_scope):
-    """Function-scoped access to the session DB with cleanup."""
-    db = db_session_scope
-    if not hasattr(db, 'client_id') or not db.client_id:
-         db.client_id = settings.get("SERVER_CLIENT_ID", "test_client_id")
-
-    yield db # Use the session-scoped DB instance
-
-    # Cleanup application tables after each test function
-    logger.debug(f"--- Cleaning DB tables after test in {db.db_path_str} ---")
-    try:
-        with db.transaction():
-            db.execute_query("DELETE FROM MediaKeywords;", commit=False)
-            db.execute_query("DELETE FROM DocumentVersions;", commit=False)
-            try:
-                db.execute_query("DELETE FROM MediaFTS;", commit=False)
-                logger.debug("Cleared MediaFTS table.")
-            except Exception as fts_e:
-                logger.debug(f"Note: Could not clear MediaFTS (may not exist or error): {fts_e}")
-            db.execute_query("DELETE FROM Media;", commit=False)
-            db.execute_query("DELETE FROM Keywords;", commit=False)
-            try:
-                db.execute_query(
-                    "DELETE FROM sqlite_sequence WHERE name IN ('Media', 'Keywords', 'DocumentVersions', 'MediaFTS');",
-                    commit=False)
-            except Exception as seq_e:
-                logger.debug(f"Note: Could not clear sqlite_sequence (may be empty): {seq_e}")
-    except Exception as e:
-        logger.error(f"Error during DB cleanup in test_add_media_endpoint: {e}", exc_info=True)
-    # No explicit close here, let session scope handle it
+    """Function-scoped access to the function DB."""
+    yield db_session_scope # Directly yield the function-scoped instance
 
 mock_test_user = User(
     id=settings["SINGLE_USER_FIXED_ID"], # Use the fixed ID from settings
@@ -187,14 +171,13 @@ def override_get_db_for_user_dependency(db_fixture):
         yield db_fixture
     return _override
 
-@pytest.fixture(scope="module")
-def test_api_client(db_session_scope):
+@pytest.fixture(scope="function")
+def test_api_client(db_session_scope): # Depends on the FUNCTION-scoped DB fixture now
     """
     RENAMED: Provides a TestClient instance, overriding auth and DB dependencies.
-    This fixture is module-scoped, meaning the overrides apply to all tests within
-    the module where it's used, and the TestClient is created once per module.
+    Function-scoped to ensure DB isolation per test.
     """
-    logger.debug(f"Setting up test_api_client fixture for module (DB: {db_session_scope.db_path_str})...")
+    logger.debug(f"Setting up test_api_client fixture for FUNCTION (DB: {db_session_scope.db_path_str})...")
 
     # --- File Existence Checks (Keep these or adapt as needed) ---
     # Skip the entire module if essential files are missing
@@ -204,33 +187,30 @@ def test_api_client(db_session_scope):
     if not SAMPLE_EPUB_PATH.exists(): pytest.skip(f"Test EPUB file not found: {SAMPLE_EPUB_PATH}")
     # Add checks for other required sample files if necessary
 
-    # --- Dependency Overrides ---
-    # Create the override function using the session-scoped DB instance provided
-    # Ensure 'db_session_scope' fixture is correctly defined and yields the Database instance
+    # Create the override function using the FUNCTION-scoped DB instance
     db_override_func = override_get_db_for_user_dependency(db_session_scope)
 
     # Store original overrides to restore later
     original_overrides = app.dependency_overrides.copy()
 
-    # Apply overrides to the main FastAPI app instance
+    # Apply overrides
     app.dependency_overrides[get_request_user] = override_get_request_user
     app.dependency_overrides[get_db_for_user] = db_override_func
-    logger.info("Applied dependency overrides for get_request_user and get_db_for_user (module scope)")
+    logger.info("Applied dependency overrides for get_request_user and get_db_for_user (FUNCTION scope)")
 
-    # Instantiate the TestClient using the main FastAPI app instance
-    # Ensure 'fastapi_app_instance' is correctly imported from your main application file
+    # Instantiate the TestClient
     try:
+        # Using 'with' ensures client exits cleanly for each function
         with TestClient(fastapi_app_instance) as test_client_instance:
-            logger.debug("TestClient instance created.")
-            yield test_client_instance  # Yield the TestClient instance `c`
+            logger.debug("Function-scoped TestClient instance created.")
+            yield test_client_instance
     except Exception as client_exc:
         logger.error(f"Failed to create TestClient: {client_exc}", exc_info=True)
         pytest.fail(f"TestClient instantiation failed: {client_exc}")
     finally:
-        # --- Restore original overrides after tests in the module are done ---
+        # Restore original overrides after the function test is done
         app.dependency_overrides = original_overrides
-        logger.info("Restored original dependency overrides (module scope teardown)")
-
+        logger.info("Restored original dependency overrides (FUNCTION scope teardown)")
 
 @pytest.fixture
 def dummy_headers():

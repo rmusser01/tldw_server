@@ -46,7 +46,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta # Use timezone-aware UTC
 from math import ceil
 from pathlib import Path
-from typing import List, Tuple, Dict, Any, Optional, Type
+from typing import List, Tuple, Dict, Any, Optional, Type, Union
 
 # Third-Party Libraries (Ensure these are installed if used)
 # import gradio as gr # Removed if Gradio interfaces moved out
@@ -99,10 +99,8 @@ class Database:
     _CURRENT_SCHEMA_VERSION = 1 # Define the version this code supports
 
     # <<< Schema Definition (Version 1) >>>
-    # - REMOVED Sync Triggers
-    # - REMOVED FTS Triggers
-    # - ADDED schema_version table
-    _SCHEMA_SQL_V1 = """
+
+    _TABLES_SQL_V1 = """
     PRAGMA foreign_keys = ON;
 
     -- Schema Version Table --
@@ -120,22 +118,141 @@ class Database:
         type TEXT NOT NULL,
         content TEXT,
         author TEXT,
-        ingestion_date DATETIME, -- No default
+        ingestion_date DATETIME,
         transcription_model TEXT,
         is_trash BOOLEAN DEFAULT 0 NOT NULL,
-        trash_date DATETIME, -- No default
+        trash_date DATETIME,
         vector_embedding BLOB,
         chunking_status TEXT DEFAULT 'pending' NOT NULL,
         vector_processing INTEGER DEFAULT 0 NOT NULL,
         content_hash TEXT UNIQUE NOT NULL,
         uuid TEXT UNIQUE NOT NULL,
-        last_modified DATETIME NOT NULL, -- No default
+        last_modified DATETIME NOT NULL,
         version INTEGER NOT NULL DEFAULT 1,
         client_id TEXT NOT NULL,
         deleted BOOLEAN NOT NULL DEFAULT 0,
         prev_version INTEGER,
         merge_parent_uuid TEXT
     );
+
+    -- Keywords Table --
+    CREATE TABLE IF NOT EXISTS Keywords (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        keyword TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        uuid TEXT UNIQUE NOT NULL,
+        last_modified DATETIME NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        client_id TEXT NOT NULL,
+        deleted BOOLEAN NOT NULL DEFAULT 0,
+        prev_version INTEGER,
+        merge_parent_uuid TEXT
+    );
+
+    -- MediaKeywords Table (Junction Table) --
+    CREATE TABLE IF NOT EXISTS MediaKeywords (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_id INTEGER NOT NULL,
+        keyword_id INTEGER NOT NULL,
+        UNIQUE (media_id, keyword_id),
+        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
+        FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
+    );
+
+    -- Transcripts Table --
+    CREATE TABLE IF NOT EXISTS Transcripts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_id INTEGER NOT NULL,
+        whisper_model TEXT,
+        transcription TEXT,
+        created_at DATETIME,
+        uuid TEXT UNIQUE NOT NULL,
+        last_modified DATETIME NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        client_id TEXT NOT NULL,
+        deleted BOOLEAN NOT NULL DEFAULT 0,
+        prev_version INTEGER,
+        merge_parent_uuid TEXT,
+        UNIQUE (media_id, whisper_model),
+        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
+    );
+
+    -- MediaChunks Table --
+    CREATE TABLE IF NOT EXISTS MediaChunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_id INTEGER NOT NULL,
+        chunk_text TEXT NOT NULL,
+        start_index INTEGER,
+        end_index INTEGER,
+        chunk_id TEXT UNIQUE,
+        uuid TEXT UNIQUE NOT NULL,
+        last_modified DATETIME NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        client_id TEXT NOT NULL,
+        deleted BOOLEAN NOT NULL DEFAULT 0,
+        prev_version INTEGER,
+        merge_parent_uuid TEXT,
+        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
+    );
+
+    -- UnvectorizedMediaChunks Table --
+    CREATE TABLE IF NOT EXISTS UnvectorizedMediaChunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_id INTEGER NOT NULL,
+        chunk_text TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        start_char INTEGER,
+        end_char INTEGER,
+        chunk_type TEXT,
+        creation_date DATETIME,
+        last_modified_orig DATETIME,
+        is_processed BOOLEAN DEFAULT FALSE NOT NULL,
+        metadata TEXT,
+        uuid TEXT UNIQUE NOT NULL,
+        last_modified DATETIME NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        client_id TEXT NOT NULL,
+        deleted BOOLEAN NOT NULL DEFAULT 0,
+        prev_version INTEGER,
+        merge_parent_uuid TEXT,
+        UNIQUE (media_id, chunk_index, chunk_type),
+        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
+    );
+
+    -- DocumentVersions Table --
+    CREATE TABLE IF NOT EXISTS DocumentVersions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_id INTEGER NOT NULL,
+        version_number INTEGER NOT NULL,
+        prompt TEXT,
+        analysis_content TEXT,
+        content TEXT NOT NULL,
+        created_at DATETIME,
+        uuid TEXT UNIQUE NOT NULL,
+        last_modified DATETIME NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        client_id TEXT NOT NULL,
+        deleted BOOLEAN NOT NULL DEFAULT 0,
+        prev_version INTEGER,
+        merge_parent_uuid TEXT,
+        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
+        UNIQUE (media_id, version_number)
+    );
+
+    -- Sync Log Table --
+    CREATE TABLE IF NOT EXISTS sync_log (
+        change_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity TEXT NOT NULL,
+        entity_uuid TEXT NOT NULL,
+        operation TEXT NOT NULL CHECK(operation IN ('create','update','delete', 'link', 'unlink')),
+        timestamp DATETIME NOT NULL,
+        client_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        payload TEXT
+    );
+    """
+
+    _INDICES_SQL_V1 = """
+    -- Indices (Create after tables exist) --
     CREATE INDEX IF NOT EXISTS idx_media_title ON Media(title);
     CREATE INDEX IF NOT EXISTS idx_media_type ON Media(type);
     CREATE INDEX IF NOT EXISTS idx_media_author ON Media(author);
@@ -150,53 +267,15 @@ class Database:
     CREATE INDEX IF NOT EXISTS idx_media_prev_version ON Media(prev_version);
     CREATE INDEX IF NOT EXISTS idx_media_merge_parent_uuid ON Media(merge_parent_uuid);
 
-    -- Keywords Table --
-    CREATE TABLE IF NOT EXISTS Keywords (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        keyword TEXT NOT NULL UNIQUE COLLATE NOCASE,
-        uuid TEXT UNIQUE NOT NULL,
-        last_modified DATETIME NOT NULL, -- No default
-        version INTEGER NOT NULL DEFAULT 1,
-        client_id TEXT NOT NULL,
-        deleted BOOLEAN NOT NULL DEFAULT 0,
-        prev_version INTEGER,
-        merge_parent_uuid TEXT
-    );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_uuid ON Keywords(uuid);
     CREATE INDEX IF NOT EXISTS idx_keywords_last_modified ON Keywords(last_modified);
     CREATE INDEX IF NOT EXISTS idx_keywords_deleted ON Keywords(deleted);
     CREATE INDEX IF NOT EXISTS idx_keywords_prev_version ON Keywords(prev_version);
     CREATE INDEX IF NOT EXISTS idx_keywords_merge_parent_uuid ON Keywords(merge_parent_uuid);
 
-    -- MediaKeywords Table (Junction Table) --
-    CREATE TABLE IF NOT EXISTS MediaKeywords (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        media_id INTEGER NOT NULL,
-        keyword_id INTEGER NOT NULL,
-        UNIQUE (media_id, keyword_id),
-        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
-        FOREIGN KEY (keyword_id) REFERENCES Keywords(id) ON DELETE CASCADE
-    );
     CREATE INDEX IF NOT EXISTS idx_mediakeywords_media_id ON MediaKeywords(media_id);
     CREATE INDEX IF NOT EXISTS idx_mediakeywords_keyword_id ON MediaKeywords(keyword_id);
 
-    -- Transcripts Table --
-    CREATE TABLE IF NOT EXISTS Transcripts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        media_id INTEGER NOT NULL,
-        whisper_model TEXT,
-        transcription TEXT,
-        created_at DATETIME, -- No default
-        uuid TEXT UNIQUE NOT NULL,
-        last_modified DATETIME NOT NULL, -- No default
-        version INTEGER NOT NULL DEFAULT 1,
-        client_id TEXT NOT NULL,
-        deleted BOOLEAN NOT NULL DEFAULT 0,
-        prev_version INTEGER,
-        merge_parent_uuid TEXT,
-        UNIQUE (media_id, whisper_model),
-        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
-    );
     CREATE INDEX IF NOT EXISTS idx_transcripts_media_id ON Transcripts(media_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_transcripts_uuid ON Transcripts(uuid);
     CREATE INDEX IF NOT EXISTS idx_transcripts_last_modified ON Transcripts(last_modified);
@@ -204,23 +283,6 @@ class Database:
     CREATE INDEX IF NOT EXISTS idx_transcripts_prev_version ON Transcripts(prev_version);
     CREATE INDEX IF NOT EXISTS idx_transcripts_merge_parent_uuid ON Transcripts(merge_parent_uuid);
 
-    -- MediaChunks Table --
-    CREATE TABLE IF NOT EXISTS MediaChunks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        media_id INTEGER NOT NULL,
-        chunk_text TEXT NOT NULL,
-        start_index INTEGER,
-        end_index INTEGER,
-        chunk_id TEXT UNIQUE,
-        uuid TEXT UNIQUE NOT NULL,
-        last_modified DATETIME NOT NULL, -- No default
-        version INTEGER NOT NULL DEFAULT 1,
-        client_id TEXT NOT NULL,
-        deleted BOOLEAN NOT NULL DEFAULT 0,
-        prev_version INTEGER,
-        merge_parent_uuid TEXT,
-        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
-    );
     CREATE INDEX IF NOT EXISTS idx_mediachunks_media_id ON MediaChunks(media_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_mediachunks_uuid ON MediaChunks(uuid);
     CREATE INDEX IF NOT EXISTS idx_mediachunks_last_modified ON MediaChunks(last_modified);
@@ -228,29 +290,6 @@ class Database:
     CREATE INDEX IF NOT EXISTS idx_mediachunks_prev_version ON MediaChunks(prev_version);
     CREATE INDEX IF NOT EXISTS idx_mediachunks_merge_parent_uuid ON MediaChunks(merge_parent_uuid);
 
-    -- UnvectorizedMediaChunks Table --
-    CREATE TABLE IF NOT EXISTS UnvectorizedMediaChunks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        media_id INTEGER NOT NULL,
-        chunk_text TEXT NOT NULL,
-        chunk_index INTEGER NOT NULL,
-        start_char INTEGER,
-        end_char INTEGER,
-        chunk_type TEXT,
-        creation_date DATETIME, -- No default
-        last_modified_orig DATETIME, -- No default
-        is_processed BOOLEAN DEFAULT FALSE NOT NULL,
-        metadata TEXT,
-        uuid TEXT UNIQUE NOT NULL,
-        last_modified DATETIME NOT NULL, -- No default (sync last modified)
-        version INTEGER NOT NULL DEFAULT 1,
-        client_id TEXT NOT NULL,
-        deleted BOOLEAN NOT NULL DEFAULT 0,
-        prev_version INTEGER,
-        merge_parent_uuid TEXT,
-        UNIQUE (media_id, chunk_index, chunk_type),
-        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
-    );
     CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_media_id ON UnvectorizedMediaChunks(media_id);
     CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_is_processed ON UnvectorizedMediaChunks(is_processed);
     CREATE INDEX IF NOT EXISTS idx_unvectorized_media_chunks_chunk_type ON UnvectorizedMediaChunks(chunk_type);
@@ -260,25 +299,6 @@ class Database:
     CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_prev_version ON UnvectorizedMediaChunks(prev_version);
     CREATE INDEX IF NOT EXISTS idx_unvectorizedmediachunks_merge_parent_uuid ON UnvectorizedMediaChunks(merge_parent_uuid);
 
-    -- DocumentVersions Table --
-    CREATE TABLE IF NOT EXISTS DocumentVersions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        media_id INTEGER NOT NULL,
-        version_number INTEGER NOT NULL,
-        prompt TEXT,
-        analysis_content TEXT,
-        content TEXT NOT NULL,
-        created_at DATETIME, -- No default
-        uuid TEXT UNIQUE NOT NULL,
-        last_modified DATETIME NOT NULL, -- No default (sync last modified)
-        version INTEGER NOT NULL DEFAULT 1,
-        client_id TEXT NOT NULL,
-        deleted BOOLEAN NOT NULL DEFAULT 0,
-        prev_version INTEGER,
-        merge_parent_uuid TEXT,
-        FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
-        UNIQUE (media_id, version_number)
-    );
     CREATE INDEX IF NOT EXISTS idx_document_versions_media_id ON DocumentVersions(media_id);
     CREATE INDEX IF NOT EXISTS idx_document_versions_version_number ON DocumentVersions(version_number);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_documentversions_uuid ON DocumentVersions(uuid);
@@ -287,29 +307,23 @@ class Database:
     CREATE INDEX IF NOT EXISTS idx_documentversions_prev_version ON DocumentVersions(prev_version);
     CREATE INDEX IF NOT EXISTS idx_documentversions_merge_parent_uuid ON DocumentVersions(merge_parent_uuid);
 
-    -- Sync Log Table & Indices --
-    CREATE TABLE IF NOT EXISTS sync_log (
-        change_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        entity TEXT NOT NULL,
-        entity_uuid TEXT NOT NULL,
-        operation TEXT NOT NULL CHECK(operation IN ('create','update','delete', 'link', 'unlink')),
-        timestamp DATETIME NOT NULL, -- No default, will be set by _log_sync_event
-        client_id TEXT NOT NULL,
-        version INTEGER NOT NULL,
-        payload TEXT
-    );
     CREATE INDEX IF NOT EXISTS idx_sync_log_ts ON sync_log(timestamp);
     CREATE INDEX IF NOT EXISTS idx_sync_log_entity_uuid ON sync_log(entity_uuid);
     CREATE INDEX IF NOT EXISTS idx_sync_log_client_id ON sync_log(client_id);
+    """
 
-    -- Validation Triggers (remain the same) --
+    _TRIGGERS_SQL_V1 = """
+    -- Validation Triggers (Create after tables and indices) --
     DROP TRIGGER IF EXISTS media_validate_sync_update;
     CREATE TRIGGER media_validate_sync_update BEFORE UPDATE ON Media
     BEGIN
-        SELECT RAISE(ABORT, 'Sync Error (Media): Version must increment by exactly 1.')      
+        SELECT RAISE(ABORT, 'Sync Error (Media): Version must increment by exactly 1.')
         WHERE NEW.version IS NOT OLD.version + 1;
         SELECT RAISE(ABORT, 'Sync Error (Media): Client ID cannot be NULL or empty.')
         WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+        -- Add more checks if needed (e.g., UUID modification)
+        SELECT RAISE(ABORT, 'Sync Error (Media): UUID cannot be changed.')
+        WHERE NEW.uuid IS NOT OLD.uuid;
     END;
 
     DROP TRIGGER IF EXISTS keywords_validate_sync_update;
@@ -319,6 +333,8 @@ class Database:
         WHERE NEW.version IS NOT OLD.version + 1;
         SELECT RAISE(ABORT, 'Sync Error (Keywords): Client ID cannot be NULL or empty.')
         WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+        SELECT RAISE(ABORT, 'Sync Error (Keywords): UUID cannot be changed.')
+        WHERE NEW.uuid IS NOT OLD.uuid;
     END;
 
     DROP TRIGGER IF EXISTS transcripts_validate_sync_update;
@@ -328,6 +344,8 @@ class Database:
         WHERE NEW.version IS NOT OLD.version + 1;
         SELECT RAISE(ABORT, 'Sync Error (Transcripts): Client ID cannot be NULL or empty.')
         WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+        SELECT RAISE(ABORT, 'Sync Error (Transcripts): UUID cannot be changed.')
+        WHERE NEW.uuid IS NOT OLD.uuid;
     END;
 
     DROP TRIGGER IF EXISTS mediachunks_validate_sync_update;
@@ -337,6 +355,8 @@ class Database:
         WHERE NEW.version IS NOT OLD.version + 1;
         SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Client ID cannot be NULL or empty.')
         WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+        SELECT RAISE(ABORT, 'Sync Error (MediaChunks): UUID cannot be changed.')
+        WHERE NEW.uuid IS NOT OLD.uuid;
     END;
 
     DROP TRIGGER IF EXISTS unvectorizedmediachunks_validate_sync_update;
@@ -346,6 +366,8 @@ class Database:
         WHERE NEW.version IS NOT OLD.version + 1;
         SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Client ID cannot be NULL or empty.')
         WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+        SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): UUID cannot be changed.')
+        WHERE NEW.uuid IS NOT OLD.uuid;
     END;
 
     DROP TRIGGER IF EXISTS documentversions_validate_sync_update;
@@ -355,9 +377,9 @@ class Database:
         WHERE NEW.version IS NOT OLD.version + 1;
         SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): Client ID cannot be NULL or empty.')
         WHERE NEW.client_id IS NULL OR NEW.client_id = '';
+        SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): UUID cannot be changed.')
+        WHERE NEW.uuid IS NOT OLD.uuid;
     END;
-
-    -- DO NOT UPDATE schema_version here, do it in Python code after script success
     """
 
     _FTS_TABLES_SQL = """
@@ -375,34 +397,83 @@ class Database:
         content_rowid='id'  -- Link to Keywords.id
     );
     """
-    _SCHEMA_AND_FTS_SQL_V1 = _SCHEMA_SQL_V1 + _FTS_TABLES_SQL + """
-        -- Final step: Update schema version after applying V1 schema
-        UPDATE schema_version \
-        SET version = 1 \
-        WHERE version = 0; \
-        """
 
-    def __init__(self, db_path: str, client_id: str):
-        self.is_memory_db = (db_path == ':memory:')
+    def __init__(self, db_path: Union[str, Path], client_id: str):
+        """
+        Initializes the Database instance, sets up the connection pool (via threading.local),
+        and ensures the database schema is correctly initialized or migrated.
+
+        Args:
+            db_path (Union[str, Path]): The path to the SQLite database file or ':memory:'.
+            client_id (str): A unique identifier for the client using this database instance.
+
+        Raises:
+            ValueError: If client_id is empty or None.
+            DatabaseError: If database initialization or schema setup fails.
+        """
+        # Determine if it's an in-memory DB and resolve the path
+        if isinstance(db_path, Path):
+             self.is_memory_db = False
+             self.db_path = db_path.resolve()
+        else: # Treat as string
+             self.is_memory_db = (db_path == ':memory:')
+             if not self.is_memory_db:
+                  self.db_path = Path(db_path).resolve()
+             else:
+                  # Even for memory, Path object can be useful internally, though str is ':memory:'
+                  self.db_path = Path(":memory:") # Represent in-memory path consistently
+
+        # Store the path as a string for convenience/logging
+        self.db_path_str = str(self.db_path) if not self.is_memory_db else ':memory:'
+
+        # Validate client_id
         if not client_id:
             raise ValueError("Client ID cannot be empty or None.")
         self.client_id = client_id
 
-        if self.is_memory_db:
-            self.db_path_str = ':memory:'
-            logging.info(f"Initializing Database object for :memory: [Client ID: {self.client_id}]")
-        else:
-            self.db_path = Path(db_path).resolve()
-            self.db_path_str = str(self.db_path)
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            logging.info(f"Initializing Database object for path: {self.db_path_str} [Client ID: {self.client_id}]")
+        # Ensure parent directory exists if it's a file-based DB
+        if not self.is_memory_db:
+            try:
+                 self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                 # Catch potential errors creating the directory (e.g., permissions)
+                 raise DatabaseError(f"Failed to create database directory {self.db_path.parent}: {e}") from e
 
+        logging.info(f"Initializing Database object for path: {self.db_path_str} [Client ID: {self.client_id}]")
+
+        # Initialize thread-local storage for connections
         self._local = threading.local()
+
+        # Flag to track successful initialization before logging completion
+        initialization_successful = False
         try:
+            # --- Core Initialization Logic ---
+            # This establishes the first connection for the current thread
+            # and applies/verifies the schema.
             self._initialize_schema()
-        except (DatabaseError, SchemaError) as e:
+            initialization_successful = True # Mark as successful if no exception occurred
+        except (DatabaseError, SchemaError, sqlite3.Error) as e:
+            # Catch specific DB/Schema errors and general SQLite errors during init
             logging.critical(f"FATAL: DB Initialization failed for {self.db_path_str}: {e}", exc_info=True)
-            raise
+            # Attempt to clean up the connection before raising
+            self.close_connection()
+            # Re-raise as a DatabaseError to signal catastrophic failure
+            raise DatabaseError(f"Database initialization failed: {e}") from e
+        except Exception as e:
+            # Catch any other unexpected errors during initialization
+            logging.critical(f"FATAL: Unexpected error during DB Initialization for {self.db_path_str}: {e}", exc_info=True)
+            # Attempt cleanup
+            self.close_connection()
+            # Re-raise as a DatabaseError
+            raise DatabaseError(f"Unexpected database initialization error: {e}") from e
+        finally:
+            # Log completion status based on the flag
+            if initialization_successful:
+                logging.debug(f"Database initialization completed successfully for {self.db_path_str}")
+            else:
+                # This path indicates an exception was caught and raised above.
+                # Logging here provides context that the __init__ block finished, albeit with failure.
+                logging.error(f"Database initialization block finished for {self.db_path_str}, but failed.")
 
     # --- Connection Management (Unchanged) ---
     def _get_thread_connection(self) -> sqlite3.Connection:
@@ -576,137 +647,122 @@ class Database:
 
     # --- Schema Initialization and Migration ---
     def _get_db_version(self, conn: sqlite3.Connection) -> int:
-        """
-        Internal helper to get the current schema version from the database.
-
-        Args:
-            conn (sqlite3.Connection): The database connection to use.
-
-        Returns:
-            int: The schema version number found in the `schema_version` table,
-                 or 0 if the table doesn't exist or is empty.
-
-        Raises:
-            DatabaseError: If there's an error querying the schema version table
-                           (other than it not existing).
-        """
+        """Internal helper to get the current schema version."""
         try:
             cursor = conn.execute("SELECT version FROM schema_version LIMIT 1")
             result = cursor.fetchone()
             return result['version'] if result else 0
         except sqlite3.Error as e:
-            # Check if the error is "no such table"
             if "no such table: schema_version" in str(e):
-                logger.warning("Schema version table not found, assuming version 0.")
-                return 0
+                return 0 # Table doesn't exist yet
             else:
-                logger.error(f"Error querying schema version: {e}", exc_info=True)
                 raise DatabaseError(f"Could not determine database schema version: {e}") from e
 
-    def _set_db_version(self, conn: sqlite3.Connection, version: int):
-        """
-        Internal helper to set the schema version in the database.
+    _SCHEMA_UPDATE_VERSION_SQL_V1 = "UPDATE schema_version SET version = 1 WHERE version = 0;"
 
-        Uses REPLACE INTO to handle both initial insertion and updates.
-
-        Args:
-            conn (sqlite3.Connection): The database connection to use.
-            version (int): The schema version number to set.
-
-        Raises:
-            DatabaseError: If setting the schema version fails.
-        """
+    def _apply_schema_v1(self, conn: sqlite3.Connection):
+        """Applies the full Version 1 schema, ensuring version update is part of the main script."""
+        logging.info(f"Applying initial schema (Version 1) to DB: {self.db_path_str}...")
         try:
-            # Use REPLACE to handle both insert and update
-            conn.execute("REPLACE INTO schema_version (version) VALUES (?)", (version,))
-            logger.info(f"Database schema version set to {version}.")
+            # --- Combine Core Schema + Version Update for one executescript call ---
+            # This ensures the version update is part of the same atomic operation block
+            # executed by executescript within the transaction.
+            core_schema_script_with_version_update = f"""
+                {self._TABLES_SQL_V1}
+                {self._INDICES_SQL_V1}
+                {self._TRIGGERS_SQL_V1}
+                {self._SCHEMA_UPDATE_VERSION_SQL_V1}
+            """ # Note the added UPDATE statement
+
+            # --- Transaction for Core Schema + Version Update ---
+            with self.transaction(): # Use the transaction context manager
+                logging.debug("[Schema V1] Applying Core Schema + Version Update...")
+                conn.executescript(core_schema_script_with_version_update)
+                logging.debug("[Schema V1] Core Schema script (incl. version update) executed.")
+
+                # --- Validation step (optional but good) - Check Media table ---
+                try:
+                    cursor = conn.execute("PRAGMA table_info(Media)")
+                    columns = {row['name'] for row in cursor.fetchall()}
+                    # Update this set to match ALL columns defined in _TABLES_SQL_V1.Media
+                    expected_cols = {'id', 'url', 'title', 'type', 'content', 'author', 'ingestion_date', 'transcription_model', 'is_trash', 'trash_date', 'vector_embedding', 'chunking_status', 'vector_processing', 'content_hash', 'uuid', 'last_modified', 'version', 'client_id', 'deleted', 'prev_version', 'merge_parent_uuid'}
+                    if not expected_cols.issubset(columns):
+                         missing_cols = expected_cols - columns
+                         raise SchemaError(f"Validation Error: Media table is missing columns after creation: {missing_cols}")
+                    logging.debug("[Schema V1] Media table structure validated successfully.")
+                except (sqlite3.Error, SchemaError) as val_err:
+                    logging.error(f"[Schema V1] Validation failed after table creation: {val_err}", exc_info=True)
+                    raise # Re-raise to trigger rollback
+
+                # --- Explicitly check version *inside* transaction AFTER script ---
+                # This helps debug if the update itself isn't working
+                cursor_check = conn.execute("SELECT version FROM schema_version LIMIT 1")
+                version_in_tx = cursor_check.fetchone()
+                if not version_in_tx or version_in_tx['version'] != 1:
+                     logging.error(f"[Schema V1] Version check *inside* transaction failed. Found: {version_in_tx['version'] if version_in_tx else 'None'}")
+                     raise SchemaError("Schema version update did not take effect within the transaction.")
+                logging.debug(f"[Schema V1] Version check inside transaction confirmed version is 1.")
+
+            # Transaction commits here if all steps above succeeded
+            logging.info(f"[Schema V1] Core Schema V1 (incl. version update) applied and committed successfully for DB: {self.db_path_str}.")
+
+            # --- Create FTS Tables Separately (Remains the same) ---
+            try:
+                logging.debug("[Schema V1] Applying FTS Tables...")
+                conn.executescript(self._FTS_TABLES_SQL)
+                conn.commit()
+                logging.info("[Schema V1] FTS Tables created successfully.")
+            except sqlite3.Error as fts_err:
+                 logging.error(f"[Schema V1] Failed to create FTS tables: {fts_err}", exc_info=True)
+
         except sqlite3.Error as e:
-            logger.error(f"Failed to set schema version to {version}: {e}", exc_info=True)
-            raise DatabaseError(f"Failed to update schema version: {e}") from e
+            logging.error(f"[Schema V1] Application failed during core transaction: {e}", exc_info=True)
+            raise DatabaseError(f"DB schema V1 setup failed: {e}") from e
+        except Exception as e:
+             logging.error(f"[Schema V1] Unexpected error during schema V1 application: {e}", exc_info=True)
+             raise DatabaseError(f"Unexpected error applying schema V1: {e}") from e
 
     def _initialize_schema(self):
-        """
-        Checks the database schema version and applies initial schema or migrations.
-
-        Compares the version stored in the DB (`schema_version` table) with
-        `_CURRENT_SCHEMA_VERSION`. If the DB is new (version 0), it applies
-        the full V1 schema (_SCHEMA_SQL_V1 + _FTS_TABLES_SQL) and sets the
-        version to 1. If the versions match, it ensures FTS tables exist.
-        If the DB version is newer, it raises an error. Future migration logic
-        would be added here.
-
-        Raises:
-            SchemaError: If the DB schema version is newer than the code supports,
-                         or if a required migration path is not implemented, or
-                         if schema application fails verification.
-            DatabaseError: For underlying SQLite errors during schema execution.
-        """
+        """Checks schema version and applies initial schema or migrations."""
         conn = self.get_connection()
         try:
             current_db_version = self._get_db_version(conn)
-            logger.info(f"Current DB schema version: {current_db_version}. Code supports version: {self._CURRENT_SCHEMA_VERSION}")
+            target_version = self._CURRENT_SCHEMA_VERSION
 
-            if current_db_version == self._CURRENT_SCHEMA_VERSION:
-                logger.info("Database schema is up to date.")
-                # Ensure FTS tables exist even if schema is current
+            logging.info(f"Checking DB schema. Current version: {current_db_version}. Code supports: {target_version}")
+
+            if current_db_version == target_version:
+                logging.debug("Database schema is up to date.")
+                # Optionally ensure FTS tables exist even if schema version matches
                 try:
-                     # Use executescript for potentially multiple statements
                      conn.executescript(self._FTS_TABLES_SQL)
-                     conn.commit() # Commit FTS check/creation separately
-                except sqlite3.Error as fts_check_err:
-                     logger.error(f"Failed to ensure FTS tables exist on up-to-date schema: {fts_check_err}", exc_info=True)
+                     conn.commit()
+                     logging.debug("Verified FTS tables exist.")
+                except sqlite3.Error as fts_err:
+                     logging.warning(f"Could not verify/create FTS tables on already correct schema version: {fts_err}")
                 return
 
-            if current_db_version > self._CURRENT_SCHEMA_VERSION:
-                raise SchemaError(f"Database schema version ({current_db_version}) is newer than supported by code ({self._CURRENT_SCHEMA_VERSION}). Please update the application.")
+            if current_db_version > target_version:
+                raise SchemaError(f"Database schema version ({current_db_version}) is newer than supported by code ({target_version}).")
 
-            # Apply Schema V1 (including FTS and version update) within a single transaction
-            with self.transaction() as tx_conn:
-                if current_db_version == 0:
-                    logger.info("Applying initial schema (Version 1)...")
-                    # Ensure schema_version table exists and version is 0
-                    tx_conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY NOT NULL);")
-                    tx_conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (0);")
+            # --- Apply Migrations ---
+            if current_db_version == 0:
+                self._apply_schema_v1(conn) # Call the updated method
+                # Verify version update AFTER _apply_schema_v1 has committed
+                final_db_version = self._get_db_version(conn)
+                if final_db_version != target_version:
+                     # If this fails now, it means the commit didn't work or the read is stale
+                     raise SchemaError(f"Schema migration applied, but final DB version is {final_db_version}, expected {target_version}. Manual check required.")
+                logging.info(f"Database schema initialized/migrated to version {target_version}.")
 
-                    # Run the main schema script (tables, indices, triggers - NO version update)
-                    tx_conn.executescript(self._SCHEMA_SQL_V1) # Without schema_version commands
-                    logger.info("Main schema objects created.")
+            else:
+                 raise SchemaError(f"Migration needed from version {current_db_version} to {target_version}, but no migration path is defined in the code.")
 
-                    # Run the FTS table creation script
-                    logger.info("Creating FTS virtual tables...")
-                    tx_conn.executescript(self._FTS_TABLES_SQL)
-                    logger.info("FTS virtual tables created.")
-
-                    # <<< Explicitly set the version using execute() within the transaction >>>
-                    logger.info("Setting database schema version to 1...")
-                    tx_conn.execute("UPDATE schema_version SET version = 1 WHERE version = 0")
-                    # Check rows affected (should be 1)
-                    cursor_check = tx_conn.cursor() # Create a temporary cursor
-                    if cursor_check.rowcount == 0:
-                        # Maybe it was already 1 somehow? Or the insert failed earlier?
-                        # Try replacing just in case.
-                        logger.warning("UPDATE schema_version affected 0 rows, attempting REPLACE.")
-                        tx_conn.execute("REPLACE INTO schema_version (version) VALUES (1)")
-
-                    logger.info("Initial schema V1 application complete (pending commit).")
-                else:
-                    # --- Placeholder for Future Migrations ---
-                    logger.warning(f"Migration path from version {current_db_version} to {self._CURRENT_SCHEMA_VERSION} not implemented yet.")
-                    raise SchemaError(f"Migration needed from version {current_db_version}, but no migration path is defined.")
-
-            # Get version *after* transaction commit for verification
-            final_db_version = self._get_db_version(conn)
-            if final_db_version != self._CURRENT_SCHEMA_VERSION:
-                 raise SchemaError(f"Schema application committed, but DB version check shows {final_db_version}, expected {self._CURRENT_SCHEMA_VERSION}.")
-            logger.info("Schema verified after commit.")
-
-        except sqlite3.Error as e:
-            logger.error(f"Schema initialization/migration failed: {e}", exc_info=True)
-            raise DatabaseError(f"DB schema setup/migration failed: {e}") from e
-        except SchemaError:
-             raise
+        except (DatabaseError, SchemaError, sqlite3.Error) as e:
+            logging.error(f"Schema initialization/migration failed: {e}", exc_info=True)
+            raise DatabaseError(f"Schema initialization failed: {e}") from e
         except Exception as e:
-             logger.error(f"Unexpected error during schema application: {e}", exc_info=True)
+             logging.error(f"Unexpected error during schema initialization: {e}", exc_info=True)
              raise DatabaseError(f"Unexpected error applying schema: {e}") from e
 
     # --- Internal Helpers (Unchanged) ---

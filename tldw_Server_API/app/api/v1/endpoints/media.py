@@ -1393,7 +1393,8 @@ async def _process_batch_media(
     form_data: AddMediaForm,
     chunk_options: Optional[Dict],
     loop: asyncio.AbstractEventLoop,
-    db: Database, # Pass DB instance
+    db_path: str,
+    client_id: str,
     temp_dir: Path # Pass temp_dir Path object
 ) -> List[Dict[str, Any]]:
     """
@@ -1422,18 +1423,25 @@ async def _process_batch_media(
         # --- Perform DB pre-check only if overwrite is False AND for relevant types ---
         if not form_data.overwrite_existing and media_type in ['video', 'audio']:
             try:
-                # Use the db instance's connection for the query
-                # This query is specific, so direct execution is fine here
+                # --- Create a temporary DB instance JUST for the check ---
+                # NOTE: This adds overhead. Consider if pre-check is strictly needed here.
+                # If the check is vital, this ensures it uses the correct DB file.
+                # FIXME
+                # Alternatively, move the check inside the executor task later.
+                # For now, let's instantiate temporarily for the check:
+                temp_db_for_check = Database(db_path=db_path, client_id=client_id)
                 model_for_check = form_data.transcription_model
                 pre_check_query = """
-                    SELECT id FROM Media
-                    WHERE url = ?
-                      AND transcription_model = ?
-                      AND is_trash = 0
-                """
-                # Use db instance's method to execute query
-                cursor = db.execute_query(pre_check_query, (identifier_for_check, model_for_check))
+                                  SELECT id \
+                                  FROM Media
+                                  WHERE url = ?
+                                    AND transcription_model = ?
+                                    AND is_trash = 0 \
+                                  """
+                cursor = temp_db_for_check.execute_query(pre_check_query, (identifier_for_check, model_for_check))
                 existing_record = cursor.fetchone()
+                temp_db_for_check.close_connection()  # Close the temporary connection
+                # --- End temporary DB instance ---
 
                 if existing_record:
                     existing_id = existing_record['id']
@@ -1618,8 +1626,9 @@ async def _process_batch_media(
         db_id = None
         db_message = "DB interaction skipped (Processing failed or DB not provided)."
 
-        # Perform DB add/update ONLY if processing succeeded and DB manager is available
-        if db and process_result.get("status") in ["Success", "Warning"]:
+        # Perform DB add/update ONLY if processing succeeded
+        # No need to check for db object here, we check db_path/client_id
+        if db_path and client_id and process_result.get("status") in ["Success", "Warning"]:
             # Extract data needed for the database from the process_result dict
             # Use transcript as content for audio/video
             content_for_db = process_result.get('transcript', process_result.get('content'))
@@ -1656,12 +1665,25 @@ async def _process_batch_media(
                         chunk_options=chunk_options,
                         segments=process_result.get('segments'),
                     )
-                    # Run the bound method call inside a lambda
+
+                    # --- Function to run in executor ---
+                    def _db_worker():
+                        worker_db = None  # Initialize
+                        try:
+                            # --- Instantiate DB inside the worker ---
+                            worker_db = Database(db_path=db_path, client_id=client_id)
+                            # --- Call the INSTANCE method ---
+                            return worker_db.add_media_with_keywords(**db_add_kwargs)
+                        finally:
+                            # --- Ensure connection is closed ---
+                            if worker_db:
+                                worker_db.close_connection()
+
+                    # --------------------------------------
+
                     media_id_result, media_uuid_result, db_message_result = await loop.run_in_executor(
-                        None,
-                        lambda: db.add_media_with_keywords(**db_add_kwargs) # Use lambda
+                        None, _db_worker  # Pass the worker function
                     )
-                    # ---------------------------------------------------
 
                     db_id = media_id_result
                     media_uuid = media_uuid_result
@@ -1752,7 +1774,8 @@ async def _process_document_like_item(
     chunk_options: Optional[Dict],
     temp_dir: Path, # Use Path object
     loop: asyncio.AbstractEventLoop,
-    db: Database # Pass DB instance
+    db_path: str,
+    client_id: str
 ) -> Dict[str, Any]:
     """
     Handles PRE-CHECK, download/prep, processing, and DB persistence for document-like items.
@@ -1971,27 +1994,31 @@ async def _process_document_like_item(
         if content_for_db:
             try:
                 logger.info(f"Attempting DB persistence for item: {item_input_ref} using user DB")
-                # --- FIX 2: Use lambda for run_in_executor ---
                 db_add_kwargs = dict(
-                    url=item_input_ref,
-                    title=title_for_db,
-                    media_type=media_type,
-                    content=content_for_db,
-                    keywords=final_keywords_list,
-                    prompt=form_data.custom_prompt,
-                    analysis_content=analysis_for_db,
-                    transcription_model=model_used,
-                    author=author_for_db,
-                    overwrite=form_data.overwrite_existing,
-                    chunk_options=chunk_options,
+                    url=item_input_ref, title=title_for_db, media_type=media_type,
+                    content=content_for_db, keywords=final_keywords_list,
+                    prompt=form_data.custom_prompt, analysis_content=analysis_for_db,
+                    transcription_model=model_used, author=author_for_db,
+                    overwrite=form_data.overwrite_existing, chunk_options=chunk_options,
                     segments=None
                 )
-                # Run the bound method call inside a lambda
+
+                # --- Function to run in executor ---
+                def _db_worker():
+                    worker_db = None
+                    try:
+                        # --- Instantiate DB inside the worker ---
+                        worker_db = Database(db_path=db_path, client_id=client_id)
+                        # --- Call the INSTANCE method ---
+                        return worker_db.add_media_with_keywords(**db_add_kwargs)
+                    finally:
+                        if worker_db:
+                            worker_db.close_connection()
+                # --------------------------------------
+
                 media_id_result, media_uuid_result, db_message_result = await loop.run_in_executor(
-                    None,
-                    lambda: db.add_media_with_keywords(**db_add_kwargs) # Use lambda
+                    None, _db_worker # Pass the worker function
                 )
-                # ---------------------------------------------------
 
                 final_result["db_id"] = media_id_result
                 final_result["db_message"] = db_message_result
@@ -2205,29 +2232,40 @@ async def add_media(
             source_to_ref_map = {src: src for src in url_list} # URLs map to themselves
             source_to_ref_map.update({str(pf["path"]): pf["original_filename"] for pf in saved_files_info})
 
+            # --- Get DB info from the dependency ---
+            db_path_for_workers = db.db_path_str
+            client_id_for_workers = db.client_id
+
             # --- 6. Process Media based on Type ---
             logging.info(f"Processing {len(all_valid_input_sources)} items of type '{form_data.media_type}'")
 
             if form_data.media_type in ['video', 'audio']:
                 batch_results = await _process_batch_media(
-                    media_type=form_data.media_type, urls=url_list, uploaded_file_paths=uploaded_file_paths,
-                    source_to_ref_map=source_to_ref_map, form_data=form_data,
-                    chunk_options=chunking_options_dict, loop=loop, db=db,
-                    temp_dir=temp_dir_path # Pass the Path object
+                    media_type=form_data.media_type,
+                    urls=url_list,
+                    uploaded_file_paths=uploaded_file_paths,
+                    source_to_ref_map=source_to_ref_map,
+                    form_data=form_data,
+                    chunk_options=chunking_options_dict,
+                    loop=loop,
+                    db_path=db_path_for_workers,
+                    client_id=client_id_for_workers,
+                    temp_dir=temp_dir_path
                 )
                 results.extend(batch_results)
             else:  # PDF/Document/Ebook
                 tasks = [
                     _process_document_like_item(
-                        item_input_ref=source_to_ref_map.get(source, source), # Get original ref
-                        processing_source=source, # Pass the URL or upload path string
+                        item_input_ref=source_to_ref_map.get(source, source),
+                        processing_source=source,
                         media_type=form_data.media_type,
                         is_url=(source in url_list),
                         form_data=form_data,
                         chunk_options=chunking_options_dict,
-                        temp_dir=temp_dir_path, # Pass the Path object
+                        temp_dir=temp_dir_path,
                         loop=loop,
-                        db=db
+                        db_path=db_path_for_workers,
+                        client_id=client_id_for_workers
                     )
                     for source in all_valid_input_sources
                 ]

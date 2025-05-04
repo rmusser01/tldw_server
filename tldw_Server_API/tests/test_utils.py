@@ -3,44 +3,52 @@
 #
 # Imports
 import os
+import sqlite3
+import uuid
 from contextlib import contextmanager
 import tempfile
 import logging # Added for potential logging
+from pathlib import Path
+
 #
 # Local Imports
-from tldw_Server_API.app.core.DB_Management.Media_DB import Database
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, DatabaseError
+
+
 #
 ########################################################################################################################
 # Functions:
 
 @contextmanager
-def temp_db():
-    """
-    Creates a temporary directory and yields an initialized Database instance
-    pointing to a test.db file within that directory.
-    Relies on Database class's __init__ to handle schema creation.
-    """
-    db_instance = None # Initialize to None
-    # Create a temporary directory; it will be deleted automatically
+def temp_db(client_id: str = None):
+    """Provides a temporary, function-scoped database instance."""
+    if client_id is None:
+        # Generate a unique client ID for each test function instance
+        client_id = f"test_client_{uuid.uuid4()}"
+
     with tempfile.TemporaryDirectory() as temp_dir:
-        # Build a database path inside the temporary directory.
-        db_path = os.path.join(temp_dir, "test.db")
-        logging.debug(f"Creating temporary DB at: {db_path}")
-        # --- Initialize Database instance - This calls _ensure_schema internally ---
-        db_instance = Database(db_path)
+        db_path = Path(temp_dir) / f"test_{client_id}.db"
+        db = None
         try:
-            # --- REMOVED: create_tables(db) ---
-
-            # Optionally, verify the schema AFTER initialization
-            # verify_media_db_schema(db_instance) # Keep if desired
-
-            # Yield the fresh database instance.
-            yield db_instance
+            logging.debug(f"Creating temp DB instance for test: {db_path} (Client: {client_id})")
+            # --- Ensure this uses the CORRECT imported Database class ---
+            db = Database(db_path=db_path, client_id=client_id)
+            # -------------------------------------------------------------
+            yield db
+        except (DatabaseError, sqlite3.Error) as e:
+             logging.error(f"Failed to create/initialize temp DB {db_path}: {e}", exc_info=True)
+             # Re-raise to fail the test setup clearly
+             raise RuntimeError(f"Failed temp_db setup for {db_path}: {e}") from e
         finally:
-            # Ensure the connection associated with this instance is closed
-            if db_instance:
-                logging.debug(f"Closing connection for temporary DB: {db_path}")
-                db_instance.close_connection() # Use the instance's close method
+            if db:
+                logging.debug(f"Closing temp DB connection for test: {db_path}")
+                try:
+                    # Attempt to gracefully close the connection
+                    db.close_connection()
+                except Exception as close_err:
+                    logging.warning(f"Error closing temp DB {db_path} during cleanup: {close_err}")
+            # TemporaryDirectory context manager handles directory removal
+            logging.debug(f"Temporary directory {temp_dir} will be removed.")
 
 def verify_media_db_schema(db):
     """Ensure critical columns exist in Media table."""
