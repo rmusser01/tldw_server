@@ -58,3 +58,10 @@ Can you explain what you generated in detail:
 2. How does it work step-by-step?
 3. What alternatives did you consider and why did you choose this one?
 ```
+
+Follow-up questions:
+```
+ "After every answer provide 3 enumerated ways to continue the conversations or possible questions I might have."
+
+I basically find myself just typing 1, 2, 3 to continue conversations in ways I might have never thought of, or often, questions that I would reasonably have. 
+```

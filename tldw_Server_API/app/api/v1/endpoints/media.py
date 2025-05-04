@@ -60,8 +60,9 @@ from starlette.responses import JSONResponse, Response
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
 # Database Instance Dependency (Gets DB based on User)
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
-from tldw_Server_API.app.core.DB_Management.DB_Manager import get_paginated_files, add_media_with_keywords
-# Database Class, Exceptions, and Standalone DB Functions (New)
+from tldw_Server_API.app.core.DB_Management.DB_Manager import (
+    get_paginated_files,
+)
 from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import (
     Database, DatabaseError, InputError, ConflictError, SchemaError, # Core class & exceptions
     # Standalone Functions AVAILABLE in Media_DB_v2.py (Import ONLY what's provided):
@@ -1428,7 +1429,6 @@ async def _process_batch_media(
                     SELECT id FROM Media
                     WHERE url = ?
                       AND transcription_model = ?
-                      AND deleted = 0
                       AND is_trash = 0
                 """
                 # Use db instance's method to execute query
@@ -1626,60 +1626,77 @@ async def _process_batch_media(
             analysis_for_db = process_result.get('summary', process_result.get('analysis'))
             metadata_for_db = process_result.get('metadata', {})
             analysis_details_for_db = process_result.get('analysis_details', {})
-            transcription_model_used = analysis_details_for_db.get('transcription_model', form_data.transcription_model)
+            # Use the model reported by the processor if available, else fallback to form data
+            transcription_model_used = metadata_for_db.get('model', form_data.transcription_model) # Use metadata['model'] if present
             extracted_keywords = metadata_for_db.get('keywords', [])
-            combined_keywords = set(form_data.keywords)
+            # Ensure keywords from form_data (which is a list) are combined correctly
+            combined_keywords = set(form_data.keywords or []) # Use the list directly
             if isinstance(extracted_keywords, list):
-                 combined_keywords.update(k.strip().lower() for k in extracted_keywords if k.strip())
+                 combined_keywords.update(k.strip().lower() for k in extracted_keywords if k and k.strip())
             final_keywords_list = sorted(list(combined_keywords))
+            # Use title from metadata if available, fallback to form_data.title, then input ref stem
+            title_for_db = metadata_for_db.get('title', form_data.title or (Path(input_ref).stem if input_ref else 'Untitled'))
+            author_for_db = metadata_for_db.get('author', form_data.author)
 
             if content_for_db:
                 try:
-                    logging.info(f"Attempting DB persistence for item: {input_ref}")
-                    # --- USE DB INSTANCE METHOD ---
-                    # The method should exist on the 'db' object passed in
-                    db_id, media_uuid, db_message = await loop.run_in_executor(
-                        None,
-                        db.add_media_with_keywords, # Call instance method
-                        # Pass arguments by keyword
+                    logger.info(f"Attempting DB persistence for item: {input_ref}")
+                    # --- FIX 2: Use lambda for run_in_executor ---
+                    db_add_kwargs = dict(
                         url=input_ref,
-                        title=metadata_for_db.get('title', form_data.title or Path(input_ref).stem),
+                        title=title_for_db,
                         media_type=media_type,
                         content=content_for_db,
                         keywords=final_keywords_list,
                         prompt=form_data.custom_prompt,
                         analysis_content=analysis_for_db,
                         transcription_model=transcription_model_used,
-                        author=metadata_for_db.get('author', form_data.author),
+                        author=author_for_db,
                         overwrite=form_data.overwrite_existing,
                         chunk_options=chunk_options,
-                        segments=process_result.get('segments'), # Pass segments if needed
+                        segments=process_result.get('segments'),
                     )
-                    # ----------------------------
+                    # Run the bound method call inside a lambda
+                    media_id_result, media_uuid_result, db_message_result = await loop.run_in_executor(
+                        None,
+                        lambda: db.add_media_with_keywords(**db_add_kwargs) # Use lambda
+                    )
+                    # ---------------------------------------------------
+
+                    db_id = media_id_result
+                    media_uuid = media_uuid_result
+                    db_message = db_message_result # Use message from DB method
 
                     process_result["db_id"] = db_id
-                    process_result["db_message"] = db_message # Use message from DB method
-                    logging.info(f"DB persistence result for {input_ref}: ID={db_id}, UUID={media_uuid}, Msg='{db_message}'")
+                    process_result["db_message"] = db_message
+                    process_result["media_uuid"] = media_uuid # Add UUID to result if useful
 
-                except (DatabaseError, InputError, ConflictError) as db_err: # Catch specific DB errors
+                    logger.info(f"DB persistence result for {input_ref}: ID={db_id}, UUID={media_uuid}, Msg='{db_message}'")
+
+                except (DatabaseError, InputError, ConflictError) as db_err:  # Catch specific DB errors
                     logging.error(f"Database operation failed for {input_ref}: {db_err}", exc_info=True)
-                    process_result['status'] = 'Warning'
+                    process_result['status'] = 'Warning'  # Downgrade to Warning if DB fails after successful processing
                     process_result['error'] = (process_result.get('error') or "") + f" | DB Error: {db_err}"
                     process_result.setdefault("warnings", []).append(f"Database operation failed: {db_err}")
                     process_result["db_message"] = f"DB Error: {db_err}"
+                    process_result["db_id"] = None  # Ensure db_id is None on error
+                    process_result["media_uuid"] = None
+
                 except Exception as e:
                     logging.error(f"Unexpected error during DB persistence for {input_ref}: {e}", exc_info=True)
-                    process_result['status'] = 'Warning' # Maintain Warning status
-                    process_result['error'] = (process_result.get('error') or "") + f" | Persistence Error: {e}"
+                    process_result['status'] = 'Warning'  # Downgrade to Warning
+                    process_result['error'] = (process_result.get(
+                        'error') or "") + f" | Persistence Error: {type(e).__name__}"
                     process_result.setdefault("warnings", []).append(f"Unexpected persistence error: {e}")
-                    process_result["db_message"] = f"Persistence Error: {e}"
+                    process_result["db_message"] = f"Persistence Error: {type(e).__name__}"
+                    process_result["db_id"] = None  # Ensure db_id is None on error
+                    process_result["media_uuid"] = None
+
             else:
                 logging.warning(f"Skipping DB persistence for {input_ref} due to missing content.")
                 process_result["db_message"] = "DB persistence skipped (no content)."
-        else:
-             if not db: db_message = "DB interaction skipped (DB not provided)."
-             else: db_message = f"DB interaction skipped (Processing status '{process_result.get('status')}' not Success/Warning)."
-             process_result["db_message"] = db_message
+                process_result["db_id"] = None  # Ensure db_id is None
+                process_result["media_uuid"] = None
 
         # Add the (potentially updated) result to the final list
         final_batch_results.append(process_result)
@@ -1750,28 +1767,31 @@ async def _process_document_like_item(
     }
 
     # --- 1. Pre-check ---
-    identifier_for_check = item_input_ref
-    existing_id = None
-    pre_check_warning = None
-    # Perform DB pre-check only if overwrite is False
-    if not form_data.overwrite_existing:
-        try:
-            # --- FIX: Call with db_instance ---
-            existing_id = check_media_exists(db_instance=db, url=identifier_for_check)
-            # ---------------------------------
-            if existing_id is not None:
-                 logger.info(f"Skipping processing for {item_input_ref}: Media exists (ID: {existing_id}) and overwrite=False.")
-                 final_result.update({
-                     "status": "Skipped", "message": f"Media exists (ID: {existing_id}), overwrite=False",
-                     "db_id": existing_id, "db_message": "Skipped - Exists in DB."
-                 })
-                 return final_result
-        except (DatabaseError, sqlite3.Error) as check_err:
-            logger.error(f"Database pre-check failed for {item_input_ref}: {check_err}", exc_info=True)
-            final_result["warnings"].append(f"Database pre-check failed: {check_err}")
-        except Exception as check_err:
-            logger.error(f"Unexpected error during DB pre-check for {item_input_ref}: {check_err}", exc_info=True)
-            final_result["warnings"].append(f"Unexpected database pre-check error: {check_err}")
+    # identifier_for_check = item_input_ref
+    # existing_id = None
+    # pre_check_warning = None
+    # # Perform DB pre-check only if overwrite is False
+    # if not form_data.overwrite_existing:
+    #     try:
+    #         # Use run_in_executor as check_media_exists is likely sync
+    #         check_func = functools.partial(check_media_exists, db_instance=db, url=identifier_for_check)
+    #         existing_id = await loop.run_in_executor(None, check_func)
+    #         if existing_id is not None:
+    #              logger.info(f"Skipping processing for {item_input_ref}: Media exists (ID: {existing_id}) and overwrite=False.")
+    #              final_result.update({
+    #                  "status": "Skipped", "message": f"Media exists (ID: {existing_id}), overwrite=False",
+    #                  "db_id": existing_id, "db_message": "Skipped - Exists in DB."
+    #              })
+    #              # Clean up warnings if empty before returning
+    #              if not final_result.get("warnings"): final_result["warnings"] = None
+    #              return final_result
+    #     except (DatabaseError, sqlite3.Error) as check_err:
+    #         logger.error(f"Database pre-check failed for {item_input_ref}: {check_err}", exc_info=True)
+    #         # Don't fail, just add a warning and proceed
+    #         final_result.setdefault("warnings", []).append(f"Database pre-check failed: {check_err}")
+    #     except Exception as check_err:
+    #         logger.error(f"Unexpected error during DB pre-check for {item_input_ref}: {check_err}", exc_info=True)
+    #         final_result.setdefault("warnings", []).append(f"Unexpected database pre-check error: {check_err}")
 
     # --- 2. Download/Prepare File ---
     file_bytes: Optional[bytes] = None
@@ -1780,38 +1800,39 @@ async def _process_document_like_item(
     try:
         if is_url:
             logger.info(f"Downloading URL: {processing_source}")
-            # --- FIX: Use smart_download (or _download_url_async) which returns Path ---
-            # smart_download is likely synchronous, use run_in_executor if needed
-            # Or prefer _download_url_async if available and using httpx client passed down
-            # Assuming smart_download exists and works for now:
-            downloaded_path = await loop.run_in_executor(None, smart_download, processing_source, temp_dir)
-            # ---------------------------------------------------------------------
+            download_func = functools.partial(smart_download, processing_source, temp_dir) # Pass url, temp_dir positionally
+            downloaded_path = await loop.run_in_executor(None, download_func)
             if downloaded_path and isinstance(downloaded_path, Path) and downloaded_path.exists():
                  processing_filepath = downloaded_path
                  processing_filename = downloaded_path.name
-                 # Read bytes if needed (e.g., PDF processor might want bytes)
+                 # --- FIX: Read bytes correctly for PDF ---
                  if media_type == 'pdf':
-                      file_bytes = await aiofiles.open(processing_filepath, "rb").read() # Async read
-                 final_result["processing_source"] = str(processing_filepath) # Update source to the path
+                     # Use aiofiles directly here since we have the path
+                     async with aiofiles.open(processing_filepath, "rb") as f:
+                         file_bytes = await f.read()
+                 # Update source to the actual path used for processing
+                 final_result["processing_source"] = str(processing_filepath) # Keep track of the temp file path
             else:
                  raise IOError(f"Download failed or did not return a valid path for {processing_source}")
 
         else: # It's an uploaded file path string
             path_obj = Path(processing_source)
-            if not path_obj.exists():
-                 raise FileNotFoundError(f"Uploaded file path not found: {processing_source}")
+            if not path_obj.is_file(): # More specific check
+                 raise FileNotFoundError(f"Uploaded file path not found or is not a file: {processing_source}")
             processing_filepath = path_obj
             processing_filename = path_obj.name
-            # Read bytes if needed (e.g., PDF)
+            # --- FIX: Read bytes correctly for PDF ---
             if media_type == 'pdf':
-                 async with aiofiles.open(path_obj, "rb") as f: file_bytes = await f.read()
-            final_result["processing_source"] = str(processing_filepath) # Update source
+                 async with aiofiles.open(processing_filepath, "rb") as f: # Use processing_filepath here
+                      file_bytes = await f.read()
+            # processing_source is already the path string
+            final_result["processing_source"] = processing_source
 
     except (httpx.HTTPStatusError, httpx.RequestError, IOError, OSError, FileNotFoundError) as prep_err:
          logging.error(f"File preparation/download error for {item_input_ref}: {prep_err}", exc_info=True)
          final_result.update({"status": "Error", "error": f"File preparation/download failed: {prep_err}"})
          # Clean up warnings list if empty
-         if not final_result["warnings"]: final_result["warnings"] = None
+         if not final_result.get("warnings"): final_result["warnings"] = None
          return final_result
 
 
@@ -1822,91 +1843,99 @@ async def _process_document_like_item(
         common_args = {
             "title_override": form_data.title,
             "author_override": form_data.author,
-            "keywords": form_data.keywords,
+            "keywords": form_data.keywords, # Pass the list
             "perform_chunking": form_data.perform_chunking,
             "chunk_options": chunk_options,
             "perform_analysis": form_data.perform_analysis,
+            # --- FIX: Pass these arguments ---
             "api_name": form_data.api_name,
             "api_key": form_data.api_key,
             "custom_prompt": form_data.custom_prompt,
             "system_prompt": form_data.system_prompt,
+            # ----------------------------------
             "summarize_recursively": form_data.summarize_recursively,
         }
         specific_args = {}
         run_in_executor = True # Default for sync library functions
 
         if media_type == 'pdf':
-             if file_bytes is None: raise ValueError("PDF processing requires file bytes for process_pdf_task.")
+             # --- FIX: Check file_bytes which were read earlier ---
+             if file_bytes is None: raise ValueError("PDF processing requires file bytes, but they were not read.")
              processing_func = process_pdf_task # Use the async task wrapper
              run_in_executor = False # Task is already async
              specific_args = {
                  "file_bytes": file_bytes,
                  "filename": processing_filename or item_input_ref,
-                 "parser": str(form_data.pdf_parsing_engine) or "pymupdf4llm", # Use enum value or default
-                 # Pass individual chunk params if process_pdf_task expects them
+                 "parser": str(form_data.pdf_parsing_engine) or "pymupdf4llm",
+                 # Pass individual chunk params expected by process_pdf_task
                  "chunk_method": chunk_options.get('method') if chunk_options else None,
                  "max_chunk_size": chunk_options.get('max_size') if chunk_options else None,
                  "chunk_overlap": chunk_options.get('overlap') if chunk_options else None,
+                 # Keep common args like api_name, api_key etc for analysis within process_pdf_task
              }
-             common_args.pop("chunk_options", None) # Remove dict if passing individually
+             # Remove chunk_options dict if passing individually to avoid confusion
+             common_args.pop("chunk_options", None)
+
 
         elif media_type == "document":
              if not processing_filepath: raise ValueError("Document processing requires a file path.")
              processing_func = process_document_content
              specific_args = {"doc_path": processing_filepath} # Pass Path object
+             # --- FIX: Ensure process_document_content receives all its required args ---
+             # Common args already contain api_name, api_key, prompts etc.
 
         elif media_type == "ebook":
              if not processing_filepath: raise ValueError("Ebook processing requires a file path.")
              # Need a wrapper if process_epub is sync
-             # Assume _process_single_ebook exists or create it
              def _sync_process_ebook_wrapper(**kwargs):
-                 # Call the actual synchronous process_epub function
                  return process_epub(**kwargs)
              processing_func = _sync_process_ebook_wrapper
              specific_args = {
-                 "file_path": str(processing_filepath), # process_epub expects string path
-                 # Map common args to process_epub expected args if names differ
-                 "extraction_method": 'filtered', # Example: Set default or get from form_data if available
+                 "file_path": str(processing_filepath),
+                 "extraction_method": 'filtered', # Get from form_data if available
+                 # Pass other ebook specific args if needed
              }
-             # Add ebook specific args from form_data if necessary
+             # Add custom chapter pattern if provided in form_data
              if form_data.custom_chapter_pattern:
-                  specific_args["custom_chapter_pattern"] = form_data.custom_chapter_pattern
+                 specific_args["custom_chapter_pattern"] = form_data.custom_chapter_pattern
              # Ensure all necessary args from common_args are passed if needed by process_epub
-
 
         else:
              raise NotImplementedError(f"Processor not implemented for media type: '{media_type}'")
 
         # Combine common and specific args, overriding common with specific if keys clash
         all_args = {**common_args, **specific_args}
-        # Remove None values from final args if function doesn't handle them
-        all_args = {k: v for k, v in all_args.items() if v is not None}
-
+        # Remove None values ONLY if the target function cannot handle them
+        # Usually better to let the function handle defaults
+        # final_args = {k: v for k, v in all_args.items() if v is not None}
+        final_args = all_args # Pass all prepared args
 
         # --- Execute Processing ---
         if processing_func:
             func_name = getattr(processing_func, "__name__", str(processing_func))
             logging.info(f"Calling refactored '{func_name}' for '{item_input_ref}' {'in executor' if run_in_executor else 'directly'}")
             if run_in_executor:
-                # --- FIX: Use run_in_executor for synchronous functions ---
-                target_func = functools.partial(processing_func, **all_args)
+                # Use run_in_executor for synchronous functions
+                target_func = functools.partial(processing_func, **final_args)
                 process_result_dict = await loop.run_in_executor(None, target_func)
-                # -------------------------------------------------------
             else: # For async functions like process_pdf_task
-                process_result_dict = await processing_func(**all_args)
+                process_result_dict = await processing_func(**final_args)
 
             if not isinstance(process_result_dict, dict):
                 raise TypeError(f"Processor '{func_name}' returned non-dict: {type(process_result_dict)}")
 
             # Merge the result from the processing function into our final_result
-            # Prioritize keys from process_result_dict if they exist
             final_result.update(process_result_dict)
-            # Ensure essential fields like status are correctly set from the processor's output
             final_result["status"] = process_result_dict.get("status", "Error" if process_result_dict.get("error") else "Success")
-            # Merge warnings
             proc_warnings = process_result_dict.get("warnings")
             if isinstance(proc_warnings, list):
+                 # Ensure warnings list exists before extending
+                 if not isinstance(final_result.get("warnings"), list): final_result["warnings"] = []
                  final_result["warnings"].extend(proc_warnings)
+            elif proc_warnings: # If it's a single string warning
+                 if not isinstance(final_result.get("warnings"), list): final_result["warnings"] = []
+                 final_result["warnings"].append(str(proc_warnings))
+
 
         else: # Should not happen
             final_result.update({"status": "Error", "error": "No processing function selected."})
@@ -1917,67 +1946,90 @@ async def _process_document_like_item(
 
     # Ensure essential fields are always present after processing attempt
     final_result.setdefault("status", "Error")
-    final_result["input_ref"] = item_input_ref
-    final_result["media_type"] = media_type
+    final_result["input_ref"] = item_input_ref # Already set
+    final_result["media_type"] = media_type # Already set
 
     # --- 4. Post-Processing DB Logic ---
-    # Only attempt if processing status is Success or Warning (implying data exists)
+    # Only attempt if processing status is Success or Warning
     if final_result.get("status") in ["Success", "Warning"]:
-        # Extract data from the final_result dictionary (populated by the processor)
-        content_for_db = final_result.get('content', '') # Use content key
+        content_for_db = final_result.get('content', '')
         analysis_for_db = final_result.get('summary') or final_result.get('analysis')
         metadata_for_db = final_result.get('metadata', {})
-        final_keywords_list = final_result.get('keywords', form_data.keywords)
-        # Determine model used (e.g., parser for PDF, 'Imported' for others)
-        model_used = final_result.get('parser_used', 'Imported')
-        if media_type == 'pdf' and 'parser' in final_result.get('analysis_details', {}):
-            model_used = final_result['analysis_details']['parser']
+        # Use parsed keywords list from form_data, combined with any extracted
+        extracted_keywords = final_result.get('keywords', [])
+        combined_keywords = set(form_data.keywords or []) # Use list from form
+        if isinstance(extracted_keywords, list):
+            combined_keywords.update(k.strip().lower() for k in extracted_keywords if k and k.strip())
+        final_keywords_list = sorted(list(combined_keywords))
+
+        model_used = metadata_for_db.get('parser_used', 'Imported') # Check metadata first
+        if not model_used and media_type == 'pdf': model_used = final_result.get('analysis_details', {}).get('parser', 'Imported')
+        title_for_db = metadata_for_db.get('title', form_data.title or (Path(item_input_ref).stem if item_input_ref else 'Untitled'))
+        author_for_db = metadata_for_db.get('author', form_data.author or 'Unknown')
+
 
         if content_for_db:
             try:
                 logger.info(f"Attempting DB persistence for item: {item_input_ref} using user DB")
-
-                # --- FIX: Use DB INSTANCE METHOD ---
-                # Use run_in_executor because DB operations are sync
-                db_add_func = functools.partial(
-                    add_media_with_keywords, # Call instance method
+                # --- FIX 2: Use lambda for run_in_executor ---
+                db_add_kwargs = dict(
                     url=item_input_ref,
-                    title=metadata_for_db.get('title', form_data.title or Path(item_input_ref).stem),
+                    title=title_for_db,
                     media_type=media_type,
                     content=content_for_db,
                     keywords=final_keywords_list,
                     prompt=form_data.custom_prompt,
                     analysis_content=analysis_for_db,
-                    transcription_model=model_used, # Use determined model
-                    author=metadata_for_db.get('author', form_data.author or 'Unknown'),
+                    transcription_model=model_used,
+                    author=author_for_db,
                     overwrite=form_data.overwrite_existing,
                     chunk_options=chunk_options,
+                    segments=None
                 )
-                media_id_result, media_uuid_result, db_message_result = await loop.run_in_executor(None, db_add_func)
-                # ----------------------------------
+                # Run the bound method call inside a lambda
+                media_id_result, media_uuid_result, db_message_result = await loop.run_in_executor(
+                    None,
+                    lambda: db.add_media_with_keywords(**db_add_kwargs) # Use lambda
+                )
+                # ---------------------------------------------------
 
                 final_result["db_id"] = media_id_result
                 final_result["db_message"] = db_message_result
-                logger.info(f"DB persistence result for {item_input_ref}: ID={media_id_result}, Msg='{db_message_result}'")
+                final_result["media_uuid"] = media_uuid_result # Add UUID
+                logger.info(f"DB persistence result for {item_input_ref}: ID={media_id_result}, UUID={media_uuid_result}, Msg='{db_message_result}'")
 
             except (DatabaseError, InputError, ConflictError) as db_err:
                  logger.error(f"Database operation failed for {item_input_ref}: {db_err}", exc_info=True)
-                 final_result['status'] = 'Warning' # Keep Warning if processing was ok
+                 final_result['status'] = 'Warning' # Keep Warning status
                  final_result['error'] = (final_result.get('error') or "") + f" | DB Error: {db_err}"
+                 # Ensure warnings list exists before appending
+                 if not isinstance(final_result.get("warnings"), list):
+                     final_result["warnings"] = []
                  final_result["warnings"].append(f"Database operation failed: {db_err}")
                  final_result["db_message"] = f"DB Error: {db_err}"
+                 final_result["db_id"] = None # Ensure None on error
+                 final_result["media_uuid"] = None
             except Exception as e:
                  logger.error(f"Unexpected error during DB persistence for {item_input_ref}: {e}", exc_info=True)
-                 final_result['status'] = 'Warning' # Keep Warning if processing was ok
-                 final_result['error'] = (final_result.get('error') or "") + f" | Persistence Error: {e}"
+                 final_result['status'] = 'Warning' # Keep Warning status
+                 final_result['error'] = (final_result.get('error') or "") + f" | Persistence Error: {type(e).__name__}"
+                 # Ensure warnings list exists before appending
+                 if not isinstance(final_result.get("warnings"), list):
+                     final_result["warnings"] = []
                  final_result["warnings"].append(f"Unexpected persistence error: {e}")
-                 final_result["db_message"] = f"Persistence Error: {e}"
+                 final_result["db_message"] = f"Persistence Error: {type(e).__name__}"
+                 final_result["db_id"] = None # Ensure None on error
+                 final_result["media_uuid"] = None
         else:
              logger.warning(f"Skipping DB persistence for {item_input_ref} due to missing content.")
              final_result["db_message"] = "DB persistence skipped (no content)."
+             final_result["db_id"] = None # Ensure None
+             final_result["media_uuid"] = None
     else:
         # If processing failed, set DB message accordingly
         final_result["db_message"] = "DB operation skipped (processing failed)."
+        final_result["db_id"] = None # Ensure None
+        final_result["media_uuid"] = None
 
 
     # Clean up warnings if empty list
