@@ -12,6 +12,7 @@
 #
 # Imports
 import re
+import sqlite3
 
 import aiofiles
 import asyncio
@@ -49,20 +50,39 @@ from pydantic.v1 import Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.responses import JSONResponse, Response
-
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import verify_api_key, get_db_for_user
 #
 # Local Imports
-# DB Mgmt
-from tldw_Server_API.app.core.DB_Management.DB_Manager import (
-    search_media_db,
-    get_paginated_files,
-    fetch_keywords_for_media, get_full_media_details2, create_document_version, get_all_document_versions, get_document_version, rollback_to_version, delete_document_version,
-    fetch_item_details, add_media_with_keywords, check_should_process_by_url,
-)
-from tldw_Server_API.app.core.DB_Management.Media_DB import DatabaseError, InputError, Database
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
 #
+# --- Core Libraries (New) ---
+# Configuration (Import settings if needed directly, else handled by dependencies)
+# from tldw_Server_API.app.core.config import settings
+# Authentication & User Identification (Primary Dependency)
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
+# Database Instance Dependency (Gets DB based on User)
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
+from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords, get_paginated_files
+# Database Class, Exceptions, and Standalone DB Functions (New)
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import (
+    Database, DatabaseError, InputError, ConflictError, SchemaError, # Core class & exceptions
+    # Standalone Functions AVAILABLE in Media_DB_v2.py (Import ONLY what's provided):
+    get_document_version,
+    check_media_exists,
+    fetch_keywords_for_media,
+    search_media_db,
+    get_all_content_from_database, # Might be useful for listing
+    # Standalone functions needed for versioning endpoints:
+    # Note: These are now INSTANCE methods in Media_DB_v2:
+    # create_document_version -> db_instance.create_document_version(...)
+    # rollback_to_version -> db_instance.rollback_to_version(...)
+    # soft_delete_document_version -> db_instance.soft_delete_document_version(...)
+    # get_all_document_versions -> Needs replacement logic (likely query DocumentVersions table)
+    # fetch_item_details -> Needs replacement logic
+    # get_full_media_details2 -> Needs replacement logic
+    # get_paginated_files -> Needs replacement logic (likely query Media table with pagination)
+    # check_should_process_by_url -> Needs replacement logic (likely using check_media_exists)
+    # add_media_with_keywords -> db_instance.add_media_with_keywords(...)
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
 # Media Processing
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib import process_epub
 from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib import process_pdf_task
@@ -71,7 +91,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestio
 #
 # Document Processing
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
-from tldw_Server_API.app.core.Utils.Utils import truncate_content, logging, \
+from tldw_Server_API.app.core.Utils.Utils import logging, \
     sanitize_filename, smart_download
 from tldw_Server_API.app.core.Utils.Utils import logging as logger
 #
@@ -168,9 +188,26 @@ async def get_cached_response(key: str) -> Optional[tuple]: # Changed to async d
 #
 def invalidate_cache(media_id: int):
     """Invalidate all cache entries related to specific media"""
-    keys = cache.keys(f"cache:*:{media_id}")
-    for key in keys:
-        cache.delete(key)
+    # Ensure key pattern matches what get_cache_key generates
+    # Assuming key format is like "cache:/api/v1/media/{media_id}:{hash}" or similar
+    # This pattern might be too broad or too narrow depending on actual keys.
+    # Adjust pattern if needed. Example: "cache:/api/v1/media/{media_id}*" ?
+    # Using a more precise pattern if possible is better for performance.
+    # Let's assume keys contain the media_id clearly.
+    pattern = f"cache:*:{media_id}*" # Example pattern, adjust if needed
+    try:
+        # Note: KEYS can be slow on large Redis DBs. Consider alternatives like
+        # storing related keys in a Set if performance becomes an issue.
+        keys_to_delete = [key.decode('utf-8') for key in cache.keys(pattern)]
+        if keys_to_delete:
+            deleted_count = cache.delete(*keys_to_delete)
+            logger.info(f"Invalidated {deleted_count} cache entries matching media ID {media_id} (pattern: '{pattern}')")
+        else:
+            logger.debug(f"No cache keys found to invalidate for media ID {media_id} (pattern: '{pattern}')")
+    except redis.RedisError as e:
+        logger.error(f"Redis error invalidating cache for media ID {media_id}: {e}")
+    except Exception as e:
+         logger.error(f"Unexpected error invalidating cache for media ID {media_id}: {e}")
 
 
 ##################################################################
@@ -236,118 +273,127 @@ async def get_all_media(
     "/{media_id}", # Endpoint for retrieving a specific item
     status_code=status.HTTP_200_OK,
     summary="Get Media Item Details",
-    tags=["Media Management"], # SAME tag as the search endpoint
-    # response_model=MediaItemResponse # Example response model
+    tags=["Media Management"],
+    # response_model=MediaDetailResponse # Define a Pydantic model for this response if desired
 )
-def get_media_item(
-        media_id: int,
-        db=Depends(get_db_for_user)
+async def get_media_item( # Changed to `async def` for consistency
+    media_id: int,
+    # --- Use the new DB dependency ---
+    db: Database = Depends(get_db_for_user) # Inject the Database instance
 ):
     """
     **Retrieve Media Item by ID**
 
-    Fetches the full details, content, and analysis for a specific media item
-    identified by its unique database ID.
+    Fetches the details for a specific *active* (non-deleted, non-trash) media item,
+    including its associated keywords and the prompt/analysis from its latest version.
     """
+    logger.debug(f"Attempting to fetch details for media_id: {media_id}")
     try:
-        # -- 1) Fetch the main record (includes title, type, content, author, etc.)
-        logging.info(f"Calling get_full_media_details2 for ID: {media_id}")
-        media_info = get_full_media_details2(media_id, db)
-        if not media_info:
-            logging.warning(f"Media not found for ID: {media_id}")
-            raise HTTPException(status_code=404, detail="Media not found")
+        # --- 1. Fetch the main Media record (active only) ---
+        # Use the instance method get_media_by_id, asking for non-deleted/non-trash
+        media_record = db.get_media_by_id(media_id, include_deleted=False, include_trash=False)
 
-        logging.info(f"Received media_info type: {type(media_info)}")
-        logging.debug(f"Received media_info value: {media_info}")
+        if not media_record:
+            logger.warning(f"Media not found or not active for ID: {media_id}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found or is inactive/trashed")
 
-        logging.info("Attempting to access keys in media_info...")
+        logger.debug(f"Found active media record for ID: {media_id}")
+        # Convert row object to dict if not already (depends on DB class setup)
+        # Assuming db.get_media_by_id returns a dict-like object or row factory handles it
+        if not isinstance(media_record, dict):
+             # Explicitly convert if needed, though db.get_media_by_id SHOULD return a dict
+             try:
+                  media_record = dict(media_record)
+             except TypeError:
+                   logger.error(f"Could not convert media_record to dict for ID {media_id}")
+                   raise HTTPException(status_code=500, detail="Internal server error processing media data format.")
 
-        media_type = media_info['type']
-        raw_content = media_info['content']
-        author = media_info['author']
-        title = media_info['title']
-        logging.info("Successfully accessed initial keys.")
 
-        # -- 2) Get keywords. You can use the next line, or just grab media_info['keywords']:
-        # kw_list = fetch_keywords_for_media(media_id) or []
-        kw_list = media_info.get('keywords') or ["default"]
+        # --- 2. Fetch Associated Keywords (active only) ---
+        # Use the standalone function from the new DB library
+        keywords_list = fetch_keywords_for_media(media_id=media_id, db_instance=db)
+        logger.debug(f"Fetched keywords for media ID {media_id}: {keywords_list}")
 
-        # -- 3) Fetch the latest prompt & analysis from MediaModifications
-        prompt, analysis, _ = fetch_item_details(media_id, db_instance=db)
-        if not prompt:
-            prompt = None
-        if not analysis:
-            analysis = None
+        # --- 3. Fetch Latest Prompt & Analysis from DocumentVersions ---
+        latest_version_info = None
+        prompt = None
+        analysis = None
+        try:
+             # Use the standalone function, get latest by passing version_number=None
+             # Don't include full content to save bandwidth/processing
+             latest_version_info = get_document_version(
+                 db_instance=db,
+                 media_id=media_id,
+                 version_number=None, # Explicitly get latest
+                 include_content=False # We only need prompt/analysis from here
+             )
+             if latest_version_info:
+                  prompt = latest_version_info.get('prompt')
+                  analysis = latest_version_info.get('analysis_content')
+                  logger.debug(f"Fetched latest version info (prompt/analysis) for media ID {media_id}")
+             else:
+                   logger.warning(f"No active document version found for media ID {media_id}")
 
-        metadata = {}
-        transcript = []
-        timestamps = []
+        except DatabaseError as dv_e:
+            # Log error fetching version, but don't fail the whole request
+            logger.error(f"Database error fetching latest document version for media {media_id}: {dv_e}")
+        except Exception as dv_e:
+            logger.error(f"Unexpected error fetching latest document version for media {media_id}: {dv_e}", exc_info=True)
 
-        if raw_content:
-            # Split metadata and transcript
-            parts = raw_content.split('\n\n', 1)
-            if parts[0].startswith('{'):
-                # If the first block is JSON, parse it
-                try:
-                    metadata = json.loads(parts[0])
-                    if len(parts) > 1:
-                        transcript = parts[1].split('\n')
-                except json.JSONDecodeError:
-                    transcript = raw_content.split('\n')
-            else:
-                transcript = raw_content.split('\n')
+        # --- 4. Prepare Response ---
+        # Extract data primarily from the main media_record
+        # NOTE: Metadata like 'duration', 'webpage_url', and detailed 'timestamps'
+        # are NOT standard fields in the new `Media` table schema provided.
+        # They would need to be added to the schema or stored differently (e.g., in content or a dedicated metadata field/table)
+        # if they are required. The response below reflects data *available* in the new schema.
 
-            # Extract timestamps
-            timestamps = [line.split('|')[0].strip() for line in transcript if '|' in line]
+        content_text = media_record.get('content', '') # Main content/transcript
+        word_count = len(content_text.split()) if content_text else 0
 
-        # Clean prompt
-        clean_prompt = prompt.strip() if prompt else ""
-
-        # Attempt to find a "whisper model" from the first few lines
-        transcription_model = "unknown"
-        for line in transcript[:3]:
-            if "whisper model:" in line.lower():
-                transcription_model = line.split(":")[-1].strip()
-                break
-
-        return {
+        # Reconstruct the response structure using available data
+        response_data = {
             "media_id": media_id,
+            "uuid": media_record.get('uuid'), # Add UUID
             "source": {
-                "url": metadata.get("webpage_url"),
-                "title": title,
-                "duration": metadata.get("duration"),
-                "type": media_type
+                "url": media_record.get('url'), # Original URL if available
+                "title": media_record.get('title'),
+                "duration": None, # <<< Not directly available in schema
+                "type": media_record.get('type')
             },
             "processing": {
-                "prompt": clean_prompt,
-                "analysis": analysis,
-                "model": transcription_model,
-                "timestamp_option": True
+                "prompt": prompt, # From latest version
+                "analysis": analysis, # From latest version
+                "model": media_record.get('transcription_model'), # From Media table
+                "timestamp_option": None # <<< Not directly available, unclear how determined
             },
             "content": {
-                "metadata": metadata,
-                "text": "\n".join(transcript),
-                "word_count": len(" ".join(transcript).split())
+                # 'metadata' dictionary is unclear how it would be populated now
+                # If you stored JSON in a 'metadata' TEXT column, parse it here.
+                "metadata": {}, # <<< Placeholder, needs clarification
+                "text": content_text, # Main content from Media table
+                "word_count": word_count
             },
-            "keywords": kw_list or ["default"],
-            "timestamps": timestamps
+            "keywords": keywords_list if keywords_list else [], # Use fetched list
+            "timestamps": [], # <<< Not directly available in schema/content format
+            "author": media_record.get('author'),
+            "ingestion_date": media_record.get('ingestion_date'),
+            "last_modified": media_record.get('last_modified'),
+            "version": media_record.get('version'), # Sync version
         }
 
-    except TypeError as e:
-        logging.error(f"TypeError encountered in get_media_item: {e}. Check 'Received media_info type' log above.", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error processing data: {e}")
-    except HTTPException:
+        return response_data
+
+    except HTTPException: # Re-raise HTTP exceptions directly
         raise
-    # except Exception as e:
-    #     logging.error(f"Generic exception in get_media_item: {e}", exc_info=True)
-    #     raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        import traceback
-        print("------ TRACEBACK START ------")
-        traceback.print_exc() # Print traceback to stdout/stderr
-        print("------ TRACEBACK END ------")
-        logging.error(f"Generic exception in get_media_item: {e}", exc_info=True) # Keep your original logging too
-        raise HTTPException(status_code=500, detail=str(e))
+    except DatabaseError as e: # Catch specific DB errors
+        logger.error(f"Database error fetching details for media {media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database error retrieving media details: {e}")
+    except Exception as e: # Catch other potential errors
+        logger.error(f"Unexpected error fetching details for media {media_id}: {e}", exc_info=True)
+        # Print traceback if needed during debugging:
+        # import traceback
+        # traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred retrieving media details: {type(e).__name__}")
 
 ##############################################################################
 ############################## MEDIA Versioning ##############################
@@ -362,378 +408,521 @@ def get_media_item(
 
 @router.post(
     "/{media_id}/versions",
-    tags=["Media Versioning"], # Assign tag
-    summary="Create Media Version", # Add summary
-    status_code=status.HTTP_201_CREATED, # Explicitly set status code for creation
-    # response_model=YourVersionResponseModel # Define response model if available
+    tags=["Media Versioning"],
+    summary="Create Media Version",
+    status_code=status.HTTP_201_CREATED,
+    response_model=Dict[str, Any], # Update if you create a specific Pydantic model
 )
 async def create_version(
     media_id: int,
-    request: VersionCreateRequest,
-    db=Depends(get_db_for_user)
+    request_body: VersionCreateRequest, # Renamed for clarity (vs request object)
+    # --- Use the new DB dependency ---
+    db: Database = Depends(get_db_for_user)
 ):
     """
     **Create a New Document Version**
 
-    Creates a new version record for an existing media item based on the provided
-    content, prompt, and analysis.
+    Creates a new version record for an existing *active* media item based on the
+    provided content, prompt, and analysis.
     """
-    # Check if the media exists:
-    cursor = db.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,))
-    media_exists_row = cursor.fetchone()
-    if not media_exists_row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
+    logger.debug(f"Attempting to create version for media_id: {media_id}")
     try:
-        result = create_document_version(
-            media_id=media_id,
-            content=request.content,
-            prompt=request.prompt,
-            analysis_content=request.analysis_content,
-            db_instance=db,
-        )
-        if isinstance(result, dict) and "version_number" in result:
-            return {"media_id": result.get("media_id", media_id), "version_number": result["version_number"]}
-        elif isinstance(result, dict) and "error" in result:
-            # Handle potential errors from the DB function itself
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
-        else:
-            # Unexpected result from DB function
-            logging.error(f"Unexpected result from create_document_version: {result}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create version")
+        # No explicit media check needed here if db.create_document_version handles it
+        # (It checks for active parent Media ID internally)
 
-    except DatabaseError as e:  # specific DB error handling
-        raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:  # Re-raise HTTP exceptions directly
+        # Use the Database instance method within a transaction context
+        # The method handles its own sync logging
+        with db.transaction():
+            result_dict = db.create_document_version(
+                media_id=media_id,
+                content=request_body.content,
+                prompt=request_body.prompt,
+                analysis_content=request_body.analysis_content,
+            )
+
+        # New method returns a dict with id, uuid, media_id, version_number
+        logger.info(f"Successfully created version {result_dict.get('version_number')} (UUID: {result_dict.get('uuid')}) for media_id: {media_id}")
+
+        # Return the useful info from the result
+        return {
+            "message": "Document version created successfully.",
+            "media_id": result_dict.get("media_id"),
+            "version_number": result_dict.get("version_number"),
+            "version_uuid": result_dict.get("uuid")
+        }
+
+    except InputError as e: # Catch specific error if media_id not found/inactive
+        logger.warning(f"Cannot create version for media {media_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except (DatabaseError, ConflictError) as e: # Catch DB errors from new library
+        logger.error(f"Database error creating version for media {media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {e}")
+    except HTTPException: # Re-raise FastAPI exceptions
         raise
-    except AttributeError as e:
-        logging.error(f"Pydantic model access error in create_version for media {media_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal Server Error: Field mismatch - {e}")
     except Exception as e:
-        logging.error(f"Version creation failed unexpectedly for media {media_id}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error during version creation")
+        logger.error(f"Unexpected error creating version for media {media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error during version creation")
+
 
 @router.get(
     "/{media_id}/versions",
-    tags=["Media Versioning"], # Assign tag
-    summary="List Media Versions", # Add summary
-    # response_model=List[YourVersionListResponseModel] # Define response model FIXME
+    tags=["Media Versioning"],
+    summary="List Media Versions",
+    response_model=List[Dict[str, Any]], # Update if you create a specific Pydantic model
 )
 async def list_versions(
     media_id: int,
-    include_content: bool = False,
-    limit: int = 10,
-    offset: int = 0,
-    db=Depends(get_db_for_user)
+    include_content: bool = Query(False, description="Include full content in response"),
+    limit: int = Query(10, ge=1, le=100, description="Results per page"),
+    page: int = Query(1, ge=1, description="Page number"), # Use page instead of offset
+    # --- Use the new DB dependency ---
+    db: Database = Depends(get_db_for_user)
 ):
     """
-    **List Versions for a Media Item**
+    **List Active Versions for an Active Media Item**
 
-    Retrieves a list of available versions for a specific media item.
-    Optionally includes the full content for each version. Supports pagination.
+    Retrieves a paginated list of *active* versions (`deleted=0`) for a specific
+    *active* media item (`deleted=0`, `is_trash=0`).
+    Optionally includes the full content for each version. Ordered by version number descending.
     """
-    # Check if media exists first
-    cursor = db.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,))
-    media_exists_row = cursor.fetchone()
-    if not media_exists_row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
+    logger.debug(f"Listing versions for media_id: {media_id} (Page: {page}, Limit: {limit}, Content: {include_content})")
+    offset = (page - 1) * limit
 
-    versions = get_all_document_versions(
-        media_id=media_id,
-        include_content=include_content,
-        limit=limit,
-        offset=offset,
-        db_instance=db
-    )
+    try:
+        # Check if the parent media item is active first
+        media_exists = check_media_exists(db_instance=db, media_id=media_id) # Uses standalone check
+        if not media_exists:
+             logger.warning(f"Cannot list versions: Media ID {media_id} not found or deleted.")
+             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found or deleted")
 
-    return versions
+        # --- Query active versions directly ---
+        select_cols_list = ["dv.id", "dv.uuid", "dv.media_id", "dv.version_number", "dv.created_at",
+                           "dv.prompt", "dv.analysis_content", "dv.last_modified", "dv.version"]
+        if include_content: select_cols_list.append("dv.content")
+        select_cols = ", ".join(select_cols_list)
+
+        # Query Explanation:
+        # - Select columns from DocumentVersions (dv)
+        # - WHERE clause ensures:
+        #   - Matching media_id
+        #   - DocumentVersion is not deleted (dv.deleted = 0)
+        # - ORDER BY version_number descending (latest first)
+        # - LIMIT and OFFSET for pagination
+        query = f"""
+            SELECT {select_cols}
+            FROM DocumentVersions dv
+            WHERE dv.media_id = ? AND dv.deleted = 0
+            ORDER BY dv.version_number DESC
+            LIMIT ? OFFSET ?
+        """
+        params = (media_id, limit, offset)
+        cursor = db.execute_query(query, params)
+        versions = [dict(row) for row in cursor.fetchall()]
+
+        # Optionally, add pagination info (total count) - requires another query
+        count_cursor = db.execute_query("SELECT COUNT(*) FROM DocumentVersions WHERE media_id = ? AND deleted = 0", (media_id,))
+        total_versions = count_cursor.fetchone()[0]
+
+        return versions, total_versions
+
+    except DatabaseError as e: # Catch DB errors from new library
+        logger.error(f"Database error listing versions for media {media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {e}")
+    except HTTPException: # Re-raise FastAPI exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error listing versions for media {media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error listing versions")
 
 
 @router.get(
     "/{media_id}/versions/{version_number}",
-    tags=["Media Versioning"], # Assign tag
-    summary="Get Specific Media Version", # Add summary
-    # response_model=YourVersionDetailResponseModel # Define response model FIXME
+    tags=["Media Versioning"],
+    summary="Get Specific Media Version",
+    response_model=Dict[str, Any], # Update if you create a specific Pydantic model
 )
 async def get_version(
     media_id: int,
     version_number: int,
-    include_content: bool = True,
-    db=Depends(get_db_for_user)
+    include_content: bool = Query(True, description="Include full content in response"),
+    # --- Use the new DB dependency ---
+    db: Database = Depends(get_db_for_user)
 ):
     """
-    **Get Specific Version Details**
+    **Get Specific Active Version Details**
 
-    Retrieves the details of a single, specific version for a media item.
-    By default, includes the full content.
+    Retrieves the details of a single, specific *active* version (`deleted=0`)
+    for an *active* media item (`deleted=0`, `is_trash=0`).
     """
-    # Check to make sure media exists
-    cursor = db.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,))
-    media_exists_row = cursor.fetchone()
-    if not media_exists_row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
+    logger.debug(f"Getting version {version_number} for media_id: {media_id} (Content: {include_content})")
+    try:
+        # Use the standalone function from the new DB library.
+        # It handles checking for active media and active version.
+        version_dict = get_document_version(
+            db_instance=db,
+            media_id=media_id,
+            version_number=version_number,
+            include_content=include_content
+        )
 
-    version = get_document_version(
-        media_id=media_id,
-        version_number=version_number,
-        include_content=include_content,
-        db_instance=db
-    )
-    if version is None or (isinstance(version, dict) and 'error' in version):
-         # Assuming the DB function returns a dict like {'error': 'Version not found'} or None
-         error_detail = "Version not found" # Default message
-         if isinstance(version, dict) and 'error' in version:
-              error_detail = version['error'] # Use specific error from DB if available
-         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_detail)
-    return version
+        if version_dict is None:
+            # Function returns None if media inactive, version inactive, or version number doesn't exist
+            logger.warning(f"Active version {version_number} not found for active media {media_id}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found or media/version is inactive")
+
+        return version_dict
+
+    except ValueError as e: # Catch invalid version_number from standalone function
+        logger.warning(f"Invalid input for get_document_version: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except DatabaseError as e: # Catch DB errors from new library
+        logger.error(f"Database error getting version {version_number} for media {media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {e}")
+    except HTTPException: # Re-raise FastAPI exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error getting version {version_number} for media {media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error getting version")
 
 
 @router.delete(
     "/{media_id}/versions/{version_number}",
     tags=["Media Versioning"],
-    summary="Delete Media Version",
-    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Soft Delete Media Version", # Changed summary: Soft Delete
+    status_code=status.HTTP_204_NO_CONTENT, # Keep 204 on success
 )
 async def delete_version(
     media_id: int,
     version_number: int,
-    db_instance=Depends(get_db_for_user)
+    # --- Use the new DB dependency ---
+    db: Database = Depends(get_db_for_user)
 ):
     """
-    **Delete a Specific Version**
+    **Soft Delete a Specific Version**
 
-    Permanently removes a specific version of a media item.
-    *Caution: This action cannot be undone.*
+    Marks a specific version of an active media item as deleted (`deleted=1`).
+    Cannot delete the only remaining active version for a media item.
+    This action is logged for synchronization but does not permanently remove data.
     """
-    # Ensure media exists
-    cursor = db_instance.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,))
-    media_exists_row = cursor.fetchone()
-    if not media_exists_row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
+    logger.debug(f"Attempting to soft delete version {version_number} for media_id: {media_id}")
+    try:
+        # 1. Find the UUID for the given media_id and version_number
+        # Ensure both the target version and the parent media are active
+        query_uuid = """
+            SELECT dv.uuid
+            FROM DocumentVersions dv
+            JOIN Media m ON dv.media_id = m.id
+            WHERE dv.media_id = ?
+              AND dv.version_number = ?
+              AND dv.deleted = 0
+              AND m.deleted = 0
+              AND m.is_trash = 0
+        """
+        cursor = db.execute_query(query_uuid, (media_id, version_number))
+        result_uuid = cursor.fetchone()
 
-    result = delete_document_version(media_id, version_number, db_instance)
+        if not result_uuid:
+            logger.warning(f"Active version {version_number} for active media {media_id} not found.")
+            # Raise 404 whether media or version wasn't found/active
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active media or specific active version not found.")
 
-    if isinstance(result, dict):
-        if 'error' in result:
-            error_msg = result['error']
-            logging.warning(f"DB function delete_document_version returned error: {error_msg}") # Log the specific DB error
-            if 'Cannot delete the only version' in error_msg:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
-            elif "Version not found" in error_msg:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_msg)
-            else: # Other DB error
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error during deletion: {error_msg}")
-        elif result.get('success'):
-             # Success! Return 204 No Content.
-             return Response(status_code=status.HTTP_204_NO_CONTENT)
+        version_uuid = result_uuid['uuid']
+        logger.debug(f"Found UUID {version_uuid} for version {version_number} of media {media_id}")
+
+        # 2. Call the instance method using the UUID
+        # The method handles sync logging and checks for 'last active version'.
+        with db.transaction(): # Use transaction for consistency
+             success = db.soft_delete_document_version(version_uuid=version_uuid)
+
+        if success:
+            # Return 204 No Content, FastAPI handles the response body
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
         else:
-             # Dictionary returned, but unexpected format (no 'error' or 'success')
-             logging.error(f"Unexpected dictionary format from delete_document_version: {result}")
-             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal error processing deletion result.")
-    else:
-        # DB function returned something other than a dictionary
-        logging.error(f"Unexpected result type from delete_document_version: {type(result)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal error during version deletion.")
+            # soft_delete_document_version returns False if it was the last active version
+            logger.warning(f"Failed to delete version {version_number} (UUID: {version_uuid}) for media {media_id} - likely the last active version.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete the only active version of the document.")
+
+    except ConflictError as e: # Catch conflict during DB update
+         logger.error(f"Conflict deleting version {version_number} (UUID: {version_uuid}) for media {media_id}: {e}", exc_info=True)
+         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Conflict during deletion: {e}")
+    except InputError as e: # Catch invalid input errors from DB method
+        logger.error(f"Input error deleting version {version_number} for media {media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Input error: {e}")
+    except DatabaseError as e: # Catch general DB errors
+        logger.error(f"Database error deleting version {version_number} for media {media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {e}")
+    except HTTPException: # Re-raise FastAPI exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error deleting version {version_number} for media {media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error deleting version")
 
 
 @router.post(
     "/{media_id}/versions/rollback",
-    tags=["Media Versioning"], # Assign tag
-    summary="Rollback to Media Version", # Add summary
-    # response_model=YourRollbackResponseModel # Define response model
+    tags=["Media Versioning"],
+    summary="Rollback to Media Version",
+    response_model=Dict[str, Any], # Update if you create a specific Pydantic model
 )
 async def rollback_version(
-        media_id: int,
-        request: VersionRollbackRequest,
-        db_instance=Depends(get_db_for_user)
+    media_id: int,
+    request_body: VersionRollbackRequest, # Renamed for clarity
+    # --- Use the new DB dependency ---
+    db: Database = Depends(get_db_for_user)
 ):
     """
     **Rollback to a Previous Version**
 
-    Restores the main content of a media item to the state of a specified previous version.
-    This typically creates a *new* version reflecting the rolled-back content.
+    Restores the main content of an *active* media item to the state of a specified *active*
+    previous version. Creates a *new* version reflecting the rolled-back content and
+    updates the main Media record.
     """
-    # Validate media exists in the first place
-    cursor = db_instance.execute_query("SELECT 1 FROM Media WHERE id = ? AND is_trash = 0", (media_id,))
-    media_exists_row = cursor.fetchone()
-    if not media_exists_row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found")
+    target_version_number = request_body.version_number
+    logger.debug(f"Attempting to rollback media_id {media_id} to version {target_version_number}")
+    try:
+        # Use the Database instance method within a transaction context
+        # The method handles checking media/version existence, 'cannot rollback to latest',
+        # creating the new version, updating Media, and logging sync events.
+        with db.transaction():
+            rollback_result = db.rollback_to_version(
+                media_id=media_id,
+                target_version_number=target_version_number
+            )
 
-    # Perform rollback
-    result = rollback_to_version(
-            media_id=media_id,
-            target_version_number=request.version_number,
-            db_instance=db_instance
-    )
-    # Check if the rollback was successful
-    if "error" in result:
-        error_msg = result["error"]
-        if "not found" in error_msg.lower():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_msg)
-        elif "Cannot rollback to the current latest version" in error_msg:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
-        elif "Media item not found" in error_msg: # Assuming DB function might return this
-             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_msg)
-        else: # Generic rollback failure
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+        # Check the result dictionary from the DB method
+        if "error" in rollback_result:
+            error_msg = rollback_result["error"]
+            logger.warning(f"Rollback failed for media {media_id} to version {target_version_number}: {error_msg}")
+            # Map specific errors to HTTP status codes
+            if "not found" in error_msg.lower():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_msg)
+            elif "Cannot rollback to the current latest version" in error_msg:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+            else: # Other rollback errors reported by DB function
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
 
-    # Ensure we have a valid new_version_number
-    new_version = result.get("new_version_number")
+        # Success case - DB method returns success details
+        logger.info(f"Rollback successful for media {media_id} to version {target_version_number}. New doc version: {rollback_result.get('new_document_version_number')}")
+        return {
+            "message": rollback_result.get("success", "Rollback successful."),
+            "media_id": media_id,
+            "rolled_back_from_version": target_version_number,
+            "new_document_version_number": rollback_result.get("new_document_version_number"),
+            "new_document_version_uuid": rollback_result.get("new_document_version_uuid"),
+            "new_media_version": rollback_result.get("new_media_version") # Sync version of Media record
+        }
 
-    # If new_version is None, create a fallback version number (for tests to pass)
-    if new_version is None:
-        # This is a temporary fallback - log that there's an issue
-        logging.warning("Rollback didn't return a new_version_number - using fallback")
-        # Generate a fallback version number (last version + 1)
-        versions = get_all_document_versions(media_id)
-        new_version = max([v.get('version_number', 0) for v in versions]) + 1 if versions else 1
-
-    # Build proper response structure with guaranteed numeric new_version_number
-    response = {
-        "success": result.get("success", f"Rolled back to version {request.version_number}"),
-        "new_version_number": int(new_version)  # Ensure it's an integer
-    }
-
-    return response
+    except ValueError as e: # Catch invalid target_version_number
+        logger.warning(f"Invalid input for rollback media {media_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except ConflictError as e: # Catch conflict during Media update
+         logger.error(f"Conflict rolling back media {media_id} to version {target_version_number}: {e}", exc_info=True)
+         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Conflict during rollback: {e}")
+    except (InputError, DatabaseError) as e: # Catch DB errors
+        logger.error(f"Database error rolling back media {media_id} to version {target_version_number}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error during rollback: {e}")
+    except HTTPException: # Re-raise FastAPI exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error rolling back media {media_id} to version {target_version_number}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error during rollback")
 
 
 @router.put(
     "/{media_id}",
-    tags=["Media Management"], # Assign tag
-    summary="Update Media Item", # Add summary
-    status_code=status.HTTP_200_OK, # Return 200 OK with updated item representation
-    response_model=Dict[str, Any],
-    # FIXME - Response models...
-    # response_model=YourUpdatedMediaResponseModel # Define response model if applicable
+    tags=["Media Management"],
+    summary="Update Media Item",
+    status_code=status.HTTP_200_OK,
+    response_model=Dict[str, Any], # Update if specific model created
 )
 async def update_media_item(
     media_id: int,
     payload: MediaUpdateRequest,
-    db=Depends(get_db_for_user)
+    # --- Use the new DB dependency ---
+    db: Database = Depends(get_db_for_user)
 ):
     """
     **Update Media Item Details**
 
-    Modifies attributes of the main media item record (like title, author)
-    and potentially its content.
+    Modifies attributes of an *active* main media item record (e.g., title, author).
 
-    If **content** is updated:
-      - A new content hash is calculated and stored.
-      - A **new version** is created in DocumentVersions.
-      - If `payload.prompt` and `payload.analysis` are provided, they are stored
-        in the *new* version record.
-      - If `payload.prompt` and `payload.analysis` are *not* provided with the
-        content update, the `prompt` and `analysis_content` fields in the *new*
-        version record will be set to `NULL`.
+    If **content** is updated (`payload.content` is not None):
+      - A *new document version* is created using the provided `payload.content`.
+      - The `payload.prompt` and `payload.analysis` (if provided) are stored in this *new* version.
+      - The main `Media` record's `content`, `content_hash`, `last_modified`, and `version` (sync) are updated.
+      - FTS index for the media item is updated.
 
-    If only non-content fields (e.g., title, author) are updated, no new version is created.
+    If only non-content fields (e.g., title, author) are updated:
+      - Only the main `Media` record is updated (fields, `last_modified`, `version`).
+      - No new document version is created.
+      - FTS index is updated if `title` changed.
     """
-    logging.debug(f"Received request to update media_id={media_id} with payload: {payload.dict(exclude_unset=True)}")
+    logger.debug(f"Received request to update media_id={media_id} with payload: {payload.model_dump(exclude_unset=True)}")
 
-    updates = []
-    params = []
-    requires_new_version = False
-    new_content_hash = None
-    new_content = None
+    # Prepare data for the update, excluding None values from payload
+    # Use `exclude_unset=True` to only include fields explicitly set in the request
+    update_fields = payload.model_dump(exclude_unset=True)
 
-    # --- 1. Check if media exists ---
+    # Check if any fields were actually provided for update
+    if not update_fields:
+        logger.info(f"Update request for media {media_id} received with no fields to update.")
+        # Return 200 OK but indicate no changes were made
+        # Fetch current data to return a representation? Or just a message?
+        # Fetching current data seems appropriate for a PUT response.
+        current_data = db.get_media_by_id(media_id, include_deleted=False, include_trash=False)
+        if not current_data:
+             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found or inactive.")
+        return {"message": "No update fields provided.", "media_item": current_data}
+
+
+    new_doc_version_info: Optional[Dict] = None
+    updated_media_info: Optional[Dict] = None
+    message: str = ""
+
     try:
-        # Use transaction for check + potential update + version creation
-        with db.transaction() as conn:
+        # --- Use a single transaction for all potential DB operations ---
+        with db.transaction() as conn: # Get connection for potential direct use if needed
+
+            # --- 1. Get Current State (needed for hash comparison & version increment) ---
             cursor = conn.cursor()
-            cursor.execute("SELECT id, content_hash FROM Media WHERE id = ? AND is_trash = 0", (media_id,))
-            media_record = cursor.fetchone()
+            cursor.execute("SELECT id, uuid, content_hash, version FROM Media WHERE id = ? AND deleted = 0 AND is_trash = 0", (media_id,))
+            current_media = cursor.fetchone()
+            if not current_media:
+                logger.warning(f"Update failed: Media not found or inactive/trashed for ID {media_id}")
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media item not found or is inactive/trashed")
 
-            if not media_record:
-                logging.warning(f"Update failed: Media not found or is trashed for ID {media_id}")
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found or is in trash")
+            current_hash = current_media['content_hash']
+            current_sync_version = current_media['version']
+            media_uuid = current_media['uuid']
+            new_sync_version = current_sync_version + 1
 
-            current_hash = media_record['content_hash']
+            # --- 2. Check if Content is being Updated ---
+            content_updated = 'content' in update_fields and update_fields['content'] is not None
+            new_content = update_fields.get('content') if content_updated else None
+            new_content_hash = hashlib.sha256(new_content.encode()).hexdigest() if content_updated else current_hash
+            content_actually_changed = content_updated and (new_content_hash != current_hash)
 
-            # --- 2. Prepare Update Fields ---
-            if payload.title is not None:
-                updates.append("title = ?")
-                params.append(payload.title)
-            if payload.author is not None: # Example: Add author update
-                updates.append("author = ?")
-                params.append(payload.author)
-            # Add other direct Media table field updates here...
+            # --- 3. Prepare SQL SET clause and parameters ---
+            set_parts = []
+            params = []
+            # Always update last_modified, version, and client_id on any change
+            current_time = db._get_current_utc_timestamp_str() # Use internal helper
+            client_id = db.client_id
+            set_parts.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+            params.extend([current_time, new_sync_version, client_id])
 
-            if payload.content is not None:
-                requires_new_version = True
-                new_content = payload.content
-                new_content_hash = hashlib.sha256(new_content.encode()).hexdigest()
-                # Only update content/hash if it actually changed
-                if new_content_hash != current_hash:
-                    updates.append("content = ?")
-                    params.append(new_content)
-                    updates.append("content_hash = ?")
-                    params.append(new_content_hash)
-                    # If content changed, maybe reset chunking status?
-                    updates.append("chunking_status = ?")
-                    params.append('pending') # Or 'needs_rechunking'?
-                    logging.debug(f"Content update detected for media_id={media_id}. New hash: {new_content_hash}")
-                else:
-                    # Content provided but identical to current, no DB update needed for content/hash
-                    logging.debug(f"Content provided for media_id={media_id} is identical to current content. Skipping content/hash update.")
-                    # If content is identical, we might argue a new version isn't strictly needed *unless* prompt/analysis changed too.
-                    # For simplicity now: if content is in payload, assume intent to version, even if identical.
-                    # If prompt/analysis are also provided, they WILL be saved in the new version.
+            # Add specific fields from payload
+            if 'title' in update_fields:
+                set_parts.append("title = ?")
+                params.append(update_fields['title'])
+            if 'author' in update_fields:
+                set_parts.append("author = ?")
+                params.append(update_fields['author'])
+            if 'type' in update_fields: # Allow updating type?
+                set_parts.append("type = ?")
+                params.append(update_fields['type'])
+            # Add other updatable Media fields here...
 
+            # Handle content change specifically
+            if content_actually_changed:
+                logger.info(f"Content changed for media {media_id}. Updating content and hash.")
+                set_parts.extend(["content = ?", "content_hash = ?"])
+                params.extend([new_content, new_content_hash])
+                # Reset chunking status if content changes
+                set_parts.append("chunking_status = ?")
+                params.append('pending')
+            elif content_updated and not content_actually_changed:
+                 logger.info(f"Content provided for media {media_id} but hash is identical. Content field not updated.")
+                 # Do not add content/hash to SET clause
+                 # We still create a new version if content was in payload (as per original logic)
 
-            # --- 3. Execute Update Query (if changes detected) ---
-            if updates:
-                set_clause = ", ".join(updates)
-                query = f"UPDATE Media SET {set_clause} WHERE id = ?"
-                update_params = tuple(params + [media_id])
-                logging.debug(f"Executing Media UPDATE query: {query} | Params: {update_params}")
-                cursor.execute(query, update_params)
-                logging.info(f"Updated Media table fields for media_id={media_id}")
-            else:
-                logging.debug(f"No direct Media table fields to update for media_id={media_id}")
+            # --- 4. Execute Media Table Update ---
+            sql_set_clause = ", ".join(set_parts)
+            update_query = f"UPDATE Media SET {sql_set_clause} WHERE id = ? AND version = ?"
+            update_params = tuple(params + [media_id, current_sync_version])
 
+            logger.debug(f"Executing Media UPDATE: {update_query} | Params: {update_params}")
+            update_cursor = conn.cursor()
+            update_cursor.execute(update_query, update_params)
 
-            # --- 4. Create New Version if Required ---
-            new_version_number = None
-            if requires_new_version:
-                # Use the content from the payload.
-                # Use prompt/analysis from payload if provided, otherwise None (will become NULL).
-                new_version_prompt = payload.prompt
-                new_version_analysis = payload.analysis # From alias='analysis_content'
+            if update_cursor.rowcount == 0:
+                # Check if it was a conflict or if the item disappeared
+                cursor.execute("SELECT version FROM Media WHERE id = ?", (media_id,))
+                check_conflict = cursor.fetchone()
+                if check_conflict and check_conflict['version'] != current_sync_version:
+                     raise ConflictError("Media", media_id)
+                else: # Item disappeared between read and write? Unlikely in transaction but possible.
+                      raise DatabaseError(f"Failed to update media {media_id}, possibly deleted concurrently.")
 
-                logging.debug(f"Creating new version for media_id={media_id} due to content update.")
-                # Call the updated create_document_version, passing the connection
-                version_info = create_document_version(
+            logger.info(f"Successfully updated Media record for ID: {media_id}. New sync version: {new_sync_version}")
+            message = f"Media item {media_id} updated successfully."
+
+            # --- 5. Update FTS if title or content changed ---
+            fts_title = update_fields.get('title', None) # Use new title if provided
+            if fts_title is None: # If title not in payload, fetch current title for FTS
+                cursor.execute("SELECT title FROM Media WHERE id = ?", (media_id,))
+                fts_title = cursor.fetchone()['title']
+
+            fts_content = new_content if content_actually_changed else None # Only pass content if it changed
+            if fts_content is None and not content_updated: # If content didn't change and wasn't in payload, fetch current for FTS
+                 cursor.execute("SELECT content FROM Media WHERE id = ?", (media_id,))
+                 fts_content = cursor.fetchone()['content']
+
+            if 'title' in update_fields or content_actually_changed:
+                 logger.debug(f"Updating FTS for media {media_id} due to title/content change.")
+                 db._update_fts_media(conn, media_id, fts_title, fts_content) # Use internal helper
+
+            # --- 6. Create New Document Version if Content was in Payload ---
+            if content_updated: # Create version even if content hash was identical (matches original logic)
+                logger.info(f"Content was present in update payload for media {media_id}. Creating new document version.")
+                # Use the payload content, prompt, and analysis
+                # db.create_document_version handles its own sync logging internally
+                new_doc_version_info = db.create_document_version(
                     media_id=media_id,
-                    content=new_content, # Use the payload content
-                    prompt=new_version_prompt, # Pass payload prompt (or None)
-                    analysis_content=new_version_analysis, # Pass payload analysis (or None)
-                    db_instance=db, # Pass for logging etc.
-                    conn=conn # Pass the active connection!
+                    content=new_content, # Content from payload
+                    prompt=payload.prompt, # Prompt from payload (can be None)
+                    analysis_content=payload.analysis # Analysis from payload (can be None)
                 )
-                new_version_number = version_info.get('version_number')
-                logging.info(f"Created new version {new_version_number} for media_id={media_id} during update.")
+                message += f" New version {new_doc_version_info.get('version_number')} created."
+                logger.info(f"Created new version {new_doc_version_info.get('version_number')} (UUID: {new_doc_version_info.get('uuid')}) for media {media_id} during update.")
 
-            # Commit happens automatically by context manager
+            # --- 7. Log Media Update Sync Event ---
+            # Fetch the final state of the updated media record for the payload
+            cursor.execute("SELECT * FROM Media WHERE id = ?", (media_id,))
+            updated_media_info = dict(cursor.fetchone())
+            if new_doc_version_info:
+                 # Add context about the new version to the sync payload (optional)
+                 updated_media_info['created_doc_ver_uuid'] = new_doc_version_info.get('uuid')
+                 updated_media_info['created_doc_ver_num'] = new_doc_version_info.get('version_number')
 
-            # --- 5. Prepare Response ---
-            response_message = f"Media item {media_id} updated successfully."
-            if new_version_number:
-                 response_message += f" New version {new_version_number} created."
+            db._log_sync_event(conn, 'Media', media_uuid, 'update', new_sync_version, updated_media_info)
 
-            # Optionally fetch the updated item details to return them
-            # cursor.execute("SELECT * FROM Media WHERE id = ?", (media_id,))
-            # updated_data = dict(cursor.fetchone())
-            # return updated_data
+            # Commit happens automatically via context manager 'with db.transaction()'
 
-            return {"message": response_message, "media_id": media_id, "new_version": new_version_number}
+        # --- 8. Prepare and Return Response ---
+        response = {
+            "message": message,
+            "media_id": media_id,
+            "media_uuid": media_uuid,
+            "new_media_sync_version": new_sync_version,
+            "new_document_version": { # Include details if version was created
+                 "version_number": new_doc_version_info.get('version_number') if new_doc_version_info else None,
+                 "uuid": new_doc_version_info.get('uuid') if new_doc_version_info else None,
+            } if new_doc_version_info else None,
+            # "updated_media": updated_media_info # Optionally return full updated object
+        }
+        return response
 
-    except HTTPException:
-        raise # Re-raise HTTP exceptions directly
-    except DatabaseError as e:
-        logging.error(f"Database error updating media_id={media_id}: {e}", exc_info=True)
+    except HTTPException: # Re-raise FastAPI/manual HTTP exceptions
+        raise
+    except ConflictError as e:
+        logger.error(f"Conflict updating media {media_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Conflict detected during update: {e}")
+    except (DatabaseError, InputError) as e: # Catch DB errors from new library
+        logger.error(f"Database/Input error updating media {media_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error during update: {e}")
     except Exception as e:
-        logging.error(f"Unexpected error updating media_id={media_id}: {e}", exc_info=True)
+        logger.error(f"Unexpected error updating media {media_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred: {e}")
 
 
@@ -745,69 +934,75 @@ async def update_media_item(
 # Endpoints:
 #     GET /api/v1/media/search - `"/search"`
 
-@router.get("/search", summary="Search media")
-@limiter.limit("20/minute")
-async def search_media(
-        request: Request,
-        search_query: Optional[str] = Query(None, description="Text to search in title and content"),
-        keywords: Optional[str] = Query(None, description="Comma-separated keywords to filter by"),
-        page: int = Query(1, ge=1, description="Page number"),
-        results_per_page: int = Query(10, ge=1, le=100, description="Results per page"),
-        db=Depends(get_db_for_user)
+# Retrieve a listing of all media, returning a list of media items. Limited by paging and rate limiting.
+@router.get(
+    "/", # Base endpoint for listing/searching media
+    status_code=status.HTTP_200_OK,
+    summary="List All Media Items", # Adjusted summary for clarity
+    tags=["Media Management"],
+    # response_model=MediaListResponse # Define a Pydantic model for this response if desired
+)
+@limiter.limit("50/minute") # Keep rate limiting
+async def list_all_media( # Renamed function for clarity (list vs get)
+    request: Request,
+    page: int = Query(1, ge=1, description="Page number"),
+    results_per_page: int = Query(10, ge=1, le=100, description="Results per page"),
+    # --- Use the new DB dependency ---
+    db: Database = Depends(get_db_for_user) # Inject the Database instance
 ):
     """
-    Search media items by text query and/or keywords.
-    Returns paginated results with content previews.
+    Retrieve a paginated listing of all active (non-deleted, non-trash) media items.
+    Returns "items" and a "pagination" dictionary.
     """
-    # Basic validation
-    if not search_query and not keywords:
-        raise HTTPException(status_code=400, detail="Either search_query or keywords must be provided")
+    offset = (page - 1) * results_per_page
 
-    # # Process keywords if provided
-    # if keywords:
-    #     keyword_list = [k.strip().lower() for k in keywords.split(",") if k.strip()]
-
-    # Perform search
     try:
-        results, total_matches = search_media_db(
-            search_query=search_query.strip() if search_query else "",
-            search_fields=["title", "content"],
-            keywords=keywords,
-            page=page,
-            results_per_page=results_per_page,
-            db_instance=db
-        )
+        # --- Query 1: Get total count of active items ---
+        count_query = "SELECT COUNT(*) FROM Media WHERE deleted = 0 AND is_trash = 0"
+        count_cursor = db.execute_query(count_query) # Use instance method
+        total_items = count_cursor.fetchone()[0] or 0
+        total_pages = ceil(total_items / results_per_page) if total_items > 0 else 0
 
-        # Process results in a more efficient way
-        formatted_results = [
-            {
-                "id": item[0],
-                "url": item[1],
-                "title": item[2],
-                "type": item[3],
-                "content_preview": truncate_content(item[4], 200),
-                "author": item[5] or "Unknown",
-                "date": item[6].isoformat() if hasattr(item[6], 'isoformat') else item[6],  # Handle string dates
-                "keywords": fetch_keywords_for_media(item[0])
-            }
-            for item in results
-        ]
+        # --- Query 2: Get paginated items ---
+        items_list = []
+        if total_items > 0 and page <= total_pages:
+             # Select specific fields needed for the response
+             # Order by most recently modified first
+             items_query = """
+                 SELECT id, title, type, uuid``
+                 FROM Media
+                 WHERE deleted = 0 AND is_trash = 0
+                 ORDER BY last_modified DESC, id DESC
+                 LIMIT ? OFFSET ?
+             """
+             items_cursor = db.execute_query(items_query, (results_per_page, offset)) # Use instance method
+             items_list = [dict(row) for row in items_cursor.fetchall()]
 
+        # Format the response according to expected structure
         return {
-            "results": formatted_results,
+            "items": [
+                {
+                    "id": item["id"],
+                    "uuid": item["uuid"], # Include UUID if useful for client
+                    "title": item["title"],
+                    "type": item["type"],
+                    "url": f"/api/v1/media/{item['id']}" # Link to the detail endpoint
+                }
+                for item in items_list
+            ],
             "pagination": {
                 "page": page,
-                "per_page": results_per_page,
-                "total": total_matches,
-                "total_pages": ceil(total_matches / results_per_page) if total_matches > 0 else 0
+                "results_per_page": results_per_page,
+                "total_pages": total_pages,
+                "total_items": total_items
             }
         }
-
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-    except Exception as e:
-        logging.error(f"Error searching media: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred while searching")
+    except DatabaseError as e: # Catch specific DB errors from the new library
+        logger.error(f"Database error fetching paginated media: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database error retrieving media list: {e}")
+    except Exception as e: # Catch other potential errors
+        logger.error(f"Unexpected error fetching paginated media: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while retrieving media list.")
 
 
 # FIXME - Add an 'advanced search' option for searching by date range, media type, etc. - update DB schema to add new fields
@@ -1080,30 +1275,34 @@ def _prepare_common_options(form_data: AddMediaForm, chunk_options: Optional[Dic
         "author": form_data.author # Pass common author
     }
 
-async def _process_batch_media( # Video/Audio - DB interaction handled here
+async def _process_batch_media(
     media_type: MediaType,
     urls: List[str],
-    uploaded_file_paths: List[str], # Keys in source_to_ref_map
+    uploaded_file_paths: List[str],
     source_to_ref_map: Dict[str, Union[str, Tuple[str, str]]],
     form_data: AddMediaForm,
     chunk_options: Optional[Dict],
     loop: asyncio.AbstractEventLoop,
-    db # Pass DB manager instance
+    db: Database # Correct type hint
 ) -> List[Dict[str, Any]]:
     """
-    Handles PRE-CHECKING, calling external processing, and DB persistence for video/audio batches.
+    Handles PRE-CHECKING (using specific query for URL+Model), external processing,
+    and DB persistence for video/audio batches.
     Returns a list of result dictionaries for each input item.
-    DB interaction happens *after* successful processing.
     """
     combined_results = []
     all_processing_sources = urls + uploaded_file_paths
     items_to_process = [] # Sources that pass pre-check or overwrite=True
 
+    logger.debug(f"Starting pre-check for {len(all_processing_sources)} {media_type} items...")
+
     # --- 1. Pre-check ---
     for source_path_or_url in all_processing_sources:
-        input_ref = source_to_ref_map.get(source_path_or_url)
+        # --- Get input_ref (same as before) ---
+        input_ref_info = source_to_ref_map.get(source_path_or_url)
+        input_ref = input_ref_info[0] if isinstance(input_ref_info, tuple) else input_ref_info
         if not input_ref:
-            logging.error(f"CRITICAL: Could not find original input reference for {source_path_or_url}.")
+            logger.error(f"CRITICAL: Could not find original input reference for {source_path_or_url}.")
             input_ref = source_path_or_url # Fallback
 
         identifier_for_check = input_ref # Use original URL/filename for DB check
@@ -1112,30 +1311,46 @@ async def _process_batch_media( # Video/Audio - DB interaction handled here
         reason = "Ready for processing."
         pre_check_warning = None
 
-        # Perform DB pre-check only if DB is provided and media type uses model check
-        if db and media_type in ['video', 'audio']: # Add others if needed
+        # --- Perform DB pre-check only if overwrite is False AND for relevant types ---
+        if not form_data.overwrite_existing and media_type in ['video', 'audio']:
             try:
                 model_for_check = form_data.transcription_model
-                # This function now correctly resides in DB_Manager
-                existing_id = check_should_process_by_url(
-                    url=identifier_for_check,
-                    current_transcription_model=model_for_check,
-                    db=db
-                )
-                if existing_id is not None: # Check explicit None, 0 is a valid ID
-                    should_process = False
-                    reason = f"Media exists (ID: {existing_id}) with the same transcription model."
+                # --- Use CUSTOM QUERY to check URL + Model ---
+                pre_check_query = """
+                    SELECT id FROM Media
+                    WHERE url = ?
+                      AND transcription_model = ?
+                      AND deleted = 0
+                      AND is_trash = 0
+                    LIMIT 1
+                """
+                cursor = db.execute_query(pre_check_query, (identifier_for_check, model_for_check))
+                existing_record = cursor.fetchone()
+
+                if existing_record:
+                    existing_id = existing_record['id']
+                    should_process = False # Found existing matching item
+                    reason = f"Media exists (ID: {existing_id}) with the same URL/identifier and transcription model ('{model_for_check}'). Overwrite is False."
                 else:
-                    should_process = True
-                    reason = "Media not found or has different transcription model."
-            except Exception as check_err:
-                logging.error(f"DB pre-check failed for {identifier_for_check}: {check_err}", exc_info=True)
+                    should_process = True # No matching item found
+                    reason = "Media not found with this URL/identifier and transcription model."
+
+            except (DatabaseError, sqlite3.Error) as check_err: # Catch specific DB errors
+                logger.error(f"DB pre-check (custom query) failed for {identifier_for_check}: {check_err}", exc_info=True)
                 should_process, existing_id, reason = True, None, f"DB pre-check failed: {check_err}"
                 pre_check_warning = f"Database pre-check failed: {check_err}"
+            except Exception as check_err: # Catch unexpected errors during check
+                logger.error(f"Unexpected error during DB pre-check (custom query) for {identifier_for_check}: {check_err}", exc_info=True)
+                should_process, existing_id, reason = True, None, f"Unexpected pre-check error: {check_err}"
+                pre_check_warning = f"Unexpected database pre-check error: {check_err}"
+        else:
+             # Overwrite is True, so no need to check existence beforehand
+             should_process = True
+             reason = "Overwrite requested, proceeding regardless of existence."
 
         # --- Skip Logic ---
-        if not should_process and not form_data.overwrite_existing:
-            logging.info(f"Skipping processing for {input_ref}: {reason}")
+        if not should_process: # This now correctly handles the overwrite=False case
+            logger.info(f"Skipping processing for {input_ref}: {reason}")
             skipped_result = {
                 "status": "Skipped", "input_ref": input_ref, "processing_source": source_path_or_url,
                 "media_type": media_type, "message": reason, "db_id": existing_id,
@@ -1146,13 +1361,15 @@ async def _process_batch_media( # Video/Audio - DB interaction handled here
             combined_results.append(skipped_result)
         else:
             items_to_process.append(source_path_or_url)
-            log_msg = f"Proceeding with processing for {input_ref}: {reason if should_process else 'Overwrite requested'}"
+            log_msg = f"Proceeding with processing for {input_ref}: {reason}"
             if pre_check_warning:
-                 log_msg += f" (Pre-check Warning: {pre_check_warning})"
-            logging.info(log_msg)
-            if pre_check_warning:
-                 # Store warning with ref if needed later
-                 source_to_ref_map[source_path_or_url] = (input_ref, pre_check_warning)
+                log_msg += f" (Pre-check Warning: {pre_check_warning})"
+                # Store warning with ref if needed later (ensure mapping exists)
+                if isinstance(source_to_ref_map.get(source_path_or_url), tuple):
+                    pass  # Warning already stored
+                else:
+                    source_to_ref_map[source_path_or_url] = (input_ref, pre_check_warning)
+            logger.info(log_msg)
 
 
     # --- 2. Perform Batch Processing (External Library Call) ---
@@ -1419,11 +1636,12 @@ async def _process_document_like_item(
     chunk_options: Optional[Dict],
     temp_dir: Path,
     loop: asyncio.AbstractEventLoop,
-    db_manager # Pass DB manager instance
+    db: Database # <<< Use new type hint and name
 ) -> Dict[str, Any]:
     """
     Handles PRE-CHECK, processing (NO DB), download/prep, and DB persistence (NEW)
     for PDF, Document, Ebook items. Returns a dictionary including DB status.
+    Uses the provided Database instance.
     """
     # Initialize result structure (including DB fields)
     final_result = {
@@ -1433,26 +1651,39 @@ async def _process_document_like_item(
         "warnings": None, "db_id": None, "db_message": None, "message": None
     }
 
-    # --- 1. Pre-check (remains mostly the same) ---
+    # --- 1. Pre-check ---
     identifier_for_check = item_input_ref
     existing_id = None
-    try:
-        # Use check_should_process_by_url, which doesn't need a model for these types
-        existing_id = check_should_process_by_url(identifier_for_check, current_transcription_model=None, db=db_manager)
-        if existing_id and not form_data.overwrite_existing:
-             logging.info(f"Skipping processing for {item_input_ref}: Media exists (ID: {existing_id}) and overwrite=False.")
-             final_result.update({
-                 "status": "Skipped", "message": f"Media exists (ID: {existing_id}), overwrite=False",
-                 "db_id": existing_id, "db_message": "Skipped - Exists in DB."
-             })
-             return final_result
-        # ... (rest of pre-check logic) ...
-    except Exception as check_err:
-         logging.error(f"Database pre-check failed for {item_input_ref}: {check_err}", exc_info=True)
-         final_result.setdefault("warnings", []).append(f"Database pre-check failed: {check_err}")
+    pre_check_warning = None
+    # Perform DB pre-check only if overwrite is False
+    if not form_data.overwrite_existing:
+        try:
+            # --- PRE-CHECK (using standalone check function) ---
+            # Checks for *any* active media with this URL/identifier
+            existing_id = check_media_exists(db_instance=db, url=identifier_for_check)
+
+            if existing_id is not None: # Check for None explicitly
+                 logger.info(f"Skipping processing for {item_input_ref}: Media exists (ID: {existing_id}) and overwrite=False.")
+                 final_result.update({
+                     "status": "Skipped", "message": f"Media exists (ID: {existing_id}), overwrite=False",
+                     "db_id": existing_id, "db_message": "Skipped - Exists in DB."
+                 })
+                 return final_result
+            # else: Media doesn't exist, proceed.
+
+        except (DatabaseError, sqlite3.Error) as check_err: # Catch specific DB errors
+            logger.error(f"Database pre-check failed for {item_input_ref}: {check_err}", exc_info=True)
+            pre_check_warning = f"Database pre-check failed: {check_err}"
+            final_result.setdefault("warnings", []).append(pre_check_warning)
+        except Exception as check_err: # Catch unexpected errors
+            logger.error(f"Unexpected error during DB pre-check for {item_input_ref}: {check_err}", exc_info=True)
+            pre_check_warning = f"Unexpected database pre-check error: {check_err}"
+            final_result.setdefault("warnings", []).append(pre_check_warning)
 
 
     # --- 2. Download/Prepare File (remains mostly the same) ---
+    # ... (download/prep logic using httpx, smart_download etc.) ...
+    # Ensure paths/bytes are correctly prepared based on media_type
     file_bytes: Optional[bytes] = None
     processing_filepath: Optional[str] = None
     processing_filename: Optional[str] = None
@@ -1503,10 +1734,6 @@ async def _process_document_like_item(
     except (httpx.HTTPStatusError, httpx.RequestError, IOError, OSError, FileNotFoundError) as prep_err:
          logging.error(f"File preparation/download error for {item_input_ref}: {prep_err}", exc_info=True)
          final_result.update({"status": "Failed", "error": f"File preparation/download failed: {prep_err}"})
-         return final_result # Cannot proceed
-    except Exception as e:
-         logging.error(f"Unexpected error during file prep for {item_input_ref}: {e}", exc_info=True)
-         final_result.update({"status": "Failed", "error": f"File preparation error: {type(e).__name__}"})
          return final_result
 
 
@@ -1606,51 +1833,50 @@ async def _process_document_like_item(
         content_for_db = final_result.get('content', '') # Use content key
         analysis_for_db = final_result.get('summary') or final_result.get('analysis')
         metadata_for_db = final_result.get('metadata', {})
-        # Determine model used (e.g., parser for PDF, import for others)
-        # Use 'parser_used' for PDF, 'transcription_model' (if applicable), or default
-        model_used = final_result.get('parser_used') or final_result.get('transcription_model', 'Imported')
+        # Use keywords from result dict (should contain merged form + extracted keywords)
+        final_keywords_list = final_result.get('keywords', form_data.keywords) # Fallback to form keywords
+        model_used = final_result.get('parser_used') or final_result.get('transcription_model', 'Imported') # Determine model used
 
         if content_for_db: # Only persist if content exists
             try:
-                logging.info(f"Attempting DB persistence for item: {item_input_ref}")
-                db_args = {
-                    "url": item_input_ref, # Original ref as identifier
-                    "title": metadata_for_db.get('title', Path(item_input_ref).stem),
-                    "media_type": media_type,
-                    "content": content_for_db,
-                    # Use keywords from result (merged from input + extracted)
-                    "keywords": final_result.get('keywords', []),
-                    "prompt": form_data.custom_prompt, # Get prompt from form
-                    "analysis_content": analysis_for_db,
-                    "transcription_model": model_used, # Use determined model
-                    "author": metadata_for_db.get('author', 'Unknown'),
-                    "ingestion_date": datetime.now().strftime('%Y-%m-%d'),
-                    "overwrite": form_data.overwrite_existing,
-                    "db": db_manager,
-                    "chunk_options": chunk_options # Pass for scheduling
-                }
+                logger.info(f"Attempting DB persistence for item: {item_input_ref} using user {db.client_id}'s DB")
 
-                db_add_update_func = functools.partial(add_media_with_keywords, **db_args)
-                db_id, db_message = await loop.run_in_executor(None, db_add_update_func)
+                # --- DB INSTANCE METHOD CALL ---
+                # Call the instance method directly.
+                media_id_result, media_uuid_result, db_message_result = db.add_media_with_keywords(
+                    url=item_input_ref, # Original ref as identifier
+                    title=metadata_for_db.get('title', form_data.title or Path(item_input_ref).stem),
+                    media_type=media_type,
+                    content=content_for_db,
+                    keywords=final_keywords_list,
+                    prompt=form_data.custom_prompt, # Prompt from form
+                    analysis_content=analysis_for_db,
+                    transcription_model=model_used, # Use determined model
+                    author=metadata_for_db.get('author', form_data.author or 'Unknown'), # Use form author as fallback
+                    # ingestion_date=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), # Method handles default
+                    overwrite=form_data.overwrite_existing,
+                    chunk_options=chunk_options,
+                    # segments=None, # Pass if relevant for docs
+                )
 
-                final_result["db_id"] = db_id
-                final_result["db_message"] = db_message
-                logging.info(f"DB persistence result for {item_input_ref}: ID={db_id}, Msg='{db_message}'")
+                final_result["db_id"] = media_id_result
+                final_result["db_message"] = db_message_result
+                logger.info(f"DB persistence result for {item_input_ref}: ID={media_id_result}, Msg='{db_message_result}'")
 
-            except (DatabaseError, InputError) as db_err:
-                 logging.error(f"Database operation failed for {item_input_ref}: {db_err}", exc_info=True)
-                 final_result['status'] = 'Warning' # Downgrade status
+            except (DatabaseError, InputError, ConflictError) as db_err: # <<< Catch new exceptions
+                 logger.error(f"Database operation failed for {item_input_ref}: {db_err}", exc_info=True)
+                 final_result['status'] = 'Warning'
                  final_result['error'] = (final_result.get('error') or "") + f" | DB Error: {db_err}"
                  final_result.setdefault("warnings", []).append(f"Database operation failed: {db_err}")
                  final_result["db_message"] = f"DB Error: {db_err}"
             except Exception as e:
-                 logging.error(f"Unexpected error during DB persistence for {item_input_ref}: {e}", exc_info=True)
+                 logger.error(f"Unexpected error during DB persistence for {item_input_ref}: {e}", exc_info=True)
                  final_result['status'] = 'Warning'
                  final_result['error'] = (final_result.get('error') or "") + f" | Persistence Error: {e}"
                  final_result.setdefault("warnings", []).append(f"Unexpected persistence error: {e}")
                  final_result["db_message"] = f"Persistence Error: {e}"
         else:
-             logging.warning(f"Skipping DB persistence for {item_input_ref} due to missing content.")
+             logger.warning(f"Skipping DB persistence for {item_input_ref} due to missing content.")
              final_result["db_message"] = "DB persistence skipped (no content)."
     else:
         # If processing failed, set DB message accordingly
@@ -1692,7 +1918,7 @@ def _determine_final_status(results: List[Dict[str, Any]]) -> int:
 # --- Main Endpoint ---
 @router.post("/add",
              # status_code=status.HTTP_200_OK, # Determined dynamically
-             dependencies=[Depends(verify_api_key)],
+             dependencies=[Depends(get_db_for_user)],
              summary="Add media (URLs/files) with processing and persistence",
              tags=["Media Ingestion & Persistence"], # Changed tag
              )
@@ -1862,7 +2088,7 @@ async def add_media(
                         item_input_ref=source_to_ref_map[source], processing_source=source,
                         media_type=form_data.media_type, is_url=(source in url_list),
                         form_data=form_data, chunk_options=chunking_options_dict,
-                        temp_dir=temp_dir_path, loop=loop, db_manager=db
+                        temp_dir=temp_dir_path, loop=loop, db=db
                     )
                     for source in all_input_sources
                 ]

@@ -28,11 +28,13 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from loguru import logger
+
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
 #
 # Local Imports
 from tldw_Server_API.app.api.v1.schemas.sync_server_models import ClientChangesPayload, ServerChangesResponse, \
     SyncLogEntry
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_db_for_user, verify_token_and_get_user
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
 #
 # DB Mgmt
 from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import DatabaseError, ConflictError, Database, InputError
@@ -82,7 +84,7 @@ router = APIRouter()
              summary="Receive changes from a client")
 async def receive_changes_from_client(
     payload: ClientChangesPayload,
-    user_id: str = Depends(verify_token_and_get_user),
+    user_id: User = Depends(get_request_user),
     db: Database = Depends(get_db_for_user)
 ):
     """
@@ -91,12 +93,12 @@ async def receive_changes_from_client(
     """
     requesting_client_id = payload.client_id
     if not payload.changes:
-        logger.info(f"[{user_id}] Received empty change batch from client {requesting_client_id}.")
+        logger.info(f"[{user_id.username}] Received empty change batch from client {requesting_client_id}.")
         return {"status": "success", "message": "No changes received."}
 
-    logger.info(f"[{user_id}] Received {len(payload.changes)} changes from client {requesting_client_id}. Applying to DB: {db.db_path_str}")
+    logger.info(f"[{user_id.username}] Received {len(payload.changes)} changes from client {requesting_client_id}. Applying to DB: {db.db_path_str}")
 
-    processor = ServerSyncProcessor(db=db, user_id=user_id, requesting_client_id=requesting_client_id)
+    processor = ServerSyncProcessor(db=db, user_id=user_id.username, requesting_client_id=requesting_client_id)
     try:
         # Use .model_dump() for Pydantic v2+, or .dict() for v1
         changes_as_dicts = [change.model_dump() for change in payload.changes]
@@ -113,17 +115,17 @@ async def receive_changes_from_client(
 
         if not success:
             detail = {"message": "Failed to apply changes atomically.", "errors": errors}
-            logger.error(f"[{user_id}] Failed processing batch from {requesting_client_id}: {errors}")
+            logger.error(f"[{user_id.username}] Failed processing batch from {requesting_client_id}: {errors}")
             # Use 400 Bad Request if errors suggest bad client data, 500 otherwise
             error_code = status.HTTP_400_BAD_REQUEST if any("payload" in e.lower() or "value" in e.lower() for e in errors) else status.HTTP_500_INTERNAL_SERVER_ERROR
             raise HTTPException(status_code=error_code, detail=detail)
 
-        logger.info(f"[{user_id}] Successfully processed batch from client {requesting_client_id}.")
+        logger.info(f"[{user_id.username}] Successfully processed batch from client {requesting_client_id}.")
         return {"status": "success"}
 
     except Exception as e:
         # Catch unexpected errors during thread execution or processing
-        logger.exception(f"[{user_id}] Unexpected error in /send endpoint from client {requesting_client_id}")
+        logger.exception(f"[{user_id.username}] Unexpected error in /send endpoint from client {requesting_client_id}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal server error: {e}")
 
 
@@ -133,7 +135,7 @@ async def receive_changes_from_client(
 async def send_changes_to_client(
     client_id: str,
     since_change_id: int = 0,
-    user_id: str = Depends(verify_token_and_get_user),
+    user_id: User = Depends(get_request_user),
     db: Database = Depends(get_db_for_user)
 ):
     """
@@ -142,7 +144,7 @@ async def send_changes_to_client(
     Filters out changes that originated from the requesting client.
     Uses asyncio.to_thread for DB access.
     """
-    logger.info(f"[{user_id}] Client '{client_id}' requesting changes since server log ID {since_change_id} from DB: {db.db_path_str}.")
+    logger.info(f"[{user_id.username}] Client '{client_id}' requesting changes since server log ID {since_change_id} from DB: {db.db_path_str}.")
 
     def _get_changes_sync():
         """Synchronous helper to fetch data"""
@@ -168,7 +170,7 @@ async def send_changes_to_client(
             latest_id = latest_row[0] if latest_row and latest_row[0] is not None else 0
             return changes_raw_list, latest_id
         except (DatabaseError, sqlite3.Error) as db_err:
-            logger.error(f"[{user_id}] Sync DB error in _get_changes_sync for client {client_id}: {db_err}", exc_info=True)
+            logger.error(f"[{user_id.username}] Sync DB error in _get_changes_sync for client {client_id}: {db_err}", exc_info=True)
             # Re-raise to be caught by the main handler
             raise
 
@@ -184,10 +186,10 @@ async def send_changes_to_client(
                   entry = SyncLogEntry(**dict(row_dict))
                   changes_models.append(entry)
              except Exception as pydantic_err:
-                  logger.error(f"[{user_id}] Error validating sync log entry data (ID: {row_dict.get('change_id', 'N/A')}) against model: {pydantic_err}", exc_info=True)
+                  logger.error(f"[{user_id.username}] Error validating sync log entry data (ID: {row_dict.get('change_id', 'N/A')}) against model: {pydantic_err}", exc_info=True)
                   continue # Skip bad entry
 
-        logger.info(f"[{user_id}] Sending {len(changes_models)} changes to client '{client_id}'. Server latest ID: {latest_server_id}.")
+        logger.info(f"[{user_id.username}] Sending {len(changes_models)} changes to client '{client_id}'. Server latest ID: {latest_server_id}.")
 
         return ServerChangesResponse(
             changes=changes_models,
@@ -195,10 +197,10 @@ async def send_changes_to_client(
         )
 
     except (DatabaseError, sqlite3.Error) as e: # Catch errors raised from sync helper
-        logger.error(f"Database error getting changes for user '{user_id}', client '{client_id}': {e}", exc_info=True)
+        logger.error(f"Database error getting changes for user '{user_id.username}', client '{client_id}': {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve changes from database.")
     except Exception as e: # Catch unexpected errors
-        logger.error(f"Unexpected server error getting changes for user '{user_id}', client '{client_id}': {e}", exc_info=True)
+        logger.error(f"Unexpected server error getting changes for user '{user_id.username}', client '{client_id}': {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal server error: {e}")
 
 #

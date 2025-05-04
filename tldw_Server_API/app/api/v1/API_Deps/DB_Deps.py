@@ -1,79 +1,164 @@
 # DB_Deps.py
-# Description: This file contains the database dependency management for the FastAPI application.
+# Description: Manages user-specific database instances based on application mode.
 #
 # Imports
-import os
 import threading
 from pathlib import Path
 import logging
+from typing import Dict, Optional
+
 # 3rd-party Libraries
 from fastapi import Header, HTTPException, status, Depends
-#
-# Local Imports
-from tldw_Server_API.app.core.DB_Management.Media_DB import Database # Adjust import path
-#
-#######################################################################################################################
-#
-# Functions:
-
-# Define the path for the single database file
-# Use Path object for better path handling
-SINGLE_DB_FILE_PATH = Path("./single-user-folder/main_media_library.sqlite") # Example: store in a 'data' subdir
-
-# --- Ensure base directory exists ---
-# This ensures the directory where the DB will live is created if it doesn't exist
 try:
-    SINGLE_DB_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    logging.info(f"Ensured database directory exists: {SINGLE_DB_FILE_PATH.parent}")
-except OSError as e:
-    logging.error(f"Could not create database directory {SINGLE_DB_FILE_PATH.parent}: {e}", exc_info=True)
-    # Decide if you want the app to fail startup if the dir can't be created
-    # raise RuntimeError(f"Failed to create database directory: {e}") from e
+    from cachetools import LRUCache
+    _HAS_CACHETOOLS = True
+except ImportError:
+    _HAS_CACHETOOLS = False
+    logging.warning("cachetools not found. User DB instance cache will grow indefinitely. "
+                    "Install with: pip install cachetools")
 
+# Local Imports
+# Import the settings dictionary
+from tldw_Server_API.app.core.config import settings
+# Import the primary user identification dependency and User model
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
+# Import the specific Database class
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, DatabaseError, SchemaError # Adjust import path
 
-# --- Global cache for the single DB instance ---
-# To avoid reconnecting constantly, we can cache the single instance.
-_db_instance = None
-_db_lock = threading.Lock() # To prevent race conditions during first creation
+#######################################################################################################################
 
+# --- Configuration (using imported settings dictionary) ---
+# Assign to module-level vars for convenience or use settings["KEY"] directly
+USER_DB_BASE_DIR = settings["USER_DB_BASE_DIR"]
+SERVER_CLIENT_ID = settings["SERVER_CLIENT_ID"]
 
+# Base directory existence is now checked within config.py
 
+# --- Global Cache for User DB Instances ---
+MAX_CACHED_DB_INSTANCES = 100  # Adjust as needed
 
-#########################################################
-#
-# Singleton pattern for the Database instance for a single user
+if _HAS_CACHETOOLS:
+    # Keyed by user ID (int)
+    _user_db_instances: LRUCache = LRUCache(maxsize=MAX_CACHED_DB_INSTANCES)
+    logging.info(f"Using LRUCache for user DB instances (maxsize={MAX_CACHED_DB_INSTANCES}).")
+else:
+    # Keyed by user ID (int)
+    _user_db_instances: Dict[int, Database] = {} # Fallback to standard dict
 
-async def get_database() -> Database:
+_user_db_lock = threading.Lock() # Protects access to _user_db_instances
+
+#######################################################################################################################
+
+# --- Helper Functions ---
+
+def _get_db_path_for_user(user_id: int) -> Path:
     """
-    Gets the singleton Database instance for the single, shared database file.
-    Handles initialization and schema checks on first access.
+    Determines the database file path for a given user ID.
+    Ensures the user's specific directory exists.
+    Uses USER_DB_BASE_DIR assigned from settings.
     """
-    global _db_instance
-    if _db_instance is None:
-        # Use a lock to ensure only one thread initializes the instance if multiple requests hit simultaneously
-        with _db_lock:
-            # Double-check if another thread initialized it while waiting for the lock
-            if _db_instance is None:
-                try:
-                    logging.info(f"Initializing database instance for path: {SINGLE_DB_FILE_PATH}")
-                    # Instantiate the Database class with the single path
-                    # The __init__ method handles schema checks (_ensure_schema)
-                    _db_instance = Database(db_path=str(SINGLE_DB_FILE_PATH))
-                    logging.info(f"Database instance created successfully for {SINGLE_DB_FILE_PATH}")
-                except Exception as e:
-                    logging.error(f"Failed to initialize database instance at {SINGLE_DB_FILE_PATH}: {e}", exc_info=True)
-                    # Reset instance on failure so next request might retry
-                    _db_instance = None
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"Could not initialize database: {e}"
-                    )
-    # Always return the cached instance (once created)
-    if _db_instance is None:
-         # Should not happen if initialization worked, but handle defensively
-         raise HTTPException(status_code=500, detail="Database instance is not available.")
-    return _db_instance
+    # user_id will be settings["SINGLE_USER_FIXED_ID"] in single-user mode
+    user_dir_name = str(user_id)
+    # Use the variable assigned from settings dict
+    user_dir = USER_DB_BASE_DIR / user_dir_name
+    db_file = user_dir / "user_media_library.sqlite" # Consistent naming
 
+    try:
+        user_dir.mkdir(parents=True, exist_ok=True)
+        # Optional: logging.debug(f"Ensured directory exists for user {user_id}: {user_dir}")
+    except OSError as e:
+        logging.error(f"Could not create database directory for user_id {user_id} at {user_dir}: {e}", exc_info=True)
+        # Raise a standard exception to be caught by the main dependency
+        raise IOError(f"Could not initialize storage directory for user {user_id}.") from e
+    return db_file
+
+# --- Main Dependency Function ---
+
+async def get_db_for_user(
+    # Depends on the primary authentication/identification dependency
+    current_user: User = Depends(get_request_user)
+) -> Database:
+    """
+    FastAPI dependency to get the Database instance for the identified user.
+
+    Works in both single-user (using fixed ID from settings) and multi-user modes.
+    Handles caching, initialization, and schema checks. Uses configuration
+    values assigned from the 'settings' dictionary.
+
+    Args:
+        current_user: The User object (either fixed or fetched) provided by `get_request_user`.
+
+    Returns:
+        A Database instance connected to the appropriate user's database file.
+
+    Raises:
+        HTTPException: If authentication fails (handled by `get_request_user`),
+                       or if the database cannot be initialized.
+    """
+    if not current_user or not isinstance(current_user.id, int):
+        logging.error("get_db_for_user called without a valid User object/ID.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="User identification failed.")
+
+    user_id = current_user.id # Will be SINGLE_USER_FIXED_ID in single-user mode
+    db_instance: Optional[Database] = None
+
+    # --- Check Cache ---
+    # Read lock implicitly handled by context manager
+    with _user_db_lock:
+        db_instance = _user_db_instances.get(user_id)
+
+    if db_instance:
+        # Optional: Add connection check if needed, though Database class might handle it
+        logging.debug(f"Using cached Database instance for user_id: {user_id}")
+        return db_instance
+
+    # --- Instance Not Cached: Create New One ---
+    logging.info(f"No cached DB instance found for user_id: {user_id}. Initializing.")
+    # Acquire write lock
+    with _user_db_lock:
+        # Double-check cache in case another thread created it while waiting
+        db_instance = _user_db_instances.get(user_id)
+        if db_instance:
+            logging.debug(f"DB instance for user {user_id} created concurrently.")
+            return db_instance
+
+        # --- Get Path and Initialize ---
+        db_path: Optional[Path] = None # Define scope for logging in except block
+        try:
+            db_path = _get_db_path_for_user(user_id)
+            logging.info(f"Initializing Database instance for user {user_id} at path: {db_path}")
+
+            # Instantiate the Database class for the specific user ID's path
+            # Use SERVER_CLIENT_ID assigned from settings dict
+            db_instance = Database(db_path=str(db_path), client_id=SERVER_CLIENT_ID)
+
+            # --- Store in Cache ---
+            _user_db_instances[user_id] = db_instance
+            logging.info(f"Database instance created and cached successfully for user {user_id}")
+
+        except (DatabaseError, SchemaError) as e:
+            log_path = db_path or f"directory for user_id {user_id}"
+            logging.error(f"Failed to initialize database for user {user_id} at {log_path}: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Could not initialize database for user: {e}"
+            ) from e
+        except IOError as e: # Catch error from _get_db_path_for_user
+            logging.error(f"Failed to get DB path for user {user_id}: {e}", exc_info=True)
+            raise HTTPException(
+                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                 detail=str(e) # Use the message from IOError
+             ) from e
+        except Exception as e:
+            log_path = db_path or f"directory for user_id {user_id}"
+            logging.error(f"Unexpected error initializing database for user {user_id} at {log_path}: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"An unexpected error occurred during database setup for user."
+            ) from e
+
+    # Return the newly created and cached instance
+    return db_instance
 
 #
 # End of DB_Deps.py

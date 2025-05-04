@@ -2169,7 +2169,290 @@ class Database:
             logger.error(f"Unexpected error fetching media by title '{title}': {e}", exc_info=True)
             raise DatabaseError(f"Unexpected error fetching media by title: {e}") from e
 
+    def get_paginated_files(self, page: int = 1, results_per_page: int = 50) -> Tuple[List[sqlite3.Row], int, int, int]:
+        """
+        Fetches a paginated list of active media items (id, title, type) from this database instance.
 
+        Filters for items where `deleted = 0` and `is_trash = 0`.
+
+        Args:
+            page (int): The page number (1-based). Defaults to 1.
+            results_per_page (int): The number of items per page. Defaults to 50.
+
+        Returns:
+            A tuple containing:
+                - results (List[sqlite3.Row]): List of Row objects for the current page.
+                                               Each row contains 'id', 'title', 'type'.
+                - total_pages (int): Total number of pages for active items.
+                - current_page (int): The requested page number.
+                - total_items (int): The total number of active items matching the criteria.
+
+        Raises:
+            ValueError: If page or results_per_page are invalid.
+            DatabaseError: If a database query fails.
+        """
+        # No need to check self type, it's guaranteed by method call
+        if page < 1:
+            raise ValueError("Page number must be 1 or greater.")
+        if results_per_page < 1:
+            raise ValueError("Results per page must be 1 or greater.")
+
+        # Use self.db_path_str for logging context
+        logging.debug(
+            f"Fetching paginated files: page={page}, results_per_page={results_per_page} from DB: {self.db_path_str} (Active Only)")
+
+        offset = (page - 1) * results_per_page
+        total_items = 0
+        results: List[sqlite3.Row] = []  # Type hint for clarity
+
+        try:
+            # Query 1: Get total count of active items
+            count_query = "SELECT COUNT(*) FROM Media WHERE deleted = 0 AND is_trash = 0"
+            # Use self.execute_query
+            count_cursor = self.execute_query(count_query)
+            count_result = count_cursor.fetchone()
+            total_items = count_result[0] if count_result else 0
+
+            # Query 2: Get paginated items if count > 0
+            if total_items > 0:
+                # Order by most recently modified, then ID for stable pagination
+                items_query = """
+                              SELECT id, title, type
+                              FROM Media
+                              WHERE deleted = 0 \
+                                AND is_trash = 0
+                              ORDER BY last_modified DESC, id DESC LIMIT ? \
+                              OFFSET ? \
+                              """
+                # Use self.execute_query
+                items_cursor = self.execute_query(items_query, (results_per_page, offset))
+                # Fetchall returns a list of Row objects (if row_factory is sqlite3.Row)
+                results = items_cursor.fetchall()
+
+            # Calculate total pages
+            total_pages = ceil(total_items / results_per_page) if results_per_page > 0 and total_items > 0 else 0
+
+            return results, total_pages, page, total_items
+
+        # Catch DatabaseError potentially raised by self.execute_query
+        except DatabaseError as e:
+            logging.error(f"Database error in get_paginated_files for DB {self.db_path_str}: {e}", exc_info=True)
+            # Re-raise the specific error for the caller to handle
+            raise
+        # Catch potential underlying SQLite errors if not wrapped by execute_query
+        except sqlite3.Error as e:
+            logging.error(f"SQLite error during pagination query in {self.db_path_str}: {e}", exc_info=True)
+            raise DatabaseError(f"Failed pagination query: {e}") from e
+        # Catch unexpected errors
+        except Exception as e:
+            logging.error(f"Unexpected error in get_paginated_files for DB {self.db_path_str}: {e}", exc_info=True)
+            # Wrap unexpected errors in DatabaseError
+            raise DatabaseError(f"Unexpected error during pagination: {e}") from e
+
+    def add_media_chunk(self, media_id: int, chunk_text: str, start_index: int, end_index: int, chunk_id: str) -> \
+    Optional[Dict]:
+        """
+        Adds a single chunk record to the MediaChunks table for an active media item.
+
+        Handles transaction, generates UUID, sets sync metadata, and logs a 'create' sync event.
+        This is an instance method operating on the specific user's database.
+
+        Args:
+            media_id (int): The ID of the parent Media item.
+            chunk_text (str): The text content of the chunk.
+            start_index (int): Starting character index within the original content.
+            end_index (int): Ending character index within the original content.
+            chunk_id (str): The application-specific unique ID for this chunk within the media item.
+
+        Returns:
+            Optional[Dict]: A dictionary containing the new chunk's database 'id' and 'uuid'
+                            on success, otherwise None or raises an exception.
+
+        Raises:
+            InputError: If media_id doesn't exist/is inactive, or chunk_text is empty.
+            DatabaseError: For database errors during insertion or sync logging, including IntegrityErrors.
+        """
+        if not chunk_text:
+            raise InputError("Chunk text cannot be empty.")
+
+        logger.debug(f"Adding chunk for media_id {media_id}, chunk_id {chunk_id} using client {self.client_id}")
+
+        # Prepare sync/metadata fields using instance attributes/methods
+        client_id = self.client_id
+        current_time = self._get_current_utc_timestamp_str()  # Use internal helper
+        new_uuid = self._generate_uuid()  # Use internal helper
+        new_sync_version = 1  # Initial version for a new chunk record
+
+        try:
+            # Use instance transaction method
+            with self.transaction() as conn:
+                # Optional: Check if parent media exists and is active
+                cursor_check = conn.cursor()
+                cursor_check.execute("SELECT uuid FROM Media WHERE id = ? AND deleted = 0", (media_id,))
+                media_info = cursor_check.fetchone()
+                if not media_info:
+                    raise InputError(f"Cannot add chunk: Parent Media ID {media_id} not found or deleted.")
+                media_uuid = media_info['uuid']  # Get parent UUID for context if needed
+
+                # Prepare data for insert statement
+                insert_data = {
+                    'media_id': media_id,
+                    'chunk_text': chunk_text,
+                    'start_index': start_index,
+                    'end_index': end_index,
+                    'chunk_id': chunk_id,  # Keep the original chunk_id column
+                    'uuid': new_uuid,  # Add the new UUID column
+                    'last_modified': current_time,
+                    'version': new_sync_version,
+                    'client_id': client_id,
+                    'deleted': 0,
+                    'media_uuid': media_uuid  # For sync payload context
+                }
+
+                # Execute INSERT
+                cursor_insert = conn.cursor()
+                sql = """
+                      INSERT INTO MediaChunks
+                      (media_id, chunk_text, start_index, end_index, chunk_id, uuid, last_modified, version, client_id, \
+                       deleted)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+                      """
+                params = (
+                    insert_data['media_id'], insert_data['chunk_text'], insert_data['start_index'],
+                    insert_data['end_index'], insert_data['chunk_id'], insert_data['uuid'],
+                    insert_data['last_modified'], insert_data['version'], insert_data['client_id'],
+                    insert_data['deleted']
+                )
+                cursor_insert.execute(sql, params)
+                chunk_pk_id = cursor_insert.lastrowid
+
+                if not chunk_pk_id:
+                    raise DatabaseError("Failed to get last row ID for new media chunk.")
+
+                # Log sync event using instance method (passing connection)
+                self._log_sync_event(conn, 'MediaChunks', new_uuid, 'create', new_sync_version, insert_data)
+
+                logger.info(f"Successfully added chunk ID {chunk_pk_id} (UUID: {new_uuid}) for media {media_id}.")
+                return {'id': chunk_pk_id, 'uuid': new_uuid}
+
+        except sqlite3.IntegrityError as ie:
+            logger.error(f"Integrity error adding chunk for media {media_id}: {ie}", exc_info=True)
+            raise DatabaseError(f"Failed to add chunk due to constraint violation: {ie}") from ie
+        except (InputError, DatabaseError) as e:
+            logger.error(f"Error adding chunk for media {media_id}: {e}", exc_info=True)
+            raise e
+        except Exception as e:
+            logger.error(f"Unexpected error adding chunk for media {media_id}: {e}", exc_info=True)
+            raise DatabaseError(f"An unexpected error occurred while adding media chunk: {e}") from e
+
+    def batch_insert_chunks(self, media_id: int, chunks: List[Dict]) -> int:
+        """
+        Inserts a batch of chunk records into the MediaChunks table for an active media item.
+
+        Uses executemany for efficiency within a single transaction.
+        Generates UUIDs, sets sync metadata, and logs a 'create' sync event for EACH chunk.
+        This is an instance method operating on the specific user's database.
+
+        Args:
+            media_id (int): The ID of the parent Media item.
+            chunks (List[Dict]): A list of dictionaries, where each dictionary represents a chunk.
+                                 Expected keys in each dict: 'text' (or 'chunk_text'), and
+                                 'metadata' dict containing 'start_index', 'end_index'.
+
+        Returns:
+            int: The number of chunks successfully prepared for insertion.
+
+        Raises:
+            InputError: If media_id doesn't exist/is inactive, or the chunks list is empty or invalid.
+            DatabaseError: For database errors during insertion or sync logging, including IntegrityErrors.
+            KeyError: If expected keys ('text', 'metadata', 'start_index', 'end_index') are missing in chunk dicts.
+        """
+        if not chunks:
+            logger.warning(f"batch_insert_chunks called with empty list for media {media_id}.")
+            return 0
+
+        logger.info(f"Batch inserting {len(chunks)} chunks for media_id {media_id} using client {self.client_id}.")
+
+        # Use instance attributes/methods
+        client_id = self.client_id
+        current_time = self._get_current_utc_timestamp_str()
+        params_list = []
+        sync_log_data = []
+
+        try:
+            # Prepare data for all chunks first
+            for i, chunk_dict in enumerate(chunks):
+                try:
+                    chunk_text = chunk_dict.get('text', chunk_dict['chunk_text'])
+                    metadata = chunk_dict['metadata']
+                    start_index = metadata['start_index']
+                    end_index = metadata['end_index']
+                except KeyError as ke:
+                    logger.error(f"Missing expected key {ke} in chunk data at index {i} for media {media_id}")
+                    raise InputError(f"Invalid chunk data structure at index {i}: Missing key {ke}") from ke
+
+                if not chunk_text:
+                    logger.warning(f"Skipping chunk at index {i} for media {media_id} due to empty text.")
+                    continue
+
+                # Generate IDs and sync fields using instance methods
+                chunk_id = f"{media_id}_chunk_{i + 1}"
+                new_uuid = self._generate_uuid()
+                new_sync_version = 1
+
+                params = (
+                    media_id, chunk_text, start_index, end_index, chunk_id, new_uuid,
+                    current_time, new_sync_version, client_id, 0  # deleted=0
+                )
+                params_list.append(params)
+
+                payload = {
+                    'media_id': media_id, 'chunk_text': chunk_text, 'start_index': start_index,
+                    'end_index': end_index, 'chunk_id': chunk_id, 'uuid': new_uuid,
+                    'last_modified': current_time, 'version': new_sync_version,
+                    'client_id': client_id, 'deleted': 0
+                }
+                sync_log_data.append((new_uuid, new_sync_version, payload))
+
+            if not params_list:
+                logger.warning(f"No valid chunks prepared for batch insert media {media_id}.")
+                return 0
+
+            # Perform insertion and logging within a transaction using instance method
+            with self.transaction() as conn:
+                cursor_check = conn.cursor()
+                cursor_check.execute("SELECT 1 FROM Media WHERE id = ? AND deleted = 0", (media_id,))
+                if not cursor_check.fetchone():
+                    raise InputError(f"Cannot batch insert chunks: Parent Media ID {media_id} not found or deleted.")
+
+                cursor_insert = conn.cursor()
+                sql = """
+                      INSERT INTO MediaChunks
+                      (media_id, chunk_text, start_index, end_index, chunk_id, uuid, last_modified, version, client_id, \
+                       deleted)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+                      """
+                cursor_insert.executemany(sql, params_list)
+
+                inserted_count = len(params_list)
+                logger.debug(f"Executed batch insert for {inserted_count} chunks media {media_id}.")
+
+                # Log sync events using instance method
+                for chunk_uuid_log, version_log, payload_log in sync_log_data:
+                    self._log_sync_event(conn, 'MediaChunks', chunk_uuid_log, 'create', version_log, payload_log)
+
+            logger.info(f"Successfully batch inserted {inserted_count} chunks for media {media_id}.")
+            return inserted_count
+
+        except sqlite3.IntegrityError as ie:
+            logger.error(f"Integrity error batch inserting chunks for media {media_id}: {ie}", exc_info=True)
+            raise DatabaseError(f"Failed to batch insert chunks due to constraint violation: {ie}") from ie
+        except (InputError, DatabaseError, KeyError) as e:
+            logger.error(f"Error batch inserting chunks for media {media_id}: {e}", exc_info=True)
+            raise e
+        except Exception as e:
+            logger.error(f"Unexpected error batch inserting chunks for media {media_id}: {e}", exc_info=True)
+            raise DatabaseError(f"An unexpected error occurred during batch chunk insertion: {e}") from e
 
 # =========================================================================
 # Standalone Functions (REQUIRE db_instance passed explicitly)
