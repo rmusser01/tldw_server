@@ -1605,15 +1605,31 @@ async def _process_batch_media(
         # Determine input_ref (original URL/filename) and processing source
         input_ref = process_result.get("input_ref")
         processing_source = process_result.get("processing_source")
-        if not input_ref and processing_source:
-            ref_info = source_to_ref_map.get(processing_source)
-            input_ref = ref_info[0] if isinstance(ref_info, tuple) else ref_info or processing_source
-            logging.warning(f"Processor result missing 'input_ref', inferred as '{input_ref}' from source '{processing_source}'")
-            process_result["input_ref"] = input_ref
-        elif not input_ref and not processing_source:
-             input_ref = "Unknown Input"
-             process_result["input_ref"] = input_ref
+        if processing_source:
+            # Use the processing_source (temp path or URL) to look up the original ref
+            ref_info = source_to_ref_map.get(str(processing_source))  # Ensure key is string
 
+            if isinstance(ref_info, tuple):
+                original_input_ref = ref_info[0]  # Get the ref part from (ref, warning) tuple
+            elif isinstance(ref_info, str):
+                original_input_ref = ref_info  # It's just the ref string
+            else:  # Lookup failed or ref_info is None/unexpected
+                logger.warning(
+                    f"Could not find original input reference in source_to_ref_map for processing_source: {processing_source}. Falling back.")
+                # Fallback: Try using input_ref from result if present, else use processing_source itself
+                original_input_ref = process_result.get("input_ref") or processing_source or "Unknown Input"
+        else:
+            # If processing_source is missing, try input_ref from result, fallback to Unknown
+            original_input_ref = process_result.get("input_ref") or "Unknown Input (Missing Source)"
+            logger.warning(
+                f"Processing result missing 'processing_source'. Using fallback input_ref: {original_input_ref}")
+            # Try to set processing_source if possible for consistency, though it's unknown
+            # Make sure original_input_ref is a string before assigning
+            process_result["processing_source"] = str(original_input_ref) if original_input_ref else "Unknown"
+
+        # Store it in the dictionary that will be added to the final results list
+        # Make sure original_input_ref is a string before assigning
+        process_result["input_ref"] = str(original_input_ref) if original_input_ref else "Unknown"
 
         pre_check_info = source_to_ref_map.get(processing_source) if processing_source else None
         pre_check_warning_msg = None
@@ -1643,8 +1659,7 @@ async def _process_batch_media(
             if isinstance(extracted_keywords, list):
                  combined_keywords.update(k.strip().lower() for k in extracted_keywords if k and k.strip())
             final_keywords_list = sorted(list(combined_keywords))
-            # Use title from metadata if available, fallback to form_data.title, then input ref stem
-            title_for_db = metadata_for_db.get('title', form_data.title or (Path(input_ref).stem if input_ref else 'Untitled'))
+            title_for_db = metadata_for_db.get('title', form_data.title or (Path(str(original_input_ref)).stem if original_input_ref else 'Untitled')) # Use original_input_ref here
             author_for_db = metadata_for_db.get('author', form_data.author)
 
             if content_for_db:
@@ -1652,7 +1667,7 @@ async def _process_batch_media(
                     logger.info(f"Attempting DB persistence for item: {input_ref}")
                     # --- FIX 2: Use lambda for run_in_executor ---
                     db_add_kwargs = dict(
-                        url=input_ref,
+                        url=str(original_input_ref),
                         title=title_for_db,
                         media_type=media_type,
                         content=content_for_db,
@@ -1693,10 +1708,10 @@ async def _process_batch_media(
                     process_result["db_message"] = db_message
                     process_result["media_uuid"] = media_uuid # Add UUID to result if useful
 
-                    logger.info(f"DB persistence result for {input_ref}: ID={db_id}, UUID={media_uuid}, Msg='{db_message}'")
+                    logger.info(f"DB persistence result for {original_input_ref}: ID={db_id}, UUID={media_uuid}, Msg='{db_message}'") # Log original ref
 
                 except (DatabaseError, InputError, ConflictError) as db_err:  # Catch specific DB errors
-                    logging.error(f"Database operation failed for {input_ref}: {db_err}", exc_info=True)
+                    logging.error(f"Database operation failed for {original_input_ref}: {db_err}", exc_info=True) # Log original ref
                     process_result['status'] = 'Warning'  # Downgrade to Warning if DB fails after successful processing
                     process_result['error'] = (process_result.get('error') or "") + f" | DB Error: {db_err}"
                     process_result.setdefault("warnings", []).append(f"Database operation failed: {db_err}")
@@ -1705,7 +1720,7 @@ async def _process_batch_media(
                     process_result["media_uuid"] = None
 
                 except Exception as e:
-                    logging.error(f"Unexpected error during DB persistence for {input_ref}: {e}", exc_info=True)
+                    logging.error(f"Unexpected error during DB persistence for {original_input_ref}: {e}", exc_info=True) # Log original ref
                     process_result['status'] = 'Warning'  # Downgrade to Warning
                     process_result['error'] = (process_result.get(
                         'error') or "") + f" | Persistence Error: {type(e).__name__}"
@@ -1715,7 +1730,7 @@ async def _process_batch_media(
                     process_result["media_uuid"] = None
 
             else:
-                logging.warning(f"Skipping DB persistence for {input_ref} due to missing content.")
+                logging.warning(f"Skipping DB persistence for {original_input_ref} due to missing content.") # Log original ref
                 process_result["db_message"] = "DB persistence skipped (no content)."
                 process_result["db_id"] = None  # Ensure db_id is None
                 process_result["media_uuid"] = None
@@ -1754,7 +1769,8 @@ async def _process_batch_media(
             "warnings": res.get("warnings"),
             "db_id": res.get("db_id"),
             "db_message": res.get("db_message"),
-            "message": res.get("message")
+            "message": res.get("message"),
+            "media_uuid": res.get("media_uuid"),
         }
         # Ensure warnings list is None if empty
         if isinstance(standardized.get("warnings"), list) and not standardized["warnings"]:
