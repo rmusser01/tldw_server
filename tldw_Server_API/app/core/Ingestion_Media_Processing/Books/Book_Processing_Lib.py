@@ -30,7 +30,7 @@ from loguru import logger
 
 #
 # Import Local
-from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords, add_media_to_database
+from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
 from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_ebook_by_chapters, improved_chunking_process
 from tldw_Server_API.app.core.Metrics.metrics_logger import (log_counter, log_histogram)

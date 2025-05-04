@@ -40,11 +40,12 @@ from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from loguru import logger
 from starlette.responses import JSONResponse, StreamingResponse
+
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
 #
 # Local Imports
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest, API_KEYS, \
     DEFAULT_LLM_PROVIDER
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_db_for_user
 from tldw_Server_API.app.core.Chat.Chat_Functions import (
         chat_api_call,
         ChatAuthenticationError,
@@ -79,7 +80,7 @@ router = APIRouter()
 )
 async def create_chat_completion(
     request_data: ChatCompletionRequest = Body(...),
-    db: Database = Depends(get_db_for_user), # Your existing auth dependency
+    db = Depends(get_db_for_user)
 ):
     # FIXME - Add auth checks here
     """

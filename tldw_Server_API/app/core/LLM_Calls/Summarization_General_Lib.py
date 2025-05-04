@@ -42,7 +42,6 @@ from tldw_Server_API.app.core.LLM_Calls.Local_Summarization_Lib import (
     summarize_with_custom_openai,
     summarize_with_custom_openai_2
 )
-from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
 from tldw_Server_API.app.core.Utils.Utils import (
     load_and_log_configs,
     logging

@@ -1,16 +1,16 @@
 # /Server_API/app/services/web_scraping_service.py
-
+#
 # FIXME - This is a placeholder file for the web scraping service.
-
+#
+# Imports
 import asyncio
 from typing import Optional, List, Dict, Any
-
+#
+# Third-party Libraries
 from fastapi import HTTPException
-
-# If you want ephemeral storage or DB insertion
+#
+# Local Imports
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
-from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
-
 # If you want your summarization logic:
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
 # If you want the functions from your existing library:
