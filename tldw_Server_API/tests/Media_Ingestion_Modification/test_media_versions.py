@@ -1,13 +1,17 @@
 # test_media_versions.py
 # Description: This file contains tests for the media versioning endpoints.
-
+#
+# Imports
 import time
 import pytest
+#
+# Third-party Libraries
 from fastapi.testclient import TestClient
 from fastapi import status # Use status codes from fastapi
 
-from tldw_Server_API.app.core.DB_Management.DB_Dependency import get_db_manager_for_user
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
+#
+# Local Imports
 # --- Use Main App Instance ---
 from tldw_Server_API.app.main import app as fastapi_app_instance, app
 from tldw_Server_API.app.core.DB_Management.DB_Manager import Database
@@ -18,8 +22,9 @@ from tldw_Server_API.app.core.DB_Management.Media_DB import (
     )
     # Import the utility for temporary DB if it's defined elsewhere
 from tldw_Server_API.tests.test_utils import temp_db
-
-
+#
+#######################################################################################################################
+#
 # --- Fixtures ---
 
 @pytest.fixture(scope="session")
@@ -40,8 +45,6 @@ def db_instance_session():
         # Cleanup (closing connection) is handled by temp_db's finally block
     finally:
          if db:
-             print(f"--- Closing ALL session DB connections: {db.db_path_str} ---")
-             # --- FIX: Use close_all_connections if available ---
              if hasattr(db, 'close_all_connections'):
                  db.close_all_connections()
              else:
