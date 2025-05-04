@@ -97,16 +97,16 @@ class Database:
         type TEXT NOT NULL,
         content TEXT,
         author TEXT,
-        ingestion_date DATETIME,
+        ingestion_date DATETIME, -- No default
         transcription_model TEXT,
         is_trash BOOLEAN DEFAULT 0 NOT NULL,
-        trash_date DATETIME,
+        trash_date DATETIME, -- No default
         vector_embedding BLOB,
         chunking_status TEXT DEFAULT 'pending' NOT NULL,
         vector_processing INTEGER DEFAULT 0 NOT NULL,
         content_hash TEXT UNIQUE NOT NULL,
         uuid TEXT UNIQUE NOT NULL,
-        last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_modified DATETIME NOT NULL, -- No default
         version INTEGER NOT NULL DEFAULT 1,
         client_id TEXT NOT NULL,
         deleted BOOLEAN NOT NULL DEFAULT 0,
@@ -132,7 +132,7 @@ class Database:
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         keyword TEXT NOT NULL UNIQUE COLLATE NOCASE,
         uuid TEXT UNIQUE NOT NULL,
-        last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_modified DATETIME NOT NULL, -- No default
         version INTEGER NOT NULL DEFAULT 1,
         client_id TEXT NOT NULL,
         deleted BOOLEAN NOT NULL DEFAULT 0,
@@ -163,9 +163,9 @@ class Database:
         media_id INTEGER NOT NULL,
         whisper_model TEXT,
         transcription TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME, -- No default
         uuid TEXT UNIQUE NOT NULL,
-        last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_modified DATETIME NOT NULL, -- No default
         version INTEGER NOT NULL DEFAULT 1,
         client_id TEXT NOT NULL,
         deleted BOOLEAN NOT NULL DEFAULT 0,
@@ -190,7 +190,7 @@ class Database:
         end_index INTEGER,
         chunk_id TEXT UNIQUE,
         uuid TEXT UNIQUE NOT NULL,
-        last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_modified DATETIME NOT NULL, -- No default
         version INTEGER NOT NULL DEFAULT 1,
         client_id TEXT NOT NULL,
         deleted BOOLEAN NOT NULL DEFAULT 0,
@@ -214,12 +214,12 @@ class Database:
         start_char INTEGER,
         end_char INTEGER,
         chunk_type TEXT,
-        creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        last_modified_orig TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        creation_date DATETIME, -- No default
+        last_modified_orig DATETIME, -- No default
         is_processed BOOLEAN DEFAULT FALSE NOT NULL,
         metadata TEXT,
         uuid TEXT UNIQUE NOT NULL,
-        last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_modified DATETIME NOT NULL, -- No default (sync last modified)
         version INTEGER NOT NULL DEFAULT 1,
         client_id TEXT NOT NULL,
         deleted BOOLEAN NOT NULL DEFAULT 0,
@@ -245,9 +245,9 @@ class Database:
         prompt TEXT,
         analysis_content TEXT,
         content TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME, -- No default
         uuid TEXT UNIQUE NOT NULL,
-        last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_modified DATETIME NOT NULL, -- No default (sync last modified)
         version INTEGER NOT NULL DEFAULT 1,
         client_id TEXT NOT NULL,
         deleted BOOLEAN NOT NULL DEFAULT 0,
@@ -270,7 +270,7 @@ class Database:
         entity TEXT NOT NULL,
         entity_uuid TEXT NOT NULL,
         operation TEXT NOT NULL CHECK(operation IN ('create','update','delete', 'link', 'unlink')),
-        timestamp DATETIME NOT NULL,
+        timestamp DATETIME NOT NULL, -- No default, will be set by _log_sync_event
         client_id TEXT NOT NULL,
         version INTEGER NOT NULL,
         payload TEXT
@@ -279,12 +279,12 @@ class Database:
     CREATE INDEX IF NOT EXISTS idx_sync_log_entity_uuid ON sync_log(entity_uuid);
     CREATE INDEX IF NOT EXISTS idx_sync_log_client_id ON sync_log(client_id);
 
-    -- Validation Triggers --
+    -- Validation Triggers (remain the same) --
     DROP TRIGGER IF EXISTS media_validate_sync_update;
     CREATE TRIGGER media_validate_sync_update BEFORE UPDATE ON Media
     BEGIN
-        SELECT RAISE(ABORT, 'Sync Error (Media): Version must increment by exactly 1.')
-        WHERE NEW.version IS NOT OLD.version + 1 AND NEW.version IS NOT OLD.version;
+        SELECT RAISE(ABORT, 'Sync Error (Media): Version must increment by exactly 1.')      
+        WHERE NEW.version IS NOT OLD.version + 1;
         SELECT RAISE(ABORT, 'Sync Error (Media): Client ID cannot be NULL or empty.')
         WHERE NEW.client_id IS NULL OR NEW.client_id = '';
     END;
@@ -293,7 +293,7 @@ class Database:
     CREATE TRIGGER keywords_validate_sync_update BEFORE UPDATE ON Keywords
     BEGIN
         SELECT RAISE(ABORT, 'Sync Error (Keywords): Version must increment by exactly 1.')
-        WHERE NEW.version IS NOT OLD.version + 1 AND NEW.version IS NOT OLD.version;
+        WHERE NEW.version IS NOT OLD.version + 1;
         SELECT RAISE(ABORT, 'Sync Error (Keywords): Client ID cannot be NULL or empty.')
         WHERE NEW.client_id IS NULL OR NEW.client_id = '';
     END;
@@ -302,7 +302,7 @@ class Database:
     CREATE TRIGGER transcripts_validate_sync_update BEFORE UPDATE ON Transcripts
     BEGIN
         SELECT RAISE(ABORT, 'Sync Error (Transcripts): Version must increment by exactly 1.')
-        WHERE NEW.version IS NOT OLD.version + 1 AND NEW.version IS NOT OLD.version;
+        WHERE NEW.version IS NOT OLD.version + 1;
         SELECT RAISE(ABORT, 'Sync Error (Transcripts): Client ID cannot be NULL or empty.')
         WHERE NEW.client_id IS NULL OR NEW.client_id = '';
     END;
@@ -311,7 +311,7 @@ class Database:
     CREATE TRIGGER mediachunks_validate_sync_update BEFORE UPDATE ON MediaChunks
     BEGIN
         SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Version must increment by exactly 1.')
-        WHERE NEW.version IS NOT OLD.version + 1 AND NEW.version IS NOT OLD.version;
+        WHERE NEW.version IS NOT OLD.version + 1;
         SELECT RAISE(ABORT, 'Sync Error (MediaChunks): Client ID cannot be NULL or empty.')
         WHERE NEW.client_id IS NULL OR NEW.client_id = '';
     END;
@@ -320,7 +320,7 @@ class Database:
     CREATE TRIGGER unvectorizedmediachunks_validate_sync_update BEFORE UPDATE ON UnvectorizedMediaChunks
     BEGIN
         SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Version must increment by exactly 1.')
-        WHERE NEW.version IS NOT OLD.version + 1 AND NEW.version IS NOT OLD.version;
+        WHERE NEW.version IS NOT OLD.version + 1;
         SELECT RAISE(ABORT, 'Sync Error (UnvectorizedMediaChunks): Client ID cannot be NULL or empty.')
         WHERE NEW.client_id IS NULL OR NEW.client_id = '';
     END;
@@ -329,7 +329,7 @@ class Database:
     CREATE TRIGGER documentversions_validate_sync_update BEFORE UPDATE ON DocumentVersions
     BEGIN
         SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): Version must increment by exactly 1.')
-        WHERE NEW.version IS NOT OLD.version + 1 AND NEW.version IS NOT OLD.version;
+        WHERE NEW.version IS NOT OLD.version + 1;
         SELECT RAISE(ABORT, 'Sync Error (DocumentVersions): Client ID cannot be NULL or empty.')
         WHERE NEW.client_id IS NULL OR NEW.client_id = '';
     END;
@@ -619,13 +619,15 @@ class Database:
             logging.error("Sync log attempt with missing entity, uuid, or operation.")
             return
 
-        current_time = self._get_current_utc_timestamp_str()
+        current_time = self._get_current_utc_timestamp_str() # Generate timestamp here
         client_id = self.client_id
 
         # Exclude potentially large/binary fields from default payload logging
-        if payload and 'vector_embedding' in payload:
-            del payload['vector_embedding']
-        # Add other fields to exclude if necessary
+        if payload:
+            payload = payload.copy() # Avoid modifying the original dict
+            if 'vector_embedding' in payload:
+                del payload['vector_embedding']
+            # Add other fields to exclude if necessary
 
         payload_json = json.dumps(payload, separators=(',', ':')) if payload else None # Compact JSON
 
@@ -633,8 +635,8 @@ class Database:
             conn.execute("""
                 INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (entity, entity_uuid, operation, current_time, client_id, version, payload_json))
-            logging.debug(f"Logged sync event: {entity} {entity_uuid} {operation} v{version}")
+            """, (entity, entity_uuid, operation, current_time, client_id, version, payload_json)) # Pass current_time
+            logging.debug(f"Logged sync event: {entity} {entity_uuid} {operation} v{version} at {current_time}")
         except sqlite3.Error as e:
             logging.error(f"Failed to insert sync log event for {entity} {entity_uuid}: {e}", exc_info=True)
             raise DatabaseError(f"Failed to log sync event: {e}") from e
@@ -683,12 +685,11 @@ class Database:
             raise DatabaseError(f"Failed to delete FTS for Keyword ID {keyword_id}: {e}") from e
 
     # --- Public Mutating Methods (Modified for Python Sync/FTS Logging) ---
-
     def add_keyword(self, keyword: str) -> Tuple[Optional[int], Optional[str]]:
         """Adds a keyword or undeletes an existing one. Logs sync event and updates FTS."""
         if not keyword or not keyword.strip(): raise InputError("Keyword cannot be empty.")
         keyword = keyword.strip().lower()
-        current_time = self._get_current_utc_timestamp_str()
+        current_time = self._get_current_utc_timestamp_str() # Get current time once
         client_id = self.client_id
 
         try:
@@ -702,11 +703,12 @@ class Database:
                     if is_deleted:
                         new_version = current_version + 1
                         logger.info(f"Undeleting keyword '{keyword}' (ID: {kw_id}). New ver: {new_version}")
+                        # Pass current_time for last_modified
                         cursor.execute("UPDATE Keywords SET deleted=0, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
                                        (current_time, new_version, client_id, kw_id, current_version))
                         if cursor.rowcount == 0: raise ConflictError("Keywords", kw_id)
 
-                        # Fetch data for payload BEFORE logging
+                        # Fetch data for payload AFTER update to get correct last_modified
                         cursor.execute("SELECT * FROM Keywords WHERE id=?", (kw_id,))
                         payload_data = dict(cursor.fetchone())
                         self._log_sync_event(conn, 'Keywords', kw_uuid, 'update', new_version, payload_data)
@@ -719,24 +721,25 @@ class Database:
                     new_uuid = self._generate_uuid()
                     new_version = 1
                     logger.info(f"Adding new keyword '{keyword}' UUID {new_uuid}")
+                    # Pass current_time for last_modified
                     cursor.execute("INSERT INTO Keywords (keyword, uuid, last_modified, version, client_id, deleted) VALUES (?, ?, ?, ?, ?, 0)",
                                    (keyword, new_uuid, current_time, new_version, client_id))
                     kw_id = cursor.lastrowid
                     if not kw_id: raise DatabaseError("Failed to get last row ID for new keyword.")
 
-                    # Fetch data for payload BEFORE logging
+                    # Fetch data for payload AFTER insert to get correct last_modified
                     cursor.execute("SELECT * FROM Keywords WHERE id=?", (kw_id,))
                     payload_data = dict(cursor.fetchone())
                     self._log_sync_event(conn, 'Keywords', new_uuid, 'create', new_version, payload_data)
                     self._update_fts_keyword(conn, kw_id, keyword)
                     return kw_id, new_uuid
         except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e:
-            logger.error(f"Error in add_keyword for '{keyword}': {e}", exc_info=isinstance(e, (DatabaseError, sqlite3.Error)))
-            if isinstance(e, (InputError, ConflictError, DatabaseError)): raise e
-            else: raise DatabaseError(f"Failed to add/update keyword: {e}") from e
+             logger.error(f"Error in add_keyword for '{keyword}': {e}", exc_info=isinstance(e, (DatabaseError, sqlite3.Error)))
+             if isinstance(e, (InputError, ConflictError, DatabaseError)): raise e
+             else: raise DatabaseError(f"Failed to add/update keyword: {e}") from e
         except Exception as e:
-            logger.error(f"Unexpected error in add_keyword for '{keyword}': {e}", exc_info=True)
-            raise DatabaseError(f"Unexpected error adding/updating keyword: {e}") from e
+             logger.error(f"Unexpected error in add_keyword for '{keyword}': {e}", exc_info=True)
+             raise DatabaseError(f"Unexpected error adding/updating keyword: {e}") from e
 
     def get_sync_log_entries(self, since_change_id: int = 0, limit: Optional[int] = None) -> List[Dict]:
         """Retrieves sync log entries newer than a given change_id."""
@@ -802,7 +805,7 @@ class Database:
 
     def soft_delete_media(self, media_id: int, cascade: bool = True) -> bool:
         """Soft deletes Media item and optionally cascades, logging sync events and updating FTS."""
-        current_time = self._get_current_utc_timestamp_str()
+        current_time = self._get_current_utc_timestamp_str() # Get time
         client_id = self.client_id
         logger.info(f"Attempting soft delete for Media ID: {media_id} [Client: {client_id}, Cascade: {cascade}]")
 
@@ -817,16 +820,19 @@ class Database:
                 media_uuid, current_media_version = media_info['uuid'], media_info['version']
                 new_media_version = current_media_version + 1
 
+                # Update Media: Pass current_time for last_modified
                 cursor.execute("UPDATE Media SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ?",
                                (current_time, new_media_version, client_id, media_id, current_media_version))
                 if cursor.rowcount == 0: raise ConflictError(entity="Media", identifier=media_id)
 
-                delete_payload = {'uuid': media_uuid, 'last_modified': current_time, 'version': new_media_version, 'client_id': client_id}
+                # Payload reflects the state *after* the update
+                delete_payload = {'uuid': media_uuid, 'last_modified': current_time, 'version': new_media_version, 'client_id': client_id, 'deleted': 1}
                 self._log_sync_event(conn, 'Media', media_uuid, 'delete', new_media_version, delete_payload)
                 self._delete_fts_media(conn, media_id)
 
                 if cascade:
                     logger.info(f"Performing explicit cascade delete for Media ID: {media_id}")
+                    # Unlinking MediaKeywords - logic remains the same
                     cursor.execute("SELECT mk.id, k.uuid AS keyword_uuid FROM MediaKeywords mk JOIN Keywords k ON mk.keyword_id = k.id WHERE mk.media_id = ? AND k.deleted = 0", (media_id,))
                     keywords_to_unlink = cursor.fetchall()
                     if keywords_to_unlink:
@@ -839,23 +845,27 @@ class Database:
                              unlink_payload = {'media_uuid': media_uuid, 'keyword_uuid': kw_link['keyword_uuid']}
                              self._log_sync_event(conn, 'MediaKeywords', link_uuid, 'unlink', unlink_version, unlink_payload)
 
+                    # Soft deleting child tables
                     child_tables = [("Transcripts", "media_id", "uuid"), ("MediaChunks", "media_id", "uuid"),
                                     ("UnvectorizedMediaChunks", "media_id", "uuid"), ("DocumentVersions", "media_id", "uuid")]
                     for table, fk_col, uuid_col in child_tables:
                         cursor.execute(f"SELECT id, {uuid_col} AS uuid, version FROM {table} WHERE {fk_col} = ? AND deleted = 0", (media_id,))
                         children = cursor.fetchall()
                         if not children: continue
+                        # Pass current_time for last_modified in child update
                         update_sql = f"UPDATE {table} SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
                         processed_children_count = 0
                         for child in children:
                             child_id, child_uuid, child_current_version = child['id'], child['uuid'], child['version']
                             child_new_version = child_current_version + 1
+                            # Pass current_time here
                             params = (current_time, child_new_version, client_id, child_id, child_current_version)
                             child_cursor = conn.cursor()
                             child_cursor.execute(update_sql, params)
                             if child_cursor.rowcount == 1:
                                 processed_children_count += 1
-                                child_delete_payload = {'uuid': child_uuid, 'media_uuid': media_uuid, 'last_modified': current_time, 'version': child_new_version, 'client_id': client_id}
+                                # Ensure payload includes correct last_modified and deleted status
+                                child_delete_payload = {'uuid': child_uuid, 'media_uuid': media_uuid, 'last_modified': current_time, 'version': child_new_version, 'client_id': client_id, 'deleted': 1}
                                 self._log_sync_event(conn, table, child_uuid, 'delete', child_new_version, child_delete_payload)
                             else:
                                 logger.warning(f"Conflict/error cascade deleting {table} ID {child_id}")
@@ -882,10 +892,15 @@ class Database:
         title = title or 'Untitled'
         media_type = media_type or 'unknown'
         keywords_list = [k.strip().lower() for k in keywords if k and k.strip()] if keywords else []
-        ingestion_date_str = ingestion_date or self._get_current_utc_timestamp_str().split("T")[0] # Default today YYYY-MM-DD
-        content_hash = hashlib.sha256(content.encode()).hexdigest()
+
+        # Get current time and client ID
         current_time = self._get_current_utc_timestamp_str()
         client_id = self.client_id
+
+        # Handle ingestion_date: Use provided, else generate now. Use full timestamp.
+        ingestion_date_str = ingestion_date or current_time
+
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
         if not url: url = f"local://{media_type}/{content_hash}"
 
         logging.info(f"Processing add/update for: URL='{url}', Title='{title}', Client='{client_id}'")
@@ -906,8 +921,9 @@ class Database:
                         update_data = { # Prepare dict for easier payload generation
                             'url': url, 'title': title, 'type': media_type, 'content': content, 'author': author,
                             'ingestion_date': ingestion_date_str, 'transcription_model': transcription_model,
-                            'content_hash': content_hash, 'is_trash': 0, 'trash_date': None,
-                            'chunking_status': "pending", 'vector_processing': 0, 'last_modified': current_time,
+                            'content_hash': content_hash, 'is_trash': 0, 'trash_date': None, # Ensure trash_date is None here
+                            'chunking_status': "pending", 'vector_processing': 0,
+                            'last_modified': current_time, # Set last_modified
                             'version': new_version, 'client_id': client_id, 'deleted': 0, 'uuid': media_uuid
                         }
                         cursor.execute(
@@ -917,16 +933,19 @@ class Database:
                                WHERE id=? AND version=?""",
                             (update_data['url'], update_data['title'], update_data['type'], update_data['content'],
                              update_data['author'], update_data['ingestion_date'], update_data['transcription_model'],
-                             update_data['content_hash'], update_data['is_trash'], update_data['trash_date'],
-                             update_data['chunking_status'], update_data['vector_processing'], update_data['last_modified'],
+                             update_data['content_hash'], update_data['is_trash'], update_data['trash_date'], # Pass None for trash_date
+                             update_data['chunking_status'], update_data['vector_processing'],
+                             update_data['last_modified'], # Pass current_time
                              update_data['version'], update_data['client_id'], update_data['deleted'],
                              media_id, current_version)
                         )
                         if cursor.rowcount == 0: raise ConflictError("Media", media_id)
 
+                        # Use the update_data dict directly for the payload
                         self._log_sync_event(conn, 'Media', media_uuid, 'update', new_version, update_data)
                         self._update_fts_media(conn, media_id, update_data['title'], update_data['content'])
                         self.update_keywords_for_media(media_id, keywords_list) # Manages its own logs
+                        # Create a new document version representing this update
                         self.create_document_version(media_id=media_id, content=content, prompt=prompt, analysis_content=analysis_content) # Manages its own logs
                     else:
                         action = "already_exists_skipped"
@@ -937,9 +956,11 @@ class Database:
                     logger.info(f"Inserting new media '{title}' with UUID {media_uuid}.")
                     insert_data = { # Prepare dict for easier payload generation
                          'url': url, 'title': title, 'type': media_type, 'content': content, 'author': author,
-                         'ingestion_date': ingestion_date_str, 'transcription_model': transcription_model,
-                         'content_hash': content_hash, 'is_trash': 0, 'trash_date': None, 'chunking_status': "pending",
-                         'vector_processing': 0, 'uuid': media_uuid, 'last_modified': current_time,
+                         'ingestion_date': ingestion_date_str, # Use generated/passed ingestion_date
+                         'transcription_model': transcription_model,
+                         'content_hash': content_hash, 'is_trash': 0, 'trash_date': None, # trash_date is NULL on creation
+                         'chunking_status': "pending", 'vector_processing': 0, 'uuid': media_uuid,
+                         'last_modified': current_time, # Set last_modified
                          'version': new_version, 'client_id': client_id, 'deleted': 0
                     }
                     cursor.execute(
@@ -948,15 +969,17 @@ class Database:
                            last_modified, version, client_id, deleted)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (insert_data['url'], insert_data['title'], insert_data['type'], insert_data['content'],
-                         insert_data['author'], insert_data['ingestion_date'], insert_data['transcription_model'],
-                         insert_data['content_hash'], insert_data['is_trash'], insert_data['trash_date'],
+                         insert_data['author'], insert_data['ingestion_date'], # Pass ingestion_date_str
+                         insert_data['transcription_model'], insert_data['content_hash'], insert_data['is_trash'],
+                         insert_data['trash_date'], # Pass None for trash_date
                          insert_data['chunking_status'], insert_data['vector_processing'], insert_data['uuid'],
-                         insert_data['last_modified'], insert_data['version'], insert_data['client_id'],
-                         insert_data['deleted'])
+                         insert_data['last_modified'], # Pass current_time
+                         insert_data['version'], insert_data['client_id'], insert_data['deleted'])
                     )
                     media_id = cursor.lastrowid
                     if not media_id: raise DatabaseError("Failed to get last row ID for new media.")
 
+                    # Use the insert_data dict directly for the payload
                     self._log_sync_event(conn, 'Media', media_uuid, 'create', new_version, insert_data)
                     self._update_fts_media(conn, media_id, insert_data['title'], insert_data['content'])
                     self.update_keywords_for_media(media_id, keywords_list) # Manages its own logs
@@ -970,17 +993,17 @@ class Database:
             else: message = f"Media '{title}' exists, not overwritten."
             return media_id, media_uuid, message
         except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e:
-            logger.error(f"Error processing media (URL: {url}): {e}", exc_info=isinstance(e, (DatabaseError, sqlite3.Error)))
-            if isinstance(e, (InputError, ConflictError, DatabaseError)): raise e
-            else: raise DatabaseError(f"Failed to process media: {e}") from e
+             logger.error(f"Error processing media (URL: {url}): {e}", exc_info=isinstance(e, (DatabaseError, sqlite3.Error)))
+             if isinstance(e, (InputError, ConflictError, DatabaseError)): raise e
+             else: raise DatabaseError(f"Failed to process media: {e}") from e
         except Exception as e:
-            logger.error(f"Unexpected error processing media (URL: {url}): {e}", exc_info=True)
-            raise DatabaseError(f"Unexpected error processing media: {e}") from e
+             logger.error(f"Unexpected error processing media (URL: {url}): {e}", exc_info=True)
+             raise DatabaseError(f"Unexpected error processing media: {e}") from e
 
     def create_document_version(self, media_id: int, content: str, prompt: Optional[str] = None, analysis_content: Optional[str] = None) -> Dict[str, Any]:
         """Creates a new document version and logs a sync event."""
         if content is None: raise InputError("Content is required for a document version.")
-        current_time = self._get_current_utc_timestamp_str()
+        current_time = self._get_current_utc_timestamp_str() # Get time
         client_id = self.client_id
         new_uuid = self._generate_uuid()
         new_version = 1 # Sync version for the DocumentVersion entity itself
@@ -1000,15 +1023,21 @@ class Database:
 
             insert_data = { # Prepare dict for easier payload generation
                 'media_id': media_id, 'version_number': local_version_number, 'content': content, 'prompt': prompt,
-                'analysis_content': analysis_content, 'created_at': current_time, 'uuid': new_uuid,
-                'last_modified': current_time, 'version': new_version, 'client_id': client_id, 'deleted': 0,
+                'analysis_content': analysis_content,
+                'created_at': current_time, # Set created_at
+                'uuid': new_uuid,
+                'last_modified': current_time, # Set last_modified
+                'version': new_version, 'client_id': client_id, 'deleted': 0,
                 'media_uuid': media_uuid # Add parent uuid for context in payload
             }
             cursor.execute(
                 """INSERT INTO DocumentVersions (media_id, version_number, content, prompt, analysis_content, created_at,
                    uuid, last_modified, version, client_id, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (insert_data['media_id'], insert_data['version_number'], insert_data['content'], insert_data['prompt'],
-                 insert_data['analysis_content'], insert_data['created_at'], insert_data['uuid'], insert_data['last_modified'],
+                 insert_data['analysis_content'],
+                 insert_data['created_at'], # Pass created_at
+                 insert_data['uuid'],
+                 insert_data['last_modified'], # Pass last_modified
                  insert_data['version'], insert_data['client_id'], insert_data['deleted'])
             )
             version_id = cursor.lastrowid
@@ -1017,15 +1046,15 @@ class Database:
             self._log_sync_event(conn, 'DocumentVersions', new_uuid, 'create', new_version, insert_data)
             return {'id': version_id, 'uuid': new_uuid, 'media_id': media_id, 'version_number': local_version_number}
         except (InputError, DatabaseError, sqlite3.Error) as e:
-             if "foreign key constraint failed" in str(e).lower():
-                  logger.error(f"Failed create document version: Media ID {media_id} not found.", exc_info=False)
-                  raise InputError(f"Cannot create document version: Media ID {media_id} not found.") from e
-             logger.error(f"DB error creating document version media {media_id}: {e}", exc_info=True)
-             if isinstance(e, (InputError, DatabaseError)): raise e
-             else: raise DatabaseError(f"Failed create document version: {e}") from e
+              if "foreign key constraint failed" in str(e).lower():
+                   logger.error(f"Failed create document version: Media ID {media_id} not found.", exc_info=False)
+                   raise InputError(f"Cannot create document version: Media ID {media_id} not found.") from e
+              logger.error(f"DB error creating document version media {media_id}: {e}", exc_info=True)
+              if isinstance(e, (InputError, DatabaseError)): raise e
+              else: raise DatabaseError(f"Failed create document version: {e}") from e
         except Exception as e:
-             logger.error(f"Unexpected error creating document version media {media_id}: {e}", exc_info=True)
-             raise DatabaseError(f"Unexpected error creating document version: {e}") from e
+              logger.error(f"Unexpected error creating document version media {media_id}: {e}", exc_info=True)
+              raise DatabaseError(f"Unexpected error creating document version: {e}") from e
 
     def update_keywords_for_media(self, media_id: int, keywords: List[str]):
         """Updates keyword links for a media item, logging 'link'/'unlink' events."""
@@ -1091,7 +1120,7 @@ class Database:
         """Soft deletes a keyword and unlinks it, logging sync events and updating FTS."""
         if not keyword or not keyword.strip(): raise InputError("Keyword cannot be empty.")
         keyword = keyword.strip().lower()
-        current_time = self._get_current_utc_timestamp_str()
+        current_time = self._get_current_utc_timestamp_str() # Get time
         client_id = self.client_id
 
         try:
@@ -1106,14 +1135,17 @@ class Database:
                 new_version = current_version + 1
 
                 logger.info(f"Soft deleting keyword '{keyword}' (ID: {keyword_id}). New ver: {new_version}")
+                # Pass current_time for last_modified
                 cursor.execute("UPDATE Keywords SET deleted=1, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
                                (current_time, new_version, client_id, keyword_id, current_version))
                 if cursor.rowcount == 0: raise ConflictError("Keywords", keyword_id)
 
-                delete_payload = {'uuid': keyword_uuid, 'last_modified': current_time, 'version': new_version, 'client_id': client_id}
+                # Payload reflects the state *after* the update
+                delete_payload = {'uuid': keyword_uuid, 'last_modified': current_time, 'version': new_version, 'client_id': client_id, 'deleted': 1}
                 self._log_sync_event(conn, 'Keywords', keyword_uuid, 'delete', new_version, delete_payload)
                 self._delete_fts_keyword(conn, keyword_id)
 
+                # Unlinking logic remains the same
                 cursor.execute("SELECT mk.media_id, m.uuid AS media_uuid FROM MediaKeywords mk JOIN Media m ON mk.media_id = m.id WHERE mk.keyword_id = ? AND m.deleted = 0", (keyword_id,))
                 media_to_unlink = cursor.fetchall()
                 if media_to_unlink:
@@ -1121,11 +1153,12 @@ class Database:
                     placeholders = ','.join('?' * len(media_ids))
                     cursor.execute(f"DELETE FROM MediaKeywords WHERE keyword_id = ? AND media_id IN ({placeholders})", (keyword_id, *media_ids))
                     unlink_version = 1
+                    deleted_link_count = cursor.rowcount # Get actual count of deleted links
                     for media_link in media_to_unlink:
                          link_uuid = f"{media_link['media_uuid']}_{keyword_uuid}"
                          unlink_payload = {'media_uuid': media_link['media_uuid'], 'keyword_uuid': keyword_uuid}
                          self._log_sync_event(conn, 'MediaKeywords', link_uuid, 'unlink', unlink_version, unlink_payload)
-                    logger.info(f"Unlinked keyword '{keyword}' from {cursor.rowcount} items.")
+                    logger.info(f"Unlinked keyword '{keyword}' from {deleted_link_count} items.")
             return True
         except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e:
              logger.error(f"Error soft delete keyword '{keyword}': {e}", exc_info=True)
@@ -1138,7 +1171,8 @@ class Database:
     def soft_delete_document_version(self, version_uuid: str) -> bool:
         """Soft deletes a document version, logging sync event."""
         if not version_uuid: raise InputError("Version UUID required.")
-        current_time = self._get_current_utc_timestamp_str(); client_id = self.client_id
+        current_time = self._get_current_utc_timestamp_str() # Get time
+        client_id = self.client_id
         logger.debug(f"Attempting soft delete DocVersion UUID: {version_uuid}")
         try:
             with self.transaction() as conn:
@@ -1155,11 +1189,13 @@ class Database:
                 if active_count <= 1:
                     logger.warning(f"Cannot delete DocVersion UUID {version_uuid} - last active."); return False
 
+                # Pass current_time for last_modified
                 cursor.execute("UPDATE DocumentVersions SET deleted=1, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
                                (current_time, new_sync_version, client_id, version_id, current_sync_version))
                 if cursor.rowcount == 0: raise ConflictError("DocumentVersions", version_id)
 
-                delete_payload = {'uuid': version_uuid, 'media_uuid': media_uuid, 'last_modified': current_time, 'version': new_sync_version, 'client_id': client_id}
+                # Payload reflects the state *after* the update
+                delete_payload = {'uuid': version_uuid, 'media_uuid': media_uuid, 'last_modified': current_time, 'version': new_sync_version, 'client_id': client_id, 'deleted': 1}
                 self._log_sync_event(conn, 'DocumentVersions', version_uuid, 'delete', new_sync_version, delete_payload)
                 logger.info(f"Soft deleted DocVersion UUID {version_uuid}. New ver: {new_sync_version}")
                 return True
@@ -1173,7 +1209,8 @@ class Database:
 
     def mark_as_trash(self, media_id: int) -> bool:
         """Marks media as trash, logging sync event."""
-        current_time = self._get_current_utc_timestamp_str(); client_id = self.client_id
+        current_time = self._get_current_utc_timestamp_str() # Get time
+        client_id = self.client_id
         logger.debug(f"Marking media {media_id} as trash.")
         try:
             with self.transaction() as conn:
@@ -1181,15 +1218,16 @@ class Database:
                 cursor.execute("SELECT uuid, version, is_trash FROM Media WHERE id = ? AND deleted = 0", (media_id,))
                 media_info = cursor.fetchone()
                 if not media_info: logger.warning(f"Cannot trash: Media {media_id} not found/deleted."); return False
-                if media_info['is_trash']: logger.warning(f"Media {media_id} already in trash."); return False
+                if media_info['is_trash']: logger.warning(f"Media {media_id} already in trash."); return False # No change needed
                 media_uuid, current_version = media_info['uuid'], media_info['version']
                 new_version = current_version + 1
 
+                # Pass current_time for both trash_date and last_modified
                 cursor.execute("UPDATE Media SET is_trash=1, trash_date=?, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
                                (current_time, current_time, new_version, client_id, media_id, current_version))
                 if cursor.rowcount == 0: raise ConflictError("Media", media_id)
 
-                cursor.execute("SELECT * FROM Media WHERE id = ?", (media_id,)) # Fetch updated state
+                cursor.execute("SELECT * FROM Media WHERE id = ?", (media_id,)) # Fetch updated state for payload
                 sync_payload = dict(cursor.fetchone())
                 self._log_sync_event(conn, 'Media', media_uuid, 'update', new_version, sync_payload)
                 # No FTS change needed for trash status itself
@@ -1205,7 +1243,8 @@ class Database:
 
     def restore_from_trash(self, media_id: int) -> bool:
         """Restores media from trash, logging sync event."""
-        current_time = self._get_current_utc_timestamp_str(); client_id = self.client_id
+        current_time = self._get_current_utc_timestamp_str() # Get time
+        client_id = self.client_id
         logger.debug(f"Restoring media {media_id} from trash.")
         try:
             with self.transaction() as conn:
@@ -1213,15 +1252,16 @@ class Database:
                 cursor.execute("SELECT uuid, version, is_trash FROM Media WHERE id = ? AND deleted = 0", (media_id,))
                 media_info = cursor.fetchone()
                 if not media_info: logger.warning(f"Cannot restore: Media {media_id} not found/deleted."); return False
-                if not media_info['is_trash']: logger.warning(f"Cannot restore: Media {media_id} not in trash."); return False
+                if not media_info['is_trash']: logger.warning(f"Cannot restore: Media {media_id} not in trash."); return False # No change needed
                 media_uuid, current_version = media_info['uuid'], media_info['version']
                 new_version = current_version + 1
 
+                # Pass current_time for last_modified, set trash_date to NULL
                 cursor.execute("UPDATE Media SET is_trash=0, trash_date=NULL, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
                                (current_time, new_version, client_id, media_id, current_version))
                 if cursor.rowcount == 0: raise ConflictError("Media", media_id)
 
-                cursor.execute("SELECT * FROM Media WHERE id = ?", (media_id,)) # Fetch updated state
+                cursor.execute("SELECT * FROM Media WHERE id = ?", (media_id,)) # Fetch updated state for payload
                 sync_payload = dict(cursor.fetchone())
                 self._log_sync_event(conn, 'Media', media_uuid, 'update', new_version, sync_payload)
                 # No FTS change needed
@@ -1238,46 +1278,63 @@ class Database:
     def rollback_to_version(self, media_id: int, target_version_number: int) -> Dict[str, Any]:
         """Rolls back media content to a previous version, logging events and updating FTS."""
         if not isinstance(target_version_number, int) or target_version_number < 1: raise ValueError("Target version invalid.")
-        client_id = self.client_id; current_time = self._get_current_utc_timestamp_str();
+        client_id = self.client_id
+        current_time = self._get_current_utc_timestamp_str() # Get time
         logger.debug(f"Rolling back media {media_id} to doc version {target_version_number}.")
         try:
             with self.transaction() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT uuid, version, title FROM Media WHERE id = ? AND deleted = 0", (media_id,)) # Get title too
+                # Get current media info
+                cursor.execute("SELECT uuid, version, title FROM Media WHERE id = ? AND deleted = 0", (media_id,))
                 media_info = cursor.fetchone()
-                if not media_info: return {'error': f'Media {media_id} not found/deleted.'}
+                if not media_info: return {'error': f'Media {media_id} not found or deleted.'}
                 media_uuid, current_media_version, current_title = media_info['uuid'], media_info['version'], media_info['title']
                 new_media_version = current_media_version + 1
 
+                # Get target document version data (using standalone function)
                 target_version_data = get_document_version(self, media_id, target_version_number, True)
-                if target_version_data is None: return {'error': f'Rollback target version {target_version_number} not found/inactive.'}
-                cursor.execute("SELECT MAX(version_number) FROM DocumentVersions WHERE media_id=? AND deleted=0", (media_id,)); latest_vn_res = cursor.fetchone()
-                if latest_vn_res and target_version_number == latest_vn_res[0]: return {'error': 'Cannot rollback to the current latest version number.'}
+                if target_version_data is None: return {'error': f'Rollback target version {target_version_number} not found or inactive.'}
 
-                target_content = target_version_data.get('content'); target_prompt = target_version_data.get('prompt'); target_analysis = target_version_data.get('analysis_content')
+                # Prevent rolling back to the absolute latest version number
+                cursor.execute("SELECT MAX(version_number) FROM DocumentVersions WHERE media_id=? AND deleted=0", (media_id,)); latest_vn_res = cursor.fetchone()
+                if latest_vn_res and target_version_number == latest_vn_res[0]:
+                    return {'error': 'Cannot rollback to the current latest version number.'}
+
+                target_content = target_version_data.get('content')
+                target_prompt = target_version_data.get('prompt')
+                target_analysis = target_version_data.get('analysis_content')
                 if target_content is None: return {'error': f'Version {target_version_number} has no content.'}
 
-                # Create new doc version representing the rollback (handles its own logging)
+                # 1. Create new doc version representing the rollback state (handles its own logging & timestamps)
                 new_doc_version_info = self.create_document_version(media_id=media_id, content=target_content, prompt=target_prompt, analysis_content=target_analysis)
                 new_doc_version_number = new_doc_version_info.get('version_number')
                 new_doc_version_uuid = new_doc_version_info.get('uuid')
 
+                # 2. Update the Media table with the rolled-back content and new hash/timestamp
                 new_content_hash = hashlib.sha256(target_content.encode()).hexdigest()
+                # Pass current_time for last_modified
                 cursor.execute(
                     """UPDATE Media SET content=?, content_hash=?, last_modified=?, version=?, client_id=?,
                        chunking_status="pending", vector_processing=0 WHERE id=? AND version=?""",
                     (target_content, new_content_hash, current_time, new_media_version, client_id, media_id, current_media_version))
                 if cursor.rowcount == 0: raise ConflictError("Media", media_id)
 
-                cursor.execute("SELECT * FROM Media WHERE id = ?", (media_id,)) # Fetch updated state
+                # 3. Log the Media update sync event
+                cursor.execute("SELECT * FROM Media WHERE id = ?", (media_id,)) # Fetch updated state for payload
                 updated_media_data = dict(cursor.fetchone())
+                # Add context about the rollback to the payload (optional but helpful)
                 updated_media_data['rolled_back_to_doc_ver_uuid'] = new_doc_version_uuid
                 updated_media_data['rolled_back_to_doc_ver_num'] = new_doc_version_number
                 self._log_sync_event(conn, 'Media', media_uuid, 'update', new_media_version, updated_media_data)
+
+                # 4. Update FTS for the Media item
                 self._update_fts_media(conn, media_id, current_title, target_content) # Use original title, new content
 
             logger.info(f"Rolled back media {media_id} to state of doc ver {target_version_number}. New DocVer: {new_doc_version_number}, New MediaVer: {new_media_version}")
-            return {'success': f'Rolled back to version {target_version_number}. State saved as new version {new_doc_version_number}.', 'new_document_version_number': new_doc_version_number, 'new_document_version_uuid': new_doc_version_uuid, 'new_media_version': new_media_version}
+            return {'success': f'Rolled back to version {target_version_number}. State saved as new version {new_doc_version_number}.',
+                    'new_document_version_number': new_doc_version_number,
+                    'new_document_version_uuid': new_doc_version_uuid,
+                    'new_media_version': new_media_version}
         except (InputError, ValueError, ConflictError, DatabaseError, sqlite3.Error, TypeError) as e:
              logger.error(f"Rollback error media {media_id}: {e}", exc_info=True)
              if isinstance(e, (InputError, ValueError, ConflictError, DatabaseError, TypeError)): raise e
@@ -1293,7 +1350,8 @@ class Database:
         start_time = time.time(); total_chunks = len(chunks); processed_count = 0;
         logger.info(f"Processing {total_chunks} unvectorized chunks for media {media_id}.")
         try:
-            if not check_media_exists(self, media_id=media_id): # Use standalone check function
+            # Use standalone check function (assumed to exist and work)
+            if not check_media_exists(self, media_id=media_id):
                  raise InputError(f"Cannot add chunks: Parent Media {media_id} not found or deleted.")
             conn_check = self.get_connection()
             cursor_check = conn_check.execute("SELECT uuid FROM Media WHERE id = ?", (media_id,))
@@ -1304,7 +1362,7 @@ class Database:
             with self.transaction() as conn:
                 for i in range(0, total_chunks, batch_size):
                     batch = chunks[i:i + batch_size]; chunk_params = []; log_events_data = []
-                    current_time = self._get_current_utc_timestamp_str()
+                    current_time = self._get_current_utc_timestamp_str() # Get time for the batch
                     for chunk_dict in batch:
                         chunk_uuid = self._generate_uuid()
                         chunk_text = chunk_dict.get('chunk_text', chunk_dict.get('text'))
@@ -1316,21 +1374,27 @@ class Database:
                             'media_id': media_id, 'chunk_text': chunk_text, 'chunk_index': chunk_index,
                             'start_char': chunk_dict.get('start_char'), 'end_char': chunk_dict.get('end_char'),
                             'chunk_type': chunk_dict.get('chunk_type'),
-                            'creation_date': chunk_dict.get('creation_date', current_time),
-                            'last_modified_orig': chunk_dict.get('last_modified_orig', current_time),
+                            # Use current_time if not provided in chunk_dict
+                            'creation_date': chunk_dict.get('creation_date') or current_time,
+                            'last_modified_orig': chunk_dict.get('last_modified_orig') or current_time,
                             'is_processed': chunk_dict.get('is_processed', False),
                             'metadata': json.dumps(chunk_dict.get('metadata')) if chunk_dict.get('metadata') else None, # Ensure metadata is JSON string
-                            'uuid': chunk_uuid, 'last_modified': current_time, 'version': new_sync_version,
-                            'client_id': client_id, 'deleted': 0, 'media_uuid': media_uuid # for payload
+                            'uuid': chunk_uuid,
+                            'last_modified': current_time, # Set sync last_modified
+                            'version': new_sync_version, 'client_id': client_id, 'deleted': 0,
+                            'media_uuid': media_uuid # for payload context
                         }
                         params = ( # Order must match SQL query
                             insert_data['media_id'], insert_data['chunk_text'], insert_data['chunk_index'],
                             insert_data['start_char'], insert_data['end_char'], insert_data['chunk_type'],
-                            insert_data['creation_date'], insert_data['last_modified_orig'], insert_data['is_processed'],
-                            insert_data['metadata'], insert_data['uuid'], insert_data['last_modified'],
+                            insert_data['creation_date'], # Pass creation_date
+                            insert_data['last_modified_orig'], # Pass last_modified_orig
+                            insert_data['is_processed'], insert_data['metadata'], insert_data['uuid'],
+                            insert_data['last_modified'], # Pass sync last_modified
                             insert_data['version'], insert_data['client_id'], insert_data['deleted']
                         )
                         chunk_params.append(params)
+                        # Pass the full insert_data as payload
                         log_events_data.append((chunk_uuid, new_sync_version, insert_data))
 
                     if not chunk_params: continue
@@ -1338,7 +1402,7 @@ class Database:
                     sql = """INSERT INTO UnvectorizedMediaChunks (media_id, chunk_text, chunk_index, start_char, end_char, chunk_type,
                                creation_date, last_modified_orig, is_processed, metadata, uuid,
                                last_modified, version, client_id, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
-                    cursor = conn.cursor(); cursor.executemany(sql, chunk_params); actual_inserted = len(chunk_params)
+                    cursor = conn.cursor(); cursor.executemany(sql, chunk_params); actual_inserted = len(chunk_params) # executemany doesn't give reliable rowcount
 
                     for chunk_uuid_log, version_log, payload_log in log_events_data:
                         self._log_sync_event(conn, 'UnvectorizedMediaChunks', chunk_uuid_log, 'create', version_log, payload_log)
@@ -1362,17 +1426,42 @@ class Database:
         except DatabaseError as e: logger.error(f"Error fetching keywords: {e}"); raise
 
     def get_media_by_id(self, media_id: int, include_deleted=False, include_trash=False) -> Optional[Dict]:
-        """Gets media by ID, filtering by deleted and trash status."""
-        if not isinstance(media_id, int): raise InputError("media_id must be an integer.")
+        """
+        Gets media by its primary key (ID).
+
+        Args:
+            media_id: The integer ID of the media item.
+            include_deleted: If True, includes items marked as deleted. Defaults to False.
+            include_trash: If True, includes items marked as trash. Defaults to False.
+
+        Returns:
+            A dictionary representing the media item if found, otherwise None.
+
+        Raises:
+            InputError: If media_id is not an integer.
+            DatabaseError: If a database query error occurs.
+        """
+        if not isinstance(media_id, int):
+            raise InputError("media_id must be an integer.")
+
         query = "SELECT * FROM Media WHERE id = ?"
         params = [media_id]
-        if not include_deleted: query += " AND deleted = 0"
-        if not include_trash: query += " AND is_trash = 0"
+
+        if not include_deleted:
+            query += " AND deleted = 0"
+        if not include_trash:
+            query += " AND is_trash = 0"
+
         try:
             cursor = self.execute_query(query, tuple(params))
             result = cursor.fetchone()
             return dict(result) if result else None
-        except (DatabaseError, sqlite3.Error) as e: logger.error(f"Error fetching media by ID {media_id}: {e}", exc_info=True); raise DatabaseError(f"Failed fetch media by ID: {e}") from e
+        except sqlite3.Error as e:
+            logger.error(f"Error fetching media by ID {media_id}: {e}", exc_info=True)
+            raise DatabaseError(f"Failed to fetch media by ID: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error fetching media by ID {media_id}: {e}", exc_info=True)
+            raise DatabaseError(f"Unexpected error fetching media by ID: {e}") from e
 
     # Add similar get_media_by_uuid, get_media_by_url, get_media_by_hash, get_media_by_title
     # Ensure they include the include_deleted and include_trash filters correctly.
@@ -1388,39 +1477,129 @@ class Database:
         except (DatabaseError, sqlite3.Error) as e: logger.error(f"Error fetching media by UUID {media_uuid}: {e}"); raise DatabaseError(f"Failed fetch media by UUID: {e}") from e
 
     def get_media_by_url(self, url: str, include_deleted=False, include_trash=False) -> Optional[Dict]:
-        if not url: raise InputError("url cannot be empty.")
+        """
+        Gets media by its URL.
+
+        Args:
+            url: The URL string of the media item.
+            include_deleted: If True, includes items marked as deleted. Defaults to False.
+            include_trash: If True, includes items marked as trash. Defaults to False.
+
+        Returns:
+            A dictionary representing the media item if found, otherwise None.
+
+        Raises:
+            InputError: If url is empty or None.
+            DatabaseError: If a database query error occurs.
+        """
+        if not url:
+            raise InputError("url cannot be empty or None.")
+
         query = "SELECT * FROM Media WHERE url = ?"
         params = [url]
-        if not include_deleted: query += " AND deleted = 0"
-        if not include_trash: query += " AND is_trash = 0"
+
+        if not include_deleted:
+            query += " AND deleted = 0"
+        if not include_trash:
+            query += " AND is_trash = 0"
+
+        # URLs are unique, so LIMIT 1 is implicit but doesn't hurt
+        query += " LIMIT 1"
+
         try:
             cursor = self.execute_query(query, tuple(params))
-            result = cursor.fetchone(); return dict(result) if result else None
-        except (DatabaseError, sqlite3.Error) as e: logger.error(f"Error fetching media by URL {url}: {e}"); raise DatabaseError(f"Failed fetch media by URL: {e}") from e
+            result = cursor.fetchone()
+            return dict(result) if result else None
+        except sqlite3.Error as e:
+            logger.error(f"Error fetching media by URL '{url}': {e}", exc_info=True)
+            raise DatabaseError(f"Failed to fetch media by URL: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error fetching media by URL '{url}': {e}", exc_info=True)
+            raise DatabaseError(f"Unexpected error fetching media by URL: {e}") from e
 
     def get_media_by_hash(self, content_hash: str, include_deleted=False, include_trash=False) -> Optional[Dict]:
-        if not content_hash: raise InputError("content_hash cannot be empty.")
+        """
+        Gets media by its content hash.
+
+        Args:
+            content_hash: The SHA256 hash string of the media content.
+            include_deleted: If True, includes items marked as deleted. Defaults to False.
+            include_trash: If True, includes items marked as trash. Defaults to False.
+
+        Returns:
+            A dictionary representing the media item if found, otherwise None.
+
+        Raises:
+            InputError: If content_hash is empty or None.
+            DatabaseError: If a database query error occurs.
+        """
+        if not content_hash:
+            raise InputError("content_hash cannot be empty or None.")
+
         query = "SELECT * FROM Media WHERE content_hash = ?"
         params = [content_hash]
-        if not include_deleted: query += " AND deleted = 0"
-        if not include_trash: query += " AND is_trash = 0"
+
+        if not include_deleted:
+            query += " AND deleted = 0"
+        if not include_trash:
+            query += " AND is_trash = 0"
+
+        # Hashes are unique, so LIMIT 1 is implicit
+        query += " LIMIT 1"
+
         try:
             cursor = self.execute_query(query, tuple(params))
-            result = cursor.fetchone(); return dict(result) if result else None
-        except (DatabaseError, sqlite3.Error) as e: logger.error(f"Error fetching media by hash {content_hash[:10]}...: {e}"); raise DatabaseError(f"Failed fetch media by hash: {e}") from e
+            result = cursor.fetchone()
+            return dict(result) if result else None
+        except sqlite3.Error as e:
+            logger.error(f"Error fetching media by hash '{content_hash[:10]}...': {e}", exc_info=True)
+            raise DatabaseError(f"Failed to fetch media by hash: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error fetching media by hash '{content_hash[:10]}...': {e}", exc_info=True)
+            raise DatabaseError(f"Unexpected error fetching media by hash: {e}") from e
 
     def get_media_by_title(self, title: str, include_deleted=False, include_trash=False) -> Optional[Dict]:
-        """Gets *first* media matching title (case-sensitive), filtering appropriately."""
-        if not title: raise InputError("title cannot be empty.")
+        """
+        Gets the *first* media item matching the given title (case-sensitive).
+        Note: Titles are not guaranteed to be unique.
+
+        Args:
+            title: The title string of the media item.
+            include_deleted: If True, includes items marked as deleted. Defaults to False.
+            include_trash: If True, includes items marked as trash. Defaults to False.
+
+        Returns:
+            A dictionary representing the first matching media item if found, otherwise None.
+
+        Raises:
+            InputError: If title is empty or None.
+            DatabaseError: If a database query error occurs.
+        """
+        if not title:
+            raise InputError("title cannot be empty or None.")
+
         query = "SELECT * FROM Media WHERE title = ?"
         params = [title]
-        if not include_deleted: query += " AND deleted = 0"
-        if not include_trash: query += " AND is_trash = 0"
-        query += " LIMIT 1"
+
+        if not include_deleted:
+            query += " AND deleted = 0"
+        if not include_trash:
+            query += " AND is_trash = 0"
+
+        # Order by last_modified to get potentially the most relevant if duplicates exist
+        query += " ORDER BY last_modified DESC LIMIT 1"
+
         try:
             cursor = self.execute_query(query, tuple(params))
-            result = cursor.fetchone(); return dict(result) if result else None
-        except (DatabaseError, sqlite3.Error) as e: logger.error(f"Error fetching media by title '{title}': {e}"); raise DatabaseError(f"Failed fetch media by title: {e}") from e
+            result = cursor.fetchone()
+            return dict(result) if result else None
+        except sqlite3.Error as e:
+            logger.error(f"Error fetching media by title '{title}': {e}", exc_info=True)
+            raise DatabaseError(f"Failed to fetch media by title: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error fetching media by title '{title}': {e}", exc_info=True)
+            raise DatabaseError(f"Unexpected error fetching media by title: {e}") from e
+
 
 
 # =========================================================================
@@ -1455,10 +1634,23 @@ def get_document_version(db_instance: Database, media_id: int, version_number: O
     except (DatabaseError, sqlite3.Error) as e: logger.error(f"Error retrieving {log_msg} DB '{db_instance.db_path_str}': {e}", exc_info=True); raise DatabaseError(f"DB error retrieving version: {e}") from e
     except Exception as e: logger.error(f"Unexpected error retrieving {log_msg} DB '{db_instance.db_path_str}': {e}", exc_info=True); raise DatabaseError(f"Unexpected error retrieving version: {e}") from e
 
+
 # Backup functions remain placeholders or need proper implementation
-def create_incremental_backup(db_path, backup_dir): logger.warning("create_incremental_backup not implemented."); pass
-def create_automated_backup(db_path, backup_dir): logger.warning("create_automated_backup not implemented."); pass
-def rotate_backups(backup_dir, max_backups=10): logger.warning("rotate_backups not implemented."); pass
+def create_incremental_backup(db_path, backup_dir):
+    logger.warning("create_incremental_backup not implemented.")
+    pass
+
+
+def create_automated_backup(db_path, backup_dir):
+    logger.warning("create_automated_backup not implemented.")
+    pass
+
+
+def rotate_backups(backup_dir, max_backups=10):
+    logger.warning("rotate_backups not implemented.")
+    pass
+
+
 def check_database_integrity(db_path): # Standalone check is fine
     logger.info(f"Checking integrity of database: {db_path}")
     conn = None
@@ -1616,10 +1808,11 @@ def get_specific_prompt(db_instance: Database, version_uuid: str) -> Optional[st
 
 # Specific deletes call instance methods
 def soft_delete_transcript(db_instance: Database, transcript_uuid: str) -> bool:
-    """Soft deletes a specific transcript by UUID using instance method."""
+    """Soft deletes a specific transcript by UUID."""
     if not isinstance(db_instance, Database): raise TypeError("db_instance required.")
-    # Implementation uses instance method for logic, logging, etc.
-    current_time = db_instance._get_current_utc_timestamp_str()
+    if not transcript_uuid: raise InputError("Transcript UUID required.")
+
+    current_time = db_instance._get_current_utc_timestamp_str() # Get time via instance
     client_id = db_instance.client_id
     logger.debug(f"Attempting soft delete Transcript UUID: {transcript_uuid}")
     try:
@@ -1627,64 +1820,106 @@ def soft_delete_transcript(db_instance: Database, transcript_uuid: str) -> bool:
              cursor = conn.cursor()
              cursor.execute("SELECT t.id, t.version, m.uuid as media_uuid FROM Transcripts t JOIN Media m ON t.media_id = m.id WHERE t.uuid = ? AND t.deleted = 0", (transcript_uuid,))
              info = cursor.fetchone()
-             if not info: logger.warning(f"Transcript UUID {transcript_uuid} not found/deleted."); return False
+             if not info:
+                 logger.warning(f"Transcript UUID {transcript_uuid} not found or already deleted."); return False
              t_id, current_version, media_uuid = info['id'], info['version'], info['media_uuid']
              new_version = current_version + 1
-             cursor.execute("UPDATE Transcripts SET deleted=1, last_modified=?, version=?, client_id=? WHERE id=? AND version=?", (current_time, new_version, client_id, t_id, current_version))
+
+             # Pass current_time for last_modified
+             cursor.execute("UPDATE Transcripts SET deleted=1, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
+                            (current_time, new_version, client_id, t_id, current_version))
              if cursor.rowcount == 0: raise ConflictError("Transcripts", t_id)
-             payload = {'uuid': transcript_uuid, 'media_uuid': media_uuid, 'last_modified': current_time, 'version': new_version, 'client_id': client_id}
-             db_instance._log_sync_event(conn, 'Transcripts', transcript_uuid, 'delete', new_version, payload)
+
+             # Payload reflects the state *after* the update
+             payload = {'uuid': transcript_uuid, 'media_uuid': media_uuid, 'last_modified': current_time, 'version': new_version, 'client_id': client_id, 'deleted': 1}
+             db_instance._log_sync_event(conn, 'Transcripts', transcript_uuid, 'delete', new_version, payload) # Call instance method for logging
              logger.info(f"Soft deleted Transcript UUID {transcript_uuid}. New ver: {new_version}")
              return True
-    except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e: logger.error(f"Error soft delete Transcript UUID {transcript_uuid}: {e}", exc_info=True); raise e if isinstance(e, (InputError, ConflictError, DatabaseError)) else DatabaseError(f"Failed soft delete transcript: {e}") from e
-    except Exception as e: logger.error(f"Unexpected soft delete Transcript error UUID {transcript_uuid}: {e}", exc_info=True); raise DatabaseError(f"Unexpected transcript soft delete error: {e}") from e
+    except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e:
+        logger.error(f"Error soft delete Transcript UUID {transcript_uuid}: {e}", exc_info=True)
+        # Re-raise specific errors, wrap general DB errors
+        if isinstance(e, (InputError, ConflictError, DatabaseError)): raise e
+        else: raise DatabaseError(f"Failed soft delete transcript: {e}") from e
+    except Exception as e:
+        logger.error(f"Unexpected soft delete Transcript error UUID {transcript_uuid}: {e}", exc_info=True)
+        raise DatabaseError(f"Unexpected transcript soft delete error: {e}") from e
+
 
 # clear_specific_analysis/prompt call instance methods implicitly via update logic
 def clear_specific_analysis(db_instance: Database, version_uuid: str) -> bool:
     """Sets analysis_content to NULL for a specific active DocumentVersion."""
     if not isinstance(db_instance, Database): raise TypeError("db_instance required.")
     if not version_uuid: raise InputError("Version UUID required.")
-    current_time = db_instance._get_current_utc_timestamp_str(); client_id = db_instance.client_id
+
+    current_time = db_instance._get_current_utc_timestamp_str() # Get time via instance
+    client_id = db_instance.client_id
     logger.debug(f"Clearing analysis for DocVersion UUID: {version_uuid}")
     try:
         with db_instance.transaction() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id, version FROM DocumentVersions WHERE uuid = ? AND deleted = 0", (version_uuid,))
             info = cursor.fetchone()
-            if not info: logger.warning(f"DocVersion UUID {version_uuid} not found/deleted."); return False
-            v_id, current_version = info['id'], info['version']; new_version = current_version + 1
-            cursor.execute("UPDATE DocumentVersions SET analysis_content=NULL, last_modified=?, version=?, client_id=? WHERE id=? AND version=?", (current_time, new_version, client_id, v_id, current_version))
+            if not info:
+                logger.warning(f"DocVersion UUID {version_uuid} not found or already deleted."); return False
+            v_id, current_version = info['id'], info['version']
+            new_version = current_version + 1
+
+            # Pass current_time for last_modified
+            cursor.execute("UPDATE DocumentVersions SET analysis_content=NULL, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
+                           (current_time, new_version, client_id, v_id, current_version))
             if cursor.rowcount == 0: raise ConflictError("DocumentVersions", v_id)
+
+            # Fetch full data for payload AFTER update
             cursor.execute("SELECT dv.*, m.uuid as media_uuid FROM DocumentVersions dv JOIN Media m ON dv.media_id = m.id WHERE dv.id = ?", (v_id,))
             payload = dict(cursor.fetchone())
-            db_instance._log_sync_event(conn, 'DocumentVersions', version_uuid, 'update', new_version, payload)
+            db_instance._log_sync_event(conn, 'DocumentVersions', version_uuid, 'update', new_version, payload) # Call instance method for logging
             logger.info(f"Cleared analysis for DocVersion UUID {version_uuid}. New ver: {new_version}")
             return True
-    except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e: logger.error(f"Error clearing analysis UUID {version_uuid}: {e}", exc_info=True); raise e if isinstance(e, (InputError, ConflictError, DatabaseError)) else DatabaseError(f"Failed clear analysis: {e}") from e
-    except Exception as e: logger.error(f"Unexpected error clearing analysis UUID {version_uuid}: {e}", exc_info=True); raise DatabaseError(f"Unexpected clear analysis error: {e}") from e
+    except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e:
+        logger.error(f"Error clearing analysis UUID {version_uuid}: {e}", exc_info=True)
+        if isinstance(e, (InputError, ConflictError, DatabaseError)): raise e
+        else: raise DatabaseError(f"Failed clear analysis: {e}") from e
+    except Exception as e:
+        logger.error(f"Unexpected error clearing analysis UUID {version_uuid}: {e}", exc_info=True)
+        raise DatabaseError(f"Unexpected clear analysis error: {e}") from e
+
 
 def clear_specific_prompt(db_instance: Database, version_uuid: str) -> bool:
     """Sets prompt to NULL for a specific active DocumentVersion."""
     if not isinstance(db_instance, Database): raise TypeError("db_instance required.")
     if not version_uuid: raise InputError("Version UUID required.")
-    current_time = db_instance._get_current_utc_timestamp_str(); client_id = db_instance.client_id
+
+    current_time = db_instance._get_current_utc_timestamp_str() # Get time via instance
+    client_id = db_instance.client_id
     logger.debug(f"Clearing prompt for DocVersion UUID: {version_uuid}")
     try:
         with db_instance.transaction() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id, version FROM DocumentVersions WHERE uuid = ? AND deleted = 0", (version_uuid,))
             info = cursor.fetchone()
-            if not info: logger.warning(f"DocVersion UUID {version_uuid} not found/deleted."); return False
-            v_id, current_version = info['id'], info['version']; new_version = current_version + 1
-            cursor.execute("UPDATE DocumentVersions SET prompt=NULL, last_modified=?, version=?, client_id=? WHERE id=? AND version=?", (current_time, new_version, client_id, v_id, current_version))
+            if not info:
+                logger.warning(f"DocVersion UUID {version_uuid} not found or already deleted."); return False
+            v_id, current_version = info['id'], info['version']
+            new_version = current_version + 1
+
+            # Pass current_time for last_modified
+            cursor.execute("UPDATE DocumentVersions SET prompt=NULL, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
+                           (current_time, new_version, client_id, v_id, current_version))
             if cursor.rowcount == 0: raise ConflictError("DocumentVersions", v_id)
+
+            # Fetch full data for payload AFTER update
             cursor.execute("SELECT dv.*, m.uuid as media_uuid FROM DocumentVersions dv JOIN Media m ON dv.media_id = m.id WHERE dv.id = ?", (v_id,))
             payload = dict(cursor.fetchone())
-            db_instance._log_sync_event(conn, 'DocumentVersions', version_uuid, 'update', new_version, payload)
+            db_instance._log_sync_event(conn, 'DocumentVersions', version_uuid, 'update', new_version, payload) # Call instance method for logging
             logger.info(f"Cleared prompt for DocVersion UUID {version_uuid}. New ver: {new_version}")
             return True
-    except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e: logger.error(f"Error clearing prompt UUID {version_uuid}: {e}", exc_info=True); raise e if isinstance(e, (InputError, ConflictError, DatabaseError)) else DatabaseError(f"Failed clear prompt: {e}") from e
-    except Exception as e: logger.error(f"Unexpected error clearing prompt UUID {version_uuid}: {e}", exc_info=True); raise DatabaseError(f"Unexpected clear prompt error: {e}") from e
+    except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e:
+        logger.error(f"Error clearing prompt UUID {version_uuid}: {e}", exc_info=True)
+        if isinstance(e, (InputError, ConflictError, DatabaseError)): raise e
+        else: raise DatabaseError(f"Failed clear prompt: {e}") from e
+    except Exception as e:
+        logger.error(f"Unexpected error clearing prompt UUID {version_uuid}: {e}", exc_info=True)
+        raise DatabaseError(f"Unexpected clear prompt error: {e}") from e
 
 # Other remaining functions
 def get_chunk_text(db_instance: Database, chunk_uuid: str) -> Optional[str]:
