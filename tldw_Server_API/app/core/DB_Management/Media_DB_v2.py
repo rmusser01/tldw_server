@@ -1903,6 +1903,121 @@ class Database:
              logger.error(f"Unexpected rollback error media {media_id}: {e}", exc_info=True)
              raise DatabaseError(f"Unexpected rollback error: {e}") from e
 
+    def get_all_document_versions(
+        self,  # Add self as the first parameter
+        media_id: int,
+        include_content: bool = False,
+        include_deleted: bool = False,
+        limit: Optional[int] = None,
+        offset: Optional[int] = 0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieves all document versions for an active media item with pagination.
+
+        Filters results to only include versions where the parent Media item is active
+        (`Media.deleted = 0`). By default, only active document versions
+        (`DocumentVersions.deleted = 0`) are returned, unless `include_deleted` is True.
+
+        Includes standard V2 sync metadata columns (uuid, version, last_modified, client_id).
+
+        Args:
+            media_id (int): The ID of the parent Media item.
+            include_content (bool): Whether to include the 'content' field. Defaults to False.
+            include_deleted (bool): If True, include versions marked as soft-deleted
+                                    (`deleted = 1`). Defaults to False.
+            limit (Optional[int]): Maximum number of versions to return. None for no limit.
+                                   Defaults to None.
+            offset (Optional[int]): Number of versions to skip (for pagination).
+                                    Defaults to 0.
+
+        Returns:
+            List[Dict[str, Any]]: A list of dictionaries, each representing a document
+                                  version matching the criteria. Returns an empty list
+                                  if none found.
+
+        Raises:
+            TypeError: If input arguments have wrong types.
+            ValueError: If limit or offset are invalid.
+            DatabaseError: For database query errors.
+        """
+        # --- Input Validation ---
+        # No need to validate self
+        if not isinstance(media_id, int):
+            raise TypeError("media_id must be an integer.")
+        if not isinstance(include_content, bool):
+            raise TypeError("include_content must be a boolean.")
+        if not isinstance(include_deleted, bool):
+            raise TypeError("include_deleted must be a boolean.")
+        if limit is not None and (not isinstance(limit, int) or limit < 1):
+            raise ValueError("Limit must be a positive integer.")
+        if offset is not None and (not isinstance(offset, int) or offset < 0):
+            raise ValueError("Offset must be a non-negative integer.")
+
+        # --- Logging ---
+        # Use self.db_path_str for logging context
+        log_msg = (f"Getting {'all' if include_deleted else 'active'} versions for media_id={media_id} "
+                   f"(Limit={limit}, Offset={offset}, Content={include_content}) "
+                   f"from DB: {self.db_path_str}") # Use self.db_path_str
+        logger.debug(log_msg)
+
+        # --- Query Construction ---
+        try:
+            # Select all relevant columns from DocumentVersions
+            select_cols_list = [
+                "dv.id", "dv.uuid", "dv.media_id", "dv.version_number", "dv.created_at",
+                "dv.prompt", "dv.analysis_content", "dv.last_modified", "dv.version",
+                "dv.client_id", "dv.deleted"
+            ]
+            if include_content:
+                select_cols_list.append("dv.content")
+            select_clause = ", ".join(select_cols_list)
+
+            params = [media_id]
+            where_conditions = ["dv.media_id = ?", "m.deleted = 0"] # Always filter by active parent
+
+            if not include_deleted:
+                where_conditions.append("dv.deleted = 0")
+
+            where_clause = " AND ".join(where_conditions)
+
+            limit_offset_clause = ""
+            if limit is not None:
+                limit_offset_clause += " LIMIT ?"
+                params.append(limit)
+                if offset is not None and offset > 0:
+                    limit_offset_clause += " OFFSET ?"
+                    params.append(offset)
+
+            final_query = f"""
+                SELECT {select_clause}
+                FROM DocumentVersions dv
+                JOIN Media m ON dv.media_id = m.id
+                WHERE {where_clause}
+                ORDER BY dv.version_number DESC
+                {limit_offset_clause}
+            """
+
+            # --- Execution ---
+            logging.debug(f"Executing get_all_document_versions query | Params: {params}")
+            # Use self.execute_query
+            cursor = self.execute_query(final_query, tuple(params))
+            results_raw = cursor.fetchall()
+
+            versions_list = [dict(row) for row in results_raw]
+
+            logging.debug(f"Found {len(versions_list)} versions for media_id={media_id}")
+            return versions_list
+
+        # --- Error Handling ---
+        except sqlite3.Error as e:
+            # Use self.db_path_str
+            logging.error(f"SQLite error retrieving versions for media_id {media_id} from {self.db_path_str}: {e}", exc_info=True)
+            raise DatabaseError(f"Failed to retrieve document versions: {e}") from e
+        except Exception as e:
+            # Use self.db_path_str
+            logging.error(f"Unexpected error retrieving versions for media_id {media_id} from {self.db_path_str}: {e}", exc_info=True)
+            raise DatabaseError(f"An unexpected error occurred: {e}") from e
+
     def process_unvectorized_chunks(self, media_id: int, chunks: List[Dict[str, Any]], batch_size: int = 100):
         """
         Adds a batch of unvectorized chunk records to the database.

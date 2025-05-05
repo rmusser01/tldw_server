@@ -16,7 +16,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
 from tldw_Server_API.app.main import app as fastapi_app_instance, app
 from tldw_Server_API.app.core.DB_Management.DB_Manager import Database
     # Import specific DB functions used directly in tests/fixtures
-from tldw_Server_API.app.core.DB_Management.Media_DB import (
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import (
         create_document_version, get_document_version, get_all_document_versions,
         delete_document_version, rollback_to_version
     )

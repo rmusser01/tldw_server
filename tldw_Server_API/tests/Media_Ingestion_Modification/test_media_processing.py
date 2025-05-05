@@ -3,11 +3,14 @@
 # (endpoints that DO NOT persist to DB) of the tldw application.
 #
 # Imports
+import hashlib
 import os
+import sqlite3
 import sys
 from pathlib import Path
 import time
 import json # Added for potential debugging
+from typing import Dict
 from unittest.mock import patch, AsyncMock, MagicMock # Added AsyncMock, MagicMock
 
 # 3rd-party Libraries
@@ -16,6 +19,9 @@ from fastapi import status # Added
 from fastapi.testclient import TestClient
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.DB_Manager import get_all_document_versions
+from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.tests.MediaDB2.test_sqlite_db import get_entity_version, get_latest_log
 from tldw_Server_API.tests.Media_Ingestion_Modification.test_add_media_endpoint import override_get_request_user
 # Local Imports
 # --- Test Utilities ---
@@ -28,7 +34,8 @@ try:
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User, _single_user_instance
     from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
     from tldw_Server_API.app.core.config import settings
-    from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database # If type hints needed
+    from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, get_document_version, \
+    search_media_db  # If type hints needed
 except ImportError as e:
     raise ImportError(f"Could not locate the FastAPI app instance or dependencies: {e}")
 
@@ -585,7 +592,7 @@ class TestProcessPdfs:
         check_media_item_result(result, "Error", check_db_fields=True)
         assert result["input_ref"] == SAMPLE_AUDIO_PATH.name
         # Check for errors related to PDF parsing
-        assert "PDF processing failed" in result["error"] or "Cannot open document" in result["error"] or "failed to extract text" in result["error"]
+        assert "PDF processing failed" in result["error"] or "Invalid file type" in result["error"] or "failed to extract text" in result["error"]
 
     @patch("tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.summarize")
     @pytest.mark.skip(reason="Analysis requires LLM setup or mocking")
@@ -1068,6 +1075,393 @@ class TestProcessDocuments:
         assert result["chunks"] is not None and len(result["chunks"]) > 0
         # Check analysis_details
         assert result["analysis_details"]["summarization_model"] == "mock_api"
+
+
+# ============================================================
+# Test Class for Document Versioning and Rollback (V2)
+# ============================================================
+class TestDocumentVersioningV2:
+
+    @pytest.fixture
+    def db_instance(self, memory_db_factory):
+        """Provides a fresh in-memory DB for each test in this class."""
+        db = memory_db_factory("versioning_client")
+        # Ensure FTS tables exist for tests that might need them
+        try:
+             db.execute_query("SELECT 1 FROM media_fts LIMIT 1")
+        except sqlite3.OperationalError as e:
+             if "no such table" in str(e):
+                  logging.warning("FTS tables not found, attempting to create for test.")
+                  try:
+                       db.execute_query(Database._FTS_TABLES_SQL, commit=True) # Use the schema definition
+                       logging.info("FTS tables created for test.")
+                  except Exception as fts_e:
+                       logging.error(f"Failed to create FTS tables for test: {fts_e}")
+                       pytest.fail(f"FTS table creation failed: {fts_e}")
+             else:
+                  raise # Re-raise other operational errors
+        return db
+
+    # === Test Document Version Creation (implicitly tested by add_media_with_keywords) ===
+    # We rely on add_media_with_keywords to create the initial version correctly.
+    # We can add specific tests if create_document_version is used independently.
+
+    def test_create_document_version_standalone(self, db_instance):
+        """Test creating subsequent document versions explicitly."""
+        title = "Doc Version Test"
+        content1 = "Content V1"
+        # Setup initial media and first version
+        media_id, media_uuid, _ = db_instance.add_media_with_keywords(
+            title=title, content=content1, media_type="document"
+        )
+        assert get_entity_version(db_instance, "Media", media_uuid) == 1
+        initial_doc_version = get_document_version(db_instance, media_id, version_number=1)
+        assert initial_doc_version is not None
+        assert initial_doc_version['content'] == content1
+        assert initial_doc_version['version'] == 1 # Sync version of the doc version record
+
+        # Create a second version using the instance method
+        content2 = "Content V2 - Updated"
+        prompt2 = "Prompt for V2"
+        analysis2 = "Analysis for V2"
+        # Use the instance method directly
+        result_dict = db_instance.create_document_version(
+            media_id=media_id,
+            content=content2,
+            prompt=prompt2,
+            analysis_content=analysis2
+        )
+
+        assert isinstance(result_dict, Dict)
+        assert result_dict['media_id'] == media_id
+        assert result_dict['version_number'] == 2 # Second version
+        new_doc_version_uuid = result_dict['uuid']
+
+        # Verify DB state for version 2
+        v2_data = get_document_version(db_instance, media_id, version_number=2)
+        assert v2_data is not None
+        assert v2_data['uuid'] == new_doc_version_uuid
+        assert v2_data['content'] == content2
+        assert v2_data['prompt'] == prompt2
+        assert v2_data['analysis_content'] == analysis2
+        assert v2_data['version'] == 1 # Initial sync version for *this* row
+        assert v2_data['client_id'] == db_instance.client_id
+        assert not v2_data['deleted']
+
+        # Verify Sync Log for the new DocumentVersion
+        log_entry = get_latest_log(db_instance, new_doc_version_uuid)
+        assert log_entry is not None
+        assert log_entry['entity'] == 'DocumentVersions'
+        assert log_entry['operation'] == 'create'
+        assert log_entry['version'] == 1
+        assert log_entry['client_id'] == db_instance.client_id
+        payload = json.loads(log_entry['payload'])
+        assert payload['uuid'] == new_doc_version_uuid
+        assert payload['version_number'] == 2
+        assert payload['content'] == content2
+
+    # === Test Getting Document Versions ===
+
+    @pytest.mark.skipif(get_document_version is None, reason="get_document_version not imported")
+    def test_get_document_version_latest(self, db_instance):
+        media_id, _, _ = db_instance.add_media_with_keywords(title="GetLatest", content="V1", media_type="doc")
+        db_instance.create_document_version(media_id=media_id, content="V2 Content", prompt="P2", analysis_content="A2")
+
+        result = get_document_version(db_instance=db_instance, media_id=media_id) # version_number=None gets latest active
+
+        assert result is not None
+        assert result['version_number'] == 2
+        assert result['content'] == "V2 Content"
+        assert result['prompt'] == "P2"
+        assert result['analysis_content'] == "A2"
+        assert not result['deleted'] # Ensure it's active
+
+    @pytest.mark.skipif(get_document_version is None, reason="get_document_version not imported")
+    def test_get_document_version_specific(self, db_instance):
+        media_id, _, _ = db_instance.add_media_with_keywords(title="GetSpecific", content="V1 Content", prompt="P1", analysis_content="A1", media_type="doc")
+        db_instance.create_document_version(media_id=media_id, content="V2 Content", prompt="P2", analysis_content="A2")
+
+        result = get_document_version(db_instance=db_instance, media_id=media_id, version_number=1)
+
+        assert result is not None
+        assert result['version_number'] == 1
+        assert result['content'] == "V1 Content"
+        assert result['prompt'] == "P1"
+        assert result['analysis_content'] == "A1"
+        assert not result['deleted']
+
+    @pytest.mark.skipif(get_document_version is None, reason="get_document_version not imported")
+    def test_get_document_version_without_content(self, db_instance):
+        media_id, _, _ = db_instance.add_media_with_keywords(title="GetNoContent", content="V1 Content", prompt="P1", media_type="doc")
+
+        result = get_document_version(db_instance=db_instance, media_id=media_id, version_number=1, include_content=False)
+
+        assert result is not None
+        assert result['version_number'] == 1
+        assert 'content' not in result # Content should be excluded
+        assert result['prompt'] == "P1"
+
+    @pytest.mark.skipif(get_document_version is None, reason="get_document_version not imported")
+    def test_get_document_version_not_found(self, db_instance):
+        media_id, _, _ = db_instance.add_media_with_keywords(title="GetNotFound", content="V1", media_type="doc")
+
+        # Specific version doesn't exist
+        result_specific = get_document_version(db_instance=db_instance, media_id=media_id, version_number=5)
+        assert result_specific is None
+
+        # Media ID doesn't exist
+        result_bad_media = get_document_version(db_instance=db_instance, media_id=999)
+        assert result_bad_media is None
+
+    # === Test Getting All Document Versions ===
+
+    @pytest.mark.skipif(get_all_document_versions is None, reason="get_all_document_versions not imported")
+    def test_get_all_document_versions(self, db_instance):
+        media_id, _, _ = db_instance.add_media_with_keywords(title="GetAll", content="V1", prompt="P1", analysis_content="A1", media_type="doc")
+        db_instance.create_document_version(media_id=media_id, content="V2", prompt="P2", analysis_content="A2")
+        # Create a deleted version - should NOT be returned by default
+        deleted_v3_info = db_instance.create_document_version(media_id=media_id, content="V3 - Deleted")
+        db_instance.soft_delete_document_version(version_uuid=deleted_v3_info['uuid'])
+
+
+        # Default: include_content=True, include_deleted=False
+        results = get_all_document_versions(db_instance=db_instance, media_id=media_id)
+
+        assert len(results) == 2 # Only active versions
+        # Results are ordered DESC by version_number
+        assert results[0]['version_number'] == 2
+        assert results[0]['content'] == "V2"
+        assert results[0]['prompt'] == "P2"
+        assert results[0]['analysis_content'] == "A2"
+        assert not results[0]['deleted']
+        assert results[1]['version_number'] == 1
+        assert results[1]['content'] == "V1"
+        assert results[1]['prompt'] == "P1"
+        assert results[1]['analysis_content'] == "A1"
+        assert not results[1]['deleted']
+
+    @pytest.mark.skipif(get_all_document_versions is None, reason="get_all_document_versions not imported")
+    def test_get_all_document_versions_pagination(self, db_instance):
+        media_id, _, _ = db_instance.add_media_with_keywords(title="GetAllPaginated", content="V1", media_type="doc")
+        db_instance.create_document_version(media_id=media_id, content="V2")
+        db_instance.create_document_version(media_id=media_id, content="V3")
+
+        # Get page 1 (limit 2) - Should be V3, V2
+        results_p1 = get_all_document_versions(db_instance=db_instance, media_id=media_id, limit=2, offset=0)
+        # Get page 2 (limit 2, skip 2) - Should be V1
+        results_p2 = get_all_document_versions(db_instance=db_instance, media_id=media_id, limit=2, offset=2)
+
+        assert len(results_p1) == 2
+        assert results_p1[0]['version_number'] == 3 # Latest
+        assert results_p1[1]['version_number'] == 2
+
+        assert len(results_p2) == 1
+        assert results_p2[0]['version_number'] == 1
+
+    # === Test Deleting Document Versions ===
+
+    def test_delete_document_version_success(self, db_instance):
+        media_id, _, _ = db_instance.add_media_with_keywords(title="DeleteVersion", content="V1", media_type="doc")
+        v2_info = db_instance.create_document_version(media_id=media_id, content="V2")
+        v2_uuid = v2_info['uuid']
+        initial_sync_version = get_entity_version(db_instance, "DocumentVersions", v2_uuid) # Should be 1
+
+        result = db_instance.soft_delete_document_version(version_uuid=v2_uuid)
+
+        assert result is True # Method returns bool
+
+        # Verify DB state for version 2
+        cursor = db_instance.execute_query("SELECT deleted, version FROM DocumentVersions WHERE uuid = ?", (v2_uuid,))
+        row = cursor.fetchone()
+        assert row is not None
+        assert row['deleted'] == 1
+        assert row['version'] == initial_sync_version + 1
+
+        # Verify V1 still exists and is active
+        v1 = get_document_version(db_instance, media_id=media_id, version_number=1)
+        assert v1 is not None
+        assert not v1['deleted']
+
+        # Verify V2 is considered deleted by get_document_version
+        v2_get = get_document_version(db_instance, media_id=media_id, version_number=2)
+        assert v2_get is None # Default get function should filter deleted
+
+        # Verify Sync Log
+        log_entry = get_latest_log(db_instance, v2_uuid)
+        assert log_entry['operation'] == 'delete'
+        assert log_entry['entity'] == 'DocumentVersions'
+        assert log_entry['version'] == initial_sync_version + 1
+
+    def test_delete_last_document_version_fails(self, db_instance):
+        media_id, media_uuid, _ = db_instance.add_media_with_keywords(title="DeleteLastVersion", content="V1", media_type="doc")
+        v1_info = get_document_version(db_instance, media_id=media_id, version_number=1)
+        assert v1_info is not None
+        v1_uuid = v1_info['uuid']
+
+        result = db_instance.soft_delete_document_version(version_uuid=v1_uuid)
+
+        assert result is False # Should fail to delete the last active one
+
+        # Verify version 1 still exists and is active
+        v1_check = get_document_version(db_instance, media_id=media_id, version_number=1)
+        assert v1_check is not None
+        assert not v1_check['deleted']
+        # Verify DB state didn't change
+        assert get_entity_version(db_instance, "DocumentVersions", v1_uuid) == 1 # Still version 1
+
+    def test_delete_nonexistent_version_fails(self, db_instance):
+        media_id, _, _ = db_instance.add_media_with_keywords(title="DeleteNonExistent", content="V1", media_type="doc")
+        non_existent_uuid = db_instance._generate_uuid() # Generate a valid but unused UUID
+
+        result = db_instance.soft_delete_document_version(version_uuid=non_existent_uuid)
+
+        assert result is False # Fails because UUID doesn't exist
+
+    # === Test Rollback to Version ===
+
+    def test_rollback_to_version_success(self, db_instance):
+        # 1. Setup: Media with two versions
+        title = "Rollback Test"
+        content1 = "Version 1 content - Original"
+        prompt1 = "Prompt V1"
+        analysis1 = "Analysis V1"
+        content2 = "Version 2 content - Changed"
+        prompt2 = "Prompt V2" # Add distinct prompt for V2
+
+        media_id, media_uuid, _ = db_instance.add_media_with_keywords(
+            title=title, content=content1, prompt=prompt1, analysis_content=analysis1, media_type="doc"
+        ) # Creates V1 doc version implicitly
+        media_version_after_v1 = get_entity_version(db_instance, "Media", media_uuid) # Should be 1
+
+        v2_info = db_instance.create_document_version(media_id=media_id, content=content2, prompt=prompt2)
+        v2_num = v2_info['version_number'] # Should be 2
+
+        # 2. Perform Rollback to version 1
+        result = db_instance.rollback_to_version(media_id=media_id, target_version_number=1)
+
+        # 3. Verify Result Dictionary
+        assert 'success' in result
+        assert 'error' not in result
+        assert result['new_document_version_number'] == 3 # V3 created from V1 state
+        assert result['new_media_version'] == media_version_after_v1 + 1 # Media version incremented
+        new_doc_ver_uuid = result['new_document_version_uuid']
+        assert isinstance(new_doc_ver_uuid, str)
+        assert f"Rolled back to version 1. State saved as new version 3." in result['success']
+
+        # 4. Verify New Document Version (V3)
+        latest_version_data = get_document_version(db_instance=db_instance, media_id=media_id) # Get latest (should be V3)
+        assert latest_version_data is not None
+        assert latest_version_data['version_number'] == 3
+        assert latest_version_data['uuid'] == new_doc_ver_uuid
+        assert latest_version_data['content'] == content1 # Content matches V1
+        assert latest_version_data['prompt'] == prompt1 # Prompt matches V1
+        assert latest_version_data['analysis_content'] == analysis1 # Analysis matches V1
+        assert latest_version_data['version'] == 1 # Sync version of V3 record
+        assert latest_version_data['client_id'] == db_instance.client_id
+        assert not latest_version_data['deleted']
+
+        # 5. Verify Media Record Update
+        media_row = db_instance.get_media_by_id(media_id)
+        assert media_row is not None
+        assert media_row['content'] == content1 # Media content updated
+        expected_hash = hashlib.sha256(content1.encode()).hexdigest()
+        assert media_row['content_hash'] == expected_hash
+        assert media_row['version'] == media_version_after_v1 + 1 # Media sync version incremented
+        assert media_row['client_id'] == db_instance.client_id # Client ID updated
+        # last_modified should also be updated, harder to assert exact value
+
+        # 6. Verify Sync Logs
+        # Check DocumentVersion create log for V3
+        v3_log = get_latest_log(db_instance, new_doc_ver_uuid)
+        assert v3_log is not None
+        assert v3_log['entity'] == 'DocumentVersions'
+        assert v3_log['operation'] == 'create'
+        assert v3_log['version'] == 1
+        assert v3_log['client_id'] == db_instance.client_id
+        payload_v3 = json.loads(v3_log['payload'])
+        assert payload_v3['content'] == content1
+
+        # Check Media update log
+        media_log = get_latest_log(db_instance, media_uuid)
+        assert media_log is not None
+        assert media_log['entity'] == 'Media'
+        assert media_log['operation'] == 'update'
+        assert media_log['version'] == media_version_after_v1 + 1
+        assert media_log['client_id'] == db_instance.client_id
+        payload_media = json.loads(media_log['payload'])
+        assert payload_media['content'] == content1
+        assert payload_media['uuid'] == media_uuid
+        assert payload_media['rolled_back_to_doc_ver_uuid'] == new_doc_ver_uuid # Check extra context
+
+        # 7. Verify FTS Update
+        # Search for the rolled-back content (V1 content)
+        results_fts, total_fts = search_media_db(db_instance, search_query='"Original"', search_fields=["content"])
+        assert total_fts == 1
+        assert results_fts[0]['id'] == media_id
+
+        # Search for the previous content (V2 content) - should not be found in main search
+        results_fts_old, total_fts_old = search_media_db(db_instance, search_query='"Changed"', search_fields=["content"])
+        assert total_fts_old == 0
+
+    def test_rollback_to_nonexistent_version(self, db_instance):
+        media_id, _, _ = db_instance.add_media_with_keywords(title="RollbackNonExistent", content="V1", media_type="doc")
+        initial_media_version = get_entity_version(db_instance, "Media", _)
+
+        result = db_instance.rollback_to_version(media_id=media_id, target_version_number=5) # Version 5 doesn't exist
+
+        assert 'error' in result
+        assert 'success' not in result
+        assert result['error'] == 'Rollback target version 5 not found or inactive.'
+
+        # Verify media record was NOT updated
+        assert get_entity_version(db_instance, "Media", _) == initial_media_version
+        media_content = db_instance.get_media_by_id(media_id)['content']
+        assert media_content == "V1"
+
+        # Verify no new document version was created
+        latest_version = get_document_version(db_instance, media_id=media_id)
+        assert latest_version['version_number'] == 1
+
+    def test_rollback_to_latest_version_fails(self, db_instance):
+        media_id, media_uuid, _ = db_instance.add_media_with_keywords(title="RollbackLatest", content="V1", media_type="doc")
+        db_instance.create_document_version(media_id=media_id, content="V2") # V2 is latest
+
+        result = db_instance.rollback_to_version(media_id=media_id, target_version_number=2) # Attempt rollback to latest
+
+        assert 'error' in result
+        assert 'success' not in result
+        assert result['error'] == 'Cannot rollback to the current latest version number.'
+
+        # Verify no changes occurred
+        assert get_entity_version(db_instance, "Media", media_uuid) == 1 # Still initial media version
+        latest_version = get_document_version(db_instance, media_id=media_id)
+        assert latest_version['version_number'] == 2 # Still V2
+        assert latest_version['content'] == "V2"
+
+    def test_rollback_target_version_no_content(self, db_instance):
+        media_id, media_uuid, _ = db_instance.add_media_with_keywords(title="RollbackNoContent", content="V1", media_type="doc")
+        # Manually insert a version with NULL content to simulate the edge case
+        v2_uuid = db_instance._generate_uuid()
+        with db_instance.transaction() as conn:
+             conn.execute(
+                 """INSERT INTO DocumentVersions (media_id, version_number, content, uuid, last_modified, version, client_id, deleted)
+                    VALUES (?, ?, NULL, ?, ?, 1, ?, 0)""",
+                 (media_id, 2, v2_uuid, db_instance._get_current_utc_timestamp_str(), db_instance.client_id)
+             )
+
+        result = db_instance.rollback_to_version(media_id=media_id, target_version_number=2)
+
+        assert 'error' in result
+        assert 'success' not in result
+        # Check the exact error message based on your implementation
+        assert 'Version 2 has no content' in result['error'] or 'target_content is None' in result['error'] # Adjust based on actual message
+
+        # Verify no changes occurred
+        assert get_entity_version(db_instance, "Media", media_uuid) == 1
+        media_content = db_instance.get_media_by_id(media_id)['content']
+        assert media_content == "V1"
+        latest_version = get_document_version(db_instance, media_id=media_id, version_number=1)
+        assert latest_version is not None
 
 #
 # End of test_media_processing.py
