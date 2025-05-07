@@ -233,7 +233,8 @@ def seeded_multi_media(db_session):
                    (title, type, content, author, content_hash, uuid, last_modified, client_id)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    "Multi Test Audio", "audio", '{"webpage_url": "http://aud.com"}\nAudio Transcript v1', "Multi Tester",
+                    "Multi Test Audio", "audio", '{"webpage_url": "http://aud.com"}\n\nAudio Transcript v1',
+                    "Multi Tester",
                     f"hash_maud_{time.time()}", # content_hash
                     aud_uuid,                   # uuid
                     current_time,               # last_modified

@@ -52,7 +52,8 @@ from slowapi.util import get_remote_address
 from starlette.responses import JSONResponse, Response
 
 from tldw_Server_API.app.api.v1 import schemas
-from tldw_Server_API.app.api.v1.schemas.media_response_models import PaginationInfo, MediaListResponse, MediaListItem
+from tldw_Server_API.app.api.v1.schemas.media_response_models import PaginationInfo, MediaListResponse, MediaListItem, \
+    MediaDetailResponse, VersionDetailResponse
 #
 # Local Imports
 #
@@ -332,55 +333,6 @@ def get_add_media_form(
             detail=f"Internal server error during form processing: {type(e).__name__}"
         )
 
-# Retrieve a listing of all media, returning a list of media items. Limited by paging and rate limiting.
-@router.get(
-    "/", # Base endpoint for listing/searching media
-    status_code=status.HTTP_200_OK,
-    summary="Search/List All Media Items",
-    tags=["Media Management"], # Assign another different tag
-    # response_model=MediaSearchResponse # Example response model
-)
-@limiter.limit("50/minute")
-async def get_all_media(
-    request: Request,
-    page: int = Query(1, ge=1, description="Page number"),
-    results_per_page: int = Query(10, ge=1, le=100, description="Results per page"),
-    db=Depends(get_db_for_user)
-):
-    """
-    Retrieve a paginated listing of all media items.
-    The tests expect "items" plus a "pagination" dict with "page", "results_per_page", and total "total_pages".
-    """
-    try:
-        # Reuse your existing "get_paginated_files(page, results_per_page)"
-        # which returns (results, total_pages, current_page)
-        results, total_pages, current_page, total_items = get_paginated_files(
-            db_instance=db,
-            page=page,
-            results_per_page=results_per_page
-        )
-        return {
-            "items": [
-                {
-                    "id": item[0],
-                    "title": item[1],
-                    "type": item[2],
-                    "url": f"/api/v1/media/{item[0]}"
-                }
-                # Assuming results are tuples (id, title, type, url)
-                for item in results
-            ],
-            "pagination": {
-                "page": current_page,
-                "results_per_page": results_per_page,
-                "total_pages": total_pages,
-                "total_items": total_items
-            }
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 #Obtain details of a single media item using its ID
 @router.get(
     "/{media_id}", # Endpoint for retrieving a specific item
@@ -389,124 +341,279 @@ async def get_all_media(
     tags=["Media Management"],
     # response_model=MediaDetailResponse # Define a Pydantic model for this response if desired
 )
-async def get_media_item( # Changed to `async def` for consistency
+async def get_media_item(
     media_id: int,
-    # --- Use the new DB dependency ---
-    db: Database = Depends(get_db_for_user) # Inject the Database instance
+    db: Database = Depends(get_db_for_user)
 ):
     """
     **Retrieve Media Item by ID**
 
     Fetches the details for a specific *active* (non-deleted, non-trash) media item,
-    including its associated keywords and the prompt/analysis from its latest version.
+    including its associated keywords, its latest prompt/analysis, and document versions.
     """
     logger.debug(f"Attempting to fetch details for media_id: {media_id}")
     try:
-        # --- 1. Fetch the main Media record (active only) ---
-        # Use the instance method get_media_by_id, asking for non-deleted/non-trash
-        media_record = db.get_media_by_id(media_id, include_deleted=False, include_trash=False)
+        media_record_raw = db.get_media_by_id(media_id, include_deleted=False, include_trash=False)
 
-        if not media_record:
+        if not media_record_raw:
             logger.warning(f"Media not found or not active for ID: {media_id}")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found or is inactive/trashed")
 
+        # Ensure media_record is a dictionary
+        media_record = dict(media_record_raw)
         logger.debug(f"Found active media record for ID: {media_id}")
-        # Convert row object to dict if not already (depends on DB class setup)
-        # Assuming db.get_media_by_id returns a dict-like object or row factory handles it
-        if not isinstance(media_record, dict):
-             # Explicitly convert if needed, though db.get_media_by_id SHOULD return a dict
-             try:
-                  media_record = dict(media_record)
-             except TypeError:
-                   logger.error(f"Could not convert media_record to dict for ID {media_id}")
-                   raise HTTPException(status_code=500, detail="Internal server error processing media data format.")
 
-
-        # --- 2. Fetch Associated Keywords (active only) ---
-        # Use the standalone function from the new DB library
         keywords_list = fetch_keywords_for_media(media_id=media_id, db_instance=db)
         logger.debug(f"Fetched keywords for media ID {media_id}: {keywords_list}")
 
-        # --- 3. Fetch Latest Prompt & Analysis from DocumentVersions ---
         latest_version_info = None
         prompt = None
         analysis = None
         try:
-             # Use the standalone function, get latest by passing version_number=None
-             # Don't include full content to save bandwidth/processing
              latest_version_info = get_document_version(
                  db_instance=db,
                  media_id=media_id,
-                 version_number=None, # Explicitly get latest
-                 include_content=False # We only need prompt/analysis from here
+                 version_number=None, # Get latest
+                 include_content=False
              )
              if latest_version_info:
                   prompt = latest_version_info.get('prompt')
                   analysis = latest_version_info.get('analysis_content')
                   logger.debug(f"Fetched latest version info (prompt/analysis) for media ID {media_id}")
              else:
-                   logger.warning(f"No active document version found for media ID {media_id}")
-
-        except DatabaseError as dv_e:
-            # Log error fetching version, but don't fail the whole request
-            logger.error(f"Database error fetching latest document version for media {media_id}: {dv_e}")
+                   logger.warning(f"No active document version found for media ID {media_id} to get latest prompt/analysis.")
         except Exception as dv_e:
-            logger.error(f"Unexpected error fetching latest document version for media {media_id}: {dv_e}", exc_info=True)
+            logger.error(f"Error fetching latest document version for media {media_id}: {dv_e}", exc_info=True)
 
-        # --- 4. Prepare Response ---
-        # Extract data primarily from the main media_record
-        # NOTE: Metadata like 'duration', 'webpage_url', and detailed 'timestamps'
-        # are NOT standard fields in the new `Media` table schema provided.
-        # They would need to be added to the schema or stored differently (e.g., in content or a dedicated metadata field/table)
-        # if they are required. The response below reflects data *available* in the new schema.
 
-        content_text = media_record.get('content', '') # Main content/transcript
-        word_count = len(content_text.split()) if content_text else 0
+        # --- FIX for Structured Content (Video/Audio) ---
+        content_from_db = media_record.get('content', '')
+        final_content_text = content_from_db
+        final_metadata = {} # Default to empty dict
 
-        # Reconstruct the response structure using available data
+        if media_record.get('type') in ['video', 'audio']:
+            try:
+                # This assumes JSON part, then "\n\n", then text transcript.
+                parts = content_from_db.split("\n\n", 1)
+                if len(parts) == 2:
+                    possible_json_str = parts[0]
+                    remaining_text = parts[1]
+                    try:
+                        parsed_json_metadata = json.loads(possible_json_str)
+                        if isinstance(parsed_json_metadata, dict):
+                            final_metadata = parsed_json_metadata
+                            final_content_text = remaining_text
+                        else:
+                            logger.warning(f"Parsed JSON metadata for media {media_id} is not a dict. Treating as text.")
+                    except json.JSONDecodeError:
+                        logger.warning(f"First part of content for media {media_id} is not valid JSON. Treating all as text.")
+                # If no "\n\n", the whole content_from_db is treated as text
+            except Exception as e_parse_meta:
+                logger.error(f"Could not parse structured metadata from content for media {media_id}: {e_parse_meta}", exc_info=True)
+        # --- END FIX for Structured Content ---
+
+        word_count = len(final_content_text.split()) if final_content_text else 0
+
+        # --- FIX for Document Versions List ---
+        doc_versions_list = []
+        # Only fetch versions if it's a 'document' type, or adjust logic as needed
+        if media_record.get('type') == 'document':
+            try:
+                # Fetch active versions, without full content to keep the list light
+                raw_versions = db.get_all_document_versions(media_id=media_id, include_content=False, include_deleted=False)
+                for rv_row in raw_versions:
+                    rv = dict(rv_row) # Convert row to dict
+                    # Map to VersionDetailResponse fields
+                    # Ensure datetime objects are handled correctly if not already strings
+                    created_at_dt = rv.get("created_at")
+                    if isinstance(created_at_dt, str):
+                        try:
+                            created_at_dt = datetime.fromisoformat(created_at_dt.replace('Z', '+00:00'))
+                        except ValueError:
+                            logger.warning(f"Could not parse created_at string '{created_at_dt}' for version {rv.get('version_number')}")
+                            # Handle as per Pydantic model requirements, maybe skip or use a default
+                            pass # Pydantic will handle it if it's not a valid datetime
+
+                    doc_versions_list.append(
+                        VersionDetailResponse(
+                            media_id=rv.get("media_id"),
+                            version_number=rv.get("version_number"),
+                            created_at=created_at_dt, # Pass datetime object
+                            prompt=rv.get("prompt"),
+                            analysis_content=rv.get("analysis_content")
+                            # content is None because include_content=False above
+                        )
+                    )
+                logger.debug(f"Fetched {len(doc_versions_list)} document versions for media ID {media_id}")
+            except Exception as e_vers:
+                logger.error(f"Error fetching document versions for media {media_id}: {e_vers}", exc_info=True)
+
         response_data = {
             "media_id": media_id,
-            "uuid": media_record.get('uuid'), # Add UUID
-            "source": {
-                "url": media_record.get('url'), # Original URL if available
+            "source": { # Corresponds to MediaSourceDetail model
+                "url": media_record.get('url'),
                 "title": media_record.get('title'),
-                "duration": None, # <<< Not directly available in schema
+                "duration": media_record.get('duration'), # Assuming 'duration' exists in Media table
                 "type": media_record.get('type')
             },
-            "processing": {
-                "prompt": prompt, # From latest version
-                "analysis": analysis, # From latest version
-                "model": media_record.get('transcription_model'), # From Media table
-                "timestamp_option": None # <<< Not directly available, unclear how determined
+            "processing": { # Corresponds to MediaProcessingDetail model
+                "prompt": prompt,
+                "analysis": analysis,
+                "model": media_record.get('transcription_model'),
+                "timestamp_option": media_record.get('timestamp_option') # Assuming 'timestamp_option' exists
             },
-            "content": {
-                # 'metadata' dictionary is unclear how it would be populated now
-                # If you stored JSON in a 'metadata' TEXT column, parse it here.
-                "metadata": {}, # <<< Placeholder, needs clarification
-                "text": content_text, # Main content from Media table
+            "content": { # Corresponds to MediaContentDetail model
+                "metadata": final_metadata,
+                "text": final_content_text,
                 "word_count": word_count
             },
-            "keywords": keywords_list if keywords_list else [], # Use fetched list
-            "timestamps": [], # <<< Not directly available in schema/content format
-            "author": media_record.get('author'),
-            "ingestion_date": media_record.get('ingestion_date'),
-            "last_modified": media_record.get('last_modified'),
-            "version": media_record.get('version'), # Sync version
+            "keywords": keywords_list if keywords_list else [],
+            "timestamps": media_record.get('timestamps', []), # Assuming 'timestamps' list exists in Media table or is parsed
+            "versions": doc_versions_list, # Add the fetched versions
+            # Add other top-level fields from MediaDetailResponse if they come directly from media_record
+            # e.g., "uuid": media_record.get('uuid'),
+            # "author": media_record.get('author'),
+            # "ingestion_date": media_record.get('ingestion_date'),
+            # "last_modified": media_record.get('last_modified'),
+            # "version": media_record.get('version'), # Sync version
         }
 
-        return response_data
+        # To ensure the response matches MediaDetailResponse, instantiate it:
+        try:
+            return MediaDetailResponse(**response_data)
+        except Exception as pydantic_err: # Catch Pydantic validation errors
+            logger.error(f"Pydantic validation error for MediaDetailResponse for media {media_id}: {pydantic_err}", exc_info=True)
+            # Log the data that failed validation
+            logger.debug(f"Data causing Pydantic error: {response_data}")
+            raise HTTPException(status_code=500, detail=f"Internal server error creating response for media item.")
 
-    except HTTPException: # Re-raise HTTP exceptions directly
+
+    except HTTPException:
         raise
-    except DatabaseError as e: # Catch specific DB errors
+    except DatabaseError as e:
         logger.error(f"Database error fetching details for media {media_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Database error retrieving media details: {e}")
-    except Exception as e: # Catch other potential errors
+    except Exception as e:
         logger.error(f"Unexpected error fetching details for media {media_id}: {e}", exc_info=True)
-        # Print traceback if needed during debugging:
-        # import traceback
-        # traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred retrieving media details: {type(e).__name__}")
+# async def get_media_item( # Changed to `async def` for consistency
+#     media_id: int,
+#     # --- Use the new DB dependency ---
+#     db: Database = Depends(get_db_for_user) # Inject the Database instance
+# ):
+#     """
+#     **Retrieve Media Item by ID**
+#
+#     Fetches the details for a specific *active* (non-deleted, non-trash) media item,
+#     including its associated keywords and the prompt/analysis from its latest version.
+#     """
+#     logger.debug(f"Attempting to fetch details for media_id: {media_id}")
+#     try:
+#         # --- 1. Fetch the main Media record (active only) ---
+#         # Use the instance method get_media_by_id, asking for non-deleted/non-trash
+#         media_record = db.get_media_by_id(media_id, include_deleted=False, include_trash=False)
+#
+#         if not media_record:
+#             logger.warning(f"Media not found or not active for ID: {media_id}")
+#             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found or is inactive/trashed")
+#
+#         logger.debug(f"Found active media record for ID: {media_id}")
+#         # Convert row object to dict if not already (depends on DB class setup)
+#         # Assuming db.get_media_by_id returns a dict-like object or row factory handles it
+#         if not isinstance(media_record, dict):
+#              # Explicitly convert if needed, though db.get_media_by_id SHOULD return a dict
+#              try:
+#                   media_record = dict(media_record)
+#              except TypeError:
+#                    logger.error(f"Could not convert media_record to dict for ID {media_id}")
+#                    raise HTTPException(status_code=500, detail="Internal server error processing media data format.")
+#
+#
+#         # --- 2. Fetch Associated Keywords (active only) ---
+#         # Use the standalone function from the new DB library
+#         keywords_list = fetch_keywords_for_media(media_id=media_id, db_instance=db)
+#         logger.debug(f"Fetched keywords for media ID {media_id}: {keywords_list}")
+#
+#         # --- 3. Fetch Latest Prompt & Analysis from DocumentVersions ---
+#         latest_version_info = None
+#         prompt = None
+#         analysis = None
+#         try:
+#              # Use the standalone function, get latest by passing version_number=None
+#              # Don't include full content to save bandwidth/processing
+#              latest_version_info = get_document_version(
+#                  db_instance=db,
+#                  media_id=media_id,
+#                  version_number=None, # Explicitly get latest
+#                  include_content=False # We only need prompt/analysis from here
+#              )
+#              if latest_version_info:
+#                   prompt = latest_version_info.get('prompt')
+#                   analysis = latest_version_info.get('analysis_content')
+#                   logger.debug(f"Fetched latest version info (prompt/analysis) for media ID {media_id}")
+#              else:
+#                    logger.warning(f"No active document version found for media ID {media_id}")
+#
+#         except DatabaseError as dv_e:
+#             # Log error fetching version, but don't fail the whole request
+#             logger.error(f"Database error fetching latest document version for media {media_id}: {dv_e}")
+#         except Exception as dv_e:
+#             logger.error(f"Unexpected error fetching latest document version for media {media_id}: {dv_e}", exc_info=True)
+#
+#         # --- 4. Prepare Response ---
+#         # Extract data primarily from the main media_record
+#         # NOTE: Metadata like 'duration', 'webpage_url', and detailed 'timestamps'
+#         # are NOT standard fields in the new `Media` table schema provided.
+#         # They would need to be added to the schema or stored differently (e.g., in content or a dedicated metadata field/table)
+#         # if they are required. The response below reflects data *available* in the new schema.
+#
+#         content_text = media_record.get('content', '') # Main content/transcript
+#         word_count = len(content_text.split()) if content_text else 0
+#
+#         # Reconstruct the response structure using available data
+#         response_data = {
+#             "media_id": media_id,
+#             "uuid": media_record.get('uuid'), # Add UUID
+#             "source": {
+#                 "url": media_record.get('url'), # Original URL if available
+#                 "title": media_record.get('title'),
+#                 "duration": None, # <<< Not directly available in schema
+#                 "type": media_record.get('type')
+#             },
+#             "processing": {
+#                 "prompt": prompt, # From latest version
+#                 "analysis": analysis, # From latest version
+#                 "model": media_record.get('transcription_model'), # From Media table
+#                 "timestamp_option": None # <<< Not directly available, unclear how determined
+#             },
+#             "content": {
+#                 # 'metadata' dictionary is unclear how it would be populated now
+#                 # If you stored JSON in a 'metadata' TEXT column, parse it here.
+#                 "metadata": {}, # <<< Placeholder, needs clarification
+#                 "text": content_text, # Main content from Media table
+#                 "word_count": word_count
+#             },
+#             "keywords": keywords_list if keywords_list else [], # Use fetched list
+#             "timestamps": [], # <<< Not directly available in schema/content format
+#             "author": media_record.get('author'),
+#             "ingestion_date": media_record.get('ingestion_date'),
+#             "last_modified": media_record.get('last_modified'),
+#             "version": media_record.get('version'), # Sync version
+#         }
+#
+#         return response_data
+#
+#     except HTTPException: # Re-raise HTTP exceptions directly
+#         raise
+#     except DatabaseError as e: # Catch specific DB errors
+#         logger.error(f"Database error fetching details for media {media_id}: {e}", exc_info=True)
+#         raise HTTPException(status_code=500, detail=f"Database error retrieving media details: {e}")
+#     except Exception as e: # Catch other potential errors
+#         logger.error(f"Unexpected error fetching details for media {media_id}: {e}", exc_info=True)
+#         # Print traceback if needed during debugging:
+#         # import traceback
+#         # traceback.print_exc()
+#         raise HTTPException(status_code=500, detail=f"An unexpected error occurred retrieving media details: {type(e).__name__}")
 
 ##############################################################################
 ############################## MEDIA Versioning ##############################
@@ -1049,15 +1156,15 @@ async def update_media_item(
 
 # Retrieve a listing of all media, returning a list of media items. Limited by paging and rate limiting.
 @router.get(
-    "/", # Base endpoint for listing/searching media
+    "/",
     status_code=status.HTTP_200_OK,
-    summary="List All Media Items", # Adjusted summary for clarity
+    summary="List All Media Items",
     tags=["Media Management"],
-    response_model=MediaListResponse # Define a Pydantic model for this response if desired
+    response_model=MediaListResponse
 )
-@limiter.limit("50/minute") # Keep rate limiting
+@limiter.limit("50/minute")
 async def list_all_media(
-    request: Request,
+    request: Request, # Keep request for limiter
     page: int = Query(1, ge=1, description="Page number"),
     results_per_page: int = Query(10, ge=1, le=100, description="Results per page"),
     db: Database = Depends(get_db_for_user)
@@ -1066,59 +1173,54 @@ async def list_all_media(
     Retrieve a paginated listing of all active (non-deleted, non-trash) media items.
     Returns "items" and a "pagination" dictionary matching the MediaListResponse schema.
     """
-    offset = (page - 1) * results_per_page
-
     try:
-        count_query = "SELECT COUNT(*) FROM Media WHERE deleted = 0 AND is_trash = 0"
-        count_cursor = db.execute_query(count_query)
-        total_items = count_cursor.fetchone()[0] or 0
-        total_pages = ceil(total_items / results_per_page) if total_items > 0 else 0
+        # Use the new Database method
+        items_data, total_pages, current_page, total_items = db.get_paginated_media_list(
+            page=page,
+            results_per_page=results_per_page
+        )
 
-        items_list_from_db = []
-        if total_items > 0 and page <= total_pages:
-            # --- Query still selects uuid, but we won't use it in the response item ---
-            items_query = """
-                 SELECT id, title, type, uuid
-                 FROM Media
-                 WHERE deleted = 0 AND is_trash = 0
-                 ORDER BY last_modified DESC, id DESC
-                 LIMIT ? OFFSET ?
-             """
-            items_cursor = db.execute_query(items_query, (results_per_page, offset))
-            items_list_from_db = [dict(row) for row in items_cursor.fetchall()]
-
-        # --- Construct items list matching MediaListItem schema ---
         formatted_items = [
             MediaListItem(
-                id=item[id],
+                id=item["id"],
                 title=item["title"],
                 type=item["type"],
-                url=f"/api/v1/media/{item['id']}" # Construct the API URL
+                # UUID is now available from items_data if needed, but MediaListItem doesn't use it.
+                # The URL can still be constructed here.
+                url=f"/api/v1/media/{item['id']}"
             )
-            for item in items_list_from_db
+            for item in items_data # items_data is now a list of dicts
         ]
 
-
-        # Construct pagination (ensure it matches PaginationInfo schema)
         pagination_info = PaginationInfo(
-             page=page,
+             page=current_page, # Use current_page returned from DB method
              results_per_page=results_per_page,
              total_pages=total_pages,
              total_items=total_items
          )
 
-        # Return the full response object matching MediaListResponse
-        return MediaListResponse(
-            items=formatted_items,
-            pagination=pagination_info
-        )
+        try:
+            response_obj = MediaListResponse(
+                items=formatted_items,
+                pagination=pagination_info
+            )
+            return response_obj
+        except ValidationError as ve:
+            logger.error(f"Pydantic validation error creating MediaListResponse: {ve.errors()}", exc_info=True) # Log Pydantic errors
+            logger.debug(f"Data causing validation error: items_count={len(formatted_items)}, pagination={pagination_info.model_dump_json(indent=2) if pagination_info else 'None'}")
+            raise HTTPException(status_code=500, detail="Internal server error: Response creation failed.")
 
+    except ValueError as ve: # Catch ValueError from db.get_paginated_media_list
+        logger.warning(f"Invalid pagination parameters for list_all_media: {ve}")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(ve))
     except DatabaseError as e:
-        logger.error(f"Database error fetching paginated media: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Database error retrieving media list: {e}")
+        logger.error(f"Database error fetching paginated media in list_all_media endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Database error retrieving media list.")
+    except HTTPException: # Re-raise existing HTTPExceptions
+        raise
     except Exception as e:
-        logger.error(f"Unexpected error fetching paginated media: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while retrieving media list.")
+        logger.error(f"Unexpected error in list_all_media endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected internal server error occurred.")
 
 
 # FIXME - Add an 'advanced search' option for searching by date range, media type, etc. - update DB schema to add new fields
@@ -4645,8 +4747,8 @@ async def ingest_web_content(
             article["analysis"] = "No content to analyze."
             return article
 
-        # Summarize
-        analyze = analyze(
+        # Analyze
+        analysis_results = analyze(
             input_data=content,
             custom_prompt_arg=request.custom_prompt or "Summarize this article.",
             api_name=request.api_name,
@@ -4654,7 +4756,7 @@ async def ingest_web_content(
             temp=0.7,
             system_message=request.system_prompt or "Act as a professional summarizer."
         )
-        article["analysis"] = analyze
+        article["analysis"] = analysis_results
 
         # Rolling summarization or confab check
         if request.perform_rolling_summarization:

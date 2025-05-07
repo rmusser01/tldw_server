@@ -154,7 +154,17 @@ def convert_document_to_text(file_path: Path) -> Tuple[str, str, Dict[str, Any]]
                 # Basic text concatenation - consider xml_to_markdown if structure is important
                 content = _xml_to_text_simple(root)
                 # Try finding common title elements
-                title_elem = root.find('.//title') or root.find('.//Title')
+                title_elem_candidate1 = root.find('.//title')
+                if title_elem_candidate1 is not None and len(
+                        title_elem_candidate1):  # Check it's not None and not empty
+                    title_elem = title_elem_candidate1
+                else:
+                    title_elem_candidate2 = root.find('.//Title')
+                    if title_elem_candidate2 is not None and len(
+                            title_elem_candidate2):  # Check it's not None and not empty
+                        title_elem = title_elem_candidate2
+                    else:
+                        title_elem = None  # Or handle as appropriate if neither is found or both are empty
                 extracted_title = title_elem.text.strip() if title_elem is not None and title_elem.text else None
                 raw_metadata = {'xml_root_tag': root.tag, 'xml_title': extracted_title}
                 log_counter("xml_conversion_success", labels={"file_path": str(file_path)})

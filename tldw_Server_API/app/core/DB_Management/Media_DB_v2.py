@@ -2131,6 +2131,77 @@ class Database:
             return [row['keyword'] for row in cursor.fetchall()]
         except DatabaseError as e: logger.error(f"Error fetching keywords: {e}"); raise
 
+    def get_paginated_media_list(self, page: int = 1, results_per_page: int = 10) -> Tuple[
+        List[Dict[str, Any]], int, int, int]:
+        """
+        Fetches a paginated list of active media items (id, title, type, uuid)
+        for the media listing endpoint.
+
+        Filters for items where deleted = 0 and is_trash = 0.
+        Returns data suitable for constructing MediaListItem objects.
+
+        Args:
+            page (int): The page number (1-based).
+            results_per_page (int): Number of items per page.
+
+        Returns:
+            Tuple[List[Dict[str, Any]], int, int, int]:
+                - results (List[Dict]): List of dictionaries for the current page.
+                                       Each dict contains 'id', 'title', 'type', 'uuid'.
+                - total_pages (int): Total number of pages.
+                - current_page (int): The requested page number.
+                - total_items (int): Total number of active items.
+
+        Raises:
+            ValueError: If page or results_per_page are invalid.
+            DatabaseError: If a database query fails.
+        """
+        if page < 1:
+            raise ValueError("Page number must be 1 or greater.")
+        if results_per_page < 1:
+            raise ValueError("Results per page must be 1 or greater.")
+
+        logging.debug(
+            f"DB: Fetching paginated media list: page={page}, rpp={results_per_page} from {self.db_path_str}"
+        )
+        offset = (page - 1) * results_per_page
+
+        try:
+            with self.transaction() as conn:  # Use a transaction for consistency if doing multiple queries
+                cursor = conn.cursor()
+                # Query 1: Get total count
+                cursor.execute("SELECT COUNT(*) FROM Media WHERE deleted = 0 AND is_trash = 0")
+                count_row = cursor.fetchone()
+                total_items = count_row[0] if count_row else 0
+
+                results_data = []
+                if total_items > 0:
+                    # Query 2: Get paginated items
+                    query = """
+                            SELECT id, title, type, uuid
+                            FROM Media
+                            WHERE deleted = 0 \
+                              AND is_trash = 0
+                            ORDER BY last_modified DESC, id DESC LIMIT ? \
+                            OFFSET ? \
+                            """
+                    cursor.execute(query, (results_per_page, offset))
+                    results_data = [dict(row) for row in cursor.fetchall()]
+
+            total_pages = ceil(total_items / results_per_page) if results_per_page > 0 and total_items > 0 else 0
+            # Ensure page is not out of bounds for returned results if total_items becomes 0 after count
+            if page > total_pages and total_pages == 0:
+                results_data = []  # No items if page is invalid for 0 total pages
+
+            return results_data, total_pages, page, total_items
+
+        except sqlite3.Error as e:
+            logging.error(f"SQLite error during DB pagination: {e}", exc_info=True)
+            raise DatabaseError(f"Failed DB pagination query: {e}") from e
+        except Exception as e:
+            logging.error(f"Unexpected error during DB pagination: {e}", exc_info=True)
+            raise DatabaseError(f"Unexpected error during DB pagination: {e}") from e
+
     def get_media_by_id(self, media_id: int, include_deleted=False, include_trash=False) -> Optional[Dict]:
         """
         Retrieves a single media item by its primary key (ID).

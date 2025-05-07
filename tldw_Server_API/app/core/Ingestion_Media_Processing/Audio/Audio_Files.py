@@ -48,9 +48,10 @@ def download_audio_file(url: str, target_temp_dir: str, use_cookies: bool = Fals
     Downloads an audio file from a URL.
 
     Args:
-        url: The URL of the audio file.
-        use_cookies: Whether to use cookies for the download.
-        cookies: A JSON string of cookies if use_cookies is True.
+        :param url: The URL of the audio file.
+        :param target_temp_dir:
+        :param use_cookies: Whether to use cookies for the download.
+        :param cookies: A JSON string of cookies if use_cookies is True.
 
     Returns:
         The local path to the downloaded audio file.
@@ -61,77 +62,57 @@ def download_audio_file(url: str, target_temp_dir: str, use_cookies: bool = Fals
         Exception: For other unexpected errors.
     """
     try:
-        # --- DB CHECK REMOVED ---
-        # The decision to download is now made by the caller (API layer)
-
-        logging.info(f"Attempting audio download from: {url}")
-
-        # Set up the request headers
+        logging.info(f"Attempting audio download from: {url} into {target_temp_dir}")
         headers = {}
         if use_cookies and cookies:
             try:
-                # Accept JSON string or dictionary
                 if isinstance(cookies, str):
                     cookie_dict = json.loads(cookies)
                 elif isinstance(cookies, dict):
                     cookie_dict = cookies
                 else:
-                     raise TypeError("Cookies must be a JSON string or a dictionary.")
+                    raise TypeError("Cookies must be a JSON string or a dictionary.")
                 headers['Cookie'] = '; '.join([f'{k}={v}' for k, v in cookie_dict.items()])
                 logging.debug("Using cookies for download.")
             except (json.JSONDecodeError, TypeError) as e:
-                logging.warning(f"Invalid cookie format provided. Proceeding without cookies. Error: {e}")
-                # Decide if you want to raise an error or just proceed without cookies
-                # raise ValueError(f"Invalid cookie format: {e}") from e
+                logging.warning(f"Invalid cookie format provided for {url}. Proceeding without cookies. Error: {e}")
 
-        # Make the request
-        response = requests.get(url, headers=headers, stream=True, timeout=120) # Added timeout
-        # Raise an exception for bad status codes (4xx or 5xx)
+        response = requests.get(url, headers=headers, stream=True, timeout=120)
         response.raise_for_status()
 
-        # Get the file size
         file_size = int(response.headers.get('content-length', 0))
         if file_size > MAX_FILE_SIZE:
-            raise ValueError(f"File size ({file_size / (1024*1024):.2f} MB) exceeds the {MAX_FILE_SIZE / (1024*1024):.0f}MB limit.")
+            raise ValueError(f"File size ({file_size / (1024*1024):.2f} MB) exceeds the {MAX_FILE_SIZE / (1024*1024):.0f}MB limit for URL {url}.")
 
-        # Generate a unique filename
-        # Try to get a filename from headers or URL
         content_disposition = response.headers.get('content-disposition')
         original_filename = None
         if content_disposition:
             parts = content_disposition.split('filename=')
             if len(parts) > 1:
                 original_filename = parts[1].strip('"\' ')
-
         if not original_filename:
-             try:
-                 original_filename = Path(urlparse(url).path).name
-             except Exception:
-                 pass # Ignore errors parsing URL path
+            try:
+                original_filename = Path(urlparse(url).path).name
+                if not original_filename: # Handle case where path ends in /
+                    original_filename = f"downloaded_audio_{uuid.uuid4().hex[:8]}"
+            except Exception:
+                original_filename = f"downloaded_audio_{uuid.uuid4().hex[:8]}"
 
-        if original_filename:
-             base_name = sanitize_filename(Path(original_filename).stem)
-             extension = Path(original_filename).suffix or ".mp3" # Default to mp3 if no ext
-             # Limit length
-             base_name = base_name[:50]
-             # Use a more robust unique ID section in filename
-             unique_id = uuid.uuid4().hex[:8]
-             file_name = f"{base_name}_{unique_id}{extension}"
-        else:
-             unique_id = uuid.uuid4().hex[:8]
-             file_name = f"audio_{unique_id}.mp3"
+        base_name = sanitize_filename(Path(original_filename).stem)
+        extension = Path(original_filename).suffix or ".mp3"
+        base_name = base_name[:50] if base_name else "audio" # Ensure base_name is not empty
+        unique_id = uuid.uuid4().hex[:8]
+        file_name = f"{base_name}_{unique_id}{extension}"
 
-        # Use a dedicated, potentially configurable, download directory
-        # For temporary processing, might want to use the provided temp_dir later
-        save_dir = Path(target_temp_dir)
-        save_dir.mkdir(parents=True, exist_ok=True)
+        save_dir = Path(target_temp_dir) # Use the provided temp_dir
+        save_dir.mkdir(parents=True, exist_ok=True) # Ensure it exists
         save_path = save_dir / file_name
 
         # Download the file efficiently
         downloaded_bytes = 0
-        log_interval = 5 * 1024 * 1024 # Log every 5MB
+        log_interval = 5 * 1024 * 1024
         next_log_thresh = log_interval
-        logging.info(f"Downloading to: {save_path}")
+        logging.info(f"Downloading {url} to: {save_path}")
         with open(save_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 # Filter out keep-alive new chunks.
@@ -139,11 +120,10 @@ def download_audio_file(url: str, target_temp_dir: str, use_cookies: bool = Fals
                     f.write(chunk)
                     downloaded_bytes += len(chunk)
                     if file_size > 0 and downloaded_bytes >= next_log_thresh:
-                         logging.info(f"Download progress: {downloaded_bytes / (1024*1024):.1f} / {file_size / (1024*1024):.1f} MB")
-                         next_log_thresh += log_interval
+                        logging.info(f"Download progress for {url}: {downloaded_bytes / (1024*1024):.1f} / {file_size / (1024*1024):.1f} MB")
+                        next_log_thresh += log_interval
 
-
-        logging.info(f"Audio file downloaded successfully: {save_path} ({downloaded_bytes / (1024*1024):.2f} MB)")
+        logging.info(f"Audio file downloaded successfully from {url}: {save_path} ({downloaded_bytes / (1024*1024):.2f} MB)")
         return str(save_path)
 
     except requests.exceptions.Timeout:
