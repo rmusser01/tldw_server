@@ -15,6 +15,7 @@ https://github.com/KartDriver/mira_converse?tab=readme-ov-file
 https://huggingface.co/kyutai
 https://github.com/kyutai-labs/hibiki
 https://metis-demo.github.io/#metis-tts
+https://github.com/Extraltodeus/Quick-slap-tkinter-dia/blob/main/README.md
 https://github.com/RobViren/kokovoicelab
 https://github.com/Nighthawk42/mOrpheus
 https://jordandarefsky.com/blog/2024/parakeet/

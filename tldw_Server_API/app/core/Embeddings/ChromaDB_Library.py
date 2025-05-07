@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_for_embedding, chunk_
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.Media_DB import process_chunks
 from tldw_Server_API.app.core.Embeddings.Embeddings_Create import create_embedding, create_embeddings_batch
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Utils.Utils import get_database_path, ensure_directory_exists, load_and_log_configs, logger, \
     logging
 #
@@ -74,7 +74,7 @@ def situate_context(api_name, doc_content: str, chunk_content: str) -> str:
     Answer only with the succinct context and nothing else.
     """
 
-    response = summarize(chunk_context_prompt, doc_content_prompt, api_name, api_key=None, temp=0, system_message=None)
+    response = analyze(chunk_context_prompt, doc_content_prompt, api_name, api_key=None, temp=0, system_message=None)
     return response
 
 

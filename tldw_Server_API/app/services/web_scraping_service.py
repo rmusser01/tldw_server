@@ -12,7 +12,7 @@ from fastapi import HTTPException
 # Local Imports
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
 # If you want your summarization logic:
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 # If you want the functions from your existing library:
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
     scrape_and_summarize_multiple,  # or whichever you prefer
@@ -96,7 +96,7 @@ async def process_web_scraping_task(
             for article in result_list:
                 content = article.get("content", "")
                 if content:
-                    summary = summarize(
+                    summary = analyze(
                         input_data=content,
                         custom_prompt_arg=custom_prompt or "",
                         api_name=api_name,

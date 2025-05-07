@@ -29,9 +29,8 @@ import pymupdf
 import pymupdf4llm
 #
 # Import Local
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.Utils.Utils import logging as logger
 #
@@ -503,7 +502,7 @@ def process_pdf(
                 if chunk_text:
                     try:
                         # Call the external summarization library function
-                        analysis_text = summarize(
+                        analysis_text = analyze(
                             api_name=api_name,
                             input_data=chunk_text,
                             custom_prompt_arg=custom_prompt, # User's custom prompt, if any
@@ -554,7 +553,7 @@ def process_pdf(
 
                     try:
                         # Call perform_summarization again on the combined text
-                        final_summary = summarize(
+                        final_summary = analyze(
                             api_name=api_name,
                             input_data=combined_summaries_text,
                             # Use the original custom prompt, or a default recursive prompt if none provided

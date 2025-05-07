@@ -2390,10 +2390,10 @@ class Database:
                 items_query = """
                               SELECT id, title, type
                               FROM Media
-                              WHERE deleted = 0 \
+                              WHERE deleted = 0
                                 AND is_trash = 0
-                              ORDER BY last_modified DESC, id DESC LIMIT ? \
-                              OFFSET ? \
+                              ORDER BY last_modified DESC, id DESC LIMIT ?
+                              OFFSET ?
                               """
                 # Use self.execute_query
                 items_cursor = self.execute_query(items_query, (results_per_page, offset))

@@ -609,15 +609,15 @@ class TestProcessPdfs:
         # Check for errors related to PDF parsing
         assert "PDF processing failed" in result["error"] or "Invalid file type" in result["error"] or "failed to extract text" in result["error"]
 
-    @patch("tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.summarize")
+    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib.analyze")
     @pytest.mark.skip(reason="Analysis requires LLM setup or mocking")
-    def test_process_pdf_with_analysis_and_chunking(self, mock_summarize, dummy_headers):
+    def test_process_pdf_with_analysis_and_chunking(self, mock_analyze, dummy_headers):
         """Test PDF analysis and chunking."""
         mock_analysis_text = "This is the mocked analysis result."
-        # If summarize is async:
-        async def async_mock_summarize(*args, **kwargs): return mock_analysis_text
-        mock_summarize.side_effect = async_mock_summarize
-        # Else: mock_summarize.return_value = mock_analysis_text
+        # If analyze is async:
+        async def async_mock_analyze(*args, **kwargs): return mock_analysis_text
+        mock_analyze.side_effect = async_mock_analyze
+        # Else: mock_analyze.return_value = mock_analysis_text
 
         form_data = {
             "urls": [VALID_PDF_URL],
@@ -633,7 +633,7 @@ class TestProcessPdfs:
         result = data["results"][0]
         check_media_item_result(result, "Success", check_db_fields=True)
 
-        mock_summarize.assert_called()
+        mock_analyze.assert_called()
         assert result["analysis"] is not None
         assert mock_analysis_text in result["analysis"]
         assert result["chunks"] is not None
@@ -642,7 +642,7 @@ class TestProcessPdfs:
         # You could add more specific checks on chunk content/metadata if needed
 
         # Check that the mock was called (optional but good practice)
-        mock_summarize.assert_called()
+        mock_analyze.assert_called()
 
 
 
@@ -835,18 +835,18 @@ class TestProcessEbooks:
 
     # --- Mocked Analysis Test ---
 
-    # IMPORTANT: Replace "path.to.your_ebook_processing_module.summarize" with the correct path
-    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib.summarize")
-    def test_process_ebook_with_analysis_mocked(self, mock_summarize, client):
+    # IMPORTANT: Replace "path.to.your_ebook_processing_module.analyze" with the correct path
+    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib.analyze")
+    def test_process_ebook_with_analysis_mocked(self, mock_analyze, client):
         """Test enabling analysis with mocking."""
         mock_analysis_text = "This is the mocked ebook analysis."
-        mock_summarize.return_value = mock_analysis_text
+        mock_analyze.return_value = mock_analysis_text
 
         form_data = {
             "urls": [VALID_EPUB_URL],
             "perform_analysis": "true",
             "perform_chunking": "true", # Analysis often depends on chunks
-            "api_name": "mock_api",     # Need to provide these even if mocking summarize directly
+            "api_name": "mock_api",     # Need to provide these even if mocking analyze directly
             "api_key": "mock_key"       # Depending on process_epub implementation checks
         }
         response = client.post(self.ENDPOINT, data=form_data)
@@ -855,7 +855,7 @@ class TestProcessEbooks:
         check_media_item_result(result, "Success")
 
         # Check mock was called (at least once, maybe more if chunked)
-        mock_summarize.assert_called()
+        mock_analyze.assert_called()
         # Check the *final* analysis result
         assert result["analysis"] is not None
         # The final result might be the mocked text joined, or a recursive summary
@@ -1066,11 +1066,11 @@ class TestProcessDocuments:
 
     # --- Mocked Analysis Test ---
     # IMPORTANT: Update patch path if needed
-    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.summarize")
-    def test_process_doc_with_analysis_mocked(self, mock_summarize, client, dummy_headers):
+    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.analyze")
+    def test_process_doc_with_analysis_mocked(self, mock_analyze, client, dummy_headers):
         """Test enabling analysis with mocking."""
         mock_analysis_text = "This is the mocked document analysis."
-        mock_summarize.return_value = mock_analysis_text
+        mock_analyze.return_value = mock_analysis_text
 
         form_data = {
             "urls": [VALID_TXT_URL],
@@ -1084,7 +1084,7 @@ class TestProcessDocuments:
         result = data["results"][0]
         check_media_item_result(result, "Success")
 
-        mock_summarize.assert_called()
+        mock_analyze.assert_called()
         assert result["analysis"] is not None
         assert mock_analysis_text in result["analysis"] # Check if mocked text is present
         assert result["chunks"] is not None and len(result["chunks"]) > 0

@@ -46,7 +46,7 @@ from tqdm import tqdm
 from tldw_Server_API.app.core.DB_Management.DB_Manager import ingest_article_to_db
 #
 # Import Local
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_histogram, log_counter
 from tldw_Server_API.app.core.Utils.Utils import logging, load_and_log_configs
 #
@@ -264,7 +264,7 @@ async def scrape_and_summarize_multiple(
                                                 "Act as a professional summarizer and summarize this article."
 
                         # Summarize the content using the summarize function
-                        summary = summarize(
+                        summary = analyze(
                             input_data=content,
                             custom_prompt_arg=article_custom_prompt,
                             api_name=api_name,

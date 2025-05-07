@@ -12,6 +12,6 @@ https://kaitchup.substack.com/p/the-recipe-for-extremely-accurate-quantization?t
 https://github.com/Kiln-AI/Kiln
 https://huggingface.co/blog/train-reranker
 https://arxiv.org/abs/2503.21676
+https://www.emergent-misalignment.com/
 
-
-
+https://www.datacamp.com/tutorial/fine-tuning-qwen3

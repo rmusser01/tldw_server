@@ -141,6 +141,7 @@ def perform_transcription(
 
                 logging.info("Combining transcription and diarization results...")
                 final_segments = combine_transcription_and_diarization(
+                    # FIXME
                     transcription_segments=adapted_transcription_segments,  # Use adapted segments
                     diarization_segments=diarization_segments
                 )

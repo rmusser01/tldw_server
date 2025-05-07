@@ -21,6 +21,7 @@ class PaginationInfo(BaseModel):
     page: int = Field(..., description="The current page number.", json_schema_extra={"example": 1})
     results_per_page: int = Field(..., description="Number of items requested per page.", json_schema_extra={"example": 10})
     total_pages: int = Field(..., description="Total number of pages available.", json_schema_extra={"example": 5})
+    total_items: int = Field(..., description="Total number of items matching the query.", json_schema_extra={"example": 48})
 
 class PaginationInfoSearch(BaseModel):
     """Model for pagination details used specifically in search responses."""
@@ -46,6 +47,7 @@ class MediaListItem(BaseModel):
     id: int = Field(..., description="Unique identifier for the media item.", json_schema_extra={"example": 123})
     title: str = Field(..., description="Title of the media item.", json_schema_extra={"example": "My Awesome Video"})
     url: str = Field(..., description="Relative API URL to fetch the full details of this item.", json_schema_extra={"example": "/api/v1/media/123"})
+    type: str = Field(..., description="Type of the media (e.g., 'video', 'audio', 'pdf').", json_schema_extra={"example": "video"}) # <-- ADDED
 
 class MediaListResponse(BaseModel):
     """Response model for listing all media items (GET /)."""
@@ -75,6 +77,20 @@ class MediaContentDetail(BaseModel):
     text: str = Field(..., description="The full extracted text or transcript.", json_schema_extra={"example": "Hello and welcome to the channel..."})
     word_count: int = Field(..., description="Approximate word count of the extracted text.", json_schema_extra={"example": 1500})
 
+class VersionDetailResponse(BaseModel):
+    """Represents the details of a single media version."""
+    media_id: int = Field(..., description="ID of the parent media item.", json_schema_extra={"example": 123})
+    version_number: int = Field(..., description="Sequential version number.", json_schema_extra={"example": 2})
+    created_at: datetime = Field(..., description="Timestamp when this version was created.")
+    #content_hash: Optional[str] = Field(None, description="SHA-256 hash of the content for this version.", json_schema_extra={"example": "a1b2c3d4..."})
+    prompt: Optional[str] = Field(None, description="Prompt associated with this version.", json_schema_extra={"example": "Summarize the previous version."})
+    analysis_content: Optional[str] = Field(None, description="Analysis content associated with this version.", json_schema_extra={"example": "This version focuses on..."})
+    # Conditionally include content based on 'include_content' query param
+    content: Optional[str] = Field(None, description="The full content of this version (if requested).", json_schema_extra={"example": "This is the text content for version 2..."})
+
+    class Config:
+        orm_mode = True # If fetching directly from an ORM model like SQLAlchemy
+
 class MediaDetailResponse(BaseModel):
     """Response model for retrieving a single media item's details (GET /{media_id})."""
     media_id: int = Field(..., description="Unique identifier for the media item.", json_schema_extra={"example": 123})
@@ -83,6 +99,8 @@ class MediaDetailResponse(BaseModel):
     content: MediaContentDetail = Field(..., description="Details about the extracted content.")
     keywords: List[str] = Field(..., description="Keywords associated with the media item.", json_schema_extra={"example": ["ai", "machine learning", "tech"]})
     timestamps: List[str] = Field(..., description="List of timestamps extracted from the content (if applicable).", json_schema_extra={"example": ["00:00:05", "00:01:12"]})
+    versions: List[VersionDetailResponse] = Field([], description="List of document versions, if applicable.") # <-- ADDED, default empty list
+
 
     class Config:
         # If your source data might have extra fields not in the model, use this:
@@ -116,19 +134,19 @@ class MediaDetailResponse(BaseModel):
 
 # --- /api/v1/media/{media_id}/versions ---
 
-class VersionDetailResponse(BaseModel):
-    """Represents the details of a single media version."""
-    media_id: int = Field(..., description="ID of the parent media item.", json_schema_extra={"example": 123})
-    version_number: int = Field(..., description="Sequential version number.", json_schema_extra={"example": 2})
-    created_at: datetime = Field(..., description="Timestamp when this version was created.")
-    #content_hash: Optional[str] = Field(None, description="SHA-256 hash of the content for this version.", json_schema_extra={"example": "a1b2c3d4..."})
-    prompt: Optional[str] = Field(None, description="Prompt associated with this version.", json_schema_extra={"example": "Summarize the previous version."})
-    analysis_content: Optional[str] = Field(None, description="Analysis content associated with this version.", json_schema_extra={"example": "This version focuses on..."})
-    # Conditionally include content based on 'include_content' query param
-    content: Optional[str] = Field(None, description="The full content of this version (if requested).", json_schema_extra={"example": "This is the text content for version 2..."})
-
-    class Config:
-        orm_mode = True # If fetching directly from an ORM model like SQLAlchemy
+# class VersionDetailResponse(BaseModel):
+#     """Represents the details of a single media version."""
+#     media_id: int = Field(..., description="ID of the parent media item.", json_schema_extra={"example": 123})
+#     version_number: int = Field(..., description="Sequential version number.", json_schema_extra={"example": 2})
+#     created_at: datetime = Field(..., description="Timestamp when this version was created.")
+#     #content_hash: Optional[str] = Field(None, description="SHA-256 hash of the content for this version.", json_schema_extra={"example": "a1b2c3d4..."})
+#     prompt: Optional[str] = Field(None, description="Prompt associated with this version.", json_schema_extra={"example": "Summarize the previous version."})
+#     analysis_content: Optional[str] = Field(None, description="Analysis content associated with this version.", json_schema_extra={"example": "This version focuses on..."})
+#     # Conditionally include content based on 'include_content' query param
+#     content: Optional[str] = Field(None, description="The full content of this version (if requested).", json_schema_extra={"example": "This is the text content for version 2..."})
+#
+#     class Config:
+#         orm_mode = True # If fetching directly from an ORM model like SQLAlchemy
 
 class VersionListResponse(BaseModel):
     """Response model for listing versions of a media item."""

@@ -17,7 +17,7 @@ from pypandoc import convert_file
 #
 # Local Imports
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 from tldw_Server_API.app.core.Utils.Utils import logging
 #
@@ -335,7 +335,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
                 if chunk_text:
                     try:
                         # Use standard summarize function signature
-                        analysis_text = summarize(
+                        analysis_text = analyze(
                             api_name=api_name,
                             input_data=chunk_text,
                             custom_prompt_arg=custom_prompt,
@@ -366,7 +366,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
                 if summarize_recursively and len(chunk_summaries) > 1:
                     logging.info(f"Performing recursive analysis on {len(chunk_summaries)} chunk summaries for {doc_path}.")
                     try:
-                         final_analysis = summarize(
+                         final_analysis = analyze(
                              api_name=api_name,
                              input_data="\n\n---\n\n".join(chunk_summaries), # Join summaries
                              custom_prompt_arg=custom_prompt or "Provide a concise overall summary of the following text sections.", # Recursive prompt

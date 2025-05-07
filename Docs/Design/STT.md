@@ -6,6 +6,8 @@ Switch to mobiusLabs model: https://github.com/SYSTRAN/faster-whisper/issues/103
 https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo
 https://huggingface.co/spaces/hf-audio/open_asr_leaderboard
 https://github.com/EvolvingLMMs-Lab/Aero-1
+https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2
+https://github.com/senstella/parakeet-mlx
 Benchmark
     https://github.com/dnhkng/GLaDOS/blob/main/src/glados/ASR/asr.py
     https://github.com/SYSTRAN/faster-whisper/blob/master/tests/test_transcribe.py

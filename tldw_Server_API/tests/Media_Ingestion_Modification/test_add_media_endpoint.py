@@ -44,6 +44,10 @@ except ImportError:
 # --- Constants (Borrowing/Adapting from test-library-1) ---
 API_PREFIX = "/api/v1/media"
 ADD_MEDIA_ENDPOINT = f"{API_PREFIX}/add"
+PROCESS_EBOOKS_ENDPOINT = f"{API_PREFIX}/process-ebooks"
+PROCESS_AUDIO_ENDPOINT = f"{API_PREFIX}/process-audios"
+PROCESS_VIDEO_ENDPOINT = f"{API_PREFIX}/process-videos"
+PROCESS_DOCUMENTS_ENDPOINT = f"{API_PREFIX}/process-documents"
 
 # Test Media Files (Ensure these paths are correct relative to your test file)
 TEST_MEDIA_DIR = Path(__file__).parent / "test_media"
@@ -72,8 +76,8 @@ SAMPLE_HTML_PATH = TEST_MEDIA_DIR / "sample.html"
 SAMPLE_XML_PATH = TEST_MEDIA_DIR / "sample.xml"
 
 # Create dummy files
-create_dummy_file(SAMPLE_VIDEO_PATH, "dummy video data") # Content doesn't need to be valid video
-create_dummy_file(SAMPLE_AUDIO_PATH, "dummy audio data") # Content doesn't need to be valid audio
+# create_dummy_file(SAMPLE_VIDEO_PATH, "dummy video data") # Content doesn't need to be valid video
+# create_dummy_file(SAMPLE_AUDIO_PATH, "dummy audio data") # Content doesn't need to be valid audio
 create_dummy_file(SAMPLE_PDF_PATH, "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 0>>endobj\nxref\n0 3\n0000000000 65535 f \n0000000010 00000 n \n0000000059 00000 n \ntrailer<</Size 3/Root 1 0 R>>\nstartxref\n114\n%%EOF") # Minimal PDF
 create_dummy_file(SAMPLE_EPUB_PATH, "dummy epub data") # Content doesn't need to be valid epub
 create_dummy_file(SAMPLE_TXT_PATH, "Sample TXT content.")
@@ -808,26 +812,22 @@ def test_add_media_processor_handles_invalid_format(test_api_client, db_session,
 # === Analysis and Chunking Tests ===
 
 # Target the summarize function *within* the specific PDF processing library module
-@patch("tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.summarize")
-@pytest.mark.timeout(90) # Increased timeout
-def test_add_media_pdf_with_analysis_mocked(mock_summarize, test_api_client, db_session, dummy_headers): # Added db_session
+@patch("tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib.analyze")
+@pytest.mark.timeout(90)
+def test_add_media_pdf_with_analysis_mocked(mock_analyze, test_api_client, db_session, dummy_headers):
     """Test PDF analysis via /add, mocking only the summarize call."""
     if not SAMPLE_PDF_PATH.exists(): pytest.skip(f"Test file not found: {SAMPLE_PDF_PATH}")
 
     mock_analysis_text = "Mocked analysis for PDF."
-    # Configure the mock to return the desired text directly
-    # AsyncMock is suitable if summarize is async
-    mock_summarize.return_value = asyncio.Future() # Create a future
-    mock_summarize.return_value.set_result(mock_analysis_text) # Set its result
+    # Configure the mock to return the desired text directly since analyze is synchronous
+    mock_analyze.return_value = mock_analysis_text
 
     form_data = create_add_media_form_data(
         media_type="pdf",
         urls=[VALID_PDF_URL],
         perform_analysis=True,
         perform_chunking=True,
-        # --- Use a placeholder API name that might pass basic validation if one exists ---
-        # Or adjust if your summarize lib has a known "dummy" or "mock" API name setting
-        api_name="mock", # Changed from "mock_model" - adjust if needed
+        api_name="mock-llm",
         api_key="mock_key"
     )
     response = test_api_client.post(ADD_MEDIA_ENDPOINT, data=form_data, headers=dummy_headers)
@@ -836,7 +836,6 @@ def test_add_media_pdf_with_analysis_mocked(mock_summarize, test_api_client, db_
     if response.status_code != expected_code:
         logger.error(f"PDF Analysis test failed. Status: {response.status_code}, Expected: {expected_code}, Text: {response.text}")
 
-    # Expect 200 or 207 (if analysis mock/integration causes warnings)
     assert response.status_code in [status.HTTP_200_OK, status.HTTP_207_MULTI_STATUS]
     data = check_batch_response(response, response.status_code, expected_processed=1, expected_errors=0, check_results_len=1)
 
@@ -845,25 +844,225 @@ def test_add_media_pdf_with_analysis_mocked(mock_summarize, test_api_client, db_
     check_media_item_result(result, result["status"], expected_media_type="pdf")
 
     assert result.get("content") is not None and len(result["content"]) > 0
-    # Chunks might be None if PDF processor doesn't return them explicitly in this flow
-    # assert result["chunks"] is not None and len(result["chunks"]) > 0
 
-    # Check if the mocked function was called
-    mock_summarize.assert_called()  # Check if the mock itself was entered
+    mock_analyze.assert_called()
 
-    # Check if analysis result contains the mocked text
     assert result.get("analysis") is not None
-    # The check should be precise now if the mock worked
     assert result.get("analysis") == mock_analysis_text
+
     # Check if analysis details reflect the mock API name used
-    assert result.get("analysis_details", {}).get("model") == form_data["api_name"]  # Should match the input api_name
-    # Check DB insertion (this should work after Fix #1)
+    # The key in your application code is "summarization_model"
+    assert result.get("analysis_details", {}).get("summarization_model") == form_data["api_name"]
     assert isinstance(result.get("db_id"), int)
     assert "added" in result.get("db_message", "").lower() or "updated" in result.get("db_message", "").lower()
 
-# TODO: Add similar mocked analysis tests for other media types (video, audio, ebook, document)
-#       - Ensure the @patch target points to the correct analysis/summarization function used by that media type's processor.
-#       - Use AsyncMock if the target function is async.
+
+# Helper to check the common structure of processing-only endpoint results
+def check_processing_only_item_result_structure(
+        result_item: Dict[str, Any],
+        expected_media_type: str,
+        mock_analysis_text: str,
+        expected_api_name: str,
+        check_content: bool = True
+):
+    """Checks the structure and key values for a single item from a processing-only endpoint."""
+    assert result_item["status"] in ["Success", "Warning"]
+    assert result_item["media_type"] == expected_media_type
+
+    if check_content:
+        assert result_item.get("content") is not None, f"Content missing for {expected_media_type}"
+        assert len(result_item["content"]) > 0, f"Content empty for {expected_media_type}"
+
+    assert result_item.get("analysis") == mock_analysis_text
+
+    analysis_details = result_item.get("analysis_details", {})
+    # Check for 'model' or 'model_used' as the key can vary
+    model_key_present = "model" in analysis_details or "model_used" in analysis_details
+    assert model_key_present, f"Neither 'model' nor 'model_used' found in analysis_details: {analysis_details}"
+
+    actual_api_name = analysis_details.get("model_used", analysis_details.get("model"))
+    assert actual_api_name == expected_api_name, \
+        f"Expected API name '{expected_api_name}', got '{actual_api_name}' in analysis_details"
+
+    assert result_item.get("db_id") is None
+    assert result_item.get("db_message") == "Processing only endpoint."
+
+
+# === Mocked Analysis Tests for Processing-Only Endpoints ===
+
+@patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib.analyze")
+@pytest.mark.timeout(120)  # Ebook processing can take a bit
+def test_process_ebook_with_analysis_mocked(mock_analyze, test_api_client, db_session, create_upload_file,
+                                            dummy_headers):
+    """Test EPUB analysis via /process-ebooks, mocking only the analyze call."""
+    if not SAMPLE_EPUB_PATH.exists():
+        pytest.skip(f"Test file not found: {SAMPLE_EPUB_PATH}")
+
+    mock_analysis_text = "Mocked analysis for EPUB."
+    mock_analyze.return_value = mock_analysis_text
+
+    form_data_dict = create_add_media_form_data(
+        # media_type will be set by ProcessEbooksForm model
+        perform_analysis=True,
+        perform_chunking=True,  # Default for ebooks is chapter, which is fine
+        api_name="mock-llm",
+        api_key="mock_key",
+        extraction_method="filtered"  # Ebook specific option
+    )
+    # Remove fields fixed by the Pydantic model on the server for this endpoint
+    if 'media_type' in form_data_dict: del form_data_dict['media_type']
+    if 'keep_original_file' in form_data_dict: del form_data_dict['keep_original_file']
+    # Ensure urls is not sent if we are uploading a file
+    form_data_dict['urls'] = None
+
+    file_tuple = create_upload_file(SAMPLE_EPUB_PATH)
+    response = test_api_client.post(
+        PROCESS_EBOOKS_ENDPOINT,
+        data=form_data_dict,
+        files={"files": file_tuple},
+        headers=dummy_headers
+    )
+
+    assert response.status_code in [status.HTTP_200_OK, status.HTTP_207_MULTI_STATUS], \
+        f"Request failed: {response.status_code} - {response.text}"
+
+    data = response.json()
+    assert data.get("processed_count", 0) >= 1  # Allow for warnings to still count as processed
+    assert data.get("errors_count", 0) == 0
+    assert len(data.get("results", [])) >= 1
+
+    result = data["results"][0]
+    mock_analyze.assert_called()
+    check_processing_only_item_result_structure(result, "ebook", mock_analysis_text, "mock-llm")
+
+
+@patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files.analyze")
+@pytest.mark.timeout(180)  # Audio processing can be slow
+def test_process_audio_with_analysis_mocked(mock_analyze, test_api_client, db_session, create_upload_file,
+                                            dummy_headers):
+    """Test Audio analysis via /process-audios, mocking only the analyze call."""
+    if not SAMPLE_AUDIO_PATH.exists():
+        pytest.skip(f"Test file not found: {SAMPLE_AUDIO_PATH}")
+
+    mock_analysis_text = "Mocked analysis for Audio."
+    mock_analyze.return_value = mock_analysis_text
+
+    form_data_dict = create_add_media_form_data(
+        perform_analysis=True,
+        perform_chunking=True,
+        api_name="mock-llm",
+        api_key="mock_key",
+        transcription_model="deepdml/faster-distil-whisper-medium.en"  # Example
+    )
+    if 'media_type' in form_data_dict: del form_data_dict['media_type']
+    if 'keep_original_file' in form_data_dict: del form_data_dict['keep_original_file']
+    form_data_dict['urls'] = None
+
+    file_tuple = create_upload_file(SAMPLE_AUDIO_PATH)
+    response = test_api_client.post(
+        PROCESS_AUDIO_ENDPOINT,
+        data=form_data_dict,
+        files={"files": file_tuple},
+        headers=dummy_headers
+    )
+
+    assert response.status_code in [status.HTTP_200_OK, status.HTTP_207_MULTI_STATUS], \
+        f"Request failed: {response.status_code} - {response.text}"
+
+    data = response.json()
+    assert data.get("processed_count", 0) >= 1
+    assert data.get("errors_count", 0) == 0
+    assert len(data.get("results", [])) >= 1
+
+    result = data["results"][0]
+    mock_analyze.assert_called()
+    check_processing_only_item_result_structure(result, "audio", mock_analysis_text, "mock-llm")
+
+
+@patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.analyze")
+@pytest.mark.timeout(240)  # Video processing can be very slow
+def test_process_video_with_analysis_mocked(mock_analyze, test_api_client, db_session, create_upload_file,
+                                            dummy_headers):
+    """Test Video analysis via /process-videos, mocking only the analyze call."""
+    if not SAMPLE_VIDEO_PATH.exists():
+        pytest.skip(f"Test file not found: {SAMPLE_VIDEO_PATH}")
+
+    mock_analysis_text = "Mocked analysis for Video."
+    mock_analyze.return_value = mock_analysis_text
+
+    form_data_dict = create_add_media_form_data(
+        perform_analysis=True,
+        perform_chunking=True,
+        api_name="mock-llm",
+        api_key="mock_key",
+        transcription_model="deepdml/faster-distil-whisper-small.en"  # Example
+    )
+    if 'media_type' in form_data_dict: del form_data_dict['media_type']
+    if 'keep_original_file' in form_data_dict: del form_data_dict['keep_original_file']
+    form_data_dict['urls'] = []
+
+    file_tuple = create_upload_file(SAMPLE_VIDEO_PATH)
+    response = test_api_client.post(
+        PROCESS_VIDEO_ENDPOINT,
+        data=form_data_dict,
+        files={"files": file_tuple},
+        headers=dummy_headers
+    )
+
+    assert response.status_code in [status.HTTP_200_OK, status.HTTP_207_MULTI_STATUS], \
+        f"Request failed: {response.status_code} - {response.text}"
+
+    data = response.json()
+    assert data.get("processed_count", 0) >= 1
+    assert data.get("errors_count", 0) == 0
+    assert len(data.get("results", [])) >= 1
+
+    result = data["results"][0]
+    mock_analyze.assert_called()
+    check_processing_only_item_result_structure(result, "video", mock_analysis_text, "mock-llm")
+
+
+@patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.analyze")
+@pytest.mark.timeout(90)
+def test_process_document_with_analysis_mocked(mock_analyze, test_api_client, db_session, create_upload_file,
+                                               dummy_headers):
+    """Test Document (TXT) analysis via /process-documents, mocking only the analyze call."""
+    if not SAMPLE_TXT_PATH.exists():
+        pytest.skip(f"Test file not found: {SAMPLE_TXT_PATH}")
+
+    mock_analysis_text = "Mocked analysis for TXT Document."
+    mock_analyze.return_value = mock_analysis_text
+
+    form_data_dict = create_add_media_form_data(
+        perform_analysis=True,
+        perform_chunking=True,  # Default for documents is recursive, which is fine
+        api_name="mock-llm",
+        api_key="mock_key",
+        chunk_method="sentences"  # Example specific override if needed
+    )
+    if 'media_type' in form_data_dict: del form_data_dict['media_type']
+    if 'keep_original_file' in form_data_dict: del form_data_dict['keep_original_file']
+    form_data_dict['urls'] = []
+
+    file_tuple = create_upload_file(SAMPLE_TXT_PATH)
+    response = test_api_client.post(
+        PROCESS_DOCUMENTS_ENDPOINT,
+        data=form_data_dict,
+        files={"files": file_tuple},
+        headers=dummy_headers
+    )
+
+    assert response.status_code in [status.HTTP_200_OK, status.HTTP_207_MULTI_STATUS], \
+        f"Request failed: {response.status_code} - {response.text}"
+
+    data = response.json()
+    assert data.get("processed_count", 0) >= 1
+    assert data.get("errors_count", 0) == 0
+    assert len(data.get("results", [])) >= 1
+
+    result = data["results"][0]
+    mock_analyze.assert_called()
+    check_processing_only_item_result_structure(result, "document", mock_analysis_text, "mock-llm")
 
 
 # ##################################################################################################################

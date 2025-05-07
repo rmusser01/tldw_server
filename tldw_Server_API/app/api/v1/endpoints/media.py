@@ -50,6 +50,9 @@ from pydantic.v1 import Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.responses import JSONResponse, Response
+
+from tldw_Server_API.app.api.v1 import schemas
+from tldw_Server_API.app.api.v1.schemas.media_response_models import PaginationInfo, MediaListResponse, MediaListItem
 #
 # Local Imports
 #
@@ -91,7 +94,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Fil
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
 #
 # Document Processing
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Utils.Utils import logging, \
     sanitize_filename, smart_download
 from tldw_Server_API.app.core.Utils.Utils import logging as logger
@@ -633,7 +636,7 @@ async def list_versions(
         count_cursor = db.execute_query("SELECT COUNT(*) FROM DocumentVersions WHERE media_id = ?", (media_id,))
         total_versions = count_cursor.fetchone()[0]
 
-        return versions, total_versions
+        return versions  #, total_versions
 
     except DatabaseError as e: # Catch DB errors from new library
         logger.error(f"Database error listing versions for media {media_id}: {e}", exc_info=True)
@@ -1050,67 +1053,70 @@ async def update_media_item(
     status_code=status.HTTP_200_OK,
     summary="List All Media Items", # Adjusted summary for clarity
     tags=["Media Management"],
-    # response_model=MediaListResponse # Define a Pydantic model for this response if desired
+    response_model=MediaListResponse # Define a Pydantic model for this response if desired
 )
 @limiter.limit("50/minute") # Keep rate limiting
-async def list_all_media( # Renamed function for clarity (list vs get)
+async def list_all_media(
     request: Request,
     page: int = Query(1, ge=1, description="Page number"),
     results_per_page: int = Query(10, ge=1, le=100, description="Results per page"),
-    # --- Use the new DB dependency ---
-    db: Database = Depends(get_db_for_user) # Inject the Database instance
+    db: Database = Depends(get_db_for_user)
 ):
     """
     Retrieve a paginated listing of all active (non-deleted, non-trash) media items.
-    Returns "items" and a "pagination" dictionary.
+    Returns "items" and a "pagination" dictionary matching the MediaListResponse schema.
     """
     offset = (page - 1) * results_per_page
 
     try:
-        # --- Query 1: Get total count of active items ---
         count_query = "SELECT COUNT(*) FROM Media WHERE deleted = 0 AND is_trash = 0"
-        count_cursor = db.execute_query(count_query) # Use instance method
+        count_cursor = db.execute_query(count_query)
         total_items = count_cursor.fetchone()[0] or 0
         total_pages = ceil(total_items / results_per_page) if total_items > 0 else 0
 
-        # --- Query 2: Get paginated items ---
-        items_list = []
+        items_list_from_db = []
         if total_items > 0 and page <= total_pages:
-             # Select specific fields needed for the response
-             # Order by most recently modified first
-             items_query = """
-                 SELECT id, title, type, uuid``
+            # --- Query still selects uuid, but we won't use it in the response item ---
+            items_query = """
+                 SELECT id, title, type, uuid
                  FROM Media
                  WHERE deleted = 0 AND is_trash = 0
                  ORDER BY last_modified DESC, id DESC
                  LIMIT ? OFFSET ?
              """
-             items_cursor = db.execute_query(items_query, (results_per_page, offset)) # Use instance method
-             items_list = [dict(row) for row in items_cursor.fetchall()]
+            items_cursor = db.execute_query(items_query, (results_per_page, offset))
+            items_list_from_db = [dict(row) for row in items_cursor.fetchall()]
 
-        # Format the response according to expected structure
-        return {
-            "items": [
-                {
-                    "id": item["id"],
-                    "uuid": item["uuid"], # Include UUID if useful for client
-                    "title": item["title"],
-                    "type": item["type"],
-                    "url": f"/api/v1/media/{item['id']}" # Link to the detail endpoint
-                }
-                for item in items_list
-            ],
-            "pagination": {
-                "page": page,
-                "results_per_page": results_per_page,
-                "total_pages": total_pages,
-                "total_items": total_items
-            }
-        }
-    except DatabaseError as e: # Catch specific DB errors from the new library
+        # --- Construct items list matching MediaListItem schema ---
+        formatted_items = [
+            MediaListItem(
+                id=item[id],
+                title=item["title"],
+                type=item["type"],
+                url=f"/api/v1/media/{item['id']}" # Construct the API URL
+            )
+            for item in items_list_from_db
+        ]
+
+
+        # Construct pagination (ensure it matches PaginationInfo schema)
+        pagination_info = PaginationInfo(
+             page=page,
+             results_per_page=results_per_page,
+             total_pages=total_pages,
+             total_items=total_items
+         )
+
+        # Return the full response object matching MediaListResponse
+        return MediaListResponse(
+            items=formatted_items,
+            pagination=pagination_info
+        )
+
+    except DatabaseError as e:
         logger.error(f"Database error fetching paginated media: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Database error retrieving media list: {e}")
-    except Exception as e: # Catch other potential errors
+    except Exception as e:
         logger.error(f"Unexpected error fetching paginated media: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred while retrieving media list.")
 
@@ -4640,7 +4646,7 @@ async def ingest_web_content(
             return article
 
         # Summarize
-        analyze = summarize(
+        analyze = analyze(
             input_data=content,
             custom_prompt_arg=request.custom_prompt or "Summarize this article.",
             api_name=request.api_name,

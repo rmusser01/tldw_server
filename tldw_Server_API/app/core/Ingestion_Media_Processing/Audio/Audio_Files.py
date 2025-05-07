@@ -29,7 +29,7 @@ import yt_dlp
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords, \
     check_media_and_whisper_model
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Utils.Utils import downloaded_files, \
     sanitize_filename, logging
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import extract_metadata
@@ -43,7 +43,7 @@ from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 
 MAX_FILE_SIZE = 500 * 1024 * 1024
 
-def download_audio_file(url: str, use_cookies: bool = False, cookies: Optional[str] = None) -> str:
+def download_audio_file(url: str, target_temp_dir: str, use_cookies: bool = False, cookies: Optional[str] = None) -> str:
     """
     Downloads an audio file from a URL.
 
@@ -123,7 +123,7 @@ def download_audio_file(url: str, use_cookies: bool = False, cookies: Optional[s
 
         # Use a dedicated, potentially configurable, download directory
         # For temporary processing, might want to use the provided temp_dir later
-        save_dir = Path(tempfile.gettempdir()) / "tldw_audio_downloads"
+        save_dir = Path(target_temp_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
         save_path = save_dir / file_name
 
@@ -359,11 +359,9 @@ def process_audio_files(
                         update_progress(f"Copying local file '{local_path.name}' to temporary directory.")
                         try:
                             target_path = processing_temp_dir_path / local_path.name
-                            import shutil
-                            shutil.copy2(local_path, target_path) # copy2 preserves metadata
+                            import shutil  # Should be at top of file
+                            shutil.copy2(local_path, target_path)
                             current_audio_path = str(target_path)
-                            # Only mark the *copied* file for item-specific cleanup if needed
-                            # and if keep_original=False (handled by the main finally block check)
                             item_temp_files.append(current_audio_path)
                         except Exception as copy_err:
                              # Log the specific error
@@ -473,7 +471,7 @@ def process_audio_files(
                     if perform_analysis and api_name and api_name.lower() != "none" and text_to_process_for_analysis:
                         update_progress(f"Starting analysis using API: {api_name}")
                         try:
-                            analysis_result = summarize(
+                            analysis_result = analyze(
                                 api_name=api_name,
                                 input_data=text_to_process_for_analysis,
                                 custom_prompt_arg=custom_prompt_input,

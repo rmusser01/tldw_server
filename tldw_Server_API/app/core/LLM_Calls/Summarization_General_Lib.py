@@ -294,6 +294,9 @@ def _dispatch_to_api(
         elif api_name_lower == "ollama":
             # Ollama might need model param or load from config
             return summarize_with_ollama(text_to_summarize, custom_prompt_arg, None, api_key, temp, system_message, streaming) # Passing None for model, assuming func handles it
+        # --- MOCKING TEST LLM Calls ---
+        elif api_name_lower == "mock-llm":
+            return summarize_with_mock_llm(text_to_summarize, custom_prompt_arg, api_key, temp, system_message, streaming)
         else:
             error_msg = f"Error: Invalid API Name '{api_name}'"
             logging.error(error_msg)
@@ -303,8 +306,9 @@ def _dispatch_to_api(
         logging.error(f"Error during dispatch to API '{api_name}': {str(e)}", exc_info=True)
         return f"Error calling API {api_name}: {str(e)}"
 
+
 # --- Main Summarization Function ---
-def summarize(
+def analyze(
     api_name: str,
     input_data: Any,
     custom_prompt_arg: Optional[str],
@@ -317,10 +321,10 @@ def summarize(
     chunk_options: Optional[dict] = None
 ) -> Union[str, Generator[str, None, None]]:
     """
-    Performs summarization using a specified API, with optional chunking strategies.
+    Performs analysis(summarization by default) using a specified API, with optional chunking strategies. Provide a system prompt to avoid summarization.
 
     Args:
-        input_data: Data to summarize (text string, file path to JSON, dict, list of dicts).
+        input_data: Data to analyze(Default is summarization) (text string, file path to JSON, dict, list of dicts).
         custom_prompt_arg: Custom prompt instructions for the LLM.
         api_name: Name of the API service to use (e.g., 'openai', 'anthropic', 'ollama').
         api_key: Optional API key. If None, the specific API function will attempt to load from config.
@@ -532,7 +536,7 @@ def summarize(
         return f"Error: An unexpected error occurred during summarization: {str(e)}"
 
 #
-# End of Summarization Function
+# End of Analysis Function
 ###################################################################################
 
 
@@ -2196,6 +2200,50 @@ def summarize_with_google(api_key, input_data, custom_prompt_arg, temp=None, sys
         logging.error(f"Google: Unexpected error: {str(e)}", exc_info=True)
         return f"Google: Unexpected error occurred: {str(e)}"
 
+def summarize_with_mock_llm(text_to_summarize: str, custom_prompt_arg: Optional[str], api_key: Optional[str] = None, temp: Optional[float] = None, system_message: Optional[str] = None, streaming: bool = False):
+    """
+    Mock implementation of OpenAI summarization function that mimics the behavior
+    without making actual API calls.
+
+    Returns either a string summary or a generator for streaming responses,
+    matching the behavior of the real function.
+    """
+    try:
+        # Log the same debug information as the real function
+        logging.debug(f"MOCK-LLM (MOCK): Received text length: {len(str(text_to_summarize))}")
+        logging.debug(f"MOCK-LLM (MOCK): Custom prompt: {custom_prompt_arg}")
+        logging.debug(f"MOCK-LLM (MOCK): Temperature: {temp}, System Message: {system_message}, Streaming: {streaming}")
+
+        # Extract a sample of text to include in mock response
+        sample_text = str(text_to_summarize)[:50] + "..." if len(str(text_to_summarize)) > 50 else str(text_to_summarize)
+
+        # Create mock summary
+        mock_summary = (
+            f"[MOCK OPENAI RESPONSE]\n"
+            f"This is a mock summary generated for testing purposes.\n\n"
+            f"Sample of input text: '{sample_text}'\n"
+            f"Custom prompt: '{custom_prompt_arg}'\n"
+            f"Temperature: {temp or 0.7}\n"
+            f"System message: '{system_message or 'You are a helpful AI assistant.'}'\n"
+            f"Time generated: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+        # Add some simulated delay to mimic API latency
+        time.sleep(0.5)
+
+        mock_summary_text = f"Mocked summary for: {text_to_summarize[:30]}..."
+        if streaming:
+            def _stream():
+                yield mock_summary_text
+
+            return _stream()
+        else:
+            logging.debug("OpenAI (MOCK): Returning non-streaming mock response")
+            return mock_summary
+
+    except Exception as e:
+        logging.error(f"OpenAI (MOCK): Unexpected error: {str(e)}", exc_info=True)
+        return f"Error: OpenAI mock function unexpected error: {str(e)}"
 #
 #
 
@@ -2207,7 +2255,7 @@ def summarize_chunk(api_name, text, custom_prompt_input, api_key, temp=None, sys
         return "No summary available"
 
     try:
-        result = summarize(text, custom_prompt_input, api_name, api_key, temp, system_message)
+        result = analyze(text, custom_prompt_input, api_name, api_key, temp, system_message)
 
         # Handle streaming generator responses
         if inspect.isgenerator(result):

@@ -15,6 +15,8 @@ https://towardsdatascience.com/how-i-won-singapores-gpt-4-prompt-engineering-com
 https://arxiv.org/abs/2411.01992
 https://www.linkedin.com/blog/engineering/product-design/building-collaborative-prompt-engineering-playgrounds-using-jupyter-notebook
 https://github.com/lks-ai/prowl
+https://rentry.co/samplers
+https://github.com/asgeirtj/system_prompts_leaks/blob/main/claude.txt
 https://github.com/MIATECHPARTNERS/PromptChains
 https://github.com/mazen160/llmquery/
 https://juuzt.ai/knowledge-base/prompt-frameworks/

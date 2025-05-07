@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Optional
 # Local Imports
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import vector_search, chroma_client
 from tldw_Server_API.app.core.RAG.RAG_Persona_Chat import perform_vector_search_chat
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.DB_Management.DB_Manager import fetch_keywords_for_media, search_media_db, get_notes_by_keywords, \
     search_conversations_by_keywords
 from tldw_Server_API.app.core.Utils.Utils import load_and_log_configs, logging
@@ -318,8 +318,8 @@ def generate_answer(api_choice: str, context: str, query: str) -> str:
             answer_generation_duration = time.time() - start_time
             log_histogram("generate_answer_duration", answer_generation_duration, labels={"api_choice": api_choice})
             api_choice = api_choice.casefold()
-            result = summarize(rag_prompt, "", api_choice, loaded_config_data[f'{api_choice}_api']['api_key'], None,
-                               None, None)
+            result = analyze(rag_prompt, "", api_choice, loaded_config_data[f'{api_choice}_api']['api_key'], None,
+                             None, None)
             log_counter("generate_answer_success", labels={"api_choice": api_choice})
             return result
 

@@ -24,7 +24,7 @@ from urllib3 import Retry
 from tldw_Server_API.app.core.Utils.Utils import loaded_config_data, logging
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article
 from tldw_Server_API.app.core.Chat.Chat_Functions import chat_api_call
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 #
 #######################################################################################################################
 #
@@ -453,7 +453,7 @@ async def search_result_relevance(
 
                         # Generate summary using the summarize function
                         logging.info(f"Summarizing relevant result: ID={result_id}")
-                        summary = summarize(
+                        summary = analyze(
                             input_data=scraped_content['content'],
                             custom_prompt_arg=summary_prompt,
                             api_name=api_endpoint,

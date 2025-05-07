@@ -52,9 +52,10 @@
 
 Website:
   https://github.com/AnswerDotAI/fasthtml-example/tree/main/02_chatbot
-
+https://github.com/pi0/clippyjs
 https://uxdesign.cc/a-study-of-gatcha-games-the-ux-of-the-pokemon-tcg-pocket-app-b291c78db86fc
 https://github.com/sshh12/spark-stack
+https://rentry.org/bloatmaxx
 https://github.com/abi/screenshot-to-
 https://data.perkins.org/
 https://designdetails.fm/episodes

@@ -41,7 +41,7 @@ from loguru import logger
 # Import Local
 from tldw_Server_API.app.core.Evaluations.ms_g_eval import run_geval
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import perform_transcription
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import summarize
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Utils.Utils import (
     convert_to_seconds,
     extract_text_from_segments,
@@ -893,7 +893,7 @@ def process_single_video(
                          logging.warning(warn_msg)
                          processing_result["warnings"].append(warn_msg)
                          # Fallback: Summarize original text if chunking fails/is empty
-                         analysis_text = summarize(api_name, text_to_analyze, custom_prompt, api_key, system_message=system_prompt)
+                         analysis_text = analyze(api_name, text_to_analyze, custom_prompt, api_key, system_message=system_prompt)
 
                     else:
                          logger.info(f"Chunking successful, created {len(chunked_texts_list)} chunks.")
@@ -903,7 +903,7 @@ def process_single_video(
                              chunk_text = chunk_block.get("text")
                              if chunk_text:
                                  try:
-                                     csum = summarize(api_name, chunk_text, custom_prompt, api_key, system_message=system_prompt)
+                                     csum = analyze(api_name, chunk_text, custom_prompt, api_key, system_message=system_prompt)
                                      if csum:
                                          chunk_summaries.append(csum)
                                          # Optionally store chunk summary in chunk metadata if needed later
@@ -921,7 +921,7 @@ def process_single_video(
                                  logger.info("Performing recursive summarization on chunk summaries.")
                                  combined_chunk_summaries = "\n\n---\n\n".join(chunk_summaries) # Use separator
                                  try:
-                                     analysis_text = summarize(api_name, combined_chunk_summaries, custom_prompt or "Summarize the key points from the preceding text sections.", api_key, system_message=system_prompt)
+                                     analysis_text = analyze(api_name, combined_chunk_summaries, custom_prompt or "Summarize the key points from the preceding text sections.", api_key, system_message=system_prompt)
                                  except Exception as rec_summ_err:
                                      warn_msg = f"Recursive summarization failed: {rec_summ_err}"
                                      logging.warning(warn_msg)
@@ -940,7 +940,7 @@ def process_single_video(
                     processing_result["warnings"].append(warn_msg)
                     # Fallback: Summarize original text if chunking fails
                     try:
-                        analysis_text = summarize(api_name, text_to_analyze, custom_prompt, api_key, system_message=system_prompt)
+                        analysis_text = analyze(api_name, text_to_analyze, custom_prompt, api_key, system_message=system_prompt)
                     except Exception as summ_err:
                          warn_msg = f"Summarization failed after chunking error: {summ_err}"
                          logging.error(warn_msg, exc_info=True)
@@ -949,7 +949,7 @@ def process_single_video(
             else: # No chunking requested
                  logger.info(f"Performing single-pass analysis for {local_file_path_for_transcription}")
                  try:
-                     analysis_text = summarize(api_name, text_to_analyze, custom_prompt, api_key, system_message=system_prompt)
+                     analysis_text = analyze(api_name, text_to_analyze, custom_prompt, api_key, system_message=system_prompt)
                  except Exception as summ_err:
                      warn_msg = f"Summarization failed: {summ_err}"
                      logging.error(warn_msg, exc_info=True)
