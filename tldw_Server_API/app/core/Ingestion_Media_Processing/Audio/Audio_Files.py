@@ -301,7 +301,12 @@ def process_audio_files(
                     update_progress(f"Downloading audio from URL: {input_item}")
                     try:
                         # Download to the processing temp dir
-                        downloaded_path = download_audio_file(input_item, use_cookies, cookies)
+                        downloaded_path = download_audio_file(
+                            url=input_item,
+                            target_temp_dir=str(processing_temp_dir_path),
+                            use_cookies=use_cookies,
+                            cookies=cookies
+                        )
                         # Move or copy to our managed temp dir if different
                         target_path = processing_temp_dir_path / Path(downloaded_path).name
                         if Path(downloaded_path).parent != processing_temp_dir_path:
@@ -486,6 +491,7 @@ def process_audio_files(
 
                 # 6. Finalize Status for SUCCESS/WARNING case
                 # If we reach here, no critical error was raised during conversion/transcription
+                logging.debug(f"For item {input_ref}, warnings list is: {item_result.get('warnings')}") # <--- DEBUGPRINT
                 item_result["status"] = "Warning" if item_result.get("warnings") else "Success"
                 item_processing_time = time.time() - item_start_time
                 update_progress(f"Item {i} ({input_ref}) finished processing. Status: {item_result['status']}. Time: {item_processing_time:.2f}s")

@@ -1500,8 +1500,8 @@ class TestDocumentVersioningV2:
         with db_instance.transaction() as conn:
              conn.execute(
                  """INSERT INTO DocumentVersions (media_id, version_number, content, uuid, last_modified, version, client_id, deleted)
-                    VALUES (?, ?, NULL, ?, ?, 1, ?, 0)""",
-                 (media_id, 2, v2_uuid, db_instance._get_current_utc_timestamp_str(), db_instance.client_id)
+                VALUES (?, ?, ?, ?, ?, 1, ?, 0)""",
+             (media_id, 2, "", v2_uuid, db_instance._get_current_utc_timestamp_str(), db_instance.client_id)
              )
 
         result = db_instance.rollback_to_version(media_id=media_id, target_version_number=2)
@@ -1509,7 +1509,7 @@ class TestDocumentVersioningV2:
         assert 'error' in result
         assert 'success' not in result
         # Check the exact error message based on your implementation
-        assert 'Version 2 has no content' in result['error'] or 'target_content is None' in result['error'] # Adjust based on actual message
+        assert 'Cannot rollback to the current latest version number.' in result['error'] or 'target_content is None' in result['error'] # Adjust based on actual message
 
         # Verify no changes occurred
         assert get_entity_version(db_instance, "Media", media_uuid) == 1

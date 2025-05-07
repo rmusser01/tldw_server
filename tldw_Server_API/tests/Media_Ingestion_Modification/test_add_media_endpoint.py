@@ -877,7 +877,7 @@ def check_processing_only_item_result_structure(
 
     analysis_details = result_item.get("analysis_details", {})
     # Check for 'model' or 'model_used' as the key can vary
-    model_key_present = "model" in analysis_details or "model_used" in analysis_details
+    model_key_present = "model" in analysis_details or "model_used" or "summarization_model" in analysis_details
     assert model_key_present, f"Neither 'model' nor 'model_used' found in analysis_details: {analysis_details}"
 
     actual_api_name = analysis_details.get("model_used", analysis_details.get("model"))

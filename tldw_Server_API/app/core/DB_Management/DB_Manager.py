@@ -435,9 +435,32 @@ def get_specific_transcript(*args, **kwargs: int) -> Dict:
     else:
         raise ValueError(f"Unsupported database type: {db_type}")
 
-def get_all_document_versions(*args, **kwargs):
-    if db_type == 'sqlite':
-        return Database.get_all_document_versions(*args, **kwargs)
+
+def get_all_document_versions(db_instance: Database, media_id: int, **kwargs):
+    """
+    Wrapper to get all document versions for a given media_id from a Database instance.
+    """
+    # db_type check might be relevant if you support multiple DB backends via DB_Manager
+    # For now, assume db_instance is always a Media_DB_v2.Database instance.
+    if isinstance(db_instance, Database):
+        # Call the INSTANCE method, passing only the relevant kwargs
+        # The instance method itself is get_all_document_versions(self, media_id, include_content=True, include_deleted=False, limit=None, offset=None)
+        # So we need to ensure only those valid arguments are passed from kwargs.
+
+        # Extract known arguments for the instance method
+        limit = kwargs.get('limit')
+        offset = kwargs.get('offset')
+        include_content = kwargs.get('include_content', True)  # Default if not in test call
+        include_deleted = kwargs.get('include_deleted', False)  # Default if not in test call
+
+        return db_instance.get_all_document_versions(
+            media_id=media_id,
+            include_content=include_content,
+            include_deleted=include_deleted,
+            limit=limit,
+            offset=offset
+        )
+
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of get_all_document_versions not yet implemented")
