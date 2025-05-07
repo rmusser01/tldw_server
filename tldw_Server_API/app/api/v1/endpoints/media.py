@@ -2578,6 +2578,11 @@ async def process_videos_endpoint(
     """
     # --- Validation and Logging ---
     logger.info("Request received for /process-videos. Form data validated via dependency.")
+
+    if form_data.urls and form_data.urls == ['']:
+        logger.info("Received urls=[''], treating as no URLs provided for video processing.")
+        form_data.urls = None # Or []
+
     _validate_inputs("video", form_data.urls, files) # Keep basic input check
 
     # --- Setup ---
@@ -2967,6 +2972,11 @@ async def process_audios_endpoint(
     # --- 0) Validation and Logging ---
     # Validation happened in the dependency. Log success or handle HTTPException.
     logger.info(f"Request received for /process-audios. Form data validated via dependency.")
+
+    if form_data.urls and form_data.urls == ['']:
+        logger.info("Received urls=[''], treating as no URLs provided for audio processing.")
+        form_data.urls = None # Or []
+
     # Use the helper function from media_endpoints_utils
     try:
         _validate_inputs("audio", form_data.urls, files)
@@ -3455,6 +3465,10 @@ async def process_ebooks_endpoint(
     # Log form data safely (exclude sensitive fields)
     # Use .model_dump() for Pydantic v2
     logger.debug(f"Form data received: {form_data.model_dump(exclude={'api_key'})}")
+
+    if form_data.urls and form_data.urls == ['']:
+        logger.info("Received urls=[''], treating as no URLs provided for ebook processing.")
+        form_data.urls = None # Or []
 
     _validate_inputs("ebook", form_data.urls, files)
 

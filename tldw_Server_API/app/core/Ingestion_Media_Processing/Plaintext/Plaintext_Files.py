@@ -25,6 +25,10 @@ from tldw_Server_API.app.core.Utils.Utils import logging
 #
 # Function Definitions
 
+class PandocMissing(Exception): # Custom exception for Pandoc not found
+    pass
+
+
 def _read_text(path: Path) -> str:
     """Read file content as UTF‑8, fallback to latin‑1 if needed."""
     try:
@@ -49,11 +53,19 @@ def convert_to_plain_text(file_path: Path) -> str:
         if extension == '.docx':
             content = docx2txt.process(str(file_path))
             log_counter("docx_conversion_success", labels={"file_path": str(file_path)})
-        elif extension == '.rtccf':
-            # Use pandoc via pypandoc for RTF
-            # Requires pandoc binary to be installed on the system
-            content = convert_file(str(file_path), 'plain', format='rtf')
-            log_counter("rtf_conversion_success", labels={"file_path": str(file_path)})
+        elif extension == '.rtf': # Corrected extension from .rtccf
+            try:
+                content = convert_file(str(file_path), 'plain', format='rtf')
+                log_counter("rtf_conversion_success", labels={"file_path": str(file_path)})
+            except FileNotFoundError as e_fnf: # Specifically catch if pandoc is not found
+                if 'pandoc' in str(e_fnf).lower():
+                    logging.error(f"Pandoc binary not found for RTF conversion: {e_fnf}")
+                    raise PandocMissing(f"Pandoc binary not found. Cannot convert {extension}") from e_fnf
+                else: # Re-raise if it's a different FileNotFoundError
+                    raise
+            except Exception as e_rtf: # Catch other pandoc errors
+                logging.error(f"Pandoc conversion error for {file_path}: {e_rtf}")
+                raise ValueError(f"Failed to convert {extension} with Pandoc: {e_rtf}") from e_rtf
         elif extension in ['.txt', '.md']:
             content = _read_text(file_path) # Use robust reader
         else:
@@ -81,9 +93,6 @@ def _xml_to_text_simple(element):
     return text.strip()
 
 # ───────────────────────────  Conversion Function ───────────────────────────
-class PandocMissing:
-    pass
-
 
 def convert_document_to_text(file_path: Path) -> Tuple[str, str, Dict[str, Any]]:
     """
@@ -155,13 +164,12 @@ def convert_document_to_text(file_path: Path) -> Tuple[str, str, Dict[str, Any]]
                 content = _xml_to_text_simple(root)
                 # Try finding common title elements
                 title_elem_candidate1 = root.find('.//title')
-                if title_elem_candidate1 is not None and len(
-                        title_elem_candidate1):  # Check it's not None and not empty
+                title_elem = None
+                if title_elem_candidate1 is not None and title_elem_candidate1.text and title_elem_candidate1.text.strip():
                     title_elem = title_elem_candidate1
                 else:
-                    title_elem_candidate2 = root.find('.//Title')
-                    if title_elem_candidate2 is not None and len(
-                            title_elem_candidate2):  # Check it's not None and not empty
+                    title_elem_candidate2 = root.find('.//Title') # Case-sensitive common alternative
+                    if title_elem_candidate2 is not None and title_elem_candidate2.text and title_elem_candidate2.text.strip():
                         title_elem = title_elem_candidate2
                     else:
                         title_elem = None  # Or handle as appropriate if neither is found or both are empty
@@ -190,16 +198,14 @@ def convert_document_to_text(file_path: Path) -> Tuple[str, str, Dict[str, Any]]
 
         return content, source_format_used, raw_metadata
 
-    except (ValueError, ImportError) as specific_error:
-        # Catch ValueErrors/ImportErrors raised intentionally above or by libraries
-        logging.error(f"Conversion error for {file_path}: {specific_error}", exc_info=False) # Log cleanly
+    except (ValueError, ImportError, PandocMissing) as specific_error:
+        logging.error(f"Conversion error for {file_path}: {specific_error}", exc_info=False)
         log_counter(f"{source_format_used}_conversion_error", labels={"file_path": str(file_path), "error": type(specific_error).__name__})
         # Re-raise the specific error caught to be handled by process_document_content
         raise specific_error
 
     except Exception as unexpected_error:
-        # Catch truly unexpected errors
-        logging.exception(f"Unexpected error converting {file_path} to text: {unexpected_error}") # Use exception for full trace
+        logging.exception(f"Unexpected error converting {file_path} to text: {unexpected_error}")
         log_counter(f"{source_format_used}_conversion_error", labels={"file_path": str(file_path), "error": "UnexpectedError"})
         # Wrap in a consistent ValueError for process_document_content
         raise ValueError(f"Unexpected failure converting {extension} file '{file_path.name}': {unexpected_error}") from unexpected_error
@@ -209,7 +215,7 @@ def convert_document_to_text(file_path: Path) -> Tuple[str, str, Dict[str, Any]]
 def process_document_content( # Renamed from _process_single_document for clarity
     doc_path: Path,
     perform_chunking: bool,
-    chunk_options: Optional[Dict[str, Any]], # Use Optional Dict
+    chunk_options: Optional[Dict[str, Any]],
     perform_analysis: bool,
     summarize_recursively: bool,
     api_name: Optional[str],
@@ -228,7 +234,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
 
     Returns: Dict aligned with MediaItemProcessResponse structure.
     """
-    start_time = datetime.now()
+    start_time_func = time.perf_counter()
     result: Dict[str, Any] = {
         "status": "Pending",
         "input_ref": str(doc_path), # Will be overwritten by endpoint with original ref
@@ -241,19 +247,17 @@ def process_document_content( # Renamed from _process_single_document for clarit
         "chunks": None,
         "analysis": None, # Renamed from summary
         "analysis_details": { # Initialize analysis details
-            "summarization_model": api_name if perform_analysis else None,
-            "custom_prompt_used": custom_prompt if perform_analysis else None,
-            "system_prompt_used": system_prompt if perform_analysis else None,
-            "summarized_recursively": summarize_recursively if perform_analysis else False,
-            "parser_used": None, # Will be set after conversion
+            "summarization_model": None, # Will be set if analysis happens
+            "custom_prompt_used": None,
+            "system_prompt_used": None,
+            "summarized_recursively": summarize_recursively if perform_analysis else False, # Store user's intent
+            "parser_used": None,
         },
-        "keywords": keywords or [], # Store keywords passed in
+        "keywords": keywords or [],
         "error": None,
-        "warnings": [], # Initialize as list
-        # --- DB Fields (ensure None) ---
+        "warnings": [],
         "db_id": None,
         "db_message": None,
-        # -----------------------------
     }
     log_counter("document_processing_attempt", labels={"file_path": str(doc_path)})
 
@@ -262,7 +266,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
         text_content, source_format_used, raw_metadata = convert_document_to_text(doc_path)
         result["content"] = text_content
         result["source_format"] = source_format_used
-        result["analysis_details"]["parser_used"] = source_format_used # Track conversion method
+        result["analysis_details"]["parser_used"] = source_format_used
 
         # Handle empty content after conversion
         if not text_content or not text_content.strip():
@@ -271,7 +275,9 @@ def process_document_content( # Renamed from _process_single_document for clarit
              result["warnings"].append("Content is empty after conversion.")
              # Set status to Warning if otherwise successful
              result["status"] = "Warning"
-             # No further processing needed if content is empty
+             # No further processing for empty content
+             end_time_func_empty = time.perf_counter()
+             log_histogram("document_processing_duration", end_time_func_empty - start_time_func, labels={"file_path": str(doc_path), "status": result["status"]})
              return result
 
 
@@ -284,7 +290,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
             "title": final_title,
             "author": final_author,
             "source_filename": doc_path.name,
-            "raw": raw_metadata # Store format-specific extracted info
+            "raw": raw_metadata
         }
         logging.debug(f"Document metadata - Title: {final_title}, Author: {final_author}")
 
@@ -296,7 +302,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
             effective_chunk_options = chunk_options or {}
             # Sensible defaults for documents
             effective_chunk_options.setdefault('method', 'recursive')
-            effective_chunk_options.setdefault('max_size', 1000) # Smaller default?
+            effective_chunk_options.setdefault('max_size', 1000)
             effective_chunk_options.setdefault('overlap', 200)
 
             logging.info(f"Chunking document content {doc_path} with options: {effective_chunk_options}")
@@ -307,8 +313,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
                 if not processed_chunks:
                      logging.warning(f"Chunking produced no chunks for {doc_path}. Using full text.")
                      result["warnings"].append("Chunking yielded no results; using full text as one chunk.")
-                     # Ensure chunks list contains the single chunk
-                     processed_chunks = [{'text': text_content, 'metadata': {'chunk_num': 0}}]
+                     processed_chunks = [{'text': text_content, 'metadata': {'chunk_index': 0, 'total_chunks': 1}}] # Match chunk structure
                 else:
                      logging.info(f"Total chunks created: {len(processed_chunks)}")
                      log_histogram("document_chunks_created", len(processed_chunks), labels={"file_path": str(doc_path)})
@@ -316,15 +321,12 @@ def process_document_content( # Renamed from _process_single_document for clarit
             except Exception as chunk_err:
                 logging.error(f"Chunking failed for {doc_path}: {chunk_err}", exc_info=True)
                 result["warnings"].append(f"Chunking failed: {chunk_err}")
-                # Fallback: use full text as one chunk
-                processed_chunks = [{'text': text_content, 'metadata': {'chunk_num': 0, 'error': f"Chunking failed: {chunk_err}"}}]
-
+                processed_chunks = [{'text': text_content, 'metadata': {'chunk_index': 0, 'total_chunks': 1, 'error': f"Chunking failed: {chunk_err}"}}]
             result["chunks"] = processed_chunks
 
         elif text_content:
-             # If not chunking, but content exists, create a single chunk
-             processed_chunks = [{'text': text_content, 'metadata': {'chunk_num': 0}}]
-             result["chunks"] = processed_chunks # Store the single chunk
+             processed_chunks = [{'text': text_content, 'metadata': {'chunk_index': 0, 'total_chunks': 1}}]
+             result["chunks"] = processed_chunks
              logging.info("Chunking disabled. Using full text as one chunk.")
         else:
              # Content was empty or None (should have been handled earlier)
@@ -332,78 +334,83 @@ def process_document_content( # Renamed from _process_single_document for clarit
 
 
         # 4. Summarization / Analysis
-        final_analysis = None
+        final_analysis_text = None
         if perform_analysis and api_name and api_key and processed_chunks:
             logging.info(f"Analysis enabled for {len(processed_chunks)} chunks of {doc_path}.")
             log_counter("document_analysis_attempt", value=len(processed_chunks), labels={"file_path": str(doc_path), "api_name": api_name})
-            chunk_summaries: List[str] = []
-            summarized_chunks_for_result = []
 
-            for i, chunk in enumerate(processed_chunks):
-                chunk_text = chunk.get('text', '')
-                chunk_metadata = chunk.get('metadata', {})
-                if chunk_text:
+            result["analysis_details"]["summarization_model"] = api_name
+            result["analysis_details"]["custom_prompt_used"] = custom_prompt
+            result["analysis_details"]["system_prompt_used"] = system_prompt
+
+            chunk_summaries: List[str] = []
+            # Re-initialize or update result["chunks"] if chunk metadata needs to be updated
+            analyzed_chunks_for_result = []
+
+            for i, chunk_data in enumerate(processed_chunks):
+                chunk_text_to_analyze = chunk_data.get('text', '')
+                current_chunk_metadata = chunk_data.get('metadata', {}) # Keep existing metadata
+
+                if chunk_text_to_analyze:
                     try:
-                        # Use standard summarize function signature
-                        analysis_text = analyze(
+                        analysis_text_for_chunk = analyze(
                             api_name=api_name,
-                            input_data=chunk_text,
+                            input_data=chunk_text_to_analyze,
                             custom_prompt_arg=custom_prompt,
                             api_key=api_key,
                             system_message=system_prompt,
-                            temp=None, # Add default temp if needed
-                            recursive_summarization=False, # Summarize chunk first
+                            temp=None,
+                            recursive_summarization=False,
                         )
-                        if analysis_text and isinstance(analysis_text, str) and analysis_text.strip():
-                            chunk_summaries.append(analysis_text)
-                            # Add analysis to chunk metadata for potential later use
-                            chunk_metadata['analysis'] = analysis_text
+                        if analysis_text_for_chunk and isinstance(analysis_text_for_chunk, str) and analysis_text_for_chunk.strip():
+                            chunk_summaries.append(analysis_text_for_chunk)
+                            current_chunk_metadata['analysis'] = analysis_text_for_chunk # Store analysis in chunk metadata
                         else:
-                            chunk_metadata['analysis'] = None
+                            current_chunk_metadata['analysis'] = None
                             logging.debug(f"Analysis yielded empty result for chunk {i+1}/{len(processed_chunks)} of {doc_path}.")
                     except Exception as summ_err:
                         logging.warning(f"Analysis failed for chunk {i+1}/{len(processed_chunks)} of {doc_path}: {summ_err}", exc_info=False)
-                        chunk_metadata['analysis'] = f"[Analysis Error: {str(summ_err)}]"
+                        current_chunk_metadata['analysis'] = f"[Analysis Error: {str(summ_err)}]"
                         result["warnings"].append(f"Analysis failed for chunk {i+1}: {str(summ_err)}")
 
-                chunk['metadata'] = chunk_metadata # Update chunk with metadata
-                summarized_chunks_for_result.append(chunk)
+                # Create a new chunk dict with updated metadata to avoid modifying list while iterating if not careful
+                updated_chunk_data = {'text': chunk_text_to_analyze, 'metadata': current_chunk_metadata}
+                analyzed_chunks_for_result.append(updated_chunk_data)
 
-            result["chunks"] = summarized_chunks_for_result # Update result with modified chunks
+            result["chunks"] = analyzed_chunks_for_result # Update with chunks that may now have analysis in metadata
 
             # Combine summaries if generated
             if chunk_summaries:
                 if summarize_recursively and len(chunk_summaries) > 1:
                     logging.info(f"Performing recursive analysis on {len(chunk_summaries)} chunk summaries for {doc_path}.")
                     try:
-                         final_analysis = analyze(
+                         final_analysis_text = analyze(
                              api_name=api_name,
-                             input_data="\n\n---\n\n".join(chunk_summaries), # Join summaries
-                             custom_prompt_arg=custom_prompt or "Provide a concise overall summary of the following text sections.", # Recursive prompt
+                             input_data="\n\n---\n\n".join(chunk_summaries),
+                             custom_prompt_arg=custom_prompt or "Provide a concise overall summary of the following text sections.",
                              api_key=api_key,
                              system_message=system_prompt,
                              temp=None,
                              recursive_summarization=False, # Final pass
                          )
-                         if not final_analysis or not final_analysis.strip():
+                         if not final_analysis_text or not final_analysis_text.strip():
                             logging.warning(f"Recursive analysis for {doc_path} yielded empty result. Falling back to joined summaries.")
-                            final_analysis = "\n\n---\n\n".join(chunk_summaries) # Fallback
+                            final_analysis_text = "\n\n---\n\n".join(chunk_summaries)
                             result["warnings"].append("Recursive analysis yielded empty result.")
                          else:
                              log_counter("document_recursive_analysis_success", labels={"file_path": str(doc_path)})
 
                     except Exception as rec_summ_err:
                          logging.error(f"Recursive analysis failed for {doc_path}: {rec_summ_err}", exc_info=True)
-                         final_analysis = f"[Recursive Analysis Error: {str(rec_summ_err)}]\n\n" + "\n\n---\n\n".join(chunk_summaries)
+                         final_analysis_text = f"[Recursive Analysis Error: {str(rec_summ_err)}]\n\n" + "\n\n---\n\n".join(chunk_summaries)
                          result["warnings"].append(f"Recursive analysis failed: {str(rec_summ_err)}")
                          log_counter("document_recursive_analysis_error", labels={"file_path": str(doc_path), "error": str(rec_summ_err)})
                 else:
-                    # Simple join if not recursive or only one summary
-                    final_analysis = "\n\n---\n\n".join(chunk_summaries)
-                    if len(chunk_summaries) > 1 : logging.info(f"Combined {len(chunk_summaries)} chunk analyses (non-recursive).")
+                    final_analysis_text = "\n\n---\n\n".join(chunk_summaries)
+                    if len(chunk_summaries) > 1: logging.info(f"Combined {len(chunk_summaries)} chunk analyses (non-recursive).")
                     else: logging.info(f"Using single chunk analysis as final analysis.")
 
-            result["analysis"] = final_analysis # Store final combined analysis
+            result["analysis"] = final_analysis_text
             log_counter("document_chunks_analyzed", value=len(chunk_summaries), labels={"file_path": str(doc_path)})
             logging.info(f"Analysis processing completed for document {doc_path}.")
 
@@ -418,8 +425,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
         if not result["warnings"]:
             result["status"] = "Success"
         else:
-            # Already set to Warning if content was empty, otherwise set it now
-            if result["status"] != "Warning":
+            if result["status"] != "Warning": # Avoid overwriting if already Warning due to empty content
                  result["status"] = "Warning"
 
         log_counter(f"document_processing_{result['status'].lower()}", labels={"file_path": str(doc_path)})
@@ -429,6 +435,11 @@ def process_document_content( # Renamed from _process_single_document for clarit
         result["status"] = "Error"
         result["error"] = str(ve)
         log_counter("document_processing_error", labels={"file_path": str(doc_path), "error": "ValueError"})
+    except PandocMissing as pm_err: # Catch PandocMissing specifically
+        logging.error(f"Pandoc not found during processing for {doc_path}: {pm_err}", exc_info=False)
+        result["status"] = "Error"
+        result["error"] = str(pm_err) # Include specific message
+        log_counter("document_processing_error", labels={"file_path": str(doc_path), "error": "PandocMissing"})
     except Exception as e:
         logging.exception(f"Unexpected error processing document {doc_path}: {str(e)}")
         result["status"] = "Error"
@@ -439,8 +450,8 @@ def process_document_content( # Renamed from _process_single_document for clarit
     if not result["warnings"]:
         result["warnings"] = None
 
-    end_time = datetime.now()
-    processing_time = (end_time - start_time).total_seconds()
+    end_time_func = time.perf_counter()
+    processing_time = end_time_func - start_time_func
     log_histogram("document_processing_duration", processing_time, labels={"file_path": str(doc_path), "status": result["status"]})
 
     logging.info(f"Document '{result.get('metadata',{}).get('title', doc_path.name)}' processed with status: {result['status']} in {processing_time:.2f}s")

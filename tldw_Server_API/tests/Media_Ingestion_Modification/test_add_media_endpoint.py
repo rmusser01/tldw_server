@@ -827,7 +827,7 @@ def test_add_media_pdf_with_analysis_mocked(mock_analyze, test_api_client, db_se
         urls=[VALID_PDF_URL],
         perform_analysis=True,
         perform_chunking=True,
-        api_name="mock-llm",
+        api_name="mock_llm",
         api_key="mock_key"
     )
     response = test_api_client.post(ADD_MEDIA_ENDPOINT, data=form_data, headers=dummy_headers)
@@ -877,8 +877,12 @@ def check_processing_only_item_result_structure(
 
     analysis_details = result_item.get("analysis_details", {})
     # Check for 'model' or 'model_used' as the key can vary
-    model_key_present = "model" in analysis_details or "model_used" or "summarization_model" in analysis_details
-    assert model_key_present, f"Neither 'model' nor 'model_used' found in analysis_details: {analysis_details}"
+    model_key_present = ("llm_api" in analysis_details or
+                         "summarization_model" in analysis_details or
+                         "model_used" in analysis_details or
+                         "whisper_model" in analysis_details)
+    assert model_key_present, f"None of 'summarization_model', 'whisper_model', or 'model' found in analysis_details: {analysis_details}"
+
 
     actual_api_name = analysis_details.get("model_used", analysis_details.get("model"))
     assert actual_api_name == expected_api_name, \
@@ -898,14 +902,14 @@ def test_process_ebook_with_analysis_mocked(mock_analyze, test_api_client, db_se
     if not SAMPLE_EPUB_PATH.exists():
         pytest.skip(f"Test file not found: {SAMPLE_EPUB_PATH}")
 
-    mock_analysis_text = "Mocked analysis for EPUB."
+    mock_analysis_text = "sis for EPUB."
     mock_analyze.return_value = mock_analysis_text
 
     form_data_dict = create_add_media_form_data(
         # media_type will be set by ProcessEbooksForm model
         perform_analysis=True,
         perform_chunking=True,  # Default for ebooks is chapter, which is fine
-        api_name="mock-llm",
+        api_name="mock_llm",
         api_key="mock_key",
         extraction_method="filtered"  # Ebook specific option
     )
@@ -933,7 +937,7 @@ def test_process_ebook_with_analysis_mocked(mock_analyze, test_api_client, db_se
 
     result = data["results"][0]
     mock_analyze.assert_called()
-    check_processing_only_item_result_structure(result, "ebook", mock_analysis_text, "mock-llm")
+    check_processing_only_item_result_structure(result, "ebook", mock_analysis_text, "mock_llm")
 
 
 @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files.analyze")
@@ -950,9 +954,9 @@ def test_process_audio_with_analysis_mocked(mock_analyze, test_api_client, db_se
     form_data_dict = create_add_media_form_data(
         perform_analysis=True,
         perform_chunking=True,
-        api_name="mock-llm",
+        api_name="mock_llm",
         api_key="mock_key",
-        transcription_model="deepdml/faster-distil-whisper-medium.en"  # Example
+        transcription_model="deepdml/faster-distil-whisper-large-v3.5"
     )
     if 'media_type' in form_data_dict: del form_data_dict['media_type']
     if 'keep_original_file' in form_data_dict: del form_data_dict['keep_original_file']
@@ -976,7 +980,7 @@ def test_process_audio_with_analysis_mocked(mock_analyze, test_api_client, db_se
 
     result = data["results"][0]
     mock_analyze.assert_called()
-    check_processing_only_item_result_structure(result, "audio", mock_analysis_text, "mock-llm")
+    check_processing_only_item_result_structure(result, "audio", mock_analysis_text, "mock_llm")
 
 
 @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.analyze")
@@ -993,9 +997,9 @@ def test_process_video_with_analysis_mocked(mock_analyze, test_api_client, db_se
     form_data_dict = create_add_media_form_data(
         perform_analysis=True,
         perform_chunking=True,
-        api_name="mock-llm",
+        api_name="mock_llm",
         api_key="mock_key",
-        transcription_model="deepdml/faster-distil-whisper-small.en"  # Example
+        transcription_model="deepdml/faster-distil-whisper-large-v3.5"
     )
     if 'media_type' in form_data_dict: del form_data_dict['media_type']
     if 'keep_original_file' in form_data_dict: del form_data_dict['keep_original_file']
@@ -1019,7 +1023,7 @@ def test_process_video_with_analysis_mocked(mock_analyze, test_api_client, db_se
 
     result = data["results"][0]
     mock_analyze.assert_called()
-    check_processing_only_item_result_structure(result, "video", mock_analysis_text, "mock-llm")
+    check_processing_only_item_result_structure(result, "video", mock_analysis_text, "mock_llm")
 
 
 @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.analyze")
@@ -1036,7 +1040,7 @@ def test_process_document_with_analysis_mocked(mock_analyze, test_api_client, db
     form_data_dict = create_add_media_form_data(
         perform_analysis=True,
         perform_chunking=True,  # Default for documents is recursive, which is fine
-        api_name="mock-llm",
+        api_name="mock_llm",
         api_key="mock_key",
         chunk_method="sentences"  # Example specific override if needed
     )
@@ -1062,7 +1066,7 @@ def test_process_document_with_analysis_mocked(mock_analyze, test_api_client, db
 
     result = data["results"][0]
     mock_analyze.assert_called()
-    check_processing_only_item_result_structure(result, "document", mock_analysis_text, "mock-llm")
+    check_processing_only_item_result_structure(result, "document", mock_analysis_text, "mock_llm")
 
 
 # ##################################################################################################################
