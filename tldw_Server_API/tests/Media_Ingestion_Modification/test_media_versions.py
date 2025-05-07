@@ -2,6 +2,7 @@
 # Description: This file contains tests for the media versioning endpoints.
 #
 # Imports
+import sys
 import time
 import uuid
 import pytest
@@ -9,11 +10,10 @@ import pytest
 # Third-party Libraries
 from fastapi.testclient import TestClient
 from fastapi import status # Use status codes from fastapi
-
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
 #
 # Local Imports
 # --- Use Main App Instance ---
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
 from tldw_Server_API.app.main import app as fastapi_app_instance, app
     # Import specific DB functions used directly in tests/fixtures
 from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import (
@@ -830,6 +830,7 @@ class TestSecurityAndPerformance:
         # Expect validation error due to non-integer page
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
+    @pytest.mark.skipif(sys.platform.startswith("win"), reason="Skipping on Windows due to PermissionError during teardown (DB file lock issue)")
     def test_content_type_enforcement_json(self, seeded_document_media):
         """Test that endpoints expecting JSON reject incorrect Content-Type."""
         # Use an endpoint that expects JSON (e.g., create version)

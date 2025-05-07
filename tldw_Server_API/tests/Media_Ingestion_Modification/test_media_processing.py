@@ -7,6 +7,7 @@ import hashlib
 import os
 import sqlite3
 import sys
+import uuid
 from pathlib import Path
 import time
 import json # Added for potential debugging
@@ -175,6 +176,58 @@ def client(db_instance_session_proc, override_auth_proc):
     # Cleanup overrides after all tests in the module run
     app.dependency_overrides.clear()
     logger.info("--- TestClient (Processing) DB and Auth overrides cleared ---")
+
+
+# --- Define the factory directly in the test file for isolation ---
+@pytest.fixture(scope="function")  # Function scope for the factory itself, so each test gets a fresh one if needed
+def memory_db_factory_local():  # Using a different name to avoid conflicts if one exists elsewhere
+    """
+    Factory fixture that provides a function to create
+    new, isolated in-memory Database instances for TestDocumentVersioningV2.
+    """
+    created_db_instances = []
+
+    def _create_db(client_id_prefix: str = "mem_db_client_v2"):
+        generated_uuid_str = str(uuid.uuid4())  # Direct UUID generation
+        unique_client_id = f"{client_id_prefix}_{generated_uuid_str}"
+
+        db_instance = Database(db_path=":memory:", client_id=unique_client_id)
+
+        try:
+            with db_instance.get_connection() as conn:
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("SELECT 1 FROM media_fts LIMIT 1")
+                except sqlite3.OperationalError as e:
+                    if "no such table" in str(e).lower():
+                        logging.warning(
+                            f"FTS tables not found for {db_instance.db_path_str} (client: {unique_client_id}), attempting to create.")
+                        if hasattr(Database, '_FTS_TABLES_SQL') and Database._FTS_TABLES_SQL:
+                            conn.executescript(Database._FTS_TABLES_SQL)
+                            logging.info(
+                                f"FTS tables created for {db_instance.db_path_str} (client: {unique_client_id}).")
+                        else:
+                            logging.error(
+                                "Database._FTS_TABLES_SQL is not defined or is empty. Cannot create FTS tables.")
+                            pytest.fail("Cannot create FTS tables: _FTS_TABLES_SQL is missing or empty.")
+                    else:
+                        raise
+        except Exception as schema_exc:
+            logging.error(
+                f"Failed to ensure schema for {db_instance.db_path_str} (client: {unique_client_id}): {schema_exc}",
+                exc_info=True)
+            pytest.fail(f"Schema creation failed for in-memory DB: {schema_exc}")
+
+        created_db_instances.append(db_instance)
+        return db_instance
+
+    yield _create_db  # The fixture yields the creator function
+
+    for db in created_db_instances:
+        if hasattr(db, 'close_all_connections'):
+            db.close_all_connections()
+        elif hasattr(db, 'close_connection'):
+            db.close_connection()
 
 
 # --- Helper Functions ---
@@ -1098,23 +1151,10 @@ class TestProcessDocuments:
 class TestDocumentVersioningV2:
 
     @pytest.fixture
-    def db_instance(self, memory_db_factory):
+    def db_instance(self, memory_db_factory_local):  # <--- Use the locally defined factory
         """Provides a fresh in-memory DB for each test in this class."""
-        db = memory_db_factory("versioning_client")
-        # Ensure FTS tables exist for tests that might need them
-        try:
-             db.execute_query("SELECT 1 FROM media_fts LIMIT 1")
-        except sqlite3.OperationalError as e:
-             if "no such table" in str(e):
-                  logging.warning("FTS tables not found, attempting to create for test.")
-                  try:
-                       db.execute_query(Database._FTS_TABLES_SQL, commit=True) # Use the schema definition
-                       logging.info("FTS tables created for test.")
-                  except Exception as fts_e:
-                       logging.error(f"Failed to create FTS tables for test: {fts_e}")
-                       pytest.fail(f"FTS table creation failed: {fts_e}")
-             else:
-                  raise # Re-raise other operational errors
+        # The FTS creation is now handled inside _create_db by the factory
+        db = memory_db_factory_local("versioning_client_v2")
         return db
 
     # === Test Document Version Creation (implicitly tested by add_media_with_keywords) ===
