@@ -348,7 +348,7 @@ def parse_and_expand_urls(urls):
                 expanded_urls.append(full_url)
 
             # Vimeo handling
-            elif 'vimeo.com' in parsed_url.netloc:
+            elif 'http://vimeo.com' or 'https://vimeo.com' or 'https://wwww.vimeo.com' in parsed_url.netloc:
                 video_id = parsed_url.path.lstrip('/')
                 full_url = f'https://vimeo.com/{video_id}'
                 logging.info(f"Processed Vimeo URL: {full_url}")

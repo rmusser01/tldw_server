@@ -25,7 +25,7 @@ import uuid
 from datetime import datetime
 from math import ceil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Callable, Literal, Union, Set
+from typing import Any, Dict, List, Optional, Tuple, Callable, Literal, Union, Set, Coroutine
 from urllib.parse import urlparse
 #
 # 3rd-party imports
@@ -92,6 +92,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files impor
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib import process_epub
 from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib import process_pdf_task
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files import process_document_content
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import FileValidator
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import process_videos
 #
 # Document Processing
@@ -1315,15 +1316,22 @@ def _validate_inputs(media_type: MediaType, urls: Optional[List[str]], files: Op
 async def _save_uploaded_files(
     files: List[UploadFile],
     temp_dir: Path,
-    allowed_extensions: Optional[List[str]] = None # <-- Added optional argument
+    validator: FileValidator,
+    expected_media_type_key: Optional[str] = None,
+    allowed_extensions: Optional[List[str]] = None
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
+    """
+    Saves uploaded files to a temporary directory, validating them.
+    Requires a FileValidator instance.
+    """
     """
     Saves uploaded files to a temporary directory, optionally filtering by extension.
 
     Args:
-        files: List of UploadFile objects from FastAPI.
-        temp_dir: The Path object representing the temporary directory to save files in.
-        allowed_extensions: An optional list of allowed file extensions (e.g., ['.epub', '.pdf']).
+        :param files: List of UploadFile objects from FastAPI.
+        :param temp_dir: The Path object representing the temporary directory to save files in.
+        :param expected_media_type_key: An optional key to check against the file's media type.
+        :param allowed_extensions: An optional list of allowed file extensions (e.g., ['.epub', '.pdf']).
                            Comparison is case-insensitive. If None, all files are attempted.
 
     Returns:
@@ -1952,7 +1960,6 @@ async def _process_document_like_item(
             if downloaded_path and isinstance(downloaded_path, Path) and downloaded_path.exists():
                  processing_filepath = downloaded_path
                  processing_filename = downloaded_path.name
-                 # --- FIX: Read bytes correctly for PDF ---
                  if media_type == 'pdf':
                      # Use aiofiles directly here since we have the path
                      async with aiofiles.open(processing_filepath, "rb") as f:
@@ -1968,7 +1975,6 @@ async def _process_document_like_item(
                  raise FileNotFoundError(f"Uploaded file path not found or is not a file: {processing_source}")
             processing_filepath = path_obj
             processing_filename = path_obj.name
-            # --- FIX: Read bytes correctly for PDF ---
             if media_type == 'pdf':
                  async with aiofiles.open(processing_filepath, "rb") as f: # Use processing_filepath here
                       file_bytes = await f.read()

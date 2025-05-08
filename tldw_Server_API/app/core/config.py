@@ -21,6 +21,7 @@ from pathlib import Path
 # Imports
 import os
 from pathlib import Path
+from typing import Optional
 
 # Imports from this project
 # Note: It's generally better practice to keep config simple and avoid
@@ -57,6 +58,11 @@ def load_settings():
     # Flag to indicate if the central Users DB is configured
     users_db_configured = os.getenv("USERS_DB_ENABLED", "false").lower() == "true"
     database_url = os.getenv("DATABASE_URL", f"sqlite:///{Path('./tldw_data/databases/tldw.db').resolve()}") # Example path
+
+    # --- File Validation/YARA Settings ---
+    YARA_RULES_PATH: Optional[str] = None # e.g., "/app/yara_rules/index.yar"
+    # For python-magic's magic file, if not in default location
+    MAGIC_FILE_PATH: Optional[str] = None
 
     # --- Logging ---
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
