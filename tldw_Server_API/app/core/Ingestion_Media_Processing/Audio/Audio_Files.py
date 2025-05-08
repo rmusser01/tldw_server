@@ -433,11 +433,20 @@ def process_audio_files(
                             update_progress("Warning: Chunking resulted in no text chunks.")
                             item_result.setdefault("warnings", [])
                             item_result["warnings"].append("Chunking process yielded no chunks.")
+                            # ---> Set to empty list if no chunks <---
+                            text_to_process_for_analysis = []
                         else:
                             update_progress(f"Chunking produced {len(generated_chunks)} chunk(s).")
                             item_result["chunks"] = generated_chunks
-                            # Assuming summarize needs list of strings for now
-                            text_to_process_for_analysis = [chunk.get('text', '') if isinstance(chunk, dict) else str(chunk) for chunk in generated_chunks]
+                            text_to_process_for_analysis = [
+                                chunk.get('text', '') for chunk in generated_chunks if chunk.get('text')
+                            ]
+                            # ---> Optional: Check if list contains only empty strings after extraction
+                            if not any(text_chunk for text_chunk in text_to_process_for_analysis):
+                                update_progress("Warning: Chunking resulted in chunks with empty text content.")
+                                item_result.setdefault("warnings", [])
+                                item_result["warnings"].append("Chunking process yielded empty text chunks.")
+                                text_to_process_for_analysis = []
                     except Exception as chunk_err:
                          err_msg = f"Chunking failed: {chunk_err}"
                          update_progress(err_msg)
@@ -447,46 +456,49 @@ def process_audio_files(
                          item_result["chunks"] = None
                 elif chunk_options:
                     update_progress("Chunking skipped (empty transcript).")
+                    text_to_process_for_analysis = []
                 else:
                     update_progress("Chunking not requested.")
-                    if text_to_process and text_to_process.strip():
-                         text_to_process_for_analysis = [text_to_process]
+                    # ---> Ensure list contains the full text if available <---
+                    text_to_process_for_analysis = [text_to_process] if text_to_process and text_to_process.strip() else []
 
-                    # 5. Analysis (Summarization) (if requested and text exists)
-                    if perform_analysis and api_name and api_name.lower() != "none" and text_to_process_for_analysis:
-                        update_progress(f"Starting analysis using API: {api_name}")
-                        try:
-                            analysis_result = analyze(
-                                api_name=api_name,
-                                input_data=text_to_process_for_analysis,
-                                custom_prompt_arg=custom_prompt_input,
-                                api_key=api_key,
-                                recursive_summarization=summarize_recursively,
-                                chunked_summarization=(generated_chunks is not None and len(
-                                    generated_chunks) > 1 and not summarize_recursively),
-                                temp=None,
-                                system_message=system_prompt_input
-                            )
-                            if isinstance(analysis_result, str) and analysis_result.startswith("Error:"):
-                                raise RuntimeError(analysis_result)
+                # 5. Analysis (Summarization) (if requested and text exists)
+                if perform_analysis and api_name and api_name.lower() != "none" and text_to_process_for_analysis:
+                    update_progress(f"Starting analysis using API: {api_name}")
+                    try:
+                        analysis_result = analyze(
+                            api_name=api_name,
+                            input_data=text_to_process_for_analysis,
+                            custom_prompt_arg=custom_prompt_input,
+                            api_key=api_key,
+                            recursive_summarization=summarize_recursively,
+                            chunked_summarization=(generated_chunks is not None and len(
+                                generated_chunks) > 1 and not summarize_recursively),
+                            temp=None,
+                            system_message=system_prompt_input
+                        )
+                        if isinstance(analysis_result, str) and analysis_result.startswith("Error:"):
+                            raise RuntimeError(analysis_result)
 
-                            item_result["analysis"] = analysis_result or "Analysis API returned no result."
-                            update_progress("Analysis completed.")
+                        item_result["analysis"] = analysis_result or "Analysis API returned no result."
+                        item_result["analysis_details"] = {"analysis_model": api_name}
+                        update_progress("Analysis completed.")
 
-                        except Exception as exc:
-                            err_msg = f"Analysis failed: {exc}"
-                            update_progress(err_msg)
-                            item_result["analysis"] = "[Analysis Failed]"
-                            item_result.setdefault("warnings", [])
-                            item_result["warnings"].append(f"Analysis error: {exc}")
-                    elif perform_analysis and (not api_name or api_name.lower() == "none"):
-                        item_result["analysis"] = "[Analysis Skipped: No API specified]"
-                        update_progress("Analysis skipped (no API name provided).")
-                    elif perform_analysis and not text_to_process_for_analysis:
-                        item_result["analysis"] = "[Analysis Skipped: No text content]"
-                        update_progress("Analysis skipped (no text found after transcription/chunking).")
-                    else:  # Analysis not requested
-                        item_result["analysis"] = "[Analysis Not Requested]"
+                    except Exception as exc:
+                        err_msg = f"Analysis failed: {exc}"
+                        update_progress(err_msg)
+                        item_result["analysis"] = "[Analysis Failed]"
+                        item_result.setdefault("warnings", [])
+                        item_result["warnings"].append(f"Analysis error: {exc}")
+                        item_result["analysis_details"] = {"error": err_msg, "api_used": api_name}
+                elif perform_analysis and (not api_name or api_name.lower() == "none"):
+                    item_result["analysis"] = "[Analysis Skipped: No API specified]"
+                    update_progress("Analysis skipped (no API name provided).")
+                elif perform_analysis and not text_to_process_for_analysis:
+                    item_result["analysis"] = "[Analysis Skipped: No text content]"
+                    update_progress("Analysis skipped (no text found after transcription/chunking).")
+                else:  # Analysis not requested
+                    item_result["analysis"] = "[Analysis Not Requested]"
 
 
                 # 6. Finalize Status for SUCCESS/WARNING case

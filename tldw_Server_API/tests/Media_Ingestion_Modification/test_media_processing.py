@@ -1142,7 +1142,7 @@ class TestProcessDocuments:
         assert mock_analysis_text in result["analysis"] # Check if mocked text is present
         assert result["chunks"] is not None and len(result["chunks"]) > 0
         # Check analysis_details
-        assert result["analysis_details"]["summarization_model"] == "mock_api"
+        assert result["analysis_details"]["analysis_model"] == "mock_api"
 
 
 # ============================================================

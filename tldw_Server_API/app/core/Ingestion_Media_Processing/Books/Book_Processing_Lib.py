@@ -490,7 +490,7 @@ def process_epub(
         "error": None,
         "warnings": [], # Initialize as list
         "analysis_details": { # Initialize
-            "summarization_model": api_name if perform_analysis else None,
+            "analysis_model": api_name if perform_analysis else None,
             "custom_prompt_used": custom_prompt if perform_analysis else None,
             "system_prompt_used": system_prompt if perform_analysis else None,
             "summarized_recursively": summarize_recursively if perform_analysis else False,
@@ -865,7 +865,7 @@ def _process_markup_or_plain_text(
         "metadata": {"title": None, "author": None, "raw": None}, "chunks": None,
         "analysis": None, "keywords": keywords or [], "error": None, "warnings": [],
         "analysis_details": { # Initialize
-            "summarization_model": api_name if perform_analysis else None,
+            "analysis_model": api_name if perform_analysis else None,
             "custom_prompt_used": custom_prompt if perform_analysis else None,
             "system_prompt_used": system_prompt if perform_analysis else None,
             "summarized_recursively": summarize_recursively if perform_analysis else False,

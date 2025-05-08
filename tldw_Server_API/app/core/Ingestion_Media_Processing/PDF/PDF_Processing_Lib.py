@@ -268,7 +268,7 @@ def process_pdf(
         "error": None,
         "warnings": [], # Initialize as list for easier appending
         "analysis_details": {
-            "summarization_model": api_name if perform_analysis else None,
+            "analysis_model": api_name if perform_analysis else None,
             "custom_prompt_used": custom_prompt if perform_analysis else None,
             "system_prompt_used": system_prompt if perform_analysis else None,
             "summarized_recursively": summarize_recursively if perform_analysis else False,

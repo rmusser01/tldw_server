@@ -247,7 +247,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
         "chunks": None,
         "analysis": None, # Renamed from summary
         "analysis_details": { # Initialize analysis details
-            "summarization_model": None, # Will be set if analysis happens
+            "analysis_model": None, # Will be set if analysis happens
             "custom_prompt_used": None,
             "system_prompt_used": None,
             "summarized_recursively": summarize_recursively if perform_analysis else False, # Store user's intent
@@ -339,7 +339,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
             logging.info(f"Analysis enabled for {len(processed_chunks)} chunks of {doc_path}.")
             log_counter("document_analysis_attempt", value=len(processed_chunks), labels={"file_path": str(doc_path), "api_name": api_name})
 
-            result["analysis_details"]["summarization_model"] = api_name
+            result["analysis_details"]["analysis_model"] = api_name
             result["analysis_details"]["custom_prompt_used"] = custom_prompt
             result["analysis_details"]["system_prompt_used"] = system_prompt
 
