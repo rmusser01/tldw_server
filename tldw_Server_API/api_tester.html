@@ -963,7 +963,7 @@
 
     </div>
 
-        <script>
+    <script>
         async function makeRequest(endpointId, method, pathTemplate, bodyType = 'json') {
             const baseUrl = document.getElementById('baseUrl').value;
             const apiKeyOrTokenValue = document.getElementById('apiKeyInput').value;
@@ -973,82 +973,81 @@
             responseEl.textContent = 'Loading...';
             curlEl.textContent = 'Generating...';
             console.log(`--- Request for ${endpointId} ---`);
+            console.log("Method:", method, "Path Template:", pathTemplate, "Body Type:", bodyType);
             console.log("API Key/Token from input:", apiKeyOrTokenValue);
 
-
             let path = pathTemplate;
-            const pathParams = {};
+            const pathParams = {}; // To store collected path params to avoid adding them to query
             let body = null;
             let headers = {}; // Initialize headers object
             const curlHeaderParts = [];
-            const curlFormParts = [];
+            const curlFormParts = []; // For -F options in cURL
 
+            // 1. Collect path parameters and substitute them into the path
             if (pathTemplate.includes('{')) {
                 pathTemplate.match(/{[a-zA-Z0-9_]+}/g)?.forEach(param => {
                     const paramName = param.substring(1, param.length - 1);
                     const inputEl = document.getElementById(endpointId + '_' + paramName);
                     if (inputEl && inputEl.value) {
                         path = path.replace(param, encodeURIComponent(inputEl.value));
-                        pathParams[paramName] = inputEl.value;
+                        pathParams[paramName] = inputEl.value; // Store it
+                    } else if (inputEl) { // Input element exists but is empty
+                        console.warn(`Path parameter '${paramName}' for endpoint '${endpointId}' is empty. Using empty string in path.`);
+                        path = path.replace(param, ""); // Replace with empty string, or handle as error
+                        pathParams[paramName] = "";
                     } else {
-                        console.error(`Missing path parameter ${paramName} for endpoint ${endpointId}`);
-                        responseEl.textContent = `Error: Missing path parameter ${paramName}`;
+                        console.error(`Missing input element for path parameter ${paramName} for endpoint ${endpointId}`);
+                        responseEl.textContent = `Error: Missing input for path parameter ${paramName}`;
                         return;
                     }
                 });
             }
 
             let fullUrl = baseUrl + path;
-            console.log("Initial fullUrl:", fullUrl);
+            console.log("Initial fullUrl (after path param substitution):", fullUrl);
 
-
-            // Set authentication headers
+            // 2. Set authentication headers
             if (apiKeyOrTokenValue) {
-                // Primary: Send X-API-KEY for single-user mode
                 headers['X-API-KEY'] = apiKeyOrTokenValue;
                 curlHeaderParts.push(`-H "X-API-KEY: ${apiKeyOrTokenValue.replace(/"/g, '\\"')}"`);
                 console.log("Set X-API-KEY header:", apiKeyOrTokenValue);
-
-                // Optional: For multi-user mode testing, you might also send Authorization Bearer
-                // headers['Authorization'] = `Bearer ${apiKeyOrTokenValue}`;
-                // curlHeaderParts.push(`-H "Authorization: Bearer ${apiKeyOrTokenValue.replace(/"/g, '\\"')}"`);
             } else {
-                console.warn("API Key/Token input is empty. No X-API-KEY or Authorization header will be sent.");
+                console.warn("API Key/Token input is empty. No X-API-KEY header will be sent.");
             }
 
+            // 3. Handle body/query parameters based on bodyType
             if (bodyType === 'query' || (method === 'GET' && bodyType !== 'none')) {
                 const params = new URLSearchParams();
                 const formElements = document.getElementById(endpointId).querySelectorAll('input, select, textarea');
                 formElements.forEach(el => {
                     if (el.id && el.id.startsWith(endpointId + '_')) {
                         const key = el.id.replace(endpointId + '_', '');
-                        if (pathParams[key]) return;
+                        if (pathParams[key]) return; // Skip if it was a path parameter
+
                         if (el.type === 'checkbox') {
                             if (el.checked) params.append(key, 'true');
+                            // else: do not append if unchecked (FastAPI bools default to False if not present)
                         } else if (el.type === 'file') {
-                            // skip
-                        } else if (el.value) { // MODIFIED: Only append if el.value is truthy (not empty string, not null, not undefined)
-                            body.append(key, el.value);
-                            curlFormParts.push(`-F "${key}=${el.value.replace(/"/g, '\\"')}"`);
-                        } else {
-                            // If el.value is empty string or null/undefined for optional fields, don't append.
-                            // This allows Pydantic model defaults (like Optional[str] = None) to take effect.
-                            console.log(`Skipping empty/null optional form field: ${key}`);
-                            // Optionally add a comment to cURL to show it was intentionally omitted
-                            if (el.value === "") { // Only comment if it was explicitly an empty string
-                                 curlFormParts.push(`# Optional field '${key}' was empty, not sent.`);
+                            // Files are not sent as query params
+                        } else if (el.tagName.toLowerCase() === 'select' && el.multiple) {
+                             for (const option of el.selectedOptions) {
+                                if (option.value) params.append(key, option.value);
                             }
+                        } else if (el.value) { // Only append if there's a value
+                            params.append(key, el.value);
                         }
+                        // If el.value is empty, it's not appended, allowing server defaults
                     }
-                    });
+                });
                 if (params.toString()) {
                     fullUrl += '?' + params.toString();
                 }
+                console.log("URL with query params:", fullUrl);
             } else if (bodyType === 'json') {
                 const payloadText = document.getElementById(endpointId + '_payload')?.value;
                 if (payloadText) {
                     try {
-                        body = JSON.parse(payloadText);
+                        body = JSON.parse(payloadText); // Keep as object for fetch
                         headers['Content-Type'] = 'application/json';
                         console.log("Set Content-Type header: application/json");
                     } catch (e) {
@@ -1061,10 +1060,12 @@
             } else if (bodyType === 'form') {
                 body = new FormData();
                 const formElements = document.getElementById(endpointId).querySelectorAll('input, select, textarea');
+
                 formElements.forEach(el => {
                     if (el.id && el.id.startsWith(endpointId + '_')) {
                         const key = el.id.replace(endpointId + '_', '');
-                        if (pathParams[key]) return;
+                        if (pathParams[key]) return; // Skip path params
+
                         if (el.type === 'file') {
                             if (el.files.length > 0) {
                                 for (let i = 0; i < el.files.length; i++) {
@@ -1077,33 +1078,43 @@
                             body.append(key, val);
                             curlFormParts.push(`-F "${key}=${val}"`);
                         } else if (el.tagName.toLowerCase() === 'textarea' && key === 'urls') {
-                            const urls = el.value.split('\n').map(u => u.trim()).filter(u => u); // Corrected split
+                            const urls = el.value.split('\n').map(u => u.trim()).filter(u => u);
                             urls.forEach(url => {
                                 body.append(key, url);
                                 curlFormParts.push(`-F "${key}=${url.replace(/"/g, '\\"')}"`);
                             });
-                        } else if (el.tagName.toLowerCase() === 'select' && el.value === "" && key === 'chunk_method') { // SPECIFICALLY for chunk_method with empty value
-                            // Do not append if it's the chunk_method select and its value is empty
-                            // This allows the Pydantic model's default (None) to be used.
-                            console.log(`Skipping empty chunk_method for FormData key: ${key}`);
-                            curlFormParts.push(`# chunk_method intentionally omitted to use Pydantic default (None)`);
-                        } else if (el.value || el.value === '') { // For other fields, send if value exists or is empty string
+                        } else if (el.tagName.toLowerCase() === 'select' && el.value === "" && (key === 'chunk_method' || key.endsWith('_chunk_method'))) {
+                             console.log(`Skipping empty valued select '${key}' for FormData to allow Pydantic default.`);
+                             curlFormParts.push(`# Optional select '${key}' was empty, not sent.`);
+                        } else if (el.tagName.toLowerCase() === 'select' && el.multiple) {
+                            for (const option of el.selectedOptions) {
+                                if (option.value) { // Only append if option has a value
+                                    body.append(key, option.value);
+                                    curlFormParts.push(`-F "${key}=${option.value.replace(/"/g, '\\"')}"`);
+                                }
+                            }
+                        } else if (el.value || (el.type === 'text' && el.value === '')) {
+                            // Send if value is truthy, OR if it's a text input and explicitly an empty string
+                            // This handles cases where an empty string is a valid submission for some text fields,
+                            // but for optional fields like start_time/end_time, Pydantic validator should handle empty strings if needed.
                             body.append(key, el.value);
                             curlFormParts.push(`-F "${key}=${el.value.replace(/"/g, '\\"')}"`);
+                        } else {
+                            // If el.value is empty for other types (e.g. number) and not explicitly handled, it won't be sent
+                             console.log(`Skipping form field with no value: ${key}`);
+                             if(el.value === "") curlFormParts.push(`# Optional field '${key}' was empty, not sent.`);
                         }
                     }
                 });
-                // For FormData, browser sets Content-Type with boundary.
-                // `headers` object should not have Content-Type for FormData.
-                // If 'Content-Type' was added for JSON and then bodyType is 'form', it needs to be removed.
-                // However, current logic path doesn't allow this overlap.
             }
 
+            // 4. Assemble cURL command
             let finalCurlCommandParts = [`curl -X ${method}`];
-            finalCurlCommandParts.push(...curlHeaderParts); // Auth headers first
+            finalCurlCommandParts.push(...curlHeaderParts); // Auth headers
 
             if (bodyType === 'json' && body) {
-                if (!curlHeaderParts.some(h => h.toLowerCase().includes('content-type: application/json'))) {
+                // Ensure Content-Type header for cURL if not already added via other logic
+                if (!finalCurlCommandParts.some(h => h.toLowerCase().includes('content-type: application/json'))) {
                     finalCurlCommandParts.push(`-H "Content-Type: application/json"`);
                 }
                 const payloadText = document.getElementById(endpointId + '_payload')?.value;
@@ -1117,8 +1128,9 @@
             finalCurlCommandParts.push(`"${fullUrl}"`);
             curlEl.textContent = finalCurlCommandParts.join(' \\\n    ');
             console.log("Final computed URL for fetch:", fullUrl);
-            console.log("Headers for fetch:", JSON.parse(JSON.stringify(headers))); // Deep copy for logging
+            console.log("Headers for fetch:", JSON.parse(JSON.stringify(headers)));
 
+            // 5. Make the fetch request
             try {
                 const fetchOptions = {
                     method: method,
@@ -1128,14 +1140,13 @@
                 if (method !== 'GET' && method !== 'HEAD' && body) {
                     fetchOptions.body = (bodyType === 'json' && body) ? JSON.stringify(body) : body;
                 }
-                console.log("Fetch options:", fetchOptions);
+                console.log("Fetch options being sent:", fetchOptions);
 
                 const res = await fetch(fullUrl, fetchOptions);
                 let responseData;
                 const contentTypeHeader = res.headers.get("content-type");
                 console.log("Response status:", res.status);
                 console.log("Response Content-Type header:", contentTypeHeader);
-
 
                 if (contentTypeHeader && contentTypeHeader.includes("application/json")) {
                     responseData = await res.json();
@@ -1146,14 +1157,14 @@
                 }
 
                 if (!res.ok) {
-                    console.error(`API Error ${res.status}:`, responseData);
+                    console.error(`API Error ${res.status} for ${endpointId}:`, responseData);
                 } else {
-                    console.log("API Success:", responseData);
+                    console.log(`API Success for ${endpointId}:`, responseData);
                 }
 
             } catch (error) {
                 responseEl.textContent = 'Network Error: ' + error.message;
-                console.error("Fetch/Network error:", error);
+                console.error(`Fetch/Network error for ${endpointId}:`, error);
             }
         }
     </script>

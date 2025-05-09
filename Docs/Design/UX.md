@@ -65,6 +65,7 @@ https://websiteheadlines.com/
 https://joseparreogarcia.substack.com/p/airbnb-ai-search-ranking-lessons
 https://piccalil.li/blog/how-to-write-error-messages-that-actually-help-users-rather-than-frustrate-them/
 https://docs.replit.com/replitai/agent
+https://news.ycombinator.com/item?id=43925732
 https://uxplanet.org/ui-design-with-chatgpt-4o-4d79b2a32008
 https://bolt.new/
 https://github.com/rmusser01/agentic_rag/tree/main
