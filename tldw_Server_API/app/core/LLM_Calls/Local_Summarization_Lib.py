@@ -54,13 +54,8 @@ summarizer_prompt = """
 
 def summarize_with_local_llm(input_data, custom_prompt_arg, temp, system_message=None, streaming=False):
     try:
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("Local LLM: Loading json data for summarization")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("openai: Using provided string data for summarization")
-            data = input_data
+        logging.debug("openai: Using provided string data for summarization")
+        data = input_data
 
         logging.debug(f"Local LLM: Loaded data: {data}")
         logging.debug(f"Local LLM: Type of data: {type(data)}")
@@ -179,14 +174,8 @@ def summarize_with_llama(input_data, custom_prompt, api_key=None, temp=None, sys
         logging.debug(f"Llama: Using API URL: {api_url}")
 
         # Load transcript
-        logging.debug("Llama.cpp: Loading JSON data")
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("Llama.cpp: Loading JSON data for summarization")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("Llama.cpp: Using provided string data for summarization")
-            data = input_data
+        logging.debug("Llama.cpp: Using provided string data for summarization")
+        data = input_data
 
         logging.debug(f"Llama.cpp Summarize: Loaded data: {data}")
         logging.debug(f"Llama.cpp Summarize: Type of data: {type(data)}")
@@ -354,13 +343,8 @@ def summarize_with_kobold(input_data, api_key, custom_prompt_input,  system_mess
 
         logging.debug(f"Kobold: Using API Key: {kobold_api_key[:5]}...{kobold_api_key[-5:]}")
 
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("Kobold.cpp: Loading json data for summarization")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("Kobold.cpp: Using provided string data for summarization")
-            data = input_data
+        logging.debug("Kobold.cpp: Using provided string data for summarization")
+        data = input_data
 
         logging.debug(f"Kobold.cpp: Loaded data: {data}")
         logging.debug(f"Kobold.cpp: Type of data: {type(data)}")
@@ -590,10 +574,6 @@ def summarize_with_oobabooga(input_data, api_key, custom_prompt, system_message=
                 except json.JSONDecodeError as e:
                     logging.error(f"Oobabooga: Error parsing JSON string: {str(e)}")
                     return f"Oobabooga: Error parsing JSON input: {str(e)}"
-            elif os.path.isfile(input_data):
-                logging.debug("Oobabooga: Loading JSON data from file")
-                with open(input_data, 'r') as file:
-                    data = json.load(file)
             else:
                 data = input_data
                 logging.debug("Oobabooga: Using provided string data")
@@ -791,13 +771,8 @@ def summarize_with_tabbyapi(
         logging.debug(f"TabbyAPI: Using API Key: {tabby_api_key[:5]}...{tabby_api_key[-5:] if tabby_api_key else 'None'}")
 
         # Process input data
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("TabbyAPI: Loading JSON data for summarization")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("TabbyAPI: Using provided data for summarization")
-            data = input_data
+        logging.debug("TabbyAPI: Using provided data for summarization")
+        data = input_data
 
         logging.debug(f"TabbyAPI: Loaded data: {data}")
         logging.debug(f"TabbyAPI: Type of data: {type(data)}")
@@ -982,10 +957,6 @@ def summarize_with_vllm(api_key, input_data, custom_prompt_arg, temp=None, syste
                 except json.JSONDecodeError as e:
                     logging.error(f"vLLM Summarize: Error parsing JSON string: {str(e)}")
                     return f"vLLM Summarize: Error parsing JSON input: {str(e)}"
-            elif os.path.isfile(input_data):
-                logging.debug("vLLM Summarize: Loading JSON data from file for summarization")
-                with open(input_data, 'r') as file:
-                    data = json.load(file)
             else:
                 logging.debug("vLLM Summarize: Using provided string data for summarization")
                 data = input_data
@@ -1458,10 +1429,6 @@ def summarize_with_custom_openai(api_key, input_data, custom_prompt_arg, temp=No
                     logging.error(f"Custom OpenAI API: Error parsing JSON string: {str(e)}")
                     data = input_data
                     pass
-            elif os.path.isfile(input_data):
-                logging.debug("Custom OpenAI API: Loading JSON data from file for summarization")
-                with open(input_data, 'r') as file:
-                    data = json.load(file)
             else:
                 logging.debug("Custom OpenAI API: Using provided string data for summarization")
                 data = input_data
@@ -1673,10 +1640,6 @@ def summarize_with_custom_openai_2(api_key, input_data, custom_prompt_arg, temp=
                     logging.error(f"Custom OpenAI API-2: Error parsing JSON string: {str(e)}")
                     data = input_data
                     pass
-            elif os.path.isfile(input_data):
-                logging.debug("Custom OpenAI API-2: Loading JSON data from file for summarization")
-                with open(input_data, 'r') as file:
-                    data = json.load(file)
             else:
                 logging.debug("Custom OpenAI API-2: Using provided string data for summarization")
                 data = input_data

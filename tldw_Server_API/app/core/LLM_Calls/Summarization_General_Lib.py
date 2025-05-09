@@ -710,13 +710,8 @@ def summarize_with_anthropic(api_key, input_data, custom_prompt_arg, temp=None, 
 
         logging.debug(f"Anthropic: Using API Key: {anthropic_api_key[:5]}...{anthropic_api_key[-5:]}")
 
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("AnthropicAI: Loading json data for summarization")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("AnthropicAI: Using provided string data for summarization")
-            data = input_data
+        logging.debug("AnthropicAI: Using provided string data for summarization")
+        data = input_data
 
         # DEBUG - Debug logging to identify sent data
         logging.debug(f"AnthropicAI: Loaded data: {str(data)[:500]}...(snipped to first 500 chars)")
@@ -913,13 +908,8 @@ def summarize_with_cohere(api_key, input_data, custom_prompt_arg, temp=None, sys
 
         logging.debug(f"Cohere: Using API Key: {cohere_api_key[:5]}...{cohere_api_key[-5:] if cohere_api_key else None}")
 
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("Cohere: Loading json data for summarization")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("Cohere: Using provided string data for summarization")
-            data = input_data
+        logging.debug("Cohere: Using provided string data for summarization")
+        data = input_data
 
         # DEBUG - Debug logging to identify sent data
         logging.debug(f"Cohere: Loaded data: {str(data)[:500]}...(snipped to first 500 chars)")
@@ -1098,13 +1088,8 @@ def summarize_with_groq(api_key, input_data, custom_prompt_arg, temp=None, syste
         logging.debug(f"Groq: Using API Key: {groq_api_key[:5]}...{groq_api_key[-5:]}")
 
         # Input data handling
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("Groq: Loading JSON data for summarization")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("Groq: Using provided string data for summarization")
-            data = input_data
+        logging.debug("Groq: Using provided string data for summarization")
+        data = input_data
 
         # Debug logging to identify sent data
         logging.debug(f"Groq: Loaded data: {str(data)[:500]}...(snipped to first 500 chars)")
@@ -1298,13 +1283,8 @@ def summarize_with_openrouter(api_key, input_data, custom_prompt_arg, temp=None,
 
     logging.debug(f"OpenRouter: Using Model: {openrouter_model}")
 
-    if isinstance(input_data, str) and os.path.isfile(input_data):
-        logging.debug("OpenRouter: Loading json data for summarization")
-        with open(input_data, 'r') as file:
-            data = json.load(file)
-    else:
-        logging.debug("OpenRouter: Using provided string data for summarization")
-        data = input_data
+    logging.debug("OpenRouter: Using provided string data for summarization")
+    data = input_data
 
     # DEBUG - Debug logging to identify sent data
     logging.debug(f"OpenRouter: Loaded data: {data[:500]}...(snipped to first 500 chars)")
@@ -1503,13 +1483,8 @@ def summarize_with_huggingface(api_key, input_data, custom_prompt_arg, temp=None
 
         logging.debug(f"HuggingFace: Using API Key: {huggingface_api_key[:5]}...{huggingface_api_key[-5:]}")
 
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("HuggingFace: Loading json data for summarization")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("HuggingFace: Using provided string data for summarization")
-            data = input_data
+        logging.debug("HuggingFace: Using provided string data for summarization")
+        data = input_data
 
         # DEBUG - Debug logging to identify sent data
         logging.debug(f"HuggingFace: Loaded data: {data[:500]}...(snipped to first 500 chars)")
@@ -1672,13 +1647,8 @@ def summarize_with_deepseek(api_key, input_data, custom_prompt_arg, temp=None, s
         logging.debug(f"DeepSeek: Using API Key: {deepseek_api_key[:5]}...{deepseek_api_key[-5:]}")
 
         # Input data handling
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("DeepSeek: Loading json data for summarization")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("DeepSeek: Using provided string data for summarization")
-            data = input_data
+        logging.debug("DeepSeek: Using provided string data for summarization")
+        data = input_data
 
         # DEBUG - Debug logging to identify sent data
         logging.debug(f"DeepSeek: Loaded data: {str(data)[:500]}...(snipped to first 500 chars)")
@@ -1849,13 +1819,8 @@ def summarize_with_mistral(api_key, input_data, custom_prompt_arg, temp=None, sy
         logging.debug(f"Mistral: Using API Key: {mistral_api_key[:5]}...{mistral_api_key[-5:]}")
 
         # Input data handling
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("Mistral: Loading json data for summarization")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("Mistral: Using provided string data for summarization")
-            data = input_data
+        logging.debug("Mistral: Using provided string data for summarization")
+        data = input_data
 
         # DEBUG - Debug logging to identify sent data
         logging.debug(f"Mistral: Loaded data: {str(data)[:500]}...(snipped to first 500 chars)")
@@ -2041,10 +2006,6 @@ def summarize_with_google(api_key, input_data, custom_prompt_arg, temp=None, sys
                 except json.JSONDecodeError as e:
                     logging.error(f"Google: Error parsing JSON string: {str(e)}")
                     return f"Google: Error parsing JSON input: {str(e)}"
-            elif os.path.isfile(input_data):
-                logging.debug("Google: Loading JSON data from file for summarization")
-                with open(input_data, 'r') as file:
-                    data = json.load(file)
             else:
                 logging.debug("Google: Using provided string data for summarization")
                 data = input_data

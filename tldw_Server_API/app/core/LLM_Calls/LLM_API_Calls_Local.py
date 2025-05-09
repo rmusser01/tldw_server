@@ -38,14 +38,8 @@ from tldw_Server_API.app.core.Utils.Utils import logging, extract_text_from_segm
 
 def chat_with_local_llm(input_data, custom_prompt_arg, temp, system_message=None, streaming=False, top_k=None, top_p=None, min_p=None):
     try:
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("Local LLM: Loading json data for Chat request")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("Local LLM: Using provided string data for Chat request")
-            data = input_data
-
+        logging.debug("Local LLM: Using provided string data for Chat request")
+        data = input_data
         logging.debug(f"Local LLM: Loaded data: {data}")
         logging.debug(f"Local LLM: Type of data: {type(data)}")
 
@@ -420,14 +414,8 @@ def chat_with_kobold(input_data, api_key, custom_prompt_input, temp=None, system
 
         kobold_max_tokens = int(loaded_config_data['kobold_api']['max_tokens'])
 
-        if isinstance(input_data, str) and os.path.isfile(input_data):
-            logging.debug("Kobold.cpp: Loading json data for summarization")
-            with open(input_data, 'r') as file:
-                data = json.load(file)
-        else:
-            logging.debug("Kobold.cpp: Using provided string data for summarization")
-            data = input_data
-
+        logging.debug("Kobold.cpp: Using provided string data for summarization")
+        data = input_data
         logging.debug(f"Kobold.cpp: Loaded data: {data}")
         logging.debug(f"Kobold.cpp: Type of data: {type(data)}")
 
