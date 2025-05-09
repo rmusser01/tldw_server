@@ -10,7 +10,7 @@ from fastapi.security import OAuth2PasswordBearer
 #######################################################################################################################
 #
 # Static Variables
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 #
 # Functions:
 

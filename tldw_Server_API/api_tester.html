@@ -37,11 +37,12 @@
             <h2>Global Settings</h2>
             <div class="form-group">
                 <label for="baseUrl">API Base URL:</label>
-                <input type="text" id="baseUrl" value="http://localhost:8000">
+                <input type="text" id="baseUrl" value="http://localhost:8000"> <!-- Adjust if your port is different -->
             </div>
             <div class="form-group">
-                <label for="authToken">Auth Token (Bearer):</label>
-                <input type="text" id="authToken" value="YOUR_TOKEN_HERE">
+                <label for="apiKeyInput">API Key (for X-API-KEY header in single-user mode):</label>
+                <input type="text" id="apiKeyInput" value="default-secret-key-for-single-user"><br>
+                <small>If your backend is in multi-user mode, this field might be used for a Bearer token (without "Bearer " prefix).</small>
             </div>
         </div>
 
@@ -91,7 +92,8 @@
     "author": "New Author (Optional)",
     "content": "New content for the media item (Optional). If provided, a new version will be created.",
     "prompt": "Prompt for new version (Optional, if content is updated)",
-    "analysis": "Analysis for new version (Optional, if content is updated)"
+    "analysis": "Analysis for new version (Optional, if content is updated)",
+    "keywords": ["new_keyword1", "new_keyword2"]
 }</textarea>
             </div>
             <button onclick="makeRequest('updateMediaItem', 'PUT', '/api/v1/media/{media_id}', 'json')">Send Request</button>
@@ -115,8 +117,8 @@
                             <option value="video">video</option>
                             <option value="document">document</option>
                             <option value="pdf">pdf</option>
-                            <option value="xml">xml</option>
-                            <option value="archive">archive</option>
+                            <!-- <option value="xml">xml</option> API doesn't list xml as a MediaType Literal -->
+                            <!-- <option value="archive">archive</option> API doesn't list archive as a MediaType Literal -->
                             <option value="ebook">ebook</option>
                         </select>
                     </div>
@@ -145,7 +147,7 @@
                     <h3>Processing Options</h3>
                      <div class="form-group checkbox-group">
                         <input type="checkbox" id="addMedia_overwrite_existing"> <label for="addMedia_overwrite_existing">Overwrite Existing</label><br>
-                        <input type="checkbox" id="addMedia_keep_original_file"> <label for="addMedia_keep_original_file">Keep Original File (if temp dir cleanup is off)</label><br>
+                        <input type="checkbox" id="addMedia_keep_original_file"> <label for="addMedia_keep_original_file">Keep Original File</label><br>
                         <input type="checkbox" id="addMedia_perform_analysis" checked> <label for="addMedia_perform_analysis">Perform Analysis</label><br>
                         <input type="checkbox" id="addMedia_use_cookies"> <label for="addMedia_use_cookies">Use Cookies (for URL download)</label><br>
                         <input type="checkbox" id="addMedia_diarize"> <label for="addMedia_diarize">Diarize (Audio/Video)</label><br>
@@ -205,11 +207,10 @@
                     <div class="form-group">
                         <label for="addMedia_pdf_parsing_engine">PDF Parsing Engine:</label>
                         <select id="addMedia_pdf_parsing_engine">
-                            <option value="pymupdf">pymupdf</option>
                             <option value="pymupdf4llm">pymupdf4llm</option>
-                            <option value="pdfminer">pdfminer</option>
-                            <option value="pdfplumber">pdfplumber</option>
                             <option value="pypdf">pypdf</option>
+                            <option value="pdfminer">pdfminer</option>
+                            <!-- Add other PdfEngine options from your model -->
                         </select>
                     </div>
                 </div>
@@ -223,13 +224,9 @@
                             <option value="">Default based on type</option>
                             <option value="sentences">sentences</option>
                             <option value="recursive">recursive</option>
-                            <option value="markdown">markdown</option>
-                            <option value="token">token</option>
-                            <option value="label">label</option>
                             <option value="chapter">chapter</option>
-                            <option value="page">page</option>
-                            <option value="fixed">fixed</option>
-                            <option value="semantic">semantic</option>
+                            <option value="token">token</option>
+                            <!-- Add other ChunkMethod options from your model -->
                         </select>
                     </div>
                      <div class="form-group">
@@ -268,8 +265,8 @@
                 <label for="createVersion_payload">Payload (VersionCreateRequest JSON):</label>
                 <textarea id="createVersion_payload">{
     "content": "Content for the new version.",
-    "prompt": "Prompt used for this version (optional).",
-    "analysis_content": "Analysis content for this version (optional)."
+    "prompt": "Prompt used for this version.",
+    "analysis_content": "Analysis content for this version."
 }</textarea>
             </div>
             <button onclick="makeRequest('createVersion', 'POST', '/api/v1/media/{media_id}/versions', 'json')">Send Request</button>
@@ -366,11 +363,10 @@
         <!-- POST /api/v1/media/process-videos -->
         <div class="endpoint-section" id="processVideos">
             <h2>POST /api/v1/media/process-videos - Process Videos (No DB)</h2>
-            <p>Similar to /add, but media_type is fixed to "video" and keep_original_file is false.</p>
-            <!-- Reuse structure from addMedia, but adapt IDs and values -->
+            <p>Media type is fixed to "video", keep_original_file is false.</p>
             <div class="columns">
                 <div class="column">
-                    <h3>Basic Info & Sources</h3>
+                    <h3>Sources & Info</h3>
                     <div class="form-group">
                         <label for="processVideos_urls">URLs (one per line):</label>
                         <textarea id="processVideos_urls" placeholder="https://example.com/video.mp4"></textarea>
@@ -462,7 +458,6 @@
                             <option value="sentences">sentences</option>
                             <option value="recursive">recursive</option>
                             <option value="token">token</option>
-                            <!-- Add other ChunkMethod options if applicable -->
                         </select>
                     </div>
                      <div class="form-group">
@@ -477,6 +472,10 @@
                         <label for="processVideos_chunk_overlap">Chunk Overlap:</label>
                         <input type="number" id="processVideos_chunk_overlap" value="200">
                     </div>
+                     <div class="form-group">
+                        <label for="processVideos_custom_chapter_pattern">Custom Chapter Pattern (Regex):</label>
+                        <input type="text" id="processVideos_custom_chapter_pattern">
+                    </div>
                 </div>
             </div>
             <button onclick="makeRequest('processVideos', 'POST', '/api/v1/media/process-videos', 'form')">Send Request</button>
@@ -489,11 +488,10 @@
         <!-- POST /api/v1/media/process-audios -->
         <div class="endpoint-section" id="processAudios">
             <h2>POST /api/v1/media/process-audios - Process Audios (No DB)</h2>
-            <p>Similar to /process-videos, but for audio files.</p>
-            <!-- Reuse structure from processVideos, just change IDs and potentially defaults -->
+            <p>Media type is fixed to "audio", keep_original_file is false.</p>
              <div class="columns">
                 <div class="column">
-                    <h3>Basic Info & Sources</h3>
+                    <h3>Sources & Info</h3>
                     <div class="form-group">
                         <label for="processAudios_urls">URLs (one per line):</label>
                         <textarea id="processAudios_urls" placeholder="https://example.com/audio.mp3"></textarea>
@@ -591,6 +589,10 @@
                         <label for="processAudios_chunk_overlap">Chunk Overlap:</label>
                         <input type="number" id="processAudios_chunk_overlap" value="200">
                     </div>
+                    <div class="form-group">
+                        <label for="processAudios_custom_chapter_pattern">Custom Chapter Pattern (Regex):</label>
+                        <input type="text" id="processAudios_custom_chapter_pattern">
+                    </div>
                 </div>
             </div>
             <button onclick="makeRequest('processAudios', 'POST', '/api/v1/media/process-audios', 'form')">Send Request</button>
@@ -603,9 +605,10 @@
         <!-- POST /api/v1/media/process-ebooks -->
         <div class="endpoint-section" id="processEbooks">
             <h2>POST /api/v1/media/process-ebooks - Process Ebooks (No DB)</h2>
+            <p>Media type is fixed to "ebook", keep_original_file is false.</p>
             <div class="columns">
                 <div class="column">
-                    <h3>Basic Info & Sources</h3>
+                    <h3>Sources & Info</h3>
                     <div class="form-group">
                         <label for="processEbooks_urls">URLs (one per line, .epub):</label>
                         <textarea id="processEbooks_urls"></textarea>
@@ -624,7 +627,7 @@
                     </div>
                     <div class="form-group">
                         <label for="processEbooks_keywords_str">Keywords (comma-separated):</label>
-                        <input type="text" id="processEbooks_keywords_str">
+                        <input type="text" id="processEbooks_keywords_str"> <!-- Note: model has keywords_str alias keywords -->
                     </div>
                      <div class="form-group">
                         <label for="processEbooks_extraction_method">Extraction Method:</label>
@@ -648,6 +651,7 @@
                             <option value="chapter">chapter</option>
                             <option value="recursive">recursive</option>
                             <option value="sentences">sentences</option>
+                            <option value="token">token</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -695,10 +699,10 @@
         <!-- POST /api/v1/media/process-documents -->
         <div class="endpoint-section" id="processDocuments">
             <h2>POST /api/v1/media/process-documents - Process Documents (No DB)</h2>
-            <!-- Similar structure to processEbooks, adjust specific fields like extraction_method -->
+            <p>Media type is fixed to "document", keep_original_file is false.</p>
              <div class="columns">
                 <div class="column">
-                    <h3>Basic Info & Sources</h3>
+                    <h3>Sources & Info</h3>
                     <div class="form-group">
                         <label for="processDocuments_urls">URLs (one per line, .txt, .docx, etc.):</label>
                         <textarea id="processDocuments_urls"></textarea>
@@ -717,7 +721,7 @@
                     </div>
                     <div class="form-group">
                         <label for="processDocuments_keywords_str">Keywords (comma-separated):</label>
-                        <input type="text" id="processDocuments_keywords_str">
+                        <input type="text" id="processDocuments_keywords_str"> <!-- Note: model has keywords_str alias keywords -->
                     </div>
                 </div>
                 <div class="column">
@@ -743,6 +747,10 @@
                     <div class="form-group">
                         <label for="processDocuments_chunk_overlap">Chunk Overlap:</label>
                         <input type="number" id="processDocuments_chunk_overlap" value="200">
+                    </div>
+                    <div class="form-group">
+                        <label for="processDocuments_custom_chapter_pattern">Custom Chapter Pattern (Regex):</label>
+                        <input type="text" id="processDocuments_custom_chapter_pattern">
                     </div>
                 </div>
             </div>
@@ -777,9 +785,10 @@
         <!-- POST /api/v1/media/process-pdfs -->
         <div class="endpoint-section" id="processPdfs">
             <h2>POST /api/v1/media/process-pdfs - Process PDFs (No DB)</h2>
+            <p>Media type is fixed to "pdf", keep_original_file is false.</p>
              <div class="columns">
                 <div class="column">
-                    <h3>Basic Info & Sources</h3>
+                    <h3>Sources & Info</h3>
                     <div class="form-group">
                         <label for="processPdfs_urls">URLs (one per line, .pdf):</label>
                         <textarea id="processPdfs_urls"></textarea>
@@ -798,16 +807,14 @@
                     </div>
                     <div class="form-group">
                         <label for="processPdfs_keywords">Keywords (comma-separated):</label>
-                        <input type="text" id="processPdfs_keywords">
+                        <input type="text" id="processPdfs_keywords"> <!-- Model alias `keywords` for `keywords_str` -->
                     </div>
                      <div class="form-group">
                         <label for="processPdfs_pdf_parsing_engine">PDF Parsing Engine:</label>
                         <select id="processPdfs_pdf_parsing_engine">
                             <option value="pymupdf4llm">pymupdf4llm</option>
-                            <option value="pymupdf">pymupdf</option>
-                            <option value="pdfminer">pdfminer</option>
-                            <option value="pdfplumber">pdfplumber</option>
                             <option value="pypdf">pypdf</option>
+                            <option value="pdfminer">pdfminer</option>
                         </select>
                     </div>
                 </div>
@@ -825,6 +832,7 @@
                             <option value="sentences">sentences</option>
                             <option value="recursive">recursive</option>
                             <option value="page">page</option>
+                            <option value="token">token</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -884,9 +892,9 @@
     "custom_prompt": "Summarize this briefly.",
     "system_prompt": "You are a concise summarizer.",
     "api_name": "openai",
-    "api_key": "YOUR_API_KEY_HERE_OR_NULL",
+    "api_key": null,
     "perform_translation": false,
-    "translation_language": "es",
+    "translation_language": "en",
     "perform_chunking": true,
     "chunk_method": "sentences",
     "chunk_size": 500,
@@ -899,9 +907,10 @@
     "use_cookies": false,
     "cookies": null,
     "perform_rolling_summarization": false,
-    "perform_confabulation_check_of_analysis": false
+    "perform_confabulation_check_of_analysis": false,
+    "custom_chapter_pattern": null
 }</textarea>
-                <small>Scrape Methods: individual, sitemap, url_level, recursive</small>
+                <small>Scrape Methods: individual, sitemap, url_level, recursive_scraping</small>
             </div>
             <button onclick="makeRequest('ingestWebContent', 'POST', '/api/v1/media/ingest-web-content', 'json')">Send Request</button>
             <h3>cURL Command:</h3>
@@ -917,16 +926,16 @@
                 <label for="processWebScraping_payload">Payload (WebScrapingRequest JSON):</label>
                 <textarea id="processWebScraping_payload">{
     "scrape_method": "Individual URLs",
-    "url_input": "https://example.com/article1\nhttps://example.com/article2",
+    "url_input": "https://example.com/article1\\nhttps://example.com/article2",
     "url_level": null,
     "max_pages": 10,
     "max_depth": 3,
     "summarize_checkbox": true,
     "custom_prompt": "Please summarize with bullet points only.",
     "api_name": "openai",
-    "api_key": "YOUR_API_KEY_HERE_OR_NULL",
+    "api_key": null,
     "keywords": "web, scraping, example",
-    "custom_titles": "Article 1 Title\nArticle 2 Title",
+    "custom_titles": "Article 1 Title\\nArticle 2 Title",
     "system_prompt": "You are a bulleted-notes specialist...",
     "temperature": 0.7,
     "custom_cookies": null,
@@ -954,153 +963,196 @@
 
     </div>
 
-    <script>
+        <script>
         async function makeRequest(endpointId, method, pathTemplate, bodyType = 'json') {
             const baseUrl = document.getElementById('baseUrl').value;
-            const token = document.getElementById('authToken').value;
+            const apiKeyOrTokenValue = document.getElementById('apiKeyInput').value;
             const responseEl = document.getElementById(endpointId + '_response');
             const curlEl = document.getElementById(endpointId + '_curl');
 
             responseEl.textContent = 'Loading...';
             curlEl.textContent = 'Generating...';
+            console.log(`--- Request for ${endpointId} ---`);
+            console.log("API Key/Token from input:", apiKeyOrTokenValue);
+
 
             let path = pathTemplate;
             const pathParams = {};
-            const queryParams = {};
             let body = null;
-            let headers = {
-                'Authorization': `Bearer ${token}`
-            };
+            let headers = {}; // Initialize headers object
+            const curlHeaderParts = [];
+            const curlFormParts = [];
 
-            // Collect path parameters
-            pathTemplate.match(/{[a-zA-Z0-9_]+}/g)?.forEach(param => {
-                const paramName = param.substring(1, param.length - 1);
-                const inputEl = document.getElementById(endpointId + '_' + paramName);
-                if (inputEl) {
-                    path = path.replace(param, inputEl.value);
-                    pathParams[paramName] = inputEl.value;
-                }
-            });
+            if (pathTemplate.includes('{')) {
+                pathTemplate.match(/{[a-zA-Z0-9_]+}/g)?.forEach(param => {
+                    const paramName = param.substring(1, param.length - 1);
+                    const inputEl = document.getElementById(endpointId + '_' + paramName);
+                    if (inputEl && inputEl.value) {
+                        path = path.replace(param, encodeURIComponent(inputEl.value));
+                        pathParams[paramName] = inputEl.value;
+                    } else {
+                        console.error(`Missing path parameter ${paramName} for endpoint ${endpointId}`);
+                        responseEl.textContent = `Error: Missing path parameter ${paramName}`;
+                        return;
+                    }
+                });
+            }
 
             let fullUrl = baseUrl + path;
-            const curlParts = [`curl -X ${method}`];
+            console.log("Initial fullUrl:", fullUrl);
 
-            if (bodyType === 'query' || method === 'GET' && bodyType !== 'none') { // GET with query params
-                const formElements = document.getElementById(endpointId).querySelectorAll('input, select, textarea');
+
+            // Set authentication headers
+            if (apiKeyOrTokenValue) {
+                // Primary: Send X-API-KEY for single-user mode
+                headers['X-API-KEY'] = apiKeyOrTokenValue;
+                curlHeaderParts.push(`-H "X-API-KEY: ${apiKeyOrTokenValue.replace(/"/g, '\\"')}"`);
+                console.log("Set X-API-KEY header:", apiKeyOrTokenValue);
+
+                // Optional: For multi-user mode testing, you might also send Authorization Bearer
+                // headers['Authorization'] = `Bearer ${apiKeyOrTokenValue}`;
+                // curlHeaderParts.push(`-H "Authorization: Bearer ${apiKeyOrTokenValue.replace(/"/g, '\\"')}"`);
+            } else {
+                console.warn("API Key/Token input is empty. No X-API-KEY or Authorization header will be sent.");
+            }
+
+            if (bodyType === 'query' || (method === 'GET' && bodyType !== 'none')) {
                 const params = new URLSearchParams();
+                const formElements = document.getElementById(endpointId).querySelectorAll('input, select, textarea');
                 formElements.forEach(el => {
-                    if (el.id && el.id.startsWith(endpointId + '_') && el.type !== 'file' && !pathParams[el.id.replace(endpointId + '_', '')]) {
-                         // Check if it's a path param, if so, skip
+                    if (el.id && el.id.startsWith(endpointId + '_')) {
                         const key = el.id.replace(endpointId + '_', '');
+                        if (pathParams[key]) return;
                         if (el.type === 'checkbox') {
                             if (el.checked) params.append(key, 'true');
+                        } else if (el.type === 'file') {
+                            // skip
                         } else if (el.value) {
-                            params.append(key, el.value);
+                             if (el.multiple && el.tagName.toLowerCase() === 'select') {
+                                for (const option of el.selectedOptions) {
+                                    params.append(key, option.value);
+                                }
+                            } else {
+                                params.append(key, el.value);
+                            }
                         }
                     }
                 });
                 if (params.toString()) {
                     fullUrl += '?' + params.toString();
                 }
-            }
-
-            if (bodyType === 'json') {
+            } else if (bodyType === 'json') {
                 const payloadText = document.getElementById(endpointId + '_payload')?.value;
                 if (payloadText) {
                     try {
-                        body = JSON.parse(payloadText); // Keep as object for fetch
+                        body = JSON.parse(payloadText);
                         headers['Content-Type'] = 'application/json';
-                        curlParts.push(`-H "Content-Type: application/json"`);
-                        curlParts.push(`-d '${payloadText.replace(/'/g, "'\\''")}'`); // Escape single quotes for curl
+                        console.log("Set Content-Type header: application/json");
                     } catch (e) {
                         responseEl.textContent = 'Error: Invalid JSON payload. ' + e.message;
+                        curlEl.textContent = 'Invalid JSON payload.';
+                        console.error("JSON parsing error:", e);
                         return;
                     }
                 }
             } else if (bodyType === 'form') {
                 body = new FormData();
                 const formElements = document.getElementById(endpointId).querySelectorAll('input, select, textarea');
-                const curlFormParts = [];
-
                 formElements.forEach(el => {
                     if (el.id && el.id.startsWith(endpointId + '_')) {
                         const key = el.id.replace(endpointId + '_', '');
+                        if (pathParams[key]) return;
                         if (el.type === 'file') {
                             if (el.files.length > 0) {
                                 for (let i = 0; i < el.files.length; i++) {
-                                    body.append(key, el.files[i], el.files[i].name); // FastAPI expects key, not files[]
-                                    curlFormParts.push(`-F "${key}=@${el.files[i].name}"`);
+                                    body.append(key, el.files[i], el.files[i].name);
+                                    curlFormParts.push(`-F "${key}=@${el.files[i].name.replace(/"/g, '\\"')}"`);
                                 }
                             }
                         } else if (el.type === 'checkbox') {
-                            body.append(key, el.checked ? 'true' : 'false');
-                             curlFormParts.push(`-F "${key}=${el.checked ? 'true' : 'false'}"`);
+                            const val = el.checked ? 'true' : 'false';
+                            body.append(key, val);
+                            curlFormParts.push(`-F "${key}=${val}"`);
                         } else if (el.tagName.toLowerCase() === 'textarea' && key === 'urls') {
-                            // Handle multi-line URLs for form data
-                            const urls = el.value.split('\\n').map(u => u.trim()).filter(u => u);
-                            urls.forEach(url => body.append(key, url));
-                             urls.forEach(url => curlFormParts.push(`-F "${key}=${url}"`));
-                        }
-                        else if (el.value) {
+                            const urls = el.value.split('\n').map(u => u.trim()).filter(u => u); // Corrected split
+                            urls.forEach(url => {
+                                body.append(key, url);
+                                curlFormParts.push(`-F "${key}=${url.replace(/"/g, '\\"')}"`);
+                            });
+                        } else if (el.multiple && el.tagName.toLowerCase() === 'select'){
+                            for (const option of el.selectedOptions) {
+                                body.append(key, option.value);
+                                curlFormParts.push(`-F "${key}=${option.value.replace(/"/g, '\\"')}"`);
+                            }
+                        } else if (el.value || el.value === '') {
                             body.append(key, el.value);
                             curlFormParts.push(`-F "${key}=${el.value.replace(/"/g, '\\"')}"`);
-                        } else if (el.tagName.toLowerCase() === 'select' && !el.value && el.multiple) {
-                            // For multiple select, if nothing selected, don't append
-                        } else if (el.tagName.toLowerCase() === 'select' && el.value) { // single select
-                             body.append(key, el.value);
-                             curlFormParts.push(`-F "${key}=${el.value.replace(/"/g, '\\"')}"`);
                         }
                     }
                 });
-                if (curlFormParts.length > 0) {
-                    curlParts.push(curlFormParts.join(' '));
-                }
-                // Don't set Content-Type for FormData, browser does it with boundary
+                // For FormData, browser sets Content-Type with boundary.
+                // `headers` object should not have Content-Type for FormData.
+                // If 'Content-Type' was added for JSON and then bodyType is 'form', it needs to be removed.
+                // However, current logic path doesn't allow this overlap.
             }
 
-            curlParts.unshift(`-H "Authorization: Bearer ${token}"`);
-            curlParts.push(`"${fullUrl}"`);
-            curlEl.textContent = curlParts.join(' \\\n    ');
+            let finalCurlCommandParts = [`curl -X ${method}`];
+            finalCurlCommandParts.push(...curlHeaderParts); // Auth headers first
 
+            if (bodyType === 'json' && body) {
+                if (!curlHeaderParts.some(h => h.toLowerCase().includes('content-type: application/json'))) {
+                    finalCurlCommandParts.push(`-H "Content-Type: application/json"`);
+                }
+                const payloadText = document.getElementById(endpointId + '_payload')?.value;
+                if (payloadText) {
+                    finalCurlCommandParts.push(`-d '${payloadText.replace(/'/g, "'\\''")}'`);
+                }
+            } else if (bodyType === 'form') {
+                finalCurlCommandParts.push(...curlFormParts);
+            }
+
+            finalCurlCommandParts.push(`"${fullUrl}"`);
+            curlEl.textContent = finalCurlCommandParts.join(' \\\n    ');
+            console.log("Final computed URL for fetch:", fullUrl);
+            console.log("Headers for fetch:", JSON.parse(JSON.stringify(headers))); // Deep copy for logging
 
             try {
                 const fetchOptions = {
                     method: method,
                     headers: headers
                 };
+
                 if (method !== 'GET' && method !== 'HEAD' && body) {
                     fetchOptions.body = (bodyType === 'json' && body) ? JSON.stringify(body) : body;
                 }
+                console.log("Fetch options:", fetchOptions);
 
                 const res = await fetch(fullUrl, fetchOptions);
                 let responseData;
-                const contentType = res.headers.get("content-type");
-                if (contentType && contentType.includes("application/json")) {
+                const contentTypeHeader = res.headers.get("content-type");
+                console.log("Response status:", res.status);
+                console.log("Response Content-Type header:", contentTypeHeader);
+
+
+                if (contentTypeHeader && contentTypeHeader.includes("application/json")) {
                     responseData = await res.json();
+                    responseEl.textContent = `Status: ${res.status}\n\n` + JSON.stringify(responseData, null, 2);
                 } else {
                     responseData = await res.text();
+                    responseEl.textContent = `Status: ${res.status}\n\n` + responseData;
                 }
 
-                if (res.ok) {
-                    responseEl.textContent = `Status: ${res.status}\n\n` +
-                                           (typeof responseData === 'object' ? JSON.stringify(responseData, null, 2) : responseData);
+                if (!res.ok) {
+                    console.error(`API Error ${res.status}:`, responseData);
                 } else {
-                    responseEl.textContent = `Error: ${res.status} ${res.statusText}\n\n` +
-                                           (typeof responseData === 'object' ? JSON.stringify(responseData, null, 2) : responseData);
+                    console.log("API Success:", responseData);
                 }
+
             } catch (error) {
                 responseEl.textContent = 'Network Error: ' + error.message;
+                console.error("Fetch/Network error:", error);
             }
         }
-
-        // Helper to auto-populate form fields from a Pydantic model's schema for /add (example)
-        // This is more advanced and might be overkill for "very simple"
-        /*
-        function populateFormFromSchema(endpointId, schema) {
-            // Example: iterate schema.properties and create inputs
-            // For AddMediaForm, this would be quite involved due to its size.
-        }
-        */
     </script>
 </body>
 </html>

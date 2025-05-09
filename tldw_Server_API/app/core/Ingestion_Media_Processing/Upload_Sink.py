@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Set, Union, Tuple
 #
 # 3rd-party Libraries
-import magic
+import puremagic
 import yara
 import zipfile
 #
@@ -140,7 +140,7 @@ EXT_TO_MEDIA_TYPE_KEY = {
 
 class FileValidator:
     def __init__(self, yara_rules_path: Optional[str] = None, custom_media_configs: Optional[Dict] = None):
-        self.magic_available = bool(magic)
+        self.magic_available = bool(puremagic)
         self.yara_available = bool(yara)
         self.zipfile_available = bool(zipfile)
 
@@ -263,7 +263,7 @@ class FileValidator:
         detected_mime_type: Optional[str] = None
         if self.magic_available:
             try:
-                detected_mime_type = magic.from_file(str(current_file_path), mime=True)
+                detected_mime_type = puremagic.from_file(str(current_file_path), mime=True)
                 if final_allowed_mimetypes:
                     if detected_mime_type not in final_allowed_mimetypes:
                         issues.append(
@@ -272,8 +272,6 @@ class FileValidator:
                 # TODO: Add more sophisticated MIME vs. Extension consistency check here if needed
                 # For example, if claimed_ext is '.jpg', ensure detected_mime_type is 'image/jpeg'.
                 # This requires a mapping. For now, relying on allowed_extensions and allowed_mimetypes.
-            except magic.MagicException as e:  # Catch specific magic errors
-                issues.append(f"Could not determine MIME type for {_original_filename}: {e}")
             except Exception as e:  # Catch other errors during MIME detection
                 issues.append(f"Unexpected error during MIME type detection for {_original_filename}: {e}")
 

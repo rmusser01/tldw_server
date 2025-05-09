@@ -1,15 +1,12 @@
 <div align="center">
 
-<h1>tldw server</h1>
+<h1>tldw</h1>
 
 [![License](https://img.shields.io/badge/license-apache2.0-green)](https://img.shields.io/badge/license-apache2.0-green)
 [![madewithlove](https://img.shields.io/badge/made_with-%E2%9D%A4-red?style=for-the-badge&labelColor=orange)](https://github.com/rmusser01/tldw) 
 
-<h3>Your Personal(or Team's) Research Assistant & Multi-Tool</h3>
+<h3>Your personal research multi-tool</h3>
 <h3>Download, Transcribe, Summarize/Analyze & then Chat with/about Videos, Audio, Documents, Web Articles, and Books.</h3>
-<h3>Chat with your ingested content using LLMs, and search across all of it.</h3>
-<h3>Interact with/Chat through the major local LLM APIs, and the major commercial LLM APIs.</h3>
-
 
 ## All Automated. All Local. All Yours.
 </div>

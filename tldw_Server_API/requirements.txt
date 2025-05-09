@@ -2,6 +2,7 @@ fastapi # FastAPI for building the API
 pydantic # FastAPI
 slowapi # For rate limiting in FastAPI
 uvicorn # ASGI server for FastAPI
-python-magic # File type detection
 redis # In-Memory Caching, Rate Limiting
 yara # File scanning
+puremagic # File type detection
+

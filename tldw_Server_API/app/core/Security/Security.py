@@ -27,7 +27,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30 # Default token expiration time
 
 # Check if the default secret key is being used and log a warning (important for production awareness)
 if SECRET_KEY == "a_very_insecure_default_secret_key_for_dev_only":
-    logging.warning("!!! SECURITY WARNING: Using default JWT_SECRET_KEY. Set a strong JWT_SECRET_KEY environment variable for production! !!!")
+    logging.warning("!!! SECURITY WARNING: Using default JWT_SECRET_KEY. Set a strong JWT_SECRET_KEY environment variable for production! !!! Unrelated to single-user mode.")
 
 # --- Password Hashing ---
 # CryptContext for password hashing using bcrypt

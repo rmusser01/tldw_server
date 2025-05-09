@@ -22,6 +22,7 @@ from pathlib import Path
 import os
 from pathlib import Path
 from typing import Optional
+import logging
 
 # Imports from this project
 # Note: It's generally better practice to keep config simple and avoid
@@ -61,11 +62,9 @@ def load_settings():
 
     # --- File Validation/YARA Settings ---
     YARA_RULES_PATH: Optional[str] = None # e.g., "/app/yara_rules/index.yar"
-    # For python-magic's magic file, if not in default location
-    MAGIC_FILE_PATH: Optional[str] = None
 
     # --- Logging ---
-    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_level = os.getenv("LOG_LEVEL", "I NFO").upper()
 
     # --- Build the Settings Dictionary ---
     config_dict = {
@@ -95,6 +94,8 @@ def load_settings():
     # --- Warnings (can be placed after dictionary creation) ---
     if config_dict["SINGLE_USER_MODE"] and config_dict["SINGLE_USER_API_KEY"] == "default-secret-key-for-single-user":
         print("!!! WARNING: Using default API_KEY for single-user mode. Set the API_KEY environment variable for security. !!!")
+        print("DEBUGPRING: Using default API_KEY for single-user mode: '{}'".format(config_dict["SINGLE_USER_API_KEY"]))
+        #logging.debug("DEBUGPRING: Using default API_KEY for single-user mode: {}".format(config_dict["SINGLE_USER_API_KEY"]))
     if not config_dict["SINGLE_USER_MODE"] and config_dict["JWT_SECRET_KEY"] == "a_very_insecure_default_secret_key_for_dev_only":
         print("!!! SECURITY WARNING: Using default JWT_SECRET_KEY in multi-user mode. Set a strong JWT_SECRET_KEY environment variable! !!!")
     if not config_dict["SINGLE_USER_MODE"] and not config_dict["USERS_DB_CONFIGURED"]:
