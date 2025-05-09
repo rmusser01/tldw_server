@@ -35,6 +35,10 @@ import logging
 # Client ID used by the Server API itself when writing to sync logs
 SERVER_CLIENT_ID = "SERVER_API_V1"
 
+# --- File Validation/YARA Settings ---
+YARA_RULES_PATH: Optional[str] = None # e.g., "/app/yara_rules/index.yar"
+MAGIC_FILE_PATH: Optional[str] = os.getenv("MAGIC_FILE_PATH", None) # e.g., "/app/magic.mgc"
+
 # --- Helper Function (Optional but can keep dictionary creation clean) ---
 def load_settings():
     """Loads all settings from environment variables or defaults into a dictionary."""
@@ -59,9 +63,6 @@ def load_settings():
     # Flag to indicate if the central Users DB is configured
     users_db_configured = os.getenv("USERS_DB_ENABLED", "false").lower() == "true"
     database_url = os.getenv("DATABASE_URL", f"sqlite:///{Path('./tldw_data/databases/tldw.db').resolve()}") # Example path
-
-    # --- File Validation/YARA Settings ---
-    YARA_RULES_PATH: Optional[str] = None # e.g., "/app/yara_rules/index.yar"
 
     # --- Logging ---
     log_level = os.getenv("LOG_LEVEL", "I NFO").upper()

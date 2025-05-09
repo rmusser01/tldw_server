@@ -194,6 +194,17 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
         "populate_by_name": True # Allows using 'alias' for fields
     }
 
+    @field_validator('start_time', 'end_time')
+    @classmethod
+    def check_time_format(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":  # MODIFIED: Treat empty string like None
+            return None  # Return None, which is valid for Optional[str]
+
+        # Example basic check: Allow seconds or HH:MM:SS format
+        if re.fullmatch(r'\d+', v) or re.fullmatch(r'\d{1,2}:\d{2}:\d{2}', v):
+            return v
+        raise ValueError("Time format must be seconds or HH:MM:SS")
+
     # Validator to ensure 'cookies' is provided if 'use_cookies' is True
     @field_validator('cookies')
     @classmethod
@@ -204,17 +215,6 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
             raise ValueError("Cookie string must be provided when 'use_cookies' is set to True.")
         return v
 
-    # Add validator for start/end time format
-    @field_validator('start_time', 'end_time')
-    @classmethod
-    def check_time_format(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        # Example basic check: Allow seconds or HH:MM:SS format
-        # Use raw strings (r'') for regex patterns
-        if re.fullmatch(r'\d+', v) or re.fullmatch(r'\d{1,2}:\d{2}:\d{2}', v):
-            return v
-        raise ValueError("Time format must be seconds or HH:MM:SS")
 
 class MediaItemProcessResponse(BaseModel):
     """

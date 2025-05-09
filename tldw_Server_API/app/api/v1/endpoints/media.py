@@ -23,10 +23,8 @@ import shutil
 import tempfile
 import uuid
 from datetime import datetime
-from math import ceil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Callable, Literal, Union, Set, Coroutine
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional, Tuple, Callable, Literal, Union, Set
 #
 # 3rd-party imports
 from fastapi import (
@@ -51,10 +49,6 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.responses import JSONResponse, Response
 
-from tldw_Server_API.app.api.v1 import schemas
-from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
-from tldw_Server_API.app.api.v1.schemas.media_response_models import PaginationInfo, MediaListResponse, MediaListItem, \
-    MediaDetailResponse, VersionDetailResponse
 #
 # Local Imports
 #
@@ -88,8 +82,11 @@ from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import (
     # check_should_process_by_url -> Needs replacement logic (likely using check_media_exists)
     # add_media_with_keywords -> db_instance.add_media_with_keywords(...)
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
+from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
+from tldw_Server_API.app.api.v1.schemas.media_response_models import PaginationInfo, MediaListResponse, MediaListItem, \
+    MediaDetailResponse, VersionDetailResponse
 # Media Processing
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import process_audio_files
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Books.Book_Processing_Lib import process_epub
 from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib import process_pdf_task
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files import process_document_content
@@ -442,8 +439,8 @@ async def get_media_item(
                             version_number=rv.get("version_number"),
                             created_at=created_at_dt, # Pass datetime object
                             prompt=rv.get("prompt"),
-                            analysis_content=rv.get("analysis_content")
-                            # content is None because include_content=False above
+                            analysis_content=rv.get("analysis_content"),
+                            content=None # Don't include content in the list
                         )
                     )
                 logger.debug(f"Fetched {len(doc_versions_list)} document versions for media ID {media_id}")
@@ -2322,7 +2319,7 @@ async def add_media(
             logger.info(f"Using temporary directory: {temp_dir_path}")
 
             # --- 4. Save Uploaded Files ---
-            saved_files_info, file_save_errors = await _save_uploaded_files(files or [], temp_dir_path, file_validator_instance)
+            saved_files_info, file_save_errors = await _save_uploaded_files(files or [], temp_dir_path, validator=file_validator_instance,)
             # Adapt file saving errors to the standard result format
             for err_info in file_save_errors:
                  results.append({
@@ -2478,7 +2475,7 @@ def get_process_videos_form(
     perform_rolling_summarization: bool = Form(False, description="Perform rolling summarization"),
     summarize_recursively: bool = Form(False, description="Perform recursive summarization"),
     # --- Keep Token and Files separate ---
-    token: str = Header(..., description="Authentication token"),  # TODO: Implement auth check
+    #token: str = Header(..., description="Authentication token"),  # Auth handled by get_db_for_user
     db=Depends(get_db_for_user)
 ) -> ProcessVideosForm:
     """
@@ -2604,7 +2601,7 @@ async def process_videos_endpoint(
         logger.info(f"Using temporary directory for /process-videos: {temp_dir}")
 
         # --- Save Uploads ---
-        saved_files_info, file_handling_errors_raw = await _save_uploaded_files(files or [], temp_dir, file_validator_instance)
+        saved_files_info, file_handling_errors_raw = await _save_uploaded_files(files or [], temp_dir, validator=file_validator_instance,)
 
         # --- Populate the temp path to original name map ---
         for sf in saved_files_info:
@@ -3006,7 +3003,7 @@ async def process_audios_endpoint(
         saved_files, file_errors_raw = await _save_uploaded_files(
             files or [],
             temp_dir_path,
-            file_validator_instance,
+            validator=file_validator_instance,
             allowed_extensions=ALLOWED_AUDIO_EXTENSIONS # Pass allowed extensions
         )
 
@@ -3506,7 +3503,7 @@ async def process_ebooks_endpoint(
                 saved_files, upload_errors = await _save_uploaded_files(
                     files,
                     temp_dir,
-                    file_validator_instance,
+                    validator=file_validator_instance,
                     allowed_extensions=[".epub"]
                 )
                 # Add file saving/validation errors to batch_result
@@ -3905,7 +3902,7 @@ async def process_documents_endpoint(
             saved_files, upload_errors = await _save_uploaded_files(
                 files,
                 temp_dir,
-                file_validator_instance,
+                validator=file_validator_instance,
                 allowed_extensions=ALLOWED_DOC_EXTENSIONS
             )
             # Add file saving/validation errors to batch_result
@@ -4394,8 +4391,9 @@ async def process_pdfs_endpoint(
         # Handle Uploads (read bytes directly)
         if files:
             saved_files, upload_errors = await _save_uploaded_files(
-                Path(temp_dir),  # Need Path object
-                file_validator_instance,
+                files,
+                temp_dir=Path(temp_dir),  # Need Path object
+                validator=file_validator_instance,
                 allowed_extensions=ALLOWED_PDF_EXTENSIONS
             )
 

@@ -1,5 +1,5 @@
 # tldw_Server_API/app/api/v1/API_Deps/validation_deps.py
-from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.config import settings, MAGIC_FILE_PATH, YARA_RULES_PATH
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import FileValidator
 from tldw_Server_API.app.core.Utils.Utils import logging # Your logger
 #
@@ -7,7 +7,7 @@ from tldw_Server_API.app.core.Utils.Utils import logging # Your logger
 #
 #
 # Configure python-magic if a custom magic file path is provided
-if settings.MAGIC_FILE_PATH:
+if MAGIC_FILE_PATH:
     try:
         import magic
         magic.Magic(magic_file=settings.MAGIC_FILE_PATH) # This call might affect global state for magic
@@ -17,7 +17,7 @@ if settings.MAGIC_FILE_PATH:
 
 
 file_validator_instance = FileValidator(
-    yara_rules_path=settings.YARA_RULES_PATH,
+    yara_rules_path=YARA_RULES_PATH,
     # custom_media_configs can be loaded from settings too if needed
 )
 

@@ -209,7 +209,7 @@
                         <select id="addMedia_pdf_parsing_engine">
                             <option value="pymupdf4llm">pymupdf4llm</option>
                             <option value="pypdf">pypdf</option>
-                            <option value="pdfminer">pdfminer</option>
+                            <option value="docling">docling</option>
                             <!-- Add other PdfEngine options from your model -->
                         </select>
                     </div>
@@ -1027,17 +1027,20 @@
                             if (el.checked) params.append(key, 'true');
                         } else if (el.type === 'file') {
                             // skip
-                        } else if (el.value) {
-                             if (el.multiple && el.tagName.toLowerCase() === 'select') {
-                                for (const option of el.selectedOptions) {
-                                    params.append(key, option.value);
-                                }
-                            } else {
-                                params.append(key, el.value);
+                        } else if (el.value) { // MODIFIED: Only append if el.value is truthy (not empty string, not null, not undefined)
+                            body.append(key, el.value);
+                            curlFormParts.push(`-F "${key}=${el.value.replace(/"/g, '\\"')}"`);
+                        } else {
+                            // If el.value is empty string or null/undefined for optional fields, don't append.
+                            // This allows Pydantic model defaults (like Optional[str] = None) to take effect.
+                            console.log(`Skipping empty/null optional form field: ${key}`);
+                            // Optionally add a comment to cURL to show it was intentionally omitted
+                            if (el.value === "") { // Only comment if it was explicitly an empty string
+                                 curlFormParts.push(`# Optional field '${key}' was empty, not sent.`);
                             }
                         }
                     }
-                });
+                    });
                 if (params.toString()) {
                     fullUrl += '?' + params.toString();
                 }
