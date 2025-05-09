@@ -105,6 +105,7 @@ async def create_chat_completion(
     # --- Get API Key for the Target Provider ---
     current_api_key = API_KEYS.get(target_endpoint.lower())
     # Allow providers without keys (like some local LLMs)
+    # FIXME
     # if not current_api_key and target_endpoint.lower() not in ["llama.cpp", "local-llm", "ooba"]: # Add other keyless providers if needed
     is_key_required = target_endpoint.lower() not in ["llama.cpp", "local-llm", "ooba", "tabbyapi", "kobold"] # Example: List providers potentially not needing a key
     if not current_api_key and is_key_required:
