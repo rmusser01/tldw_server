@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple API Frontend</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 1000px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        .endpoint-section { border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; border-radius: 5px; background-color: #fff; }
+        .endpoint-section h2 { margin-top: 0; color: #007bff; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+        .endpoint-section h3 { margin-top: 15px; color: #555; }
+        label { display: block; margin-top: 10px; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="number"], input[type="password"], textarea, select {
+            width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px;
+            box-sizing: border-box;
+        }
+        textarea { min-height: 80px; resize: vertical; }
+        button {
+            background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px;
+            cursor: pointer; font-size: 16px; transition: background-color 0.3s ease;
+        }
+        button:hover { background-color: #0056b3; }
+        pre { background-color: #e9e9e9; padding: 10px; border: 1px solid #ccc; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; }
+        .form-group { margin-bottom: 15px; }
+        .checkbox-group label { display: inline-block; margin-right: 10px; font-weight: normal;}
+        .checkbox-group input[type="checkbox"] { margin-right: 5px; }
+        .columns { display: flex; flex-wrap: wrap; gap: 20px; }
+        .column { flex: 1; min-width: 300px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>API Interaction Page</h1>
+
+        <div class="endpoint-section">
+            <h2>Global Settings</h2>
+            <div class="form-group">
+                <label for="baseUrl">API Base URL:</label>
+                <input type="text" id="baseUrl" value="http://localhost:8000">
+            </div>
+            <div class="form-group">
+                <label for="authToken">Auth Token (Bearer):</label>
+                <input type="text" id="authToken" value="YOUR_TOKEN_HERE">
+            </div>
+        </div>
+
+        <!-- GET /api/v1/media/ -->
+        <div class="endpoint-section" id="listAllMedia">
+            <h2>GET /api/v1/media/ - List All Media Items</h2>
+            <div class="form-group">
+                <label for="listAllMedia_page">Page:</label>
+                <input type="number" id="listAllMedia_page" value="1">
+            </div>
+            <div class="form-group">
+                <label for="listAllMedia_results_per_page">Results per page:</label>
+                <input type="number" id="listAllMedia_results_per_page" value="10">
+            </div>
+            <button onclick="makeRequest('listAllMedia', 'GET', '/api/v1/media/', 'query')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="listAllMedia_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="listAllMedia_response">---</pre>
+        </div>
+
+        <!-- GET /api/v1/media/{media_id} -->
+        <div class="endpoint-section" id="getMediaItem">
+            <h2>GET /api/v1/media/{media_id} - Get Media Item Details</h2>
+            <div class="form-group">
+                <label for="getMediaItem_media_id">Media ID:</label>
+                <input type="number" id="getMediaItem_media_id" value="1">
+            </div>
+            <button onclick="makeRequest('getMediaItem', 'GET', '/api/v1/media/{media_id}', 'none')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="getMediaItem_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="getMediaItem_response">---</pre>
+        </div>
+
+        <!-- PUT /api/v1/media/{media_id} -->
+        <div class="endpoint-section" id="updateMediaItem">
+            <h2>PUT /api/v1/media/{media_id} - Update Media Item</h2>
+            <div class="form-group">
+                <label for="updateMediaItem_media_id">Media ID:</label>
+                <input type="number" id="updateMediaItem_media_id" value="1">
+            </div>
+            <div class="form-group">
+                <label for="updateMediaItem_payload">Payload (MediaUpdateRequest JSON):</label>
+                <textarea id="updateMediaItem_payload">{
+    "title": "New Title (Optional)",
+    "author": "New Author (Optional)",
+    "content": "New content for the media item (Optional). If provided, a new version will be created.",
+    "prompt": "Prompt for new version (Optional, if content is updated)",
+    "analysis": "Analysis for new version (Optional, if content is updated)"
+}</textarea>
+            </div>
+            <button onclick="makeRequest('updateMediaItem', 'PUT', '/api/v1/media/{media_id}', 'json')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="updateMediaItem_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="updateMediaItem_response">---</pre>
+        </div>
+
+        <!-- POST /api/v1/media/add -->
+        <div class="endpoint-section" id="addMedia">
+            <h2>POST /api/v1/media/add - Add Media (URLs/Files)</h2>
+            <p>This is a complex endpoint. Fill relevant fields. Checkboxes are booleans.</p>
+            <div class="columns">
+                <div class="column">
+                    <h3>Basic Info & Sources</h3>
+                    <div class="form-group">
+                        <label for="addMedia_media_type">Media Type:</label>
+                        <select id="addMedia_media_type">
+                            <option value="audio">audio</option>
+                            <option value="video">video</option>
+                            <option value="document">document</option>
+                            <option value="pdf">pdf</option>
+                            <option value="xml">xml</option>
+                            <option value="archive">archive</option>
+                            <option value="ebook">ebook</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="addMedia_urls">URLs (one per line):</label>
+                        <textarea id="addMedia_urls" placeholder="https://example.com/video.mp4"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="addMedia_files">Files:</label>
+                        <input type="file" id="addMedia_files" multiple>
+                    </div>
+                     <div class="form-group">
+                        <label for="addMedia_title">Title (optional, for single item):</label>
+                        <input type="text" id="addMedia_title">
+                    </div>
+                    <div class="form-group">
+                        <label for="addMedia_author">Author (optional, for single item):</label>
+                        <input type="text" id="addMedia_author">
+                    </div>
+                    <div class="form-group">
+                        <label for="addMedia_keywords">Keywords (comma-separated):</label>
+                        <input type="text" id="addMedia_keywords">
+                    </div>
+                </div>
+                <div class="column">
+                    <h3>Processing Options</h3>
+                     <div class="form-group checkbox-group">
+                        <input type="checkbox" id="addMedia_overwrite_existing"> <label for="addMedia_overwrite_existing">Overwrite Existing</label><br>
+                        <input type="checkbox" id="addMedia_keep_original_file"> <label for="addMedia_keep_original_file">Keep Original File (if temp dir cleanup is off)</label><br>
+                        <input type="checkbox" id="addMedia_perform_analysis" checked> <label for="addMedia_perform_analysis">Perform Analysis</label><br>
+                        <input type="checkbox" id="addMedia_use_cookies"> <label for="addMedia_use_cookies">Use Cookies (for URL download)</label><br>
+                        <input type="checkbox" id="addMedia_diarize"> <label for="addMedia_diarize">Diarize (Audio/Video)</label><br>
+                        <input type="checkbox" id="addMedia_timestamp_option" checked> <label for="addMedia_timestamp_option">Timestamp Option (Audio/Video)</label><br>
+                        <input type="checkbox" id="addMedia_vad_use"> <label for="addMedia_vad_use">VAD Use (Audio/Video)</label><br>
+                        <input type="checkbox" id="addMedia_perform_confabulation_check_of_analysis"> <label for="addMedia_perform_confabulation_check_of_analysis">Confabulation Check</label><br>
+                        <input type="checkbox" id="addMedia_perform_chunking" checked> <label for="addMedia_perform_chunking">Perform Chunking</label><br>
+                        <input type="checkbox" id="addMedia_use_adaptive_chunking"> <label for="addMedia_use_adaptive_chunking">Use Adaptive Chunking</label><br>
+                        <input type="checkbox" id="addMedia_use_multi_level_chunking"> <label for="addMedia_use_multi_level_chunking">Use Multi-Level Chunking</label><br>
+                        <input type="checkbox" id="addMedia_perform_rolling_summarization"> <label for="addMedia_perform_rolling_summarization">Perform Rolling Summarization</label><br>
+                        <input type="checkbox" id="addMedia_summarize_recursively"> <label for="addMedia_summarize_recursively">Summarize Recursively</label>
+                    </div>
+                </div>
+            </div>
+            <div class="columns">
+                 <div class="column">
+                    <h3>Prompts & API</h3>
+                    <div class="form-group">
+                        <label for="addMedia_custom_prompt">Custom Prompt:</label>
+                        <textarea id="addMedia_custom_prompt"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="addMedia_system_prompt">System Prompt:</label>
+                        <textarea id="addMedia_system_prompt"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="addMedia_api_name">API Name (for analysis):</label>
+                        <input type="text" id="addMedia_api_name">
+                    </div>
+                    <div class="form-group">
+                        <label for="addMedia_api_key">API Key (for analysis):</label>
+                        <input type="password" id="addMedia_api_key">
+                    </div>
+                    <div class="form-group">
+                        <label for="addMedia_cookies">Cookies (string, if use_cookies):</label>
+                        <input type="text" id="addMedia_cookies">
+                    </div>
+                </div>
+                <div class="column">
+                    <h3>Specific Media Settings</h3>
+                     <div class="form-group">
+                        <label for="addMedia_transcription_model">Transcription Model (Audio/Video):</label>
+                        <input type="text" id="addMedia_transcription_model" value="deepdml/faster-distil-whisper-large-v3.5">
+                    </div>
+                    <div class="form-group">
+                        <label for="addMedia_transcription_language">Transcription Language (Audio/Video):</label>
+                        <input type="text" id="addMedia_transcription_language" value="en">
+                    </div>
+                     <div class="form-group">
+                        <label for="addMedia_start_time">Start Time (HH:MM:SS or secs, A/V):</label>
+                        <input type="text" id="addMedia_start_time">
+                    </div>
+                    <div class="form-group">
+                        <label for="addMedia_end_time">End Time (HH:MM:SS or secs, A/V):</label>
+                        <input type="text" id="addMedia_end_time">
+                    </div>
+                    <div class="form-group">
+                        <label for="addMedia_pdf_parsing_engine">PDF Parsing Engine:</label>
+                        <select id="addMedia_pdf_parsing_engine">
+                            <option value="pymupdf">pymupdf</option>
+                            <option value="pymupdf4llm">pymupdf4llm</option>
+                            <option value="pdfminer">pdfminer</option>
+                            <option value="pdfplumber">pdfplumber</option>
+                            <option value="pypdf">pypdf</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+             <div class="columns">
+                <div class="column">
+                    <h3>Chunking Details</h3>
+                     <div class="form-group">
+                        <label for="addMedia_chunk_method">Chunk Method:</label>
+                        <select id="addMedia_chunk_method">
+                            <option value="">Default based on type</option>
+                            <option value="sentences">sentences</option>
+                            <option value="recursive">recursive</option>
+                            <option value="markdown">markdown</option>
+                            <option value="token">token</option>
+                            <option value="label">label</option>
+                            <option value="chapter">chapter</option>
+                            <option value="page">page</option>
+                            <option value="fixed">fixed</option>
+                            <option value="semantic">semantic</option>
+                        </select>
+                    </div>
+                     <div class="form-group">
+                        <label for="addMedia_chunk_language">Chunk Language Override:</label>
+                        <input type="text" id="addMedia_chunk_language">
+                    </div>
+                    <div class="form-group">
+                        <label for="addMedia_chunk_size">Chunk Size:</label>
+                        <input type="number" id="addMedia_chunk_size" value="500">
+                    </div>
+                    <div class="form-group">
+                        <label for="addMedia_chunk_overlap">Chunk Overlap:</label>
+                        <input type="number" id="addMedia_chunk_overlap" value="200">
+                    </div>
+                     <div class="form-group">
+                        <label for="addMedia_custom_chapter_pattern">Custom Chapter Pattern (Regex):</label>
+                        <input type="text" id="addMedia_custom_chapter_pattern">
+                    </div>
+                </div>
+            </div>
+            <button onclick="makeRequest('addMedia', 'POST', '/api/v1/media/add', 'form')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="addMedia_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="addMedia_response">---</pre>
+        </div>
+
+        <!-- POST /api/v1/media/{media_id}/versions -->
+        <div class="endpoint-section" id="createVersion">
+            <h2>POST /api/v1/media/{media_id}/versions - Create Media Version</h2>
+            <div class="form-group">
+                <label for="createVersion_media_id">Media ID:</label>
+                <input type="number" id="createVersion_media_id" value="1">
+            </div>
+            <div class="form-group">
+                <label for="createVersion_payload">Payload (VersionCreateRequest JSON):</label>
+                <textarea id="createVersion_payload">{
+    "content": "Content for the new version.",
+    "prompt": "Prompt used for this version (optional).",
+    "analysis_content": "Analysis content for this version (optional)."
+}</textarea>
+            </div>
+            <button onclick="makeRequest('createVersion', 'POST', '/api/v1/media/{media_id}/versions', 'json')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="createVersion_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="createVersion_response">---</pre>
+        </div>
+
+        <!-- GET /api/v1/media/{media_id}/versions -->
+        <div class="endpoint-section" id="listVersions">
+            <h2>GET /api/v1/media/{media_id}/versions - List Media Versions</h2>
+            <div class="form-group">
+                <label for="listVersions_media_id">Media ID:</label>
+                <input type="number" id="listVersions_media_id" value="1">
+            </div>
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="listVersions_include_content"> <label for="listVersions_include_content">Include Content</label>
+            </div>
+            <div class="form-group">
+                <label for="listVersions_limit">Limit:</label>
+                <input type="number" id="listVersions_limit" value="10">
+            </div>
+            <div class="form-group">
+                <label for="listVersions_page">Page:</label>
+                <input type="number" id="listVersions_page" value="1">
+            </div>
+            <button onclick="makeRequest('listVersions', 'GET', '/api/v1/media/{media_id}/versions', 'query')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="listVersions_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="listVersions_response">---</pre>
+        </div>
+
+        <!-- GET /api/v1/media/{media_id}/versions/{version_number} -->
+        <div class="endpoint-section" id="getVersion">
+            <h2>GET /api/v1/media/{media_id}/versions/{version_number} - Get Specific Media Version</h2>
+            <div class="form-group">
+                <label for="getVersion_media_id">Media ID:</label>
+                <input type="number" id="getVersion_media_id" value="1">
+            </div>
+            <div class="form-group">
+                <label for="getVersion_version_number">Version Number:</label>
+                <input type="number" id="getVersion_version_number" value="1">
+            </div>
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="getVersion_include_content" checked> <label for="getVersion_include_content">Include Content</label>
+            </div>
+            <button onclick="makeRequest('getVersion', 'GET', '/api/v1/media/{media_id}/versions/{version_number}', 'query')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="getVersion_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="getVersion_response">---</pre>
+        </div>
+
+        <!-- DELETE /api/v1/media/{media_id}/versions/{version_number} -->
+        <div class="endpoint-section" id="deleteVersion">
+            <h2>DELETE /api/v1/media/{media_id}/versions/{version_number} - Soft Delete Media Version</h2>
+            <div class="form-group">
+                <label for="deleteVersion_media_id">Media ID:</label>
+                <input type="number" id="deleteVersion_media_id" value="1">
+            </div>
+            <div class="form-group">
+                <label for="deleteVersion_version_number">Version Number:</label>
+                <input type="number" id="deleteVersion_version_number" value="1">
+            </div>
+            <button onclick="makeRequest('deleteVersion', 'DELETE', '/api/v1/media/{media_id}/versions/{version_number}', 'none')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="deleteVersion_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="deleteVersion_response">---</pre>
+        </div>
+
+        <!-- POST /api/v1/media/{media_id}/versions/rollback -->
+        <div class="endpoint-section" id="rollbackVersion">
+            <h2>POST /api/v1/media/{media_id}/versions/rollback - Rollback to Media Version</h2>
+            <div class="form-group">
+                <label for="rollbackVersion_media_id">Media ID:</label>
+                <input type="number" id="rollbackVersion_media_id" value="1">
+            </div>
+            <div class="form-group">
+                <label for="rollbackVersion_payload">Payload (VersionRollbackRequest JSON):</label>
+                <textarea id="rollbackVersion_payload">{
+    "version_number": 1
+}</textarea>
+            </div>
+            <button onclick="makeRequest('rollbackVersion', 'POST', '/api/v1/media/{media_id}/versions/rollback', 'json')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="rollbackVersion_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="rollbackVersion_response">---</pre>
+        </div>
+
+        <!-- POST /api/v1/media/process-videos -->
+        <div class="endpoint-section" id="processVideos">
+            <h2>POST /api/v1/media/process-videos - Process Videos (No DB)</h2>
+            <p>Similar to /add, but media_type is fixed to "video" and keep_original_file is false.</p>
+            <!-- Reuse structure from addMedia, but adapt IDs and values -->
+            <div class="columns">
+                <div class="column">
+                    <h3>Basic Info & Sources</h3>
+                    <div class="form-group">
+                        <label for="processVideos_urls">URLs (one per line):</label>
+                        <textarea id="processVideos_urls" placeholder="https://example.com/video.mp4"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processVideos_files">Files:</label>
+                        <input type="file" id="processVideos_files" multiple>
+                    </div>
+                     <div class="form-group">
+                        <label for="processVideos_title">Title (optional):</label>
+                        <input type="text" id="processVideos_title">
+                    </div>
+                    <div class="form-group">
+                        <label for="processVideos_author">Author (optional):</label>
+                        <input type="text" id="processVideos_author">
+                    </div>
+                    <div class="form-group">
+                        <label for="processVideos_keywords">Keywords (comma-separated):</label>
+                        <input type="text" id="processVideos_keywords">
+                    </div>
+                </div>
+                <div class="column">
+                    <h3>Processing Options</h3>
+                     <div class="form-group checkbox-group">
+                        <input type="checkbox" id="processVideos_perform_analysis" checked> <label for="processVideos_perform_analysis">Perform Analysis</label><br>
+                        <input type="checkbox" id="processVideos_use_cookies"> <label for="processVideos_use_cookies">Use Cookies</label><br>
+                        <input type="checkbox" id="processVideos_diarize"> <label for="processVideos_diarize">Diarize</label><br>
+                        <input type="checkbox" id="processVideos_timestamp_option" checked> <label for="processVideos_timestamp_option">Timestamp Option</label><br>
+                        <input type="checkbox" id="processVideos_vad_use"> <label for="processVideos_vad_use">VAD Use</label><br>
+                        <input type="checkbox" id="processVideos_perform_confabulation_check_of_analysis"> <label for="processVideos_perform_confabulation_check_of_analysis">Confabulation Check</label><br>
+                        <input type="checkbox" id="processVideos_perform_chunking" checked> <label for="processVideos_perform_chunking">Perform Chunking</label><br>
+                        <input type="checkbox" id="processVideos_use_adaptive_chunking"> <label for="processVideos_use_adaptive_chunking">Adaptive Chunking</label><br>
+                        <input type="checkbox" id="processVideos_use_multi_level_chunking"> <label for="processVideos_use_multi_level_chunking">Multi-Level Chunking</label><br>
+                        <input type="checkbox" id="processVideos_summarize_recursively"> <label for="processVideos_summarize_recursively">Summarize Recursively</label>
+                    </div>
+                </div>
+            </div>
+             <div class="columns">
+                 <div class="column">
+                    <h3>Prompts & API</h3>
+                    <div class="form-group">
+                        <label for="processVideos_custom_prompt">Custom Prompt:</label>
+                        <textarea id="processVideos_custom_prompt"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processVideos_system_prompt">System Prompt:</label>
+                        <textarea id="processVideos_system_prompt"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processVideos_api_name">API Name (for analysis):</label>
+                        <input type="text" id="processVideos_api_name">
+                    </div>
+                    <div class="form-group">
+                        <label for="processVideos_api_key">API Key (for analysis):</label>
+                        <input type="password" id="processVideos_api_key">
+                    </div>
+                    <div class="form-group">
+                        <label for="processVideos_cookies">Cookies (string, if use_cookies):</label>
+                        <input type="text" id="processVideos_cookies">
+                    </div>
+                </div>
+                 <div class="column">
+                    <h3>Video Specific Settings</h3>
+                     <div class="form-group">
+                        <label for="processVideos_transcription_model">Transcription Model:</label>
+                        <input type="text" id="processVideos_transcription_model" value="deepdml/faster-whisper-large-v3-turbo-ct2">
+                    </div>
+                    <div class="form-group">
+                        <label for="processVideos_transcription_language">Transcription Language:</label>
+                        <input type="text" id="processVideos_transcription_language" value="en">
+                    </div>
+                     <div class="form-group">
+                        <label for="processVideos_start_time">Start Time (HH:MM:SS or secs):</label>
+                        <input type="text" id="processVideos_start_time">
+                    </div>
+                    <div class="form-group">
+                        <label for="processVideos_end_time">End Time (HH:MM:SS or secs):</label>
+                        <input type="text" id="processVideos_end_time">
+                    </div>
+                </div>
+            </div>
+            <div class="columns">
+                <div class="column">
+                    <h3>Chunking Details</h3>
+                     <div class="form-group">
+                        <label for="processVideos_chunk_method">Chunk Method:</label>
+                        <select id="processVideos_chunk_method">
+                            <option value="">Default (sentences)</option>
+                            <option value="sentences">sentences</option>
+                            <option value="recursive">recursive</option>
+                            <option value="token">token</option>
+                            <!-- Add other ChunkMethod options if applicable -->
+                        </select>
+                    </div>
+                     <div class="form-group">
+                        <label for="processVideos_chunk_language">Chunk Language Override:</label>
+                        <input type="text" id="processVideos_chunk_language">
+                    </div>
+                    <div class="form-group">
+                        <label for="processVideos_chunk_size">Chunk Size:</label>
+                        <input type="number" id="processVideos_chunk_size" value="500">
+                    </div>
+                    <div class="form-group">
+                        <label for="processVideos_chunk_overlap">Chunk Overlap:</label>
+                        <input type="number" id="processVideos_chunk_overlap" value="200">
+                    </div>
+                </div>
+            </div>
+            <button onclick="makeRequest('processVideos', 'POST', '/api/v1/media/process-videos', 'form')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="processVideos_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="processVideos_response">---</pre>
+        </div>
+
+        <!-- POST /api/v1/media/process-audios -->
+        <div class="endpoint-section" id="processAudios">
+            <h2>POST /api/v1/media/process-audios - Process Audios (No DB)</h2>
+            <p>Similar to /process-videos, but for audio files.</p>
+            <!-- Reuse structure from processVideos, just change IDs and potentially defaults -->
+             <div class="columns">
+                <div class="column">
+                    <h3>Basic Info & Sources</h3>
+                    <div class="form-group">
+                        <label for="processAudios_urls">URLs (one per line):</label>
+                        <textarea id="processAudios_urls" placeholder="https://example.com/audio.mp3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processAudios_files">Files:</label>
+                        <input type="file" id="processAudios_files" multiple>
+                    </div>
+                     <div class="form-group">
+                        <label for="processAudios_title">Title (optional):</label>
+                        <input type="text" id="processAudios_title">
+                    </div>
+                    <div class="form-group">
+                        <label for="processAudios_author">Author (optional):</label>
+                        <input type="text" id="processAudios_author">
+                    </div>
+                    <div class="form-group">
+                        <label for="processAudios_keywords">Keywords (comma-separated):</label>
+                        <input type="text" id="processAudios_keywords">
+                    </div>
+                </div>
+                <div class="column">
+                    <h3>Processing Options</h3>
+                     <div class="form-group checkbox-group">
+                        <input type="checkbox" id="processAudios_perform_analysis" checked> <label for="processAudios_perform_analysis">Perform Analysis</label><br>
+                        <input type="checkbox" id="processAudios_use_cookies"> <label for="processAudios_use_cookies">Use Cookies</label><br>
+                        <input type="checkbox" id="processAudios_diarize"> <label for="processAudios_diarize">Diarize</label><br>
+                        <input type="checkbox" id="processAudios_timestamp_option" checked> <label for="processAudios_timestamp_option">Timestamp Option</label><br>
+                        <input type="checkbox" id="processAudios_vad_use"> <label for="processAudios_vad_use">VAD Use</label><br>
+                        <input type="checkbox" id="processAudios_perform_confabulation_check_of_analysis"> <label for="processAudios_perform_confabulation_check_of_analysis">Confabulation Check</label><br>
+                        <input type="checkbox" id="processAudios_perform_chunking" checked> <label for="processAudios_perform_chunking">Perform Chunking</label><br>
+                        <input type="checkbox" id="processAudios_use_adaptive_chunking"> <label for="processAudios_use_adaptive_chunking">Adaptive Chunking</label><br>
+                        <input type="checkbox" id="processAudios_use_multi_level_chunking"> <label for="processAudios_use_multi_level_chunking">Multi-Level Chunking</label><br>
+                        <input type="checkbox" id="processAudios_summarize_recursively"> <label for="processAudios_summarize_recursively">Summarize Recursively</label>
+                    </div>
+                </div>
+            </div>
+             <div class="columns">
+                 <div class="column">
+                    <h3>Prompts & API</h3>
+                    <div class="form-group">
+                        <label for="processAudios_custom_prompt">Custom Prompt:</label>
+                        <textarea id="processAudios_custom_prompt"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processAudios_system_prompt">System Prompt:</label>
+                        <textarea id="processAudios_system_prompt"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processAudios_api_name">API Name (for analysis):</label>
+                        <input type="text" id="processAudios_api_name">
+                    </div>
+                    <div class="form-group">
+                        <label for="processAudios_api_key">API Key (for analysis):</label>
+                        <input type="password" id="processAudios_api_key">
+                    </div>
+                    <div class="form-group">
+                        <label for="processAudios_cookies">Cookies (string, if use_cookies):</label>
+                        <input type="text" id="processAudios_cookies">
+                    </div>
+                </div>
+                 <div class="column">
+                    <h3>Audio Specific Settings</h3>
+                     <div class="form-group">
+                        <label for="processAudios_transcription_model">Transcription Model:</label>
+                        <input type="text" id="processAudios_transcription_model" value="deepdml/faster-distil-whisper-large-v3.5">
+                    </div>
+                    <div class="form-group">
+                        <label for="processAudios_transcription_language">Transcription Language:</label>
+                        <input type="text" id="processAudios_transcription_language" value="en">
+                    </div>
+                </div>
+            </div>
+            <div class="columns">
+                <div class="column">
+                    <h3>Chunking Details</h3>
+                     <div class="form-group">
+                        <label for="processAudios_chunk_method">Chunk Method:</label>
+                        <select id="processAudios_chunk_method">
+                            <option value="">Default (sentences)</option>
+                            <option value="sentences">sentences</option>
+                            <option value="recursive">recursive</option>
+                            <option value="token">token</option>
+                        </select>
+                    </div>
+                     <div class="form-group">
+                        <label for="processAudios_chunk_language">Chunk Language Override:</label>
+                        <input type="text" id="processAudios_chunk_language">
+                    </div>
+                    <div class="form-group">
+                        <label for="processAudios_chunk_size">Chunk Size:</label>
+                        <input type="number" id="processAudios_chunk_size" value="500">
+                    </div>
+                    <div class="form-group">
+                        <label for="processAudios_chunk_overlap">Chunk Overlap:</label>
+                        <input type="number" id="processAudios_chunk_overlap" value="200">
+                    </div>
+                </div>
+            </div>
+            <button onclick="makeRequest('processAudios', 'POST', '/api/v1/media/process-audios', 'form')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="processAudios_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="processAudios_response">---</pre>
+        </div>
+
+        <!-- POST /api/v1/media/process-ebooks -->
+        <div class="endpoint-section" id="processEbooks">
+            <h2>POST /api/v1/media/process-ebooks - Process Ebooks (No DB)</h2>
+            <div class="columns">
+                <div class="column">
+                    <h3>Basic Info & Sources</h3>
+                    <div class="form-group">
+                        <label for="processEbooks_urls">URLs (one per line, .epub):</label>
+                        <textarea id="processEbooks_urls"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processEbooks_files">Files (.epub):</label>
+                        <input type="file" id="processEbooks_files" multiple accept=".epub">
+                    </div>
+                     <div class="form-group">
+                        <label for="processEbooks_title">Title Override:</label>
+                        <input type="text" id="processEbooks_title">
+                    </div>
+                    <div class="form-group">
+                        <label for="processEbooks_author">Author Override:</label>
+                        <input type="text" id="processEbooks_author">
+                    </div>
+                    <div class="form-group">
+                        <label for="processEbooks_keywords_str">Keywords (comma-separated):</label>
+                        <input type="text" id="processEbooks_keywords_str">
+                    </div>
+                     <div class="form-group">
+                        <label for="processEbooks_extraction_method">Extraction Method:</label>
+                        <select id="processEbooks_extraction_method">
+                            <option value="filtered">filtered</option>
+                            <option value="markdown">markdown</option>
+                            <option value="basic">basic</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="column">
+                    <h3>Processing & Chunking Options</h3>
+                     <div class="form-group checkbox-group">
+                        <input type="checkbox" id="processEbooks_perform_analysis" checked> <label for="processEbooks_perform_analysis">Perform Analysis</label><br>
+                        <input type="checkbox" id="processEbooks_summarize_recursively"> <label for="processEbooks_summarize_recursively">Summarize Recursively</label><br>
+                        <input type="checkbox" id="processEbooks_perform_chunking" checked> <label for="processEbooks_perform_chunking">Perform Chunking (Default: chapter)</label>
+                    </div>
+                    <div class="form-group">
+                        <label for="processEbooks_chunk_method">Chunk Method:</label>
+                        <select id="processEbooks_chunk_method">
+                            <option value="chapter">chapter</option>
+                            <option value="recursive">recursive</option>
+                            <option value="sentences">sentences</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="processEbooks_chunk_size">Chunk Size (for non-chapter):</label>
+                        <input type="number" id="processEbooks_chunk_size" value="1500">
+                    </div>
+                    <div class="form-group">
+                        <label for="processEbooks_chunk_overlap">Chunk Overlap (for non-chapter):</label>
+                        <input type="number" id="processEbooks_chunk_overlap" value="200">
+                    </div>
+                     <div class="form-group">
+                        <label for="processEbooks_custom_chapter_pattern">Custom Chapter Pattern (Regex):</label>
+                        <input type="text" id="processEbooks_custom_chapter_pattern">
+                    </div>
+                </div>
+            </div>
+            <div class="columns">
+                 <div class="column">
+                    <h3>Prompts & API (for Analysis)</h3>
+                    <div class="form-group">
+                        <label for="processEbooks_custom_prompt">Custom Prompt:</label>
+                        <textarea id="processEbooks_custom_prompt"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processEbooks_system_prompt">System Prompt:</label>
+                        <textarea id="processEbooks_system_prompt"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processEbooks_api_name">API Name:</label>
+                        <input type="text" id="processEbooks_api_name">
+                    </div>
+                    <div class="form-group">
+                        <label for="processEbooks_api_key">API Key:</label>
+                        <input type="password" id="processEbooks_api_key">
+                    </div>
+                </div>
+            </div>
+            <button onclick="makeRequest('processEbooks', 'POST', '/api/v1/media/process-ebooks', 'form')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="processEbooks_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="processEbooks_response">---</pre>
+        </div>
+
+        <!-- POST /api/v1/media/process-documents -->
+        <div class="endpoint-section" id="processDocuments">
+            <h2>POST /api/v1/media/process-documents - Process Documents (No DB)</h2>
+            <!-- Similar structure to processEbooks, adjust specific fields like extraction_method -->
+             <div class="columns">
+                <div class="column">
+                    <h3>Basic Info & Sources</h3>
+                    <div class="form-group">
+                        <label for="processDocuments_urls">URLs (one per line, .txt, .docx, etc.):</label>
+                        <textarea id="processDocuments_urls"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processDocuments_files">Files (.txt, .docx, .rtf, .md, .html, .xml):</label>
+                        <input type="file" id="processDocuments_files" multiple accept=".txt,.md,.docx,.rtf,.html,.htm,.xml">
+                    </div>
+                     <div class="form-group">
+                        <label for="processDocuments_title">Title Override:</label>
+                        <input type="text" id="processDocuments_title">
+                    </div>
+                    <div class="form-group">
+                        <label for="processDocuments_author">Author Override:</label>
+                        <input type="text" id="processDocuments_author">
+                    </div>
+                    <div class="form-group">
+                        <label for="processDocuments_keywords_str">Keywords (comma-separated):</label>
+                        <input type="text" id="processDocuments_keywords_str">
+                    </div>
+                </div>
+                <div class="column">
+                    <h3>Processing & Chunking Options</h3>
+                     <div class="form-group checkbox-group">
+                        <input type="checkbox" id="processDocuments_perform_analysis" checked> <label for="processDocuments_perform_analysis">Perform Analysis</label><br>
+                        <input type="checkbox" id="processDocuments_summarize_recursively"> <label for="processDocuments_summarize_recursively">Summarize Recursively</label><br>
+                        <input type="checkbox" id="processDocuments_perform_chunking" checked> <label for="processDocuments_perform_chunking">Perform Chunking (Default: recursive)</label>
+                    </div>
+                    <div class="form-group">
+                        <label for="processDocuments_chunk_method">Chunk Method:</label>
+                        <select id="processDocuments_chunk_method">
+                            <option value="recursive">recursive</option>
+                            <option value="sentences">sentences</option>
+                            <option value="markdown">markdown</option>
+                            <option value="token">token</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="processDocuments_chunk_size">Chunk Size:</label>
+                        <input type="number" id="processDocuments_chunk_size" value="1000">
+                    </div>
+                    <div class="form-group">
+                        <label for="processDocuments_chunk_overlap">Chunk Overlap:</label>
+                        <input type="number" id="processDocuments_chunk_overlap" value="200">
+                    </div>
+                </div>
+            </div>
+            <div class="columns">
+                 <div class="column">
+                    <h3>Prompts & API (for Analysis)</h3>
+                    <div class="form-group">
+                        <label for="processDocuments_custom_prompt">Custom Prompt:</label>
+                        <textarea id="processDocuments_custom_prompt"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processDocuments_system_prompt">System Prompt:</label>
+                        <textarea id="processDocuments_system_prompt"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processDocuments_api_name">API Name:</label>
+                        <input type="text" id="processDocuments_api_name">
+                    </div>
+                    <div class="form-group">
+                        <label for="processDocuments_api_key">API Key:</label>
+                        <input type="password" id="processDocuments_api_key">
+                    </div>
+                </div>
+            </div>
+            <button onclick="makeRequest('processDocuments', 'POST', '/api/v1/media/process-documents', 'form')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="processDocuments_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="processDocuments_response">---</pre>
+        </div>
+
+        <!-- POST /api/v1/media/process-pdfs -->
+        <div class="endpoint-section" id="processPdfs">
+            <h2>POST /api/v1/media/process-pdfs - Process PDFs (No DB)</h2>
+             <div class="columns">
+                <div class="column">
+                    <h3>Basic Info & Sources</h3>
+                    <div class="form-group">
+                        <label for="processPdfs_urls">URLs (one per line, .pdf):</label>
+                        <textarea id="processPdfs_urls"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processPdfs_files">Files (.pdf):</label>
+                        <input type="file" id="processPdfs_files" multiple accept=".pdf">
+                    </div>
+                     <div class="form-group">
+                        <label for="processPdfs_title">Title Override:</label>
+                        <input type="text" id="processPdfs_title">
+                    </div>
+                    <div class="form-group">
+                        <label for="processPdfs_author">Author Override:</label>
+                        <input type="text" id="processPdfs_author">
+                    </div>
+                    <div class="form-group">
+                        <label for="processPdfs_keywords">Keywords (comma-separated):</label>
+                        <input type="text" id="processPdfs_keywords">
+                    </div>
+                     <div class="form-group">
+                        <label for="processPdfs_pdf_parsing_engine">PDF Parsing Engine:</label>
+                        <select id="processPdfs_pdf_parsing_engine">
+                            <option value="pymupdf4llm">pymupdf4llm</option>
+                            <option value="pymupdf">pymupdf</option>
+                            <option value="pdfminer">pdfminer</option>
+                            <option value="pdfplumber">pdfplumber</option>
+                            <option value="pypdf">pypdf</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="column">
+                    <h3>Processing & Chunking Options</h3>
+                     <div class="form-group checkbox-group">
+                        <input type="checkbox" id="processPdfs_perform_analysis" checked> <label for="processPdfs_perform_analysis">Perform Analysis</label><br>
+                        <input type="checkbox" id="processPdfs_summarize_recursively"> <label for="processPdfs_summarize_recursively">Summarize Recursively</label><br>
+                        <input type="checkbox" id="processPdfs_perform_chunking" checked> <label for="processPdfs_perform_chunking">Perform Chunking</label>
+                    </div>
+                    <div class="form-group">
+                        <label for="processPdfs_chunk_method">Chunk Method:</label>
+                        <select id="processPdfs_chunk_method">
+                            <option value="">Default (sentences)</option>
+                            <option value="sentences">sentences</option>
+                            <option value="recursive">recursive</option>
+                            <option value="page">page</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="processPdfs_chunk_size">Chunk Size:</label>
+                        <input type="number" id="processPdfs_chunk_size" value="500">
+                    </div>
+                    <div class="form-group">
+                        <label for="processPdfs_chunk_overlap">Chunk Overlap:</label>
+                        <input type="number" id="processPdfs_chunk_overlap" value="200">
+                    </div>
+                     <div class="form-group">
+                        <label for="processPdfs_custom_chapter_pattern">Custom Chapter Pattern (Regex, for chunking):</label>
+                        <input type="text" id="processPdfs_custom_chapter_pattern">
+                    </div>
+                </div>
+            </div>
+            <div class="columns">
+                 <div class="column">
+                    <h3>Prompts & API (for Analysis)</h3>
+                    <div class="form-group">
+                        <label for="processPdfs_custom_prompt">Custom Prompt:</label>
+                        <textarea id="processPdfs_custom_prompt"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processPdfs_system_prompt">System Prompt:</label>
+                        <textarea id="processPdfs_system_prompt"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="processPdfs_api_name">API Name:</label>
+                        <input type="text" id="processPdfs_api_name">
+                    </div>
+                    <div class="form-group">
+                        <label for="processPdfs_api_key">API Key:</label>
+                        <input type="password" id="processPdfs_api_key">
+                    </div>
+                </div>
+            </div>
+            <button onclick="makeRequest('processPdfs', 'POST', '/api/v1/media/process-pdfs', 'form')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="processPdfs_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="processPdfs_response">---</pre>
+        </div>
+
+        <!-- POST /api/v1/media/ingest-web-content -->
+        <div class="endpoint-section" id="ingestWebContent">
+            <h2>POST /api/v1/media/ingest-web-content</h2>
+            <div class="form-group">
+                <label for="ingestWebContent_payload">Payload (IngestWebContentRequest JSON):</label>
+                <textarea id="ingestWebContent_payload">{
+    "urls": ["https://example.com/article1", "https://example.com/article2"],
+    "scrape_method": "individual",
+    "titles": ["Optional Title 1", "Optional Title 2"],
+    "authors": ["Author 1", "Author 2"],
+    "keywords": ["keywordA,keywordB", "keywordC"],
+    "perform_analysis": true,
+    "custom_prompt": "Summarize this briefly.",
+    "system_prompt": "You are a concise summarizer.",
+    "api_name": "openai",
+    "api_key": "YOUR_API_KEY_HERE_OR_NULL",
+    "perform_translation": false,
+    "translation_language": "es",
+    "perform_chunking": true,
+    "chunk_method": "sentences",
+    "chunk_size": 500,
+    "chunk_overlap": 50,
+    "timestamp_option": true,
+    "overwrite_existing": false,
+    "max_pages": 10,
+    "max_depth": 2,
+    "url_level": 1,
+    "use_cookies": false,
+    "cookies": null,
+    "perform_rolling_summarization": false,
+    "perform_confabulation_check_of_analysis": false
+}</textarea>
+                <small>Scrape Methods: individual, sitemap, url_level, recursive</small>
+            </div>
+            <button onclick="makeRequest('ingestWebContent', 'POST', '/api/v1/media/ingest-web-content', 'json')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="ingestWebContent_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="ingestWebContent_response">---</pre>
+        </div>
+
+        <!-- POST /api/v1/media/process-web-scraping -->
+        <div class="endpoint-section" id="processWebScraping">
+            <h2>POST /api/v1/media/process-web-scraping</h2>
+            <div class="form-group">
+                <label for="processWebScraping_payload">Payload (WebScrapingRequest JSON):</label>
+                <textarea id="processWebScraping_payload">{
+    "scrape_method": "Individual URLs",
+    "url_input": "https://example.com/article1\nhttps://example.com/article2",
+    "url_level": null,
+    "max_pages": 10,
+    "max_depth": 3,
+    "summarize_checkbox": true,
+    "custom_prompt": "Please summarize with bullet points only.",
+    "api_name": "openai",
+    "api_key": "YOUR_API_KEY_HERE_OR_NULL",
+    "keywords": "web, scraping, example",
+    "custom_titles": "Article 1 Title\nArticle 2 Title",
+    "system_prompt": "You are a bulleted-notes specialist...",
+    "temperature": 0.7,
+    "custom_cookies": null,
+    "mode": "persist"
+}</textarea>
+                <small>Scrape Methods: "Individual URLs", "Sitemap", "URL Level", "Recursive Scraping". Mode: "persist" or "ephemeral".</small>
+            </div>
+            <button onclick="makeRequest('processWebScraping', 'POST', '/api/v1/media/process-web-scraping', 'json')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="processWebScraping_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="processWebScraping_response">---</pre>
+        </div>
+
+
+        <!-- GET /api/v1/media/debug/schema -->
+        <div class="endpoint-section" id="debugSchema">
+            <h2>GET /api/v1/media/debug/schema - Debug Schema</h2>
+            <button onclick="makeRequest('debugSchema', 'GET', '/api/v1/media/debug/schema', 'none')">Send Request</button>
+            <h3>cURL Command:</h3>
+            <pre id="debugSchema_curl">---</pre>
+            <h3>Response:</h3>
+            <pre id="debugSchema_response">---</pre>
+        </div>
+
+    </div>
+
+    <script>
+        async function makeRequest(endpointId, method, pathTemplate, bodyType = 'json') {
+            const baseUrl = document.getElementById('baseUrl').value;
+            const token = document.getElementById('authToken').value;
+            const responseEl = document.getElementById(endpointId + '_response');
+            const curlEl = document.getElementById(endpointId + '_curl');
+
+            responseEl.textContent = 'Loading...';
+            curlEl.textContent = 'Generating...';
+
+            let path = pathTemplate;
+            const pathParams = {};
+            const queryParams = {};
+            let body = null;
+            let headers = {
+                'Authorization': `Bearer ${token}`
+            };
+
+            // Collect path parameters
+            pathTemplate.match(/{[a-zA-Z0-9_]+}/g)?.forEach(param => {
+                const paramName = param.substring(1, param.length - 1);
+                const inputEl = document.getElementById(endpointId + '_' + paramName);
+                if (inputEl) {
+                    path = path.replace(param, inputEl.value);
+                    pathParams[paramName] = inputEl.value;
+                }
+            });
+
+            let fullUrl = baseUrl + path;
+            const curlParts = [`curl -X ${method}`];
+
+            if (bodyType === 'query' || method === 'GET' && bodyType !== 'none') { // GET with query params
+                const formElements = document.getElementById(endpointId).querySelectorAll('input, select, textarea');
+                const params = new URLSearchParams();
+                formElements.forEach(el => {
+                    if (el.id && el.id.startsWith(endpointId + '_') && el.type !== 'file' && !pathParams[el.id.replace(endpointId + '_', '')]) {
+                         // Check if it's a path param, if so, skip
+                        const key = el.id.replace(endpointId + '_', '');
+                        if (el.type === 'checkbox') {
+                            if (el.checked) params.append(key, 'true');
+                        } else if (el.value) {
+                            params.append(key, el.value);
+                        }
+                    }
+                });
+                if (params.toString()) {
+                    fullUrl += '?' + params.toString();
+                }
+            }
+
+            if (bodyType === 'json') {
+                const payloadText = document.getElementById(endpointId + '_payload')?.value;
+                if (payloadText) {
+                    try {
+                        body = JSON.parse(payloadText); // Keep as object for fetch
+                        headers['Content-Type'] = 'application/json';
+                        curlParts.push(`-H "Content-Type: application/json"`);
+                        curlParts.push(`-d '${payloadText.replace(/'/g, "'\\''")}'`); // Escape single quotes for curl
+                    } catch (e) {
+                        responseEl.textContent = 'Error: Invalid JSON payload. ' + e.message;
+                        return;
+                    }
+                }
+            } else if (bodyType === 'form') {
+                body = new FormData();
+                const formElements = document.getElementById(endpointId).querySelectorAll('input, select, textarea');
+                const curlFormParts = [];
+
+                formElements.forEach(el => {
+                    if (el.id && el.id.startsWith(endpointId + '_')) {
+                        const key = el.id.replace(endpointId + '_', '');
+                        if (el.type === 'file') {
+                            if (el.files.length > 0) {
+                                for (let i = 0; i < el.files.length; i++) {
+                                    body.append(key, el.files[i], el.files[i].name); // FastAPI expects key, not files[]
+                                    curlFormParts.push(`-F "${key}=@${el.files[i].name}"`);
+                                }
+                            }
+                        } else if (el.type === 'checkbox') {
+                            body.append(key, el.checked ? 'true' : 'false');
+                             curlFormParts.push(`-F "${key}=${el.checked ? 'true' : 'false'}"`);
+                        } else if (el.tagName.toLowerCase() === 'textarea' && key === 'urls') {
+                            // Handle multi-line URLs for form data
+                            const urls = el.value.split('\\n').map(u => u.trim()).filter(u => u);
+                            urls.forEach(url => body.append(key, url));
+                             urls.forEach(url => curlFormParts.push(`-F "${key}=${url}"`));
+                        }
+                        else if (el.value) {
+                            body.append(key, el.value);
+                            curlFormParts.push(`-F "${key}=${el.value.replace(/"/g, '\\"')}"`);
+                        } else if (el.tagName.toLowerCase() === 'select' && !el.value && el.multiple) {
+                            // For multiple select, if nothing selected, don't append
+                        } else if (el.tagName.toLowerCase() === 'select' && el.value) { // single select
+                             body.append(key, el.value);
+                             curlFormParts.push(`-F "${key}=${el.value.replace(/"/g, '\\"')}"`);
+                        }
+                    }
+                });
+                if (curlFormParts.length > 0) {
+                    curlParts.push(curlFormParts.join(' '));
+                }
+                // Don't set Content-Type for FormData, browser does it with boundary
+            }
+
+            curlParts.unshift(`-H "Authorization: Bearer ${token}"`);
+            curlParts.push(`"${fullUrl}"`);
+            curlEl.textContent = curlParts.join(' \\\n    ');
+
+
+            try {
+                const fetchOptions = {
+                    method: method,
+                    headers: headers
+                };
+                if (method !== 'GET' && method !== 'HEAD' && body) {
+                    fetchOptions.body = (bodyType === 'json' && body) ? JSON.stringify(body) : body;
+                }
+
+                const res = await fetch(fullUrl, fetchOptions);
+                let responseData;
+                const contentType = res.headers.get("content-type");
+                if (contentType && contentType.includes("application/json")) {
+                    responseData = await res.json();
+                } else {
+                    responseData = await res.text();
+                }
+
+                if (res.ok) {
+                    responseEl.textContent = `Status: ${res.status}\n\n` +
+                                           (typeof responseData === 'object' ? JSON.stringify(responseData, null, 2) : responseData);
+                } else {
+                    responseEl.textContent = `Error: ${res.status} ${res.statusText}\n\n` +
+                                           (typeof responseData === 'object' ? JSON.stringify(responseData, null, 2) : responseData);
+                }
+            } catch (error) {
+                responseEl.textContent = 'Network Error: ' + error.message;
+            }
+        }
+
+        // Helper to auto-populate form fields from a Pydantic model's schema for /add (example)
+        // This is more advanced and might be overkill for "very simple"
+        /*
+        function populateFormFromSchema(endpointId, schema) {
+            // Example: iterate schema.properties and create inputs
+            // For AddMediaForm, this would be quite involved due to its size.
+        }
+        */
+    </script>
+</body>
+</html>

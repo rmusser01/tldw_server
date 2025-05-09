@@ -118,7 +118,16 @@ def improved_chunking_process(text: str, chunk_options: Dict[str, Any] = None) -
         logging.debug("No JSON metadata found at the beginning of the text")
 
     # Extract any additional header text
-    header_match = re.match(r"(This text was transcribed using.*?)\n\n", text, re.DOTALL)
+    header_re = re.compile(
+        r"""^                # start of the string
+            This[ ]text[ ]was[ ]transcribed[ ]using  # literal header
+            (?:[^\n]*\n)*?   # zero or more complete lines
+            \n               # first completely blank line
+        """,
+        re.MULTILINE | re.VERBOSE,
+    )
+
+    header_match = header_re.match(text)
     header_text = ""
     if header_match:
         header_text = header_match.group(1)
