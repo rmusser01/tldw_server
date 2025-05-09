@@ -120,9 +120,9 @@ def improved_chunking_process(text: str, chunk_options: Dict[str, Any] = None) -
     # Extract any additional header text
     header_re = re.compile(
         r"""^                # start of the string
-            This[ ]text[ ]was[ ]transcribed[ ]using  # literal header
+            (This[ ]text[ ]was[ ]transcribed[ ]using  # literal header
             (?:[^\n]*\n)*?   # zero or more complete lines
-            \n               # first completely blank line
+            \n)              # first completely blank line
         """,
         re.MULTILINE | re.VERBOSE,
     )
