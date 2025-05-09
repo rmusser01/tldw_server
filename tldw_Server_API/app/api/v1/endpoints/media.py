@@ -52,6 +52,7 @@ from slowapi.util import get_remote_address
 from starlette.responses import JSONResponse, Response
 
 from tldw_Server_API.app.api.v1 import schemas
+from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.api.v1.schemas.media_response_models import PaginationInfo, MediaListResponse, MediaListItem, \
     MediaDetailResponse, VersionDetailResponse
 #
@@ -2321,7 +2322,7 @@ async def add_media(
             logger.info(f"Using temporary directory: {temp_dir_path}")
 
             # --- 4. Save Uploaded Files ---
-            saved_files_info, file_save_errors = await _save_uploaded_files(files or [], temp_dir_path)
+            saved_files_info, file_save_errors = await _save_uploaded_files(files or [], temp_dir_path, file_validator_instance)
             # Adapt file saving errors to the standard result format
             for err_info in file_save_errors:
                  results.append({
@@ -2603,7 +2604,7 @@ async def process_videos_endpoint(
         logger.info(f"Using temporary directory for /process-videos: {temp_dir}")
 
         # --- Save Uploads ---
-        saved_files_info, file_handling_errors_raw = await _save_uploaded_files(files or [], temp_dir)
+        saved_files_info, file_handling_errors_raw = await _save_uploaded_files(files or [], temp_dir, file_validator_instance)
 
         # --- Populate the temp path to original name map ---
         for sf in saved_files_info:
@@ -3005,6 +3006,7 @@ async def process_audios_endpoint(
         saved_files, file_errors_raw = await _save_uploaded_files(
             files or [],
             temp_dir_path,
+            file_validator_instance,
             allowed_extensions=ALLOWED_AUDIO_EXTENSIONS # Pass allowed extensions
         )
 
@@ -3504,6 +3506,7 @@ async def process_ebooks_endpoint(
                 saved_files, upload_errors = await _save_uploaded_files(
                     files,
                     temp_dir,
+                    file_validator_instance,
                     allowed_extensions=[".epub"]
                 )
                 # Add file saving/validation errors to batch_result
@@ -3902,6 +3905,7 @@ async def process_documents_endpoint(
             saved_files, upload_errors = await _save_uploaded_files(
                 files,
                 temp_dir,
+                file_validator_instance,
                 allowed_extensions=ALLOWED_DOC_EXTENSIONS
             )
             # Add file saving/validation errors to batch_result
@@ -4390,8 +4394,8 @@ async def process_pdfs_endpoint(
         # Handle Uploads (read bytes directly)
         if files:
             saved_files, upload_errors = await _save_uploaded_files(
-                files,
                 Path(temp_dir),  # Need Path object
+                file_validator_instance,
                 allowed_extensions=ALLOWED_PDF_EXTENSIONS
             )
 
@@ -4518,7 +4522,7 @@ async def process_pdfs_endpoint(
                      title_override=form_data.title,
                      author_override=form_data.author,
                      keywords=form_data.keywords, # Pass list
-                     perform_chunking=form_data.perform_chunking,
+                     perform_chunking=form_data.perform_chunking or None,
                      # Pass individual chunk params from form model
                      chunk_method=chunk_opts_for_task['method'],
                      max_chunk_size=chunk_opts_for_task['max_size'],

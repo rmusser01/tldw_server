@@ -100,6 +100,12 @@ class ChunkingOptions(BaseModel):
     chunk_overlap: int = Field(200, ge=0, description="Overlap size between chunks (non-negative integer)")
     custom_chapter_pattern: Optional[str] = Field(None, description="Optional regex pattern for custom chapter splitting (ebook/docs)")
 
+    @field_validator('chunk_method', mode='before')
+    @classmethod
+    def empty_str_to_none(cls, v: Any) -> Optional[Any]: # Accept Any for input
+        if v == "":
+            return None
+        return v
 
     @field_validator('chunk_overlap')
     @classmethod

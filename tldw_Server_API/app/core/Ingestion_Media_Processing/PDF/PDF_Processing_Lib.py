@@ -788,7 +788,7 @@ async def process_pdf_task(
     author_override: Optional[str] = None,
     keywords: Optional[List[str]] = None,
     perform_chunking: bool = True,
-    chunk_method: Optional[str] = "sentences",
+    chunk_method: Optional[str] = None,
     max_chunk_size: Optional[int] = 500,
     chunk_overlap: Optional[int] = 100,
     perform_analysis: bool = False,

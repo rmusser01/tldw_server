@@ -1079,12 +1079,12 @@
                                 body.append(key, url);
                                 curlFormParts.push(`-F "${key}=${url.replace(/"/g, '\\"')}"`);
                             });
-                        } else if (el.multiple && el.tagName.toLowerCase() === 'select'){
-                            for (const option of el.selectedOptions) {
-                                body.append(key, option.value);
-                                curlFormParts.push(`-F "${key}=${option.value.replace(/"/g, '\\"')}"`);
-                            }
-                        } else if (el.value || el.value === '') {
+                        } else if (el.tagName.toLowerCase() === 'select' && el.value === "" && key === 'chunk_method') { // SPECIFICALLY for chunk_method with empty value
+                            // Do not append if it's the chunk_method select and its value is empty
+                            // This allows the Pydantic model's default (None) to be used.
+                            console.log(`Skipping empty chunk_method for FormData key: ${key}`);
+                            curlFormParts.push(`# chunk_method intentionally omitted to use Pydantic default (None)`);
+                        } else if (el.value || el.value === '') { // For other fields, send if value exists or is empty string
                             body.append(key, el.value);
                             curlFormParts.push(`-F "${key}=${el.value.replace(/"/g, '\\"')}"`);
                         }
