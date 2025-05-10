@@ -17,6 +17,7 @@ https://github.com/kyutai-labs/hibiki
 https://metis-demo.github.io/#metis-tts
 https://github.com/Extraltodeus/Quick-slap-tkinter-dia/blob/main/README.md
 https://github.com/RobViren/kokovoicelab
+https://decodingml.substack.com/p/deploying-agents-as-real-time-apis
 https://github.com/Nighthawk42/mOrpheus
 https://jordandarefsky.com/blog/2024/parakeet/
 https://github.com/collabora/WhisperLive

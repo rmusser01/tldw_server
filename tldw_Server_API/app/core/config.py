@@ -2,34 +2,20 @@
 # Description: Configuration settings for the tldw server application.
 #
 # Imports
+import json
 import os
 from pathlib import Path
+from typing import Optional, Dict
 
 
 #
 # 3rd-party Libraries
-#
+from loguru import logger#
 # Local Imports
 #
 ########################################################################################################################
 #
 # Functions:
-
-# config.py
-# Description: Configuration settings for the tldw server application.
-#
-# Imports
-import os
-from pathlib import Path
-from typing import Optional
-import logging
-
-# Imports from this project
-# Note: It's generally better practice to keep config simple and avoid
-# complex imports here if possible, but logging is often an exception.
-# from tldw_Server_API.app.core.Utils.Utils import logging # Example if needed
-
-########################################################################################################################
 
 # --- Constants ---
 # Client ID used by the Server API itself when writing to sync logs
@@ -38,6 +24,63 @@ SERVER_CLIENT_ID = "SERVER_API_V1"
 # --- File Validation/YARA Settings ---
 YARA_RULES_PATH: Optional[str] = None # e.g., "/app/yara_rules/index.yar"
 MAGIC_FILE_PATH: Optional[str] = os.getenv("MAGIC_FILE_PATH", None) # e.g., "/app/magic.mgc"
+
+
+# FIXME - TTS Config
+APP_CONFIG = {
+    "OPENAI_API_KEY": "sk-...",
+    "KOKORO_ONNX_MODEL_PATH_DEFAULT": "path/to/your/downloaded/kokoro-v0_19.onnx",
+    "KOKORO_ONNX_VOICES_JSON_DEFAULT": "path/to/your/downloaded/voices.json",
+    "KOKORO_DEVICE_DEFAULT": "cpu", # or "cuda"
+    "ELEVENLABS_API_KEY": "el-...",
+    "local_kokoro_default_onnx": { # Specific overrides for this backend_id
+        "KOKORO_DEVICE": "cuda:0"
+    },
+    "global_tts_settings": {
+        # shared settings
+    }
+}
+def load_openai_mappings() -> Dict:
+    # Determine path relative to this file or use an absolute/configurable path
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    # Assume mappings.json is in a 'configs' folder at the project root
+    # or adjust as needed. For example, if it's next to this router file:
+    # mapping_path = os.path.join(current_dir, "openai_tts_mappings.json")
+
+    # Example: if your project root is one level up from 'routers'
+    # and configs is at root:
+    project_root = os.path.dirname(os.path.dirname(current_dir))
+    mapping_path = os.path.join(project_root, "configs", "openai_tts_mappings.json")
+    try:
+        with open(mapping_path, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load OpenAI TTS mappings from {mapping_path}: {e}", exc_info=True)
+        # Fallback to a default or raise an error
+        return {
+            "models": {"tts-1": "openai_official_tts-1"},
+            "voices": {"alloy": "alloy"}
+        }
+
+_openai_mappings = load_openai_mappings()
+
+openai_tts_mappings = {
+    "models": {
+        "tts-1": "openai_official_tts-1",
+        "tts-1-hd": "openai_official_tts-1-hd",
+        "eleven_monolingual_v1": "elevenlabs_english_v1",
+        "kokoro": "local_kokoro_default_onnx"
+    },
+    "voices": {
+        "alloy": "alloy", "echo": "echo", "fable": "fable",
+        "onyx": "onyx", "nova": "nova", "shimmer": "shimmer",
+
+        "RachelEL": "21m00Tcm4TlvDq8ikWAM",
+
+        "k_bella": "af_bella",
+        "k_adam" : "am_v0adam"
+    }
+}
 
 # --- Helper Function (Optional but can keep dictionary creation clean) ---
 def load_settings():

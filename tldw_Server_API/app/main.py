@@ -13,18 +13,21 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
-
 #
 # Local Imports
 # Media Endpoint
 from tldw_Server_API.app.api.v1.endpoints.media import router as media_router
 #
+# Audio Endpoint
+from tldw_Server_API.app.api.v1.endpoints.audio import router as audio_router
 # RAG Endpoint
 #from tldw_Server_API.app.api.v1.endpoints.rag import router as rag_router
 #
 # Chat Endpoint
 from tldw_Server_API.app.api.v1.endpoints.chat import router as chat_router
 #
+# Embedding Endpoint
+from tldw_Server_API.app.api.v1.endpoints.embeddings import router as embeddings_router
 # Prompt Management Endpoint
 from tldw_Server_API.app.api.v1.endpoints.prompts import router as prompt_router
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -139,6 +142,8 @@ async def root():
 # Router for media endpoints/media file handling
 app.include_router(media_router, prefix="/api/v1/media", tags=["media"])
 
+# Router for /audio/ endpoints
+app.include_router(audio_router, prefix="/api/v1/audio", tags=["audio"])
 
 # Router for RAG endpoints
 #app.include_router(rag_router, prefix="/api/v1/rag", tags=["rag"])
@@ -151,6 +156,8 @@ app.include_router(chat_router, prefix="/api/v1/chat", tags=["chat"])
 # Router for Prompt Management endpoints
 app.include_router(prompt_router, prefix="/api/v1/prompts", tags=["prompts]"])
 
+# Router for Embedding Endpoint
+app.include_router(embeddings_router, prefix="/api/v1/embedding", tags=["embedding"])
 
 # Router for trash endpoints - deletion of media items / trash file handling (FIXME: Secure delete vs lag on delete?)
 #app.include_router(trash_router, prefix="/api/v1/trash", tags=["trash"])
@@ -159,6 +166,10 @@ app.include_router(prompt_router, prefix="/api/v1/prompts", tags=["prompts]"])
 #app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 # The docs at http://localhost:8000/docs will show an “Authorize” button. You can log in by calling POST /api/v1/auth/login with a form that includes username and password. The docs interface is automatically aware because we used OAuth2PasswordBearer.
 
+# Health check
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
 #
 ## End of main.py

@@ -103,6 +103,7 @@ https://www.scoutos.com/
 https://github.com/FishiaT/yawullm
 https://ilikeinterfaces.com/2015/03/09/map-ui-ghost-in-the-shell/
 https://jdan.github.io/98.css
+https://uxdesign.cc/writing-the-onboarding-experience-c1d9b70925be
 https://github.com/vercel/ai-chatbot
 https://www.nngroup.com/videos/the-danger-of-defaults/
 https://writings.stephenwolfram.com/2024/12/useful-to-the-point-of-being-revolutionary-introducing-wolfram-notebook-assistant/

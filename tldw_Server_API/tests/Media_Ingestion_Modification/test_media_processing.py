@@ -83,6 +83,8 @@ VALID_HTML_URL = "https://example.com/" # Use example.com for basic HTML
 INVALID_URL = "http://this.url.definitely.does.not.exist.invalid/resource.mp4"
 URL_404 = "https://httpbin.org/status/404"
 
+PDF_ENGINES_TO_TEST = ["pymupdf4llm", "pymupdf", "docling"]
+
 
 # --- Fixtures ---
 
@@ -601,15 +603,21 @@ class TestProcessPdfs:
         assert result["metadata"] is not None and isinstance(result["metadata"], dict)
         assert result["content"] is not None and len(result["content"]) > 0
 
-    def test_process_pdf_upload_success(self, client, dummy_headers):
-        """Test processing a single valid PDF file upload."""
-        form_data = {"perform_analysis": "false"}
+    @pytest.mark.parametrize("pdf_engine_to_test", PDF_ENGINES_TO_TEST)
+    def test_process_pdf_upload_success(self, client, dummy_headers, pdf_engine_to_test):
+        """Test processing a single valid PDF file upload with different engines."""
+        logger.info(f"Testing PDF upload success with engine: {pdf_engine_to_test}")
+        form_data = {
+            "perform_analysis": "false",
+            "pdf_parsing_engine": pdf_engine_to_test  # Pass the engine
+        }
         with open(SAMPLE_PDF_PATH, "rb") as f:
             files = {"files": (SAMPLE_PDF_PATH.name, f, "application/pdf")}
             response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
         if response.status_code == 400 and "error parsing the body" in response.text.lower():
-            pytest.fail("Still getting 400 'error parsing body' after auth fix (pdf upload).")
+            pytest.fail(
+                f"Still getting 400 'error parsing body' after auth fix (pdf upload, engine: {pdf_engine_to_test}).")
 
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
@@ -618,15 +626,22 @@ class TestProcessPdfs:
         assert result["input_ref"] == SAMPLE_PDF_PATH.name
         assert result["content"] is not None and len(result["content"]) > 0
 
-    def test_process_pdf_multi_status_mixed(self, client, dummy_headers):
-        """Test one valid PDF upload, one invalid URL -> 207."""
-        form_data = {"urls": [INVALID_URL], "perform_analysis": "false"}
+    @pytest.mark.parametrize("pdf_engine_to_test", PDF_ENGINES_TO_TEST)
+    def test_process_pdf_multi_status_mixed(self, client, dummy_headers, pdf_engine_to_test):
+        """Test one valid PDF upload, one invalid URL -> 207 with different engines."""
+        logger.info(f"Testing PDF multi status mixed with engine: {pdf_engine_to_test}")
+        form_data = {
+            "urls": [INVALID_URL],
+            "perform_analysis": "false",
+            "pdf_parsing_engine": pdf_engine_to_test  # Pass the engine
+        }
         with open(SAMPLE_PDF_PATH, "rb") as f:
             files = {"files": (SAMPLE_PDF_PATH.name, f, "application/pdf")}
             response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
 
         if response.status_code == 400 and "error parsing the body" in response.text.lower():
-            pytest.fail("Still getting 400 'error parsing body' after auth fix (pdf mixed).")
+            pytest.fail(
+                f"Still getting 400 'error parsing body' after auth fix (pdf mixed, engine: {pdf_engine_to_test}).")
 
         data = check_batch_response(response, 207, expected_processed=1, expected_errors=1, check_results_len=2)
         success_result = next((r for r in data["results"] if r["status"] == "Success"), None)
@@ -638,6 +653,7 @@ class TestProcessPdfs:
         check_media_item_result(error_result, "Error", check_db_fields=True)
         assert success_result["input_ref"] == SAMPLE_PDF_PATH.name
         assert error_result["input_ref"] == INVALID_URL
+        # Error message might vary slightly based on engine if it attempts to parse bad download
         assert "Download failed" in error_result["error"] or "Download/preparation failed" in error_result["error"]
 
     def test_process_pdf_no_input(self, client, dummy_headers):
@@ -645,28 +661,48 @@ class TestProcessPdfs:
         assert response.status_code == 400
         assert "No valid media sources supplied" in response.json()["detail"]
 
-    def test_process_pdf_upload_not_a_pdf(self, client):
-        form_data = {} # Minimal data
+    @pytest.mark.parametrize("pdf_engine_to_test", PDF_ENGINES_TO_TEST)
+    def test_process_pdf_upload_not_a_pdf(self, client, pdf_engine_to_test):  # Added pdf_engine_to_test param
+        """Test uploading a non-PDF file (e.g., audio) with different engines."""
+        logger.info(f"Testing PDF upload not a PDF with engine: {pdf_engine_to_test}")
+        form_data = {
+            "pdf_parsing_engine": pdf_engine_to_test  # Pass the engine
+        }
         with open(SAMPLE_AUDIO_PATH, "rb") as f:
             files = {"files": (SAMPLE_AUDIO_PATH.name, f, "audio/mpeg")}
+            # Note: dummy_headers might be needed if your client fixture doesn't add them automatically
+            # For consistency with other tests, let's assume it's not needed here if client handles it globally.
+            # If it's per-call, add `headers=dummy_headers`
             response = client.post(self.ENDPOINT, data=form_data, files=files)
 
         if response.status_code == 400 and "error parsing the body" in response.text.lower():
-             pytest.fail("Still getting 400 'error parsing body' after auth fix (pdf invalid format).")
+            pytest.fail(
+                f"Still getting 400 'error parsing body' after auth fix (pdf invalid format, engine: {pdf_engine_to_test}).")
 
         # Endpoint might reject early based on filename/mime or library might fail
+        # The error message might change depending on whether the file validation (e.g., _save_uploaded_files)
+        # happens before the PDF-specific processing, or if the selected engine itself reports the error.
         data = check_batch_response(response, 207, expected_processed=0, expected_errors=1, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Error", check_db_fields=True)
         assert result["input_ref"] == SAMPLE_AUDIO_PATH.name
-        # Check for errors related to PDF parsing
-        assert "PDF processing failed" in result["error"] or "Invalid file type" in result["error"] or "failed to extract text" in result["error"]
+        # The error could be "Invalid file type" from _save_uploaded_files if ALLOWED_PDF_EXTENSIONS is strict,
+        # or "PDF processing failed" if it reaches the process_pdf_task.
+        # This assertion needs to be robust to either.
+        assert ("PDF processing failed" in result["error"] or
+                "Invalid file type" in result["error"] or
+                "failed to extract text" in result["error"] or
+                "Upload error: Invalid file type" in result["error"]  # From _save_uploaded_files
+                ), f"Unexpected error message: {result['error']}"
 
-    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib.analyze")
-    @pytest.mark.skip(reason="Analysis requires LLM setup or mocking")
-    def test_process_pdf_with_analysis_and_chunking(self, mock_analyze, dummy_headers):
-        """Test PDF analysis and chunking."""
-        mock_analysis_text = "This is the mocked analysis result."
+
+    @pytest.mark.skip(reason="Analysis requires LLM setup or mocking. Parametrization for engine might be complex with mocks.")
+    @pytest.mark.parametrize("pdf_engine_to_test", PDF_ENGINES_TO_TEST)
+    @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib.analyze") # Ensure this path is correct
+    def test_process_pdf_with_analysis_and_chunking(self, mock_analyze, client, dummy_headers, pdf_engine_to_test):
+        """Test PDF analysis and chunking with different engines (if analysis relies on engine's text)."""
+        logger.info(f"Testing PDF with analysis and chunking with engine: {pdf_engine_to_test}")
+        mock_analysis_text = f"This is the mocked analysis result for {pdf_engine_to_test}."
         # If analyze is async:
         async def async_mock_analyze(*args, **kwargs): return mock_analysis_text
         mock_analyze.side_effect = async_mock_analyze
@@ -679,8 +715,12 @@ class TestProcessPdfs:
             "chunk_size": "300",
             "chunk_overlap": "50",
             "api_name": "mock_api",
-            "api_key": "mock_key"
+            "api_key": "mock_key",
+            "pdf_parsing_engine": pdf_engine_to_test # Pass the engine
         }
+        # Need to use the `client` fixture directly if it's function-scoped from the outer scope
+        # If `client` is not available here, ensure it's passed or use the class-scoped one.
+        # Assuming `client` is available from the class fixture setup or passed.
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
@@ -691,11 +731,10 @@ class TestProcessPdfs:
         assert mock_analysis_text in result["analysis"]
         assert result["chunks"] is not None
         assert isinstance(result["chunks"], list)
-        assert len(result["chunks"]) > 0 # Should have at least one chunk
-        # You could add more specific checks on chunk content/metadata if needed
+        assert len(result["chunks"]) > 0
 
         # Check that the mock was called (optional but good practice)
-        mock_analyze.assert_called()
+        # mock_analyze.assert_called() # Already asserted above
 
 
 

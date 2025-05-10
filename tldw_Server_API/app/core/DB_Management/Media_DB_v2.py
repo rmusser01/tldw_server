@@ -3656,6 +3656,10 @@ def search_media_db(db_instance: Database, search_query: Optional[str], search_f
         logger.error(f"Error search_media_db '{db_instance.db_path_str}': {e}", exc_info=True); raise DatabaseError(f"Failed search media: {e}") from e
     except Exception as e: logger.error(f"Unexpected error search_media_db '{db_instance.db_path_str}': {e}", exc_info=True); raise DatabaseError(f"Unexpected error media search: {e}") from e
 
+
+
+
+
 #
 # End of Media_DB_v2.py
 #######################################################################################################################

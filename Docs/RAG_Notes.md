@@ -18,6 +18,7 @@ https://arxiv.org/pdf/2502.14802
 Unsorted
 https://ai.gopubby.com/8-common-mistakes-in-vector-search-and-how-to-avoid-them-e48d849c23f8
 https://arxiv.org/pdf/2501.11551v4
+https://levelup.gitconnected.com/testing-18-rag-techniques-to-find-the-best-094d166af27f
 https://aiexpjourney.substack.com/p/the-mystery-of-rag-optimization-insights
 https://ai.plainenglish.io/part-2-chatting-with-my-companys-brain-how-i-built-my-ai-knowledge-buddy-16a38b59792b
 https://medium.com/data-science-collective/ai-engineering-3-3-dataset-engineering-inference-optimization-and-architecture-and-user-aac4ddf43c23

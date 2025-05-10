@@ -1,4 +1,4 @@
-# PDF_Ingestion_Lib.py
+# PDF_Processing_Lib.py
 #########################################
 # Library to hold functions for ingesting PDF files.#
 #

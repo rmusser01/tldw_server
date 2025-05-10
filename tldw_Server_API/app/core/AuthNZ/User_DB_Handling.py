@@ -178,7 +178,6 @@ async def get_request_user(
       and returns the User object fetched from Users_DB.
     """
     #print(f"DEBUGPRINT: Inside get_request_user. api_key from header: '{api_key}', token from scheme: '{token}'") #DEBUGPRINT
-    print(f"DEBUGPRINT: Inside get_request_user. api_key from header: '{api_key}'") #DEBUGPRINT
     # Check mode from the settings dictionary
     if settings["SINGLE_USER_MODE"]:
         # Single-User Mode: X-API-KEY is primary.

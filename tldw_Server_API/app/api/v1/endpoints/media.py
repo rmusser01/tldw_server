@@ -13,6 +13,7 @@
 # Imports
 import re
 import sqlite3
+from math import ceil
 
 import aiofiles
 import asyncio
@@ -105,7 +106,7 @@ from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_a
 from tldw_Server_API.app.api.v1.schemas.media_request_models import MediaUpdateRequest, VersionCreateRequest, \
     VersionRollbackRequest, \
     IngestWebContentRequest, ScrapeMethod, MediaType, AddMediaForm, ChunkMethod, PdfEngine, ProcessVideosForm, \
-    ProcessAudiosForm
+    ProcessAudiosForm, SearchRequest
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.services.web_scraping_service import process_web_scraping_task
 #
@@ -1151,7 +1152,7 @@ async def update_media_item(
 # Search Media Endpoints
 
 # Endpoints:
-#     GET /api/v1/media/search - `"/search"`
+
 
 # Retrieve a listing of all media, returning a list of media items. Limited by paging and rate limiting.
 @router.get(
@@ -1227,17 +1228,6 @@ async def list_all_media(
 # Enhanced Search Endpoint with ETags
 #
 
-class SearchRequest(BaseModel):
-    query: Optional[str] = None
-    fields: List[str] = ["title", "content"]
-    exact_phrase: Optional[str] = None
-    media_types: Optional[List[str]] = None
-    date_range: Optional[Dict[str, datetime]] = None
-    must_have: Optional[List[str]] = None
-    must_not_have: Optional[List[str]] = None
-    sort_by: Optional[str] = "relevance"
-    boost_fields: Optional[Dict[str, float]] = None
-
 def parse_advanced_query(search_request: SearchRequest) -> Dict:
     """Convert advanced search request to DB query format"""
     query_params = {
@@ -1253,6 +1243,119 @@ def parse_advanced_query(search_request: SearchRequest) -> Dict:
         'boost': search_request.boost_fields or {'title': 2.0, 'content': 1.0}
     }
     return query_params
+
+
+@router.post(
+    "/search",
+    status_code=status.HTTP_200_OK,
+    summary="Search Media Items",
+    tags=["Media Management"],
+    response_model=MediaListResponse
+)
+@limiter.limit("30/minute")  # Adjust rate limit as needed
+async def search_media_items(  # Renamed to avoid conflict if list_all_media is in same file
+        request: Request,  # Keep request for limiter
+        search_params: SearchRequest,
+        page: int = Query(1, ge=1, description="Page number"),
+        results_per_page: int = Query(10, ge=1, le=100, description="Results per page"),
+        db: Database = Depends(get_db_for_user)
+):
+    """
+    Search across media items based on various criteria.
+
+    Args:
+        db_instance (Database): An initialized Database instance.
+        search_query (Optional[str]): The text query string. Matched against
+            selected `search_fields`. Can be None for keyword-only search.
+        search_fields (Optional[List[str]]): Fields to match `search_query` against.
+            Valid options: 'title', 'content' (use FTS), 'author', 'type' (use LIKE).
+            Defaults to ['title', 'content'] if `search_query` is provided.
+            If `search_query` is None, this is ignored.
+        keywords (Optional[List[str]]): A list of keywords. Media items must be
+            associated with *all* provided keywords to match. Case-insensitive.
+        page (int): The page number for pagination (1-based). Defaults to 1.
+        results_per_page (int): Number of results per page. Defaults to 20.
+        include_trash (bool): If True, include items marked as trash. Defaults to False.
+        include_deleted (bool): If True, include soft-deleted items. Defaults to False.
+
+    The search is case-insensitive for LIKE queries and uses SQLite FTS capabilities.
+    """
+    try:
+        db_search_query: Optional[str] = None
+        if search_params.exact_phrase:
+            # SQLite FTS exact phrase is typically enclosed in double quotes
+            db_search_query = f'"{search_params.exact_phrase.strip()}"'
+        elif search_params.query:
+            db_search_query = search_params.query.strip()
+
+        # Fields to search in; defaults are handled by Pydantic model
+        db_search_fields = search_params.fields
+
+        # Call the database search function
+        items_data, total_items = search_media_db(
+            db_instance=db,
+            search_query=db_search_query,
+            search_fields=db_search_fields,
+            keywords=search_params.must_have,  # Maps to 'must_have'
+            page=page,
+            results_per_page=results_per_page,
+            include_trash=False,
+            include_deleted=False
+        )
+
+        formatted_items = [
+            MediaListItem(
+                id=item["id"],
+                title=item["title"],
+                type=item["type"],
+                # Construct URL as in the list_all_media example
+                # Ensure your router prefix is handled correctly if media details are under /api/v1/media/{id}
+                url=f"/api/v1/media/{item['id']}"
+            )
+            for item in items_data
+        ]
+
+        total_pages = ceil(total_items / results_per_page) if results_per_page > 0 and total_items > 0 else 0
+
+        # The requested page number is `page`. If it's out of bounds for the results,
+        # `items` will be empty, and `total_pages` will reflect the actual number of pages.
+        current_page_for_response = page
+
+        pagination_info = PaginationInfo(
+            page=current_page_for_response,
+            results_per_page=results_per_page,
+            total_pages=total_pages,  # Calculated total pages
+            total_items=total_items  # Total items matching search
+        )
+
+        try:
+            response_obj = MediaListResponse(
+                items=formatted_items,
+                pagination=pagination_info
+            )
+            return response_obj
+        except ValidationError as ve:
+            logger.error(f"Pydantic validation error creating MediaListResponse for search: {ve.errors()}",
+                         exc_info=True)
+            logger.debug(
+                f"Data causing validation error in search: items_count={len(formatted_items)}, pagination={pagination_info.model_dump_json(indent=2) if pagination_info else 'None'}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail="Internal server error: Response creation failed.")
+
+    except ValueError as ve:
+        logger.warning(f"Invalid parameters for media search: {ve}",
+                       exc_info=True)  # Log stack trace for ValueErrors too
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(ve))
+    except DatabaseError as e:
+        logger.error(f"Database error during media search: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="A database error occurred during the search.")
+    except HTTPException:  # Re-raise HTTPExceptions directly
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in search_media_items endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="An unexpected internal server error occurred.")
 
 #
 # End of Bare Media Endpoint Functions/Routes

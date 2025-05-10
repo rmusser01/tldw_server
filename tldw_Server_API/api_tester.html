@@ -44,7 +44,7 @@
         .checkbox-group input[type="checkbox"] { margin-right: 5px; vertical-align: middle; }
         .columns { display: flex; flex-wrap: wrap; gap: 20px; }
         .column { flex: 1; min-width: 300px; }
-        small { color: #666; }
+        small { color: #666; display: block; margin-top: -5px; margin-bottom: 10px;}
     </style>
 </head>
 <body>
@@ -60,7 +60,7 @@
                 <button class="tab-button" onclick="openTab(event, 'tabMediaVersioning')">Media Versioning</button>
                 <button class="tab-button" onclick="openTab(event, 'tabMediaIngestionPersistence')">Media Ingestion (DB)</button>
                 <button class="tab-button" onclick="openTab(event, 'tabMediaProcessingNoDB')">Media Processing (No DB)</button>
-                <button class="tab-button" onclick="openTab(event, 'tabChatCompletions')">Chat Completions</button> <!-- NEW TAB -->
+                <button class="tab-button" onclick="openTab(event, 'tabChatCompletions')">Chat Completions</button>
                 <button class="tab-button" onclick="openTab(event, 'tabWebScraping')">Web Scraping</button>
                 <button class="tab-button" onclick="openTab(event, 'tabDebug')">Debug</button>
             </div>
@@ -83,7 +83,7 @@
                 </div>
             </div>
 
-            <!-- Media Management Tab (existing content) -->
+            <!-- Media Management Tab -->
             <div id="tabMediaManagement" class="tab-content">
                 <!-- GET /api/v1/media/ - List All Media Items -->
                 <div class="endpoint-section" id="listAllMedia">
@@ -101,6 +101,46 @@
                     <pre id="listAllMedia_curl">---</pre>
                     <h3>Response:</h3>
                     <pre id="listAllMedia_response">---</pre>
+                </div>
+
+                <!-- POST /api/v1/media/search - Search Media Items -->
+                <div class="endpoint-section" id="searchMediaItems">
+                    <h2>POST /api/v1/media/search - Search Media Items</h2>
+                    <p>Search media items based on criteria. Pagination is handled via query parameters.</p>
+                    <div class="columns">
+                        <div class="column">
+                            <div class="form-group">
+                                <label for="searchMediaItems_payload">Payload (SearchRequest JSON):</label>
+                                <textarea id="searchMediaItems_payload" style="min-height: 200px;">{
+    "query": "example search term",
+    "fields": ["title", "content"],
+    "exact_phrase": null,
+    "media_types": ["article", "video"],
+    "must_have": ["keyword1", "project_alpha"],
+    "must_not_have": null,
+    "sort_by": "relevance",
+    "boost_fields": null,
+    "date_range": null
+}</textarea>
+                                <small><code>date_range</code>, <code>must_not_have</code>, advanced <code>sort_by</code>, <code>boost_fields</code> are not fully implemented by current backend.</small>
+                            </div>
+                        </div>
+                        <div class="column">
+                            <div class="form-group">
+                                <label for="searchMediaItems_page">Page (Query Param):</label>
+                                <input type="number" id="searchMediaItems_page" value="1">
+                            </div>
+                            <div class="form-group">
+                                <label for="searchMediaItems_results_per_page">Results per page (Query Param):</label>
+                                <input type="number" id="searchMediaItems_results_per_page" value="10">
+                            </div>
+                        </div>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('searchMediaItems', 'POST', '/api/v1/media/search', 'json_with_query')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="searchMediaItems_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="searchMediaItems_response">---</pre>
                 </div>
 
                 <!-- GET /api/v1/media/{media_id} -->
@@ -143,7 +183,7 @@
                 </div>
             </div>
 
-            <!-- Media Versioning Tab (existing content) -->
+            <!-- Media Versioning Tab -->
             <div id="tabMediaVersioning" class="tab-content">
                 <!-- POST /api/v1/media/{media_id}/versions -->
                 <div class="endpoint-section" id="createVersion">
@@ -252,7 +292,7 @@
                 </div>
             </div>
 
-            <!-- Media Ingestion (DB Persistence) Tab (existing content) -->
+            <!-- Media Ingestion (DB Persistence) Tab -->
             <div id="tabMediaIngestionPersistence" class="tab-content">
                 <div class="endpoint-section" id="addMedia">
                     <h2>POST /api/v1/media/add - Add Media (URLs/Files) with DB Persistence</h2>
@@ -356,8 +396,8 @@
                                 <label for="addMedia_pdf_parsing_engine">PDF Parsing Engine:</label>
                                 <select id="addMedia_pdf_parsing_engine">
                                     <option value="pymupdf4llm">pymupdf4llm</option>
-                                    <option value="pypdf">pypdf</option>
-                                    <option value="pdfminer">pdfminer</option>
+                                    <option value="pymupdf">pymupdf</option>
+                                    <option value="docling">docling</option>
                                 </select>
                             </div>
                         </div>
@@ -372,6 +412,7 @@
                                     <option value="recursive">recursive</option>
                                     <option value="chapter">chapter</option>
                                     <option value="token">token</option>
+                                    <option value="character">character</option>
                                 </select>
                             </div>
                              <div class="form-group">
@@ -400,7 +441,7 @@
                 </div>
             </div>
 
-            <!-- Media Processing (No DB) Tab (existing content) -->
+            <!-- Media Processing (No DB) Tab -->
             <div id="tabMediaProcessingNoDB" class="tab-content">
                 <!-- POST /api/v1/media/process-videos -->
                 <div class="endpoint-section" id="processVideos">
@@ -499,6 +540,7 @@
                                     <option value="sentences" selected>sentences</option>
                                     <option value="recursive">recursive</option>
                                     <option value="token">token</option>
+                                    <option value="character">character</option>
                                 </select>
                             </div>
                              <div class="form-group">
@@ -615,6 +657,7 @@
                                      <option value="sentences" selected>sentences</option>
                                     <option value="recursive">recursive</option>
                                     <option value="token">token</option>
+                                    <option value="character">character</option>
                                 </select>
                             </div>
                              <div class="form-group">
@@ -692,6 +735,7 @@
                                     <option value="recursive">recursive</option>
                                     <option value="sentences">sentences</option>
                                     <option value="token">token</option>
+                                    <option value="character">character</option>
                                 </select>
                             </div>
                             <div class="form-group">
@@ -748,7 +792,7 @@
                                 <textarea id="processDocuments_urls"></textarea>
                             </div>
                             <div class="form-group">
-                                <label for="processDocuments_files">Files (.txt, .docx, .rtf, .md, .html, .xml):</label>
+                                <label for="processDocuments_files">Files (.txt, .md, .docx, .rtf, .html, .htm, .xml):</label>
                                 <input type="file" id="processDocuments_files" multiple accept=".txt,.md,.docx,.rtf,.html,.htm,.xml">
                             </div>
                              <div class="form-group">
@@ -778,6 +822,7 @@
                                     <option value="sentences">sentences</option>
                                     <option value="markdown">markdown</option>
                                     <option value="token">token</option>
+                                    <option value="character">character</option>
                                 </select>
                             </div>
                             <div class="form-group">
@@ -853,8 +898,8 @@
                                 <label for="processPdfs_pdf_parsing_engine">PDF Parsing Engine:</label>
                                 <select id="processPdfs_pdf_parsing_engine">
                                     <option value="pymupdf4llm">pymupdf4llm</option>
-                                    <option value="pypdf">pypdf</option>
-                                    <option value="pdfminer">pdfminer</option>
+                                    <option value="pymupdf">pymupdf</option>
+                                    <option value="docling">docling</option>
                                 </select>
                             </div>
                         </div>
@@ -872,6 +917,7 @@
                                     <option value="recursive">recursive</option>
                                     <option value="chapter">chapter</option>
                                     <option value="token">token</option>
+                                    <option value="character">character</option>
                                 </select>
                             </div>
                             <div class="form-group">
@@ -966,7 +1012,7 @@
                 </div>
             </div>
 
-            <!-- Web Scraping Tab (existing content) -->
+            <!-- Web Scraping Tab -->
             <div id="tabWebScraping" class="tab-content">
                  <!-- POST /api/v1/media/ingest-web-content -->
                 <div class="endpoint-section" id="ingestWebContent">
@@ -1042,7 +1088,7 @@
                 </div>
             </div>
 
-            <!-- Debug Tab (existing content) -->
+            <!-- Debug Tab -->
             <div id="tabDebug" class="tab-content">
                 <div class="endpoint-section" id="debugSchema">
                     <h2>GET /api/v1/media/debug/schema - Debug Schema</h2>
@@ -1140,33 +1186,40 @@
                 console.warn("API Key/Token input is empty. No X-API-KEY header will be sent.");
             }
 
-            if (bodyType === 'query' || (method === 'GET' && bodyType !== 'none')) {
-                const params = new URLSearchParams();
+            // Handle query parameters separately, especially for POST requests with query params
+            const queryParamsForUrl = new URLSearchParams();
+            if (bodyType === 'query' || bodyType === 'json_with_query' || (method === 'GET' && bodyType !== 'none')) {
                 const formSection = document.getElementById(endpointId);
                 if (formSection) {
                     const formElements = formSection.querySelectorAll('input, select, textarea');
                     formElements.forEach(el => {
                         if (el.id && el.id.startsWith(endpointId + '_')) {
                             const key = el.id.replace(endpointId + '_', '');
+                            // Skip elements that are part of path or payload for json_with_query
                             if (pathParams[key]) return;
+                            if (bodyType === 'json_with_query' && key === 'payload') return;
+
                             if (el.type === 'checkbox') {
-                                if (el.checked) params.append(key, 'true');
+                                if (el.checked) queryParamsForUrl.append(key, 'true');
                             } else if (el.type === 'file') { /* skip */ }
                             else if (el.tagName.toLowerCase() === 'select' && el.multiple) {
                                 for (const option of el.selectedOptions) {
-                                    if (option.value) params.append(key, option.value);
+                                    if (option.value) queryParamsForUrl.append(key, option.value);
                                 }
                             } else if (el.value) {
-                                params.append(key, el.value);
+                                queryParamsForUrl.append(key, el.value);
                             }
                         }
                     });
                 }
-                if (params.toString()) {
-                    fullUrl += '?' + params.toString();
-                }
-                console.log("URL with query params:", fullUrl);
-            } else if (bodyType === 'json') {
+            }
+            if (queryParamsForUrl.toString()) {
+                fullUrl += (fullUrl.includes('?') ? '&' : '?') + queryParamsForUrl.toString();
+            }
+            // console.log("URL with query params:", fullUrl);
+
+
+            if (bodyType === 'json' || bodyType === 'json_with_query') {
                 const payloadText = document.getElementById(endpointId + '_payload')?.value;
                 if (payloadText) {
                     try {
@@ -1230,11 +1283,11 @@
 
             let finalCurlCommandParts = [`curl -X ${method}`];
             finalCurlCommandParts.push(...curlHeaderParts);
-            if (isStream && method === 'POST') { // Add -N for streaming POST for cURL
+            if (isStream && method === 'POST') {
                 finalCurlCommandParts.push('-N');
             }
 
-            if (bodyType === 'json' && bodyPayload) {
+            if ((bodyType === 'json' || bodyType === 'json_with_query') && bodyPayload) {
                 if (!finalCurlCommandParts.some(h => h.toLowerCase().includes('content-type: application/json'))) {
                     finalCurlCommandParts.push(`-H "Content-Type: application/json"`);
                 }
@@ -1258,7 +1311,7 @@
                 };
 
                 if (method !== 'GET' && method !== 'HEAD' && bodyPayload) {
-                    fetchOptions.body = (bodyType === 'json' && bodyPayload) ? JSON.stringify(bodyPayload) : bodyPayload;
+                    fetchOptions.body = ((bodyType === 'json' || bodyType === 'json_with_query') && bodyPayload) ? JSON.stringify(bodyPayload) : bodyPayload;
                 }
                 console.log("Fetch options being sent:", fetchOptions);
 

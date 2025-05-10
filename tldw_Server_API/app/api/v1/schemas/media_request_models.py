@@ -79,6 +79,16 @@ class VersionResponse(BaseModel):
 class VersionRollbackRequest(BaseModel):
     version_number: int
 
+class SearchRequest(BaseModel):
+    query: Optional[str] = None
+    fields: List[str] = ["title", "content"]
+    exact_phrase: Optional[str] = None
+    media_types: Optional[List[str]] = None
+    date_range: Optional[Dict[str, datetime]] = None
+    must_have: Optional[List[str]] = None
+    must_not_have: Optional[List[str]] = None
+    sort_by: Optional[str] = "relevance"
+    boost_fields: Optional[Dict[str, float]] = None
 
 # Define allowed media types using Literal for validation
 MediaType = Literal['video', 'audio', 'document', 'pdf', 'ebook']
@@ -87,7 +97,7 @@ MediaType = Literal['video', 'audio', 'document', 'pdf', 'ebook']
 ChunkMethod = Literal['sentences', 'recursive', 'chapter', 'token']
 
 # Define allowed PDF parsing engines
-PdfEngine = Literal['pymupdf4llm', 'pypdf', 'pdfminer'] # Add others if supported
+PdfEngine = Literal['pymupdf4llm', 'pymupdf', 'docling'] # Add others if supported
 
 class ChunkingOptions(BaseModel):
     """Pydantic model for chunking specific options"""
@@ -379,8 +389,6 @@ class IngestWebContentRequest(BaseModel):
 #
 # End of Web-Scraping ingestion and analysis model schema
 ####################################################################################
-
-
 
 
 #

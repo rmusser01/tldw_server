@@ -191,7 +191,6 @@ class MediaSearchResponse(BaseModel):
     results: List[MediaSearchResultItem] = Field(..., description="List of media items matching the search criteria.")
     pagination: PaginationInfoSearch = Field(..., description="Pagination details for the search results.")
 
-
 ######################## Media Processing Response Model ###################################
 #
 # This is a schema for media processing response models.
