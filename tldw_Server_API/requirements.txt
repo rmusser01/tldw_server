@@ -1,8 +1,85 @@
-fastapi # FastAPI for building the API
-pydantic # FastAPI
-slowapi # For rate limiting in FastAPI
-uvicorn # ASGI server for FastAPI
-redis # In-Memory Caching, Rate Limiting
-yara # File scanning
-puremagic # File type detection
-
+# Requirements.txt for tldw Server API. Sorted into categories.
+# Audio
+faster_whisper
+kokoro_onnx
+nemo_toolkit
+pyannote.audio
+pyannote.core
+pyannote.database
+pyannote.metrics
+pyannote.pipeline
+PyAudio
+sounddevice
+soundfile
+#
+# API-Server
+aiofiles
+cachetools
+fastapi
+loguru
+numpy
+pandas
+passlib
+psutil
+pydantic
+pydantic_core
+pytest
+python-dotenv
+python_magic
+pywin32
+PyYAML
+redis
+scikit_learn
+scipy
+slowapi
+starlette
+toml
+tqdm
+# API-Server AuthN/AuthZ/Security
+keyring
+puremagic
+pycryptodomex
+PyJWT
+yara_python
+#
+# Chunking/Languages
+chardet
+fugashi
+jieba
+langdetect
+nltk
+tiktoken
+#
+# ETL/Document Parsing
+docling
+docx2txt
+EbookLib
+lxml
+pymupdf
+pymupdf4llm
+pypandoc
+pypandoc_binary
+yt_dlp
+#
+# LLM Inference
+onnxruntime
+openai
+torch
+transformers
+#
+# Re-Ranking
+FlashRank
+#
+# VectorDB
+chromadb
+#
+#Web-Related
+beautifulsoup4
+html2text
+httpx
+urllib3
+playwright
+playwright_stealth
+Requests
+tenacity
+trafilatura
