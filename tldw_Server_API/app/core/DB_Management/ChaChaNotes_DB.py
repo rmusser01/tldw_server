@@ -120,7 +120,7 @@ USING fts5(
     scenario,
     system_prompt,
     content='character_cards',
-    content_rowid='id'
+    content_rowid='id' -- 'id' is INTEGER PK, so this is fine
 );
 CREATE TRIGGER IF NOT EXISTS character_cards_ai AFTER INSERT ON character_cards BEGIN
   INSERT INTO character_cards_fts(rowid, name, description, personality, scenario, system_prompt)
@@ -136,7 +136,7 @@ CREATE TRIGGER IF NOT EXISTS character_cards_au AFTER UPDATE ON character_cards 
    WHERE rowid = new.id;
 END;
 CREATE TRIGGER IF NOT EXISTS character_cards_ad AFTER DELETE ON character_cards BEGIN
-  DELETE FROM character_cards_fts WHERE rowid = old.id; -- Note: FTS trigger on actual DELETE, not soft delete.
+  DELETE FROM character_cards_fts WHERE rowid = old.id; 
 END;
 
 -- ───────────────────────────────────────────────────────────────────────────
@@ -164,19 +164,19 @@ CREATE VIRTUAL TABLE IF NOT EXISTS conversations_fts
 USING fts5(
     title,
     content='conversations',
-    content_rowid='id' -- Changed from 'rowid' to 'id'
+    content_rowid='rowid' -- FIXED: Changed from 'id' to 'rowid' as conversations.id is TEXT
 );
 CREATE TRIGGER IF NOT EXISTS conversations_ai AFTER INSERT ON conversations BEGIN
   INSERT INTO conversations_fts(rowid, title)
-    VALUES (new.id, new.title); -- Changed new.rowid to new.id
+    VALUES (new.rowid, new.title); -- FIXED: Changed new.id to new.rowid
 END;
 CREATE TRIGGER IF NOT EXISTS conversations_au AFTER UPDATE ON conversations BEGIN
   UPDATE conversations_fts
      SET title = new.title
-   WHERE rowid = old.id; -- Changed old.rowid to old.id
+   WHERE rowid = old.rowid; -- FIXED: Changed old.id to old.rowid
 END;
 CREATE TRIGGER IF NOT EXISTS conversations_ad AFTER DELETE ON conversations BEGIN
-  DELETE FROM conversations_fts WHERE rowid = old.id; -- Changed old.rowid to old.id
+  DELETE FROM conversations_fts WHERE rowid = old.rowid; -- FIXED: Changed old.id to old.rowid
 END;
 
 -- ───────────────────────────────────────────────────────────────────────────
@@ -185,10 +185,10 @@ END;
 CREATE TABLE IF NOT EXISTS messages (
     id                   TEXT      PRIMARY KEY, -- UUID
     conversation_id      TEXT      NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    parent_message_id    TEXT      REFERENCES messages(id) ON DELETE SET NULL, -- For swiping/alternatives
-    sender               TEXT      NOT NULL, -- e.g. 'user', 'assistant', 'system'
+    parent_message_id    TEXT      REFERENCES messages(id) ON DELETE SET NULL, 
+    sender               TEXT      NOT NULL, 
     content              TEXT      NOT NULL,
-    timestamp            DATETIME  NOT NULL DEFAULT CURRENT_TIMESTAMP, -- This is effectively created_at
+    timestamp            DATETIME  NOT NULL DEFAULT CURRENT_TIMESTAMP, 
     ranking              INTEGER,
     last_modified        DATETIME  NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted              BOOLEAN   NOT NULL DEFAULT 0,
@@ -205,19 +205,19 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
 USING fts5(
     content,
     content='messages',
-    content_rowid='id' -- Changed from 'rowid' to 'id'
+    content_rowid='rowid' -- FIXED: Changed from 'id' to 'rowid' as messages.id is TEXT
 );
 CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
   INSERT INTO messages_fts(rowid, content)
-    VALUES (new.id, new.content); -- Changed new.rowid to new.id
+    VALUES (new.rowid, new.content); -- FIXED: Changed new.id to new.rowid
 END;
 CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
   UPDATE messages_fts
      SET content = new.content
-   WHERE rowid = old.id; -- Changed old.rowid to old.id
+   WHERE rowid = old.rowid; -- FIXED: Changed old.id to old.rowid
 END;
 CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
-  DELETE FROM messages_fts WHERE rowid = old.id; -- Changed old.rowid to old.id
+  DELETE FROM messages_fts WHERE rowid = old.rowid; -- FIXED: Changed old.id to old.rowid
 END;
 
 -- ───────────────────────────────────────────────────────────────────────────
@@ -236,7 +236,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS keywords_fts
 USING fts5(
     keyword,
     content='keywords',
-    content_rowid='id'
+    content_rowid='id' -- 'id' is INTEGER PK, fine
 );
 CREATE TRIGGER IF NOT EXISTS keywords_ai AFTER INSERT ON keywords BEGIN
   INSERT INTO keywords_fts(rowid, keyword) VALUES (new.id, new.keyword);
@@ -265,7 +265,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS keyword_collections_fts
 USING fts5(
     name,
     content='keyword_collections',
-    content_rowid='id'
+    content_rowid='id' -- 'id' is INTEGER PK, fine
 );
 CREATE TRIGGER IF NOT EXISTS keyword_collections_ai AFTER INSERT ON keyword_collections BEGIN
   INSERT INTO keyword_collections_fts(rowid, name) VALUES (new.id, new.name);
@@ -281,8 +281,8 @@ END;
 -- 6. Notes (Independent, with sync metadata + FTS5)
 -- ───────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS notes (
-    id            TEXT      PRIMARY KEY, -- Changed from INTEGER AUTOINCREMENT to TEXT (UUID)
-    title         TEXT      NOT NULL,    -- Title is not enforced as unique at DB level
+    id            TEXT      PRIMARY KEY, 
+    title         TEXT      NOT NULL,    
     content       TEXT      NOT NULL,
     created_at    DATETIME  NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_modified DATETIME  NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -297,20 +297,20 @@ USING fts5(
     title,
     content,
     content='notes',
-    content_rowid='id' -- 'id' is now TEXT PK
+    content_rowid='rowid' -- FIXED: 'id' is TEXT PK, changed to 'rowid'
 );
 CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
   INSERT INTO notes_fts(rowid, title, content)
-    VALUES (new.id, new.title, new.content); -- Use new.id (TEXT PK)
+    VALUES (new.rowid, new.title, new.content); -- FIXED: Use new.rowid
 END;
 CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE ON notes BEGIN
   UPDATE notes_fts
      SET title   = new.title,
          content = new.content
-   WHERE rowid = old.id; -- Use old.id (TEXT PK)
+   WHERE rowid = old.rowid; -- FIXED: Use old.rowid
 END;
 CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
-  DELETE FROM notes_fts WHERE rowid = old.id; -- Use old.id (TEXT PK)
+  DELETE FROM notes_fts WHERE rowid = old.rowid; -- FIXED: Use old.rowid
 END;
 
 -- ───────────────────────────────────────────────────────────────────────────
