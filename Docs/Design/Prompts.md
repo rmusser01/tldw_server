@@ -21,6 +21,7 @@ https://github.com/MIATECHPARTNERS/PromptChains
 https://github.com/mazen160/llmquery/
 https://juuzt.ai/knowledge-base/prompt-frameworks/
 https://www.turingpost.com/p/arize1
+https://rentry.co/NoAss
 https://github.com/tpetkovich/Agentic_Guideline_Gen_Example/blob/main/Agentic_Guideline_Gen_Example.ipynb
 https://github.com/xufangzhi/phi-Decoding
     https://arxiv.org/html/2503.13288v1

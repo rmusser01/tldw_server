@@ -55,6 +55,8 @@ import logging
 
 import yaml
 
+from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -3128,6 +3130,124 @@ class Database:
         except Exception as e:
             logger.error(f"Unexpected error adding chunk for media {media_id}: {e}", exc_info=True)
             raise DatabaseError(f"An unexpected error occurred while adding media chunk: {e}") from e
+
+    def add_media_chunks_in_batches(self, media_id: int, chunks_to_add: List[Dict[str, Any]],
+                                    batch_size: int = 100) -> int:
+        """
+        Processes a list of chunk dictionaries and adds them to the MediaChunks table in batches.
+        This method adapts the input chunk format for the internal self.batch_insert_chunks method.
+        It preserves the batching and logging behavior of the original standalone process_chunks function.
+
+        Args:
+            media_id (int): ID of the media these chunks belong to.
+            chunks_to_add (List[Dict[str, Any]]): List of chunk dictionaries. Each dictionary must have
+                                                  'text', 'start_index', and 'end_index' keys.
+                                                  Example: [{'text': 'chunk1', 'start_index': 0, 'end_index': 10}, ...]
+            batch_size (int): Number of chunks to process and pass to self.batch_insert_chunks in each iteration.
+
+        Returns:
+            int: The total number of chunks successfully processed and attempted for insertion.
+
+        Raises:
+            InputError: If essential keys are missing in `chunks_to_add` items, or if `media_id` is invalid
+                        (this error would be propagated from the underlying `self.batch_insert_chunks` call).
+            DatabaseError: For database errors during insertion (propagated from `self.batch_insert_chunks`).
+            Exception: For other unexpected errors during the process.
+        """
+        # These log_counter and log_histogram calls assume they are available in the global scope
+        # or otherwise accessible, as per the original function's structure.
+        # If not, they would need to be passed to this method or the Database instance.
+        log_counter("add_media_chunks_in_batches_attempt", labels={"media_id": media_id})
+        start_time = time.time()
+        total_chunks_in_input = len(chunks_to_add)
+        successfully_processed_count = 0
+
+        # Parent media_id validity will be checked within self.batch_insert_chunks.
+        # If media_id is invalid, self.batch_insert_chunks will raise an InputError.
+
+        try:
+            for i in range(0, total_chunks_in_input, batch_size):
+                current_batch_from_input = chunks_to_add[i:i + batch_size]
+
+                # Adapt batch to the format expected by self.batch_insert_chunks:
+                # [{'text': ..., 'metadata': {'start_index': ..., 'end_index': ...}}]
+                adapted_batch_for_internal_method = []
+                for chunk_item in current_batch_from_input:
+                    try:
+                        # Ensure 'text', 'start_index', 'end_index' are present
+                        # The self.batch_insert_chunks method expects 'text' (or 'chunk_text')
+                        # and 'metadata' containing 'start_index' and 'end_index'.
+                        text_content = chunk_item['text']
+                        start_idx = chunk_item['start_index']
+                        end_idx = chunk_item['end_index']
+
+                        adapted_chunk = {
+                            'text': text_content,
+                            'metadata': {
+                                'start_index': start_idx,
+                                'end_index': end_idx
+                            }
+                        }
+                        adapted_batch_for_internal_method.append(adapted_chunk)
+                    except KeyError as e:
+                        # Using global 'logging' as per the style in Database class and original function
+                        logging.error(
+                            f"Media ID {media_id}: Skipping chunk due to missing key {e} in input data: {chunk_item}")
+                        log_counter("add_media_chunks_in_batches_item_skip_key_error",
+                                    labels={"media_id": media_id, "key": str(e)})
+                        continue  # Skip this malformed chunk_item
+
+                if not adapted_batch_for_internal_method:
+                    if current_batch_from_input:  # Original batch had items, but all were malformed or skipped
+                        logging.warning(
+                            f"Media ID {media_id}: Batch starting at index {i} resulted in no valid chunks to process.")
+                    continue  # Move to the next batch
+
+                try:
+                    # self.batch_insert_chunks is an existing method in your Database class.
+                    # It handles its own transaction, generates UUIDs, sets sync metadata (version, client_id, etc.),
+                    # and logs sync events for each chunk.
+                    # It returns the number of chunks it prepared/attempted from the adapted_batch.
+                    num_inserted_this_batch = self.batch_insert_chunks(media_id, adapted_batch_for_internal_method)
+
+                    successfully_processed_count += num_inserted_this_batch
+                    logging.info(
+                        f"Media ID {media_id}: Processed {successfully_processed_count}/{total_chunks_in_input} chunks so far. Current batch (size {len(adapted_batch_for_internal_method)}) resulted in {num_inserted_this_batch} items attempted.")
+                    log_counter("add_media_chunks_in_batches_batch_success", labels={"media_id": media_id})
+
+                # Catch specific errors that self.batch_insert_chunks might raise
+                except InputError as e:  # e.g., if media_id is invalid, or chunk structure within adapted_batch is wrong
+                    logging.error(f"Media ID {media_id}: Input error during an internal batch insertion: {e}")
+                    log_counter("add_media_chunks_in_batches_batch_error",
+                                labels={"media_id": media_id, "error_type": "InputError"})
+                    raise  # Re-raise to halt the entire operation
+                except DatabaseError as e:  # For other database-related errors from self.batch_insert_chunks
+                    logging.error(f"Media ID {media_id}: Database error during an internal batch insertion: {e}")
+                    log_counter("add_media_chunks_in_batches_batch_error",
+                                labels={"media_id": media_id, "error_type": "DatabaseError"})
+                    raise  # Re-raise
+                except Exception as e:  # Catch any other unexpected errors from self.batch_insert_chunks
+                    logging.error(f"Media ID {media_id}: Unexpected error during an internal batch insertion: {e}",
+                                  exc_info=True)
+                    log_counter("add_media_chunks_in_batches_batch_error",
+                                labels={"media_id": media_id, "error_type": type(e).__name__})
+                    raise  # Re-raise
+
+            logging.info(
+                f"Media ID {media_id}: Finished processing chunk list. Total chunks from input: {total_chunks_in_input}. Successfully processed and attempted for insertion: {successfully_processed_count}.")
+            duration = time.time() - start_time
+            log_histogram("add_media_chunks_in_batches_duration", duration, labels={"media_id": media_id})
+            log_counter("add_media_chunks_in_batches_success_overall", labels={"media_id": media_id})
+            return successfully_processed_count
+
+        except Exception as e:  # Catches errors from the outer loop logic or re-raised errors from the inner try-except block
+            duration = time.time() - start_time
+            # Log duration even if the overall process failed
+            log_histogram("add_media_chunks_in_batches_duration", duration, labels={"media_id": media_id})
+            log_counter("add_media_chunks_in_batches_error_overall",
+                        labels={"media_id": media_id, "error_type": type(e).__name__})
+            logging.error(f"Media ID {media_id}: Error processing the list of chunks: {e}", exc_info=True)
+            raise  # Re-raise the caught exception to inform the caller
 
     def batch_insert_chunks(self, media_id: int, chunks: List[Dict]) -> int:
         """
