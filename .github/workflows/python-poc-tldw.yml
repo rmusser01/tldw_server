@@ -32,7 +32,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }} # Adjust if requirements.txt is not at root
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/PoC_Version/requirements.txt') }} # Adjust if requirements.txt is not at root
         restore-keys: |
           ${{ runner.os }}-pip-
 
