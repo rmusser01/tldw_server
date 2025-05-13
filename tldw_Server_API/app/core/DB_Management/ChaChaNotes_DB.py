@@ -867,14 +867,40 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
         return self._get_thread_connection()
 
     def close_connection(self):
-        if hasattr(self._local, 'conn') and self._local.conn is not None:
+        conn = getattr(self._local, 'conn', None)
+        if conn is not None:
             try:
-                conn = self._local.conn
-                self._local.conn = None  # Remove ref before closing
+                if not self.is_memory_db:
+                    # Resolve any pending transaction before checkpointing
+                    if conn.in_transaction:
+                        try:
+                            logger.warning(
+                                f"Connection to {self.db_path_str} is in an uncommitted transaction during close. Attempting rollback.")
+                            conn.rollback()  # Attempt rollback if transaction is open
+                        except sqlite3.Error as rb_err:
+                            logger.error(f"Rollback attempt during close for {self.db_path_str} failed: {rb_err}")
+                            # Don't proceed to checkpoint if rollback fails and we're still in transaction potentially
+                            # However, conn.close() below should still be attempted.
+
+                    # Checkpoint WAL only if not in a failed transaction state that prevents it
+                    # and WAL mode is active.
+                    # We assume if conn.in_transaction is false now, any transaction was committed/rolled back.
+                    if not conn.in_transaction:  # Re-check after potential rollback
+                        mode_row = conn.execute("PRAGMA journal_mode;").fetchone()
+                        if mode_row and mode_row[0].lower() == 'wal':
+                            logger.debug(
+                                f"Attempting WAL checkpoint (TRUNCATE) before closing {self.db_path_str} on thread {threading.get_ident()}.")
+                            conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                            logger.debug(f"WAL checkpoint TRUNCATE executed for {self.db_path_str}.")
+
                 conn.close()
                 logger.debug(f"Closed connection for thread {threading.get_ident()} to {self.db_path_str}.")
-            except sqlite3.Error as e:
-                logger.warning(f"Error closing connection for {self.db_path_str}: {e}")
+            except sqlite3.Error as e:  # Catches errors from execute, checkpoint, or close
+                logger.warning(
+                    f"Error during SQLite connection close/checkpoint for {self.db_path_str} on thread {threading.get_ident()}: {e}")
+            finally:
+                if hasattr(self._local, 'conn'):
+                    self._local.conn = None
 
     # --- Query Execution ---
     def execute_query(self, query: str, params: Optional[Union[tuple, Dict[str, Any]]] = None, *, commit: bool = False,
