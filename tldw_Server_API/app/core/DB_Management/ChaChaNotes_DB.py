@@ -1016,6 +1016,26 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
     def _generate_uuid(self) -> str:
         return str(uuid.uuid4())
 
+    def _get_current_db_version(self, conn: sqlite3.Connection, table_name: str, pk_col_name: str,
+                                pk_value: Any) -> int:
+        """
+        Fetches the current version of an active (not soft-deleted) record.
+        Raises ConflictError if the record is not found or is soft-deleted.
+        Returns the version number if found and active.
+        """
+        cursor = conn.execute(f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?", (pk_value,))
+        row = cursor.fetchone()
+
+        if not row:
+            logger.warning(f"Record not found in {table_name} with {pk_col_name} = {pk_value} for version check.")
+            raise ConflictError(f"Record not found in {table_name}.", entity=table_name, entity_id=pk_value)
+
+        if row['deleted']:
+            logger.warning(f"Record in {table_name} with {pk_col_name} = {pk_value} is soft-deleted.")
+            raise ConflictError(f"Record is soft-deleted in {table_name}.", entity=table_name, entity_id=pk_value)
+
+        return row['version']
+
     def _get_record_version_and_bump(self, conn: sqlite3.Connection, table_name: str, pk_col_name: str,
                                      pk_value: Any) -> Tuple[int, int]:
         cursor = conn.execute(f"SELECT version FROM {table_name} WHERE {pk_col_name} = ? AND deleted = 0", (pk_value,))
@@ -1168,122 +1188,154 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
             logger.error(f"Database error listing character cards: {e}")
             raise
 
-    def update_character_card(self, character_id: int, card_data: Dict[str, Any]) -> bool | None:
-        # FIXME: For image updates, consider changing SQL trigger `character_cards_sync_update`
-        # to compare image hashes instead of full BLOBs for performance.
+    def update_character_card(self, character_id: int, card_data: Dict[str, Any], expected_version: int) -> bool:
         if not card_data:
-            raise InputError("No data provided for update.")
+            raise InputError("No data provided for character card update.")
 
         now = self._get_current_utc_timestamp_iso()
-        fields_to_update = []
-        params = []
+        fields_to_update_sql = []
+        params_for_set_clause = []
 
         for key, value in card_data.items():
-            # These fields are handled by versioning or are immutable (id, created_at)
             if key in ['id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
                 continue
             if key in self._CHARACTER_CARD_JSON_FIELDS:
-                fields_to_update.append(f"{key} = ?")
-                params.append(self._ensure_json_string(value))
+                fields_to_update_sql.append(f"{key} = ?")
+                params_for_set_clause.append(self._ensure_json_string(value))
             else:
-                fields_to_update.append(f"{key} = ?")
-                params.append(value)
+                fields_to_update_sql.append(f"{key} = ?")
+                params_for_set_clause.append(value)
 
-        if not fields_to_update:
+        if not fields_to_update_sql:
             logger.info(f"No updatable fields provided for character card ID {character_id}.")
-            return True  # Or False, depending on desired behavior for no-op update
+            return True  # Idempotent: no changes requested.
 
-        fields_to_update.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+        next_version_val = expected_version + 1
+        fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+
+        # Values for the SET clause
+        all_set_values = params_for_set_clause[:]
+        all_set_values.extend([now, next_version_val, self.client_id])
+
+        # Values for the WHERE clause (id and expected_version)
+        where_values = [character_id, expected_version]
+
+        final_params_for_execute = tuple(all_set_values + where_values)
+
+        query = f"UPDATE character_cards SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
 
         try:
             with self.transaction() as conn:
-                current_version, next_version = self._get_record_version_and_bump(conn, "character_cards", "id",
-                                                                                  character_id)
-                current_params = params[:] # Create a copy for the update statement
-                current_params.extend([now, next_version, self.client_id])
-                current_params.extend([character_id, current_version])
+                # Explicit pre-check. _get_current_db_version raises ConflictError if not found or already soft-deleted.
+                current_db_version = self._get_current_db_version(conn, "character_cards", "id", character_id)
 
-                query = f"UPDATE character_cards SET {', '.join(fields_to_update)} WHERE id = ? AND version = ? AND deleted = 0"
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Character card ID {character_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                        entity="character_cards", entity_id=character_id
+                    )
 
-                cursor = conn.execute(query, tuple(current_params))
+                cursor = conn.execute(query, final_params_for_execute)
+
                 if cursor.rowcount == 0:
-                    # Check if the record exists but version mismatched, or if it was deleted/not found
-                    check_cursor = conn.execute("SELECT deleted, version FROM character_cards WHERE id = ?",
-                                                (character_id,))
-                    existing_record = check_cursor.fetchone()
-                    if existing_record:
-                        if existing_record['deleted']:
-                            msg = f"Character card ID {character_id} is soft-deleted."
-                        else:  # Version mismatch
-                            msg = f"Character card ID {character_id} was modified by another client (version mismatch: db has {existing_record['version']}, update tried for {current_version})."
-                        raise ConflictError(msg, entity="character_cards", entity_id=character_id)
-                    else:  # Record not found
-                        raise ConflictError(f"Character card ID {character_id} not found for update.",
-                                            entity="character_cards", entity_id=character_id)
+                    # Race condition: Record changed between pre-check and UPDATE.
+                    # Re-fetch state to provide a more specific error.
+                    check_again_cursor = conn.execute("SELECT version, deleted FROM character_cards WHERE id = ?",
+                                                      (character_id,))
+                    final_state = check_again_cursor.fetchone()
 
-                logger.info(f"Updated character card ID {character_id} to version {next_version}.")
+                    if not final_state:
+                        msg = f"Character card ID {character_id} disappeared before update (expected version {expected_version})."
+                    elif final_state['deleted']:
+                        msg = f"Character card ID {character_id} was soft-deleted concurrently (expected version {expected_version} for update)."
+                    elif final_state['version'] != expected_version:
+                        msg = f"Character card ID {character_id} version changed to {final_state['version']} concurrently (expected {expected_version} for update)."
+                    else:  # Should ideally not happen if pre-check passed and something changed
+                        msg = f"Update for character card ID {character_id} (expected version {expected_version}) affected 0 rows for an unknown reason after passing initial checks."
+                    raise ConflictError(msg, entity="character_cards", entity_id=character_id)
+
+                logger.info(
+                    f"Updated character card ID {character_id} from version {expected_version} to version {next_version_val}.")
                 return True
-            return None
-        except sqlite3.IntegrityError as e: # Catching this for conn.execute
+        except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed: character_cards.name" in str(e) and 'name' in card_data:
                 logger.warning(
                     f"Update failed for character card ID {character_id}: name '{card_data['name']}' already exists.")
                 raise ConflictError(
                     f"Cannot update character card ID {character_id}: name '{card_data['name']}' already exists.",
                     entity="character_cards", entity_id=card_data['name']) from e
+            logger.error(
+                f"SQLite integrity error updating character card ID {character_id} (expected v{expected_version}): {e}",
+                exc_info=True)
             raise CharactersRAGDBError(f"Database integrity error updating character card: {e}") from e
-        except ConflictError: # Re-raise ConflictError from _get_record_version_and_bump or rowcount check
+        except ConflictError:
             raise
         except CharactersRAGDBError as e:
-            logger.error(f"Database error updating character card ID {character_id}: {e}")
+            logger.error(
+                f"Database error updating character card ID {character_id} (expected v{expected_version}): {e}",
+                exc_info=True)
             raise
 
-    def soft_delete_character_card(self, character_id: int) -> bool | None:
-        """Soft deletes a character card. Sets deleted=1 and updates sync fields."""
+    def soft_delete_character_card(self, character_id: int, expected_version: int) -> bool:
         now = self._get_current_utc_timestamp_iso()
+        next_version_val = expected_version + 1
+
+        query = "UPDATE character_cards SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
+        params = (now, next_version_val, self.client_id, character_id, expected_version)
+
         try:
             with self.transaction() as conn:
-                # First, check if it's already deleted
-                check_cursor = conn.execute("SELECT deleted, version FROM character_cards WHERE id = ?", (character_id,))
-                existing_record = check_cursor.fetchone()
+                try:
+                    current_db_version = self._get_current_db_version(conn, "character_cards", "id", character_id)
+                    # If here, record is active.
+                except ConflictError as e:
+                    # Check if ConflictError from _get_current_db_version was because it's ALREADY soft-deleted.
+                    check_status_cursor = conn.execute("SELECT deleted, version FROM character_cards WHERE id = ?",
+                                                       (character_id,))
+                    record_status = check_status_cursor.fetchone()
+                    if record_status and record_status['deleted']:
+                        logger.info(
+                            f"Character card ID {character_id} already soft-deleted. Soft delete successful (idempotent).")
+                        return True
+                    # If not found, or some other conflict, re-raise.
+                    raise e
 
-                if not existing_record: # Truly not found
-                    logger.warning(f"Character card ID {character_id} not found for soft delete.")
-                    return False # Or raise an error if "not found" should be an error here
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Soft delete for Character ID {character_id} failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                        entity="character_cards", entity_id=character_id
+                    )
 
-                if existing_record['deleted']:
-                    logger.info(f"Character card ID {character_id} already soft-deleted.")
-                    return True # Idempotent: already deleted, so success
-
-                # If not deleted, proceed with version bumping and update
-                current_version = existing_record['version']
-                next_version = current_version + 1
-
-                query = "UPDATE character_cards SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
-                # Note: The 'AND deleted = 0' and 'AND version = ?' are still good for the actual UPDATE
-                # to prevent race conditions if another process undeleted it or updated version between our check and update.
-                params = (now, next_version, self.client_id, character_id, current_version)
                 cursor = conn.execute(query, params)
 
                 if cursor.rowcount == 0:
-                    # This means it was modified/deleted between our check and the update command
-                    # Re-check to understand why
-                    check_again_cursor = conn.execute("SELECT deleted, version FROM character_cards WHERE id = ?", (character_id,))
-                    changed_record = check_again_cursor.fetchone()
-                    if changed_record and changed_record['deleted']:
-                         logger.info(f"Character card ID {character_id} was soft-deleted concurrently.")
-                         return True # Still counts as success if the goal was to delete
-                    raise ConflictError(
-                        f"Soft delete failed for Character ID {character_id}: version mismatch or became active unexpectedly.",
-                        entity="character_cards", entity_id=character_id)
+                    # Race condition: Record changed between pre-check and UPDATE.
+                    check_again_cursor = conn.execute("SELECT version, deleted FROM character_cards WHERE id = ?",
+                                                      (character_id,))
+                    final_state = check_again_cursor.fetchone()
 
-                logger.info(f"Soft-deleted character card ID {character_id}, new version {next_version}.")
+                    if not final_state:
+                        msg = f"Character card ID {character_id} disappeared before soft delete (expected active version {expected_version})."
+                    elif final_state['deleted']:
+                        # If it got deleted by another process. Consider this success if the state is 'deleted'.
+                        logger.info(
+                            f"Character card ID {character_id} was soft-deleted concurrently to version {final_state['version']}. Soft delete successful.")
+                        return True
+                    elif final_state['version'] != expected_version:  # Still active but version changed
+                        msg = f"Soft delete for Character ID {character_id} failed: version changed to {final_state['version']} concurrently (expected {expected_version})."
+                    else:
+                        msg = f"Soft delete for Character ID {character_id} (expected version {expected_version}) affected 0 rows for an unknown reason after passing initial checks."
+                    raise ConflictError(msg, entity="character_cards", entity_id=character_id)
+
+                logger.info(
+                    f"Soft-deleted character card ID {character_id} (was version {expected_version}), new version {next_version_val}.")
                 return True
-            return None
-        except ConflictError: # Re-raise from _get_record_version_and_bump or rowcount check
+        except ConflictError:
             raise
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error soft-deleting character card ID {character_id}: {e}")
+        except CharactersRAGDBError as e:  # Catches sqlite3.Error from conn.execute
+            logger.error(
+                f"Database error soft-deleting character card ID {character_id} (expected v{expected_version}): {e}",
+                exc_info=True)
             raise
 
     def search_character_cards(self, search_term: str, limit: int = 10) -> List[Dict[str, Any]]:
@@ -1370,107 +1422,153 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
             logger.error(f"Database error fetching conversations for character ID {character_id}: {e}")
             raise
 
-    def update_conversation(self, conversation_id: str, update_data: Dict[str, Any]) -> bool | None:
-        """Updates mutable fields of a conversation (e.g., title, rating)."""
+    def update_conversation(self, conversation_id: str, update_data: Dict[str, Any], expected_version: int) -> bool:
         if not update_data:
             raise InputError("No data provided for conversation update.")
 
         now = self._get_current_utc_timestamp_iso()
-        fields_to_update = []
-        params = []
+        fields_to_update_sql = []
+        params_for_set_clause = []
 
+        allowed_to_update = ['title', 'rating', 'forked_from_message_id', 'parent_conversation_id', 'character_id']
         for key, value in update_data.items():
-            # Allow updating title, rating, forked_from_message_id, parent_conversation_id, character_id
-            if key in ['title', 'rating', 'forked_from_message_id', 'parent_conversation_id', 'character_id']:
-                fields_to_update.append(f"{key} = ?")
-                params.append(value)
+            if key in allowed_to_update:
+                fields_to_update_sql.append(f"{key} = ?")
+                params_for_set_clause.append(value)
             elif key not in ['id', 'root_id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
-                logger.warning(f"Attempted to update immutable or unknown field '{key}' in conversation, skipping.")
+                logger.warning(
+                    f"Attempted to update immutable or unknown field '{key}' in conversation ID {conversation_id}, skipping.")
 
-        if not fields_to_update:
+        if not fields_to_update_sql:
             logger.info(f"No updatable fields provided for conversation ID {conversation_id}.")
             return True
 
-        fields_to_update.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+        next_version_val = expected_version + 1
+        fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+
+        all_set_values = params_for_set_clause[:]
+        all_set_values.extend([now, next_version_val, self.client_id])
+
+        where_values = [conversation_id, expected_version]
+        final_params_for_execute = tuple(all_set_values + where_values)
+
+        query = f"UPDATE conversations SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
 
         try:
             with self.transaction() as conn:
-                current_version, next_version = self._get_record_version_and_bump(conn, "conversations", "id",
-                                                                                  conversation_id)
-                current_params = params[:]
-                current_params.extend([now, next_version, self.client_id])
-                current_params.extend([conversation_id, current_version])
+                current_db_version = self._get_current_db_version(conn, "conversations", "id", conversation_id)
 
-                query = f"UPDATE conversations SET {', '.join(fields_to_update)} WHERE id = ? AND version = ? AND deleted = 0"
-                cursor = conn.execute(query, tuple(current_params))
-                if cursor.rowcount == 0:
-                    # Conflict or not found
-                    check_cursor = conn.execute("SELECT deleted, version FROM conversations WHERE id = ?",
-                                                (conversation_id,))
-                    existing_record = check_cursor.fetchone()
-                    if existing_record:
-                        if existing_record['deleted']:
-                            msg = f"Conversation ID {conversation_id} is soft-deleted."
-                        else:
-                            msg = f"Conversation ID {conversation_id} version mismatch (db: {existing_record['version']}, update: {current_version})."
-                        raise ConflictError(msg, entity="conversations", entity_id=conversation_id)
-                    else:
-                        raise ConflictError(f"Conversation ID {conversation_id} not found for update.",
-                                            entity="conversations", entity_id=conversation_id)
-                logger.info(f"Updated conversation ID {conversation_id} to version {next_version}.")
-                return True
-        except ConflictError: # Re-raise from _get_record_version_and_bump or rowcount check
-            raise
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error updating conversation ID {conversation_id}: {e}")
-            raise
-
-    def soft_delete_conversation(self, conversation_id: str) -> bool | None:
-        now = self._get_current_utc_timestamp_iso()
-        query = "UPDATE conversations SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
-        try:
-            with self.transaction() as conn:
-                current_version, next_version = self._get_record_version_and_bump(conn, "conversations", "id",
-                                                                                  conversation_id)
-                params_tuple = (now, next_version, self.client_id, conversation_id, current_version)
-                cursor = conn.execute(query, params_tuple)
-                if cursor.rowcount == 0:
-                    # Check if already deleted or version mismatch
-                    check_cursor = conn.execute("SELECT deleted, version FROM conversations WHERE id = ?",
-                                                (conversation_id,))
-                    existing_record = check_cursor.fetchone()
-                    if existing_record and existing_record['deleted']:
-                        logger.info(f"Conversation ID {conversation_id} already soft-deleted.")
-                        return True
+                if current_db_version != expected_version:
                     raise ConflictError(
-                        f"Soft delete failed for Conversation ID {conversation_id}: version mismatch or not found/active.",
-                        entity="conversations", entity_id=conversation_id)
-                logger.info(f"Soft-deleted conversation ID {conversation_id}, new version {next_version}.")
-                # Corrected Comment: Soft-deleting a conversation does NOT automatically delete its messages
-                # via ON DELETE CASCADE, as soft delete is an UPDATE. Associated messages remain.
+                        f"Conversation ID {conversation_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                        entity="conversations", entity_id=conversation_id
+                    )
+
+                cursor = conn.execute(query, final_params_for_execute)
+
+                if cursor.rowcount == 0:
+                    check_again_cursor = conn.execute("SELECT version, deleted FROM conversations WHERE id = ?",
+                                                      (conversation_id,))
+                    final_state = check_again_cursor.fetchone()
+                    if not final_state:
+                        msg = f"Conversation ID {conversation_id} disappeared."
+                    elif final_state['deleted']:
+                        msg = f"Conversation ID {conversation_id} was soft-deleted concurrently."
+                    elif final_state['version'] != expected_version:
+                        msg = f"Conversation ID {conversation_id} version changed to {final_state['version']} concurrently."
+                    else:
+                        msg = f"Update for conversation ID {conversation_id} (expected v{expected_version}) affected 0 rows."
+                    raise ConflictError(msg, entity="conversations", entity_id=conversation_id)
+
+                logger.info(
+                    f"Updated conversation ID {conversation_id} from version {expected_version} to version {next_version_val}.")
                 return True
-        except ConflictError: # Re-raise from _get_record_version_and_bump or rowcount check
+        except sqlite3.IntegrityError as e:  # e.g. foreign key constraint if character_id points to non-existent
+            logger.error(
+                f"SQLite integrity error updating conversation ID {conversation_id} (expected v{expected_version}): {e}",
+                exc_info=True)
+            raise CharactersRAGDBError(f"Database integrity error updating conversation: {e}") from e
+        except ConflictError:
             raise
         except CharactersRAGDBError as e:
-            logger.error(f"Database error soft-deleting conversation ID {conversation_id}: {e}")
+            logger.error(
+                f"Database error updating conversation ID {conversation_id} (expected v{expected_version}): {e}",
+                exc_info=True)
+            raise
+
+    def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool:
+        now = self._get_current_utc_timestamp_iso()
+        next_version_val = expected_version + 1
+
+        query = "UPDATE conversations SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
+        params = (now, next_version_val, self.client_id, conversation_id, expected_version)
+
+        try:
+            with self.transaction() as conn:
+                try:
+                    current_db_version = self._get_current_db_version(conn, "conversations", "id", conversation_id)
+                except ConflictError as e:
+                    check_status_cursor = conn.execute("SELECT deleted, version FROM conversations WHERE id = ?",
+                                                       (conversation_id,))
+                    record_status = check_status_cursor.fetchone()
+                    if record_status and record_status['deleted']:
+                        logger.info(f"Conversation ID {conversation_id} already soft-deleted. Success (idempotent).")
+                        return True
+                    raise e
+
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Soft delete for Conversation ID {conversation_id} failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                        entity="conversations", entity_id=conversation_id
+                    )
+
+                cursor = conn.execute(query, params)
+
+                if cursor.rowcount == 0:
+                    check_again_cursor = conn.execute("SELECT version, deleted FROM conversations WHERE id = ?",
+                                                      (conversation_id,))
+                    final_state = check_again_cursor.fetchone()
+                    if not final_state:
+                        msg = f"Conversation ID {conversation_id} disappeared."
+                    elif final_state['deleted']:
+                        logger.info(f"Conversation ID {conversation_id} was soft-deleted concurrently. Success.")
+                        return True
+                    elif final_state['version'] != expected_version:
+                        msg = f"Conversation ID {conversation_id} version changed to {final_state['version']} concurrently."
+                    else:
+                        msg = f"Soft delete for conversation ID {conversation_id} (expected v{expected_version}) affected 0 rows."
+                    raise ConflictError(msg, entity="conversations", entity_id=conversation_id)
+
+                logger.info(
+                    f"Soft-deleted conversation ID {conversation_id} (was v{expected_version}), new version {next_version_val}.")
+                return True
+        except ConflictError:
+            raise
+        except CharactersRAGDBError as e:
+            logger.error(
+                f"Database error soft-deleting conversation ID {conversation_id} (expected v{expected_version}): {e}",
+                exc_info=True)
             raise
 
     def search_conversations_by_title(self, title_query: str, character_id: Optional[int] = None, limit: int = 10) -> \
             List[Dict[str, Any]]:
+        """Searches conversations_fts (title). Corrected JOIN condition."""
+        # FTS table: conversations_fts, content_rowid: rowid (maps to conversations.rowid)
+        # Content table: conversations, PK is 'id' (TEXT)
         base_query = """
                      SELECT c.*
                      FROM conversations_fts fts
-                              JOIN conversations c ON fts.rowid = c.id -- fts.rowid maps to c.id (TEXT PK)
+                              JOIN conversations c ON fts.rowid = c.rowid -- Corrected Join condition
                      WHERE fts.conversations_fts MATCH ? \
                        AND c.deleted = 0 \
                      """
         params_list: List[Any] = [title_query]
         if character_id is not None:
             base_query += " AND c.character_id = ?"
-            params_list.append(character_id) # No str() cast needed
+            params_list.append(character_id)
 
         base_query += " ORDER BY rank LIMIT ?"
-        params_list.append(limit) # No str() cast needed
+        params_list.append(limit)
 
         try:
             cursor = self.execute_query(base_query, tuple(params_list))
@@ -1554,81 +1652,130 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
             logger.error(f"Database error fetching messages for conversation ID {conversation_id}: {e}")
             raise
 
-    def update_message(self, message_id: str, update_data: Dict[str, Any]) -> bool | None:
-        """Updates mutable fields of a message (e.g., content, ranking, parent_message_id)."""
+    def update_message(self, message_id: str, update_data: Dict[str, Any], expected_version: int) -> bool:
         if not update_data:
             raise InputError("No data provided for message update.")
 
         now = self._get_current_utc_timestamp_iso()
-        fields_to_update = []
-        params = []
+        fields_to_update_sql = []
+        params_for_set_clause = []
 
+        allowed_to_update = ['content', 'ranking', 'parent_message_id']
         for key, value in update_data.items():
-            if key in ['content', 'ranking', 'parent_message_id']:  # Mutable fields
-                fields_to_update.append(f"{key} = ?")
-                params.append(value)
+            if key in allowed_to_update:
+                fields_to_update_sql.append(f"{key} = ?")
+                params_for_set_clause.append(value)
             elif key not in ['id', 'conversation_id', 'sender', 'timestamp', 'last_modified', 'version', 'client_id',
                              'deleted']:
-                logger.warning(f"Attempted to update immutable or unknown field '{key}' in message, skipping.")
+                logger.warning(
+                    f"Attempted to update immutable or unknown field '{key}' in message ID {message_id}, skipping.")
 
-        if not fields_to_update:
+        if not fields_to_update_sql:
             logger.info(f"No updatable fields provided for message ID {message_id}.")
             return True
 
-        fields_to_update.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+        next_version_val = expected_version + 1
+        fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+
+        all_set_values = params_for_set_clause[:]
+        all_set_values.extend([now, next_version_val, self.client_id])
+
+        where_values = [message_id, expected_version]
+        final_params_for_execute = tuple(all_set_values + where_values)
+
+        query = f"UPDATE messages SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
 
         try:
             with self.transaction() as conn:
-                current_version, next_version = self._get_record_version_and_bump(conn, "messages", "id", message_id)
-                current_params = params[:]
-                current_params.extend([now, next_version, self.client_id])
-                current_params.extend([message_id, current_version])
+                current_db_version = self._get_current_db_version(conn, "messages", "id", message_id)
 
-                query = f"UPDATE messages SET {', '.join(fields_to_update)} WHERE id = ? AND version = ? AND deleted = 0"
-                cursor = conn.execute(query, tuple(current_params))
-                if cursor.rowcount == 0:
-                    check_cursor = conn.execute("SELECT deleted, version FROM messages WHERE id = ?", (message_id,))
-                    existing_record = check_cursor.fetchone()
-                    if existing_record:
-                        if existing_record['deleted']:
-                            msg = f"Message ID {message_id} is soft-deleted."
-                        else:
-                            msg = f"Message ID {message_id} version mismatch (db: {existing_record['version']}, update: {current_version})."
-                        raise ConflictError(msg, entity="messages", entity_id=message_id)
-                    else:
-                        raise ConflictError(f"Message ID {message_id} not found for update.", entity="messages",
-                                            entity_id=message_id)
-                logger.info(f"Updated message ID {message_id} to version {next_version}.")
-                return True
-        except ConflictError:
-            raise
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error updating message ID {message_id}: {e}")
-            raise
-
-    def soft_delete_message(self, message_id: str) -> bool | None:
-        now = self._get_current_utc_timestamp_iso()
-        query = "UPDATE messages SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
-        try:
-            with self.transaction() as conn:
-                current_version, next_version = self._get_record_version_and_bump(conn, "messages", "id", message_id)
-                params_tuple = (now, next_version, self.client_id, message_id, current_version)
-                cursor = conn.execute(query, params_tuple)
-                if cursor.rowcount == 0:
-                    check_cursor = conn.execute("SELECT deleted, version FROM messages WHERE id = ?", (message_id,))
-                    existing_record = check_cursor.fetchone()
-                    if existing_record and existing_record['deleted']:
-                        logger.info(f"Message ID {message_id} already soft-deleted.")
-                        return True
+                if current_db_version != expected_version:
                     raise ConflictError(
-                        f"Soft delete failed for Message ID {message_id}: version mismatch or not found/active.",
-                        entity="messages", entity_id=message_id)
-                logger.info(f"Soft-deleted message ID {message_id}, new version {next_version}.")
+                        f"Message ID {message_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                        entity="messages", entity_id=message_id
+                    )
+
+                cursor = conn.execute(query, final_params_for_execute)
+
+                if cursor.rowcount == 0:
+                    check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
+                                                      (message_id,))
+                    final_state = check_again_cursor.fetchone()
+                    if not final_state:
+                        msg = f"Message ID {message_id} disappeared."
+                    elif final_state['deleted']:
+                        msg = f"Message ID {message_id} was soft-deleted concurrently."
+                    elif final_state['version'] != expected_version:
+                        msg = f"Message ID {message_id} version changed to {final_state['version']} concurrently."
+                    else:
+                        msg = f"Update for message ID {message_id} (expected v{expected_version}) affected 0 rows."
+                    raise ConflictError(msg, entity="messages", entity_id=message_id)
+
+                logger.info(
+                    f"Updated message ID {message_id} from version {expected_version} to version {next_version_val}.")
+                return True
+        except sqlite3.IntegrityError as e:  # e.g. parent_message_id FK violation
+            logger.error(f"SQLite integrity error updating message ID {message_id} (expected v{expected_version}): {e}",
+                         exc_info=True)
+            raise CharactersRAGDBError(f"Database integrity error updating message: {e}") from e
+        except ConflictError:
+            raise
+        except CharactersRAGDBError as e:
+            logger.error(f"Database error updating message ID {message_id} (expected v{expected_version}): {e}",
+                         exc_info=True)
+            raise
+
+    def soft_delete_message(self, message_id: str, expected_version: int) -> bool:
+        now = self._get_current_utc_timestamp_iso()
+        next_version_val = expected_version + 1
+
+        query = "UPDATE messages SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
+        params = (now, next_version_val, self.client_id, message_id, expected_version)
+
+        try:
+            with self.transaction() as conn:
+                try:
+                    current_db_version = self._get_current_db_version(conn, "messages", "id", message_id)
+                except ConflictError as e:
+                    check_status_cursor = conn.execute("SELECT deleted, version FROM messages WHERE id = ?",
+                                                       (message_id,))
+                    record_status = check_status_cursor.fetchone()
+                    if record_status and record_status['deleted']:
+                        logger.info(f"Message ID {message_id} already soft-deleted. Success (idempotent).")
+                        return True
+                    raise e
+
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Soft delete for Message ID {message_id} failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                        entity="messages", entity_id=message_id
+                    )
+
+                cursor = conn.execute(query, params)
+
+                if cursor.rowcount == 0:
+                    check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
+                                                      (message_id,))
+                    final_state = check_again_cursor.fetchone()
+                    if not final_state:
+                        msg = f"Message ID {message_id} disappeared."
+                    elif final_state['deleted']:
+                        logger.info(f"Message ID {message_id} was soft-deleted concurrently. Success.")
+                        return True
+                    elif final_state['version'] != expected_version:
+                        msg = f"Message ID {message_id} version changed to {final_state['version']} concurrently."
+                    else:
+                        msg = f"Soft delete for message ID {message_id} (expected v{expected_version}) affected 0 rows."
+                    raise ConflictError(msg, entity="messages", entity_id=message_id)
+
+                logger.info(
+                    f"Soft-deleted message ID {message_id} (was v{expected_version}), new version {next_version_val}.")
                 return True
         except ConflictError:
             raise
         except CharactersRAGDBError as e:
-            logger.error(f"Database error soft-deleting message ID {message_id}: {e}")
+            logger.error(f"Database error soft-deleting message ID {message_id} (expected v{expected_version}): {e}",
+                         exc_info=True)
             raise
 
     def search_messages_by_content(self, content_query: str, conversation_id: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
@@ -1765,90 +1912,189 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
             logger.error(f"Database error listing {table_name}: {e}")
             raise
 
-    def _update_generic_item(self, table_name: str, item_id: int, update_data: Dict[str, Any],
-                             allowed_fields: List[str], unique_col_name_in_data: Optional[str] = None) -> bool | None:
+    def _update_generic_item(self, table_name: str, item_id: Union[int, str],
+                             update_data: Dict[str, Any], expected_version: int,
+                             allowed_fields: List[str], pk_col_name: str = "id",
+                             unique_col_name_in_data: Optional[str] = None) -> bool:
         if not update_data:
-            raise InputError("No data provided for update.")
+            raise InputError(f"No data provided for update of {table_name} ID {item_id}.")
+
         now = self._get_current_utc_timestamp_iso()
-        fields_to_update = []
-        params = []
+        fields_to_update_sql = []
+        params_for_set_clause = []
 
         for key, value in update_data.items():
             if key in allowed_fields:
-                fields_to_update.append(f"{key} = ?")
-                params.append(value)
-            elif key not in ['id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
-                logger.warning(f"Attempted to update immutable or unknown field '{key}' in {table_name}, skipping.")
+                fields_to_update_sql.append(f"{key} = ?")
+                # Special handling for specific field types if necessary, e.g., stripping title
+                if table_name == "notes" and key == "title" and isinstance(value, str):
+                    params_for_set_clause.append(value.strip())
+                else:
+                    params_for_set_clause.append(value)
+            elif key not in [pk_col_name, 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
+                logger.warning(
+                    f"Attempted to update immutable or unknown field '{key}' in {table_name} ID {item_id}, skipping.")
 
-        if not fields_to_update:
-            return True
+        if not fields_to_update_sql:
+            logger.info(f"No updatable fields provided for {table_name} ID {item_id}.")
+            return True  # Or False, depending on desired behavior for no-op update
 
-        fields_to_update.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+        next_version_val = expected_version + 1
+        fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+
+        # Values for the SET clause
+        final_set_values = params_for_set_clause[:]
+        final_set_values.extend([now, next_version_val, self.client_id])
+
+        # Values for the WHERE clause
+        where_clause_values = [item_id, expected_version]
+
+        final_query_params = tuple(final_set_values + where_clause_values)
+
+        query = f"UPDATE {table_name} SET {', '.join(fields_to_update_sql)} WHERE {pk_col_name} = ? AND version = ? AND deleted = 0"
 
         try:
             with self.transaction() as conn:
-                current_version, next_version = self._get_record_version_and_bump(conn, table_name, "id", item_id)
-                current_params = params[:]
-                current_params.extend([now, next_version, self.client_id])
-                current_params.extend([item_id, current_version])
+                # Explicit pre-check. _get_current_db_version raises ConflictError if not found or soft-deleted.
+                current_db_version = self._get_current_db_version(conn, table_name, pk_col_name, item_id)
 
-                query = f"UPDATE {table_name} SET {', '.join(fields_to_update)} WHERE id = ? AND version = ? AND deleted = 0"
-                cursor = conn.execute(query, tuple(current_params))
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"{table_name} ID {item_id} was modified by another client (version mismatch: db has {current_db_version}, client expected {expected_version}).",
+                        entity=table_name, entity_id=item_id
+                    )
+
+                # If current_db_version == expected_version, proceed with the update.
+                cursor = conn.execute(query, final_query_params)
+
                 if cursor.rowcount == 0:
-                    # Check for conflict or not found
-                    check_cursor = conn.execute(f"SELECT deleted, version FROM {table_name} WHERE id = ?", (item_id,))
-                    existing = check_cursor.fetchone()
-                    if existing:
-                        if existing['deleted']:
-                            msg = f"{table_name} ID {item_id} is soft-deleted."
-                        else:
-                            msg = f"{table_name} ID {item_id} version mismatch (db:{existing['version']}, update:{current_version})."
-                        raise ConflictError(msg, entity=table_name, entity_id=item_id)
-                    else:
-                        raise ConflictError(f"{table_name} ID {item_id} not found for update.", entity=table_name,
-                                            entity_id=item_id)
-                logger.info(f"Updated {table_name} ID {item_id} to version {next_version}.")
+                    # This state implies the record was active with expected_version during the _get_current_db_version check,
+                    # but was either deleted or its version changed *just before* the UPDATE SQL executed.
+                    check_again_cursor = conn.execute(
+                        f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?", (item_id,))
+                    final_state = check_again_cursor.fetchone()
+
+                    if not final_state:
+                        raise ConflictError(
+                            f"{table_name} ID {item_id} disappeared before update completion (was present at version {expected_version}).",
+                            entity=table_name, entity_id=item_id)
+                    if final_state['deleted']:
+                        raise ConflictError(
+                            f"{table_name} ID {item_id} was soft-deleted concurrently while attempting update from version {expected_version}.",
+                            entity=table_name, entity_id=item_id)
+                    if final_state['version'] != expected_version:  # Version changed from expected
+                        raise ConflictError(
+                            f"{table_name} ID {item_id} version changed to {final_state['version']} concurrently, expected {expected_version} for update.",
+                            entity=table_name, entity_id=item_id)
+
+                    raise ConflictError(
+                        f"Update for {table_name} ID {item_id} (expected version {expected_version}) affected 0 rows for an unknown reason after passing initial checks.",
+                        entity=table_name, entity_id=item_id)
+
+                logger.info(
+                    f"Updated {table_name} ID {item_id} from version {expected_version} to version {next_version_val}.")
                 return True
         except sqlite3.IntegrityError as e:
             if unique_col_name_in_data and unique_col_name_in_data in update_data and \
-               f"UNIQUE constraint failed: {table_name}.{unique_col_name_in_data}" in str(e):
+                    f"UNIQUE constraint failed: {table_name}.{unique_col_name_in_data}" in str(
+                e).lower():  # Use lower() for broader match
                 val = update_data[unique_col_name_in_data]
                 logger.warning(
                     f"Update failed for {table_name} ID {item_id}: {unique_col_name_in_data} '{val}' already exists.")
                 raise ConflictError(
                     f"Cannot update {table_name} ID {item_id}: {unique_col_name_in_data} '{val}' already exists.",
-                    entity=table_name, entity_id=val) from e
-            raise CharactersRAGDBError(f"Database integrity error updating {table_name}: {e}") from e
+                    entity=table_name, entity_id=val) from e  # Pass val as entity_id for unique conflict
+            logger.error(
+                f"SQLite integrity error during update of {table_name} ID {item_id} (expected version {expected_version}): {e}",
+                exc_info=True)
+            raise CharactersRAGDBError(f"Database integrity error updating {table_name} ({item_id}): {e}") from e
         except ConflictError:
             raise
         except CharactersRAGDBError as e:
-            logger.error(f"Database error updating {table_name} ID {item_id}: {e}")
+            logger.error(
+                f"Database error updating {table_name} ID {item_id} (expected version {expected_version}): {e}",
+                exc_info=True)
             raise
+        # No implicit return None, function should return True or raise.
 
-    def _soft_delete_generic_item(self, table_name: str, item_id: int) -> bool | None:
+    def _soft_delete_generic_item(self, table_name: str, item_id: Union[int, str],
+                                  expected_version: int, pk_col_name: str = "id") -> bool:
         now = self._get_current_utc_timestamp_iso()
-        query = f"UPDATE {table_name} SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
+        next_version_val = expected_version + 1
+
+        query = f"UPDATE {table_name} SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE {pk_col_name} = ? AND version = ? AND deleted = 0"
+        params = (now, next_version_val, self.client_id, item_id, expected_version)
+
         try:
             with self.transaction() as conn:
-                current_version, next_version = self._get_record_version_and_bump(conn, table_name, "id", item_id)
-                params_tuple = (now, next_version, self.client_id, item_id, current_version)
-                cursor = conn.execute(query, params_tuple)
-                if cursor.rowcount == 0:
-                    check_cursor = conn.execute(f"SELECT deleted, version FROM {table_name} WHERE id = ?", (item_id,))
-                    existing = check_cursor.fetchone()
-                    if existing and existing['deleted']:
-                        logger.info(f"{table_name} ID {item_id} already soft-deleted.")
+                try:
+                    current_db_version = self._get_current_db_version(conn, table_name, pk_col_name, item_id)
+                    # If we are here, record is active and current_db_version is its version.
+                except ConflictError as e:
+                    # Check if the ConflictError is because it's already soft-deleted.
+                    # Query again to be absolutely sure of the 'deleted' status.
+                    check_deleted_cursor = conn.execute(
+                        f"SELECT deleted, version FROM {table_name} WHERE {pk_col_name} = ?", (item_id,))
+                    record_status = check_deleted_cursor.fetchone()
+
+                    if record_status and record_status['deleted']:
+                        logger.info(
+                            f"{table_name} ID {item_id} already soft-deleted. Operation considered successful (idempotent).")
                         return True
+                    # If it was not found, or some other conflict from _get_current_db_version, re-raise.
+                    raise e
+
+                if current_db_version != expected_version:
                     raise ConflictError(
-                        f"Soft delete failed for {table_name} ID {item_id}: version mismatch or not found/active.",
+                        f"Soft delete failed for {table_name} ID {item_id}: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                        entity=table_name, entity_id=item_id
+                    )
+
+                cursor = conn.execute(query, params)
+
+                if cursor.rowcount == 0:
+                    # This means the record (which was active with expected_version) changed state
+                    # between the _get_current_db_version check and the UPDATE execution.
+                    check_again_cursor = conn.execute(
+                        f"SELECT deleted, version FROM {table_name} WHERE {pk_col_name} = ?", (item_id,))
+                    changed_record = check_again_cursor.fetchone()
+
+                    if not changed_record:
+                        raise ConflictError(
+                            f"{table_name} ID {item_id} disappeared before soft-delete completion (expected version {expected_version}).",
+                            entity=table_name, entity_id=item_id)
+
+                    if changed_record['deleted']:
+                        # If it got deleted by another process, and the new version matches what we intended, it's fine.
+                        if changed_record['version'] == next_version_val:
+                            logger.info(
+                                f"{table_name} ID {item_id} was soft-deleted concurrently to version {next_version_val}. Operation successful.")
+                            return True
+                        else:
+                            raise ConflictError(
+                                f"{table_name} ID {item_id} was soft-deleted concurrently to an unexpected version {changed_record['version']} (expected to set to {next_version_val}).",
+                                entity=table_name, entity_id=item_id)
+
+                    if changed_record['version'] != expected_version:  # Still active, but version changed
+                        raise ConflictError(
+                            f"Soft delete failed for {table_name} ID {item_id}: version changed to {changed_record['version']} concurrently (expected {expected_version}).",
+                            entity=table_name, entity_id=item_id)
+
+                    raise ConflictError(
+                        f"Soft delete for {table_name} ID {item_id} (expected version {expected_version}) affected 0 rows for an unknown reason after passing initial checks.",
                         entity=table_name, entity_id=item_id)
-                logger.info(f"Soft-deleted {table_name} ID {item_id}, new version {next_version}.")
+
+                logger.info(
+                    f"Soft-deleted {table_name} ID {item_id} (was version {expected_version}), new version {next_version_val}.")
                 return True
         except ConflictError:
             raise
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error soft-deleting {table_name} ID {item_id}: {e}")
+        except CharactersRAGDBError as e:  # Catches sqlite3.Error from conn.execute
+            logger.error(
+                f"Database error soft-deleting {table_name} ID {item_id} (expected version {expected_version}): {e}",
+                exc_info=True)
             raise
+        # No implicit return None.
 
     def _search_generic_items_fts(self, fts_table_name: str, main_table_name: str, fts_match_cols_or_table: str,
                                   search_term: str, limit: int = 10) -> List[Dict[str, Any]]:
@@ -1885,8 +2131,30 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
 
     # Keyword text is unique and COLLATE NOCASE, so update is usually for undelete or metadata if any.
     # The _add_generic_item handles undelete. If keyword text itself could change (rare), a specific update method would be needed.
-    def soft_delete_keyword(self, keyword_id: int) -> bool:
-        return self._soft_delete_generic_item("keywords", keyword_id)
+    def soft_delete_keyword(self, keyword_id: int, expected_version: int) -> bool:
+        """
+        Soft-deletes a keyword with optimistic locking.
+
+        Args:
+            keyword_id: The ID of the keyword to soft-delete.
+            expected_version: The version number the client expects the record to have.
+
+        Returns:
+            True if the soft-delete was successful or if the keyword was already soft-deleted.
+
+        Raises:
+            ConflictError: If the record is not found, or if (it's active and)
+                           the expected_version does not match the current database version.
+            CharactersRAGDBError: For other database-related errors.
+        """
+        # pk_col_name for 'keywords' is 'id' (default in _soft_delete_generic_item)
+        # item_id is int.
+        return self._soft_delete_generic_item(
+            table_name="keywords",
+            item_id=keyword_id,
+            expected_version=expected_version,
+            pk_col_name="id" # Explicitly pass, though "id" is default
+        )
 
     def search_keywords(self, search_term: str, limit: int = 10) -> List[Dict[str, Any]]:
         return self._search_generic_items_fts("keywords_fts", "keywords", "keyword", search_term, limit)
@@ -1907,12 +2175,60 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
     def list_keyword_collections(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         return self._list_generic_items("keyword_collections", "name COLLATE NOCASE", limit, offset)
 
-    def update_keyword_collection(self, collection_id: int, update_data: Dict[str, Any]) -> bool:
-        return self._update_generic_item("keyword_collections", collection_id, update_data, ['name', 'parent_id'],
-                                         'name')
+    def update_keyword_collection(self, collection_id: int, update_data: Dict[str, Any], expected_version: int) -> bool:
+        """
+        Updates a keyword collection with optimistic locking.
 
-    def soft_delete_keyword_collection(self, collection_id: int) -> bool:
-        return self._soft_delete_generic_item("keyword_collections", collection_id)
+        Args:
+            collection_id: The ID of the keyword collection to update.
+            update_data: A dictionary containing the fields to update (e.g., 'name', 'parent_id').
+            expected_version: The version number the client expects the record to have.
+
+        Returns:
+            True if the update was successful.
+
+        Raises:
+            InputError: If no update data is provided.
+            ConflictError: If the record is not found, already soft-deleted,
+                           or if the expected_version does not match the current database version.
+            CharactersRAGDBError: For other database-related errors.
+        """
+        # pk_col_name for 'keyword_collections' is 'id' (default in _update_generic_item)
+        # item_id is int.
+        return self._update_generic_item(
+            table_name="keyword_collections",
+            item_id=collection_id,
+            update_data=update_data,
+            expected_version=expected_version,
+            allowed_fields=['name', 'parent_id'],
+            pk_col_name="id", # Explicitly pass, though "id" is default
+            unique_col_name_in_data='name' # For handling unique constraint on name if it's updated
+        )
+
+    def soft_delete_keyword_collection(self, collection_id: int, expected_version: int) -> bool:
+        """
+        Soft-deletes a keyword collection with optimistic locking.
+
+        Args:
+            collection_id: The ID of the keyword collection to soft-delete.
+            expected_version: The version number the client expects the record to have.
+
+        Returns:
+            True if the soft-delete was successful or if the collection was already soft-deleted.
+
+        Raises:
+            ConflictError: If the record is not found, or if (it's active and)
+                           the expected_version does not match the current database version.
+            CharactersRAGDBError: For other database-related errors.
+        """
+        # pk_col_name for 'keyword_collections' is 'id' (default in _soft_delete_generic_item)
+        # item_id is int.
+        return self._soft_delete_generic_item(
+            table_name="keyword_collections",
+            item_id=collection_id,
+            expected_version=expected_version,
+            pk_col_name="id" # Explicitly pass, though "id" is default
+        )
 
     def search_keyword_collections(self, search_term: str, limit: int = 10) -> List[Dict[str, Any]]:
         return self._search_generic_items_fts("keyword_collections_fts", "keyword_collections", "name", search_term,
@@ -1958,88 +2274,144 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
         # Using _list_generic_items but ensuring table name and order_by_col are correct for notes
         return self._list_generic_items("notes", "last_modified DESC", limit, offset)
 
-
-    def update_note(self, note_id: str, update_data: Dict[str, Any]) -> bool | None:
+    def update_note(self, note_id: str, update_data: Dict[str, Any], expected_version: int) -> bool:
         if not update_data:
             raise InputError("No data provided for note update.")
 
         now = self._get_current_utc_timestamp_iso()
-        fields_to_update = []
-        params = []
-        allowed_fields = ['title', 'content']
+        fields_to_update_sql = []
+        params_for_set_clause = []
 
+        allowed_to_update = ['title', 'content']
         for key, value in update_data.items():
-            if key in allowed_fields:
-                fields_to_update.append(f"{key} = ?")
-                params.append(value.strip() if key == 'title' and isinstance(value, str) else value)
+            if key in allowed_to_update:
+                fields_to_update_sql.append(f"{key} = ?")
+                # Title might need stripping, content is as-is
+                params_for_set_clause.append(value.strip() if key == 'title' and isinstance(value, str) else value)
             elif key not in ['id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
-                logger.warning(f"Attempted to update immutable or unknown field '{key}' in notes, skipping.")
+                logger.warning(
+                    f"Attempted to update immutable or unknown field '{key}' in note ID {note_id}, skipping.")
 
-        if not fields_to_update:
+        if not fields_to_update_sql:
             logger.info(f"No updatable fields provided for note ID {note_id}.")
             return True
 
-        fields_to_update.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+        next_version_val = expected_version + 1
+        fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+
+        all_set_values = params_for_set_clause[:]
+        all_set_values.extend([now, next_version_val, self.client_id])
+
+        where_values = [note_id, expected_version]
+        final_params_for_execute = tuple(all_set_values + where_values)
+
+        query = f"UPDATE notes SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
 
         try:
             with self.transaction() as conn:
-                current_version, next_version = self._get_record_version_and_bump(conn, "notes", "id", note_id)
-                current_params = params[:]
-                current_params.extend([now, next_version, self.client_id])
-                current_params.extend([note_id, current_version])
+                current_db_version = self._get_current_db_version(conn, "notes", "id", note_id)
 
-                query = f"UPDATE notes SET {', '.join(fields_to_update)} WHERE id = ? AND version = ? AND deleted = 0"
-                cursor = conn.execute(query, tuple(current_params))
-
-                if cursor.rowcount == 0:
-                    check_cursor = conn.execute("SELECT deleted, version FROM notes WHERE id = ?", (note_id,))
-                    existing = check_cursor.fetchone()
-                    if existing:
-                        if existing['deleted']:
-                            msg = f"Note ID {note_id} is soft-deleted."
-                        else:
-                            msg = f"Note ID {note_id} version mismatch (db:{existing['version']}, update:{current_version})."
-                        raise ConflictError(msg, entity="notes", entity_id=note_id)
-                    else:
-                        raise ConflictError(f"Note ID {note_id} not found for update.", entity="notes", entity_id=note_id)
-                logger.info(f"Updated note ID {note_id} to version {next_version}.")
-                return True
-        except ConflictError: # From _get_record_version_and_bump or rowcount check
-            raise
-        except CharactersRAGDBError as e: # Includes sqlite3.Error from conn.execute
-            logger.error(f"Database error updating note ID {note_id}: {e}")
-            raise
-
-    def soft_delete_note(self, note_id: str) -> bool | None:
-        now = self._get_current_utc_timestamp_iso()
-        query = "UPDATE notes SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
-        try:
-            with self.transaction() as conn:
-                current_version, next_version = self._get_record_version_and_bump(conn, "notes", "id", note_id)
-                params_tuple = (now, next_version, self.client_id, note_id, current_version)
-                cursor = conn.execute(query, params_tuple)
-
-                if cursor.rowcount == 0:
-                    check_cursor = conn.execute("SELECT deleted, version FROM notes WHERE id = ?", (note_id,))
-                    existing = check_cursor.fetchone()
-                    if existing and existing['deleted']:
-                        logger.info(f"Note ID {note_id} already soft-deleted.")
-                        return True
+                if current_db_version != expected_version:
                     raise ConflictError(
-                        f"Soft delete failed for Note ID {note_id}: version mismatch or not found/active.",
-                        entity="notes", entity_id=note_id)
-                logger.info(f"Soft-deleted note ID {note_id}, new version {next_version}.")
+                        f"Note ID {note_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                        entity="notes", entity_id=note_id
+                    )
+
+                cursor = conn.execute(query, final_params_for_execute)
+
+                if cursor.rowcount == 0:
+                    check_again_cursor = conn.execute("SELECT version, deleted FROM notes WHERE id = ?", (note_id,))
+                    final_state = check_again_cursor.fetchone()
+                    if not final_state:
+                        msg = f"Note ID {note_id} disappeared."
+                    elif final_state['deleted']:
+                        msg = f"Note ID {note_id} was soft-deleted concurrently."
+                    elif final_state['version'] != expected_version:
+                        msg = f"Note ID {note_id} version changed to {final_state['version']} concurrently."
+                    else:
+                        msg = f"Update for note ID {note_id} (expected v{expected_version}) affected 0 rows."
+                    raise ConflictError(msg, entity="notes", entity_id=note_id)
+
+                logger.info(f"Updated note ID {note_id} from version {expected_version} to version {next_version_val}.")
                 return True
-        except ConflictError: # From _get_record_version_and_bump or rowcount check
+        # No specific UNIQUE constraint on notes.title or notes.content in the schema, so sqlite3.IntegrityError less likely for these fields.
+        except ConflictError:
+            raise
+        except CharactersRAGDBError as e:  # Catches sqlite3.Error
+            logger.error(f"Database error updating note ID {note_id} (expected v{expected_version}): {e}",
+                         exc_info=True)
+            raise
+
+    def soft_delete_note(self, note_id: str, expected_version: int) -> bool:
+        now = self._get_current_utc_timestamp_iso()
+        next_version_val = expected_version + 1
+
+        query = "UPDATE notes SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
+        params = (now, next_version_val, self.client_id, note_id, expected_version)
+
+        try:
+            with self.transaction() as conn:
+                try:
+                    current_db_version = self._get_current_db_version(conn, "notes", "id", note_id)
+                except ConflictError as e:
+                    check_status_cursor = conn.execute("SELECT deleted, version FROM notes WHERE id = ?", (note_id,))
+                    record_status = check_status_cursor.fetchone()
+                    if record_status and record_status['deleted']:
+                        logger.info(f"Note ID {note_id} already soft-deleted. Success (idempotent).")
+                        return True
+                    raise e
+
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Soft delete for Note ID {note_id} failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                        entity="notes", entity_id=note_id
+                    )
+
+                cursor = conn.execute(query, params)
+
+                if cursor.rowcount == .0:
+                    check_again_cursor = conn.execute("SELECT version, deleted FROM notes WHERE id = ?", (note_id,))
+                    final_state = check_again_cursor.fetchone()
+                    if not final_state:
+                        msg = f"Note ID {note_id} disappeared."
+                    elif final_state['deleted']:
+                        logger.info(f"Note ID {note_id} was soft-deleted concurrently. Success.")
+                        return True
+                    elif final_state['version'] != expected_version:
+                        msg = f"Note ID {note_id} version changed to {final_state['version']} concurrently."
+                    else:
+                        msg = f"Soft delete for note ID {note_id} (expected v{expected_version}) affected 0 rows."
+                    raise ConflictError(msg, entity="notes", entity_id=note_id)
+
+                logger.info(
+                    f"Soft-deleted note ID {note_id} (was v{expected_version}), new version {next_version_val}.")
+                return True
+        except ConflictError:
             raise
         except CharactersRAGDBError as e:
-            logger.error(f"Database error soft-deleting note ID {note_id}: {e}")
+            logger.error(f"Database error soft-deleting note ID {note_id} (expected v{expected_version}): {e}",
+                         exc_info=True)
             raise
 
     def search_notes(self, search_term: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Searches notes_fts (title and content). Corrected JOIN condition."""
         # notes_fts matches against title and content
-        return self._search_generic_items_fts("notes_fts", "notes", "notes_fts", search_term,
-                                              limit)  # 'notes_fts' is the column group
+        # FTS table column group: notes_fts
+        # Content table: notes, content_rowid: rowid (maps to notes.rowid)
+        query = """
+                SELECT main.*
+                FROM notes_fts fts
+                         JOIN notes main ON fts.rowid = main.rowid -- Corrected Join condition
+                WHERE fts.notes_fts MATCH ? \
+                  AND main.deleted = 0
+                ORDER BY rank LIMIT ? \
+                """
+        try:
+            cursor = self.execute_query(query, (search_term, limit))
+            return [dict(row) for row in cursor.fetchall()]
+        except CharactersRAGDBError as e:
+            logger.error(f"Error searching notes for '{search_term}': {e}")
+            raise
 
 
     # --- Linking Table Methods (with manual sync_log entries) ---
