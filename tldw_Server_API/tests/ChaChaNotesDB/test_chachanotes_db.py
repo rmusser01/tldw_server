@@ -273,24 +273,31 @@ class TestCharacterCards:
         assert retrieved_after_first_delete is None
 
         conn = db_instance.get_connection()
-        raw_retrieved = conn.execute("SELECT * FROM character_cards WHERE id = ?", (card_id,)).fetchone()
-        assert raw_retrieved is not None
-        assert raw_retrieved["deleted"] == 1
-        assert raw_retrieved["version"] == expected_version_for_first_delete + 1  # Version is now 2
+        raw_retrieved_after_first_delete = conn.execute("SELECT * FROM character_cards WHERE id = ?",
+                                                        (card_id,)).fetchone()
+        assert raw_retrieved_after_first_delete is not None
+        assert raw_retrieved_after_first_delete["deleted"] == 1
+        assert raw_retrieved_after_first_delete["version"] == expected_version_for_first_delete + 1  # Version is now 2
 
-        # Attempt to delete again with the *original* expected_version (which is now incorrect)
-        # _get_current_db_version inside soft_delete should detect it's already soft-deleted.
-        with pytest.raises(ConflictError, match="Record is soft-deleted"):
-            db_instance.soft_delete_character_card(card_id, expected_version=expected_version_for_first_delete)
+        # Attempt to delete again with the *original* expected_version (which is now incorrect: 1).
+        # The soft_delete_character_card method should recognize the card is already deleted
+        # and treat this as an idempotent success, returning True.
+        # The internal _get_current_db_version would raise "Record is soft-deleted",
+        # which soft_delete_character_card catches and handles.
+        assert db_instance.soft_delete_character_card(card_id,
+                                                      expected_version=expected_version_for_first_delete) is True
+
+        # Verify version didn't change again (it's still 2 from the first delete)
+        still_deleted_card_info = conn.execute("SELECT version, deleted FROM character_cards WHERE id = ?",
+                                               (card_id,)).fetchone()
+        assert still_deleted_card_info is not None
+        assert still_deleted_card_info["deleted"] == 1
+        assert still_deleted_card_info['version'] == expected_version_for_first_delete + 1  # Still version 2
 
         # Test idempotent success: calling soft_delete on an already deleted record
-        # with its *current* version should succeed (or be treated as success).
-        # The current version of the soft-deleted record is raw_retrieved['version'] (which is 2)
-        # This part of the test assumes your soft_delete_character_card handles this gracefully.
-        # If it's designed to only operate on active records, this might need adjustment.
-        # Based on the provided soft_delete_character_card logic, the _get_current_db_version
-        # would raise "Record is soft-deleted", which is caught, and then the method returns True.
-        assert db_instance.soft_delete_character_card(card_id, expected_version=raw_retrieved['version']) is True
+        # with its *current correct version* should also succeed.
+        current_version_of_deleted_card = raw_retrieved_after_first_delete['version']  # This is 2
+        assert db_instance.soft_delete_character_card(card_id, expected_version=current_version_of_deleted_card) is True
 
     def test_search_character_cards(self, db_instance: CharactersRAGDB):
         card1_data = _create_sample_card_data("Searchable Alpha")
