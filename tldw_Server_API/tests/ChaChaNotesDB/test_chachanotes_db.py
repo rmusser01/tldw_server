@@ -447,6 +447,14 @@ class TestNotes:
         db_instance.add_note("Beta Note", "Another one with ZYX in title")
         db_instance.add_note("Gamma Note", "Nothing special")
 
+        # DEBUGGING:
+        conn = db_instance.get_connection()
+        fts_content = conn.execute("SELECT rowid, title, content FROM notes_fts;").fetchall()
+        print("\nNotes FTS Content:")
+        for row in fts_content:
+            print(dict(row))
+        # END DEBUGGING
+
         results = db_instance.search_notes("ZYX")
         assert len(results) == 2
 
