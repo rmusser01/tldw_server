@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS character_cards (
     id                        INTEGER   PRIMARY KEY AUTOINCREMENT,
     name                      TEXT      UNIQUE NOT NULL,
     description               TEXT,
-    personality               TEXT,
+    personality               TEXT,  -- <<< THIS IS THE FIELD WE ARE TESTING
     scenario                  TEXT,
     image                     BLOB,
     post_history_instructions TEXT,
@@ -112,6 +112,9 @@ CREATE TABLE IF NOT EXISTS character_cards (
     client_id                 TEXT      NOT NULL DEFAULT 'unknown',
     version                   INTEGER   NOT NULL DEFAULT 1
 );
+
+-- =========== TEMPORARILY COMMENT OUT CHARACTER_CARDS FTS AND TRIGGERS ============
+/*
 CREATE VIRTUAL TABLE IF NOT EXISTS character_cards_fts
 USING fts5(
     name,
@@ -138,6 +141,8 @@ END;
 CREATE TRIGGER IF NOT EXISTS character_cards_ad AFTER DELETE ON character_cards BEGIN
   DELETE FROM character_cards_fts WHERE rowid = old.id; 
 END;
+*/
+-- ========= END TEMPORARY COMMENT OUT FOR CHARACTER_CARDS FTS TABLE AND FTS TRIGGERS ========
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- 2. Conversations (branches) with tombstones & sync metadata
@@ -160,7 +165,7 @@ CREATE INDEX IF NOT EXISTS idx_conversations_root   ON conversations(root_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_parent ON conversations(parent_conversation_id);
 CREATE INDEX IF NOT EXISTS idx_conv_char          ON conversations(character_id);
 
--- =========== TEMPORARILY COMMENT OUT CONVERSATIONS FTS AND TRIGGERS ============
+-- =========== TEMPORARILY COMMENT OUT CONVERSATIONS FTS TABLE AND FTS TRIGGERS (SHOULD ALREADY BE DONE) ============
 /*
 CREATE VIRTUAL TABLE IF NOT EXISTS conversations_fts
 USING fts5(
@@ -508,6 +513,8 @@ END;
 -- ========= END TEMPORARY COMMENT OUT FOR CONVERSATIONS SYNC LOG TRIGGERS ========
 
 -- == Triggers for: character_cards ==
+-- =========== TEMPORARILY COMMENT OUT CHARACTER_CARDS SYNC LOG TRIGGERS ============
+/*
 CREATE TRIGGER IF NOT EXISTS character_cards_sync_create
 AFTER INSERT ON character_cards
 BEGIN
@@ -597,6 +604,7 @@ BEGIN
        )
     );
 END;
+*/
 
 -- == Triggers for: notes ==
 CREATE TRIGGER IF NOT EXISTS notes_sync_create
@@ -1222,34 +1230,69 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
 
         now = self._get_current_utc_timestamp_iso()
         # Original parameter building logic - KEEP THIS for when we revert
-        # logger.debug(f"Current timestamp: {now}")
-        # logger.debug(f"Update data: {card_data}")
-        # fields_to_update_sql = []
-        # params_for_set_clause = []
-        # for key, value in card_data.items():
-        #     if key in ['id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
-        #         continue
-        #     if key in self._CHARACTER_CARD_JSON_FIELDS:
-        #         fields_to_update_sql.append(f"{key} = ?")
-        #         json_value = self._ensure_json_string(value)
-        #         logger.debug(f"Processing JSON field {key} with value: {json_value[:100]}...")
-        #         params_for_set_clause.append(json_value)
-        #     else:
-        #         fields_to_update_sql.append(f"{key} = ?")
-        #         logger.debug(f"Processing field {key} with value: {str(value)[:100]}...")
-        #         params_for_set_clause.append(value)
-        # if not fields_to_update_sql:
-        #     logger.info(f"No updatable fields provided for character card ID {character_id}.")
-        #     return True
-        # next_version_val = expected_version + 1
-        # fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
-        # final_set_values = params_for_set_clause[:]
-        # final_set_values.extend([now, next_version_val, self.client_id])
-        # where_clause_values = [character_id, expected_version]
-        # final_query_params = tuple(final_set_values + where_clause_values)
-        # query = f"UPDATE character_cards SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
-        # logger.debug(f"Final query: {query}")
-        # logger.debug(f"Final params: {final_query_params}")
+        logger.debug(f"Current timestamp: {now}")
+        logger.debug(f"Update data: {card_data}")
+
+        # --- Build the original, full list of fields and params ---
+        original_fields_to_update_sql = []
+        original_params_for_set_clause = []
+        for key, value in card_data.items():
+            if key in ['id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
+                continue
+            if key in self._CHARACTER_CARD_JSON_FIELDS:
+                original_fields_to_update_sql.append(f"{key} = ?")
+                json_value = self._ensure_json_string(value)
+                logger.debug(f"Processing JSON field {key} with value: {str(json_value)[:100]}...")
+                original_params_for_set_clause.append(json_value)
+            else:
+                original_fields_to_update_sql.append(f"{key} = ?")
+                logger.debug(f"Processing field {key} with value: {str(value)[:100]}...")
+                original_params_for_set_clause.append(value)
+
+        next_version_val = expected_version + 1
+
+        # --- DIAGNOSTIC: Test with a subset of fields ---
+        # Test 1: Only 'description' (plus metadata)
+        # fields_to_update_sql_test = ["description = ?"]
+        # params_for_set_clause_test = [card_data.get("description")]
+
+        # Test 2: Only 'personality' (plus metadata)
+        # fields_to_update_sql_test = ["personality = ?"]
+        # params_for_set_clause_test = [card_data.get("personality")]
+
+        # Test 3: Both 'description' and 'personality' (plus metadata) - THIS IS THE CURRENT TEST
+        fields_to_update_sql_test = ["description = ?", "personality = ?"]
+        params_for_set_clause_test = [card_data.get("description"), card_data.get("personality")]
+        # No need to _ensure_json_string here as neither are in _CHARACTER_CARD_JSON_FIELDS
+
+        # --- Ensure the selected params_for_set_clause_test matches fields_to_update_sql_test ---
+        current_test_fields_sql = fields_to_update_sql_test[:]
+        current_test_params_set = params_for_set_clause_test[:]
+
+        # This block for handling empty current_test_params_set can likely be removed
+        if not current_test_fields_sql and not any(current_test_params_set):
+            logger.info(f"No specific fields to update in this diagnostic test for character card ID {character_id}.")
+            current_test_fields_sql = []
+            current_test_params_set = []
+
+        current_test_fields_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+        final_set_values = current_test_params_set[:]
+        final_set_values.extend([now, next_version_val, self.client_id])
+
+        where_clause_values = [character_id, expected_version]
+        final_query_params_test = tuple(final_set_values + where_clause_values)
+
+        set_clause_string = ", ".join(current_test_fields_sql)
+        if not current_test_params_set:  # Only metadata fields if params_for_set_clause_test was empty
+            set_clause_string = ", ".join(
+                f for f in current_test_fields_sql if not (f.startswith("description") or f.startswith("personality")))
+            final_query_params_test = tuple([now, next_version_val, self.client_id] + where_clause_values)
+
+        query_test = f"UPDATE character_cards SET {set_clause_string} WHERE id = ? AND version = ? AND deleted = 0"
+
+        logger.debug(f"TESTING Query (Desc & Pers Focus): {query_test}")
+        logger.debug(f"TESTING Params (Desc & Pers Focus): {final_query_params_test}")
+        # --- END DIAGNOSTIC SUBSET ---
 
         try:
             with self.transaction() as conn:
@@ -1267,29 +1310,14 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
                         entity_id=character_id
                     )
 
-                # --- Execute SIMPLIFIED update ---
-                next_version_val_simple = expected_version + 1
-                simple_query = "UPDATE character_cards SET description = ?, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
-                simple_params = (
-                    "SIMPLIFIED UPDATE",  # Hardcoded description
-                    now,
-                    next_version_val_simple,
-                    self.client_id,
-                    character_id,
-                    expected_version
-                )
-                logger.debug(f"Executing SIMPLIFIED update query with conn {id(conn)}: {simple_query}")
-                logger.debug(f"SIMPLIFIED params: {simple_params}")
+                logger.debug("Executing TEST update query (Personality Focus)...")
+                cursor = conn.execute(query_test, final_query_params_test)
 
-                # cursor = conn.execute(query, final_query_params) # Original line using complex query
-                cursor = conn.execute(simple_query, simple_params) # Use simplified query and params
-
-                logger.debug(f"Simplified Update executed, rowcount: {cursor.rowcount}")
+                logger.debug(f"Update executed (Personality Focus), rowcount: {cursor.rowcount}")
 
                 # Check rowcount for race condition
                 if cursor.rowcount == 0:
                     logger.debug("Checking why simplified update affected 0 rows...")
-                    # ... (rest of the rowcount check logic, can remain the same) ...
                     check_again_cursor = conn.execute("SELECT version, deleted FROM character_cards WHERE id = ?",
                                                       (character_id,))
                     final_state = check_again_cursor.fetchone()
@@ -1305,28 +1333,23 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
                     logger.error(f"Conflict error after simplified update attempt: {msg}")
                     raise ConflictError(msg, entity="character_cards", entity_id=character_id)
 
+                log_updated_fields = [f.split(' = ?')[0] for f in fields_to_update_sql_test if card_data.get(f.split(' = ?')[0]) is not None]
+                if not log_updated_fields: log_updated_fields = ['metadata only']
+
                 logger.info(
-                    f"Updated character card ID {character_id} from version {expected_version} to version {next_version_val_simple} (SIMPLIFIED).")
+                    f"Updated character card ID {character_id} (TEST DESC & PERS: {', '.join(log_updated_fields)}) from version {expected_version} to version {next_version_val}.")
                 return True
 
         except sqlite3.DatabaseError as e:
-            logger.critical(f"DATABASE CORRUPTION DETECTED during update_character_card (SIMPLIFIED ATTEMPT)!")
+            logger.critical(f"DATABASE CORRUPTION DETECTED during update_character_card (TEST DESC & PERS)!")
             logger.critical(f"Error details: {str(e)}")
-            # logger.critical(f"Query was: {query}") # Original query
-            # logger.critical(f"Params were: {final_query_params}") # Original params
-            logger.critical(f"Simplified Query was: {simple_query if 'simple_query' in locals() else 'N/A'}")
-            logger.critical(f"Simplified Params were: {simple_params if 'simple_params' in locals() else 'N/A'}")
+            logger.critical(f"Tested Query was: {query_test if 'query_test' in locals() else 'N/A'}")
+            logger.critical(
+                f"Tested Params were: {final_query_params_test if 'final_query_params_test' in locals() else 'N/A'}")
             raise CharactersRAGDBError(f"Database error during update: {e}") from e
-        except Exception as e: # Catch ConflictError or other exceptions
-            logger.error(f"Unexpected error in update_character_card (SIMPLIFIED ATTEMPT): {e}", exc_info=True)
-            # Re-raise to let test framework handle it or for transaction manager to rollback
+        except Exception as e:
+            logger.error(f"Unexpected error in update_character_card (TEST DESC & PERS): {e}", exc_info=True)
             raise
-        except Exception as e:  # Catch any other unexpected errors
-            # The context manager handles rollback
-            logger.error(
-                f"Unexpected error updating character card ID {character_id} (expected v{expected_version}): {e}",
-                exc_info=True)
-            raise CharactersRAGDBError(f"Unexpected error updating character card: {e}") from e
 
     def soft_delete_character_card(self, character_id: int, expected_version: int) -> bool:
         now = self._get_current_utc_timestamp_iso()
