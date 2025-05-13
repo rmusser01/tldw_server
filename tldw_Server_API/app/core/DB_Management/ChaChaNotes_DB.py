@@ -160,6 +160,8 @@ CREATE INDEX IF NOT EXISTS idx_conversations_root   ON conversations(root_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_parent ON conversations(parent_conversation_id);
 CREATE INDEX IF NOT EXISTS idx_conv_char          ON conversations(character_id);
 
+-- =========== TEMPORARILY COMMENT OUT CONVERSATIONS FTS AND TRIGGERS ============
+/*
 CREATE VIRTUAL TABLE IF NOT EXISTS conversations_fts
 USING fts5(
     title,
@@ -178,6 +180,8 @@ END;
 CREATE TRIGGER IF NOT EXISTS conversations_ad AFTER DELETE ON conversations BEGIN
   DELETE FROM conversations_fts WHERE rowid = old.rowid; -- FIXED: Changed old.id to old.rowid
 END;
+*/
+-- ========= END TEMPORARY COMMENT OUT FOR CONVERSATIONS FTS AND TRIGGERS ========
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- 3. Messages with swipe/fork links, rankings, tombstones & sync metadata
@@ -429,6 +433,8 @@ BEGIN
 END;
 
 -- == Triggers for: conversations ==
+-- =========== TEMPORARILY COMMENT OUT CONVERSATIONS SYNC LOG TRIGGERS ============
+/*
 CREATE TRIGGER IF NOT EXISTS conversations_sync_create
 AFTER INSERT ON conversations
 BEGIN
@@ -498,6 +504,8 @@ BEGIN
        )
     );
 END;
+*/
+-- ========= END TEMPORARY COMMENT OUT FOR CONVERSATIONS SYNC LOG TRIGGERS ========
 
 -- == Triggers for: character_cards ==
 CREATE TRIGGER IF NOT EXISTS character_cards_sync_create
