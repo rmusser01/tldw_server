@@ -41,46 +41,33 @@ def db_path(tmp_path):
 @pytest.fixture(scope="function")
 def db_instance(db_path, client_id):
     """Creates a DB instance for each test, ensuring a fresh database."""
-    current_db_path = Path(db_path)  # Ensure it's a Path object
+    current_db_path = Path(db_path)
 
-    # --- Pre-test Cleanup (Optional but generally safe) ---
-    # Let's ensure the *previous* run's files are gone IF pytest's tmp_path
-    # doesn't guarantee a completely empty directory for some reason.
-    # Usually, tmp_path handles this, making this block potentially redundant.
-    # If you trust tmp_path, you can remove this pre-cleanup.
+    # Clean up any existing files
     for suffix in ["", "-wal", "-shm"]:
         p = Path(str(current_db_path) + suffix)
         if p.exists():
             try:
-                p.unlink(missing_ok=True)  # Use missing_ok=True if Python >= 3.8
-            except FileNotFoundError:
-                pass  # Ignore if already gone
-            except OSError as e:
-                print(f"Warning: Could not unlink pre-test {p}: {e}")  # Or log
+                p.unlink(missing_ok=True)
+            except Exception as e:
+                print(f"Warning: Could not unlink {p}: {e}")
 
-    # Ensure parent directory exists
-    current_db_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # --- DB Instance Creation ---
     db = None
     try:
         db = CharactersRAGDB(current_db_path, client_id)
-        yield db  # Run the test
+        yield db
     finally:
-        # --- Post-test Teardown ---
         if db:
-            db.close_connection()  # Close the connection - this should trigger WAL checkpointing
-
-        # --- Rely on pytest's tmp_path for file cleanup ---
-        # REMOVE the manual deletion loop for .sqlite, .sqlite-wal, .sqlite-shm
-        # logger.debug(f"DB connection closed for {current_db_path}. Relying on tmp_path for cleanup.")
-        print(
-            f"\n[Teardown] DB connection closed for {current_db_path}. Relying on tmp_path for cleanup.")  # Use print for pytest visibility
-
-        # Optional: Add a small delay AFTER closing, just in case OS needs time,
-        # but often unnecessary if close() blocks properly.
-        import time
-        time.sleep(0.05)
+            # Ensure all connections are closed
+            db.close_connection()
+            # Additional cleanup
+            for suffix in ["", "-wal", "-shm"]:
+                p = Path(str(current_db_path) + suffix)
+                if p.exists():
+                    try:
+                        p.unlink(missing_ok=True)
+                    except Exception:
+                        pass
 
 
 @pytest.fixture
@@ -232,21 +219,22 @@ class TestCharacterCards:
         assert card_id is not None
 
         # Get current version to pass as expected_version
-        original_card = db_instance.get_character_card_by_id(card_id)
+        original_card = db_instance.get_character_card_by_id(card_id) # Uses its own execute_query
         assert original_card is not None
         expected_version = original_card['version']  # Should be 1
 
         update_payload = {"description": "Updated Description", "personality": "More Testy"}
+        # This call will use its internal `with db_instance.transaction():`
         updated = db_instance.update_character_card(card_id, update_payload, expected_version=expected_version)
         assert updated is True
 
-        retrieved = db_instance.get_character_card_by_id(card_id)
+        retrieved = db_instance.get_character_card_by_id(card_id) # Uses its own execute_query
         assert retrieved is not None
         assert retrieved["description"] == "Updated Description"
         assert retrieved["personality"] == "More Testy"
         assert retrieved["name"] == card_data["name"]  # Unchanged
         assert retrieved["version"] == expected_version + 1
-        assert retrieved["client_id"] == db_instance.client_id  # Should be updated by the instance
+        assert retrieved["client_id"] == db_instance.client_id
 
     def test_update_character_card_version_conflict(self, db_instance: CharactersRAGDB):
         card_data = _create_sample_card_data("VersionConflict")

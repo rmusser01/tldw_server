@@ -1189,7 +1189,6 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
         fields_to_update_sql = []
         params_for_set_clause = []
 
-        # Build field list and parameters for SET clause (same as before)
         for key, value in card_data.items():
             if key in ['id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
                 continue
@@ -1212,76 +1211,71 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
         final_query_params = tuple(final_set_values + where_clause_values)
         query = f"UPDATE character_cards SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
 
-        conn = self.get_connection() # Get connection *once* outside try/except
         try:
-            conn.execute("BEGIN") # <<< Start manual transaction >>>
-            logger.debug(f"Manual BEGIN for update_character_card ID {character_id}")
+            # <<< USE THE CONTEXT MANAGER >>>
+            with self.transaction() as conn:
+                # --- Explicit pre-check (inside transaction) ---
+                current_db_version = self._get_current_db_version(conn, "character_cards", "id", character_id)
 
-            # --- Explicit pre-check (kept inside transaction) ---
-            current_db_version = self._get_current_db_version(conn, "character_cards", "id", character_id)
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Character card ID {character_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                        entity="character_cards", entity_id=character_id
+                    )
 
-            if current_db_version != expected_version:
-                raise ConflictError(
-                    f"Character card ID {character_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
-                    entity="character_cards", entity_id=character_id
-                )
+                # Proceed with the update
+                cursor = conn.execute(query, final_query_params)  # This is where it fails
 
-            # Proceed with the update
-            cursor = conn.execute(query, final_query_params) # <<< Failure point
+                # Check rowcount for race condition
+                if cursor.rowcount == 0:
+                    check_again_cursor = conn.execute("SELECT version, deleted FROM character_cards WHERE id = ?",
+                                                      (character_id,))
+                    final_state = check_again_cursor.fetchone()
+                    msg = ""
+                    if not final_state:
+                        msg = f"Character card ID {character_id} disappeared between version check and update attempt."
+                    elif final_state['deleted']:
+                        msg = f"Character card ID {character_id} was soft-deleted concurrently between version check and update."
+                    elif final_state['version'] != expected_version:
+                        msg = f"Character card ID {character_id} version changed to {final_state['version']} concurrently between version check and update."
+                    else:
+                        msg = f"Update for character card ID {character_id} (expected version {expected_version}) affected 0 rows after passing initial check (likely race condition)."
+                    logger.error(f"Conflict error after update attempt: {msg}")
+                    raise ConflictError(msg, entity="character_cards", entity_id=character_id)
 
-            # Check rowcount
-            if cursor.rowcount == 0:
-                # If 0 rows affected, check why.
-                check_again_cursor = conn.execute("SELECT version, deleted FROM character_cards WHERE id = ?", (character_id,))
-                final_state = check_again_cursor.fetchone()
-                # ... (build specific conflict message 'msg' based on final_state - same logic as previous attempt) ...
-                if not final_state:
-                    check_exists_cursor = conn.execute("SELECT 1 FROM character_cards WHERE id = ?", (character_id,))
-                    msg = f"Update failed: Character card ID {character_id} not found." if not check_exists_cursor.fetchone() else f"Update failed: Character card ID {character_id} disappeared unexpectedly."
-                elif final_state['deleted']:
-                    msg = f"Update failed: Character card ID {character_id} is soft-deleted (DB version {final_state['version']}, expected active version {expected_version})."
-                elif final_state['version'] != expected_version:
-                    msg = f"Update failed: Character card ID {character_id} version mismatch (db has {final_state['version']}, client expected {expected_version})."
-                else:
-                    msg = f"Update for character card ID {character_id} (expected version {expected_version}) affected 0 rows for an unknown reason."
-                raise ConflictError(msg, entity="character_cards", entity_id=character_id)
+                logger.info(
+                    f"Updated character card ID {character_id} from version {expected_version} to version {next_version_val}.")
+                return True  # Return True for successful update
 
-            # If rowcount is 1, commit
-            conn.commit() # <<< Manual commit >>>
-            logger.info(f"Updated character card ID {character_id} from version {expected_version} to version {next_version_val}. Manual COMMIT.")
-            return True
-
-        except (sqlite3.Error, CharactersRAGDBError, ConflictError) as e:
-            logger.warning(f"Error during update_character_card ID {character_id}, rolling back. Error type: {type(e).__name__}, Message: {e}")
-            try:
-                # Check if connection is still valid and in transaction before rollback
-                if conn and conn.in_transaction:
-                    conn.rollback()
-                    logger.debug(f"Manual ROLLBACK successful for update_character_card ID {character_id}")
-                elif conn:
-                    logger.debug(f"Skipping rollback for update_character_card ID {character_id} as not in transaction.")
-                else:
-                    logger.warning("Cannot rollback, connection is None.")
-            except Exception as rb_err:
-                 logger.error(f"Manual ROLLBACK FAILED for update_character_card ID {character_id}: {rb_err}", exc_info=True)
-
-            # Re-raise the original error after attempting rollback
-            # Specific handling for IntegrityError/UNIQUE constraint
-            if isinstance(e, sqlite3.IntegrityError) and "UNIQUE constraint failed: character_cards.name" in str(e) and 'name' in card_data:
+        except sqlite3.IntegrityError as e:
+            # The context manager handles rollback
+            if "UNIQUE constraint failed: character_cards.name" in str(e) and 'name' in card_data:
                 updated_name = card_data['name']
-                logger.warning(f"Update failed (rolled back) for Character Card ID {character_id}: Name '{updated_name}' already exists.")
-                # Raise specific ConflictError for UNIQUE constraint
-                raise ConflictError(f"Cannot update Character Card ID {character_id}: Name '{updated_name}' already exists.",
-                                    entity="character_cards", entity_id=updated_name) from e
-            elif isinstance(e, (ConflictError, CharactersRAGDBError)):
-                 raise # Re-raise custom/conflict errors directly
-            elif isinstance(e, sqlite3.Error):
-                 # Wrap other sqlite3 errors
-                 logger.error(f"Database error updating character card ID {character_id} (expected v{expected_version}): {e}", exc_info=True)
-                 raise CharactersRAGDBError(f"Database error updating character card: {e}") from e
+                logger.warning(
+                    f"Update failed (rolled back by context manager) for Character Card ID {character_id}: Name '{updated_name}' already exists.")
+                raise ConflictError(
+                    f"Cannot update Character Card ID {character_id}: Name '{updated_name}' already exists.",
+                    entity="character_cards", entity_id=updated_name) from e
             else:
-                # Should not happen if the except block is specific enough, but safety net
-                raise e
+                logger.error(
+                    f"Database integrity error updating character card ID {character_id} (expected v{expected_version}): {e}",
+                    exc_info=True)
+                raise CharactersRAGDBError(f"Database integrity error updating character card: {e}") from e
+        except ConflictError:
+            # The context manager handles rollback
+            raise  # Re-raise ConflictErrors
+        except CharactersRAGDBError as e:  # Covers wrapped sqlite3.Error from conn.execute
+            # The context manager handles rollback
+            logger.error(
+                f"Database error updating character card ID {character_id} (expected v{expected_version}): {e}",
+                exc_info=True)
+            raise
+        except Exception as e:  # Catch any other unexpected errors
+            # The context manager handles rollback
+            logger.error(
+                f"Unexpected error updating character card ID {character_id} (expected v{expected_version}): {e}",
+                exc_info=True)
+            raise CharactersRAGDBError(f"Unexpected error updating character card: {e}") from e
 
     def soft_delete_character_card(self, character_id: int, expected_version: int) -> bool:
         now = self._get_current_utc_timestamp_iso()
@@ -1434,25 +1428,20 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
         Updates mutable fields of a conversation with optimistic locking.
         (Manual Transaction Handling)
         """
-        if not update_data:
-            raise InputError("No data provided for conversation update.")
-
+        if not update_data: raise InputError("No data provided for conversation update.")
         now = self._get_current_utc_timestamp_iso()
         fields_to_update_sql = []
         params_for_set_clause = []
-
-        # Determine which fields to update
         for key, value in update_data.items():
             if key in ['title', 'rating', 'forked_from_message_id', 'parent_conversation_id', 'character_id']:
                 fields_to_update_sql.append(f"{key} = ?")
                 params_for_set_clause.append(value)
             elif key not in ['id', 'root_id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
-                logger.warning(f"Attempted to update immutable or unknown field '{key}' in conversation {conversation_id}, skipping.")
-
+                logger.warning(
+                    f"Attempted to update immutable or unknown field '{key}' in conversation {conversation_id}, skipping.")
         if not fields_to_update_sql:
             logger.info(f"No updatable fields provided for conversation ID {conversation_id}.")
             return True
-
         next_version_val = expected_version + 1
         fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
         final_set_values = params_for_set_clause[:]
@@ -1461,73 +1450,66 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
         final_query_params = tuple(final_set_values + where_clause_values)
         query = f"UPDATE conversations SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
 
-        conn = self.get_connection() # Get connection *once*
         try:
-            conn.execute("BEGIN") # <<< Start manual transaction >>>
-            logger.debug(f"Manual BEGIN for update_conversation ID {conversation_id}")
+            # <<< USE THE CONTEXT MANAGER >>>
+            with self.transaction() as conn:
+                # --- Explicit pre-check (inside transaction) ---
+                current_db_version = self._get_current_db_version(conn, "conversations", "id", conversation_id)
 
-            # --- Explicit pre-check (kept inside transaction) ---
-            current_db_version = self._get_current_db_version(conn, "conversations", "id", conversation_id)
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Conversation ID {conversation_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                        entity="conversations", entity_id=conversation_id
+                    )
 
-            if current_db_version != expected_version:
-                raise ConflictError(
-                    f"Conversation ID {conversation_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
-                    entity="conversations", entity_id=conversation_id
-                )
+                # Proceed with the update
+                cursor = conn.execute(query, final_query_params)
 
-            # Proceed with the update
-            cursor = conn.execute(query, final_query_params) # <<< Potential failure point
+                # Check rowcount
+                if cursor.rowcount == 0:
+                    check_again_cursor = conn.execute("SELECT version, deleted FROM conversations WHERE id = ?",
+                                                      (conversation_id,))
+                    final_state = check_again_cursor.fetchone()
+                    msg = ""
+                    if not final_state:
+                        msg = f"Conversation ID {conversation_id} disappeared between version check and update attempt."
+                    elif final_state['deleted']:
+                        msg = f"Conversation ID {conversation_id} was soft-deleted concurrently between version check and update."
+                    elif final_state['version'] != expected_version:
+                        msg = f"Conversation ID {conversation_id} version changed to {final_state['version']} concurrently between version check and update."
+                    else:
+                        msg = f"Update for conversation ID {conversation_id} (expected version {expected_version}) affected 0 rows after passing initial check."
+                    logger.error(f"Conflict error after update attempt: {msg}")
+                    raise ConflictError(msg, entity="conversations", entity_id=conversation_id)
 
-            # Check rowcount
-            if cursor.rowcount == 0:
-                # If 0 rows affected, check why.
-                check_again_cursor = conn.execute("SELECT version, deleted FROM conversations WHERE id = ?", (conversation_id,))
-                final_state = check_again_cursor.fetchone()
-                msg = "" # Initialize msg
-                if not final_state:
-                    check_exists_cursor = conn.execute("SELECT 1 FROM conversations WHERE id = ?", (conversation_id,))
-                    msg = f"Update failed: Conversation ID {conversation_id} not found." if not check_exists_cursor.fetchone() else f"Update failed: Conversation ID {conversation_id} disappeared unexpectedly."
-                elif final_state['deleted']:
-                    msg = f"Update failed: Conversation ID {conversation_id} is soft-deleted (DB version {final_state['version']}, expected active version {expected_version})."
-                elif final_state['version'] != expected_version:
-                    msg = f"Update failed: Conversation ID {conversation_id} version mismatch (db has {final_state['version']}, client expected {expected_version})."
-                else:
-                    msg = f"Update for conversation ID {conversation_id} (expected version {expected_version}) affected 0 rows for an unknown reason."
-                logger.error(f"Conflict detected after update attempt: {msg}") # Log before raising
-                raise ConflictError(msg, entity="conversations", entity_id=conversation_id)
+                logger.info(
+                    f"Updated conversation ID {conversation_id} from version {expected_version} to version {next_version_val}.")
+                return True  # Return True for successful update
 
-            # If rowcount is 1, commit
-            conn.commit() # <<< Manual commit >>>
-            logger.info(f"Updated conversation ID {conversation_id} from version {expected_version} to version {next_version_val}. Manual COMMIT.")
-            return True
-
-        except (sqlite3.Error, CharactersRAGDBError, ConflictError) as e:
-            logger.warning(f"Error during update_conversation ID {conversation_id}, rolling back. Error type: {type(e).__name__}, Message: {e}")
-            try:
-                if conn and conn.in_transaction: # Check if still in transaction before rollback
-                    conn.rollback()
-                    logger.debug(f"Manual ROLLBACK successful for update_conversation ID {conversation_id}")
-                elif conn:
-                    logger.debug(f"Skipping rollback for update_conversation ID {conversation_id}, not in transaction.")
-                else:
-                    logger.warning("Rollback skipped, connection is None.")
-            except Exception as rb_err:
-                 logger.error(f"Manual ROLLBACK FAILED for update_conversation ID {conversation_id}: {rb_err}", exc_info=True)
-
-            # Re-raise the original error after attempting rollback
-            if isinstance(e, sqlite3.IntegrityError):
-                logger.error(f"Database integrity error updating conversation ID {conversation_id} (expected v{expected_version}): {e}", exc_info=True)
-                if "FOREIGN KEY constraint failed" in str(e) and 'character_id' in update_data:
-                     raise InputError(f"Update failed: Character ID {update_data['character_id']} does not exist or is deleted.") from e
-                raise CharactersRAGDBError(f"Database integrity error updating conversation: {e}") from e
-            elif isinstance(e, (ConflictError, CharactersRAGDBError)):
-                 raise # Re-raise custom/conflict errors directly
-            elif isinstance(e, sqlite3.Error):
-                 logger.error(f"Database error updating conversation ID {conversation_id} (expected v{expected_version}): {e}", exc_info=True)
-                 raise CharactersRAGDBError(f"Database error updating conversation: {e}") from e
-            else:
-                 # Should not happen, but safety net
-                 raise CharactersRAGDBError(f"Unexpected error type during update: {e}") from e
+        except sqlite3.IntegrityError as e:
+            # Context manager handles rollback
+            logger.error(
+                f"Database integrity error updating conversation ID {conversation_id} (expected v{expected_version}): {e}",
+                exc_info=True)
+            if "FOREIGN KEY constraint failed" in str(e) and 'character_id' in update_data:
+                raise InputError(
+                    f"Update failed: Character ID {update_data['character_id']} does not exist or is deleted.") from e
+            raise CharactersRAGDBError(f"Database integrity error updating conversation: {e}") from e
+        except ConflictError:
+            # Context manager handles rollback
+            raise
+        except CharactersRAGDBError as e:
+            # Context manager handles rollback
+            logger.error(
+                f"Database error updating conversation ID {conversation_id} (expected v{expected_version}): {e}",
+                exc_info=True)
+            raise
+        except Exception as e:
+            # Context manager handles rollback
+            logger.error(
+                f"Unexpected error updating conversation ID {conversation_id} (expected v{expected_version}): {e}",
+                exc_info=True)
+            raise CharactersRAGDBError(f"Unexpected error updating conversation: {e}") from e
 
     def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool:
         now = self._get_current_utc_timestamp_iso()
