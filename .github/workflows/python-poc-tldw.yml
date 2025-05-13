@@ -51,7 +51,7 @@ jobs:
         pip check
     - name: Test ChromaDB lib functions with pytest
       run: |
-        pytest PoC_Version/Tests/ChromaDB/test_chromadb.py -v --cov=PoC_Version/App_Function_Libraries/DB
+        pytest PoC_Version/Tests/ChromaDB/test_chromadb.py -v
 
     - name: Test RAG lib functions with pytest
       run: |
