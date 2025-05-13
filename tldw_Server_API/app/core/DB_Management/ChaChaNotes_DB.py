@@ -1189,6 +1189,23 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
             raise
 
     def update_character_card(self, character_id: int, card_data: Dict[str, Any], expected_version: int) -> bool:
+        """
+        Updates a character card with optimistic locking using expected_version.
+
+        Args:
+            character_id: The ID of the character card to update.
+            card_data: A dictionary containing the fields to update.
+            expected_version: The version number the client expects the record to have.
+
+        Returns:
+            True if the update was successful.
+
+        Raises:
+            InputError: If no update data is provided.
+            ConflictError: If the record is not found, already soft-deleted,
+                           or if the expected_version does not match the current database version.
+            CharactersRAGDBError: For other database-related errors.
+        """
         if not card_data:
             raise InputError("No data provided for character card update.")
 
@@ -1196,9 +1213,10 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
         fields_to_update_sql = []
         params_for_set_clause = []
 
+        # Build field list and parameters for SET clause
         for key, value in card_data.items():
             if key in ['id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
-                continue
+                continue # Skip non-updatable fields
             if key in self._CHARACTER_CARD_JSON_FIELDS:
                 fields_to_update_sql.append(f"{key} = ?")
                 params_for_set_clause.append(self._ensure_json_string(value))
@@ -1208,25 +1226,26 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
 
         if not fields_to_update_sql:
             logger.info(f"No updatable fields provided for character card ID {character_id}.")
-            return True  # Idempotent: no changes requested.
+            # Consider if this should be True (no change needed) or False/raise error. Returning True for idempotency.
+            return True
 
         next_version_val = expected_version + 1
         fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
 
         # Values for the SET clause
-        all_set_values = params_for_set_clause[:]
-        all_set_values.extend([now, next_version_val, self.client_id])
+        final_set_values = params_for_set_clause[:]
+        final_set_values.extend([now, next_version_val, self.client_id])
 
-        # Values for the WHERE clause (id and expected_version)
-        where_values = [character_id, expected_version]
+        # Values for the WHERE clause
+        where_clause_values = [character_id, expected_version]
 
-        final_params_for_execute = tuple(all_set_values + where_values)
+        final_query_params = tuple(final_set_values + where_clause_values)
 
         query = f"UPDATE character_cards SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
 
         try:
             with self.transaction() as conn:
-                # Explicit pre-check. _get_current_db_version raises ConflictError if not found or already soft-deleted.
+                # Explicit pre-check using helper for clarity and consistent error handling
                 current_db_version = self._get_current_db_version(conn, "character_cards", "id", character_id)
 
                 if current_db_version != expected_version:
@@ -1235,46 +1254,58 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
                         entity="character_cards", entity_id=character_id
                     )
 
-                cursor = conn.execute(query, final_params_for_execute)
+                # Proceed with the update, relying on the WHERE clause's version check for atomicity
+                cursor = conn.execute(query, final_query_params)
 
+                # Check if the update actually modified a row
                 if cursor.rowcount == 0:
-                    # Race condition: Record changed between pre-check and UPDATE.
-                    # Re-fetch state to provide a more specific error.
+                    # This means the record changed state (deleted or version bump) between the _get_current_db_version check and the UPDATE execution.
+                    # We re-query to give a more specific error.
                     check_again_cursor = conn.execute("SELECT version, deleted FROM character_cards WHERE id = ?",
                                                       (character_id,))
                     final_state = check_again_cursor.fetchone()
 
                     if not final_state:
-                        msg = f"Character card ID {character_id} disappeared before update (expected version {expected_version})."
+                        # Should not happen if _get_current_db_version succeeded, but handle defensively.
+                        msg = f"Character card ID {character_id} disappeared before update completion (expected active version {expected_version})."
                     elif final_state['deleted']:
-                        msg = f"Character card ID {character_id} was soft-deleted concurrently (expected version {expected_version} for update)."
+                        msg = f"Character card ID {character_id} was soft-deleted concurrently while attempting update from version {expected_version}."
                     elif final_state['version'] != expected_version:
-                        msg = f"Character card ID {character_id} version changed to {final_state['version']} concurrently (expected {expected_version} for update)."
-                    else:  # Should ideally not happen if pre-check passed and something changed
+                        # The version changed again between the pre-check and the update attempt.
+                        msg = f"Character card ID {character_id} version changed to {final_state['version']} concurrently, expected {expected_version} for update."
+                    else:
+                        # Should not be reachable if version is still expected_version and deleted is 0,
+                        # as the UPDATE should have succeeded. Log this unexpected case.
                         msg = f"Update for character card ID {character_id} (expected version {expected_version}) affected 0 rows for an unknown reason after passing initial checks."
+                        logger.error(f"Consistency issue detected: {msg}") # Log as error for investigation
+
                     raise ConflictError(msg, entity="character_cards", entity_id=character_id)
 
-                logger.info(
-                    f"Updated character card ID {character_id} from version {expected_version} to version {next_version_val}.")
+                # If rowcount is 1, the update was successful
+                logger.info(f"Updated character card ID {character_id} from version {expected_version} to version {next_version_val}.")
                 return True
+
         except sqlite3.IntegrityError as e:
+            conn.rollback() # Ensure rollback on integrity error like potential unique constraint if name is updated
+            # Check if it's a unique constraint violation on 'name'
             if "UNIQUE constraint failed: character_cards.name" in str(e) and 'name' in card_data:
-                logger.warning(
-                    f"Update failed for character card ID {character_id}: name '{card_data['name']}' already exists.")
-                raise ConflictError(
-                    f"Cannot update character card ID {character_id}: name '{card_data['name']}' already exists.",
-                    entity="character_cards", entity_id=card_data['name']) from e
-            logger.error(
-                f"SQLite integrity error updating character card ID {character_id} (expected v{expected_version}): {e}",
-                exc_info=True)
-            raise CharactersRAGDBError(f"Database integrity error updating character card: {e}") from e
+                 updated_name = card_data['name']
+                 logger.warning(f"Update failed for Character Card ID {character_id}: Name '{updated_name}' already exists.")
+                 raise ConflictError(f"Cannot update Character Card ID {character_id}: Name '{updated_name}' already exists.",
+                                     entity="character_cards", entity_id=updated_name) from e # Use name as entity_id for conflict context
+            else:
+                 logger.error(f"Database integrity error updating character card ID {character_id} (expected v{expected_version}): {e}", exc_info=True)
+                 raise CharactersRAGDBError(f"Database integrity error updating character card: {e}") from e
         except ConflictError:
+            # Let ConflictErrors (from pre-check or rowcount check) propagate up
             raise
-        except CharactersRAGDBError as e:
-            logger.error(
-                f"Database error updating character card ID {character_id} (expected v{expected_version}): {e}",
-                exc_info=True)
+        except CharactersRAGDBError as e: # Catches other custom DB errors or wraps SQLite errors from conn.execute
+            logger.error(f"Database error updating character card ID {character_id} (expected v{expected_version}): {e}", exc_info=True)
             raise
+        except Exception as e:
+            # Catch any unexpected errors
+            logger.error(f"Unexpected error updating character card ID {character_id} (expected v{expected_version}): {e}", exc_info=True)
+            raise CharactersRAGDBError(f"Unexpected error updating character card: {e}") from e
 
     def soft_delete_character_card(self, character_id: int, expected_version: int) -> bool:
         now = self._get_current_utc_timestamp_iso()
@@ -1423,6 +1454,23 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
             raise
 
     def update_conversation(self, conversation_id: str, update_data: Dict[str, Any], expected_version: int) -> bool:
+        """
+        Updates mutable fields of a conversation with optimistic locking.
+
+        Args:
+            conversation_id: The ID (UUID string) of the conversation to update.
+            update_data: A dictionary containing the fields to update (e.g., 'title', 'rating').
+            expected_version: The version number the client expects the record to have.
+
+        Returns:
+            True if the update was successful.
+
+        Raises:
+            InputError: If no update data is provided.
+            ConflictError: If the record is not found, already soft-deleted,
+                           or if the expected_version does not match the current database version.
+            CharactersRAGDBError: For other database-related errors (e.g., FK violations).
+        """
         if not update_data:
             raise InputError("No data provided for conversation update.")
 
@@ -1430,32 +1478,36 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
         fields_to_update_sql = []
         params_for_set_clause = []
 
-        allowed_to_update = ['title', 'rating', 'forked_from_message_id', 'parent_conversation_id', 'character_id']
+        # Determine which fields to update
         for key, value in update_data.items():
-            if key in allowed_to_update:
+            # Allow updating mutable fields
+            if key in ['title', 'rating', 'forked_from_message_id', 'parent_conversation_id', 'character_id']:
                 fields_to_update_sql.append(f"{key} = ?")
                 params_for_set_clause.append(value)
             elif key not in ['id', 'root_id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
-                logger.warning(
-                    f"Attempted to update immutable or unknown field '{key}' in conversation ID {conversation_id}, skipping.")
+                logger.warning(f"Attempted to update immutable or unknown field '{key}' in conversation {conversation_id}, skipping.")
 
         if not fields_to_update_sql:
             logger.info(f"No updatable fields provided for conversation ID {conversation_id}.")
-            return True
+            return True # Idempotent success if no changes needed
 
         next_version_val = expected_version + 1
         fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
 
-        all_set_values = params_for_set_clause[:]
-        all_set_values.extend([now, next_version_val, self.client_id])
+        # Values for the SET clause
+        final_set_values = params_for_set_clause[:]
+        final_set_values.extend([now, next_version_val, self.client_id])
 
-        where_values = [conversation_id, expected_version]
-        final_params_for_execute = tuple(all_set_values + where_values)
+        # Values for the WHERE clause
+        where_clause_values = [conversation_id, expected_version]
+
+        final_query_params = tuple(final_set_values + where_clause_values)
 
         query = f"UPDATE conversations SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
 
         try:
             with self.transaction() as conn:
+                # Explicit pre-check
                 current_db_version = self._get_current_db_version(conn, "conversations", "id", conversation_id)
 
                 if current_db_version != expected_version:
@@ -1464,37 +1516,49 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
                         entity="conversations", entity_id=conversation_id
                     )
 
-                cursor = conn.execute(query, final_params_for_execute)
+                # Proceed with the update
+                cursor = conn.execute(query, final_query_params)
 
+                # Check if the update succeeded
                 if cursor.rowcount == 0:
+                    # Race condition check
                     check_again_cursor = conn.execute("SELECT version, deleted FROM conversations WHERE id = ?",
                                                       (conversation_id,))
                     final_state = check_again_cursor.fetchone()
+
                     if not final_state:
-                        msg = f"Conversation ID {conversation_id} disappeared."
+                        msg = f"Conversation ID {conversation_id} disappeared before update completion (expected active version {expected_version})."
                     elif final_state['deleted']:
-                        msg = f"Conversation ID {conversation_id} was soft-deleted concurrently."
+                        msg = f"Conversation ID {conversation_id} was soft-deleted concurrently while attempting update from version {expected_version}."
                     elif final_state['version'] != expected_version:
-                        msg = f"Conversation ID {conversation_id} version changed to {final_state['version']} concurrently."
+                        msg = f"Conversation ID {conversation_id} version changed to {final_state['version']} concurrently, expected {expected_version} for update."
                     else:
-                        msg = f"Update for conversation ID {conversation_id} (expected v{expected_version}) affected 0 rows."
+                        msg = f"Update for conversation ID {conversation_id} (expected version {expected_version}) affected 0 rows for an unknown reason after passing initial checks."
+                        logger.error(f"Consistency issue detected: {msg}")
+
                     raise ConflictError(msg, entity="conversations", entity_id=conversation_id)
 
-                logger.info(
-                    f"Updated conversation ID {conversation_id} from version {expected_version} to version {next_version_val}.")
+                # Success
+                logger.info(f"Updated conversation ID {conversation_id} from version {expected_version} to version {next_version_val}.")
                 return True
-        except sqlite3.IntegrityError as e:  # e.g. foreign key constraint if character_id points to non-existent
-            logger.error(
-                f"SQLite integrity error updating conversation ID {conversation_id} (expected v{expected_version}): {e}",
-                exc_info=True)
+
+        except sqlite3.IntegrityError as e:
+            conn.rollback() # Ensure rollback on integrity errors (e.g., FK violation if character_id updated to non-existent ID)
+            logger.error(f"Database integrity error updating conversation ID {conversation_id} (expected v{expected_version}): {e}", exc_info=True)
+            # Check for specific FK violations if needed, e.g., character_id
+            if "FOREIGN KEY constraint failed" in str(e):
+                 if 'character_id' in update_data:
+                     raise InputError(f"Update failed: Character ID {update_data['character_id']} does not exist or is deleted.") from e
+                 # Add similar checks for forked_from_message_id, parent_conversation_id if necessary
             raise CharactersRAGDBError(f"Database integrity error updating conversation: {e}") from e
         except ConflictError:
             raise
         except CharactersRAGDBError as e:
-            logger.error(
-                f"Database error updating conversation ID {conversation_id} (expected v{expected_version}): {e}",
-                exc_info=True)
+            logger.error(f"Database error updating conversation ID {conversation_id} (expected v{expected_version}): {e}", exc_info=True)
             raise
+        except Exception as e:
+            logger.error(f"Unexpected error updating conversation ID {conversation_id} (expected v{expected_version}): {e}", exc_info=True)
+            raise CharactersRAGDBError(f"Unexpected error updating conversation: {e}") from e
 
     def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool:
         now = self._get_current_utc_timestamp_iso()

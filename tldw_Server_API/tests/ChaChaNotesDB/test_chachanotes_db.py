@@ -59,6 +59,10 @@ def db_instance(db_path, client_id):
     yield db
     db.close_connection() # Close first
 
+    # Small delay to let OS potentially settle file handles
+    import time
+    time.sleep(0.1)
+
     # Aggressive cleanup after
     for suffix in ["", "-wal", "-shm"]:
         p = Path(str(current_db_path) + suffix)
@@ -221,6 +225,11 @@ class TestCharacterCards:
         original_card = db_instance.get_character_card_by_id(card_id)
         assert original_card is not None
         expected_version = original_card['version']  # Should be 1
+
+        # DEBUG testing simple query first
+        print("DEBUG: Original card data: Nah.")
+        db_instance.execute_query("UPDATE character_cards SET description = 'Simple Update' WHERE id = ?", (card_id,),
+                                  commit=True)
 
         update_payload = {"description": "Updated Description", "personality": "More Testy"}
         updated = db_instance.update_character_card(card_id, update_payload, expected_version=expected_version)
