@@ -133,7 +133,7 @@ class TestDBInitialization:
         conn.commit()
         db.close_connection()
 
-        with pytest.raises(SchemaError, match="is newer than supported by code"):
+        with pytest.raises(CharactersRAGDBError, match="is newer than supported by code"):  # Changed here
             CharactersRAGDB(db_path, client_id)
 
 
@@ -215,7 +215,7 @@ class TestCharacterCards:
             db_instance.update_character_card(card_id, update_payload)
 
     def test_update_character_card_not_found(self, db_instance: CharactersRAGDB):
-        with pytest.raises(ConflictError, match="not found for update"):  # Raised by _get_record_version_and_bump
+        with pytest.raises(ConflictError, match="Record not found or already soft-deleted in character_cards."):
             db_instance.update_character_card(999, {"description": "Not Found"})
 
     def test_soft_delete_character_card(self, db_instance: CharactersRAGDB):

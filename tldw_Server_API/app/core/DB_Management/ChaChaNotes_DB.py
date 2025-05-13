@@ -1053,6 +1053,22 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
     _CHARACTER_CARD_JSON_FIELDS = ['alternate_greetings', 'tags', 'extensions']
 
     # --- Character Card Methods ---
+    def _ensure_json_string_from_mixed(data: Optional[Union[List, Dict, Set, str]]) -> Optional[str]:
+        if data is None:
+            return None
+        if isinstance(data, str):  # If it's already a string, assume it's valid JSON or pass it through
+            try:
+                json.loads(data)  # Validate if it's a JSON string
+                return data
+            except json.JSONDecodeError:
+                # If it's a plain string not meant to be JSON, this logic might need adjustment
+                # For now, let's assume if it's a string, it's intended as a pre-formatted JSON string
+                return data  # Or raise an error if non-JSON strings are not allowed for these fields
+        if isinstance(data, Set):
+            new_data = list(data)
+            return json.dumps(new_data)
+        return json.dumps(data)
+
     def add_character_card(self, card_data: Dict[str, Any]) -> Optional[int]:
         """
         Adds a new character card to the database.
@@ -1061,6 +1077,7 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
         `alternate_greetings`, `tags`, `extensions` are stored as JSON strings.
         Relies on SQL triggers for sync_log and FTS updates.
         """
+
         required_fields = ['name']
         for field in required_fields:
             if field not in card_data or not card_data[field]:
@@ -1069,9 +1086,15 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
         now = self._get_current_utc_timestamp_iso()
 
         # Ensure JSON fields are strings or None
-        alt_greetings_json = self._ensure_json_string(card_data.get('alternate_greetings'))
-        tags_json = self._ensure_json_string(card_data.get('tags'))
-        extensions_json = self._ensure_json_string(card_data.get('extensions'))
+        def get_json_field_as_string(field_value):
+            if isinstance(field_value, str):
+                # Assume it's already a JSON string if it's a string
+                return field_value
+            return self._ensure_json_string(field_value)
+
+        alt_greetings_json = get_json_field_as_string(card_data.get('alternate_greetings'))
+        tags_json = get_json_field_as_string(card_data.get('tags'))
+        extensions_json = get_json_field_as_string(card_data.get('extensions'))
 
         query = """
                 INSERT INTO character_cards (name, description, personality, scenario, image, post_history_instructions, \
@@ -1200,6 +1223,7 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
 
                 logger.info(f"Updated character card ID {character_id} to version {next_version}.")
                 return True
+            return None
         except sqlite3.IntegrityError as e: # Catching this for conn.execute
             if "UNIQUE constraint failed: character_cards.name" in str(e) and 'name' in card_data:
                 logger.warning(
@@ -1217,31 +1241,45 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
     def soft_delete_character_card(self, character_id: int) -> bool | None:
         """Soft deletes a character card. Sets deleted=1 and updates sync fields."""
         now = self._get_current_utc_timestamp_iso()
-        query = "UPDATE character_cards SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
         try:
             with self.transaction() as conn:
-                current_version, next_version = self._get_record_version_and_bump(conn, "character_cards", "id",
-                                                                                  character_id)
+                # First, check if it's already deleted
+                check_cursor = conn.execute("SELECT deleted, version FROM character_cards WHERE id = ?", (character_id,))
+                existing_record = check_cursor.fetchone()
+
+                if not existing_record: # Truly not found
+                    logger.warning(f"Character card ID {character_id} not found for soft delete.")
+                    return False # Or raise an error if "not found" should be an error here
+
+                if existing_record['deleted']:
+                    logger.info(f"Character card ID {character_id} already soft-deleted.")
+                    return True # Idempotent: already deleted, so success
+
+                # If not deleted, proceed with version bumping and update
+                current_version = existing_record['version']
+                next_version = current_version + 1
+
+                query = "UPDATE character_cards SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
+                # Note: The 'AND deleted = 0' and 'AND version = ?' are still good for the actual UPDATE
+                # to prevent race conditions if another process undeleted it or updated version between our check and update.
                 params = (now, next_version, self.client_id, character_id, current_version)
                 cursor = conn.execute(query, params)
+
                 if cursor.rowcount == 0:
-                    # Check if already deleted or version mismatch
-                    check_cursor = conn.execute("SELECT deleted, version FROM character_cards WHERE id = ?",
-                                                (character_id,))
-                    existing_record = check_cursor.fetchone()
-                    if existing_record:
-                        if existing_record['deleted']:
-                            logger.info(f"Character card ID {character_id} already soft-deleted.")
-                            return True  # Idempotent soft delete
-                        else:  # Version mismatch
-                            raise ConflictError(
-                                f"Soft delete failed for Character ID {character_id}: version mismatch.",
-                                entity="character_cards", entity_id=character_id)
-                    else:  # Record not found
-                        logger.warning(f"Character card ID {character_id} not found for soft delete.")
-                        return False
+                    # This means it was modified/deleted between our check and the update command
+                    # Re-check to understand why
+                    check_again_cursor = conn.execute("SELECT deleted, version FROM character_cards WHERE id = ?", (character_id,))
+                    changed_record = check_again_cursor.fetchone()
+                    if changed_record and changed_record['deleted']:
+                         logger.info(f"Character card ID {character_id} was soft-deleted concurrently.")
+                         return True # Still counts as success if the goal was to delete
+                    raise ConflictError(
+                        f"Soft delete failed for Character ID {character_id}: version mismatch or became active unexpectedly.",
+                        entity="character_cards", entity_id=character_id)
+
                 logger.info(f"Soft-deleted character card ID {character_id}, new version {next_version}.")
                 return True
+            return None
         except ConflictError: # Re-raise from _get_record_version_and_bump or rowcount check
             raise
         except CharactersRAGDBError as e:
