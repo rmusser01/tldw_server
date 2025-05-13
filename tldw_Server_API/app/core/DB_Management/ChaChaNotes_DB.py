@@ -1036,18 +1036,6 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
 
         return row['version']
 
-    def _get_record_version_and_bump(self, conn: sqlite3.Connection, table_name: str, pk_col_name: str,
-                                     pk_value: Any) -> Tuple[int, int]:
-        cursor = conn.execute(f"SELECT version FROM {table_name} WHERE {pk_col_name} = ? AND deleted = 0", (pk_value,))
-        row = cursor.fetchone()
-        if not row:
-            logger.warning(
-                f"Attempted to get version for non-existent or deleted record: {table_name} ({pk_col_name}={pk_value})")
-            raise ConflictError(f"Record not found or already soft-deleted in {table_name}.", entity=table_name,
-                                entity_id=pk_value)
-        current_version = row['version']
-        return current_version, current_version + 1
-
     def _ensure_json_string(self, data: Optional[Union[List, Dict, Set]]) -> Optional[str]:
         if data is None:
             return None

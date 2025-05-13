@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  build-and-run-tests:
+  build-and-run-tests-poc:
 
     runs-on: ubuntu-latest
     env:
