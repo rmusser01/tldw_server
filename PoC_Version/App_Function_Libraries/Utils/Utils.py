@@ -114,15 +114,16 @@ def cleanup_downloads():
 def load_comprehensive_config():
     # Get the directory of the current script (Utils.py)
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    logging.trace(f"Current directory: {current_dir}")
+    logging.trace(f"Current directory (Utils.py location): {current_dir}") # e.g., .../PoC_Version/App_Function_Libraries
 
-    # Go up two levels to the project root directory (tldw)
-    project_root = os.path.dirname(os.path.dirname(current_dir))
-    logging.trace(f"Project root directory: {project_root}")
+    # --- MODIFIED ---
+    # Go up one level to the project root directory (PoC_Version)
+    project_root = os.path.dirname(current_dir)
+    logging.trace(f"Project root directory (PoC_Version): {project_root}") # e.g., .../PoC_Version
 
-    # Construct the path to the config file
+    # Construct the path to the config file within the project root
     config_path = os.path.join(project_root, 'Config_Files', 'config.txt')
-    logging.trace(f"Config file path: {config_path}")
+    logging.trace(f"Config file path: {config_path}") # e.g., .../PoC_Version/Config_Files/config.txt
 
     # Check if the config file exists
     if not os.path.exists(config_path):
@@ -140,15 +141,18 @@ def load_comprehensive_config():
 
 
 def get_project_root():
-    """Get the absolute path to the project root directory."""
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(os.path.dirname(current_dir))
+    """Get the absolute path to the project root directory (PoC_Version)."""
+    current_dir = os.path.dirname(os.path.abspath(__file__)) # .../PoC_Version/App_Function_Libraries
+    # --- MODIFIED ---
+    # The project root (PoC_Version) is the parent directory of the script's directory
+    project_root = os.path.dirname(current_dir) # .../PoC_Version
     logging.trace(f"Project root: {project_root}")
     return project_root
 
 
 def get_database_dir():
-    """Get the absolute path to the database directory."""
+    """Get the absolute path to the database directory (inside PoC_Version)."""
+    # Assumes a 'Databases' folder directly under the PoC_Version root
     db_dir = os.path.join(get_project_root(), 'Databases')
     os.makedirs(db_dir, exist_ok=True)
     logging.trace(f"Database directory: {db_dir}")
@@ -168,13 +172,17 @@ def get_database_path(db_name: str) -> str:
 
 
 def get_project_relative_path(relative_path: Union[str, os.PathLike[AnyStr]]) -> str:
-    """Convert a relative path to a path relative to the project root."""
+    """Convert a path relative to the project root (PoC_Version) to an absolute path."""
+    # This function should work correctly once get_project_root() is fixed.
+    # It takes a path like 'Databases/prompts.db' or 'Logs/app.log'
+    # and joins it with the project root path (e.g., .../PoC_Version)
     path = os.path.join(get_project_root(), str(relative_path))
-    logging.trace(f"Project relative path for {relative_path}: {path}")
+    logging.trace(f"Project relative path for '{relative_path}': {path}")
     return path
 
 def get_chromadb_path():
-    path = os.path.join(get_project_root(), 'Databases', 'chroma_db')
+    # This will now correctly point to PoC_Version/Databases/chroma_db
+    path = os.path.join(get_database_dir(), 'chroma_db')
     logging.trace(f"ChromaDB path: {path}")
     return path
 
@@ -462,16 +470,21 @@ def load_and_log_configs():
         local_api_retry_delay = config.get('Local-API', 'local_api_retry_delay', fallback='5')
 
         # Retrieve output paths from the configuration file
-        output_path = config.get('Paths', 'output_path', fallback='results')
+        # --- MODIFIED FALLBACK --- (Removed leading ./)
+        output_path_relative = config.get('Paths', 'output_path', fallback='results')
+        output_path = get_project_relative_path(output_path_relative)
         logging.trace(f"Output path set to: {output_path}")
 
         # Save video transcripts
         save_video_transcripts = config.get('Paths', 'save_video_transcripts', fallback='True')
 
         # Retrieve logging settings from the configuration file
-        log_level = config.get('Logging', 'log_level', fallback='INFO')
-        log_file = config.get('Logging', 'log_file', fallback='./Logs/tldw_logs.json')
-        log_metrics_file = config.get('Logging', 'log_metrics_file', fallback='./Logs/tldw_metrics_logs.json')
+        # --- MODIFIED FALLBACK --- (Removed leading ./)
+        log_file_relative = config.get('Logging', 'log_file', fallback='Logs/tldw_logs.json')
+        log_file = get_project_relative_path(log_file_relative)
+        # --- MODIFIED FALLBACK --- (Removed leading ./)
+        log_metrics_file_relative = config.get('Logging', 'log_metrics_file', fallback='Logs/tldw_metrics_logs.json')
+        log_metrics_file = get_project_relative_path(log_metrics_file_relative)
 
         # Retrieve processing choice from the configuration file
         processing_choice = config.get('Processing', 'processing_choice', fallback='cpu')
@@ -1068,7 +1081,7 @@ def load_and_log_configs():
                 'chunk_overlap': overlap
             },
             'logging': {
-                'log_level': log_level,
+                'log_level': "DEBUG",
                 'log_file': log_file,
                 'log_metrics_file': log_metrics_file
             },
@@ -1209,8 +1222,12 @@ openai_tts_voices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
 # Setup Default API Endpoint
 try:
     loaded_config_data = load_and_log_configs()
-    default_api_endpoint = loaded_config_data['default_api']
-    print(f"Default API Endpoint: {default_api_endpoint}")
+    if loaded_config_data: # Check if config loaded successfully
+        default_api_endpoint = loaded_config_data['default_api']
+        print(f"Default API Endpoint: {default_api_endpoint}")
+    else:
+        logging.error("Failed to load configuration data. Setting default API endpoint to 'openai'.")
+        default_api_endpoint = "openai"
 except Exception as e:
     logging.error(f"Error loading default API endpoint: {str(e)}")
     default_api_endpoint = "openai"
@@ -1269,9 +1286,13 @@ def format_metadata_as_text(metadata):
                 formatted_value = f"{value:,}"
             elif key == 'duration':
                 # Convert seconds to HH:MM:SS format
-                hours, remainder = divmod(value, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                formatted_value = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                try: # Add error handling for duration conversion
+                    duration_seconds = int(value)
+                    hours, remainder = divmod(duration_seconds, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    formatted_value = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                except (ValueError, TypeError):
+                    formatted_value = str(value) # Fallback to string representation
             else:
                 formatted_value = str(value)
 
@@ -1299,23 +1320,33 @@ def convert_to_seconds(time_str):
     if not time_str:
         return 0
 
-    # If it's already a number, assume it's in seconds
-    if time_str.isdigit():
+    # If it's already a number (int or float), assume it's in seconds
+    if isinstance(time_str, (int, float)):
         return int(time_str)
+    
+    # If it's a string representing a number
+    if isinstance(time_str, str) and time_str.replace('.', '', 1).isdigit():
+        return int(float(time_str))
 
-    # Parse time string in format HH:MM:SS, MM:SS, or SS
-    time_parts = time_str.split(':')
-    if len(time_parts) == 3:
-        return int(timedelta(hours=int(time_parts[0]),
-                             minutes=int(time_parts[1]),
-                             seconds=int(time_parts[2])).total_seconds())
-    elif len(time_parts) == 2:
-        return int(timedelta(minutes=int(time_parts[0]),
-                             seconds=int(time_parts[1])).total_seconds())
-    elif len(time_parts) == 1:
-        return int(time_parts[0])
+    if isinstance(time_str, str):
+        # Parse time string in format HH:MM:SS, MM:SS, or SS
+        time_parts = time_str.split(':')
+        try:
+            if len(time_parts) == 3:
+                return int(timedelta(hours=int(time_parts[0]),
+                                     minutes=int(time_parts[1]),
+                                     seconds=int(float(time_parts[2]))).total_seconds())
+            elif len(time_parts) == 2:
+                return int(timedelta(minutes=int(time_parts[0]),
+                                     seconds=int(float(time_parts[1]))).total_seconds())
+            elif len(time_parts) == 1:
+                 return int(float(time_parts[0]))
+            else:
+                raise ValueError(f"Invalid time format: {time_str}")
+        except ValueError:
+             raise ValueError(f"Invalid time format or value: {time_str}")
     else:
-        raise ValueError(f"Invalid time format: {time_str}")
+        raise TypeError(f"Unsupported type for time conversion: {type(time_str)}")
 
 #
 # End of Misc-Functions
@@ -1326,14 +1357,19 @@ def convert_to_seconds(time_str):
 #
 # File-saving Function Definitions
 def save_to_file(video_urls, filename):
-    with open(filename, 'w') as file:
+    # Ensure filename is an absolute path or resolve it relative to project root if needed
+    # For simplicity, assuming filename is intended to be relative to CWD or absolute
+    # Consider using get_project_relative_path if it should always be in PoC_Version
+    abs_filename = os.path.abspath(filename)
+    os.makedirs(os.path.dirname(abs_filename), exist_ok=True)
+    with open(abs_filename, 'w') as file:
         file.write('\n'.join(video_urls))
-    print(f"Video URLs saved to {filename}")
+    print(f"Video URLs saved to {abs_filename}")
 
 
 def save_segments_to_json(segments, file_name="transcription_segments.json"):
     """
-    Save transcription segments to a JSON file.
+    Save transcription segments to a JSON file inside the project's Results directory.
 
     Parameters:
     segments (list): List of transcription segments
@@ -1342,11 +1378,12 @@ def save_segments_to_json(segments, file_name="transcription_segments.json"):
     Returns:
     str: Path to the saved JSON file
     """
-    # Ensure the Results directory exists
-    os.makedirs("Results", exist_ok=True)
+    # --- MODIFIED --- Use get_project_relative_path for results directory
+    results_dir = get_project_relative_path("Results")
+    ensure_directory_exists(results_dir)
 
     # Full path for the JSON file
-    json_file_path = os.path.join("Results", file_name)
+    json_file_path = os.path.join(results_dir, file_name)
 
     # Save segments to JSON file
     with open(json_file_path, 'w', encoding='utf-8') as json_file:
@@ -1356,30 +1393,53 @@ def save_segments_to_json(segments, file_name="transcription_segments.json"):
 
 
 def download_file(url, dest_path, expected_checksum=None, max_retries=3, delay=5):
+    # Ensure the destination directory exists
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     temp_path = dest_path + '.tmp'
 
     for attempt in range(max_retries):
         try:
             # Check if a partial download exists and get its size
             resume_header = {}
+            initial_pos = 0
             if os.path.exists(temp_path):
-                resume_header = {'Range': f'bytes={os.path.getsize(temp_path)}-'}
+                initial_pos = os.path.getsize(temp_path)
+                resume_header = {'Range': f'bytes={initial_pos}-'}
 
-            response = requests.get(url, stream=True, headers=resume_header)
-            response.raise_for_status()
+            response = requests.get(url, stream=True, headers=resume_header, timeout=60) # Added timeout
 
-            # Get the total file size from headers
-            total_size = int(response.headers.get('content-length', 0))
-            initial_pos = os.path.getsize(temp_path) if os.path.exists(temp_path) else 0
+            # Check if the server supports range requests for resuming
+            if 'Range' in resume_header and response.status_code == 206: # Partial Content
+                 mode = 'ab'
+                 # Need to adjust total_size if resuming
+                 content_range = response.headers.get('Content-Range')
+                 if content_range:
+                     try:
+                         total_size = int(content_range.split('/')[-1])
+                     except (ValueError, IndexError):
+                         total_size = int(response.headers.get('content-length', 0)) + initial_pos # Estimate if range total is missing
+                 else:
+                    total_size = int(response.headers.get('content-length', 0)) + initial_pos # Estimate
+            elif response.status_code == 200: # Full request
+                 mode = 'wb'
+                 initial_pos = 0 # Reset initial position for full download
+                 total_size = int(response.headers.get('content-length', 0))
+            else:
+                 response.raise_for_status() # Raise error for other status codes
 
-            mode = 'ab' if 'Range' in response.headers else 'wb'
+
             with open(temp_path, mode) as temp_file, tqdm(
-                total=total_size, unit='B', unit_scale=True, desc=dest_path, initial=initial_pos, ascii=True
+                total=total_size, unit='B', unit_scale=True, desc=os.path.basename(dest_path), initial=initial_pos, ascii=True
             ) as pbar:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:  # filter out keep-alive new chunks
                         temp_file.write(chunk)
                         pbar.update(len(chunk))
+
+            # Check if download was complete
+            if total_size != 0 and os.path.getsize(temp_path) != total_size:
+                 raise IOError(f"Download incomplete: Expected {total_size} bytes, got {os.path.getsize(temp_path)}")
+
 
             # Verify the checksum if provided
             if expected_checksum:
@@ -1389,16 +1449,22 @@ def download_file(url, dest_path, expected_checksum=None, max_retries=3, delay=5
 
             # Move the file to the final destination
             os.rename(temp_path, dest_path)
-            print("Download complete and verified!")
+            print(f"Download complete and verified: {dest_path}")
             return dest_path
 
         except Exception as e:
-            print(f"Attempt {attempt + 1} failed: {e}")
+            print(f"Attempt {attempt + 1} failed for {os.path.basename(dest_path)}: {e}")
             if attempt < max_retries - 1:
                 print(f"Retrying in {delay} seconds...")
                 time.sleep(delay)
             else:
-                print("Max retries reached. Download failed.")
+                print(f"Max retries reached for {os.path.basename(dest_path)}. Download failed.")
+                # Clean up temp file on final failure
+                if os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except OSError as rm_err:
+                        print(f"Could not remove temporary file {temp_path}: {rm_err}")
                 raise
 
 def download_file_if_missing(url: str, local_path: str) -> None:
@@ -1410,23 +1476,27 @@ def download_file_if_missing(url: str, local_path: str) -> None:
         return
     logging.info(f"Downloading from {url} to {local_path}")
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
-    r = requests.get(url, stream=True)
-    r.raise_for_status()
-    with open(local_path, "wb") as f:
-        for chunk in r.iter_content(chunk_size=8192):
-            f.write(chunk)
+    try: # Use the robust download_file function
+        download_file(url, local_path)
+    except Exception as e:
+        logging.error(f"Failed to download {url} to {local_path}: {e}")
+        # Optional: raise the exception if download is critical
+        # raise
 
 def create_download_directory(title):
-    base_dir = "Results"
+    # --- MODIFIED --- Use get_project_relative_path for base results directory
+    base_dir = get_project_relative_path("Results")
     # Remove characters that are illegal in Windows filenames and normalize
     safe_title = normalize_title(title, preserve_spaces=False)
-    logging.debug(f"{title} successfully normalized")
+    logging.debug(f"'{title}' normalized to '{safe_title}'")
     session_path = os.path.join(base_dir, safe_title)
-    if not os.path.exists(session_path):
-        os.makedirs(session_path, exist_ok=True)
-        logging.debug(f"Created directory for downloaded video: {session_path}")
-    else:
-        logging.debug(f"Directory already exists for downloaded video: {session_path}")
+    ensure_directory_exists(session_path) # Use ensure_directory_exists helper
+    logging.debug(f"Ensured directory exists for downloaded video: {session_path}")
+    # if not os.path.exists(session_path):
+    #     os.makedirs(session_path, exist_ok=True)
+    #     logging.debug(f"Created directory for downloaded video: {session_path}")
+    # else:
+    #     logging.debug(f"Directory already exists for downloaded video: {session_path}")
     return session_path
 
 
@@ -1452,25 +1522,47 @@ def safe_read_file(file_path):
 
     # Use chardet to detect the encoding
     detected = chardet.detect(raw_data)
-    if detected['encoding'] is not None:
-        encodings.insert(0, detected['encoding'])
-        logging.info(f"Detected encoding: {detected['encoding']}")
+    detected_encoding = detected['encoding']
+    if detected_encoding:
+        # Move detected encoding to the front if it's not already there
+        if detected_encoding.lower() in [e.lower() for e in encodings]:
+             # Normalize case for comparison and removal
+             encodings = [e for e in encodings if e.lower() != detected_encoding.lower()]
+        encodings.insert(0, detected_encoding)
+        logging.info(f"Detected encoding: {detected_encoding} (Confidence: {detected.get('confidence')})")
+    else:
+        logging.warning(f"Chardet could not detect encoding for {file_path}. Trying defaults.")
+
 
     for encoding in encodings:
-        logging.info(f"Trying encoding: {encoding}")
+        logging.debug(f"Trying encoding: {encoding}")
         try:
             decoded_content = raw_data.decode(encoding)
-            # Check if the content is mostly printable
-            if sum(c.isprintable() for c in decoded_content) / len(decoded_content) > 0.90:
-                logging.info(f"Successfully decoded file with encoding: {encoding}")
-                return decoded_content
+            # Basic check for printable characters (adjust threshold if needed)
+            # This might not be perfect for all file types
+            # printable_ratio = sum(c.isprintable() or c.isspace() for c in decoded_content) / len(decoded_content) if decoded_content else 0
+            # if printable_ratio > 0.85: # Allow for some non-printable chars
+            logging.info(f"Successfully decoded file '{os.path.basename(file_path)}' with encoding: {encoding}")
+            return decoded_content
+            # else:
+                # logging.debug(f"Decoded with {encoding}, but low printable ratio ({printable_ratio:.2f}). Trying next.")
+                # continue
         except UnicodeDecodeError:
             logging.debug(f"Failed to decode with {encoding}")
             continue
+        except Exception as e: # Catch other potential decoding errors
+             logging.warning(f"Error while trying encoding {encoding}: {e}")
+             continue
 
-    # If all decoding attempts fail, return the error message
-    logging.error(f"Unable to decode the file {file_path}")
-    return f"Unable to decode the file {file_path}"
+
+    # If all decoding attempts fail, return an error message or potentially the raw bytes representation
+    logging.error(f"Unable to decode the file '{file_path}' with tried encodings: {encodings}")
+    # Option 1: Return error string
+    return f"Error: Unable to decode the file {os.path.basename(file_path)} using tried encodings."
+    # Option 2: Return raw bytes as string (might be messy)
+    # return f"Decoding failed. Raw data (partial): {raw_data[:100]}..."
+    # Option 3: Raise an exception
+    # raise IOError(f"Unable to decode file {file_path}")
 
 
 #
@@ -1484,27 +1576,38 @@ def safe_read_file(file_path):
 
 def generate_unique_filename(base_path, base_filename):
     """Generate a unique filename by appending a counter if necessary."""
-    filename = base_filename
+    filename, ext = os.path.splitext(base_filename)
     counter = 1
-    while os.path.exists(os.path.join(base_path, filename)):
-        name, ext = os.path.splitext(base_filename)
-        filename = f"{name}_{counter}{ext}"
+    unique_filename = base_filename
+    while os.path.exists(os.path.join(base_path, unique_filename)):
+        unique_filename = f"{filename}_{counter}{ext}"
         counter += 1
-    return filename
+    return unique_filename
 
 
 def generate_unique_identifier(file_path):
-    filename = os.path.basename(file_path)
-    timestamp = int(time.time())
+    try:
+        filename = os.path.basename(file_path)
+        timestamp = int(time.time())
 
-    # Generate a hash of the file content
-    hasher = hashlib.md5()
-    with open(file_path, 'rb') as f:
-        buf = f.read()
-        hasher.update(buf)
-    content_hash = hasher.hexdigest()[:8]  # Use first 8 characters of the hash
+        # Generate a hash of the file content
+        hasher = hashlib.md5()
+        with open(file_path, 'rb') as f:
+            while True:
+                 chunk = f.read(8192) # Read in chunks for large files
+                 if not chunk:
+                     break
+                 hasher.update(chunk)
+        content_hash = hasher.hexdigest()[:8]  # Use first 8 characters of the hash
 
-    return f"local:{timestamp}:{content_hash}:{filename}"
+        return f"local:{timestamp}:{content_hash}:{filename}"
+    except FileNotFoundError:
+        logging.error(f"File not found for generating unique ID: {file_path}")
+        return f"error:file_not_found:{int(time.time())}:{os.path.basename(file_path)}"
+    except Exception as e:
+        logging.error(f"Error generating unique ID for {file_path}: {e}")
+        return f"error:generic_error:{int(time.time())}:{os.path.basename(file_path)}"
+
 
 #
 # End of UUID-Functions
@@ -1517,109 +1620,230 @@ def generate_unique_identifier(file_path):
 
 # Helper function to validate URL format
 def is_valid_url(url: str) -> bool:
+    if not isinstance(url, str):
+        return False
+    # More robust regex supporting various schemes and international domains
     regex = re.compile(
-        r'^(?:http|ftp)s?://'  # http:// or https://
-        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'  # domain...
-        r'localhost|'  # localhost...
-        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|'  # ...or ipv4
-        r'\[?[A-F0-9]*:[A-F0-9:]+\]?)'  # ...or ipv6
-        r'(?::\d+)?'  # optional port
-        r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+        r'^(?:(?:[a-z]+):)?//'  # Scheme (optional, allows relative URLs like //example.com)
+        r'(?:\S+(?::\S*)?@)?'  # User:pass authentication (optional)
+        r'(?:'
+        r'(?!(?:10|127)(?:\.\d{1,3}){3})'  # Exclude private IP ranges 10.x.x.x, 127.x.x.x
+        r'(?!(?:169\.254|192\.168)(?:\.\d{1,3}){2})'  # Exclude private IP ranges 169.254.x.x, 192.168.x.x
+        r'(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})'  # Exclude private IP range 172.16.x.x - 172.31.x.x
+        r'(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])'  # Valid IP address first octet
+        r'(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}'
+        r'(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))'  # Valid IP address last octet
+        r'|'
+        # r'localhost' # Allow localhost explicitly if needed
+        # r'|'
+        r'(?:(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+)'  # Domain name part
+        r'(?:\.(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+)*'  # Subdomains
+        r'(?:\.(?:[a-z\u00a1-\uffff]{2,}))'  # TLD
+        r')'
+        r'(?::\d{2,5})?'  # Port number (optional)
+        r'(?:[/?#]\S*)?$'  # Resource path, query string, fragment (optional)
+        , re.IGNORECASE | re.UNICODE)
     return re.match(regex, url) is not None
 
 
 def verify_checksum(file_path, expected_checksum):
+    if not expected_checksum:
+        logging.warning("No expected checksum provided for verification.")
+        return True # Or False, depending on desired behavior
+
     sha256_hash = hashlib.sha256()
-    with open(file_path, 'rb') as f:
-        for byte_block in iter(lambda: f.read(4096), b''):
-            sha256_hash.update(byte_block)
-    return sha256_hash.hexdigest() == expected_checksum
+    try:
+        with open(file_path, 'rb') as f:
+            # Read and update hash string value in blocks of 4K
+            while True:
+                buf = f.read(4096)
+                if not buf:
+                    break
+                sha256_hash.update(buf)
+        calculated_checksum = sha256_hash.hexdigest()
+        is_match = calculated_checksum == expected_checksum
+        if not is_match:
+            logging.warning(f"Checksum mismatch for {file_path}. Expected: {expected_checksum}, Got: {calculated_checksum}")
+        else:
+             logging.debug(f"Checksum verified successfully for {file_path}.")
+        return is_match
+    except FileNotFoundError:
+        logging.error(f"File not found for checksum verification: {file_path}")
+        return False
+    except Exception as e:
+        logging.error(f"Error during checksum verification for {file_path}: {e}")
+        return False
 
 
 def normalize_title(title, preserve_spaces=False):
+    if not isinstance(title, str):
+        title = str(title) # Attempt to convert non-strings
+
     # Normalize the string to 'NFKD' form and encode to 'ascii' ignoring non-ascii characters
+    # This removes accents and special unicode characters
     title = unicodedata.normalize('NFKD', title).encode('ascii', 'ignore').decode('ascii')
 
+    # Remove or replace characters not suitable for filenames/paths
+    # Keep alphanumeric, underscore, hyphen, period.
     if preserve_spaces:
-        # Replace special characters with underscores, but keep spaces
+        # Replace disallowed characters with underscore, keep spaces
         title = re.sub(r'[^\w\s\-.]', '_', title)
+        # Collapse multiple spaces to single space
+        title = re.sub(r'\s+', ' ', title)
     else:
-        # Replace special characters and spaces with underscores
+        # Replace disallowed characters AND spaces with underscore
         title = re.sub(r'[^\w\-.]', '_', title)
 
     # Replace multiple consecutive underscores with a single underscore
     title = re.sub(r'_+', '_', title)
 
-    # Replace specific characters with underscores
-    title = title.replace('/', '_').replace('\\', '_').replace(':', '_').replace('"', '_').replace('*', '_').replace(
-        '?', '_').replace(
-        '<', '_').replace('>', '_').replace('|', '_')
+    # Remove leading/trailing underscores and spaces
+    title = title.strip('_ ')
 
-    return title.strip('_')
+    # Optional: Limit length
+    # max_len = 100
+    # title = title[:max_len]
+
+    # Handle empty titles after normalization
+    if not title:
+        return "normalized_title_" + str(uuid.uuid4())[:8]
+
+    return title
 
 
 def clean_youtube_url(url):
-    parsed_url = urlparse(url)
-    query_params = parse_qs(parsed_url.query)
-    if 'list' in query_params:
-        query_params.pop('list')
-    cleaned_query = urlencode(query_params, doseq=True)
-    cleaned_url = urlunparse(parsed_url._replace(query=cleaned_query))
-    return cleaned_url
+    try:
+        parsed_url = urlparse(url)
+        query_params = parse_qs(parsed_url.query)
+
+        # Keep only the 'v' parameter
+        video_id = query_params.get('v', [None])[0]
+
+        if not video_id:
+            # Maybe it's a youtu.be shortlink?
+            if parsed_url.hostname == 'youtu.be':
+                 video_id = parsed_url.path.lstrip('/')
+                 if not video_id:
+                      logging.warning(f"Could not extract video ID from shortlink: {url}")
+                      return url # Return original if failed
+            else:
+                logging.warning(f"No video ID ('v' parameter) found in YouTube URL: {url}")
+                return url # Return original if no 'v' param
+
+        # Reconstruct minimal URL
+        minimal_query = urlencode({'v': video_id})
+        cleaned_url = urlunparse(('https', 'www.youtube.com', '/watch', '', minimal_query, ''))
+        return cleaned_url
+
+    except Exception as e:
+        logging.error(f"Error cleaning YouTube URL '{url}': {e}")
+        return url # Return original on error
+
 
 def sanitize_filename(filename):
     """
-    Sanitizes the filename by:
-      1) Removing forbidden characters entirely (rather than replacing them with '-')
-      2) Collapsing consecutive whitespace into a single space
-      3) Collapsing consecutive dashes into a single dash
+    Sanitizes the filename by removing or replacing potentially problematic characters
+    for cross-platform compatibility.
     """
-    # 1) Remove forbidden characters
-    sanitized = re.sub(r'[<>:"/\\|?*]', '', filename)
-    # 2) Replace runs of whitespace with a single space
-    sanitized = re.sub(r'\s+', ' ', sanitized).strip()
-    # 3) Replace consecutive dashes with a single dash
-    sanitized = re.sub(r'-{2,}', '-', sanitized)
-    return sanitized
+    if not isinstance(filename, str):
+        filename = str(filename)
+
+    # Normalize unicode characters
+    filename = unicodedata.normalize('NFKD', filename).encode('ascii', 'ignore').decode('ascii')
+
+    # Remove characters forbidden in Windows filenames
+    filename = re.sub(r'[<>:"/\\|?*]', '', filename)
+
+    # Replace control characters (0x00-0x1F) with nothing
+    filename = re.sub(r'[\x00-\x1f]', '', filename)
+
+    # Replace runs of whitespace (including newline, tabs) with a single underscore
+    filename = re.sub(r'\s+', '_', filename).strip()
+
+    # Replace multiple consecutive dashes or underscores with a single one
+    filename = re.sub(r'[-_]{2,}', '_', filename)
+
+    # Remove leading/trailing periods, underscores, dashes, spaces
+    filename = filename.strip('._- ')
+
+    # Avoid reserved names in Windows (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+    reserved_names = {'CON', 'PRN', 'AUX', 'NUL'} | {f'COM{i}' for i in range(1, 10)} | {f'LPT{i}' for i in range(1, 10)}
+    name_part, _ = os.path.splitext(filename)
+    if name_part.upper() in reserved_names:
+        filename = "_" + filename
+
+    # Limit filename length (optional, adjust as needed)
+    max_len = 200 # Common filesystem limit is ~255, leave room for path
+    if len(filename) > max_len:
+        name, ext = os.path.splitext(filename)
+        filename = name[:max_len - len(ext)] + ext
+
+
+    # Ensure filename is not empty
+    if not filename:
+        filename = "sanitized_file_" + str(uuid.uuid4())[:8]
+
+    return filename
 
 
 def format_transcription(content):
-    # Replace '\n' with actual line breaks
-    content = content.replace('\\n', '\n')
-    # Split the content by newlines first
+    if not isinstance(content, str):
+        return "" # Return empty for non-string input
+
+    # Basic cleanup: Replace escaped newlines, normalize whitespace
+    content = content.replace('\\n', '\n').replace('\r', '')
+    content = re.sub(r'[ \t]+', ' ', content) # Consolidate spaces/tabs
+    content = re.sub(r'\n[ \t]*\n', '\n\n', content) # Consolidate multiple newlines
+
+    # Optional: Add space after punctuation for readability if missing
+    content = re.sub(r'(?<=[.!?])(?=[^\s])', r' ', content)
+
+    # Split into lines/paragraphs
     lines = content.split('\n')
+
     formatted_lines = []
     for line in lines:
-        # Add extra space after periods for better readability
-        line = line.replace('.', '. ').replace('.  ', '. ')
+        line = line.strip()
+        if line: # Skip empty lines after stripping
+             # Optional: Split long lines (simple split by word count)
+             # max_words_per_line = 15
+             # words = line.split()
+             # sub_lines = [' '.join(words[i:i+max_words_per_line]) for i in range(0, len(words), max_words_per_line)]
+             # formatted_lines.extend(sub_lines)
+             formatted_lines.append(line) # Keep original lines/paragraphs for now
 
-        # Split into sentences using a more comprehensive regex
-        sentences = re.split('(?<=[.!?]) +', line)
-
-        # Trim whitespace from each sentence and add a line break
-        formatted_sentences = [sentence.strip() for sentence in sentences if sentence.strip()]
-
-        # Join the formatted sentences
-        formatted_lines.append(' '.join(formatted_sentences))
-
-    # Join the lines with HTML line breaks
+    # Join lines with HTML line breaks
+    # Use <p> tags for paragraphs (double newline separation)
+    # Use <br> for single newlines within paragraphs? This is harder to detect reliably.
+    # Let's stick to joining non-empty lines with <br> for now.
     formatted_content = '<br>'.join(formatted_lines)
 
     return formatted_content
 
 def sanitize_user_input(message):
     """
-    Removes or escapes '{{' and '}}' to prevent placeholder injection.
-
-    Args:
-        message (str): The user's message.
-
-    Returns:
-        str: Sanitized message.
+    Removes or escapes potentially harmful sequences like '{{' and '}}'
+    to prevent template injection vulnerabilities. Also performs basic HTML escaping.
     """
-    # Replace '{{' and '}}' with their escaped versions
-    message = re.sub(r'\{\{', '{ {', message)
-    message = re.sub(r'\}\}', '} }', message)
+    if not isinstance(message, str):
+        return "" # Or handle non-string input appropriately
+
+    # 1. Prevent template injection (e.g., Jinja2)
+    # Replace with visually similar but non-functional characters or add spaces
+    message = message.replace('{{', '{ { ').replace('}}', ' } }')
+    # Also consider other template engines if applicable (e.g., Mako: ${...})
+    message = message.replace('${', '$ { ')
+
+    # 2. Basic HTML escaping (prevent basic XSS)
+    # This is NOT a complete XSS solution, use a dedicated library like `bleach`
+    # or context-aware escaping in your templating engine for robust protection.
+    # message = html.escape(message) # Use this if importing html module
+
+    # Simple replacement for basic safety:
+    message = message.replace('<', '<').replace('>', '>')
+    # Consider escaping quotes if used within HTML attributes:
+    # message = message.replace('"', '"').replace("'", ''')
+
     return message
 
 def format_file_path(file_path, fallback_path=None):
@@ -1627,11 +1851,14 @@ def format_file_path(file_path, fallback_path=None):
         logging.debug(f"File exists: {file_path}")
         return file_path
     elif fallback_path and os.path.exists(fallback_path):
-        logging.debug(f"File does not exist: {file_path}. Returning fallback path: {fallback_path}")
+        logging.warning(f"File does not exist: {file_path}. Using fallback path: {fallback_path}")
         return fallback_path
-    else:
-        logging.debug(f"File does not exist: {file_path}. No fallback path available.")
-        return None
+    elif file_path: # file_path provided but doesn't exist, and no valid fallback
+         logging.error(f"File specified does not exist and no valid fallback: {file_path}")
+         return None
+    else: # No file_path provided
+         logging.debug("No file path provided.")
+         return None
 
 #
 # End of Sanitization/Verification Functions
@@ -1644,22 +1871,50 @@ def format_file_path(file_path, fallback_path=None):
 
 
 def get_db_config():
+    # --- DUPLICATE LOGIC --- Consider calling load_and_log_configs() instead?
+    # Or refactor the common config loading part into a separate helper.
+    # For now, just applying the same path correction logic.
+
     # Get the directory of the current script
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    # Go up two levels to the project root directory (tldw)
-    project_root = os.path.dirname(os.path.dirname(current_dir))
+    current_dir = os.path.dirname(os.path.abspath(__file__)) # .../PoC_Version/App_Function_Libraries
+    # Go up one level to the project root directory (PoC_Version)
+    project_root = os.path.dirname(current_dir) # .../PoC_Version
     # Construct the path to the config file
     config_path = os.path.join(project_root, 'Config_Files', 'config.txt')
-    # Read the config file
+
     config = configparser.ConfigParser()
+    if not os.path.exists(config_path):
+        logging.error(f"[get_db_config] Config file not found at {config_path}. Returning defaults.")
+        # Return default structure, paths will likely be wrong without config
+        return {
+            'type': 'sqlite',
+            'sqlite_path': os.path.join(project_root, 'Databases', 'media_summary.db'), # Default path relative to project root
+            'elasticsearch_host': 'localhost',
+            'elasticsearch_port': 9200,
+             # --- ADDED --- Chroma path default needed here too
+             'chroma_db_path': os.path.join(project_root, 'Databases', 'chroma_db')
+        }
+
     config.read(config_path)
-    # Return the database configuration
-    return {
-        'type': config['Database']['type'],
-        'sqlite_path': config.get('Database', 'sqlite_path', fallback='./Databases/media_summary.db'),
+
+    db_settings = {
+        'type': config.get('Database', 'type', fallback='sqlite'),
         'elasticsearch_host': config.get('Database', 'elasticsearch_host', fallback='localhost'),
         'elasticsearch_port': config.getint('Database', 'elasticsearch_port', fallback=9200)
     }
+
+    # Resolve paths relative to project root
+    # --- MODIFIED FALLBACK --- (Removed leading ./)
+    sqlite_path_relative = config.get('Database', 'sqlite_path', fallback='Databases/media_summary.db')
+    db_settings['sqlite_path'] = get_project_relative_path(sqlite_path_relative)
+
+    # --- ADDED --- Need to handle chroma path here as well
+    # --- MODIFIED FALLBACK --- (Removed leading ./)
+    chroma_db_path_relative = config.get('Database', 'chroma_db_path', fallback='Databases/chroma_db')
+    db_settings['chroma_db_path'] = get_project_relative_path(chroma_db_path_relative)
+
+
+    return db_settings
 
 #
 # End of DB Config Loading
@@ -1673,178 +1928,296 @@ def get_db_config():
 # Track temp files for cleanup
 temp_files = []
 
-temp_file_paths = []
+temp_file_paths = [] # Seems unused, potentially remove?
 
 def save_temp_file(file):
+    """Saves a file-like object to a temporary file and tracks it for cleanup."""
     global temp_files
-    temp_dir = tempfile.gettempdir()
-    temp_path = os.path.join(temp_dir, file.name)
-    with open(temp_path, 'wb') as f:
-        f.write(file.read())
-    temp_files.append(temp_path)
-    return temp_path
+    try:
+        # Use TemporaryDirectory for more robust cleanup if dealing with multiple files per operation
+        # For single files, NamedTemporaryFile is often better.
+        # Delete=False is needed because we return the path and expect the caller to use it.
+        # The file needs to be cleaned up later by cleanup_temp_files().
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{os.path.basename(getattr(file, 'name', 'tempfile'))}") as temp_f:
+            # Check if file object has 'read' method
+            if hasattr(file, 'read'):
+                 # Read in chunks in case it's large
+                 while True:
+                     chunk = file.read(8192)
+                     if not chunk:
+                         break
+                     temp_f.write(chunk)
+            else:
+                 # Handle cases where 'file' might be raw bytes or string?
+                 # This depends on how this function is intended to be used.
+                 # Assuming it's a file-like object for now.
+                 logging.error("Input to save_temp_file does not have a 'read' method.")
+                 # Returning None or raising an error might be appropriate here.
+                 return None # Indicate failure
+
+            temp_path = temp_f.name
+            temp_files.append(temp_path)
+            logging.debug(f"Saved temporary file: {temp_path}")
+            return temp_path
+    except Exception as e:
+        logging.error(f"Error saving temporary file: {e}")
+        return None
+
 
 def cleanup_temp_files():
     global temp_files
-    for file_path in temp_files:
+    cleaned_count = 0
+    failed_count = 0
+    # Iterate over a copy of the list to allow modification
+    for file_path in list(temp_files):
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)
                 logging.info(f"Removed temporary file: {file_path}")
-            except Exception as e:
+                temp_files.remove(file_path) # Remove from list after successful deletion
+                cleaned_count += 1
+            except OSError as e: # Catch potential OS errors like permission denied
                 logging.error(f"Failed to remove temporary file {file_path}: {e}")
-    temp_files.clear()
+                failed_count += 1
+        else:
+             logging.warning(f"Temporary file path not found for cleanup: {file_path}")
+             try:
+                 temp_files.remove(file_path) # Remove non-existent path from list
+             except ValueError:
+                 pass # Path might have been removed already if called multiple times
+
+    logging.info(f"Temporary file cleanup finished. Removed: {cleaned_count}, Failed/Not Found: {failed_count}. Remaining tracked: {len(temp_files)}")
+    # Optional: Clear the list even if some failed, depending on desired behavior
+    # temp_files.clear()
 
 def generate_unique_id():
-    return f"uploaded_file_{uuid.uuid4()}"
+    # Combine timestamp and UUID for better uniqueness and some time ordering
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    unique_part = uuid.uuid4().hex[:12] # Use a portion of UUID
+    return f"id_{timestamp}_{unique_part}"
 
 class FileProcessor:
     """Handles file reading and name processing"""
 
-    VALID_EXTENSIONS = {'.md', '.txt', '.zip'}
+    VALID_EXTENSIONS = {'.md', '.txt', '.zip'} # Keep zip here? Or handle separately?
     ENCODINGS_TO_TRY = [
-        'utf-8',
-        'utf-16',
-        'windows-1252',
-        'iso-8859-1',
+        'utf-8',        # Most common
+        'windows-1252', # Common on Windows
+        'latin-1',      # ISO-8859-1
+        'utf-16',       # With BOM
+        'utf-8-sig',    # UTF-8 with BOM
         'ascii'
     ]
 
     @staticmethod
     def detect_encoding(file_path: str) -> str:
         """Detect the file encoding using chardet"""
-        with open(file_path, 'rb') as file:
-            raw_data = file.read()
-            result = chardet.detect(raw_data)
-            return result['encoding'] or 'utf-8'
+        try:
+            with open(file_path, 'rb') as file:
+                # Read a sample of the file for detection (e.g., first 4KB)
+                sample = file.read(4096)
+                result = chardet.detect(sample)
+                encoding = result['encoding']
+                confidence = result.get('confidence', 0)
+                logging.debug(f"Chardet detected encoding: {encoding} with confidence {confidence:.2f} for {file_path}")
+                # Use detected encoding only if confidence is reasonably high
+                return encoding if encoding and confidence > 0.7 else 'utf-8'
+        except FileNotFoundError:
+            logging.error(f"File not found for encoding detection: {file_path}")
+            return 'utf-8' # Default fallback
+        except Exception as e:
+            logging.error(f"Error detecting encoding for {file_path}: {e}")
+            return 'utf-8' # Default fallback
 
     @staticmethod
-    def read_file_content(file_path: str) -> str:
-        """Read file content with automatic encoding detection"""
-        detected_encoding = FileProcessor.detect_encoding(file_path)
-
-        # Try detected encoding first
+    def read_file_content(file_path: str) -> Tuple[str, str]:
+        """
+        Read file content with automatic encoding detection.
+        Returns a tuple: (content: str, used_encoding: str) or (error_message: str, None)
+        """
         try:
-            with open(file_path, 'r', encoding=detected_encoding) as f:
-                return f.read()
-        except UnicodeDecodeError:
-            # If detected encoding fails, try others
-            for encoding in FileProcessor.ENCODINGS_TO_TRY:
+            detected_encoding = FileProcessor.detect_encoding(file_path)
+            encodings_to_try = [detected_encoding] + [enc for enc in FileProcessor.ENCODINGS_TO_TRY if enc.lower() != detected_encoding.lower()]
+
+            for encoding in encodings_to_try:
                 try:
                     with open(file_path, 'r', encoding=encoding) as f:
-                        return f.read()
+                        content = f.read()
+                        logging.info(f"Successfully read {file_path} using encoding: {encoding}")
+                        return content, encoding
                 except UnicodeDecodeError:
+                    logging.debug(f"Failed to decode {file_path} with {encoding}, trying next.")
                     continue
+                except FileNotFoundError:
+                     logging.error(f"File not found during read attempt: {file_path}")
+                     return f"Error: File not found '{file_path}'", None
+                except Exception as e: # Catch other read errors
+                     logging.warning(f"Error reading {file_path} with encoding {encoding}: {e}")
+                     # Don't stop trying other encodings unless it's FileNotFoundError
 
-            # If all encodings fail, use utf-8 with error handling
-            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                return f.read()
+            # If all attempts fail
+            logging.error(f"Could not read file {file_path} with any tried encoding.")
+            # Try reading with error replacement as last resort
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read()
+                    logging.warning(f"Read {file_path} using utf-8 with error replacement.")
+                    return content, 'utf-8 (replaced errors)'
+            except Exception as e:
+                logging.exception(f"Final attempt to read {file_path} failed: {e}") # Log full traceback
+                return f"Error: Could not read file '{file_path}'", None
+
+        except Exception as e:
+            logging.exception(f"Unexpected error in read_file_content for {file_path}: {e}")
+            return f"Error: Unexpected error reading file '{file_path}'", None
+
 
     @staticmethod
     def process_filename_to_title(filename: str) -> str:
         """Convert filename to a readable title"""
+        if not filename:
+            return "Untitled"
+
         # Remove extension
         name = os.path.splitext(filename)[0]
 
-        # Look for date patterns
-        date_pattern = r'(\d{4}[-_]?\d{2}[-_]?\d{2})'
-        date_match = re.search(date_pattern, name)
+        # Look for common date patterns (YYYY-MM-DD, YYYY_MM_DD, YYYYMMDD) at start or end
+        date_pattern = r'(?:^|[-_])(\d{4}[-_]?\d{2}[-_]?\d{2})(?:[-_]|$)'
         date_str = ""
-        if date_match:
+        match = re.search(date_pattern, name)
+        if match:
+            date_part = match.group(1)
+            # Normalize date separator for parsing
+            normalized_date = date_part.replace('_', '').replace('-', '')
             try:
-                date = datetime.strptime(date_match.group(1).replace('_', '-'), '%Y-%m-%d')
-                date_str = date.strftime("%b %d, %Y")
-                name = name.replace(date_match.group(1), '').strip('-_')
+                date_obj = datetime.strptime(normalized_date, '%Y%m%d')
+                date_str = date_obj.strftime("%b %d, %Y") # e.g., "Jan 01, 2023"
+                # Remove the date part and surrounding separators from the name
+                name = name.replace(match.group(0), ' ').strip('-_ ') # Replace match with space
             except ValueError:
-                pass
+                logging.debug(f"Found potential date '{date_part}' but failed to parse.")
+                pass # Ignore if parsing fails
 
-        # Replace separators with spaces
+        # Replace separators (hyphen, underscore) with spaces
         name = re.sub(r'[-_]+', ' ', name)
+
+        # Improve capitalization: capitalize words, handle acronyms (simple case)
+        # Exclude common small words unless they are the first word
+        exclude_words = {'a', 'an', 'the', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'and', 'or', 'but'}
+        words = name.split()
+        title_words = []
+        for i, word in enumerate(words):
+            if not word: continue
+            # Basic acronym check (all caps, len > 1) - could be improved
+            if word.isupper() and len(word) > 1:
+                title_words.append(word)
+            elif i == 0 or word.lower() not in exclude_words:
+                title_words.append(word.capitalize())
+            else:
+                title_words.append(word.lower())
+        name = ' '.join(title_words)
 
         # Remove redundant spaces
         name = re.sub(r'\s+', ' ', name).strip()
 
-        # Capitalize words, excluding certain words
-        exclude_words = {'a', 'an', 'the', 'in', 'on', 'at', 'to', 'for', 'of', 'with'}
-        words = name.split()
-        capitalized = []
-        for i, word in enumerate(words):
-            if i == 0 or word not in exclude_words:
-                capitalized.append(word.capitalize())
-            else:
-                capitalized.append(word.lower())
-        name = ' '.join(capitalized)
-
-        # Add date if found
+        # Add formatted date string if found
         if date_str:
-            name = f"{name} - {date_str}"
+            # Decide placement: append, prepend, or based on original position?
+            # Appending is usually safe.
+            name = f"{name} ({date_str})" if name else date_str # Handle cases where name becomes empty
 
-        return name
+        return name if name else "Processed Title" # Fallback if somehow name becomes empty
 
 
 class ZipValidator:
     """Validates zip file contents and structure"""
 
-    MAX_ZIP_SIZE = 100 * 1024 * 1024  # 100MB
-    MAX_FILES = 100
-    VALID_EXTENSIONS = {'.md', '.txt'}
+    MAX_ZIP_SIZE = 100 * 1024 * 1024  # 100MB (Zip file itself)
+    MAX_TOTAL_UNCOMPRESSED_SIZE = 500 * 1024 * 1024 # 500MB (Sum of contents)
+    MAX_FILES = 1000 # Increased limit
+    # Consider adding more text formats if needed
+    VALID_EXTENSIONS = {'.md', '.txt', '.rtf', '.html', '.xml'} # Added more text formats
 
     @staticmethod
     def validate_zip_file(zip_path: str) -> Tuple[bool, str, List[str]]:
         """
-        Validate zip file and its contents
-        Returns: (is_valid, error_message, valid_files)
+        Validate zip file and its contents based on defined constraints.
+        Returns: (is_valid, error_message, list_of_valid_member_filenames)
         """
         try:
-            # Check zip file size
+            # 1. Check zip file existence and size
+            if not os.path.exists(zip_path):
+                return False, f"Zip file not found: {zip_path}", []
             if os.path.getsize(zip_path) > ZipValidator.MAX_ZIP_SIZE:
-                return False, "Zip file too large (max 100MB)", []
+                return False, f"Zip file size exceeds limit ({ZipValidator.MAX_ZIP_SIZE / (1024*1024):.1f}MB)", []
 
             valid_files = []
+            total_uncompressed_size = 0
+            file_count = 0
+
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                # Check number of files
-                if len(zip_ref.filelist) > ZipValidator.MAX_FILES:
-                    return False, f"Too many files in zip (max {ZipValidator.MAX_FILES})", []
+                member_list = zip_ref.infolist()
 
-                # Check for directory traversal attempts
-                for file_info in zip_ref.filelist:
-                    if '..' in file_info.filename or file_info.filename.startswith('/'):
-                        return False, "Invalid file paths detected", []
+                # 2. Check total number of files/directories in archive
+                if len(member_list) > ZipValidator.MAX_FILES:
+                    return False, f"Zip archive contains too many items (>{ZipValidator.MAX_FILES})", []
 
-                # Validate each file
-                total_size = 0
-                for file_info in zip_ref.filelist:
-                    # Skip directories
-                    if file_info.filename.endswith('/'):
-                        continue
+                for file_info in member_list:
+                    # 3. Check for directory traversal patterns
+                    if file_info.filename.startswith('/') or '..' in file_info.filename:
+                        return False, f"Invalid file path detected in zip: '{file_info.filename}'", []
 
-                    # Check file size
-                    if file_info.file_size > ZipValidator.MAX_ZIP_SIZE:
-                        return False, f"File {file_info.filename} too large", []
+                    # 4. Check for encryption (ZipFile cannot handle standard encrypted files)
+                    if file_info.flag_bits & 0x1:
+                         return False, f"Encrypted file detected in zip: '{file_info.filename}' (not supported)", []
 
-                    total_size += file_info.file_size
-                    if total_size > ZipValidator.MAX_ZIP_SIZE:
-                        return False, "Total uncompressed size too large", []
 
-                    # Check file extension
-                    ext = os.path.splitext(file_info.filename)[1].lower()
-                    if ext in ZipValidator.VALID_EXTENSIONS:
-                        valid_files.append(file_info.filename)
+                    # Skip directories, process only files
+                    if not file_info.filename.endswith('/'):
+                        file_count += 1
 
+                        # 5. Check individual file uncompressed size (optional, can rely on total)
+                        # individual_max_size = 100 * 1024 * 1024 # e.g., 100MB per file
+                        # if file_info.file_size > individual_max_size:
+                        #     return False, f"File '{file_info.filename}' exceeds individual size limit", []
+
+                        # 6. Accumulate total uncompressed size
+                        total_uncompressed_size += file_info.file_size
+                        if total_uncompressed_size > ZipValidator.MAX_TOTAL_UNCOMPRESSED_SIZE:
+                            return False, f"Total uncompressed size exceeds limit ({ZipValidator.MAX_TOTAL_UNCOMPRESSED_SIZE / (1024*1024):.1f}MB)", []
+
+                        # 7. Check file extension against whitelist
+                        _, ext = os.path.splitext(file_info.filename)
+                        if ext.lower() in ZipValidator.VALID_EXTENSIONS:
+                            valid_files.append(file_info.filename)
+                        else:
+                             logging.debug(f"Skipping file with invalid extension in zip: '{file_info.filename}' (ext: {ext})")
+
+
+            # 8. Check if any valid files were found
             if not valid_files:
-                return False, "No valid markdown or text files found in zip", []
+                return False, f"No files with allowed extensions ({', '.join(ZipValidator.VALID_EXTENSIONS)}) found in the zip archive.", []
 
-            return True, "", valid_files
+            logging.info(f"Validated zip '{os.path.basename(zip_path)}'. Found {len(valid_files)} valid files out of {file_count} total files.")
+            return True, "", valid_files # Success
 
         except zipfile.BadZipFile:
-            return False, "Invalid or corrupted zip file", []
+            return False, f"Invalid or corrupted zip file: {os.path.basename(zip_path)}", []
+        except FileNotFoundError: # Should be caught earlier, but good practice
+             return False, f"Zip file not found (validation stage): {zip_path}", []
         except Exception as e:
-            return False, f"Error processing zip file: {str(e)}", []
+            logging.error(f"Unexpected error validating zip file '{zip_path}': {e}")
+            return False, f"Unexpected error processing zip file: {e}", []
 
 def format_text_with_line_breaks(text):
-    # Split the text into sentences and add line breaks
-    sentences = text.replace('. ', '.<br>').replace('? ', '?<br>').replace('! ', '!<br>')
-    return sentences
+    if not isinstance(text, str):
+        return ""
+    # Replace sequences of whitespace characters (including newlines) with a single space
+    text = re.sub(r'\s+', ' ', text).strip()
+    # Add a line break after sentences ending with '.', '?', '!' followed by a space and a capital letter (or end of string)
+    # This is a simple heuristic and might not be perfect
+    text = re.sub(r'(?<=[.?!]) (?=[A-Z]|$)', '<br>', text)
+    return text
 
 #
 # End of File Handling Functions

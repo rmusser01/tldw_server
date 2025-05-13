@@ -832,13 +832,13 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
         if conn:
             try:
                 conn.execute("SELECT 1")  # Check if connection is still alive
-            except (sqlite3.ProgrammingError, sqlite3.OperationalError):  # Connection closed or unusable
+            except (sqlite3.ProgrammingError, sqlite3.OperationalError):
                 logger.warning(
                     f"Thread-local connection for {self.db_path_str} was closed or became unusable. Reopening.")
                 try:
                     conn.close()
                 except Exception:
-                    pass  # Ignore errors during close of a bad connection
+                    pass
                 conn = None
 
         if not conn:
@@ -846,19 +846,34 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
                 conn = sqlite3.connect(
                     self.db_path_str,
                     detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
-                    check_same_thread=False,
-                    timeout=10
+                    check_same_thread=False, # Required for threading.local approach
+                    timeout=15 # Maybe slightly increase timeout?
                 )
                 conn.row_factory = sqlite3.Row
                 if not self.is_memory_db:
-                    conn.execute("PRAGMA journal_mode=WAL;")
+                    # === TEMPORARY DIAGNOSTIC: Change journal mode ===
+                    try:
+                        # Switch to DELETE mode (classic rollback journal)
+                        conn.execute("PRAGMA journal_mode=DELETE;")
+                        # Verify (optional but good for debugging)
+                        current_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
+                        logger.info(f"DIAGNOSTIC: Set journal_mode to DELETE. Current mode: {current_mode}")
+                        if current_mode.lower() != 'delete':
+                             logger.warning(f"DIAGNOSTIC: Failed to definitively set journal_mode=DELETE, it's still {current_mode}.")
+                    except sqlite3.Error as pragma_err:
+                         logger.error(f"DIAGNOSTIC: Failed to set PRAGMA journal_mode=DELETE: {pragma_err}")
+                    # === End Temporary Diagnostic Change ===
+
+                    # Original line (keep commented out for now):
+                    # conn.execute("PRAGMA journal_mode=WAL;")
+
                 conn.execute("PRAGMA foreign_keys = ON;")
                 self._local.conn = conn
                 logger.debug(
-                    f"Opened/Reopened SQLite connection to {self.db_path_str} for thread {threading.get_ident()}")
+                    f"Opened/Reopened SQLite connection to {self.db_path_str} (Journal: {conn.execute('PRAGMA journal_mode;').fetchone()[0]}) for thread {threading.get_ident()}")
             except sqlite3.Error as e:
                 logger.error(f"Failed to connect to database {self.db_path_str}: {e}", exc_info=True)
-                self._local.conn = None  # Ensure it's cleared on failure
+                self._local.conn = None
                 raise CharactersRAGDBError(f"Failed to connect to database '{self.db_path_str}': {e}") from e
         return self._local.conn
 

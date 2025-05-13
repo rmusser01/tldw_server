@@ -41,36 +41,46 @@ def db_path(tmp_path):
 @pytest.fixture(scope="function")
 def db_instance(db_path, client_id):
     """Creates a DB instance for each test, ensuring a fresh database."""
-    current_db_path = Path(db_path) # Ensure it's a Path object
+    current_db_path = Path(db_path)  # Ensure it's a Path object
 
-    # Aggressive cleanup
+    # --- Pre-test Cleanup (Optional but generally safe) ---
+    # Let's ensure the *previous* run's files are gone IF pytest's tmp_path
+    # doesn't guarantee a completely empty directory for some reason.
+    # Usually, tmp_path handles this, making this block potentially redundant.
+    # If you trust tmp_path, you can remove this pre-cleanup.
     for suffix in ["", "-wal", "-shm"]:
         p = Path(str(current_db_path) + suffix)
         if p.exists():
             try:
-                p.unlink()
+                p.unlink(missing_ok=True)  # Use missing_ok=True if Python >= 3.8
+            except FileNotFoundError:
+                pass  # Ignore if already gone
             except OSError as e:
-                print(f"Warning: Could not unlink {p}: {e}") # Or log
+                print(f"Warning: Could not unlink pre-test {p}: {e}")  # Or log
 
-    # Ensure parent directory exists (CharactersRAGDB already does this, but belt-and-suspenders)
+    # Ensure parent directory exists
     current_db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    db = CharactersRAGDB(current_db_path, client_id)
-    yield db
-    db.close_connection() # Close first
+    # --- DB Instance Creation ---
+    db = None
+    try:
+        db = CharactersRAGDB(current_db_path, client_id)
+        yield db  # Run the test
+    finally:
+        # --- Post-test Teardown ---
+        if db:
+            db.close_connection()  # Close the connection - this should trigger WAL checkpointing
 
-    # Small delay to let OS potentially settle file handles
-    import time
-    time.sleep(0.1)
+        # --- Rely on pytest's tmp_path for file cleanup ---
+        # REMOVE the manual deletion loop for .sqlite, .sqlite-wal, .sqlite-shm
+        # logger.debug(f"DB connection closed for {current_db_path}. Relying on tmp_path for cleanup.")
+        print(
+            f"\n[Teardown] DB connection closed for {current_db_path}. Relying on tmp_path for cleanup.")  # Use print for pytest visibility
 
-    # Aggressive cleanup after
-    for suffix in ["", "-wal", "-shm"]:
-        p = Path(str(current_db_path) + suffix)
-        if p.exists():
-            try:
-                p.unlink()
-            except OSError as e:
-                print(f"Warning: Could not unlink {p} post-test: {e}")
+        # Optional: Add a small delay AFTER closing, just in case OS needs time,
+        # but often unnecessary if close() blocks properly.
+        import time
+        time.sleep(0.05)
 
 
 @pytest.fixture
@@ -225,11 +235,6 @@ class TestCharacterCards:
         original_card = db_instance.get_character_card_by_id(card_id)
         assert original_card is not None
         expected_version = original_card['version']  # Should be 1
-
-        # DEBUG testing simple query first
-        print("DEBUG: Original card data: Nah.")
-        db_instance.execute_query("UPDATE character_cards SET description = 'Simple Update' WHERE id = ?", (card_id,),
-                                  commit=True)
 
         update_payload = {"description": "Updated Description", "personality": "More Testy"}
         updated = db_instance.update_character_card(card_id, update_payload, expected_version=expected_version)
