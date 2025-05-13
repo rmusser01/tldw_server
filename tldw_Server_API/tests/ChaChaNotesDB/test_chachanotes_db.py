@@ -39,7 +39,7 @@ def db_path(tmp_path):
 
 
 @pytest.fixture(scope="function")
-def db_instance(db_path, client_id):
+def db_instance(db_path, client_id):  # Add db_path and tmp_path back
     """Creates a DB instance for each test, ensuring a fresh database."""
     current_db_path = Path(db_path)
 
@@ -54,11 +54,10 @@ def db_instance(db_path, client_id):
 
     db = None
     try:
-        db = CharactersRAGDB(current_db_path, client_id)
+        db = CharactersRAGDB(current_db_path, client_id)  # Use current_db_path
         yield db
     finally:
         if db:
-            # Ensure all connections are closed
             db.close_connection()
             # Additional cleanup
             for suffix in ["", "-wal", "-shm"]:
@@ -251,7 +250,8 @@ class TestCharacterCards:
 
         update_payload = {"description": "Conflict Update"}
         # Updated match string to be more flexible or exact
-        with pytest.raises(ConflictError, match=r"update failed: version mismatch \(db has 2, client expected 1\)"):
+        expected_error_regex = r"Update failed: version mismatch \(db has 2, client expected 1\) for character_cards ID 1\."
+        with pytest.raises(ConflictError, match=expected_error_regex):
             db_instance.update_character_card(card_id, update_payload, expected_version=client_expected_version)
 
     def test_update_character_card_not_found(self, db_instance: CharactersRAGDB):
