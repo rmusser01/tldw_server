@@ -111,43 +111,58 @@ def cleanup_downloads():
 #######################################################################################################################
 # Config loading
 #
+
+def get_project_root():
+    """Get the absolute path to the project root directory (likely 'tldw')."""
+    script_path = os.path.abspath(__file__)
+    # logging.debug(f"get_project_root: __file__ resolved to: {script_path}") # PoC_Version/App_Function_Libraries/Utils.py
+    level1_up = os.path.dirname(script_path) # App_Function_Libraries
+    # logging.debug(f"get_project_root: Level 1 Up: {level1_up}")
+    level2_up = os.path.dirname(level1_up) # PoC_Version
+    # logging.debug(f"get_project_root: Level 2 Up: {level2_up}")
+    # Assume the *actual* root is one level above PoC_Version
+    project_root = os.path.dirname(level2_up) # tldw
+    logging.debug(f"get_project_root: Calculated project_root (Parent of PoC_Version): {project_root}")
+    return project_root
+
+# --- Use get_project_root() inside load_comprehensive_config ---
 def load_comprehensive_config():
-    # Get the directory of the current script (Utils.py)
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    logging.trace(f"Current directory (Utils.py location): {current_dir}") # e.g., .../PoC_Version/App_Function_Libraries
+    # Get the project root using the dedicated function
+    project_root = get_project_root()
+    logging.trace(f"Project root directory determined by get_project_root(): {project_root}")
 
-    # --- MODIFIED ---
-    # Go up one level to the project root directory (PoC_Version)
-    project_root = os.path.dirname(current_dir)
-    logging.trace(f"Project root directory (PoC_Version): {project_root}") # e.g., .../PoC_Version
-
-    # Construct the path to the config file within the project root
+    # Construct the path to the config file relative to the project root
     config_path = os.path.join(project_root, 'Config_Files', 'config.txt')
-    logging.trace(f"Config file path: {config_path}") # e.g., .../PoC_Version/Config_Files/config.txt
+    logging.trace(f"Attempting to load config file from: {config_path}") # Log the path being checked
 
     # Check if the config file exists
     if not os.path.exists(config_path):
         logging.error(f"Config file not found at {config_path}")
+        # Optionally, you could try looking one level higher if structure is uncertain
+        # parent_root = os.path.dirname(project_root)
+        # fallback_config_path = os.path.join(parent_root, 'Config_Files', 'config.txt')
+        # if os.path.exists(fallback_config_path):
+        #     logging.warning(f"Config not found at primary location, trying fallback: {fallback_config_path}")
+        #     config_path = fallback_config_path
+        # else:
+        #     logging.error(f"Fallback config file also not found at {fallback_config_path}")
+        #     raise FileNotFoundError(f"Config file not found at expected locations: {config_path} or fallback.")
         raise FileNotFoundError(f"Config file not found at {config_path}")
+
 
     # Read the config file
     config = configparser.ConfigParser()
-    config.read(config_path)
+    try:
+        config.read(config_path)
+        logging.info(f"Successfully read config file from {config_path}")
+    except configparser.Error as e:
+         logging.error(f"Error reading config file {config_path}: {e}")
+         raise # Re-raise the error
 
     # Log the sections found in the config file
     logging.trace(f"load_comprehensive_config(): Sections found in config: {config.sections()}")
 
     return config
-
-
-def get_project_root():
-    """Get the absolute path to the project root directory (PoC_Version)."""
-    current_dir = os.path.dirname(os.path.abspath(__file__)) # .../PoC_Version/App_Function_Libraries
-    # --- MODIFIED ---
-    # The project root (PoC_Version) is the parent directory of the script's directory
-    project_root = os.path.dirname(current_dir) # .../PoC_Version
-    logging.trace(f"Project root: {project_root}")
-    return project_root
 
 
 def get_database_dir():
@@ -1871,31 +1886,35 @@ def format_file_path(file_path, fallback_path=None):
 
 
 def get_db_config():
-    # --- DUPLICATE LOGIC --- Consider calling load_and_log_configs() instead?
-    # Or refactor the common config loading part into a separate helper.
-    # For now, just applying the same path correction logic.
-
-    # Get the directory of the current script
-    current_dir = os.path.dirname(os.path.abspath(__file__)) # .../PoC_Version/App_Function_Libraries
-    # Go up one level to the project root directory (PoC_Version)
-    project_root = os.path.dirname(current_dir) # .../PoC_Version
+    # Get the project root using the dedicated function
+    project_root = get_project_root()
     # Construct the path to the config file
     config_path = os.path.join(project_root, 'Config_Files', 'config.txt')
 
     config = configparser.ConfigParser()
     if not os.path.exists(config_path):
-        logging.error(f"[get_db_config] Config file not found at {config_path}. Returning defaults.")
-        # Return default structure, paths will likely be wrong without config
+        logging.error(f"[get_db_config] Config file not found at {config_path}. Returning defaults with resolved paths.")
+        # Return default structure, paths resolved relative to project root
         return {
             'type': 'sqlite',
-            'sqlite_path': os.path.join(project_root, 'Databases', 'media_summary.db'), # Default path relative to project root
+            'sqlite_path': os.path.join(get_database_dir(), 'media_summary.db'), # Use get_database_dir() for consistency
             'elasticsearch_host': 'localhost',
             'elasticsearch_port': 9200,
-             # --- ADDED --- Chroma path default needed here too
-             'chroma_db_path': os.path.join(project_root, 'Databases', 'chroma_db')
+            'chroma_db_path': os.path.join(get_database_dir(), 'chroma_db') # Use get_database_dir()
         }
 
-    config.read(config_path)
+    try:
+        config.read(config_path)
+    except configparser.Error as e:
+         logging.error(f"[get_db_config] Error reading config file {config_path}: {e}. Returning defaults.")
+         # Consider returning defaults or re-raising
+         return { # Return defaults similar to FileNotFoundError case
+            'type': 'sqlite',
+            'sqlite_path': os.path.join(get_database_dir(), 'media_summary.db'),
+            'elasticsearch_host': 'localhost',
+            'elasticsearch_port': 9200,
+            'chroma_db_path': os.path.join(get_database_dir(), 'chroma_db')
+        }
 
     db_settings = {
         'type': config.get('Database', 'type', fallback='sqlite'),
@@ -1903,17 +1922,14 @@ def get_db_config():
         'elasticsearch_port': config.getint('Database', 'elasticsearch_port', fallback=9200)
     }
 
-    # Resolve paths relative to project root
-    # --- MODIFIED FALLBACK --- (Removed leading ./)
+    # Resolve paths relative to project root using get_project_relative_path
     sqlite_path_relative = config.get('Database', 'sqlite_path', fallback='Databases/media_summary.db')
     db_settings['sqlite_path'] = get_project_relative_path(sqlite_path_relative)
 
-    # --- ADDED --- Need to handle chroma path here as well
-    # --- MODIFIED FALLBACK --- (Removed leading ./)
     chroma_db_path_relative = config.get('Database', 'chroma_db_path', fallback='Databases/chroma_db')
     db_settings['chroma_db_path'] = get_project_relative_path(chroma_db_path_relative)
 
-
+    logging.debug(f"[get_db_config] Loaded DB settings: Type={db_settings['type']}, SQLite={db_settings.get('sqlite_path')}, Chroma={db_settings.get('chroma_db_path')}")
     return db_settings
 
 #

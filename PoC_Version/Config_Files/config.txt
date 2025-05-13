@@ -31,16 +31,16 @@ video_summarize_prompt = "Above is the transcript of a video. Please read throug
 
 [Database]
 type = sqlite
-sqlite_path = tldw_Server_API/Databases/server_media_summary.db
-backup_path = ./tldw_Server_DB_Backups/
+sqlite_path = PoC_Version/Databases/media_summary.db
+backup_path = ./tldw_DB_Backups/
 #Path to the backup location for the database. If the path does not exist, the backup will not be created.
 elasticsearch_host = localhost
 elasticsearch_port = 9200
 # Additionally you can use elasticsearch as the database type, just replace `sqlite` with `elasticsearch` for `type` and provide the `elasticsearch_host` and `elasticsearch_port` of your configured ES instance.
-chroma_db_path = tldw_Server_API/Databases/chroma_db
-prompts_db_path = tldw_Server_API/Databases/prompts.db
-rag_qa_db_path = tldw_Server_API/Databases/RAG_QA_Chat.db
-character_db_path = tldw_Server_API/Databases/chatDB.db
+chroma_db_path = PoC_Version\Databases\chroma_db
+prompts_db_path = PoC_Version\Databases\prompts.db
+rag_qa_db_path = PoC_Version\Databases\RAG_QA_Chat.db
+character_db_path = PoC_Version\Databases\chatDB.db
 
 
 [Chunking]

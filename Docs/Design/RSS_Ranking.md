@@ -7,7 +7,7 @@
 RSS
     https://feedparser.readthedocs.io/en/latest/
     https://github.com/kurtmckee/feedparser
-
+https://huggingface.co/DeepMostInnovations/sales-conversion-model-reinf-learning
 https://news.ycombinator.com/item?id=42761219
 https://towardsdatascience.com/a-mixed-methods-approach-to-offline-evaluation-of-news-recommender-systems-7dc7e9f0b501
 https://towardsdatascience.com/making-news-recommendations-explainable-with-large-language-models-74f119c7e036
