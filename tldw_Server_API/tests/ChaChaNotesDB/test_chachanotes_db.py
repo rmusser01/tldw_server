@@ -421,40 +421,75 @@ class TestConversationsAndMessages:
         assert messages_desc[0]["id"] == msg2_id
         assert messages_desc[1]["id"] == msg1_id
 
-    def test_update_conversation(self, db_instance: CharactersRAGDB, char_id):
-        conv_id = db_instance.add_conversation({"character_id": char_id, "title": "UpdateConv"})
-        assert conv_id is not None
+    def test_update_conversation(self, db_instance: CharactersRAGDB, char_id: int):
+        # 1. Setup: Add an initial conversation with a SIMPLE title
+        initial_title = "AlphaTitleOne" # Simple, unique for this test run
+        conv_id = db_instance.add_conversation({
+            "character_id": char_id,
+            "title": initial_title
+        })
+        assert conv_id is not None, "Failed to add initial conversation"
 
-        original_conv = db_instance.get_conversation_by_id(conv_id)
-        assert original_conv is not None
-        initial_expected_version = original_conv['version']  # Should be 1
+        # 2. Verify initial state in main table
+        original_conv_main = db_instance.get_conversation_by_id(conv_id) # Renamed for clarity
+        assert original_conv_main is not None, "Failed to retrieve initial conversation"
+        assert original_conv_main['title'] == initial_title, "Initial title mismatch in main table"
+        # We get the version for the update from this pre-update state
+        initial_expected_version = original_conv_main['version']
+        assert initial_expected_version == 1, "Initial version should be 1"
 
-        update_payload = {"title": "New Title", "rating": 5}
+        # 3. Verify initial FTS state
+        try:
+            initial_fts_results = db_instance.search_conversations_by_title(initial_title)
+            assert len(initial_fts_results) == 1, \
+                f"FTS Pre-Update: Expected 1 result for '{initial_title}', got {len(initial_fts_results)}. Results: {initial_fts_results}"
+            assert initial_fts_results[0]['id'] == conv_id, \
+                f"FTS Pre-Update: Conversation ID {conv_id} not found in initial search results for '{initial_title}'."
+        except Exception as e:
+            pytest.fail(f"Failed during initial FTS check for '{initial_title}': {e}")
 
-        # Determine how many version bumps for this payload with sequential updates
-        num_updatable_fields_in_payload = 0
-        if "title" in update_payload:
-            num_updatable_fields_in_payload += 1
-        if "rating" in update_payload:
-            num_updatable_fields_in_payload += 1
-        # Add other known updatable fields if they were in update_payload
+        # Note: No re-fetch for initial_expected_version here, it's already set from original_conv_main
 
-        final_expected_version_bump = num_updatable_fields_in_payload if num_updatable_fields_in_payload > 0 else 1
-        if not update_payload:  # if payload was empty, metadata still bumps version once
-            final_expected_version_bump = 1
+        # 4. Define update payload with a SIMPLE, DIFFERENT title
+        updated_title = "BetaTitleTwo" # Simple, unique, different from initial_title
+        updated_rating = 5
+        update_payload = {"title": updated_title, "rating": updated_rating}
 
+        # 5. Perform the update
         updated = db_instance.update_conversation(conv_id, update_payload, expected_version=initial_expected_version)
-        assert updated is True
+        assert updated is True, "update_conversation returned False"
 
-        retrieved = db_instance.get_conversation_by_id(conv_id)
-        assert retrieved is not None
-        assert retrieved["title"] == "New Title"
-        assert retrieved["rating"] == 5
-        assert retrieved["version"] == initial_expected_version + final_expected_version_bump  # Should be 1 + 2 = 3
+        # 6. Verify updated state in main table
+        retrieved_after_update = db_instance.get_conversation_by_id(conv_id)
+        assert retrieved_after_update is not None, "Failed to retrieve conversation after update"
+        assert retrieved_after_update["title"] == updated_title, "Title was not updated correctly in main table"
+        assert retrieved_after_update["rating"] == updated_rating, "Rating was not updated correctly"
+        assert retrieved_after_update["version"] == initial_expected_version + 1, "Version did not increment correctly after update"
+
+        # 7. Verify FTS state after update
+        #    Search for the NEW title
+        try:
+            search_results_new_title = db_instance.search_conversations_by_title(updated_title)
+            assert len(search_results_new_title) == 1, \
+                f"FTS Post-Update: Expected 1 result for new title '{updated_title}', got {len(search_results_new_title)}. Results: {search_results_new_title}"
+            assert search_results_new_title[0]['id'] == conv_id, \
+                f"FTS Post-Update: Conversation ID {conv_id} not found in search results for new title '{updated_title}'."
+        except Exception as e:
+            pytest.fail(f"Failed during FTS check for new title '{updated_title}': {e}")
+
+        #    Search for the OLD title (it should NOT be found by FTS for this conversation_id)
+        try:
+            search_results_old_title = db_instance.search_conversations_by_title(initial_title)
+            found_old_title_for_this_conv = any(r['id'] == conv_id for r in search_results_old_title)
+            assert not found_old_title_for_this_conv, \
+                f"FTS Post-Update: Old title '{initial_title}' was STILL FOUND for conversation ID {conv_id} after update. Search results for old title: {search_results_old_title}"
+        except Exception as e:
+            pytest.fail(f"Failed during FTS check for old title '{initial_title}': {e}")
 
     def test_soft_delete_conversation_and_messages(self, db_instance: CharactersRAGDB, char_id):
         # Setup: Conversation with messages
-        conv_id = db_instance.add_conversation({"character_id": char_id, "title": "DeleteConv"})
+        conv_title_for_delete_test = "DeleteConvForFTS"
+        conv_id = db_instance.add_conversation({"character_id": char_id, "title": conv_title_for_delete_test})
         assert conv_id is not None
         msg1_id = db_instance.add_message({"conversation_id": conv_id, "sender": "user", "content": "Msg1"})
         assert msg1_id is not None
@@ -463,20 +498,39 @@ class TestConversationsAndMessages:
         assert original_conv is not None
         expected_version = original_conv['version']
 
+        # Verify it's in FTS before delete
+        results_before_delete = db_instance.search_conversations_by_title(conv_title_for_delete_test)
+        assert len(results_before_delete) == 1, "Conversation should be in FTS before soft delete"
+        assert results_before_delete[0]['id'] == conv_id
+
         # Soft delete conversation
         deleted = db_instance.soft_delete_conversation(conv_id, expected_version=expected_version)
         assert deleted is True
         assert db_instance.get_conversation_by_id(conv_id) is None
 
-        # Messages should NOT be deleted by ON DELETE CASCADE with soft delete
-        # They are still associated with the soft-deleted conversation
         msg1 = db_instance.get_message_by_id(msg1_id)
         assert msg1 is not None
         assert msg1["conversation_id"] == conv_id
 
         # FTS search for conversation should not find it
-        #results = db_instance.search_conversations_by_title("DeleteConv")
-        #assert len(results) == 0
+        # UNCOMMENTED AND VERIFIED:
+        results_after_delete = db_instance.search_conversations_by_title(conv_title_for_delete_test)
+        assert len(results_after_delete) == 0, "FTS search should not find the soft-deleted conversation"
+
+    def test_conversation_fts_search(self, db_instance: CharactersRAGDB, char_id):
+        conv_id1 = db_instance.add_conversation({"character_id": char_id, "title": "Unique Alpha Search Term"})
+        conv_id2 = db_instance.add_conversation({"character_id": char_id, "title": "Another Alpha For Test"})
+        db_instance.add_conversation({"character_id": char_id, "title": "Beta Content Only"})
+
+        results_alpha = db_instance.search_conversations_by_title("Alpha")
+        assert len(results_alpha) == 2
+        found_ids_alpha = {r['id'] for r in results_alpha}
+        assert conv_id1 in found_ids_alpha
+        assert conv_id2 in found_ids_alpha
+
+        results_unique = db_instance.search_conversations_by_title("Unique")
+        assert len(results_unique) == 1
+        assert results_unique[0]['id'] == conv_id1
 
     def test_search_messages_by_content_FIXED_JOIN(self, db_instance: CharactersRAGDB, char_id):
         # This test specifically validates the FTS join fix for messages (TEXT PK)

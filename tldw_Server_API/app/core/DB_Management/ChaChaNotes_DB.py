@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS character_cards (
 );
 
 -- =========== TEMPORARILY COMMENT OUT CHARACTER_CARDS FTS TABLE AND FTS TRIGGERS ============
-/* 
+ 
 CREATE VIRTUAL TABLE IF NOT EXISTS character_cards_fts
 USING fts5(
     name,
@@ -141,8 +141,6 @@ END;
 CREATE TRIGGER IF NOT EXISTS character_cards_ad AFTER DELETE ON character_cards BEGIN
   DELETE FROM character_cards_fts WHERE rowid = old.id; 
 END;
-*/
--- ========= END TEMPORARY COMMENT OUT FOR CHARACTER_CARDS FTS TABLE AND FTS TRIGGERS ========
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- 2. Conversations (branches) with tombstones & sync metadata
@@ -166,15 +164,14 @@ CREATE INDEX IF NOT EXISTS idx_conversations_parent ON conversations(parent_conv
 CREATE INDEX IF NOT EXISTS idx_conv_char          ON conversations(character_id);
 
 
--- =========== CONVERSATIONS FTS TABLE ACTIVE, ALL ITS TRIGGERS DISABLED ============
-
+-- =========== CONVERSATIONS FTS TABLE ACTIVE, ALL ITS TRIGGERS ACTIVE ============
 CREATE VIRTUAL TABLE IF NOT EXISTS conversations_fts
 USING fts5(
     title,
     content='conversations',
     content_rowid='rowid' 
 );
-/*
+
 CREATE TRIGGER IF NOT EXISTS conversations_ai AFTER INSERT ON conversations BEGIN
   INSERT INTO conversations_fts(rowid, title)
     SELECT new.rowid, new.title
@@ -182,8 +179,17 @@ CREATE TRIGGER IF NOT EXISTS conversations_ai AFTER INSERT ON conversations BEGI
 END;
 
 CREATE TRIGGER IF NOT EXISTS conversations_au AFTER UPDATE ON conversations 
+/*
 WHEN (OLD.title IS NOT NEW.title OR (OLD.title IS NULL AND NEW.title IS NOT NULL) OR (OLD.title IS NOT NULL AND NEW.title IS NULL)) 
      OR (OLD.deleted IS NOT NEW.deleted) 
+*/
+      
+WHEN
+    (OLD.title != NEW.title AND OLD.title IS NOT NULL AND NEW.title IS NOT NULL) -- Both not null, different
+    OR (OLD.title IS NULL AND NEW.title IS NOT NULL)                          -- Old was null, new is not
+    OR (OLD.title IS NOT NULL AND NEW.title IS NULL)                          -- Old was not null, new is
+    OR (OLD.deleted IS NOT NEW.deleted)                                       -- Or deleted status changed
+
 BEGIN
   DELETE FROM conversations_fts WHERE rowid = old.rowid;
   INSERT INTO conversations_fts(rowid, title)
@@ -194,8 +200,7 @@ END;
 CREATE TRIGGER IF NOT EXISTS conversations_ad AFTER DELETE ON conversations BEGIN
   DELETE FROM conversations_fts WHERE rowid = old.rowid; 
 END;
-*/
--- ========= END SECTION FOR CONVERSATIONS FTS TRIGGERS (ALL ARE OUT) ========
+-- ========= END SECTION FOR CONVERSATIONS FTS TRIGGERS  ========
 
 
 -- ───────────────────────────────────────────────────────────────────────────
@@ -464,6 +469,7 @@ BEGIN
     );
 END;
 
+/* -- TEMPORARILY COMMENT OUT THIS TRIGGER FOR DEBUGGING --
 CREATE TRIGGER IF NOT EXISTS conversations_sync_update
 AFTER UPDATE ON conversations
 WHEN OLD.deleted = NEW.deleted AND (
@@ -488,6 +494,7 @@ BEGIN
        )
     );
 END;
+*/ -- END TEMPORARY COMMENT OUT
 
 CREATE TRIGGER IF NOT EXISTS conversations_sync_delete
 AFTER UPDATE ON conversations
@@ -1492,81 +1499,134 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
 
     def update_conversation(self, conversation_id: str, update_data: Dict[str, Any], expected_version: int) -> bool:
         logger.debug(
-            f"Starting update_conversation for ID {conversation_id}, expected_version {expected_version} (NO FTS, Sequential Full Logic)")
-        if not update_data:
-            logger.info(f"No data provided for conversation update for ID {conversation_id}. Metadata will be updated.")
-            # Fall through to metadata update if no specific fields
+            f"Starting update_conversation for ID {conversation_id}, expected_version {expected_version} (FTS handled by DB triggers)")
 
-        # Define known updatable fields for conversations (excluding FTS-related fields)
-        # 'id', 'root_id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted' are handled by metadata or PK
-        known_updatable_fields = ['title', 'rating', 'forked_from_message_id', 'parent_conversation_id', 'character_id']
+        if not update_data:
+            # If update_data is empty, it implies only metadata (last_modified, version) might be updated.
+            # The logic below will handle this by not finding specific fields and then constructing
+            # an update query that only touches last_modified, version, and client_id.
+            logger.info(
+                f"No specific fields in update_data for conversation {conversation_id}. Will update metadata if version matches.")
+            # Allow processing to continue to the transaction block.
+            # The update query construction will adapt.
 
         now = self._get_current_utc_timestamp_iso()
-        new_title_from_payload = update_data.get('title') # Get the new title
 
         try:
             with self.transaction() as conn:
-                # ... (version check on conversations table) ...
-                cursor_check = conn.execute("SELECT rowid, version FROM conversations WHERE id = ?",
-                                            (conversation_id,))  # Get rowid
+                logger.debug(f"Conversation update transaction started. Connection object: {id(conn)}")
+
+                # Fetch current state, including rowid (though not used for manual FTS, it's good practice to fetch if available)
+                # and current title for potential non-FTS related "title_changed" logic.
+                cursor_check = conn.execute("SELECT rowid, title, version, deleted FROM conversations WHERE id = ?",
+                                            (conversation_id,))
                 current_state = cursor_check.fetchone()
-                # ... (handle not found, version mismatch) ...
-                conversation_rowid = current_state['rowid']
 
-                # --- Main Table Update ---
-                fields_to_set = []
-                params = []
+                if not current_state:
+                    raise ConflictError(f"Conversation ID {conversation_id} not found for update.",
+                                        entity="conversations", entity_id=conversation_id)
+                if current_state['deleted']:
+                    raise ConflictError(f"Conversation ID {conversation_id} is deleted, cannot update.",
+                                        entity="conversations", entity_id=conversation_id)
+
+                current_db_version = current_state['version']
+                current_title = current_state['title']  # For logging or other conditional logic if title changed
+
+                logger.debug(
+                    f"Conversation current DB version: {current_db_version}, Expected by client: {expected_version}, Current title: {current_title}")
+
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Conversation ID {conversation_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                        entity="conversations", entity_id=conversation_id
+                    )
+
+                fields_to_update_sql = []
+                params_for_set_clause = []
+                title_changed_flag = False  # Flag to indicate if title was among the updated fields and changed value
+
+                # Process 'title' if present in update_data
                 if 'title' in update_data:
-                    fields_to_set.append("title = ?")
-                    params.append(update_data['title'])
+                    fields_to_update_sql.append("title = ?")
+                    params_for_set_clause.append(update_data['title'])
+                    if update_data['title'] != current_title:
+                        title_changed_flag = True
+
+                # Process 'rating' if present in update_data
                 if 'rating' in update_data:
-                    fields_to_set.append("rating = ?")
-                    params.append(update_data['rating'])
+                    fields_to_update_sql.append("rating = ?")
+                    params_for_set_clause.append(update_data['rating'])
 
-                if not fields_to_set:  # If only metadata needs update
-                    # (handle metadata update separately or ensure test always provides fields)
-                    # For this test, assume title and/or rating are always in update_data
-                    pass  # The next block will add metadata
+                # Add other updatable fields from update_data here if needed in the future
+                # Example:
+                # if 'some_other_field' in update_data:
+                #     fields_to_update_sql.append("some_other_field = ?")
+                #     params_for_set_clause.append(update_data['some_other_field'])
 
-                next_version_val = current_state['version'] + 1  # Based on fetched current_db_version
-                fields_to_set.extend(["last_modified = ?", "version = ?", "client_id = ?"])
-                params.extend([now, next_version_val, self.client_id, conversation_id, current_state['version']])
+                next_version_val = expected_version + 1  # Version always increments on successful update
 
-                main_update_query = f"UPDATE conversations SET {', '.join(fields_to_set)} WHERE id = ? AND version = ? AND deleted = 0"
+                if not fields_to_update_sql:
+                    # This block executes if update_data was empty or contained no recognized updatable fields.
+                    # We still need to update last_modified, version, and client_id due to the successful version check.
+                    logger.info(
+                        f"No specific updatable fields (e.g. title, rating) found for conversation {conversation_id}. Updating metadata only.")
+                    main_update_query = "UPDATE conversations SET last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
+                    main_update_params = (now, next_version_val, self.client_id, conversation_id, expected_version)
+                else:
+                    # If specific fields were found, add metadata fields to the update
+                    fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+
+                    final_set_values = params_for_set_clause[:]  # Copy of values for specific fields
+                    final_set_values.extend([now, next_version_val, self.client_id])  # Add values for metadata fields
+
+                    main_update_query = f"UPDATE conversations SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
+                    main_update_params = tuple(final_set_values + [conversation_id, expected_version])
 
                 logger.debug(f"Executing MAIN conversation update query: {main_update_query}")
-                logger.debug(f"Params: {tuple(params)}")
-                cursor_main = conn.execute(main_update_query, tuple(params))
-                if cursor_main.rowcount == 0:
-                    raise ConflictError("Main conversation update affected 0 rows.")
-                logger.debug("Main conversation table updated.")
+                logger.debug(f"Params: {main_update_params}")
 
-                # --- Attempt DIRECT FTS INSERT (after main update, same transaction) ---
-                if new_title_from_payload is not None:  # Only if there's a title to insert
-                    fts_insert_query = "INSERT INTO conversations_fts (rowid, title) VALUES (?, ?)"
-                    fts_insert_params = (conversation_rowid, new_title_from_payload)
-                    logger.debug(f"Attempting DIRECT FTS INSERT: {fts_insert_query} with params {fts_insert_params}")
-                    try:
-                        conn.execute(fts_insert_query, fts_insert_params)
-                        logger.debug("DIRECT FTS INSERT successful.")
-                    except sqlite3.Error as fts_e:
-                        logger.error(f"DIRECT FTS INSERT FAILED: {fts_e}", exc_info=True)
-                        # If this fails, we might still get corruption on commit, or this error itself.
-                        # For now, just log and let it try to commit.
+                cursor_main = conn.execute(main_update_query, main_update_params)
+                logger.debug(f"Main Conversation Update executed, rowcount: {cursor_main.rowcount}")
+
+                if cursor_main.rowcount == 0:
+                    # This could happen if a concurrent modification occurred between the version check and this UPDATE.
+                    # Or if the record was deleted concurrently.
+                    # Re-check the state to provide a more accurate error.
+                    check_again_cursor = conn.execute("SELECT version, deleted FROM conversations WHERE id = ?",
+                                                      (conversation_id,))
+                    final_state = check_again_cursor.fetchone()
+                    if not final_state:
+                        msg = f"Conversation ID {conversation_id} disappeared before update completion (expected v{expected_version})."
+                    elif final_state['deleted']:
+                        msg = f"Conversation ID {conversation_id} was soft-deleted concurrently (expected v{expected_version} for update)."
+                    elif final_state['version'] != expected_version:
+                        msg = f"Conversation ID {conversation_id} version changed to {final_state['version']} concurrently (expected v{expected_version} for update)."
+                    else:  # Should not happen if rowcount is 0 and version check was successful.
+                        msg = f"Main update for conversation ID {conversation_id} (expected v{expected_version}) affected 0 rows for an unknown reason after passing initial checks."
+                    raise ConflictError(msg, entity="conversations", entity_id=conversation_id)
+
+                # FTS synchronization is handled by database triggers.
+                # No manual FTS DML (DELETE/INSERT on conversations_fts) is performed here.
 
                 logger.info(
-                    f"Updated conversation ID {conversation_id} (TESTING DIRECT FTS INSERT) to version {next_version_val}")
+                    f"Updated conversation ID {conversation_id} from version {expected_version} to version {next_version_val} (FTS handled by DB triggers). Title changed: {title_changed_flag}")
                 return True
 
         except sqlite3.DatabaseError as e:
-            logger.critical(f"DATABASE CORRUPTION DETECTED during update_conversation (TESTING DIRECT FTS INSERT)!")
+            # This broad catch is for unexpected SQLite errors, including potential "malformed" if it still occurs.
+            logger.critical(f"DATABASE ERROR during update_conversation (FTS handled by DB triggers): {e}")
             logger.critical(f"Error details: {str(e)}")
+            # Specific handling for "malformed" can be added if needed, but the goal is to prevent it.
             raise CharactersRAGDBError(f"Database error during update_conversation: {e}") from e
-
-        except sqlite3.DatabaseError as e:
-            logger.critical(f"DATABASE CORRUPTION DETECTED during update_conversation (NO FTS, Sequential Full Logic)!")
-            logger.critical(f"Error details: {str(e)}")
-            raise CharactersRAGDBError(f"Database error during update_conversation: {e}") from e
+        except ConflictError:  # Re-raise ConflictErrors for tests or callers to handle
+            raise
+        except CharactersRAGDBError as e:  # Other custom DB errors
+            logger.error(f"Application-level database error in update_conversation for ID {conversation_id}: {e}",
+                         exc_info=True)
+            raise
+        except Exception as e:  # Catch-all for any other unexpected Python errors
+            logger.error(f"Unexpected Python error in update_conversation for ID {conversation_id}: {e}", exc_info=True)
+            raise CharactersRAGDBError(f"Unexpected error during update_conversation: {e}") from e
 
     def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool:
         now = self._get_current_utc_timestamp_iso()
