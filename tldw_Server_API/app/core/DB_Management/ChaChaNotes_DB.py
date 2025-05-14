@@ -183,12 +183,10 @@ AFTER UPDATE ON conversations
 WHEN (OLD.title IS NOT NEW.title OR (OLD.title IS NULL AND NEW.title IS NOT NULL) OR (OLD.title IS NOT NULL AND NEW.title IS NULL)) 
      OR (OLD.deleted IS NOT NEW.deleted)
 BEGIN
-  -- Step 1: Use the FTS5 'delete' command to remove all indexed terms for OLD.rowid.
-  -- The value for 'title' here is ignored by the 'delete' command.
-  INSERT INTO conversations_fts (conversations_fts, rowid, title) VALUES ('delete', OLD.rowid, NULL);
+  -- Step 1: Standard DELETE from the FTS table.
+  DELETE FROM conversations_fts WHERE rowid = OLD.rowid;
 
   -- Step 2: If the new state should be indexed (not deleted and has a title), insert it.
-  -- This will now be a fresh insert for this rowid as far as the index is concerned.
   INSERT INTO conversations_fts(rowid, title)
     SELECT NEW.rowid, NEW.title
     WHERE NEW.deleted = 0 AND NEW.title IS NOT NULL;
