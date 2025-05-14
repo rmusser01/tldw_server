@@ -466,6 +466,19 @@ class TestConversationsAndMessages:
         assert retrieved_after_update["rating"] == updated_rating, "Rating was not updated correctly"
         assert retrieved_after_update["version"] == initial_expected_version + 1, "Version did not increment correctly after update"
 
+        try:
+            conn_for_rebuild = db_instance.get_connection()
+            # The 'rebuild' command re-initializes the FTS index from the content table.
+            # This is a heavy operation, used here only for diagnostics.
+            print("\nDEBUG: Attempting FTS rebuild...")
+            conn_for_rebuild.execute("INSERT INTO conversations_fts(conversations_fts) VALUES('rebuild');")
+            print("DEBUG: FTS rebuild command executed.")
+            # Alternatively, 'optimize' is less drastic but also processes pending work.
+            # conn_for_rebuild.execute("INSERT INTO conversations_fts(conversations_fts) VALUES('optimize');")
+            # print("DEBUG: FTS optimize command executed.")
+        except Exception as rebuild_e:
+            print(f"DEBUG: Error during FTS rebuild/optimize: {rebuild_e}")
+
         # 7. Verify FTS state after update
         #    Search for the NEW title
         try:

@@ -178,30 +178,26 @@ CREATE TRIGGER IF NOT EXISTS conversations_ai AFTER INSERT ON conversations BEGI
     WHERE new.deleted = 0 AND new.title IS NOT NULL; 
 END;
 
-CREATE TRIGGER IF NOT EXISTS conversations_au AFTER UPDATE ON conversations 
-/*
+CREATE TRIGGER IF NOT EXISTS conversations_au -- AFTER UPDATE
+AFTER UPDATE ON conversations 
 WHEN (OLD.title IS NOT NEW.title OR (OLD.title IS NULL AND NEW.title IS NOT NULL) OR (OLD.title IS NOT NULL AND NEW.title IS NULL)) 
-     OR (OLD.deleted IS NOT NEW.deleted) 
-*/
-      
-WHEN
-    (OLD.title != NEW.title AND OLD.title IS NOT NULL AND NEW.title IS NOT NULL) -- Both not null, different
-    OR (OLD.title IS NULL AND NEW.title IS NOT NULL)                          -- Old was null, new is not
-    OR (OLD.title IS NOT NULL AND NEW.title IS NULL)                          -- Old was not null, new is
-    OR (OLD.deleted IS NOT NEW.deleted)                                       -- Or deleted status changed
-
+     OR (OLD.deleted IS NOT NEW.deleted)
 BEGIN
-  DELETE FROM conversations_fts WHERE rowid = old.rowid;
+  -- Step 1: Use the FTS5 'delete' command to remove all indexed terms for OLD.rowid.
+  -- The value for 'title' here is ignored by the 'delete' command.
+  INSERT INTO conversations_fts (conversations_fts, rowid, title) VALUES ('delete', OLD.rowid, NULL);
+
+  -- Step 2: If the new state should be indexed (not deleted and has a title), insert it.
+  -- This will now be a fresh insert for this rowid as far as the index is concerned.
   INSERT INTO conversations_fts(rowid, title)
-    SELECT new.rowid, new.title
-    WHERE new.deleted = 0 AND new.title IS NOT NULL; 
+    SELECT NEW.rowid, NEW.title
+    WHERE NEW.deleted = 0 AND NEW.title IS NOT NULL;
 END;
 
 CREATE TRIGGER IF NOT EXISTS conversations_ad AFTER DELETE ON conversations BEGIN
   DELETE FROM conversations_fts WHERE rowid = old.rowid; 
 END;
 -- ========= END SECTION FOR CONVERSATIONS FTS TRIGGERS  ========
-
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- 3. Messages with swipe/fork links, rankings, tombstones & sync metadata
