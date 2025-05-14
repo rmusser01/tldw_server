@@ -427,17 +427,30 @@ class TestConversationsAndMessages:
 
         original_conv = db_instance.get_conversation_by_id(conv_id)
         assert original_conv is not None
-        expected_version = original_conv['version']  # Should be 1
+        initial_expected_version = original_conv['version']  # Should be 1
 
-        updated = db_instance.update_conversation(conv_id, {"title": "New Title", "rating": 5},
-                                                  expected_version=expected_version)
+        update_payload = {"title": "New Title", "rating": 5}
+
+        # Determine how many version bumps for this payload with sequential updates
+        num_updatable_fields_in_payload = 0
+        if "title" in update_payload:
+            num_updatable_fields_in_payload += 1
+        if "rating" in update_payload:
+            num_updatable_fields_in_payload += 1
+        # Add other known updatable fields if they were in update_payload
+
+        final_expected_version_bump = num_updatable_fields_in_payload if num_updatable_fields_in_payload > 0 else 1
+        if not update_payload:  # if payload was empty, metadata still bumps version once
+            final_expected_version_bump = 1
+
+        updated = db_instance.update_conversation(conv_id, update_payload, expected_version=initial_expected_version)
         assert updated is True
 
         retrieved = db_instance.get_conversation_by_id(conv_id)
         assert retrieved is not None
         assert retrieved["title"] == "New Title"
         assert retrieved["rating"] == 5
-        assert retrieved["version"] == expected_version + 1
+        assert retrieved["version"] == initial_expected_version + final_expected_version_bump  # Should be 1 + 2 = 3
 
     def test_soft_delete_conversation_and_messages(self, db_instance: CharactersRAGDB, char_id):
         # Setup: Conversation with messages

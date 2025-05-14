@@ -1491,16 +1491,34 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
 
     def update_conversation(self, conversation_id: str, update_data: Dict[str, Any], expected_version: int) -> bool:
         logger.debug(
-            f"Starting update_conversation for ID {conversation_id}, expected_version {expected_version} (NO FTS, SIMPLIFIED DIAGNOSTIC)")
-        # Using update_data['title'] to make the test pass its assertion if no corruption
-        new_title_from_payload = update_data.get('title', "Default Test Title if not in payload")
+            f"Starting update_conversation for ID {conversation_id}, expected_version {expected_version} (NO FTS, Sequential Full Logic)")
+        if not update_data:
+            logger.info(f"No data provided for conversation update for ID {conversation_id}. Metadata will be updated.")
+            # Fall through to metadata update if no specific fields
 
         now = self._get_current_utc_timestamp_iso()
+
+        # Define known updatable fields for conversations (excluding FTS-related fields)
+        # 'id', 'root_id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted' are handled by metadata or PK
+        known_updatable_fields = ['title', 'rating', 'forked_from_message_id', 'parent_conversation_id', 'character_id']
 
         try:
             with self.transaction() as conn:
                 logger.debug(f"Conversation update transaction started. Connection object: {id(conn)}")
-                current_db_version = self._get_current_db_version(conn, "conversations", "id", conversation_id)
+
+                cursor_check = conn.execute("SELECT version, deleted FROM conversations WHERE id = ?",
+                                            (conversation_id,))
+                current_state = cursor_check.fetchone()
+
+                if not current_state:
+                    raise ConflictError(f"Conversation ID {conversation_id} not found for update.",
+                                        entity="conversations", entity_id=conversation_id)
+
+                if current_state['deleted']:
+                    raise ConflictError(f"Conversation ID {conversation_id} is deleted, cannot update.",
+                                        entity="conversations", entity_id=conversation_id)
+
+                current_db_version = current_state['version']
                 logger.debug(
                     f"Conversation current DB version: {current_db_version}, Expected by client: {expected_version}")
 
@@ -1510,38 +1528,57 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
                         entity="conversations", entity_id=conversation_id
                     )
 
-                next_version_val_simple = expected_version + 1
-                # Update 'title' from payload, and other updatable fields if present
-                fields_to_set = ["title = ?", "last_modified = ?", "version = ?", "client_id = ?"]
-                params = [new_title_from_payload]  # Use title from payload
+                fields_processed_count = 0
+                current_expected_version_for_step = expected_version
+                final_actual_version_in_db = expected_version
 
-                if 'rating' in update_data:  # Allow rating update for the test
-                    fields_to_set.insert(1, "rating = ?")  # Insert before metadata
-                    params.insert(1, update_data['rating'])
+                for key, value in update_data.items():
+                    if key in known_updatable_fields:
+                        next_version_for_this_field_update = current_expected_version_for_step + 1
 
-                params.extend([now, next_version_val_simple, self.client_id, conversation_id, expected_version])
+                        query_sql = f"UPDATE conversations SET {key} = ?, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
+                        params_sql = (value, now, next_version_for_this_field_update, self.client_id, conversation_id,
+                                      current_expected_version_for_step)
 
-                query = f"UPDATE conversations SET {', '.join(fields_to_set)} WHERE id = ? AND version = ? AND deleted = 0"
+                        logger.debug(f"Executing SEQUENTIAL update for conv field '{key}': {query_sql}")
+                        logger.debug(f"Params: {params_sql}")
+                        cursor = conn.execute(query_sql, params_sql)
 
-                logger.debug(f"Executing conversation update query (NO FTS): {query}")
-                logger.debug(f"Params: {tuple(params)}")
+                        if cursor.rowcount == 0:
+                            raise ConflictError(
+                                f"Sequential update for conv field '{key}' failed for ID {conversation_id}, expected version {current_expected_version_for_step}. Row may have been modified or deleted.",
+                                entity="conversations", entity_id=conversation_id)
 
-                cursor = conn.execute(query, tuple(params))
-                logger.debug(f"Conversation Update executed (NO FTS), rowcount: {cursor.rowcount}")
+                        fields_processed_count += 1
+                        current_expected_version_for_step = next_version_for_this_field_update
+                        final_actual_version_in_db = next_version_for_this_field_update
+                    elif key not in ['id', 'root_id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
+                        logger.warning(
+                            f"Attempted to update immutable or unknown field '{key}' in conversation {conversation_id}, skipping.")
 
-                if cursor.rowcount == 0:
-                    # ... (rowcount check logic) ...
-                    raise ConflictError(f"Update for conversation ID {conversation_id} (NO FTS) affected 0 rows.",
-                                        entity="conversations", entity_id=conversation_id)
+                # If no specific known fields were in update_data, but update_data was not empty (e.g. contained only unknown keys),
+                # OR if update_data was empty from the start, update metadata.
+                if fields_processed_count == 0:
+                    logger.info(
+                        f"No specific updatable fields found for conversation ID {conversation_id}. Updating metadata only.")
+                    next_version_for_meta_update = current_expected_version_for_step + 1  # Could be original expected_version or already bumped
+                    meta_query = "UPDATE conversations SET last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
+                    meta_params = (now, next_version_for_meta_update, self.client_id, conversation_id,
+                                   current_expected_version_for_step)
+                    cursor_meta = conn.execute(meta_query, meta_params)
+                    if cursor_meta.rowcount == 0:
+                        raise ConflictError(
+                            f"Metadata-only update failed for conversation ID {conversation_id}, expected version {current_expected_version_for_step}.",
+                            entity="conversations", entity_id=conversation_id)
+                    final_actual_version_in_db = next_version_for_meta_update
 
                 logger.info(
-                    f"Updated conversation ID {conversation_id} from version {expected_version} to version {next_version_val_simple} (NO FTS).")
+                    f"Updated conversation ID {conversation_id} from client-expected version {expected_version} to final DB version {final_actual_version_in_db} (NO FTS, Sequential Full Logic).")
                 return True
+
         except sqlite3.DatabaseError as e:
-            logger.critical(f"DATABASE CORRUPTION DETECTED during update_conversation (NO FTS AT ALL)!")
+            logger.critical(f"DATABASE CORRUPTION DETECTED during update_conversation (NO FTS, Sequential Full Logic)!")
             logger.critical(f"Error details: {str(e)}")
-            logger.critical(f"Query was: {query if 'query' in locals() else 'N/A'}")
-            logger.critical(f"Params were: {params if 'params' in locals() else 'N/A'}")
             raise CharactersRAGDBError(f"Database error during update_conversation: {e}") from e
 
     def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool:
