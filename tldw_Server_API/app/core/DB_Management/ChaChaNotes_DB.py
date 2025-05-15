@@ -287,31 +287,39 @@ USING fts5(
   content_rowid='id'
 );
 
+/* ───── clean slate ─────────────────────────────────────────── */
 DROP TRIGGER IF EXISTS keywords_ai;
 DROP TRIGGER IF EXISTS keywords_au;
-DROP TRIGGER IF EXISTS keywords_ad;
+DROP TRIGGER IF EXISTS keywords_bd;
 
+/* ───── AFTER INSERT → add to index if not deleted ─────────── */
 CREATE TRIGGER keywords_ai
 AFTER INSERT ON keywords BEGIN
-  INSERT INTO keywords_fts(rowid,keyword)
-  SELECT new.id,new.keyword
+  INSERT INTO keywords_fts(rowid, keyword)
+  SELECT new.id, new.keyword
   WHERE new.deleted = 0;
 END;
 
+/* ───── AFTER UPDATE → conditional delete + add —────────────── */
 CREATE TRIGGER keywords_au
 AFTER UPDATE ON keywords BEGIN
-  INSERT INTO keywords_fts(keywords_fts,rowid,keyword)
-  VALUES('delete',old.id,old.keyword);
+  /* delete the old doc only if it was indexed */
+  INSERT INTO keywords_fts(keywords_fts, rowid, keyword)
+  SELECT 'delete', old.id, old.keyword
+  WHERE old.deleted = 0;
 
-  INSERT INTO keywords_fts(rowid,keyword)
-  SELECT new.id,new.keyword
+  /* add the new doc if it should be indexed */
+  INSERT INTO keywords_fts(rowid, keyword)
+  SELECT new.id, new.keyword
   WHERE new.deleted = 0;
 END;
 
-CREATE TRIGGER keywords_ad
-AFTER DELETE ON keywords BEGIN
-  INSERT INTO keywords_fts(keywords_fts,rowid,keyword)
-  VALUES('delete',old.id,old.keyword);
+/* ───── BEFORE DELETE → remove from index if present ────────── */
+CREATE TRIGGER keywords_bd
+BEFORE DELETE ON keywords BEGIN
+  INSERT INTO keywords_fts(keywords_fts, rowid, keyword)
+  SELECT 'delete', old.id, old.keyword
+  WHERE old.deleted = 0;
 END;
 
 /*----------------------------------------------------------------
