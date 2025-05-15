@@ -73,8 +73,680 @@ class CharactersRAGDB:
     Relies on SQL triggers for FTS updates and sync_log entries for most main tables.
     Link table sync logs are handled by Python methods.
     """
-    _CURRENT_SCHEMA_VERSION = 2 # Incremented schema version
+    _CURRENT_SCHEMA_VERSION = 3 # Incremented schema version
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
+
+    _FULL_SCHEMA_SQL_V3 = """
+/*───────────────────────────────────────────────────────────────
+  RAG Character-Chat Schema  –  Version 3   (2025-05-14)
+───────────────────────────────────────────────────────────────*/
+PRAGMA foreign_keys = ON;
+
+/*----------------------------------------------------------------
+  0. Schema-version registry
+----------------------------------------------------------------*/
+CREATE TABLE IF NOT EXISTS db_schema_version(
+  schema_name TEXT PRIMARY KEY NOT NULL,
+  version     INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO db_schema_version(schema_name,version)
+VALUES('rag_char_chat_schema',0);
+
+/*----------------------------------------------------------------
+  1. Character profiles  (FTS5 external-content)
+----------------------------------------------------------------*/
+CREATE TABLE IF NOT EXISTS character_cards(
+  id            INTEGER  PRIMARY KEY AUTOINCREMENT,
+  name          TEXT     UNIQUE NOT NULL,
+  description   TEXT,
+  personality   TEXT,
+  scenario      TEXT,
+  system_prompt TEXT,
+  image                     BLOB,
+  post_history_instructions TEXT,
+  first_message             TEXT,
+  message_example           TEXT,
+  creator_notes             TEXT,
+  alternate_greetings       TEXT,
+  tags                      TEXT,
+  creator                   TEXT,
+  character_version         TEXT,
+  extensions                TEXT,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN  NOT NULL DEFAULT 0,
+  client_id     TEXT     NOT NULL DEFAULT 'unknown',
+  version       INTEGER  NOT NULL DEFAULT 1
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS character_cards_fts
+USING fts5(
+  name, description, personality, scenario, system_prompt,
+  content='character_cards',
+  content_rowid='id'
+);
+
+DROP TRIGGER IF EXISTS character_cards_ai;
+DROP TRIGGER IF EXISTS character_cards_au;
+DROP TRIGGER IF EXISTS character_cards_ad;
+
+CREATE TRIGGER character_cards_ai
+AFTER INSERT ON character_cards BEGIN
+  INSERT INTO character_cards_fts(rowid,name,description,personality,scenario,system_prompt)
+  SELECT new.id,new.name,new.description,new.personality,new.scenario,new.system_prompt
+  WHERE new.deleted = 0;
+END;
+
+CREATE TRIGGER character_cards_au
+AFTER UPDATE ON character_cards BEGIN
+  INSERT INTO character_cards_fts(character_cards_fts,rowid,
+                                  name,description,personality,scenario,system_prompt)
+  VALUES('delete',old.id,old.name,old.description,old.personality,old.scenario,old.system_prompt);
+
+  INSERT INTO character_cards_fts(rowid,name,description,personality,scenario,system_prompt)
+  SELECT new.id,new.name,new.description,new.personality,new.scenario,new.system_prompt
+  WHERE new.deleted = 0;
+END;
+
+CREATE TRIGGER character_cards_ad
+AFTER DELETE ON character_cards BEGIN
+  INSERT INTO character_cards_fts(character_cards_fts,rowid,
+                                  name,description,personality,scenario,system_prompt)
+  VALUES('delete',old.id,old.name,old.description,old.personality,old.scenario,old.system_prompt);
+END;
+
+/*----------------------------------------------------------------
+  2. Conversations
+----------------------------------------------------------------*/
+CREATE TABLE IF NOT EXISTS conversations(
+  id                     TEXT PRIMARY KEY,            /* UUID */
+  root_id                TEXT NOT NULL,
+  forked_from_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  parent_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+  character_id           INTEGER REFERENCES character_cards(id)
+                          ON DELETE CASCADE ON UPDATE CASCADE,
+  title        TEXT,
+  rating       INTEGER CHECK(rating BETWEEN 1 AND 5),
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted      BOOLEAN  NOT NULL DEFAULT 0,
+  client_id    TEXT     NOT NULL,
+  version      INTEGER  NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_conversations_root   ON conversations(root_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_parent ON conversations(parent_conversation_id);
+CREATE INDEX IF NOT EXISTS idx_conv_char           ON conversations(character_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS conversations_fts
+USING fts5(
+  title,
+  content='conversations',
+  content_rowid='rowid'
+);
+
+DROP TRIGGER IF EXISTS conversations_ai;
+DROP TRIGGER IF EXISTS conversations_au;
+DROP TRIGGER IF EXISTS conversations_ad;
+
+CREATE TRIGGER conversations_ai
+AFTER INSERT ON conversations BEGIN
+  INSERT INTO conversations_fts(rowid,title)
+  SELECT new.rowid,new.title
+  WHERE new.deleted = 0 AND new.title IS NOT NULL;
+END;
+
+CREATE TRIGGER conversations_au
+AFTER UPDATE ON conversations BEGIN
+  INSERT INTO conversations_fts(conversations_fts,rowid,title)
+  VALUES('delete',old.rowid,old.title);
+
+  INSERT INTO conversations_fts(rowid,title)
+  SELECT new.rowid,new.title
+  WHERE new.deleted = 0 AND new.title IS NOT NULL;
+END;
+
+CREATE TRIGGER conversations_ad
+AFTER DELETE ON conversations BEGIN
+  INSERT INTO conversations_fts(conversations_fts,rowid,title)
+  VALUES('delete',old.rowid,old.title);
+END;
+
+/*----------------------------------------------------------------
+  3. Messages
+----------------------------------------------------------------*/
+CREATE TABLE IF NOT EXISTS messages(
+  id                TEXT PRIMARY KEY,                 /* UUID */
+  conversation_id   TEXT  NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  parent_message_id TEXT  REFERENCES messages(id)     ON DELETE SET NULL,
+  sender            TEXT  NOT NULL,
+  content           TEXT  NOT NULL,
+  timestamp         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ranking           INTEGER,
+  last_modified     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted           BOOLEAN NOT NULL DEFAULT 0,
+  client_id         TEXT    NOT NULL,
+  version           INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_msgs_conversation ON messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_msgs_parent       ON messages(parent_message_id);
+CREATE INDEX IF NOT EXISTS idx_msgs_timestamp    ON messages(timestamp);
+CREATE INDEX IF NOT EXISTS idx_msgs_ranking      ON messages(ranking);
+CREATE INDEX IF NOT EXISTS idx_msgs_conv_ts      ON messages(conversation_id,timestamp);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+USING fts5(
+  content,
+  content='messages',
+  content_rowid='rowid'
+);
+
+DROP TRIGGER IF EXISTS messages_ai;
+DROP TRIGGER IF EXISTS messages_au;
+DROP TRIGGER IF EXISTS messages_ad;
+
+CREATE TRIGGER messages_ai
+AFTER INSERT ON messages BEGIN
+  INSERT INTO messages_fts(rowid,content)
+  SELECT new.rowid,new.content
+  WHERE new.deleted = 0;
+END;
+
+CREATE TRIGGER messages_au
+AFTER UPDATE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts,rowid,content)
+  VALUES('delete',old.rowid,old.content);
+
+  INSERT INTO messages_fts(rowid,content)
+  SELECT new.rowid,new.content
+  WHERE new.deleted = 0;
+END;
+
+CREATE TRIGGER messages_ad
+AFTER DELETE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts,rowid,content)
+  VALUES('delete',old.rowid,old.content);
+END;
+
+/*----------------------------------------------------------------
+  4. Keywords
+----------------------------------------------------------------*/
+CREATE TABLE IF NOT EXISTS keywords(
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  keyword       TEXT    UNIQUE NOT NULL COLLATE NOCASE,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN  NOT NULL DEFAULT 0,
+  client_id     TEXT     NOT NULL DEFAULT 'unknown',
+  version       INTEGER  NOT NULL DEFAULT 1
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS keywords_fts
+USING fts5(
+  keyword,
+  content='keywords',
+  content_rowid='id'
+);
+
+DROP TRIGGER IF EXISTS keywords_ai;
+DROP TRIGGER IF EXISTS keywords_au;
+DROP TRIGGER IF EXISTS keywords_ad;
+
+CREATE TRIGGER keywords_ai
+AFTER INSERT ON keywords BEGIN
+  INSERT INTO keywords_fts(rowid,keyword)
+  SELECT new.id,new.keyword
+  WHERE new.deleted = 0;
+END;
+
+CREATE TRIGGER keywords_au
+AFTER UPDATE ON keywords BEGIN
+  INSERT INTO keywords_fts(keywords_fts,rowid,keyword)
+  VALUES('delete',old.id,old.keyword);
+
+  INSERT INTO keywords_fts(rowid,keyword)
+  SELECT new.id,new.keyword
+  WHERE new.deleted = 0;
+END;
+
+CREATE TRIGGER keywords_ad
+AFTER DELETE ON keywords BEGIN
+  INSERT INTO keywords_fts(keywords_fts,rowid,keyword)
+  VALUES('delete',old.id,old.keyword);
+END;
+
+/*----------------------------------------------------------------
+  5. Keyword collections
+----------------------------------------------------------------*/
+CREATE TABLE IF NOT EXISTS keyword_collections(
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT    UNIQUE NOT NULL COLLATE NOCASE,
+  parent_id     INTEGER REFERENCES keyword_collections(id)
+                         ON DELETE SET NULL ON UPDATE CASCADE,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN  NOT NULL DEFAULT 0,
+  client_id     TEXT     NOT NULL DEFAULT 'unknown',
+  version       INTEGER  NOT NULL DEFAULT 1
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS keyword_collections_fts
+USING fts5(
+  name,
+  content='keyword_collections',
+  content_rowid='id'
+);
+
+DROP TRIGGER IF EXISTS keyword_collections_ai;
+DROP TRIGGER IF EXISTS keyword_collections_au;
+DROP TRIGGER IF EXISTS keyword_collections_ad;
+
+CREATE TRIGGER keyword_collections_ai
+AFTER INSERT ON keyword_collections BEGIN
+  INSERT INTO keyword_collections_fts(rowid,name)
+  SELECT new.id,new.name
+  WHERE new.deleted = 0;
+END;
+
+CREATE TRIGGER keyword_collections_au
+AFTER UPDATE ON keyword_collections BEGIN
+  INSERT INTO keyword_collections_fts(keyword_collections_fts,rowid,name)
+  VALUES('delete',old.id,old.name);
+
+  INSERT INTO keyword_collections_fts(rowid,name)
+  SELECT new.id,new.name
+  WHERE new.deleted = 0;
+END;
+
+CREATE TRIGGER keyword_collections_ad
+AFTER DELETE ON keyword_collections BEGIN
+  INSERT INTO keyword_collections_fts(keyword_collections_fts,rowid,name)
+  VALUES('delete',old.id,old.name);
+END;
+
+/*----------------------------------------------------------------
+  6. Notes
+----------------------------------------------------------------*/
+CREATE TABLE IF NOT EXISTS notes(
+  id            TEXT PRIMARY KEY,                     /* UUID */
+  title         TEXT NOT NULL,
+  content       TEXT NOT NULL,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN  NOT NULL DEFAULT 0,
+  client_id     TEXT     NOT NULL DEFAULT 'unknown',
+  version       INTEGER  NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_notes_last_modified ON notes(last_modified);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts
+USING fts5(
+  title,content,
+  content='notes',
+  content_rowid='rowid'
+);
+
+DROP TRIGGER IF EXISTS notes_ai;
+DROP TRIGGER IF EXISTS notes_au;
+DROP TRIGGER IF EXISTS notes_ad;
+
+CREATE TRIGGER notes_ai
+AFTER INSERT ON notes BEGIN
+  INSERT INTO notes_fts(rowid,title,content)
+  SELECT new.rowid,new.title,new.content
+  WHERE new.deleted = 0;
+END;
+
+CREATE TRIGGER notes_au
+AFTER UPDATE ON notes BEGIN
+  INSERT INTO notes_fts(notes_fts,rowid,title,content)
+  VALUES('delete',old.rowid,old.title,old.content);
+
+  INSERT INTO notes_fts(rowid,title,content)
+  SELECT new.rowid,new.title,new.content
+  WHERE new.deleted = 0;
+END;
+
+CREATE TRIGGER notes_ad
+AFTER DELETE ON notes BEGIN
+  INSERT INTO notes_fts(notes_fts,rowid,title,content)
+  VALUES('delete',old.rowid,old.title,old.content);
+END;
+
+/*----------------------------------------------------------------
+  7. Linking tables (no FTS)
+----------------------------------------------------------------*/
+CREATE TABLE IF NOT EXISTS conversation_keywords(
+  conversation_id TEXT    NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  keyword_id      INTEGER NOT NULL REFERENCES keywords(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(conversation_id,keyword_id)
+);
+CREATE INDEX IF NOT EXISTS idx_convkw_kw ON conversation_keywords(keyword_id);
+
+CREATE TABLE IF NOT EXISTS collection_keywords(
+  collection_id INTEGER NOT NULL REFERENCES keyword_collections(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  keyword_id    INTEGER NOT NULL REFERENCES keywords(id)            ON DELETE CASCADE ON UPDATE CASCADE,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(collection_id,keyword_id)
+);
+CREATE INDEX IF NOT EXISTS idx_collkw_kw ON collection_keywords(keyword_id);
+
+CREATE TABLE IF NOT EXISTS note_keywords(
+  note_id    TEXT    NOT NULL REFERENCES notes(id)                 ON DELETE CASCADE ON UPDATE CASCADE,
+  keyword_id INTEGER NOT NULL REFERENCES keywords(id)              ON DELETE CASCADE ON UPDATE CASCADE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(note_id,keyword_id)
+);
+CREATE INDEX IF NOT EXISTS idx_notekw_kw ON note_keywords(keyword_id);
+
+/*----------------------------------------------------------------
+  8. Sync log (plus triggers)
+----------------------------------------------------------------*/
+CREATE TABLE IF NOT EXISTS sync_log(
+  change_id   INTEGER  PRIMARY KEY AUTOINCREMENT,
+  entity      TEXT     NOT NULL,
+  entity_id   TEXT     NOT NULL,
+  operation   TEXT     NOT NULL CHECK(operation IN('create','update','delete')),
+  timestamp   DATETIME NOT NULL,
+  client_id   TEXT     NOT NULL,
+  version     INTEGER  NOT NULL,
+  payload     TEXT     NOT NULL          /* JSON blob */
+);
+CREATE INDEX IF NOT EXISTS idx_sync_log_ts     ON sync_log(timestamp);
+CREATE INDEX IF NOT EXISTS idx_sync_log_entity ON sync_log(entity,entity_id);
+
+/*—— drop any pre-existing sync triggers ———————————*/
+DROP TRIGGER IF EXISTS messages_sync_create;
+DROP TRIGGER IF EXISTS messages_sync_update;
+DROP TRIGGER IF EXISTS messages_sync_delete;
+DROP TRIGGER IF EXISTS messages_sync_undelete;
+
+DROP TRIGGER IF EXISTS conversations_sync_create;
+DROP TRIGGER IF EXISTS conversations_sync_update;
+DROP TRIGGER IF EXISTS conversations_sync_delete;
+DROP TRIGGER IF EXISTS conversations_sync_undelete;
+
+DROP TRIGGER IF EXISTS character_cards_sync_create;
+DROP TRIGGER IF EXISTS character_cards_sync_update;
+DROP TRIGGER IF EXISTS character_cards_sync_delete;
+DROP TRIGGER IF EXISTS character_cards_sync_undelete;
+
+DROP TRIGGER IF EXISTS notes_sync_create;
+DROP TRIGGER IF EXISTS notes_sync_update;
+DROP TRIGGER IF EXISTS notes_sync_delete;
+DROP TRIGGER IF EXISTS notes_sync_undelete;
+
+DROP TRIGGER IF EXISTS keywords_sync_create;
+DROP TRIGGER IF EXISTS keywords_sync_update;
+DROP TRIGGER IF EXISTS keywords_sync_delete;
+DROP TRIGGER IF EXISTS keywords_sync_undelete;
+
+DROP TRIGGER IF EXISTS keyword_collections_sync_create;
+DROP TRIGGER IF EXISTS keyword_collections_sync_update;
+DROP TRIGGER IF EXISTS keyword_collections_sync_delete;
+DROP TRIGGER IF EXISTS keyword_collections_sync_undelete;
+
+/*—— sync triggers: messages ———————————————*/
+CREATE TRIGGER messages_sync_create
+AFTER INSERT ON messages BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('messages',NEW.id,'create',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'conversation_id',NEW.conversation_id,'parent_message_id',NEW.parent_message_id,
+                     'sender',NEW.sender,'content',NEW.content,'timestamp',NEW.timestamp,'ranking',NEW.ranking,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER messages_sync_update
+AFTER UPDATE ON messages
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.content IS NOT NEW.content OR
+     OLD.ranking IS NOT NEW.ranking OR
+     OLD.parent_message_id IS NOT NEW.parent_message_id OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('messages',NEW.id,'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'conversation_id',NEW.conversation_id,'parent_message_id',NEW.parent_message_id,
+                     'sender',NEW.sender,'content',NEW.content,'timestamp',NEW.timestamp,'ranking',NEW.ranking,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER messages_sync_delete
+AFTER UPDATE ON messages
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('messages',NEW.id,'delete',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER messages_sync_undelete
+AFTER UPDATE ON messages
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('messages',NEW.id,'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'conversation_id',NEW.conversation_id,'parent_message_id',NEW.parent_message_id,
+                     'sender',NEW.sender,'content',NEW.content,'timestamp',NEW.timestamp,'ranking',NEW.ranking,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/*—— sync triggers: conversations ———————————*/
+CREATE TRIGGER conversations_sync_create
+AFTER INSERT ON conversations BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('conversations',NEW.id,'create',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'root_id',NEW.root_id,'forked_from_message_id',NEW.forked_from_message_id,
+                     'parent_conversation_id',NEW.parent_conversation_id,'character_id',NEW.character_id,'title',NEW.title,
+                     'rating',NEW.rating,'created_at',NEW.created_at,'last_modified',NEW.last_modified,'deleted',NEW.deleted,
+                     'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER conversations_sync_update
+AFTER UPDATE ON conversations
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.title IS NOT NEW.title OR
+     OLD.rating IS NOT NEW.rating OR
+     OLD.forked_from_message_id IS NOT NEW.forked_from_message_id OR
+     OLD.parent_conversation_id IS NOT NEW.parent_conversation_id OR
+     OLD.character_id IS NOT NEW.character_id OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('conversations',NEW.id,'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'root_id',NEW.root_id,'forked_from_message_id',NEW.forked_from_message_id,
+                     'parent_conversation_id',NEW.parent_conversation_id,'character_id',NEW.character_id,'title',NEW.title,
+                     'rating',NEW.rating,'created_at',NEW.created_at,'last_modified',NEW.last_modified,'deleted',NEW.deleted,
+                     'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER conversations_sync_delete
+AFTER UPDATE ON conversations
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('conversations',NEW.id,'delete',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER conversations_sync_undelete
+AFTER UPDATE ON conversations
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('conversations',NEW.id,'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'root_id',NEW.root_id,'forked_from_message_id',NEW.forked_from_message_id,
+                     'parent_conversation_id',NEW.parent_conversation_id,'character_id',NEW.character_id,'title',NEW.title,
+                     'rating',NEW.rating,'created_at',NEW.created_at,'last_modified',NEW.last_modified,'deleted',NEW.deleted,
+                     'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/*—— sync triggers: character_cards —————————*/
+CREATE TRIGGER character_cards_sync_create
+AFTER INSERT ON character_cards BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('character_cards',CAST(NEW.id AS TEXT),'create',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,'personality',NEW.personality,
+                     'scenario',NEW.scenario,'post_history_instructions',NEW.post_history_instructions,
+                     'first_message',NEW.first_message,'message_example',NEW.message_example,'creator_notes',NEW.creator_notes,
+                     'system_prompt',NEW.system_prompt,'alternate_greetings',NEW.alternate_greetings,'tags',NEW.tags,'creator',NEW.creator,
+                     'character_version',NEW.character_version,'extensions',NEW.extensions,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER character_cards_sync_update
+AFTER UPDATE ON character_cards
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.name IS NOT NEW.name OR
+     OLD.description IS NOT NEW.description OR
+     OLD.personality IS NOT NEW.personality OR
+     OLD.scenario IS NOT NEW.scenario OR
+     OLD.image IS NOT NEW.image OR
+     OLD.post_history_instructions IS NOT NEW.post_history_instructions OR
+     OLD.first_message IS NOT NEW.first_message OR
+     OLD.message_example IS NOT NEW.message_example OR
+     OLD.creator_notes IS NOT NEW.creator_notes OR
+     OLD.system_prompt IS NOT NEW.system_prompt OR
+     OLD.alternate_greetings IS NOT NEW.alternate_greetings OR
+     OLD.tags IS NOT NEW.tags OR
+     OLD.creator IS NOT NEW.creator OR
+     OLD.character_version IS NOT NEW.character_version OR
+     OLD.extensions IS NOT NEW.extensions OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('character_cards',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,'personality',NEW.personality,
+                     'scenario',NEW.scenario,'post_history_instructions',NEW.post_history_instructions,
+                     'first_message',NEW.first_message,'message_example',NEW.message_example,'creator_notes',NEW.creator_notes,
+                     'system_prompt',NEW.system_prompt,'alternate_greetings',NEW.alternate_greetings,'tags',NEW.tags,'creator',NEW.creator,
+                     'character_version',NEW.character_version,'extensions',NEW.extensions,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER character_cards_sync_delete
+AFTER UPDATE ON character_cards
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('character_cards',CAST(NEW.id AS TEXT),'delete',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER character_cards_sync_undelete
+AFTER UPDATE ON character_cards
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('character_cards',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,'personality',NEW.personality,
+                     'scenario',NEW.scenario,'post_history_instructions',NEW.post_history_instructions,
+                     'first_message',NEW.first_message,'message_example',NEW.message_example,'creator_notes',NEW.creator_notes,
+                     'system_prompt',NEW.system_prompt,'alternate_greetings',NEW.alternate_greetings,'tags',NEW.tags,'creator',NEW.creator,
+                     'character_version',NEW.character_version,'extensions',NEW.extensions,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/*—— sync triggers: notes ———————————————*/
+CREATE TRIGGER notes_sync_create
+AFTER INSERT ON notes BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('notes',NEW.id,'create',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'title',NEW.title,'content',NEW.content,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER notes_sync_update
+AFTER UPDATE ON notes
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.title IS NOT NEW.title OR
+     OLD.content IS NOT NEW.content OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('notes',NEW.id,'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'title',NEW.title,'content',NEW.content,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER notes_sync_delete
+AFTER UPDATE ON notes
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('notes',NEW.id,'delete',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER notes_sync_undelete
+AFTER UPDATE ON notes
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('notes',NEW.id,'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'title',NEW.title,'content',NEW.content,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/*—— sync triggers: keyword_collections ————*/
+CREATE TRIGGER keyword_collections_sync_create
+AFTER INSERT ON keyword_collections BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('keyword_collections',CAST(NEW.id AS TEXT),'create',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'name',NEW.name,'parent_id',NEW.parent_id,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER keyword_collections_sync_update
+AFTER UPDATE ON keyword_collections
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.name IS NOT NEW.name OR
+     OLD.parent_id IS NOT NEW.parent_id OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('keyword_collections',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'name',NEW.name,'parent_id',NEW.parent_id,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER keyword_collections_sync_delete
+AFTER UPDATE ON keyword_collections
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('keyword_collections',CAST(NEW.id AS TEXT),'delete',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER keyword_collections_sync_undelete
+AFTER UPDATE ON keyword_collections
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('keyword_collections',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'name',NEW.name,'parent_id',NEW.parent_id,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/*----------------------------------------------------------------
+  Finalise version bump
+----------------------------------------------------------------*/
+UPDATE db_schema_version
+   SET version = 3
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 3;
+"""
 
     _FULL_SCHEMA_SQL_V2 = """
 PRAGMA foreign_keys = ON;
@@ -198,21 +870,19 @@ CREATE TRIGGER IF NOT EXISTS conversations_ai AFTER INSERT ON conversations BEGI
 END;
 
 CREATE TRIGGER IF NOT EXISTS conversations_au -- AFTER UPDATE
-AFTER UPDATE ON conversations 
-WHEN (OLD.title IS NOT NEW.title OR (OLD.title IS NULL AND NEW.title IS NOT NULL) OR (OLD.title IS NOT NULL AND NEW.title IS NULL)) 
-     OR (OLD.deleted IS NOT NEW.deleted)
-BEGIN
-  -- Step 1: Standard DELETE from the FTS table.
-  DELETE FROM conversations_fts WHERE rowid = OLD.rowid;
+AFTER UPDATE ON conversations BEGIN
+  INSERT INTO conversations_fts(conversations_fts, rowid, title)
+  VALUES('delete', old.rowid, old.title);
 
-  -- Step 2: If the new state should be indexed (not deleted and has a title), insert it.
   INSERT INTO conversations_fts(rowid, title)
-    SELECT NEW.rowid, NEW.title
-    WHERE NEW.deleted = 0 AND NEW.title IS NOT NULL;
+  SELECT new.rowid, new.title
+  WHERE new.deleted = 0 AND new.title IS NOT NULL;
 END;
 
-CREATE TRIGGER IF NOT EXISTS conversations_ad AFTER DELETE ON conversations BEGIN
-  DELETE FROM conversations_fts WHERE rowid = old.rowid; 
+CREATE TRIGGER conversations_ad
+AFTER DELETE ON conversations BEGIN
+  INSERT INTO conversations_fts(conversations_fts, rowid, title)
+  VALUES('delete', old.rowid, old.title);
 END;
 -- ========= END SECTION FOR CONVERSATIONS FTS TRIGGERS  ========
 
@@ -244,17 +914,27 @@ USING fts5(
     content='messages',
     content_rowid='rowid' -- FIXED: Changed from 'id' to 'rowid' as messages.id is TEXT
 );
-CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+CREATE TRIGGER messages_ai
+AFTER INSERT ON messages BEGIN
   INSERT INTO messages_fts(rowid, content)
-    VALUES (new.rowid, new.content); -- FIXED: Changed new.id to new.rowid
+  SELECT new.rowid, new.content
+  WHERE new.deleted = 0;
 END;
-CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
-  UPDATE messages_fts
-     SET content = new.content
-   WHERE rowid = old.rowid; -- FIXED: Changed old.id to old.rowid
+
+CREATE TRIGGER messages_au
+AFTER UPDATE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts, rowid, content)
+  VALUES('delete', old.rowid, old.content);
+
+  INSERT INTO messages_fts(rowid, content)
+  SELECT new.rowid, new.content
+  WHERE new.deleted = 0;
 END;
-CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
-  DELETE FROM messages_fts WHERE rowid = old.rowid; -- FIXED: Changed old.id to old.rowid
+
+CREATE TRIGGER messages_ad
+AFTER DELETE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts, rowid, content)
+  VALUES('delete', old.rowid, old.content);
 END;
 
 -- ───────────────────────────────────────────────────────────────────────────
@@ -304,14 +984,27 @@ USING fts5(
     content='keyword_collections',
     content_rowid='id' -- 'id' is INTEGER PK, fine
 );
-CREATE TRIGGER IF NOT EXISTS keyword_collections_ai AFTER INSERT ON keyword_collections BEGIN
-  INSERT INTO keyword_collections_fts(rowid, name) VALUES (new.id, new.name);
+CREATE TRIGGER keyword_collections_ai
+AFTER INSERT ON keyword_collections BEGIN
+  INSERT INTO keyword_collections_fts(rowid, name)
+  SELECT new.id, new.name
+  WHERE new.deleted = 0;
 END;
-CREATE TRIGGER IF NOT EXISTS keyword_collections_au AFTER UPDATE ON keyword_collections BEGIN
-  UPDATE keyword_collections_fts SET name = new.name WHERE rowid = old.id;
+
+CREATE TRIGGER keyword_collections_au
+AFTER UPDATE ON keyword_collections BEGIN
+  INSERT INTO keyword_collections_fts(keyword_collections_fts, rowid, name)
+  VALUES('delete', old.id, old.name);
+
+  INSERT INTO keyword_collections_fts(rowid, name)
+  SELECT new.id, new.name
+  WHERE new.deleted = 0;
 END;
-CREATE TRIGGER IF NOT EXISTS keyword_collections_ad AFTER DELETE ON keyword_collections BEGIN
-  DELETE FROM keyword_collections_fts WHERE rowid = old.id;
+
+CREATE TRIGGER keyword_collections_ad
+AFTER DELETE ON keyword_collections BEGIN
+  INSERT INTO keyword_collections_fts(keyword_collections_fts, rowid, name)
+  VALUES('delete', old.id, old.name);
 END;
 
 -- ───────────────────────────────────────────────────────────────────────────
@@ -336,18 +1029,27 @@ USING fts5(
     content='notes',
     content_rowid='rowid' -- FIXED: 'id' is TEXT PK, changed to 'rowid'
 );
-CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
+CREATE TRIGGER notes_ai
+AFTER INSERT ON notes BEGIN
   INSERT INTO notes_fts(rowid, title, content)
-    VALUES (new.rowid, new.title, new.content); -- FIXED: Use new.rowid
+  SELECT new.rowid, new.title, new.content
+  WHERE new.deleted = 0;
 END;
-CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE ON notes BEGIN
-  UPDATE notes_fts
-     SET title   = new.title,
-         content = new.content
-   WHERE rowid = old.rowid; -- FIXED: Use old.rowid
+
+CREATE TRIGGER notes_au
+AFTER UPDATE ON notes BEGIN
+  INSERT INTO notes_fts(notes_fts, rowid, title, content)
+  VALUES('delete', old.rowid, old.title, old.content);
+
+  INSERT INTO notes_fts(rowid, title, content)
+  SELECT new.rowid, new.title, new.content
+  WHERE new.deleted = 0;
 END;
-CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
-  DELETE FROM notes_fts WHERE rowid = old.rowid; -- FIXED: Use old.rowid
+
+CREATE TRIGGER notes_ad
+AFTER DELETE ON notes BEGIN
+  INSERT INTO notes_fts(notes_fts, rowid, title, content)
+  VALUES('delete', old.rowid, old.title, old.content);
 END;
 
 -- ───────────────────────────────────────────────────────────────────────────
@@ -1013,11 +1715,34 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
             raise SchemaError(f"Could not determine schema version for '{self._SCHEMA_NAME}': {e}") from e
 
     # FIXME - Fixup to use f-strings; ya.
+    def _apply_schema_v3(self, conn: sqlite3.Connection): # Renamed from _apply_schema_v1
+        logger.info(f"Applying schema Version {self._CURRENT_SCHEMA_VERSION} for '{self._SCHEMA_NAME}' to DB: {self.db_path_str}...")
+        try:
+            # Using conn.executescript directly as it manages its own transaction
+            #conn.executescript(self._FULL_SCHEMA_SQL_V3)
+            conn.executescript(self._FULL_SCHEMA_SQL_V3) # DEBUGTEST
+            logger.debug(f"[{self._SCHEMA_NAME} V{self._CURRENT_SCHEMA_VERSION}] Full schema script executed.")
+
+            final_version = self._get_db_version(conn)
+            if final_version != self._CURRENT_SCHEMA_VERSION:
+                raise SchemaError(
+                    f"[{self._SCHEMA_NAME} {self._CURRENT_SCHEMA_VERSION} Schema version update check failed. Expected 3, got: {final_version}")
+            logger.info(f"[{self._SCHEMA_NAME} {self._CURRENT_SCHEMA_VERSION}] Schema {self._CURRENT_SCHEMA_VERSION} applied and version confirmed for DB: {self.db_path_str}.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME} V3] Schema application failed: {e}", exc_info=True)
+            raise SchemaError(f"DB schema V3 setup failed for '{self._SCHEMA_NAME}': {e}") from e
+        except SchemaError:
+            raise
+        except Exception as e:
+            logger.error(f"[{self._SCHEMA_NAME} V3] Unexpected error during schema V3 application: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error applying schema V3 for '{self._SCHEMA_NAME}': {e}") from e
+
     def _apply_schema_v2(self, conn: sqlite3.Connection): # Renamed from _apply_schema_v1
         logger.info(f"Applying schema Version {self._CURRENT_SCHEMA_VERSION} for '{self._SCHEMA_NAME}' to DB: {self.db_path_str}...")
         try:
             # Using conn.executescript directly as it manages its own transaction
-            conn.executescript(self._FULL_SCHEMA_SQL_V2)
+            #conn.executescript(self._FULL_SCHEMA_SQL_V2)
+            conn.executescript(self._FULL_SCHEMA_SQL_V2) # DEBUGTEST
             logger.debug(f"[{self._SCHEMA_NAME} V{self._CURRENT_SCHEMA_VERSION}] Full schema script executed.")
 
             final_version = self._get_db_version(conn)
@@ -1052,7 +1777,7 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
                     f"Database schema '{self._SCHEMA_NAME}' version ({current_db_version}) is newer than supported by code ({target_version}). Aborting.")
 
             if current_db_version == 0:
-                self._apply_schema_v2(conn)
+                self._apply_schema_v3(conn)
             # Add future migrations here:
             # if current_db_version == 1: self._migrate_schema_v1_to_v2(conn); current_db_version = 2
             elif current_initial_version < target_version:
