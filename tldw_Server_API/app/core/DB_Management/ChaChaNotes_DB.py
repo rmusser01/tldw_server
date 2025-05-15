@@ -127,6 +127,7 @@ CREATE TRIGGER IF NOT EXISTS character_cards_ai AFTER INSERT ON character_cards 
   INSERT INTO character_cards_fts(rowid, name, description, personality, scenario, system_prompt)
     VALUES (new.id, new.name, new.description, new.personality, new.scenario, new.system_prompt);
 END;
+/*
 CREATE TRIGGER IF NOT EXISTS character_cards_au AFTER UPDATE ON character_cards BEGIN
   UPDATE character_cards_fts
      SET name        = new.name,
@@ -136,6 +137,7 @@ CREATE TRIGGER IF NOT EXISTS character_cards_au AFTER UPDATE ON character_cards 
          system_prompt = new.system_prompt
    WHERE rowid = new.id;
 END;
+*/
 CREATE TRIGGER IF NOT EXISTS character_cards_ad AFTER DELETE ON character_cards BEGIN
   DELETE FROM character_cards_fts WHERE rowid = old.id; 
 END;
