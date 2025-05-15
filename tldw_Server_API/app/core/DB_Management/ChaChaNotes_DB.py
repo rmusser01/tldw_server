@@ -117,29 +117,36 @@ CREATE VIRTUAL TABLE IF NOT EXISTS character_cards_fts
 USING fts5(
     name,
     description,
-    personality,
+    -- personality, -- REMOVED from FTS indexing
     scenario,
     system_prompt,
     content='character_cards',
-    content_rowid='id' -- 'id' is INTEGER PK, so this is fine
+    content_rowid='id'
 );
+
 CREATE TRIGGER IF NOT EXISTS character_cards_ai AFTER INSERT ON character_cards BEGIN
-  INSERT INTO character_cards_fts(rowid, name, description, personality, scenario, system_prompt)
-    VALUES (new.id, new.name, new.description, new.personality, new.scenario, new.system_prompt);
+  INSERT INTO character_cards_fts(rowid, name, description, scenario, system_prompt) -- personality removed
+    SELECT new.id, new.name, new.description, new.scenario, new.system_prompt -- personality removed
+    WHERE new.deleted = 0;
 END;
-/*
-CREATE TRIGGER IF NOT EXISTS character_cards_au AFTER UPDATE ON character_cards BEGIN
-  UPDATE character_cards_fts
-     SET name        = new.name,
-         description = new.description,
-         personality = new.personality,
-         scenario    = new.scenario,
-         system_prompt = new.system_prompt
-   WHERE rowid = new.id;
+
+CREATE TRIGGER IF NOT EXISTS character_cards_au AFTER UPDATE ON character_cards
+WHEN
+    OLD.name IS NOT NEW.name OR
+    OLD.description IS NOT NEW.description OR
+    -- OLD.personality IS NOT NEW.personality OR -- Condition removed
+    OLD.scenario IS NOT NEW.scenario OR
+    OLD.system_prompt IS NOT NEW.system_prompt OR
+    OLD.deleted IS NOT NEW.deleted
+BEGIN
+    DELETE FROM character_cards_fts WHERE rowid = OLD.id;
+    INSERT INTO character_cards_fts(rowid, name, description, scenario, system_prompt) -- personality removed
+        SELECT NEW.id, NEW.name, NEW.description, NEW.scenario, NEW.system_prompt -- personality removed
+        WHERE NEW.deleted = 0;
 END;
-*/
+
 CREATE TRIGGER IF NOT EXISTS character_cards_ad AFTER DELETE ON character_cards BEGIN
-  DELETE FROM character_cards_fts WHERE rowid = old.id; 
+  DELETE FROM character_cards_fts WHERE rowid = old.id;
 END;
 
 -- ───────────────────────────────────────────────────────────────────────────
@@ -1228,17 +1235,21 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
 
     def update_character_card(self, character_id: int, card_data: Dict[str, Any], expected_version: int) -> bool:
         logger.debug(
-            f"Starting update_character_card for ID {character_id}, expected_version {expected_version} (SEQUENTIAL STRATEGY)")
+            f"Starting update_character_card for ID {character_id}, expected_version {expected_version} (SINGLE UPDATE STRATEGY)")
+
+        # If card_data is empty, treat as a no-op as per original behavior.
+        # No version check, no transaction, no version bump.
         if not card_data:
-            logger.info(f"No data provided for character card update for ID {character_id}. No-op.")
-            return True  # Consistent with original behavior of no fields to update
+            logger.info(f"No data provided in card_data for character card update ID {character_id}. No-op.")
+            return True
 
         now = self._get_current_utc_timestamp_iso()
 
         try:
             with self.transaction() as conn:
                 logger.debug(f"Transaction started. Connection object: {id(conn)}")
-                # Initial version check against the passed-in expected_version
+
+                # Initial version check. This also confirms the record exists and is not deleted.
                 current_db_version_initial_check = self._get_current_db_version(conn, "character_cards", "id",
                                                                                 character_id)
                 logger.debug(
@@ -1250,101 +1261,94 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
                         entity="character_cards", entity_id=character_id
                     )
 
-                fields_actually_updated_in_db = []
-                current_expected_version_for_step = expected_version
-                final_actual_version_in_db = expected_version
+                set_clauses_sql = []
+                params_for_set_clause = []
+                fields_updated_log = []  # For logging which fields from payload were processed
 
-                # Define the order of updates if necessary, or process as they come
-                # For simplicity, let's process based on a predefined sensible order or just iterate card_data
+                # Define fields that can be directly updated and JSON fields
+                updatable_direct_fields = [
+                    "name", "description", "personality", "scenario", "image",
+                    "post_history_instructions", "first_message", "message_example",
+                    "creator_notes", "system_prompt", "creator", "character_version"
+                ]
+                # self._CHARACTER_CARD_JSON_FIELDS is already defined in your class
 
-                # Iterate through a copy of keys as we might modify card_data or for clarity
-                keys_to_process = list(card_data.keys())
-
-                for key in keys_to_process:
-                    if key in ['id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
-                        continue  # Skip non-updatable internal fields by design
-
-                    value = card_data[key]
-
-                    # Prepare for a potential update
-                    next_version_for_this_field_update = current_expected_version_for_step + 1
-
-                    field_specific_query_sql = ""
-                    field_specific_params = ()
-
+                for key, value in card_data.items():
                     if key in self._CHARACTER_CARD_JSON_FIELDS:
-                        field_specific_query_sql = f"UPDATE character_cards SET {key} = ?, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
-                        json_value = self._ensure_json_string(value)
-                        field_specific_params = (json_value, now, next_version_for_this_field_update, self.client_id,
-                                                 character_id, current_expected_version_for_step)
-                    elif key in ["name", "description", "personality", "scenario", "image",
-                                 "post_history_instructions", "first_message", "message_example",
-                                 "creator_notes", "system_prompt", "creator", "character_version"]:
-                        field_specific_query_sql = f"UPDATE character_cards SET {key} = ?, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
-                        field_specific_params = (value, now, next_version_for_this_field_update, self.client_id,
-                                                 character_id, current_expected_version_for_step)
-                    else:
+                        set_clauses_sql.append(f"{key} = ?")
+                        params_for_set_clause.append(self._ensure_json_string(value))
+                        fields_updated_log.append(key)
+                    elif key in updatable_direct_fields:
+                        set_clauses_sql.append(f"{key} = ?")
+                        params_for_set_clause.append(value)
+                        fields_updated_log.append(key)
+                    elif key not in ['id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
+                        # Log if a key in card_data is not recognized as updatable, but don't error.
+                        # This matches the original sequential strategy's behavior of skipping unknown fields.
                         logger.warning(
-                            f"Skipping unknown or non-updatable field '{key}' in update_character_card (sequential).")
-                        continue  # Skip to next item
+                            f"Skipping unknown or non-updatable field '{key}' in update_character_card payload.")
 
-                    logger.debug(f"Executing SEQUENTIAL update for field '{key}': {field_specific_query_sql}")
-                    logger.debug(f"Params: {field_specific_params}")
-                    cursor = conn.execute(field_specific_query_sql, field_specific_params)
-                    logger.debug(f"Field '{key}' update rowcount: {cursor.rowcount}")
+                # If expected_version check passed, we always update metadata (last_modified, version, client_id),
+                # effectively "touching" the record and bumping its version, even if fields_updated_log is empty
+                # (meaning card_data might have contained only non-updatable fields like 'id', or only unknown fields).
+                next_version_val = expected_version + 1
 
-                    if cursor.rowcount == 0:
-                        # This could happen if the version changed due to another concurrent update
-                        # after the initial check but before this specific field's update.
-                        # Or if the record was deleted.
-                        # For simplicity in this fix, we'll consider it a conflict.
-                        # A more nuanced check could re-verify the record state here.
-                        raise ConflictError(
-                            f"Sequential update for field '{key}' failed for char ID {character_id}, expected version {current_expected_version_for_step}. Row may have been modified or deleted.",
-                            entity="character_cards", entity_id=character_id)
+                # Add metadata fields to be updated
+                set_clauses_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+                params_for_set_clause.extend([now, next_version_val, self.client_id])
 
-                    fields_actually_updated_in_db.append(key)
-                    current_expected_version_for_step = next_version_for_this_field_update  # Version for the next field update
-                    final_actual_version_in_db = next_version_for_this_field_update
+                # Construct the final query
+                # The set_clauses_sql will always have at least the metadata updates if this point is reached.
+                final_update_query = f"UPDATE character_cards SET {', '.join(set_clauses_sql)} WHERE id = ? AND version = ? AND deleted = 0"
 
-                # If card_data was not empty, but no updatable fields were found (e.g., only 'id' was passed)
-                # or if all fields were processed and updated_any_field is still false (meaning card_data only contained non-target fields)
-                if not fields_actually_updated_in_db and card_data:
-                    # This means card_data had keys, but none were recognized for update.
-                    # Still, the initial version check passed, so we should update metadata.
-                    logger.info(
-                        f"No specific character fields updated for ID {character_id}, but metadata (version/timestamp) will be updated.")
-                    next_version_for_meta_update = current_expected_version_for_step + 1
-                    meta_query = "UPDATE character_cards SET last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
-                    meta_params = (now, next_version_for_meta_update, self.client_id, character_id,
-                                   current_expected_version_for_step)
-                    cursor_meta = conn.execute(meta_query, meta_params)
-                    if cursor_meta.rowcount == 0:
-                        raise ConflictError(
-                            f"Metadata-only update failed for char ID {character_id}, expected version {current_expected_version_for_step}.",
-                            entity="character_cards", entity_id=character_id)
-                    final_actual_version_in_db = next_version_for_meta_update
+                # WHERE clause parameters
+                where_params = [character_id, expected_version]
+                final_params = tuple(params_for_set_clause + where_params)
 
-                if not fields_actually_updated_in_db and not card_data:  # Should have been caught by initial check if card_data is None/empty
-                    logger.info(
-                        f"No data in card_data to update for character_id {character_id}. Update considered successful as no-op.")
-                    return True
+                logger.debug(f"Executing SINGLE character update query: {final_update_query}")
+                logger.debug(f"Params: {final_params}")
 
+                cursor = conn.execute(final_update_query, final_params)
+                logger.debug(f"Character Update executed, rowcount: {cursor.rowcount}")
+
+                if cursor.rowcount == 0:
+                    # This could happen if a concurrent modification occurred between the initial version check and this UPDATE SQL.
+                    # Re-check the record's state to provide a more specific error.
+                    check_again_cursor = conn.execute("SELECT version, deleted FROM character_cards WHERE id = ?",
+                                                      (character_id,))
+                    final_state = check_again_cursor.fetchone()
+
+                    if not final_state:
+                        msg = f"Character card ID {character_id} disappeared before update completion (expected v{expected_version})."
+                    elif final_state['deleted']:
+                        msg = f"Character card ID {character_id} was soft-deleted concurrently (expected v{expected_version} for update)."
+                    elif final_state[
+                        'version'] != expected_version:  # Version changed from what we expected for the WHERE clause
+                        msg = f"Character card ID {character_id} version changed to {final_state['version']} concurrently (expected v{expected_version} for update's WHERE clause)."
+                    else:  # This case implies the record was found with the correct version and not deleted, yet rowcount was 0. Unlikely.
+                        msg = f"Update for character card ID {character_id} (expected v{expected_version}) affected 0 rows for an unknown reason after passing initial checks."
+                    raise ConflictError(msg, entity="character_cards", entity_id=character_id)
+
+                log_msg_fields_updated = f"Fields from payload processed: {fields_updated_log if fields_updated_log else 'None'}."
                 logger.info(
-                    f"Updated character card ID {character_id} (SEQUENTIAL) from client-expected version {expected_version} to final DB version {final_actual_version_in_db}. Fields updated: {fields_actually_updated_in_db if fields_actually_updated_in_db else 'None (only metadata if applicable)'}.")
+                    f"Updated character card ID {character_id} (SINGLE UPDATE) from client-expected version {expected_version} to final DB version {next_version_val}. {log_msg_fields_updated}")
                 return True
 
-        except sqlite3.DatabaseError as e:
-            logger.critical(f"DATABASE CORRUPTION DETECTED during update_character_card (SEQUENTIAL STRATEGY)!")
+        except sqlite3.DatabaseError as e:  # Catching this specifically for robustness
+            logger.critical(f"DATABASE ERROR during update_character_card (SINGLE UPDATE STRATEGY)!")
             logger.critical(f"Error details: {str(e)}")
-            # It's hard to know which exact query caused it if it's deferred until commit
-            raise CharactersRAGDBError(f"Database error during sequential update: {e}") from e
-        except ConflictError:  # Re-raise ConflictErrors so test can catch them
-            logger.warning(f"ConflictError during update_character_card for ID {character_id}.", exc_info=True)
+            raise CharactersRAGDBError(f"Database error during single update: {e}") from e
+        except ConflictError:  # Re-raise ConflictErrors from _get_current_db_version or manual checks
+            logger.warning(f"ConflictError during update_character_card for ID {character_id}.",
+                           exc_info=False)  # exc_info=True if needed
             raise
-        except Exception as e:
-            logger.error(f"Unexpected error in update_character_card (SEQUENTIAL STRATEGY) for ID {character_id}: {e}",
-                         exc_info=True)
+        except InputError:  # Should not happen if initial `if not card_data:` check is there.
+            logger.warning(f"InputError during update_character_card for ID {character_id}.", exc_info=False)
+            raise
+        except Exception as e:  # Catch any other unexpected Python errors
+            logger.error(
+                f"Unexpected Python error in update_character_card (SINGLE UPDATE STRATEGY) for ID {character_id}: {e}",
+                exc_info=True)
             raise CharactersRAGDBError(f"Unexpected error updating character card: {e}") from e
 
     def soft_delete_character_card(self, character_id: int, expected_version: int) -> bool:
