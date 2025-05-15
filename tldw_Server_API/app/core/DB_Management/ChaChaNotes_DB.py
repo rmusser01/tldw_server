@@ -115,38 +115,50 @@ CREATE TABLE IF NOT EXISTS character_cards (
  
 CREATE VIRTUAL TABLE IF NOT EXISTS character_cards_fts
 USING fts5(
-    name,
-    description,
-    -- personality, -- REMOVED from FTS indexing
-    scenario,
-    system_prompt,
-    content='character_cards',
-    content_rowid='id'
+  name,
+  description,
+  personality,          -- safely indexed again
+  scenario,
+  system_prompt,
+  content = 'character_cards',
+  content_rowid = 'id'
 );
 
-CREATE TRIGGER IF NOT EXISTS character_cards_ai AFTER INSERT ON character_cards BEGIN
-  INSERT INTO character_cards_fts(rowid, name, description, scenario, system_prompt) -- personality removed
-    SELECT new.id, new.name, new.description, new.scenario, new.system_prompt -- personality removed
-    WHERE new.deleted = 0;
+CREATE TRIGGER IF NOT EXISTS character_cards_ai
+AFTER INSERT ON character_cards BEGIN
+  INSERT INTO character_cards_fts( rowid,
+                                   name, description, personality,
+                                   scenario, system_prompt )
+  SELECT new.id, new.name, new.description, new.personality,
+         new.scenario, new.system_prompt
+  WHERE new.deleted = 0;
 END;
 
-CREATE TRIGGER IF NOT EXISTS character_cards_au AFTER UPDATE ON character_cards
-WHEN
-    OLD.name IS NOT NEW.name OR
-    OLD.description IS NOT NEW.description OR
-    -- OLD.personality IS NOT NEW.personality OR -- Condition removed
-    OLD.scenario IS NOT NEW.scenario OR
-    OLD.system_prompt IS NOT NEW.system_prompt OR
-    OLD.deleted IS NOT NEW.deleted
-BEGIN
-    DELETE FROM character_cards_fts WHERE rowid = OLD.id;
-    INSERT INTO character_cards_fts(rowid, name, description, scenario, system_prompt) -- personality removed
-        SELECT NEW.id, NEW.name, NEW.description, NEW.scenario, NEW.system_prompt -- personality removed
-        WHERE NEW.deleted = 0;
+CREATE TRIGGER IF NOT EXISTS character_cards_au
+AFTER UPDATE ON character_cards BEGIN
+  /* remove the old revision from the index */
+  INSERT INTO character_cards_fts( character_cards_fts, rowid,
+                                   name, description, personality,
+                                   scenario, system_prompt )
+  VALUES( 'delete', old.id, old.name, old.description, old.personality,
+          old.scenario, old.system_prompt );
+
+  /* add the new revision if it is not a tombstone */
+  INSERT INTO character_cards_fts( rowid,
+                                   name, description, personality,
+                                   scenario, system_prompt )
+  SELECT new.id, new.name, new.description, new.personality,
+         new.scenario, new.system_prompt
+  WHERE new.deleted = 0;
 END;
 
-CREATE TRIGGER IF NOT EXISTS character_cards_ad AFTER DELETE ON character_cards BEGIN
-  DELETE FROM character_cards_fts WHERE rowid = old.id;
+CREATE TRIGGER IF NOT EXISTS character_cards_ad
+AFTER DELETE ON character_cards BEGIN
+  INSERT INTO character_cards_fts( character_cards_fts, rowid,
+                                   name, description, personality,
+                                   scenario, system_prompt )
+  VALUES( 'delete', old.id, old.name, old.description, old.personality,
+          old.scenario, old.system_prompt );
 END;
 
 -- ───────────────────────────────────────────────────────────────────────────
