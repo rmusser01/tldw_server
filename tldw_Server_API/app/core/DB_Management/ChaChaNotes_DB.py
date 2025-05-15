@@ -905,17 +905,21 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
                     if not conn.in_transaction:  # Re-check after potential rollback
                         mode_row = conn.execute("PRAGMA journal_mode;").fetchone()
                         if mode_row and mode_row[0].lower() == 'wal':
-                            logger.debug(
-                                f"Attempting WAL checkpoint (TRUNCATE) before closing {self.db_path_str} on thread {threading.get_ident()}.")
-                            conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
-                            logger.debug(f"WAL checkpoint TRUNCATE executed for {self.db_path_str}.")
-
+                            try:
+                                logger.debug(
+                                    f"Attempting WAL checkpoint (TRUNCATE) before closing {self.db_path_str} on thread {threading.get_ident()}.")
+                                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                                logger.debug(f"WAL checkpoint TRUNCATE executed for {self.db_path_str}.")
+                            except sqlite3.Error as cp_err:
+                                logger.warning(f"WAL checkpoint failed for {self.db_path_str}: {cp_err}")
                 conn.close()
                 logger.debug(f"Closed connection for thread {threading.get_ident()} to {self.db_path_str}.")
             except sqlite3.Error as e:  # Catches errors from execute, checkpoint, or close
                 logger.warning(
                     f"Error during SQLite connection close/checkpoint for {self.db_path_str} on thread {threading.get_ident()}: {e}")
             finally:
+                # This ensures that the reference is cleared from threading.local
+                # even if conn.close() itself raised an exception.
                 if hasattr(self._local, 'conn'):
                     self._local.conn = None
 
@@ -2491,7 +2495,7 @@ UPDATE db_schema_version SET version = 2 WHERE schema_name = 'rag_char_chat_sche
 
                 cursor = conn.execute(query, params)
 
-                if cursor.rowcount == .0:
+                if cursor.rowcount == 0:
                     check_again_cursor = conn.execute("SELECT version, deleted FROM notes WHERE id = ?", (note_id,))
                     final_state = check_again_cursor.fetchone()
                     if not final_state:
