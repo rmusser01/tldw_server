@@ -112,8 +112,6 @@ CREATE TABLE IF NOT EXISTS character_cards (
     client_id                 TEXT      NOT NULL DEFAULT 'unknown',
     version                   INTEGER   NOT NULL DEFAULT 1
 );
-
--- =========== TEMPORARILY COMMENT OUT CHARACTER_CARDS FTS TABLE AND FTS TRIGGERS ============
  
 CREATE VIRTUAL TABLE IF NOT EXISTS character_cards_fts
 USING fts5(
@@ -463,7 +461,6 @@ BEGIN
     );
 END;
 
-/* -- TEMPORARILY COMMENT OUT THIS TRIGGER FOR DEBUGGING --
 CREATE TRIGGER IF NOT EXISTS conversations_sync_update
 AFTER UPDATE ON conversations
 WHEN OLD.deleted = NEW.deleted AND (
@@ -488,7 +485,6 @@ BEGIN
        )
     );
 END;
-*/ -- END TEMPORARY COMMENT OUT
 
 CREATE TRIGGER IF NOT EXISTS conversations_sync_delete
 AFTER UPDATE ON conversations
