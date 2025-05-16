@@ -1,0 +1,48 @@
+<!-- Chat Completions Tab -->
+<div id="tabChatCompletions" class="tab-content">
+    <div class="endpoint-section" id="createChatCompletion">
+        <h2>POST /api/v1/chat/completions - Create Chat Completion</h2>
+        <div class="form-group">
+            <label for="chatCompletions_payload">Payload (ChatCompletionRequest JSON):</label>
+            <textarea id="chatCompletions_payload" style="min-height: 250px;">{
+"api_provider": "openai",
+"model": "gpt-3.5-turbo",
+"messages": [
+    {
+        "role": "system",
+        "content": "You are a helpful assistant."
+    },
+    {
+        "role": "user",
+        "content": "Hello! Can you tell me a joke?"
+    }
+],
+"temperature": 0.7,
+"max_tokens": 150,
+"top_p": 1.0,
+"stream": false,
+"seed": null,
+"stop": null,
+"tools": null,
+"tool_choice": null,
+"response_format": null,
+"frequency_penalty": 0,
+"presence_penalty": 0,
+"logit_bias": null,
+"logprobs": null,
+"top_logprobs": null,
+"minp": null,
+"topk": null
+}</textarea>
+            <small>
+                Set <code>stream: true</code> to test streaming. API key for provider is configured server-side.
+                <br>Valid <code>api_provider</code> values (examples, check server config): openai, anthropic, gemini, cohere, groq, local-llm, llama.cpp, ooba, tabbyapi, kobold.
+            </small>
+        </div>
+        <button class="api-button" onclick="handleChatCompletion('createChatCompletion')">Send Request</button>
+        <h3>cURL Command:</h3>
+        <pre id="createChatCompletion_curl">---</pre>
+        <h3>Response (or Stream):</h3>
+        <pre id="createChatCompletion_response">---</pre>
+    </div>
+</div>

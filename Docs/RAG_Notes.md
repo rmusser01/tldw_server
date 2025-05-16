@@ -14,7 +14,7 @@ https://arxiv.org/html/2503.21460v1
 https://github.com/huggingface/yourbench
 https://arxiv.org/pdf/2401.17043
 https://arxiv.org/pdf/2502.14802
-
+https://github.com/hzy312/knowledge-r1
 Unsorted
 https://ai.gopubby.com/8-common-mistakes-in-vector-search-and-how-to-avoid-them-e48d849c23f8
 https://arxiv.org/pdf/2501.11551v4

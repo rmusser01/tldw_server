@@ -6,6 +6,9 @@
 3. [References](#references)
 
 
+Evals
+  https://arxiv.org/abs/2505.06120
+  https://github.com/microsoft/lost_in_conversation
 https://huggingface.co/spaces/LISA-Kadi/LISA-demo/tree/main
 https://arxiv.org/abs/2412.07965
 https://arxiv.org/abs/2501.08292

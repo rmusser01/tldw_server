@@ -1201,6 +1201,15 @@ def load_and_log_configs():
         logging.error(f"Error loading config: {str(e)}")
         return None
 
+RAG_SEARCH_CONFIG = {
+    "fts_top_k": 10,
+    "vector_top_k": 10,
+    "web_vector_top_k": 10,
+    "llm_context_document_limit": 10,
+    "chat_context_limit": 10,
+}
+
+
 
 global_api_endpoints = ["anthropic", "cohere", "google", "groq", "openai", "huggingface", "openrouter", "deepseek", "mistral", "custom_openai_api", "custom_openai_api_2", "llama", "ollama", "ooba", "kobold", "tabby", "vllm", "aphrodite"]
 

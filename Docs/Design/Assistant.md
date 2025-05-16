@@ -14,8 +14,8 @@ https://github.com/kortix-ai/suna
 https://github.com/dyad-sh/dyad
 https://github.com/homanmirgolbabaee/arxiv-wizard-search?tab=readme-ov-file#-arxiv-research-assistant
 https://www.youtube.com/watch?v=D7_ipDqhtwk
-
-
+https://chatboxai.app/en
+https://github.com/camel-ai/camel
 
 
 
