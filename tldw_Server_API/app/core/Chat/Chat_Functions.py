@@ -50,6 +50,136 @@ def approximate_token_count(history):
         logging.error(f"Error calculating token count: {str(e)}")
         return 0
 
+# FIXME - Validate below
+# 1. Dispatch table for handler functions
+API_CALL_HANDLERS = {
+    'openai': chat_with_openai,
+    'anthropic': chat_with_anthropic,
+    'cohere': chat_with_cohere,
+    'groq': chat_with_groq,
+    'openrouter': chat_with_openrouter,
+    'deepseek': chat_with_deepseek,
+    'mistral': chat_with_mistral,
+    'google': chat_with_google,
+    'huggingface': chat_with_huggingface,
+    'llama.cpp': chat_with_llama,
+    'kobold': chat_with_kobold,
+    'ooba': chat_with_oobabooga,
+    'tabbyapi': chat_with_tabbyapi,
+    'vllm': chat_with_vllm,
+    'local-llm': chat_with_local_llm,
+    'ollama': chat_with_ollama,
+    'aphrodite': chat_with_aphrodite,
+    'custom-openai-api': chat_with_custom_openai,
+    'custom-openai-api-2': chat_with_custom_openai_2,
+}
+
+# 2. Parameter mapping for each provider
+# Maps generic chat_api_call param name to provider-specific param name
+PROVIDER_PARAM_MAP = {
+    'openai': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
+        'maxp': 'maxp', 'model': 'model'
+        # Note: OpenAI's chat_with_openai internally handles 'maxp' as 'top_p'
+    },
+    'anthropic': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
+        'model': 'model', 'topp': 'topp', 'topk': 'topk'
+    },
+    'cohere': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
+        'model': 'model', 'topp': 'topp', 'topk': 'topk'
+    },
+    'groq': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
+        'maxp': 'maxp', 'model':'model' # Groq also uses top_p, handled by chat_with_groq
+    },
+    'openrouter': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
+        'topp': 'top_p', 'topk': 'top_k', 'minp': 'minp', 'model':'model'
+    },
+    'deepseek': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
+        'topp': 'topp', 'model':'model'
+    },
+    'mistral': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
+        'topp': 'topp', 'model': 'model'
+    },
+    'google': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
+        'topp': 'topp', 'topk': 'topk', 'model':'model'
+    },
+    'huggingface': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
+        'model':'model'
+    },
+    'llama.cpp': { # Has api_url as a positional argument which needs special handling if not None
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt',
+        'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
+        'topp': 'top_p', 'topk': 'top_k', 'minp': 'min_p', 'model':'model',
+        # 'api_url' is None by default in the original, letting the function use config.
+        # If chat_api_call were to support overriding it, this map would need adjustment or
+        # the handler would need to be smarter.
+    },
+    'kobold': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_input',
+        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
+        'topp': 'top_p', 'topk': 'top_k', 'model':'model'
+    },
+    'ooba': { # api_url also a consideration like llama.cpp
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt',
+        'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
+        'topp': 'top_p', 'model':'model'
+    },
+    'tabbyapi': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_input',
+        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
+        'topp': 'top_p', 'topk': 'top_k', 'minp': 'min_p', 'model':'model'
+    },
+    'vllm': { # vllm_api_url consideration
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_input',
+        'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
+        'topp': 'topp', 'topk': 'topk', 'minp': 'minp', 'model': 'model'
+    },
+    'local-llm': {
+        'input_data': 'input_data', 'prompt': 'custom_prompt_arg', 'temp': 'temp',
+        'system_message': 'system_message', 'streaming': 'streaming',
+        'topp': 'top_p', 'topk': 'top_k', 'minp': 'min_p', 'model':'model'
+        # No api_key for local-llm usually, if there is one, add to chat_api_call args
+    },
+    'ollama': { # api_url consideration
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt',
+        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
+        'topp': 'top_p', 'model': 'model'
+    },
+    'aphrodite': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt',
+        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
+        'topp': 'topp', 'topk': 'topk', 'minp': 'minp', 'model': 'model'
+    },
+    'custom-openai-api': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
+        'maxp': 'maxp', 'minp':'minp', 'topk':'topk', 'model': 'model'
+    },
+    'custom-openai-api-2': {
+        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
+        'model': 'model'
+        # Does not take maxp, minp, topk per original comments
+    },
+    # Add other providers here
+}
 
 def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp=None, system_message=None, streaming=None, minp=None, maxp=None, model=None, topk=None, topp=None):
     """
@@ -86,258 +216,44 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
         else:
              logging.info(f"Debug - Chat API Call - API Key: Not Provided")
 
-        # --- Routing Logic (Calls to backend functions) ---
-        # The backend functions (chat_with_...) are now expected to raise exceptions
-        # (like requests.exceptions.HTTPError, SDK errors, or potentially our custom ones)
-        # on failure.
-        if endpoint_lower == 'openai':
-            response = chat_with_openai(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt' to 'custom_prompt_arg'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming,
-                maxp=maxp, # OpenAI uses 'top_p' internally, handled by chat_with_openai
-                model=model
-            )
-
-        elif endpoint_lower == 'anthropic':
-            # No need to load config here, let chat_with_anthropic handle it
-            response = chat_with_anthropic(
-                api_key=api_key,
-                input_data=input_data,
-                model=model,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                system_prompt=system_message, # Map 'system_message'
-                streaming=streaming,
-                temp=temp,
-                topp=topp, 
-                topk=topk
-                # chat_with_anthropic handles retries internally
-            )
-
-        elif endpoint_lower == "cohere":
-            response = chat_with_cohere(
-                api_key=api_key,
-                input_data=input_data,
-                model=model,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                system_prompt=system_message, # Map 'system_message'
-                temp=temp,
-                streaming=streaming,
-                topp=topp, 
-                topk=topk
-            )
-
-        elif endpoint_lower == "groq":
-            response = chat_with_groq(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming,
-                maxp=maxp # Groq uses 'top_p' internally, handled by chat_with_groq
-            )
-
-        elif endpoint_lower == "openrouter":
-            response = chat_with_openrouter(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming,
-                top_p=topp, # Map 'topp' to 'top_p'
-                top_k=topk, # Map 'topk' to 'top_k'
-                minp=minp  # Pass 'minp'
-            )
-
-        elif endpoint_lower == "deepseek":
-            response = chat_with_deepseek(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming,
-                topp=topp 
-            )
-
-        elif endpoint_lower == "mistral":
-            response = chat_with_mistral(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming,
-                topp=topp, 
-                model=model
-            )
-
-        elif endpoint_lower == "google":
-            response = chat_with_google(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming,
-                topp=topp, 
-                topk=topk
-            )
-
-        elif endpoint_lower == "huggingface":
-            response = chat_with_huggingface(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                system_prompt=system_message, # Map 'system_message'
-                temp=temp,
-                streaming=streaming
-            )
-
-        elif endpoint_lower == "llama.cpp":
-             # chat_with_llama expects api_url as 4th arg, pass None to use config default
-            response = chat_with_llama(
-                input_data=input_data,
-                custom_prompt=prompt, # Map 'prompt' to 'custom_prompt'
-                temp=temp,
-                api_url=None, # Let the function load from config
-                api_key=api_key,
-                system_prompt=system_message, # Map 'system_message'
-                streaming=streaming,
-                top_k=topk, # Map 'topk'
-                top_p=topp, # Map 'topp'
-                min_p=minp  # Map 'minp'
-            )
-
-        elif endpoint_lower == "kobold":
-            response = chat_with_kobold(
-                input_data=input_data,
-                api_key=api_key,
-                custom_prompt_input=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message, # Pass system_message
-                streaming=streaming,
-                top_k=topk, # Map 'topk'
-                top_p=topp # Map 'topp'
-            )
-
-        elif endpoint_lower == "ooba":
-             # chat_with_oobabooga expects api_url as 5th arg, pass None
-            response = chat_with_oobabooga(
-                input_data=input_data,
-                api_key=api_key,
-                custom_prompt=prompt, # Map 'prompt'
-                system_prompt=system_message, # Map 'system_message'
-                api_url=None, # Let the function load from config
-                streaming=streaming,
-                temp=temp,
-                top_p=topp # Map 'topp'
-            )
-
-        elif endpoint_lower == "tabbyapi":
-            response = chat_with_tabbyapi(
-                input_data=input_data,
-                custom_prompt_input=prompt, # Map 'prompt'
-                system_message=system_message,
-                api_key=api_key, # Pass api_key
-                temp=temp,
-                streaming=streaming, # Pass streaming
-                top_k=topk, # Pass topk
-                top_p=topp, # Pass topp
-                min_p=minp # Pass minp
-            )
-
-        elif endpoint_lower == "vllm":
-             # chat_with_vllm expects api_url as 4th arg, pass None
-            response = chat_with_vllm(
-                input_data=input_data,
-                custom_prompt_input=prompt, # Map 'prompt'
-                api_key=api_key,
-                vllm_api_url=None, # Let the function load from config
-                model=model, # Pass model
-                system_prompt=system_message, # Map 'system_message'
-                temp=temp,
-                streaming=streaming,
-                minp=minp, # Pass minp
-                topp=topp, # Pass topp
-                topk=topk # Pass topk
-             )
-
-        elif endpoint_lower == "local-llm":
-            response = chat_with_local_llm(
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming, # Pass streaming
-                top_k=topk, # Pass topk
-                top_p=topp, # Pass topp
-                min_p=minp # Pass minp
-            )
-
-        elif endpoint_lower == "ollama":
-             # chat_with_ollama expects api_url as 3rd arg, pass None
-            response = chat_with_ollama(
-                input_data=input_data,
-                custom_prompt=prompt, # Map 'prompt'
-                api_url=None, # Let the function load from config
-                api_key=api_key,
-                temp=temp,
-                system_message=system_message,
-                model=model, # Pass model
-                streaming=streaming, # Pass streaming
-                top_p=topp # Pass topp
-            )
-
-        elif endpoint_lower == "aphrodite":
-            response = chat_with_aphrodite(
-                api_key=api_key, # Pass api_key
-                input_data=input_data,
-                custom_prompt=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming, # Pass streaming
-                topp=topp, # Pass topp
-                minp=minp, # Pass minp
-                topk=topk, # Pass topk
-                model=model # Pass model
-            )
-
-        elif endpoint_lower == "custom-openai-api":
-            response = chat_with_custom_openai(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming, # Pass streaming
-                maxp=maxp, # Pass maxp (maps to top_p internally)
-                model=model, # Pass model
-                minp=minp, # Pass minp
-                topk=topk # Pass topk
-            )
-
-        elif endpoint_lower == "custom-openai-api-2":
-             # NOTE: chat_with_custom_openai_2 doesn't accept maxp, minp, topk in its signature
-            response = chat_with_custom_openai_2(
-                api_key=api_key,
-                input_data=input_data,
-                custom_prompt_arg=prompt, # Map 'prompt'
-                temp=temp,
-                system_message=system_message,
-                streaming=streaming, # Pass streaming
-                model=model # Pass model
-            )
-
-        else:
-            # --- Error for unsupported endpoint ---
+        handler_func = API_CALL_HANDLERS.get(endpoint_lower)
+        if not handler_func:
             logging.error(f"Unsupported API endpoint requested: {api_endpoint}")
-            raise ValueError(f"Unsupported API endpoint: {api_endpoint}")
+            # Original code raises ValueError here, which is caught later.
+            # Let's make it more specific for clarity if we're redesigning.
+            raise ChatConfigurationError(provider=endpoint_lower, message=f"Unsupported API endpoint: {api_endpoint}")
+
+        current_provider_param_map = PROVIDER_PARAM_MAP.get(endpoint_lower)
+        if not current_provider_param_map:
+            # This state implies an internal inconsistency (handler exists but no param map)
+            logging.error(f"Internal configuration error: Parameter map not found for endpoint: {endpoint_lower}")
+            raise ChatConfigurationError(provider=endpoint_lower, message=f"Internal config error: No parameter map for {endpoint_lower}")
+
+        # Collect all arguments passed to chat_api_call for easy lookup
+        # Note: It's crucial that the keys here match the keys in PROVIDER_PARAM_MAP's sub-dictionaries
+        available_args = {
+            'api_key': api_key, 'input_data': input_data, 'prompt': prompt, 'temp': temp,
+            'system_message': system_message, 'streaming': streaming, 'minp': minp,
+            'maxp': maxp, 'model': model, 'topk': topk, 'topp': topp
+        }
+
+        kwargs_for_handler = {}
+        for generic_name, provider_specific_name in current_provider_param_map.items():
+            if generic_name in available_args and available_args[generic_name] is not None:
+                kwargs_for_handler[provider_specific_name] = available_args[generic_name]
+
+        # Special handling for providers that expect 'api_url' or similar as None to use config,
+        # if chat_api_call doesn't expose a generic 'api_url' parameter.
+        # Example: llama.cpp, ooba, vllm, ollama.
+        # The original code passed None for these if not specified by chat_api_call.
+        # The `chat_with_...` functions themselves should handle `api_url=None` to mean "load from config".
+        # Our kwargs_for_handler will only include params explicitly mapped and non-None.
+        # This means if `api_url` isn't a generic param, it won't be passed, and the
+        # specific chat_with_... functions need to have `api_url=None` as a default in their signature.
+        # This seems to be the case in the original structure.
+
+        # --- Actual API Call ---
+        response = handler_func(**kwargs_for_handler)
 
         # --- Success Logging and Return ---
         call_duration = time.time() - start_time
@@ -352,7 +268,9 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
              logging.debug(f"Debug - Chat API Call - Response Type: {type(response)}")
 
         return response # Return successful response
-
+    except (ChatBadRequestError, ChatConfigurationError, ChatAPIError, ChatProviderError, ChatRateLimitError, ChatAuthenticationError) as e:
+        # Re-raise custom chat exceptions directly
+        raise
     # --- Exception Mapping ---
     except requests.exceptions.HTTPError as e:
         status_code = getattr(e.response, 'status_code', 500)
@@ -389,15 +307,11 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
             raise ChatAPIError(provider=endpoint_lower,
                                message=f"Unexpected HTTP status {status_code} from {endpoint_lower}. Detail: {error_text[:200]}",
                                status_code=status_code)
-
-
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Network error connecting to {endpoint_lower}: {e}", exc_info=False)
-        # Raise a custom exception for network errors too
-        raise ChatProviderError(provider=endpoint_lower, message=f"Network error contacting {endpoint_lower}: {e}",
-                                status_code=504)  # Use 504 Gateway Timeout
-
-    except (ValueError, TypeError, KeyError) as e:
+    except TypeError as e:
+        # This can catch issues where kwargs_for_handler doesn't match the handler_func's signature
+        logging.error(f"Type error calling handler for {endpoint_lower}: {e}. Args prepared: {kwargs_for_handler}", exc_info=True)
+        raise ChatConfigurationError(provider=endpoint_lower, message=f"Parameter or type mismatch for {endpoint_lower}: {e}")
+    except (ValueError, KeyError) as e: # Keep handling for general Value/Key errors during setup
         logging.error(f"Value/Type/Key error during chat API call setup for {endpoint_lower}: {e}", exc_info=True)
         # Raise a configuration or bad request error
         error_type = "Configuration/Parameter Error"
@@ -698,6 +612,7 @@ def save_chat_history_to_db_wrapper(
         return conversation_id, error_message
 
 
+# FIXME - turn into export function
 def save_chat_history(history, conversation_id, media_content):
     log_counter("save_chat_history_attempt")
     start_time = time.time()
@@ -827,7 +742,10 @@ def extract_media_name(media_content: Optional[Dict[str, Any]]):  # media_conten
     logging.warning(f"Could not extract a clear media name from media_content: {str(media_content)[:200]}")
     return None
 
-
+# FIXME
+# update_chat_content Note Parsing:
+#     Issue: raw_note_content_field can be a plain string or a JSON string. This dual nature can be brittle.
+#     Improvement: Enforce a consistent structure for notes.content in the database if it's meant to hold structured data. If it's always JSON, then json.loads can be used directly (with error handling). If it can be either, the current logic is a necessary workaround but adds complexity.
 def update_chat_content(
         selected_item: Optional[str],
         use_content: bool,
@@ -997,6 +915,7 @@ def parse_user_dict_markdown_file(file_path):
 
 class ChatDictionary:
     def __init__(self, key, content, probability=100, group=None, timed_effects=None, max_replacements=1):
+        self.key_raw = key
         self.key = self.compile_key(key)
         self.content = content
         self.probability = probability
@@ -1090,9 +1009,14 @@ def enforce_token_budget(entries, max_tokens):
 def match_whole_words(entries, text):
     matched_entries = []
     for entry in entries:
-        if re.search(rf'\b{entry.key}\b', text):
-            matched_entries.append(entry)
-            logging.debug(f"Chat Dictionary: Matched entry: {entry.key}")
+        if isinstance(entry.key, re.Pattern):
+            if entry.key.search(text):  # Use the pre-compiled regex
+                matched_entries.append(entry)
+                logging.debug(f"Chat Dictionary: Matched entry: {entry.key}")
+        elif isinstance(entry.key, str):  # Only for plain string keys
+            if re.search(rf'\b{re.escape(entry.key)}\b', text, re.IGNORECASE):
+                matched_entries.append(entry)
+                logging.debug(f"Chat Dictionary: Matched entry: {entry.key}")
     return matched_entries
 
 class TokenBudgetExceededWarning(Warning):
@@ -1145,7 +1069,7 @@ def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_ev
         try:
             logging.debug(f"Chat Dictionary: Applying group scoring for {len(matched_entries)} entries")
             matched_entries = group_scoring(matched_entries)
-        except Exception as e:
+        except Exception as ChatProcessingError:
             log_counter("chat_dict_group_scoring_error")
             logging.error(f"Error in group scoring: {str(e)}")
             matched_entries = []  # Fallback to empty list
@@ -1154,7 +1078,7 @@ def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_ev
         try:
             logging.debug(f"Chat Dictionary: Filtering by probability for {len(matched_entries)} entries")
             matched_entries = filter_by_probability(matched_entries)
-        except Exception as e:
+        except Exception as ChatProcessingError:
             log_counter("chat_dict_probability_error")
             logging.error(f"Error in probability filtering: {str(e)}")
             matched_entries = []  # Fallback to empty list
@@ -1163,7 +1087,7 @@ def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_ev
         try:
             logging.debug("Chat Dictionary: Applying timed effects")
             matched_entries = [entry for entry in matched_entries if apply_timed_effects(entry, current_time)]
-        except Exception as e:
+        except Exception as ChatProcessingError:
             log_counter("chat_dict_timed_effects_error")
             logging.error(f"Error applying timed effects: {str(e)}")
             matched_entries = []  # Fallback to empty list
@@ -1176,7 +1100,7 @@ def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_ev
             log_counter("chat_dict_token_limit")
             logging.warning(str(e))
             matched_entries = []  # Fallback to empty list
-        except Exception as e:
+        except Exception as ChatProcessingError:
             log_counter("chat_dict_token_budget_error")
             logging.error(f"Error enforcing token budget: {str(e)}")
             matched_entries = []  # Fallback to empty list
@@ -1184,7 +1108,7 @@ def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_ev
         # Alert if token budget exceeded
         try:
             alert_token_budget_exceeded(matched_entries, max_tokens)
-        except Exception as e:
+        except Exception as ChatProcessingError:
             log_counter("chat_dict_token_alert_error")
             logging.error(f"Error in token budget alert: {str(e)}")
 
@@ -1192,7 +1116,7 @@ def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_ev
         try:
             logging.debug("Chat Dictionary: Applying replacement strategy")
             matched_entries = apply_strategy(matched_entries, strategy)
-        except Exception as e:
+        except Exception as ChatProcessingError:
             log_counter("chat_dict_strategy_error")
             logging.error(f"Error applying strategy: {str(e)}")
             matched_entries = []  # Fallback to empty list
@@ -1211,7 +1135,7 @@ def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_ev
                 logging.error(f"Error applying replacement for entry {entry.key}: {str(e)}")
                 continue  # Skip this replacement but continue processing others
 
-    except Exception as e:
+    except Exception as ChatProcessingError:
         log_counter("chat_dict_processing_error")
         logging.error(f"Critical error in process_user_input: {str(e)}")
         # Return original input if critical failure occurs
@@ -1235,9 +1159,6 @@ def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_ev
 #######################################################################################################################
 #
 # Character Card Functions
-
-CHARACTERS_FILE = Path('', 'Helper_Scripts', 'Character_Cards', 'Characters.json')
-
 
 def save_character(
         db: CharactersRAGDB,  # Changed: Pass the DB instance
