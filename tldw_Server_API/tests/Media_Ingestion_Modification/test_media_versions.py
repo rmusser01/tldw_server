@@ -13,7 +13,7 @@ from fastapi import status # Use status codes from fastapi
 #
 # Local Imports
 # --- Use Main App Instance ---
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.main import app as fastapi_app_instance, app
     # Import specific DB functions used directly in tests/fixtures
 from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import (
@@ -94,8 +94,8 @@ def client_module(db_instance_session):
     """
     Creates a TestClient for the module, overriding the DB dependency to use the session-scoped test DB.
     """
-    def override_get_db_for_user():
-        # print(f"--- OVERRIDING get_db_for_user with: {db_instance_session.db_path_str} ---")
+    def override_get_media_db_for_user():
+        # print(f"--- OVERRIDING get_media_db_for_user with: {db_instance_session.db_path_str} ---")
         yield db_instance_session
 
     global test_db_instance_ref
@@ -103,7 +103,7 @@ def client_module(db_instance_session):
 
     # Store original overrides
     original_overrides = app.dependency_overrides.copy()
-    app.dependency_overrides[get_db_for_user] = override_get_db_for_user
+    app.dependency_overrides[get_media_db_for_user] = override_get_media_db_for_user
 
     with TestClient(fastapi_app_instance) as client:
         yield client
@@ -111,7 +111,7 @@ def client_module(db_instance_session):
     # Restore original overrides AFTER client is closed
     app.dependency_overrides = original_overrides
     # test_db_instance_ref = None # Consider if shutdown handler is still needed
-    # print("--- CLEARED get_db_for_user override ---")
+    # print("--- CLEARED get_media_db_for_user override ---")
 
 # --- Seeding Fixtures ---
 @pytest.fixture(scope="function") # Run for each test function

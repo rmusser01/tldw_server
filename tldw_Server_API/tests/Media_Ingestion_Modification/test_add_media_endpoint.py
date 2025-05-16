@@ -22,7 +22,7 @@ from loguru import logger
 #
 # Local Imports
 # Adjust import paths based on your project structure if needed
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.media import _process_document_like_item
 from tldw_Server_API.tests.test_utils import temp_db
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
@@ -168,13 +168,13 @@ async def override_verify_api_key(x_api_key: str = Header(..., alias="X-API-KEY"
     # You could return mock user/permissions here if needed downstream
     return {"user_id": "test_user", "permissions": ["*"]}
 
-# Override get_db_for_user to use the temp test DB
-def override_get_db_for_user_dependency(db_fixture):
+# Override get_media_db_for_user to use the temp test DB
+def override_get_media_db_for_user_dependency(db_fixture):
     """
     Returns a dependency override function that yields the provided DB fixture.
     """
     async def _override(): # Changed to async def
-        # logger.debug(f"--- OVERRIDING get_db_for_user with fixture: {db_fixture.db_path_str} ---")
+        # logger.debug(f"--- OVERRIDING get_media_db_for_user with fixture: {db_fixture.db_path_str} ---")
         yield db_fixture
     return _override
 
@@ -195,15 +195,15 @@ def test_api_client(db_session_scope): # Depends on the FUNCTION-scoped DB fixtu
     # Add checks for other required sample files if necessary
 
     # Create the override function using the FUNCTION-scoped DB instance
-    db_override_func = override_get_db_for_user_dependency(db_session_scope)
+    db_override_func = override_get_media_db_for_user_dependency(db_session_scope)
 
     # Store original overrides to restore later
     original_overrides = app.dependency_overrides.copy()
 
     # Apply overrides
     app.dependency_overrides[get_request_user] = override_get_request_user
-    app.dependency_overrides[get_db_for_user] = db_override_func
-    logger.info("Applied dependency overrides for get_request_user and get_db_for_user (FUNCTION scope)")
+    app.dependency_overrides[get_media_db_for_user] = db_override_func
+    logger.info("Applied dependency overrides for get_request_user and get_media_db_for_user (FUNCTION scope)")
 
     # Instantiate the TestClient
     try:

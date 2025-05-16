@@ -33,7 +33,7 @@ try:
     # Import app instance and specific dependencies to override
     from tldw_Server_API.app.main import app as fastapi_app_instance, app
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User, _single_user_instance
-    from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
+    from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
     from tldw_Server_API.app.core.config import settings
     from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, get_document_version, \
     search_media_db  # If type hints needed
@@ -93,13 +93,13 @@ PDF_ENGINES_TO_TEST = ["pymupdf4llm", "pymupdf", "docling"]
 @pytest.fixture(scope="module")
 def client_module_processing(db_instance_session): # Assuming similar DB fixture pattern
     """ TestClient for media processing tests with overrides """
-    def override_get_db_for_user_processing():
+    def override_get_media_db_for_user_processing():
         yield db_instance_session
 
     original_overrides = app.dependency_overrides.copy()
     app.dependency_overrides[get_request_user] = override_get_request_user
-    app.dependency_overrides[get_db_for_user] = override_get_db_for_user_processing
-    logger.info("Applied dependency overrides for get_request_user and get_db_for_user (processing)")
+    app.dependency_overrides[get_media_db_for_user] = get_media_db_for_user
+    logger.info("Applied dependency overrides for get_request_user and get_media_db_for_user (processing)")
 
     with TestClient(fastapi_app_instance) as c:
         yield c
@@ -145,7 +145,7 @@ def override_auth_proc():
     yield _override_get_request_user_proc_test
 
 # --- DB Override Fixture Function ---
-def override_get_db_for_user_proc(db_session):
+def override_get_media_db_for_user_proc(db_session):
     """Dependency override factory for processing tests."""
     def _override():
         # logger.debug(f"--- DB OVERRIDE (Processing): Providing DB session: {db_session.db_path_str} ---")
@@ -168,7 +168,7 @@ def client(db_instance_session_proc, override_auth_proc):
     # Optional files checked within tests (DOCX, RTF)
 
     # Apply DB and Auth overrides specific to this module
-    app.dependency_overrides[get_db_for_user] = override_get_db_for_user_proc(db_instance_session_proc)
+    app.dependency_overrides[get_media_db_for_user] = override_get_media_db_for_user_proc(db_instance_session_proc)
     app.dependency_overrides[get_request_user] = override_auth_proc
     logger.info("--- TestClient (Processing) created with DB and Auth overrides ---")
 

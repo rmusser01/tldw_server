@@ -41,7 +41,7 @@ from slowapi.util import get_remote_address
 from loguru import logger
 from starlette.responses import JSONResponse, StreamingResponse
 
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 #
 # Local Imports
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest, API_KEYS, \
@@ -79,7 +79,7 @@ router = APIRouter()
 )
 async def create_chat_completion(
     request_data: ChatCompletionRequest = Body(...),
-    db = Depends(get_db_for_user)
+    db = Depends(get_media_db_for_user)
 ):
     # FIXME - Add auth checks here
     """

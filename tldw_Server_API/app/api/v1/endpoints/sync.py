@@ -29,7 +29,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 #
 # Local Imports
 from tldw_Server_API.app.api.v1.schemas.sync_server_models import ClientChangesPayload, ServerChangesResponse, \
@@ -53,7 +53,7 @@ router = APIRouter()
 
 # Explanation and Key Server-Side Aspects:
 #     FastAPI Structure: Uses APIRouter, Pydantic models (SyncLogEntry, ClientChangesPayload, ServerChangesResponse), and dependency injection (Depends) for authentication and database access.
-#     User-Scoped DB: The get_db_for_user dependency is critical. It ensures that all operations within an endpoint call correctly target the database belonging to the authenticated user.
+#     User-Scoped DB: The get_media_db_for_user dependency is critical. It ensures that all operations within an endpoint call correctly target the database belonging to the authenticated user.
 #
 #     /sync/send Endpoint:
 #         Receives changes via ClientChangesPayload.
@@ -85,7 +85,7 @@ router = APIRouter()
 async def receive_changes_from_client(
     payload: ClientChangesPayload,
     user_id: User = Depends(get_request_user),
-    db: Database = Depends(get_db_for_user)
+    db: Database = Depends(get_media_db_for_user)
 ):
     """
     Receives a batch of sync log entries from a client, applies them
@@ -136,7 +136,7 @@ async def send_changes_to_client(
     client_id: str,
     since_change_id: int = 0,
     user_id: User = Depends(get_request_user),
-    db: Database = Depends(get_db_for_user)
+    db: Database = Depends(get_media_db_for_user)
 ):
     """
     Sends sync log entries from the user's server-side database back to

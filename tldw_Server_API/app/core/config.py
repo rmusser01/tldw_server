@@ -40,6 +40,18 @@ APP_CONFIG = {
         # shared settings
     }
 }
+
+DATABASE_CONFIG = {
+    }
+
+RAG_SEARCH_CONFIG = {
+    "fts_top_k": 10,
+    "vector_top_k": 10,
+    "web_vector_top_k": 10,
+    "llm_context_document_limit": 10,
+    "chat_context_limit": 10,
+}
+
 def load_openai_mappings() -> Dict:
     # Determine path relative to this file or use an absolute/configurable path
     current_dir = os.path.dirname(os.path.abspath(__file__))

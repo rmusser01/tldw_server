@@ -74,7 +74,7 @@ def _get_db_path_for_user(user_id: int) -> Path:
 
 # --- Main Dependency Function ---
 
-async def get_db_for_user(
+async def get_media_db_for_user(
     # Depends on the primary authentication/identification dependency
     current_user: User = Depends(get_request_user)
 ) -> Database:
@@ -96,7 +96,7 @@ async def get_db_for_user(
                        or if the database cannot be initialized.
     """
     if not current_user or not isinstance(current_user.id, int):
-        logging.error("get_db_for_user called without a valid User object/ID.")
+        logging.error("get_media_db_for_user called without a valid User object/ID.")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="User identification failed.")
 
     user_id = current_user.id # Will be SINGLE_USER_FIXED_ID in single-user mode

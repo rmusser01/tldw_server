@@ -1,28 +1,29 @@
 # Chat_Functions.py
-# Chat functions for interacting with the LLMs as chatbots
-import base64
+# Description: Chat functions for interacting with the LLMs as chatbots
+#
 # Imports
+import base64
 import json
 import os
 import random
 import re
-import sqlite3
 import tempfile
 import time
 import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
-
+from typing import List, Dict, Any, Tuple, Optional
+#
+# 3rd-party Libraries
 import requests
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError, ChatConfigurationError, ChatAPIError, \
-    ChatProviderError, ChatRateLimitError, ChatAuthenticationError
-#
-# External Imports
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
 #
 # Local Imports
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError, ChatConfigurationError, ChatAPIError, \
+    ChatProviderError, ChatRateLimitError, ChatAuthenticationError
 from tldw_Server_API.app.core.DB_Management.DB_Manager import start_new_conversation, delete_messages_in_conversation, save_message
-#from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError, ConflictError, CharactersRAGDBError
 from tldw_Server_API.app.core.LLM_Calls.LLM_API_Calls import chat_with_openai, chat_with_anthropic, chat_with_cohere, \
     chat_with_groq, chat_with_openrouter, chat_with_deepseek, chat_with_mistral, chat_with_huggingface, chat_with_google
 from tldw_Server_API.app.core.LLM_Calls.LLM_API_Calls_Local import chat_with_aphrodite, chat_with_local_llm, chat_with_ollama, \
@@ -30,8 +31,6 @@ from tldw_Server_API.app.core.LLM_Calls.LLM_API_Calls_Local import chat_with_aph
     chat_with_custom_openai_2
 from tldw_Server_API.app.core.Utils.Utils import generate_unique_filename, load_and_log_configs, logging
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-
-
 #
 ####################################################################################################
 #
@@ -113,8 +112,8 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
                 system_prompt=system_message, # Map 'system_message'
                 streaming=streaming,
                 temp=temp,
-                topp=topp, # Pass 'topp'
-                topk=topk  # Pass 'topk'
+                topp=topp, 
+                topk=topk
                 # chat_with_anthropic handles retries internally
             )
 
@@ -127,8 +126,8 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
                 system_prompt=system_message, # Map 'system_message'
                 temp=temp,
                 streaming=streaming,
-                topp=topp, # Pass 'topp'
-                topk=topk  # Pass 'topk'
+                topp=topp, 
+                topk=topk
             )
 
         elif endpoint_lower == "groq":
@@ -163,7 +162,7 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
                 temp=temp,
                 system_message=system_message,
                 streaming=streaming,
-                topp=topp # Pass 'topp'
+                topp=topp 
             )
 
         elif endpoint_lower == "mistral":
@@ -174,7 +173,7 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
                 temp=temp,
                 system_message=system_message,
                 streaming=streaming,
-                topp=topp, # Pass 'topp'
+                topp=topp, 
                 model=model
             )
 
@@ -186,8 +185,8 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
                 temp=temp,
                 system_message=system_message,
                 streaming=streaming,
-                topp=topp, # Pass 'topp'
-                topk=topk  # Pass 'topk'
+                topp=topp, 
+                topk=topk
             )
 
         elif endpoint_lower == "huggingface":
@@ -390,7 +389,6 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
             raise ChatAPIError(provider=endpoint_lower,
                                message=f"Unexpected HTTP status {status_code} from {endpoint_lower}. Detail: {error_text[:200]}",
                                status_code=status_code)
-        # REMOVE the old return {"__error__": True, ...} dictionary
 
 
     except requests.exceptions.RequestException as e:
@@ -398,7 +396,6 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
         # Raise a custom exception for network errors too
         raise ChatProviderError(provider=endpoint_lower, message=f"Network error contacting {endpoint_lower}: {e}",
                                 status_code=504)  # Use 504 Gateway Timeout
-        # REMOVE the old return {"__error__": True, ...} dictionary
 
     except (ValueError, TypeError, KeyError) as e:
         logging.error(f"Value/Type/Key error during chat API call setup for {endpoint_lower}: {e}", exc_info=True)
@@ -411,13 +408,12 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
             raise ChatConfigurationError(provider=endpoint_lower, message=f"Unsupported API endpoint: {endpoint_lower}")
         else:
             raise ChatBadRequestError(provider=endpoint_lower, message=f"{error_type} for {endpoint_lower}: {e}")
-        # REMOVE the old return {"__error__": True, ...} dictionary
 
     # --- Final Catch-all ---
     except Exception as e:
         # Log the unexpected error
         logging.exception(
-            f"Unexpected internal error in chat_api_call for {endpoint_lower}: {e}")  # Use logging.exception to include traceback
+            f"Unexpected internal error in chat_api_call for {endpoint_lower}: {e}")
         # Raise a generic ChatAPIError
         raise ChatAPIError(provider=endpoint_lower,
                            message=f"An unexpected internal error occurred in chat_api_call for {endpoint_lower}: {str(e)}",
@@ -501,65 +497,203 @@ def chat(message, history, media_content, selected_parts, api_endpoint, api_key,
         logging.error(f"Error in chat function: {str(e)}")
         return f"An error occurred: {str(e)}"
 
-def save_chat_history_to_db_wrapper(chatbot, conversation_id, media_content, media_name=None):
+
+def save_chat_history_to_db_wrapper(
+    db: CharactersRAGDB,
+    chatbot: List[Tuple[Optional[str], Optional[str]]],
+    conversation_id: Optional[str],
+    media_content: Optional[Dict[str, Any]],
+    media_name: Optional[str] = None,
+    character_name_for_chat: Optional[str] = None
+) -> Tuple[Optional[str], str]:
     log_counter("save_chat_history_to_db_attempt")
     start_time = time.time()
-    logging.info(f"Attempting to save chat history. Media content type: {type(media_content)}")
+    logging.info(f"Attempting to save chat history. Conversation ID: {conversation_id}, Character Name for Chat: {character_name_for_chat}, Media Name: {media_name}")
 
     try:
-        # First check if we can access the database
-        try:
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT 1")
-        except sqlite3.DatabaseError as db_error:
-            logging.error(f"Database is corrupted or inaccessible: {str(db_error)}")
-            return conversation_id, "Database error: The database file appears to be corrupted. Please contact support."
+        # The DB connection is managed by the CharactersRAGDB instance (`db`)
+        # No need for direct `get_db_connection` or manual sqlite3 corruption checks here.
+        # The `db` instance methods will raise exceptions if issues occur.
 
-        # Now attempt the save
-        if not conversation_id:
-            # Only for new conversations, not updates
-            media_id = None
-            if isinstance(media_content, dict) and 'content' in media_content:
+        associated_character_id: Optional[int] = None
+        final_character_name_for_title = "Unknown Character" # For conversation title
+
+        # Determine character_id
+        # Priority: 1. character_name_for_chat, 2. media_name, 3. title from media_content
+        char_lookup_name = character_name_for_chat
+        if not char_lookup_name and media_name:
+            char_lookup_name = media_name
+        if not char_lookup_name and media_content:
+            content_details = media_content.get('content')  # This might be a JSON string or a dict
+            if isinstance(content_details, str):
                 try:
-                    content = media_content['content']
-                    content_json = content if isinstance(content, dict) else json.loads(content)
-                    media_id = content_json.get('webpage_url')
-                    media_name = media_name or content_json.get('title', 'Unnamed Media')
-                except (json.JSONDecodeError, AttributeError) as e:
-                    logging.error(f"Error processing media content: {str(e)}")
-                    media_id = "unknown_media"
-                    media_name = media_name or "Unnamed Media"
-            else:
-                media_id = "unknown_media"
-                media_name = media_name or "Unnamed Media"
+                    content_details = json.loads(content_details)
+                except json.JSONDecodeError:
+                    content_details = {}  # Not a JSON string
+            if isinstance(content_details, dict):
+                char_lookup_name = content_details.get('title')  # Fallback to title from media content
 
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            conversation_title = f"{media_name}_{timestamp}"
-            conversation_id = start_new_conversation(title=conversation_title, media_id=media_id)
-            logging.info(f"Created new conversation with ID: {conversation_id}")
+        if char_lookup_name:
+            try:
+                character = db.get_character_card_by_name(char_lookup_name)
+                if character:
+                    associated_character_id = character['id']
+                    final_character_name_for_title = character['name'] # Use the actual name from DB
+                    logging.info(f"Chat will be associated with specific character '{final_character_name_for_title}' (ID: {associated_character_id}).")
+                else:
+                    # If a specific character was named but not found, this is an error.
+                    # The user intended a character chat, but the character is missing.
+                    logging.error(f"Intended specific character '{char_lookup_name}' not found in DB. Chat save aborted.")
+                    return conversation_id, f"Error: Specific character '{char_lookup_name}' intended for this chat was not found. Cannot save chat."
+            except CharactersRAGDBError as e:
+                logging.error(f"DB error looking up specific character '{char_lookup_name}': {e}")
+                return conversation_id, f"DB error finding specific character: {e}"
+        else: # No specific character was named, try to use the Default Character
+            logging.info("No specific character name provided for chat. Attempting to use Default Character.")
+            try:
+                default_char = db.get_character_card_by_name(DEFAULT_CHARACTER_NAME)
+                if default_char:
+                    associated_character_id = default_char['id']
+                    final_character_name_for_title = default_char['name']
+                    logging.info(f"Chat will be associated with '{DEFAULT_CHARACTER_NAME}' (ID: {associated_character_id}).")
+                else:
+                    # This is a critical state: no specific char, and default char is missing (should have been created by DB dep)
+                    logging.error(f"'{DEFAULT_CHARACTER_NAME}' is missing from the DB and no specific character was provided. Chat save aborted.")
+                    return conversation_id, f"Error: Critical - '{DEFAULT_CHARACTER_NAME}' is missing. Cannot save chat."
+            except CharactersRAGDBError as e:
+                logging.error(f"DB error looking up '{DEFAULT_CHARACTER_NAME}': {e}")
+                return conversation_id, f"DB error finding '{DEFAULT_CHARACTER_NAME}': {e}"
 
-        # For both new and existing conversations
-        try:
-            delete_messages_in_conversation(conversation_id)
+        # Ensure we have a character_id to proceed
+        if associated_character_id is None:
+             # This should be an unreachable state if the logic above is correct.
+             logging.critical(f"Logic error: associated_character_id is None after character lookup. Chat save aborted.")
+             return conversation_id, "Critical internal error: Could not determine character for chat."
+
+        current_conversation_id = conversation_id
+
+        if not current_conversation_id: # New conversation
+            # Use final_character_name_for_title for the conversation title
+            conv_title_base = f"Chat with {final_character_name_for_title}"
+
+            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            conversation_title = f"{conv_title_base} ({timestamp_str})"
+
+            conv_data = {
+                'character_id': associated_character_id,
+                'title': conversation_title,
+                # 'root_id' will be set to new conv_id by add_conversation if not provided
+                'client_id': db.client_id  # Use client_id from the DB instance
+            }
+            try:
+                current_conversation_id = db.add_conversation(conv_data)
+                if not current_conversation_id:  # Should not happen if add_conversation raises on failure
+                    return None, "Failed to create new conversation in DB."
+                logging.info(
+                    f"Created new conversation with ID: {current_conversation_id} for character ID: {associated_character_id}")
+            except (InputError, ConflictError, CharactersRAGDBError) as e:
+                logging.error(f"Error creating new conversation: {e}", exc_info=True)
+                return None, f"Error creating conversation: {e}"
+
+            # Save all messages from chatbot history to the new conversation
             for user_msg, assistant_msg in chatbot:
-                if user_msg:
-                    save_message(conversation_id, "user", user_msg)
-                if assistant_msg:
-                    save_message(conversation_id, "assistant", assistant_msg)
-        except sqlite3.DatabaseError as db_error:
-            logging.error(f"Database error during message save: {str(db_error)}")
-            return conversation_id, "Database error: Unable to save messages. Please try again or contact support."
+                try:
+                    if user_msg:
+                        db.add_message({
+                            'conversation_id': current_conversation_id,
+                            'sender': 'user',
+                            'content': user_msg,
+                            'client_id': db.client_id
+                        })
+                    if assistant_msg:
+                        db.add_message({
+                            'conversation_id': current_conversation_id,
+                            'sender': 'assistant',
+                            'content': assistant_msg,
+                            'client_id': db.client_id
+                        })
+                except (InputError, ConflictError, CharactersRAGDBError) as e:
+                    logging.error(f"Error saving message to new conversation {current_conversation_id}: {e}",
+                                  exc_info=True)
+                    # Decide: stop all, or try to save other messages? For now, return error.
+                    return current_conversation_id, f"Error saving messages: {e}"
+            logging.info(f"Saved all messages from chatbot history to new conversation {current_conversation_id}")
+
+        else:  # Existing conversation_id provided - "resaving" the history
+            logging.info(
+                f"Resaving history for existing conversation ID: {current_conversation_id}. Character ID: {associated_character_id}")
+            # This implies replacing all messages for the given conversation_id with the new 'chatbot' history.
+            # This is complex with versioning.
+            # 1. Soft-delete all existing messages for this conversation.
+            # 2. Add all messages from the 'chatbot' list.
+            try:
+                with db.transaction():
+                    existing_conv_details = db.get_conversation_by_id(current_conversation_id)
+                    if not existing_conv_details:
+                        logging.error(f"Cannot resave: Conversation {current_conversation_id} not found.")
+                        return current_conversation_id, f"Error: Conversation {current_conversation_id} not found for resaving."
+
+                    # Important: Ensure the existing conversation being updated belongs to the character context we're in.
+                    # This prevents accidentally overwriting a chat from Character A if the current UI context is Character B (or Default).
+                    if existing_conv_details.get('character_id') != associated_character_id:
+                        # Fetch names for better logging
+                        existing_char_of_conv = db.get_character_card_by_id(existing_conv_details.get('character_id'))
+                        existing_char_name = existing_char_of_conv['name'] if existing_char_of_conv else "ID "+str(existing_conv_details.get('character_id'))
+
+                        logging.error(f"Cannot resave: Conversation {current_conversation_id} (for char '{existing_char_name}') does not match current character context '{final_character_name_for_title}' (ID: {associated_character_id}).")
+                        return current_conversation_id, "Error: Mismatch in character association for resaving chat. The conversation belongs to a different character."
+
+                    existing_messages = db.get_messages_for_conversation(current_conversation_id, limit=10000, order_by_timestamp="ASC")
+                    logging.info(f"Found {len(existing_messages)} existing messages to soft-delete for conv {current_conversation_id}.")
+                    for msg in existing_messages:
+                        db.soft_delete_message(msg['id'], msg['version'])
+                    logging.info(f"Soft-deleted existing messages for conv {current_conversation_id}.")
+
+                    # Add new messages from chatbot history
+                    for user_msg, assistant_msg in chatbot:
+                        if user_msg:
+                            db.add_message({
+                                'conversation_id': current_conversation_id,
+                                'sender': 'user',
+                                'content': user_msg,
+                                'client_id': db.client_id
+                            })
+                        if assistant_msg:
+                            db.add_message({
+                                'conversation_id': current_conversation_id,
+                                'sender': 'assistant',
+                                'content': assistant_msg,
+                                'client_id': db.client_id
+                            })
+                    logging.info(f"Added new set of messages from chatbot history to conv {current_conversation_id}.")
+
+                    # Update conversation metadata (last_modified, version)
+                    # Re-fetch conversation details to get the latest version after message changes (though messages don't directly alter conv version)
+                    # This is more about bumping the conversation's own version and last_modified timestamp.
+                    conv_details_for_update = db.get_conversation_by_id(current_conversation_id)
+                    if conv_details_for_update:
+                        db.update_conversation(
+                            current_conversation_id,
+                            {'title': conv_details_for_update.get('title')}, # Pass some data to ensure update call structure is met
+                            conv_details_for_update['version']
+                        )
+                    else: # Should not happen if previous checks passed
+                        logging.error(f"Conversation {current_conversation_id} disappeared before final metadata update.")
+
+
+            except (InputError, ConflictError, CharactersRAGDBError) as e:
+                logging.error(f"Error resaving messages for conversation {current_conversation_id}: {e}", exc_info=True)
+                return current_conversation_id, f"Error resaving messages: {e}"
 
         save_duration = time.time() - start_time
         log_histogram("save_chat_history_to_db_duration", save_duration)
         log_counter("save_chat_history_to_db_success")
 
-        return conversation_id, "Chat history saved successfully!"
+        return current_conversation_id, "Chat history saved successfully!"
 
     except Exception as e:
         log_counter("save_chat_history_to_db_error", labels={"error": str(e)})
-        error_message = f"Failed to save chat history: {str(e)}"
+        error_message = f"Failed to save chat history due to an unexpected error: {str(e)}"
         logging.error(error_message, exc_info=True)
         return conversation_id, error_message
 
@@ -596,91 +730,216 @@ def save_chat_history(history, conversation_id, media_content):
         return None
 
 
-def generate_chat_history_content(history, conversation_id, media_content):
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    conversation_name = get_conversation_name(conversation_id)
-
-    if not conversation_name:
-        media_name = extract_media_name(media_content)
-        if media_name:
-            conversation_name = f"{media_name}-chat"
-        else:
-            conversation_name = f"chat-{timestamp}"  # Fallback name
-
-    chat_data = {
-        "conversation_id": conversation_id,
-        "conversation_name": conversation_name,
-        "timestamp": timestamp,
-        "history": [
-            {
-                "role": "user" if i % 2 == 0 else "bot",
-                "content": msg[0] if isinstance(msg, tuple) else msg
-            }
-            for i, msg in enumerate(history)
-        ]
-    }
-
-    return json.dumps(chat_data, indent=2), conversation_name
-
-
-def extract_media_name(media_content):
-    if isinstance(media_content, dict):
-        content = media_content.get('content', {})
-        if isinstance(content, str):
-            try:
-                content = json.loads(content)
-            except json.JSONDecodeError:
-                logging.warning("Failed to parse media_content JSON string")
-                return None
-
-        # Try to extract title from the content
-        if isinstance(content, dict):
-            return content.get('title') or content.get('name')
-
-    logging.warning(f"Unexpected media_content format: {type(media_content)}")
+def get_conversation_name(conversation_id: Optional[str], db_instance: Optional[CharactersRAGDB] = None) -> Optional[str]:
+    """
+    Helper to get conversation name. Tries DB first if instance provided, then falls back.
+    """
+    if db_instance and conversation_id:
+        try:
+            conversation = db_instance.get_conversation_by_id(conversation_id)
+            if conversation and conversation.get('title'):
+                return conversation['title']
+        except Exception as e:
+            logging.warning(f"Could not fetch conversation title from DB for {conversation_id}: {e}")
+    # Fallback or if no DB instance provided
+    # This part of the original logic is unclear how it worked without DB.
+    # For now, returning None if not found in DB.
     return None
 
 
-def update_chat_content(selected_item, use_content, use_summary, use_prompt, item_mapping, db_instance):
+def generate_chat_history_content(history, conversation_id, media_content,
+                                  db_instance: Optional[CharactersRAGDB] = None):
+    # Modified to potentially use db_instance for conversation_name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Try to get conversation name from DB if possible
+    conversation_name = None
+    if conversation_id:
+        conversation_name = get_conversation_name(conversation_id, db_instance)
+
+    if not conversation_name:  # Fallback logic
+        media_name_extracted = extract_media_name(media_content)  # media_content is the original complex object
+        if media_name_extracted:
+            conversation_name = f"{media_name_extracted}-chat-{timestamp}"
+        else:
+            conversation_name = f"chat-{timestamp}"
+
+    chat_data = {
+        "conversation_id": conversation_id,  # Can be None if new chat not yet saved to DB
+        "conversation_name": conversation_name,
+        "timestamp": timestamp,
+        "history": [],
+        # The original history format seemed to be a list of tuples (user, bot) or just a list of messages
+        # The new DB stores messages individually. This JSON should reflect the 'chatbot' structure if it's for UI.
+        # Assuming 'history' is like chatbot: List[Tuple[Optional[str], Optional[str]]]
+    }
+
+    current_turn = []
+    for item in history:  # Iterating through the provided history structure
+        if isinstance(item, tuple) and len(item) == 2:  # Expected (user_msg, bot_msg)
+            user_msg, bot_msg = item
+            if user_msg is not None:
+                chat_data["history"].append({"role": "user", "content": user_msg})
+            if bot_msg is not None:
+                chat_data["history"].append(
+                    {"role": "assistant", "content": bot_msg})  # Changed "bot" to "assistant" for consistency
+        elif isinstance(item, dict) and "role" in item and "content" in item:  # Already in desired format
+            chat_data["history"].append(item)
+        else:
+            logging.warning(f"Unexpected item format in history for JSON export: {item}")
+
+    return json.dumps(chat_data, indent=2), conversation_name  # Return the derived/fetched name
+
+
+def extract_media_name(media_content: Optional[Dict[str, Any]]):  # media_content is the original complex object
+    if not media_content or not isinstance(media_content, dict):
+        return None
+
+    # Try to get from 'content' which might be a JSON string or a dict
+    content_field = media_content.get('content')
+    parsed_content = None
+
+    if isinstance(content_field, str):
+        try:
+            parsed_content = json.loads(content_field)
+        except json.JSONDecodeError:
+            logging.warning("Failed to parse media_content['content'] JSON string in extract_media_name")
+            # It might be a plain string title itself, or not what we expect
+            # For now, if it's a non-JSON string, we don't assume it's the name.
+            parsed_content = {}
+    elif isinstance(content_field, dict):
+        parsed_content = content_field
+
+    if isinstance(parsed_content, dict):
+        # Check common keys for a title or name
+        name = parsed_content.get('title') or \
+               parsed_content.get('name') or \
+               parsed_content.get('media_title') or \
+               parsed_content.get('webpage_title')
+        if name: return name
+
+    # Fallback to top-level keys in media_content itself if 'content' didn't yield a name
+    name_top_level = media_content.get('title') or \
+                     media_content.get('name') or \
+                     media_content.get('media_title')
+    if name_top_level: return name_top_level
+
+    logging.warning(f"Could not extract a clear media name from media_content: {str(media_content)[:200]}")
+    return None
+
+
+def update_chat_content(
+        selected_item: Optional[str],
+        use_content: bool,
+        use_summary: bool,
+        use_prompt: bool,
+        item_mapping: Dict[str, str],  # Maps display name (selected_item) to a note_id (media_id)
+        db_instance: CharactersRAGDB  # Changed: Pass the DB instance
+) -> Tuple[Dict[str, str], List[str]]:  # Returns dict of content strings, and list of selected part names
     log_counter("update_chat_content_attempt")
     start_time = time.time()
-    logging.debug(f"Debug - Update Chat Content - Selected Item: {selected_item}\n")
-    logging.debug(f"Debug - Update Chat Content - Use Content: {use_content}\n\n\n\n")
-    logging.debug(f"Debug - Update Chat Content - Use Summary: {use_summary}\n\n")
-    logging.debug(f"Debug - Update Chat Content - Use Prompt: {use_prompt}\n\n")
-    logging.debug(f"Debug - Update Chat Content - Item Mapping: {item_mapping}\n\n")
+    logging.debug(f"Debug - Update Chat Content - Selected Item: {selected_item}")
+    # ... other debug logs ...
+
+    # This function's purpose seems to be to fetch content (possibly from a 'note' in the new DB)
+    # and prepare it for the 'chat' function's 'media_content' input.
+    # The 'media_content' that 'chat' receives is a simple dict of strings: {'summary': '...', 'content': '...'}
+
+    output_media_content_for_chat: Dict[str, str] = {}  # This will be passed to chat()
+    selected_parts_names: List[str] = []
 
     if selected_item and selected_item in item_mapping:
-        media_id = item_mapping[selected_item]
-        # FIXME - Fix this.
-        load_media_content = None
-        content = load_media_content(media_id, db_instance=db_instance)
-        selected_parts = []
-        if use_content and "content" in content:
-            selected_parts.append("content")
-        if use_summary and "summary" in content:
-            selected_parts.append("summary")
-        if use_prompt and "prompt" in content:
-            selected_parts.append("prompt")
+        note_id = item_mapping[selected_item]  # Assuming media_id from mapping is a note_id (UUID string)
 
-        # Modified debug print
-        if isinstance(content, dict):
-            print(f"Debug - Update Chat Content - Content keys: {list(content.keys())}")
-            for key, value in content.items():
-                print(f"Debug - Update Chat Content - {key} (first 500 char): {str(value)[:500]}\n\n\n\n")
-        else:
-            print(f"Debug - Update Chat Content - Content(first 500 char): {str(content)[:500]}\n\n\n\n")
+        try:
+            note_data = db_instance.get_note_by_id(note_id)
+        except CharactersRAGDBError as e:
+            logging.error(f"Error fetching note {note_id} for chat content: {e}", exc_info=True)
+            note_data = None
+        except Exception as e_gen:  # Catch any other unexpected error during DB fetch
+            logging.error(f"Unexpected error fetching note {note_id}: {e_gen}", exc_info=True)
+            note_data = None
 
-        print(f"Debug - Update Chat Content - Selected Parts: {selected_parts}")
-        update_duration = time.time() - start_time
-        log_histogram("update_chat_content_duration", update_duration)
-        log_counter("update_chat_content_success")
-        return content, selected_parts
-    else:
+        if note_data:
+            # The content of the note ('note_data.content') might be:
+            # 1. A plain string (e.g., the main transcript/content).
+            # 2. A JSON string containing structured data like {"content": "...", "summary": "...", "prompt": "..."}.
+
+            raw_note_content_field = note_data.get('content', '')  # The actual text from notes.content
+            structured_content_from_note: Dict[str, str] = {}
+
+            # Try to parse raw_note_content_field as JSON
+            if isinstance(raw_note_content_field, str) and \
+                    raw_note_content_field.strip().startswith('{') and \
+                    raw_note_content_field.strip().endswith('}'):
+                try:
+                    parsed_json = json.loads(raw_note_content_field)
+                    if isinstance(parsed_json, dict):
+                        # Filter to ensure only string values are taken for safety
+                        structured_content_from_note = {k: str(v) for k, v in parsed_json.items() if
+                                                        isinstance(v, (str, int, float, bool))}
+                        logging.debug(f"Parsed note's content field (ID: {note_id}) as JSON.")
+                    else:
+                        # JSON, but not a dict. Treat main content as the raw string.
+                        structured_content_from_note['content'] = raw_note_content_field
+                        logging.debug(
+                            f"Note's content field (ID: {note_id}) was JSON but not a dict. Using raw string for 'content'.")
+                except json.JSONDecodeError:
+                    # Not valid JSON, treat it as the main 'content' part
+                    structured_content_from_note['content'] = raw_note_content_field
+                    logging.debug(f"Note's content field (ID: {note_id}) is not JSON. Using raw string for 'content'.")
+            else:  # Not a JSON string, treat as main 'content'
+                structured_content_from_note['content'] = raw_note_content_field
+                logging.debug(f"Note's content field (ID: {note_id}) is a plain string. Using for 'content'.")
+
+            # Populate `output_media_content_for_chat` based on `use_` flags and what's in `structured_content_from_note`
+            if use_content and "content" in structured_content_from_note:
+                output_media_content_for_chat["content"] = structured_content_from_note["content"]
+                selected_parts_names.append("content")
+
+            if use_summary and "summary" in structured_content_from_note:
+                output_media_content_for_chat["summary"] = structured_content_from_note["summary"]
+                selected_parts_names.append("summary")
+            elif use_summary and "content" in structured_content_from_note and "summary" not in output_media_content_for_chat:
+                # Fallback: if summary requested but not explicitly present, use first N words of content as summary?
+                # For now, only include if explicitly present.
+                logging.debug("Summary requested but not found in structured note content.")
+
+            if use_prompt and "prompt" in structured_content_from_note:
+                output_media_content_for_chat["prompt"] = structured_content_from_note["prompt"]
+                selected_parts_names.append("prompt")
+
+            # Add note title as a part, if not already taken by 'content', 'summary', or 'prompt'
+            # and if a relevant use_ flag is true (e.g., use_content implies use_title if no other content)
+            # This part is a bit ambiguous from the original. Let's assume title is just metadata for now.
+            # Or, if note_data['title'] is meaningful as a 'part':
+            # if use_title_flag and "title" not in selected_parts_names:
+            #    output_media_content_for_chat["title_from_note"] = note_data.get('title', '')
+            #    selected_parts_names.append("title_from_note")
+
+            # Debug logging of what was prepared
+            logging.debug(f"Prepared media content for chat from note {note_id}:")
+            for key, value in output_media_content_for_chat.items():
+                logging.debug(f"  {key} (first 100 chars): {str(value)[:100]}")
+            logging.debug(f"Selected part names for chat: {selected_parts_names}")
+
+        else:  # Note not found
+            logging.warning(f"Note ID {note_id} (from selected_item '{selected_item}') not found in DB.")
+            # Return empty, as per original fallback
+            output_media_content_for_chat = {}
+            selected_parts_names = []
+
+    else:  # No item selected or item not in mapping
         log_counter("update_chat_content_error", labels={"error": str("No item selected or item not in mapping")})
-        print(f"Debug - Update Chat Content - No item selected or item not in mapping")
-        return {}, []
+        logging.debug(f"Debug - Update Chat Content - No item selected or item not in mapping: {selected_item}")
+        output_media_content_for_chat = {}
+        selected_parts_names = []
+
+    update_duration = time.time() - start_time
+    log_histogram("update_chat_content_duration", update_duration)
+    log_counter("update_chat_content_success" if selected_parts_names else "update_chat_content_noop")
+
+    return output_media_content_for_chat, selected_parts_names
 
 #
 # End of Chat functions
@@ -777,16 +1036,27 @@ def filter_by_probability(entries):
 
 
 # Group Scoring - Situation where multiple entries are triggered in different groups in a single message
-def group_scoring(entries):
+def group_scoring(entries: List[ChatDictionary]) -> List[ChatDictionary]:
     logging.debug(f"Group scoring for {len(entries)} entries")
-    grouped_entries = {}
+    if not entries: return []
+
+    grouped_entries: Dict[Optional[str], List[ChatDictionary]] = {}
     for entry in entries:
         grouped_entries.setdefault(entry.group, []).append(entry)
 
-    selected_entries = []
-    for group, group_entries in grouped_entries.items():
-        selected_entries.append(max(group_entries, key=lambda e: len(re.findall(e.key, e.content)) if e.key else 0))
+    selected_entries: List[ChatDictionary] = []
+    for group, group_entries_list in grouped_entries.items():
+        if not group_entries_list: continue
+        # Scoring: prefer entries with more specific (longer) keys first, then by original order if keys are same pattern
+        # This is a simple heuristic. More complex scoring could be length of key string, or complexity of regex.
+        # For now, using the length of the raw key string as a proxy for specificity.
+        # If all keys in a group are plain strings, this prefers longer string matches.
+        # If regexes are mixed, this is less reliable.
+        # Max based on key_raw length
+        best_entry_in_group = max(group_entries_list, key=lambda e: len(str(e.key_raw)) if e.key_raw else 0)
+        selected_entries.append(best_entry_in_group)
 
+    logging.debug(f"Selected {len(selected_entries)} entries after group scoring.")
     return selected_entries
 
 # Timed Effects
@@ -968,84 +1238,208 @@ def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_ev
 
 CHARACTERS_FILE = Path('', 'Helper_Scripts', 'Character_Cards', 'Characters.json')
 
-def save_character(character_data):
+
+def save_character(
+        db: CharactersRAGDB,  # Changed: Pass the DB instance
+        character_data: Dict[str, Any],  # Original character data from input
+        expected_version: Optional[int] = None  # For updates, if version is known
+) -> Optional[int]:  # Returns character_id or None on failure
     log_counter("save_character_attempt")
     start_time = time.time()
-    characters_file = os.path.join(os.path.dirname(__file__), '..', 'Helper_Scripts', 'Character_Cards', 'Characters.json')
-    characters_dir = os.path.dirname(characters_file)
+
+    char_name = character_data.get('name')
+    if not char_name:
+        logging.error("Character name is required to save.")
+        return None
+
+    # Prepare data for DB (map/transform if needed)
+    db_card_data = {
+        'name': char_name,
+        'description': character_data.get('description'),
+        'personality': character_data.get('personality'),
+        'scenario': character_data.get('scenario'),
+        'system_prompt': character_data.get('system_prompt', character_data.get('system')),  # common alternative key
+        'post_history_instructions': character_data.get('post_history_instructions',
+                                                        character_data.get('post_history')),
+        'first_message': character_data.get('first_message', character_data.get('mes_example_greeting')),
+        'message_example': character_data.get('message_example', character_data.get('mes_example')),
+        'creator_notes': character_data.get('creator_notes'),
+        'alternate_greetings': character_data.get('alternate_greetings'),  # Should be list or JSON string
+        'tags': character_data.get('tags'),  # Should be list or JSON string
+        'creator': character_data.get('creator'),
+        'character_version': character_data.get('character_version'),
+        'extensions': character_data.get('extensions')  # Should be dict or JSON string
+    }
+
+    # Handle image: convert base64 to bytes if present
+    if 'image' in character_data and character_data['image']:
+        try:
+            # Assuming character_data['image'] is base64 string. Remove data URL prefix if present.
+            img_b64_data = character_data['image']
+            if ',' in img_b64_data:  # e.g. data:image/png;base64,xxxxx
+                img_b64_data = img_b64_data.split(',', 1)[1]
+            db_card_data['image'] = base64.b64decode(img_b64_data)
+        except Exception as e_img:
+            logging.error(f"Error decoding character image for {char_name}: {e_img}")
+            db_card_data['image'] = None  # Or skip setting it
+    else:
+        db_card_data['image'] = None  # Ensure it's None if not provided or empty
+
+    # Remove None values from db_card_data to avoid inserting NULLs where defaults or existing values are preferred
+    # However, CharactersRAGDB add/update methods should handle None for optional fields correctly.
+    # db_card_data = {k: v for k, v in db_card_data.items() if v is not None}
 
     try:
-        if os.path.exists(characters_file):
-            with open(characters_file, 'r') as f:
-                characters = json.load(f)
-        else:
-            characters = {}
+        # Check if character exists for an "upsert" like behavior
+        existing_char = db.get_character_card_by_name(char_name)
 
-        char_name = character_data['name']
+        char_id = None
+        if existing_char:
+            logging.info(f"Character '{char_name}' found (ID: {existing_char['id']}). Attempting update.")
+            current_db_version = existing_char['version']
+            if expected_version is not None and expected_version != current_db_version:
+                logging.error(
+                    f"Version mismatch for character '{char_name}'. Expected {expected_version}, DB has {current_db_version}.")
+                raise ConflictError(
+                    f"Version mismatch for update. Expected {expected_version}, got {current_db_version}",
+                    entity="character_cards", entity_id=existing_char['id'])
 
-        # Save the image separately if it exists
-        if 'image' in character_data:
-            img_data = base64.b64decode(character_data['image'])
-            img_filename = f"{char_name.replace(' ', '_')}.png"
-            img_path = os.path.join(characters_dir, img_filename)
-            with open(img_path, 'wb') as f:
-                f.write(img_data)
-            character_data['image_path'] = os.path.abspath(img_path)
-            del character_data['image']  # Remove the base64 image data from the JSON
+            # Use current_db_version as expected_version for the update call
+            # Merge: Ensure fields not in character_data but in existing_char are preserved if desired
+            # For now, db_card_data contains all fields to be set.
+            # If a field is None in db_card_data, it will be set to NULL in DB.
+            # If character_data omits a field, it's None in db_card_data, so it updates to NULL.
+            # This is standard update behavior. If you want partial updates (only update provided fields),
+            # then db_card_data should only contain non-None values from character_data.
 
-        characters[char_name] = character_data
+            # Let's make db_card_data only contain fields that are present in the input character_data
+            # so it acts as a partial update for existing characters.
+            update_payload = {}
+            for key, value in character_data.items():  # Iterate over original input data
+                if key == 'name': continue  # Name is for lookup, not update here
+                if key in db_card_data:  # Check if it's a mapped key
+                    # Use the mapped value from db_card_data (e.g. image bytes)
+                    update_payload[key] = db_card_data[key]
 
-        with open(characters_file, 'w') as f:
-            json.dump(characters, f, indent=2)
+            if not update_payload:
+                logging.info(
+                    f"No updatable fields provided for existing character '{char_name}'. Skipping update, but returning ID.")
+                char_id = existing_char['id']  # No actual update, but considered "saved"
+            elif db.update_character_card(existing_char['id'], update_payload, current_db_version):
+                char_id = existing_char['id']
+                logging.info(f"Character '{char_name}' (ID: {char_id}) updated successfully.")
+            else:  # update_character_card returned False (should raise on error)
+                logging.error(
+                    f"Update failed for character '{char_name}' (ID: {existing_char['id']}) for unknown reason.")
+                # This path should ideally not be hit if update_character_card raises ConflictError or other DB errors
+
+        else:  # Character does not exist, add new
+            logging.info(f"Character '{char_name}' not found. Attempting to add new.")
+            # For add_character_card, ensure all required fields in db_card_data are present, or handle defaults
+            # add_character_card will set client_id, version, timestamps.
+            # We must provide 'name'. Other text fields can be None/empty. Image can be None.
+            # JSON fields should be None if not provided, or valid JSON string / list / dict.
+            char_id = db.add_character_card(db_card_data)
+            if char_id:
+                logging.info(f"Character '{char_name}' added successfully with ID: {char_id}.")
+            else:  # add_character_card returned None (should raise on error)
+                logging.error(f"Failed to add new character '{char_name}'.")
 
         save_duration = time.time() - start_time
-        log_histogram("save_character_duration", save_duration)
-        log_counter("save_character_success")
-        logging.info(f"Character '{char_name}' saved successfully.")
-    except Exception as e:
-        log_counter("save_character_error", labels={"error": str(e)})
-        logging.error(f"Error saving character: {str(e)}")
+        if char_id:
+            log_histogram("save_character_duration", save_duration)
+            log_counter("save_character_success")
+            return char_id
+        else:
+            # This path means neither update nor add succeeded in setting char_id
+            log_counter("save_character_error_unspecified")
+            logging.error(f"Save character operation for '{char_name}' did not result in a character ID.")
+            return None
+
+    except ConflictError as e_conflict:
+        log_counter("save_character_error_conflict", labels={"error": str(e_conflict)})
+        logging.error(f"Conflict error saving character '{char_name}': {e_conflict}")
+        # Re-raise or return None. For now, return None for simplicity in this wrapper.
+        return None
+    except (InputError, CharactersRAGDBError) as e_db:
+        log_counter("save_character_error_db", labels={"error": str(e_db)})
+        logging.error(f"Database error saving character '{char_name}': {e_db}", exc_info=True)
+        return None
+    except Exception as e_gen:
+        log_counter("save_character_error_generic", labels={"error": str(e_gen)})
+        logging.error(f"Generic error saving character '{char_name}': {e_gen}", exc_info=True)
+        return None
 
 
-def load_characters():
+def load_characters(db: CharactersRAGDB) -> Dict[str, Dict[str, Any]]:  # Returns dict keyed by char name
     log_counter("load_characters_attempt")
     start_time = time.time()
+    characters_map: Dict[str, Dict[str, Any]] = {}
     try:
-        characters_file = os.path.abspath(os.path.join(
-            os.path.dirname(__file__),
-            '..', '..',
-            'Helper_Scripts', 'Character_Cards', 'Characters.json'
-        ))
-        if os.path.exists(characters_file):
-            with open(characters_file, 'r') as f:
-                characters = json.load(f)
-            logging.info(f"Loaded characters from {characters_file}")
-            logging.trace(f"Loaded {len(characters)} characters from {characters_file}")
-            load_duration = time.time() - start_time
-            log_histogram("load_characters_duration", load_duration)
-            log_counter("load_characters_success", labels={"character_count": len(characters)})
-            return characters
-        else:
-            logging.warning(f"Characters file not found: {characters_file}")
-            return {}
-    except Exception as e:
-        log_counter("load_characters_error", labels={"error": str(e)})
+        # list_character_cards returns List[Dict[str, Any]]
+        all_cards_list = db.list_character_cards(limit=10000)  # Assuming not too many cards for now
+
+        for card_dict in all_cards_list:
+            char_name = card_dict.get('name')
+            if char_name:
+                # Convert image BLOB back to base64 string for compatibility if needed by UI
+                if 'image' in card_dict and isinstance(card_dict['image'], bytes):
+                    try:
+                        # You might want to store the image format or assume one (e.g., png)
+                        card_dict['image_base64'] = base64.b64encode(card_dict['image']).decode('utf-8')
+                        # del card_dict['image'] # Optionally remove the bytes version
+                    except Exception as e_img_enc:
+                        logging.warning(f"Could not encode image for character {char_name}: {e_img_enc}")
+                        card_dict['image_base64'] = None
+
+                # The old code had 'image_path'. This is not directly stored.
+                # If 'image_path' is needed, it implies images are also saved to disk by save_character,
+                # which the new DB logic doesn't do (it stores BLOB).
+                # For now, 'image_path' won't be present unless explicitly added.
+
+                characters_map[char_name] = card_dict
+            else:
+                logging.warning(f"Character card found with no name (ID: {card_dict.get('id')}). Skipping.")
+
+        load_duration = time.time() - start_time
+        log_histogram("load_characters_duration", load_duration)
+        log_counter("load_characters_success", labels={"character_count": len(characters_map)})
+        logging.info(f"Loaded {len(characters_map)} characters from DB.")
+        return characters_map
+
+    except CharactersRAGDBError as e_db:
+        log_counter("load_characters_error_db", labels={"error": str(e_db)})
+        logging.error(f"Database error loading characters: {e_db}", exc_info=True)
+        return {}
+    except Exception as e_gen:
+        log_counter("load_characters_error_generic", labels={"error": str(e_gen)})
+        logging.error(f"Generic error loading characters: {e_gen}", exc_info=True)
         return {}
 
 
-def get_character_names():
+def get_character_names(db: CharactersRAGDB) -> List[str]:
     log_counter("get_character_names_attempt")
     start_time = time.time()
+    names: List[str] = []
     try:
-        characters = load_characters()
-        names = list(characters.keys())
+        all_cards = db.list_character_cards(limit=10000)  # Fetch all, then extract names
+        for card in all_cards:
+            if card.get('name'):
+                names.append(card['name'])
+
+        names.sort()  # Optional: sort names alphabetically
+
         get_names_duration = time.time() - start_time
         log_histogram("get_character_names_duration", get_names_duration)
         log_counter("get_character_names_success", labels={"name_count": len(names)})
         return names
-    except Exception as e:
-        log_counter("get_character_names_error", labels={"error": str(e)})
-        logging.error(f"Error getting character names: {str(e)}")
+    except CharactersRAGDBError as e_db:
+        log_counter("get_character_names_error_db", labels={"error": str(e_db)})
+        logging.error(f"Database error getting character names: {e_db}", exc_info=True)
+        return []
+    except Exception as e_gen:
+        log_counter("get_character_names_error_generic", labels={"error": str(e_gen)})
+        logging.error(f"Generic error getting character names: {e_gen}", exc_info=True)
         return []
 
 #

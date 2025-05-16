@@ -8,7 +8,7 @@ from typing import Optional, List
 # 3rd-party Libraries
 from fastapi import HTTPException, Depends
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_db_for_user
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_media_db_for_user
 #
 # Local Imports
 from tldw_Server_API.app.core.DB_Management.DB_Manager import get_full_media_details2, create_document_version, \
@@ -24,7 +24,7 @@ def process_media_update(
     prompt: Optional[str] = None,
     summary: Optional[str] = None,
     keywords: Optional[List[str]] = None,
-    db=Depends(get_db_for_user)
+    db=Depends(get_media_db_for_user)
 ):
     """Centralized media update processing"""
     try:

@@ -59,7 +59,7 @@ from starlette.responses import JSONResponse, Response
 # Authentication & User Identification (Primary Dependency)
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
 # Database Instance Dependency (Gets DB based on User)
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     get_paginated_files,
 )
@@ -343,7 +343,7 @@ def get_add_media_form(
 )
 async def get_media_item(
     media_id: int,
-    db: Database = Depends(get_db_for_user)
+    db: Database = Depends(get_media_db_for_user)
 ):
     """
     **Retrieve Media Item by ID**
@@ -499,7 +499,7 @@ async def get_media_item(
 # async def get_media_item( # Changed to `async def` for consistency
 #     media_id: int,
 #     # --- Use the new DB dependency ---
-#     db: Database = Depends(get_db_for_user) # Inject the Database instance
+#     db: Database = Depends(get_media_db_for_user) # Inject the Database instance
 # ):
 #     """
 #     **Retrieve Media Item by ID**
@@ -637,7 +637,7 @@ async def create_version(
     media_id: int,
     request_body: VersionCreateRequest, # Renamed for clarity (vs request object)
     # --- Use the new DB dependency ---
-    db: Database = Depends(get_db_for_user)
+    db: Database = Depends(get_media_db_for_user)
 ):
     """
     **Create a New Document Version**
@@ -696,7 +696,7 @@ async def list_versions(
     limit: int = Query(10, ge=1, le=100, description="Results per page"),
     page: int = Query(1, ge=1, description="Page number"), # Use page instead of offset
     # --- Use the new DB dependency ---
-    db: Database = Depends(get_db_for_user)
+    db: Database = Depends(get_media_db_for_user)
 ):
     """
     **List Active Versions for an Active Media Item**
@@ -766,7 +766,7 @@ async def get_version(
     version_number: int,
     include_content: bool = Query(True, description="Include full content in response"),
     # --- Use the new DB dependency ---
-    db: Database = Depends(get_db_for_user)
+    db: Database = Depends(get_media_db_for_user)
 ):
     """
     **Get Specific Active Version Details**
@@ -815,7 +815,7 @@ async def delete_version(
     media_id: int,
     version_number: int,
     # --- Use the new DB dependency ---
-    db: Database = Depends(get_db_for_user)
+    db: Database = Depends(get_media_db_for_user)
 ):
     """
     **Soft Delete a Specific Version**
@@ -888,7 +888,7 @@ async def rollback_version(
     media_id: int,
     request_body: VersionRollbackRequest, # Renamed for clarity
     # --- Use the new DB dependency ---
-    db: Database = Depends(get_db_for_user)
+    db: Database = Depends(get_media_db_for_user)
 ):
     """
     **Rollback to a Previous Version**
@@ -959,7 +959,7 @@ async def update_media_item(
     media_id: int,
     payload: MediaUpdateRequest,
     # --- Use the new DB dependency ---
-    db: Database = Depends(get_db_for_user)
+    db: Database = Depends(get_media_db_for_user)
 ):
     """
     **Update Media Item Details**
@@ -1167,7 +1167,7 @@ async def list_all_media(
     request: Request, # Keep request for limiter
     page: int = Query(1, ge=1, description="Page number"),
     results_per_page: int = Query(10, ge=1, le=100, description="Results per page"),
-    db: Database = Depends(get_db_for_user)
+    db: Database = Depends(get_media_db_for_user)
 ):
     """
     Retrieve a paginated listing of all active (non-deleted, non-trash) media items.
@@ -1258,7 +1258,7 @@ async def search_media_items(  # Renamed to avoid conflict if list_all_media is 
         search_params: SearchRequest,
         page: int = Query(1, ge=1, description="Page number"),
         results_per_page: int = Query(10, ge=1, le=100, description="Results per page"),
-        db: Database = Depends(get_db_for_user)
+        db: Database = Depends(get_media_db_for_user)
 ):
     """
     Search across media items based on various criteria.
@@ -2325,7 +2325,7 @@ def _determine_final_status(results: List[Dict[str, Any]]) -> int:
 # --- Main Endpoint ---
 @router.post("/add",
              # status_code=status.HTTP_200_OK, # Determined dynamically
-             dependencies=[Depends(get_db_for_user)],
+             dependencies=[Depends(get_media_db_for_user)],
              summary="Add media (URLs/files) with processing and persistence",
              tags=["Media Ingestion & Persistence"], # Changed tag
              )
@@ -2378,7 +2378,7 @@ async def add_media(
     token: str = Header(..., description="Authentication token"), # Placeholder for auth
     files: Optional[List[UploadFile]] = File(None, description="List of files to upload"),
     # --- DB Dependency ---
-    db: Database = Depends(get_db_for_user) # Use the correct dependency
+    db: Database = Depends(get_media_db_for_user) # Use the correct dependency
 ):
     """
     **Add Media Endpoint**
@@ -2578,8 +2578,8 @@ def get_process_videos_form(
     perform_rolling_summarization: bool = Form(False, description="Perform rolling summarization"),
     summarize_recursively: bool = Form(False, description="Perform recursive summarization"),
     # --- Keep Token and Files separate ---
-    #token: str = Header(..., description="Authentication token"),  # Auth handled by get_db_for_user
-    db=Depends(get_db_for_user)
+    #token: str = Header(..., description="Authentication token"),  # Auth handled by get_media_db_for_user
+    db=Depends(get_media_db_for_user)
 ) -> ProcessVideosForm:
     """
     Dependency function to parse form data and validate it
@@ -2669,7 +2669,7 @@ async def process_videos_endpoint(
     # 1. Auth + UserID Determined through `get_db_by_user`
     # Add check here for granular permissions if needed
     # 2. DB Dependency
-    db: Database = Depends(get_db_for_user),
+    db: Database = Depends(get_media_db_for_user),
     # 3. Form Data Dependency: Parses form fields into the Pydantic model.
     form_data: ProcessVideosForm = Depends(get_process_videos_form),
     # 4. File Uploads
@@ -3063,7 +3063,7 @@ async def process_audios_endpoint(
     # 1. Auth + UserID Determined through `get_db_by_user`
     # token: str = Header(None), # Use Header(None) for optional
     # 2. DB Dependency
-    db: Database = Depends(get_db_for_user),
+    db: Database = Depends(get_media_db_for_user),
     # 3. Use Dependency Injection for Form Data
     form_data: ProcessAudiosForm = Depends(get_process_audios_form),
     # 4. File uploads remain separate
@@ -3553,7 +3553,7 @@ async def process_ebooks_endpoint(
     # 1. Auth + UserID Determined through `get_db_by_user`
     # token: str = Header(None), # Use Header(None) for optional
     # 2. DB Dependency
-    db: Database = Depends(get_db_for_user),
+    db: Database = Depends(get_media_db_for_user),
     # 3. Use Dependency Injection for Form Data
     form_data: ProcessEbooksForm = Depends(get_process_ebooks_form), # Use the dependency
     # 4. File uploads remain separate
@@ -3957,7 +3957,7 @@ async def process_documents_endpoint(
     # 1. Auth + UserID Determined through `get_db_by_user`
     # token: str = Header(None), # Use Header(None) for optional
     # 2. DB Dependency
-    db: Database = Depends(get_db_for_user),
+    db: Database = Depends(get_media_db_for_user),
     # 3. Form Data Dependency
     form_data: ProcessDocumentsForm = Depends(get_process_documents_form), # Use the dependency
     # 4. File Upload
@@ -4463,7 +4463,7 @@ async def process_pdfs_endpoint(
     # 1. Auth + UserID Determined through `get_db_by_user`
     # token: str = Header(None), # Use Header(None) for optional
     # 2. DB Dependency
-    db: Database = Depends(get_db_for_user),
+    db: Database = Depends(get_media_db_for_user),
     form_data: ProcessPDFsForm = Depends(get_process_pdfs_form),
     files: Optional[List[UploadFile]] = File(None,  description="PDF uploads"),
 ):
@@ -4810,7 +4810,7 @@ async def ingest_web_content(
     request: IngestWebContentRequest,
     background_tasks: BackgroundTasks,
     token: str = Header(..., description="Authentication token"),
-    db=Depends(get_db_for_user),
+    db=Depends(get_media_db_for_user),
 ):
     """
     A single endpoint that supports multiple advanced scraping methods:
@@ -5143,7 +5143,7 @@ async def process_web_scraping_endpoint(
         # 1. Auth + UserID Determined through `get_db_by_user`
         # token: str = Header(None), # Use Header(None) for optional
         # 2. DB Dependency
-        db: Database = Depends(get_db_for_user),
+        db: Database = Depends(get_media_db_for_user),
     ):
     """
     Ingest / scrape data from websites or sitemaps, optionally summarize,
@@ -5187,7 +5187,7 @@ async def debug_schema(
         # 1. Auth + UserID Determined through `get_db_by_user`
         # token: str = Header(None), # Use Header(None) for optional
         # 2. DB Dependency
-        db: Database = Depends(get_db_for_user),
+        db: Database = Depends(get_media_db_for_user),
     ):
     """Diagnostic endpoint to check database schema."""
     try:
