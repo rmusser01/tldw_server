@@ -23,7 +23,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 #
 # Import Local
-from tldw_Server_API.app.core.Utils.Utils import load_and_log_configs, logging
+from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.config import load_and_log_configs
 #
 #######################################################################################################################
 # Config Settings

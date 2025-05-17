@@ -28,8 +28,9 @@ from tldw_Server_API.app.core.LLM_Calls.LLM_API_Calls import chat_with_openai, c
 from tldw_Server_API.app.core.LLM_Calls.LLM_API_Calls_Local import chat_with_aphrodite, chat_with_local_llm, chat_with_ollama, \
     chat_with_kobold, chat_with_llama, chat_with_oobabooga, chat_with_tabbyapi, chat_with_vllm, chat_with_custom_openai, \
     chat_with_custom_openai_2
-from tldw_Server_API.app.core.Utils.Utils import generate_unique_filename, load_and_log_configs, logging
+from tldw_Server_API.app.core.Utils.Utils import generate_unique_filename, logging
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.config import load_and_log_configs
 #
 ####################################################################################################
 #

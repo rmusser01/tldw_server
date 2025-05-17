@@ -34,7 +34,8 @@ from tldw_Server_API.app.core.Chat.Chat_Functions import ChatAuthenticationError
     ChatBadRequestError, ChatProviderError, ChatConfigurationError
 #
 # Import Local libraries
-from tldw_Server_API.app.core.Utils.Utils import load_and_log_configs, logging
+from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.Utils.Utils import logging
 #
 #######################################################################################################################
 # Function Definitions

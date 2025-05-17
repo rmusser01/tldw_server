@@ -10,7 +10,8 @@ from typing import List, Tuple, Union, Dict
 #from elasticsearch import Elasticsearch
 #
 # Local Imports
-from tldw_Server_API.app.core.Utils.Utils import load_comprehensive_config, get_database_path, get_project_relative_path
+from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.Utils.Utils import get_database_path, get_project_relative_path
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import list_prompts as sqlite_list_prompts, \
     fetch_prompt_details as sqlite_fetch_prompt_details, add_prompt as sqlite_add_prompt, \
     search_prompts as sqlite_search_prompts, add_or_update_prompt as sqlite_add_or_update_prompt, \
