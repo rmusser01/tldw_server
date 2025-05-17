@@ -302,6 +302,8 @@ def load_and_log_configs():
         google_api_retry_delay = config_parser_object.get('API', 'google_api_retry_delay', fallback='5')
 
         # HuggingFace
+        huggingface_use_router_url_format = config_parser_object.getboolean('API', 'huggingface_use_router_url_format', fallback=False)
+        huggingface_router_base_url = config_parser_object.get('API', 'huggingface_router_base_url', fallback='https://router.huggingface.co/hf-inference')
         huggingface_api_base_url = config_parser_object.get('API', 'huggingface_api_base_url', fallback='https://router.huggingface.co/hf-inference/models')
         huggingface_model = config_parser_object.get('API', 'huggingface_model', fallback='/Qwen/Qwen3-235B-A22B')
         huggingface_streaming = config_parser_object.get('API', 'huggingface_streaming', fallback='False')
@@ -804,6 +806,8 @@ def load_and_log_configs():
                 'api_retry_delay': groq_api_retry_delay
             },
             'huggingface_api': {
+                'huggingface_use_router_url_format': huggingface_use_router_url_format,
+                'huggingface_router_base_url': huggingface_router_base_url,
                 'api_base_url': huggingface_api_base_url,
                 'api_key': huggingface_api_key,
                 'model': huggingface_model,

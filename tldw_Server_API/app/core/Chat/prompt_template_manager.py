@@ -56,7 +56,7 @@ def load_template(template_name: str) -> Optional[PromptTemplate]:
         logger.error(f"Error decoding JSON for template: {template_name}")
     except Exception as e:
         error_message_str = str(e)
-        logger.error(f"Error loading template {template_name}: %s", error_message_str, exc_info=True)
+        logger.error(f"Error loading template {template_name}: {error_message_str}", exc_info=True)
     return None
 
 def apply_template_to_string(template_string: Optional[str], data: Dict[str, Any]) -> Optional[str]:

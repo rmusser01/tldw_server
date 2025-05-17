@@ -1223,7 +1223,7 @@ def summarize_with_groq(api_key, input_data, custom_prompt_arg, temp=None, syste
             )
 
             response_data = response.json()
-            logging.debug("API Response Data: %s", response_data)
+            logging.debug(f"API Response Data: {response_data}")
 
             if response.status_code == 200:
                 if 'choices' in response_data and len(response_data['choices']) > 0:
@@ -1238,7 +1238,7 @@ def summarize_with_groq(api_key, input_data, custom_prompt_arg, temp=None, syste
                 return f"Groq: API request failed: {response.text}"
 
     except Exception as e:
-        logging.error("Groq: Error in processing: %s", str(e), exc_info=True)
+        logging.error(f"Groq: Error in processing: {str(e)}", exc_info=True)
         return f"Groq: Error occurred while processing summary with Groq: {str(e)}"
 
 
@@ -1276,7 +1276,7 @@ def summarize_with_openrouter(api_key, input_data, custom_prompt_arg, temp=None,
             logging.error("OpenRouter: No valid API key available")
             raise ValueError("No valid Anthropic API key available")
     except Exception as e:
-        logging.error("OpenRouter: Error in processing: %s", str(e))
+        logging.error("OpenRouter: Error in processing: {str(e)}")
         return f"OpenRouter: Error occurred while processing config file with OpenRouter: {str(e)}"
 
     logging.debug(f"OpenRouter: Using API Key: {openrouter_api_key[:5]}...{openrouter_api_key[-5:]}")
@@ -1432,7 +1432,7 @@ def summarize_with_openrouter(api_key, input_data, custom_prompt_arg, temp=None,
             )
 
             response_data = response.json()
-            logging.debug("API Response Data: %s", response_data)
+            logging.debug(f"API Response Data: {response_data}", )
 
             if response.status_code == 200:
                 if 'choices' in response_data and len(response_data['choices']) > 0:
@@ -1447,7 +1447,7 @@ def summarize_with_openrouter(api_key, input_data, custom_prompt_arg, temp=None,
                 logging.error(f"openrouter:  API request failed with status code {response.status_code}: {response.text}")
                 return f"openrouter: API request failed: {response.text}"
         except Exception as e:
-            logging.error("openrouter: Error in processing: %s", str(e))
+            logging.error(f"openrouter: Error in processing: {str(e)}")
             return f"openrouter: Error occurred while processing summary with openrouter: {str(e)}"
 
 
@@ -1613,7 +1613,7 @@ def summarize_with_huggingface(api_key, input_data, custom_prompt_arg, temp=None
                 return f"HuggingFace: Failed to process summary. Status code: {response.status_code}"
 
     except Exception as e:
-        logging.error("HuggingFace: Error in processing: %s", str(e), exc_info=True)
+        logging.error(f"HuggingFace: Error in processing: {str(e)}", exc_info=True)
         return f"HuggingFace: Error occurred while processing summary with HuggingFace: {str(e)}"
 
 

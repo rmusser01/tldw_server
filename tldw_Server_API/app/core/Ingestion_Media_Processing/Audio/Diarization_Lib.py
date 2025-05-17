@@ -149,7 +149,7 @@ def audio_diarization(audio_file_path: str) -> list:
 #     time_start = time.time()
 #     if audio_file_path is None:
 #         raise ValueError("audio-diarization: No audio file provided")
-#     logging.info("audio-diarization: Audio file path: %s", audio_file_path)
+#     logging.info(f"audio-diarization: Audio file path: {audio_file_path}")
 #
 #     try:
 #         _, file_ending = os.path.splitext(audio_file_path)
