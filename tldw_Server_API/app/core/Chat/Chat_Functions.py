@@ -382,12 +382,19 @@ def chat(
         # --- Construct messages payload for the LLM API (OpenAI format) ---
         llm_messages_payload: List[Dict[str, Any]] = []
 
-        # 1. System Message (if your chat_api_call doesn't handle it separately for all providers,
-        #    or if the provider needs it as the first message in the payload e.g. OpenAI).
-        #    For now, assuming chat_api_call passes `system_message` separately and providers handle it.
-        #    If OpenAI is the target, it's better to put it here:
-        # if system_message and api_endpoint.lower() == 'openai': # Or a more generic check
-        #     llm_messages_payload.append({"role": "system", "content": system_message})
+        # PHILOSOPHY:
+        # `chat()` prepares the `llm_messages_payload` (user/assistant turns with multimodal content).
+        # `chat()` also collects the `system_message`.
+        # `chat_api_call()` receives both `llm_messages_payload` and the separate `system_message`.
+        # `chat_api_call()` then dispatches these to the specific provider function (e.g., `chat_with_openai`).
+        # The provider function (e.g., `chat_with_openai`) is responsible for:
+        #   1. Taking the `messages` (which is `llm_messages_payload`).
+        #   2. Taking the `system_message` parameter.
+        #   3. If `system_message` is provided, *it* prepends `{"role": "system", "content": system_message}`
+        #      to the `messages` list *if* that's how its API works (like OpenAI).
+        #   4. Or, if its API takes system message as a separate top-level parameter (like Anthropic's `system_prompt`),
+        #      it uses it directly there.
+        # This way, `chat()` doesn't need to know the specifics of each API for system prompts
 
 
         # 2. Process History (now expecting list of OpenAI message dicts)
