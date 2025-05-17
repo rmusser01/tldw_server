@@ -32,7 +32,7 @@ from loguru import logger
 # Import Local
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_ebook_by_chapters, improved_chunking_process
+from tldw_Server_API.app.core.Utils.Chunk_Lib import Chunker, improved_chunking_process
 from tldw_Server_API.app.core.Metrics.metrics_logger import (log_counter, log_histogram)
 from tldw_Server_API.app.core.Utils.Utils import logging
 #
@@ -575,7 +575,7 @@ def process_epub(
             try:
                 # Use chunk_ebook_by_chapters or adapt improved_chunking_process if needed
                 # Assuming chunk_ebook_by_chapters exists and works similarly
-                processed_chunks = chunk_ebook_by_chapters(extracted_text, effective_chunk_options)
+                processed_chunks = Chunker._chunk_ebook_by_chapters(extracted_text, effective_chunk_options)
 
                 if not processed_chunks:
                      logging.warning(f"Chunking produced no chunks for {file_path}. Using full text as one chunk.")
