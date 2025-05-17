@@ -29,8 +29,16 @@ try:
 except FileNotFoundError:
     _config = {}
 
-def _get_setting(env_var, section, key, default=None):
-    return os.getenv(env_var) or _config.get(section, {}).get(key, default)
+def _get_setting(env_var, section, key, default=""):
+    env_value = os.getenv(env_var)
+    if env_value is not None:
+        return env_value
+    config_section = _config.get(section)
+    if config_section:
+        config_value = config_section.get(key)
+        if config_value is not None:
+            return config_value
+    return default
 
 API_KEYS = {
     name: _get_setting(

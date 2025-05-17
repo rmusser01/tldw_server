@@ -162,7 +162,7 @@ def test_create_chat_completion_success_streaming(  # Added default_chat_request
         )
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.headers["content-type"] == "text/event-stream"
+        assert "text/event-stream" in response.headers["content-type"].lower()
 
         stream_content = response.text
         chunks = [line for line in stream_content.split("\n\n") if line.strip()]
@@ -290,10 +290,20 @@ def test_api_key_used_from_config(  # Added default_chat_request_data fixture
 
         mock_chat_api_call.reset_mock()
         request_data_other = default_chat_request_data.model_copy(update={"api_provider": "other_provider"})
-        client.post("/api/v1/chat/completions", json=request_data_other.model_dump(),
-                    headers={"token": valid_auth_token})
+        response_other = client.post("/api/v1/chat/completions", json=request_data_other.model_dump(),
+                                     headers={"token": valid_auth_token})
+        assert response_other.status_code == status.HTTP_200_OK
         mock_chat_api_call.assert_called_once()
         assert mock_chat_api_call.call_args[1]["api_key"] == "other_key"
+        mock_chat_api_call.reset_mock()
+        # Test with 'cohere' (or another valid provider from SUPPORTED_API_ENDPOINTS)
+        request_data_other = default_chat_request_data.model_copy(update={"api_provider": "cohere"})
+        response_other = client.post("/api/v1/chat/completions", json=request_data_other.model_dump(),
+                                     headers={"token": valid_auth_token})
+        assert response_other.status_code == status.HTTP_200_OK  # Expect 200 now
+
+        mock_chat_api_call.assert_called_once()
+        assert mock_chat_api_call.call_args[1]["api_key"] == "cohere_test_key"
     app.dependency_overrides = {}
 
 

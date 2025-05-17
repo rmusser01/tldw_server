@@ -7,7 +7,7 @@ import asyncio
 import logging
 import json
 from functools import partial
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, AsyncIterator, Iterator
 #
 # 3rd-party imports
 from fastapi import (
@@ -306,14 +306,16 @@ async def create_chat_completion(
             func_call = partial(chat_api_call, **chat_args_cleaned)
             stream_generator_or_error = await loop.run_in_executor(None, func_call)
 
-            if isinstance(stream_generator_or_error,
-                          Exception):  # Should be caught by specific exception handlers below now
+            if isinstance(stream_generator_or_error, Exception):  # Should be caught by specific exception handlers below now
                 logger.error(
                     f"Error from chat_api_call during streaming setup for {target_endpoint}: {stream_generator_or_error}")
                 raise stream_generator_or_error  # Re-raise to be caught by specific handlers
 
-            if not hasattr(stream_generator_or_error, '__aiter__') and not hasattr(stream_generator_or_error,
-                                                                                   '__iter__'):
+            # Check if it's a "proper" iterator/async iterator and NOT just a string/bytes
+            is_valid_iterator_type = isinstance(stream_generator_or_error, (Iterator, AsyncIterator))
+            is_simple_string_or_bytes = isinstance(stream_generator_or_error, (str, bytes))
+
+            if not (is_valid_iterator_type and not is_simple_string_or_bytes):
                 logger.error(
                     f"chat_api_call did not return a valid generator/iterator for streaming from {target_endpoint}. Type: {type(stream_generator_or_error)}")
                 raise ChatProviderError(provider=target_endpoint,

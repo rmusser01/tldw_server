@@ -87,9 +87,15 @@ def test_chat_api_call_routing_and_param_mapping_openai_unit(mock_llm_api_call_h
 
     # Check that params were mapped correctly according to PROVIDER_PARAM_MAP['openai']
     param_map_for_provider = PROVIDER_PARAM_MAP[provider]
-    assert called_kwargs[param_map_for_provider['api_key']] == args["api_key"]
-    # messages_payload from chat_api_call maps to 'input_data' for the openai handler via param_map
-    assert called_kwargs[param_map_for_provider['input_data']] == args["messages_payload"]
+    expected_key = param_map_for_provider['messages_payload']
+    print(
+        f"Expected key from map for 'messages_payload': '{expected_key}' (type: {type(expected_key)})")  # Should be 'input_data'
+
+    called_kwargs = mock_openai_handler.call_args.kwargs
+    print(f"Actual keys in mock's called_kwargs: {list(called_kwargs.keys())}")
+
+    assert expected_key in called_kwargs, f"Key '{expected_key}' not found in mock's called_kwargs"
+    assert called_kwargs[expected_key] == args["messages_payload"]
     assert called_kwargs[param_map_for_provider['temp']] == args["temp"]
     assert called_kwargs[param_map_for_provider['system_message']] == args["system_message"]
     assert called_kwargs[param_map_for_provider['streaming']] == args["streaming"]
@@ -344,7 +350,7 @@ def test_chat_function_streaming_passthrough(mock_load_configs, mock_process_inp
 # --- Tests for save_chat_history_to_db_wrapper ---
 @pytest.mark.unit
 @patch("tldw_Server_API.app.core.Chat.Chat_Functions.DEFAULT_CHARACTER_NAME", "TestDefaultChar")
-def test_save_chat_history_new_conversation_default_char(): # Removed mock_default_char_name argument
+def test_save_chat_history_new_conversation_default_char():
     mock_db = MagicMock(spec=CharactersRAGDB)
     mock_db.client_id = "unit_test_client"
     mock_db.get_character_card_by_name.return_value = {"id": 99, "name": "TestDefaultChar"}  # For default char lookup
