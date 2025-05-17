@@ -12,7 +12,7 @@ import time
 import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple, Optional, Union
 #
 # 3rd-party Libraries
 import requests
@@ -84,7 +84,12 @@ PROVIDER_PARAM_MAP = {
         'system_message': 'system_message',
         'streaming': 'streaming',
         'maxp': 'maxp',
-        'model': 'model'
+        'model': 'model',
+        # 'logprobs': 'logprobs',
+        # 'top_logprobs': 'top_logprobs',
+        # 'logit_bias': 'logit_bias',
+        # 'presence_penalty': 'presence_penalty',
+        # 'frequency_penalty': 'frequency_penalty',
         # Note: OpenAI's chat_with_openai internally handles 'maxp' as 'top_p'
     },
     'anthropic': {
@@ -196,8 +201,15 @@ def chat_api_call(
     maxp: Optional[float] = None, # Often maps to top_p
     model: Optional[str] = None,
     topk: Optional[int] = None,
-    topp: Optional[float] = None # Often maps to top_p
-):
+    topp: Optional[float] = None, # Often maps to top_p
+    logprobs: Optional[bool] = None,
+    top_logprobs: Optional[int] = None,
+    logit_bias: Optional[Dict[str, float]] = None,
+    presence_penalty: Optional[float] = None,
+    frequency_penalty: Optional[float] = None,
+    tools: Optional[List[Dict[str, Any]]] = None,
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = None
+    ):
     """
     Acts as a sink/router to call various LLM API providers using a structured messages_payload.
     """
@@ -229,6 +241,13 @@ def chat_api_call(
         'model': model,
         'topk': topk,
         'topp': topp, # Will be mapped to top_p by some providers
+        'logprobs': logprobs,
+        'top_logprobs': top_logprobs,
+        'logit_bias': logit_bias,
+        'presence_penalty': presence_penalty,
+        'frequency_penalty': frequency_penalty,
+        'tools': tools,
+        'tool_choice': tool_choice,
     }
 
     for generic_param_name, provider_param_name in params_map.items():

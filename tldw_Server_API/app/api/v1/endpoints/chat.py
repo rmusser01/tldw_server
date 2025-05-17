@@ -287,7 +287,14 @@ async def create_chat_completion(
         "maxp": request_data.top_p,  # chat_api_call maps 'maxp' to provider's top_p if applicable
         "model": request_data.model,
         "topk": request_data.topk,
-        "topp": request_data.top_p  # chat_api_call also has 'topp' for direct top_p mapping
+        "topp": request_data.top_p,  # chat_api_call also has 'topp' for direct top_p mapping
+        "logprobs": request_data.logprobs,
+        "top_logprobs": request_data.top_logprobs,
+        "logit_bias": request_data.logit_bias,
+        "presence_penalty": request_data.presence_penalty,
+        "frequency_penalty": request_data.frequency_penalty,
+        "tools": request_data.tools,
+        "tool_choice": request_data.tool_choice,
         # Add other parameters from ChatCompletionRequest if chat_api_call expects them
         # e.g. "max_tokens": request_data.max_tokens (if chat_api_call passes it on)
         # For now, assuming the PROVIDER_PARAM_MAP in Chat_Functions.py handles what's needed.

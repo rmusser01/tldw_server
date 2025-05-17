@@ -38,7 +38,7 @@
         .tab-content { display: none; /* Hidden by default */ }
         .tab-content.active { display: block; }
 
-        /* Styles from previous version for endpoint sections */
+        /* Styles for endpoint sections (generic) */
         .endpoint-section { border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; border-radius: 5px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         .endpoint-section h2 { margin-top: 0; color: #007bff; border-bottom: 1px solid #eee; padding-bottom: 10px; font-size: 1.4em; }
         .endpoint-section h3 { margin-top: 15px; color: #555; font-size: 1.1em; }
@@ -53,13 +53,44 @@
             cursor: pointer; font-size: 1em; transition: background-color 0.3s ease; margin-top: 10px;
         }
         button.api-button:hover { background-color: #218838; }
-        pre { background-color: #e9e9e9; padding: 10px; border: 1px solid #ccc; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; font-size: 0.9em; }
+        pre { background-color: #e9e9e9; padding: 10px; border: 1px solid #ccc; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; font-size: 0.9em; max-height: 400px; overflow-y: auto;}
         .form-group { margin-bottom: 15px; }
         .checkbox-group label { display: inline-block; margin-right: 10px; font-weight: normal;}
-        .checkbox-group input[type="checkbox"] { margin-right: 5px; vertical-align: middle; }
+        .checkbox-group input[type="checkbox"] { margin-right: 5px; vertical-align: middle; width: auto; margin-bottom: 0;}
         .columns { display: flex; flex-wrap: wrap; gap: 20px; }
         .column { flex: 1; min-width: 300px; }
         small { color: #666; display: block; margin-top: -5px; margin-bottom: 10px;}
+
+        /* Chat Completions Specific Styles (New) */
+        textarea.raw-payload-textarea { min-height: 250px; font-family: monospace; }
+        .message-entry {
+            border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        .message-entry label { font-size: 0.9em; }
+        .message-entry select, .message-entry textarea, .message-entry input[type="text"] { margin-bottom: 5px; }
+        .remove-message-btn {
+            background-color: #dc3545; color: white; border: none; padding: 5px 10px;
+            border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px;
+        }
+        .remove-message-btn:hover { background-color: #c82333; }
+        .add-message-btn {
+            background-color: #28a745; color: white; border: none; padding: 8px 12px;
+            border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-bottom: 15px;
+        }
+        .add-message-btn:hover { background-color: #218838; }
+        .optional-params { border-left: 3px solid #007bff; padding-left: 15px; margin-top: 10px; }
+        #chatCompletions_formFields .columns .column input[type="text"],
+        #chatCompletions_formFields .columns .column input[type="number"],
+        #chatCompletions_formFields .columns .column select {
+             width: 100%; /* Override generic width for chat form's columns */
+        }
+        #chatCompletions_formFields .optional-params input[type="text"],
+        #chatCompletions_formFields .optional-params input[type="number"],
+        #chatCompletions_formFields .optional-params select,
+        #chatCompletions_formFields .optional-params textarea {
+             width: 100%; /* Override generic width for chat form's optional params */
+        }
     </style>
 </head>
 <body>
@@ -73,7 +104,7 @@
             <div class="top-tab-buttons">
                 <button class="top-tab-button" data-toptab="general">General</button>
                 <button class="top-tab-button" data-toptab="media">Media</button>
-                <button class="top-tab-button" data-toptab="chat">Chat</button>
+                <button class="top-tab-button" data-toptab="chat" id="top-tab-chat">Chat</button>
             </div>
         </div>
 
@@ -88,10 +119,7 @@
         <div id="media-subtabs" class="sub-tab-row">
             <div class="sub-tab-buttons">
                 <button class="sub-tab-button" data-content-id="tabMediaManagement" data-load-group="media">Media Management</button>
-                <button class="sub-tab-button" data-content-id="tabMediaVersioning" data-load-group="media">Media Versioning</button>
-                <button class="sub-tab-button" data-content-id="tabMediaIngestionPersistence" data-load-group="media">Media Ingestion (DB)</button>
-                <button class="sub-tab-button" data-content-id="tabMediaProcessingNoDB" data-load-group="media">Media Processing (No DB)</button>
-                <button class="sub-tab-button" data-content-id="tabWebScraping" data-load-group="media">Web Scraping</button>
+                <!-- Add other media sub-tabs here -->
             </div>
         </div>
 
@@ -112,9 +140,9 @@
                         <input type="text" id="baseUrl" value="http://localhost:8000">
                     </div>
                     <div class="form-group">
-                        <label for="apiKeyInput">API Key (X-API-KEY for single-user / JWT for multi-user):</label>
+                        <label for="apiKeyInput">API Token (used in 'Token' header):</label>
                         <input type="text" id="apiKeyInput" value="default-secret-key-for-single-user"><br>
-                        <small>For multi-user, paste JWT here. For single-user, use configured X-API-KEY.</small>
+                        <small>This will be sent in the 'Token' header for authenticated requests.</small>
                     </div>
                 </div>
             </div>
@@ -127,6 +155,7 @@
         const mainContentArea = document.getElementById('main-content-area');
         let activeTopTabButton = null;
         let activeSubTabButton = null;
+        let messageIdCounter = { chatCompletions: 0 }; // For dynamic message IDs
 
         function initTabs() {
             const topTabButtons = document.querySelectorAll('.top-tab-buttons button');
@@ -139,9 +168,12 @@
                 btn.addEventListener('click', () => activateSubTab(btn));
             });
 
-            // Activate the first top tab by default
-            if (topTabButtons.length > 0) {
-                activateTopTab(topTabButtons[0]);
+            // Activate the "Chat" top tab and its "Chat Completions" sub-tab by default
+            const defaultTopTab = document.getElementById('top-tab-chat');
+            if (defaultTopTab) {
+                activateTopTab(defaultTopTab);
+            } else if (topTabButtons.length > 0) {
+                activateTopTab(topTabButtons[0]); // Fallback to first top tab
             }
         }
 
@@ -153,28 +185,32 @@
             activeTopTabButton.classList.add('active');
 
             const topTabName = activeTopTabButton.dataset.toptab;
-
-            // Hide all sub-tab rows
             document.querySelectorAll('.sub-tab-row').forEach(row => row.classList.remove('active'));
 
-            // Show the current top tab's sub-tab row
             const subTabRowToShow = document.getElementById(topTabName + '-subtabs');
             if (subTabRowToShow) {
                 subTabRowToShow.classList.add('active');
-                // Activate the first sub-tab in this row
                 const firstSubTabButton = subTabRowToShow.querySelector('.sub-tab-buttons button');
                 if (firstSubTabButton) {
-                    activateSubTab(firstSubTabButton);
+                    await activateSubTab(firstSubTabButton); // Make sure content loading completes
                 }
-            } else { // If no sub-tabs, clear content
-                 if (activeSubTabButton) {
+            } else {
+                if (activeSubTabButton) {
                     activeSubTabButton.classList.remove('active');
                     activeSubTabButton = null;
                 }
-                document.querySelectorAll('.tab-content').forEach(tc => {
+                mainContentArea.querySelectorAll('.tab-content').forEach(tc => {
                     tc.classList.remove('active');
                     tc.style.display = 'none';
                 });
+                 // If top tab has no sub-tabs, check if it's 'general' to show 'tabGlobalSettings'
+                if (topTabName === 'general') {
+                    const globalSettingsContent = document.getElementById('tabGlobalSettings');
+                    if (globalSettingsContent) {
+                        globalSettingsContent.classList.add('active');
+                        globalSettingsContent.style.display = 'block';
+                    }
+                }
             }
         }
 
@@ -182,9 +218,7 @@
             const parentSubTabRow = subTabButtonToActivate.closest('.sub-tab-row');
             if (!parentSubTabRow) return;
 
-            // Deactivate other sub-tabs in the same row
             parentSubTabRow.querySelectorAll('.sub-tab-buttons button').forEach(btn => btn.classList.remove('active'));
-
             activeSubTabButton = subTabButtonToActivate;
             activeSubTabButton.classList.add('active');
 
@@ -193,294 +227,473 @@
 
             if (loadGroup && !loadedContentGroups.has(loadGroup)) {
                 try {
-                    await loadContentGroup(loadGroup);
+                    console.log(`Loading content for group: ${loadGroup}, target content ID: ${contentId}`);
+                    await loadContentGroup(loadGroup, contentId); // Pass contentId for initialization
                     loadedContentGroups.add(loadGroup);
                 } catch (error) {
                     console.error(`Failed to load content for group ${loadGroup}:`, error);
-                    const errorDisplay = document.getElementById(contentId) || document.createElement('div');
-                    if (!document.getElementById(contentId)) {
+                    let errorDisplay = document.getElementById(contentId);
+                    if (!errorDisplay) {
+                        errorDisplay = document.createElement('div');
                         errorDisplay.id = contentId;
                         errorDisplay.classList.add('tab-content');
                         mainContentArea.appendChild(errorDisplay);
                     }
-                    errorDisplay.innerHTML = `<p>Error loading content for ${loadGroup}. Please check console.</p>`;
-                    // Still try to show it
+                    errorDisplay.innerHTML = `<p>Error loading content for ${contentId}. Please check console.</p>`;
                 }
             }
 
-            // Hide all tab contents
             mainContentArea.querySelectorAll('.tab-content').forEach(tc => {
                 tc.classList.remove('active');
-                tc.style.display = 'none'; // Ensure it's hidden
+                tc.style.display = 'none';
             });
 
-            // Show the target tab content
             const contentToShow = document.getElementById(contentId);
             if (contentToShow) {
                 contentToShow.classList.add('active');
-                contentToShow.style.display = 'block'; // Ensure it's visible
+                contentToShow.style.display = 'block';
+                 // If this is the chat completions tab, ensure its dynamic elements are (re)initialized
+                if (contentId === 'tabChatCompletions' && typeof initializeChatCompletionsTab === "function") {
+                    initializeChatCompletionsTab();
+                }
             } else {
                 console.warn(`Content ID "${contentId}" not found after attempting to load group "${loadGroup}".`);
-                 // Display a placeholder or error if content still not found
                 const placeholder = document.createElement('div');
-                placeholder.id = contentId; // So it can be potentially found later
+                placeholder.id = contentId;
                 placeholder.classList.add('tab-content', 'active');
                 placeholder.style.display = 'block';
                 placeholder.innerHTML = `<p>Content for ${contentId} is missing or failed to load.</p>`;
-
-                // Remove any existing placeholder with the same ID before appending
                 const existingPlaceholder = mainContentArea.querySelector(`#${contentId}`);
                 if (existingPlaceholder) existingPlaceholder.remove();
-
                 mainContentArea.appendChild(placeholder);
             }
         }
 
-        async function loadContentGroup(groupName) {
+        async function loadContentGroup(groupName, targetContentId) {
             const response = await fetch(`tabs/${groupName}_content.html`);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status} for tabs/${groupName}_content.html`);
             }
             const html = await response.text();
             mainContentArea.insertAdjacentHTML('beforeend', html);
+
+            // After loading content, if it's the chat group and the specific tab, initialize
+            if (groupName === 'chat' && targetContentId === 'tabChatCompletions') {
+                if (typeof initializeChatCompletionsTab === "function") {
+                     initializeChatCompletionsTab();
+                } else {
+                    console.warn("initializeChatCompletionsTab function not found after loading chat content.");
+                }
+            }
         }
 
         document.addEventListener('DOMContentLoaded', initTabs);
 
-        // --- API Call Logic (largely unchanged) ---
-        async function makeRequest(endpointId, method, pathTemplate, bodyType = 'json', isStream = false) {
-            const baseUrl = document.getElementById('baseUrl').value;
-            const apiKeyOrTokenValue = document.getElementById('apiKeyInput').value;
-            const responseEl = document.getElementById(endpointId + '_response');
-            const curlEl = document.getElementById(endpointId + '_curl');
+        // --- Chat Completions UI Specific Functions ---
+        function escapeCurlData(data) {
+            return data.replace(/'/g, "'\\''");
+        }
 
-            if (!responseEl || !curlEl) {
-                console.error(`Response or cURL element not found for endpointId: ${endpointId}. Tab content might not be loaded or IDs are incorrect.`);
-                alert(`Error: UI elements for ${endpointId} are missing. Content might not be loaded correctly.`);
+        function addChatMessage(prefix, role = 'user', content = '') {
+            const container = document.getElementById(prefix + '_messagesContainer');
+            if (!container) {
+                console.error("Messages container not found for prefix:", prefix);
                 return;
             }
+            const id = messageIdCounter[prefix]++;
+            const entryDiv = document.createElement('div');
+            entryDiv.className = 'message-entry';
+            entryDiv.id = `${prefix}_message_entry_${id}`;
+            entryDiv.innerHTML = `
+                <label for="${prefix}_message_role_${id}">Role:</label>
+                <select id="${prefix}_message_role_${id}" onchange="toggleToolFields('${prefix}', ${id})">
+                    <option value="system" ${role === 'system' ? 'selected' : ''}>System</option>
+                    <option value="user" ${role === 'user' ? 'selected' : ''}>User</option>
+                    <option value="assistant" ${role === 'assistant' ? 'selected' : ''}>Assistant</option>
+                    <option value="tool" ${role === 'tool' ? 'selected' : ''}>Tool</option>
+                </select>
+                <label for="${prefix}_message_content_${id}">Content:</label>
+                <textarea id="${prefix}_message_content_${id}" rows="3">${content}</textarea>
+                <label for="${prefix}_message_name_${id}">Name (Optional):</label>
+                <input type="text" id="${prefix}_message_name_${id}" placeholder="Participant name">
+                <div id="${prefix}_message_tool_fields_${id}" style="display: ${role === 'tool' ? 'block' : 'none'};">
+                    <label for="${prefix}_message_tool_call_id_${id}">Tool Call ID (Required for tool role):</label>
+                    <input type="text" id="${prefix}_message_tool_call_id_${id}">
+                </div>
+                <button class="remove-message-btn" onclick="removeChatMessage('${prefix}', ${id})">Remove</button>
+            `;
+            container.appendChild(entryDiv);
+        }
 
-            responseEl.textContent = 'Loading...';
-            curlEl.textContent = 'Generating...';
-            // console.log(`--- Request for ${endpointId} ---`);
-            // console.log("Method:", method, "Path Template:", pathTemplate, "Body Type:", bodyType, "Is Stream:", isStream);
-            // console.log("API Key/Token from input:", apiKeyOrTokenValue);
-
-            let path = pathTemplate;
-            const pathParams = {};
-            let bodyPayload = null;
-            let headers = {};
-            const curlHeaderParts = [];
-            const curlFormParts = [];
-
-            if (pathTemplate.includes('{')) {
-                pathTemplate.match(/{[a-zA-Z0-9_]+}/g)?.forEach(param => {
-                    const paramName = param.substring(1, param.length - 1);
-                    const inputEl = document.getElementById(endpointId + '_' + paramName);
-                    if (inputEl && inputEl.value) {
-                        path = path.replace(param, encodeURIComponent(inputEl.value));
-                        pathParams[paramName] = inputEl.value;
-                    } else if (inputEl) {
-                        // console.warn(`Path parameter '${paramName}' for endpoint '${endpointId}' is empty. Using empty string in path.`);
-                        path = path.replace(param, "");
-                        pathParams[paramName] = "";
-                    } else {
-                        console.error(`Missing input element for path parameter ${paramName} for endpoint ${endpointId}`);
-                        responseEl.textContent = `Error: Missing input for path parameter ${paramName}`;
-                        return;
-                    }
-                });
+        function toggleToolFields(prefix, id) {
+            const roleSelect = document.getElementById(`${prefix}_message_role_${id}`);
+            const toolFieldsDiv = document.getElementById(`${prefix}_message_tool_fields_${id}`);
+            if (roleSelect && toolFieldsDiv) {
+                toolFieldsDiv.style.display = roleSelect.value === 'tool' ? 'block' : 'none';
             }
+        }
 
-            let fullUrl = baseUrl + path;
-            // console.log("Initial fullUrl (after path param substitution):", fullUrl);
-
-            if (apiKeyOrTokenValue) {
-                headers['X-API-KEY'] = apiKeyOrTokenValue;
-                curlHeaderParts.push(`-H "X-API-KEY: ${apiKeyOrTokenValue.replace(/"/g, '\\"')}"`);
-                // console.log("Set X-API-KEY header:", apiKeyOrTokenValue);
-            } else {
-                // console.warn("API Key/Token input is empty. No X-API-KEY header will be sent.");
+        function removeChatMessage(prefix, id) {
+            const entryDiv = document.getElementById(`${prefix}_message_entry_${id}`);
+            if (entryDiv) {
+                entryDiv.remove();
             }
+        }
 
-            const queryParamsForUrl = new URLSearchParams();
-            const formSection = document.getElementById(endpointId); // Parent section of the endpoint
+        function buildPayloadFromForm(prefix) {
+            const payload = {};
+            const apiProviderEl = document.getElementById(prefix + '_api_provider');
+            if (apiProviderEl) payload.api_provider = apiProviderEl.value || undefined;
 
-            if (formSection && (bodyType === 'query' || bodyType === 'json_with_query' || (method === 'GET' && bodyType !== 'none'))) {
-                const formElements = formSection.querySelectorAll(`#${endpointId} input, #${endpointId} select, #${endpointId} textarea`); // Scope to current endpoint
-                formElements.forEach(el => {
-                    // Ensure element ID is correctly prefixed for this endpoint and not a path param or payload field for json_with_query
-                    if (el.id && el.id.startsWith(endpointId + '_')) {
-                        const key = el.id.replace(endpointId + '_', '');
-                        if (pathParams[key]) return;
-                        if (bodyType === 'json_with_query' && key === 'payload') return;
+            const modelEl = document.getElementById(prefix + '_model');
+            if (modelEl) payload.model = modelEl.value || undefined;
 
-                        if (el.type === 'checkbox') {
-                            if (el.checked) queryParamsForUrl.append(key, 'true');
-                        } else if (el.type === 'file') { /* skip for query */ }
-                        else if (el.tagName.toLowerCase() === 'select' && el.multiple) {
-                            for (const option of el.selectedOptions) {
-                                if (option.value) queryParamsForUrl.append(key, option.value);
-                            }
-                        } else if (el.value) {
-                            queryParamsForUrl.append(key, el.value);
+            const messages = [];
+            const messagesContainer = document.getElementById(prefix + '_messagesContainer');
+            if (messagesContainer) {
+                const messageEntries = messagesContainer.children;
+                for (let i = 0; i < messageEntries.length; i++) {
+                    const entryDiv = messageEntries[i];
+                    if (!entryDiv.id || !entryDiv.id.startsWith(prefix + '_message_entry_')) continue;
+                    const entryId = entryDiv.id.split('_').pop();
+
+                    const roleEl = document.getElementById(`${prefix}_message_role_${entryId}`);
+                    const contentEl = document.getElementById(`${prefix}_message_content_${entryId}`);
+                    const nameEl = document.getElementById(`${prefix}_message_name_${entryId}`);
+                    if (!roleEl || !contentEl) continue;
+
+                    const role = roleEl.value;
+                    const contentValue = contentEl.value;
+                    const name = nameEl ? (nameEl.value || undefined) : undefined;
+
+                    const message = { role, content: contentValue };
+                    if (name) message.name = name;
+                    if (role === 'tool') {
+                        const toolCallIdEl = document.getElementById(`${prefix}_message_tool_call_id_${entryId}`);
+                        message.tool_call_id = toolCallIdEl ? (toolCallIdEl.value || undefined) : undefined;
+                        if (!message.tool_call_id) {
+                            alert(`Tool Call ID is required for message ${i + 1} with role 'tool'.`);
+                            throw new Error("Missing Tool Call ID for a tool message.");
                         }
                     }
-                });
-            }
-            if (queryParamsForUrl.toString()) {
-                fullUrl += (fullUrl.includes('?') ? '&' : '?') + queryParamsForUrl.toString();
-            }
-            // console.log("URL with query params:", fullUrl);
-
-
-            if (bodyType === 'json' || bodyType === 'json_with_query') {
-                const payloadTextEl = document.getElementById(endpointId + '_payload');
-                if (payloadTextEl && payloadTextEl.value) {
-                    try {
-                        bodyPayload = JSON.parse(payloadTextEl.value);
-                        headers['Content-Type'] = 'application/json';
-                        // console.log("Set Content-Type header: application/json");
-                    } catch (e) {
-                        responseEl.textContent = 'Error: Invalid JSON payload. ' + e.message;
-                        curlEl.textContent = 'Invalid JSON payload.';
-                        console.error("JSON parsing error:", e);
-                        return;
-                    }
+                    messages.push(message);
                 }
-            } else if (bodyType === 'form') {
-                bodyPayload = new FormData();
-                 if (formSection) {
-                    const formElements = formSection.querySelectorAll(`#${endpointId} input, #${endpointId} select, #${endpointId} textarea`);
-                    formElements.forEach(el => {
-                        if (el.id && el.id.startsWith(endpointId + '_')) {
-                            const key = el.id.replace(endpointId + '_', '');
-                            if (pathParams[key]) return;
-                            if (el.type === 'file') {
-                                if (el.files.length > 0) {
-                                    for (let i = 0; i < el.files.length; i++) {
-                                        bodyPayload.append(key, el.files[i], el.files[i].name);
-                                        curlFormParts.push(`-F "${key}=@${el.files[i].name.replace(/"/g, '\\"')}"`);
-                                    }
-                                }
-                            } else if (el.type === 'checkbox') {
-                                const val = el.checked ? 'true' : 'false'; // Send 'true'/'false' strings for FormData
-                                bodyPayload.append(key, val);
-                                curlFormParts.push(`-F "${key}=${val}"`);
-                            } else if (el.tagName.toLowerCase() === 'textarea' && key === 'urls') {
-                                const urls = el.value.split('\n').map(u => u.trim()).filter(u => u);
-                                urls.forEach(url => {
-                                    bodyPayload.append(key, url);
-                                    curlFormParts.push(`-F "${key}=${url.replace(/"/g, '\\"')}"`);
-                                });
-                            } else if (el.tagName.toLowerCase() === 'select' && el.value === "" && (key === 'chunk_method' || key.endsWith('_chunk_method'))) {
-                                 // console.log(`Skipping empty valued select '${key}' for FormData to allow Pydantic default.`);
-                                 curlFormParts.push(`# Optional select '${key}' was empty, not sent.`);
-                            } else if (el.tagName.toLowerCase() === 'select' && el.multiple) {
-                                for (const option of el.selectedOptions) {
-                                    if (option.value) {
-                                        bodyPayload.append(key, option.value);
-                                        curlFormParts.push(`-F "${key}=${option.value.replace(/"/g, '\\"')}"`);
-                                    }
-                                }
-                            } else if (el.value || ( (el.type === 'text' || el.tagName.toLowerCase() === 'textarea' || el.type === 'password') && el.value === '') ) {
-                                // Send empty strings if the field exists and is meant to be text, allows clearing values
-                                bodyPayload.append(key, el.value);
-                                curlFormParts.push(`-F "${key}=${el.value.replace(/"/g, '\\"')}"`);
+            }
+            payload.messages = messages;
+
+            const temperatureEl = document.getElementById(prefix + '_temperature');
+            if (temperatureEl) {
+                const tempVal = temperatureEl.value;
+                if (tempVal !== "") payload.temperature = parseFloat(tempVal); else payload.temperature = undefined;
+            }
+
+            const maxTokensEl = document.getElementById(prefix + '_max_tokens');
+            if (maxTokensEl) {
+                 const maxTokensVal = maxTokensEl.value;
+                if (maxTokensVal !== "") payload.max_tokens = parseInt(maxTokensVal); else payload.max_tokens = undefined;
+            }
+
+            const streamEl = document.getElementById(prefix + '_stream');
+            if (streamEl) payload.stream = streamEl.checked;
+
+
+            // Optional parameters
+            const optionalFields = {
+                top_p: { type: 'float', elIdSuffix: '_top_p' },
+                frequency_penalty: { type: 'float', elIdSuffix: '_frequency_penalty' },
+                presence_penalty: { type: 'float', elIdSuffix: '_presence_penalty' },
+                minp: { type: 'float', elIdSuffix: '_minp', allowUndefined: true },
+                topk: { type: 'int', elIdSuffix: '_topk', allowUndefined: true },
+                seed: { type: 'int', elIdSuffix: '_seed', allowNull: true },
+                stop: { type: 'json_or_csv_list', elIdSuffix: '_stop', allowNull: true },
+                logprobs: { type: 'checkbox_to_null', elIdSuffix: '_logprobs', allowNull: true },
+                top_logprobs: { type: 'int', elIdSuffix: '_top_logprobs', dependsOn: 'logprobs', allowUndefined: true },
+                response_format: { type: 'select_object', elIdSuffix: '_response_format_type', key: 'type', allowNull: true },
+                tools: { type: 'json', elIdSuffix: '_tools', allowNull: true },
+                tool_choice: { type: 'json_or_string', elIdSuffix: '_tool_choice', allowUndefined: true, validStrings: ["auto", "none", "required"] },
+                logit_bias: { type: 'json', elIdSuffix: '_logit_bias', allowNull: true },
+                character_id: { type: 'string', elIdSuffix: '_character_id', allowUndefined: true },
+                prompt_template_name: { type: 'string', elIdSuffix: '_prompt_template_name', allowUndefined: true }
+            };
+
+            for (const key in optionalFields) {
+                const config = optionalFields[key];
+                const el = document.getElementById(prefix + config.elIdSuffix);
+                if (!el) continue;
+
+                if (config.dependsOn && !document.getElementById(prefix + '_' + config.dependsOn)?.checked) {
+                    payload[key] = config.allowNull ? null : (config.allowUndefined ? undefined : payload[key]);
+                    continue;
+                }
+
+                let value;
+                switch (config.type) {
+                    case 'float': value = el.value !== "" ? parseFloat(el.value) : (config.allowUndefined ? undefined : (config.allowNull ? null : NaN)); break;
+                    case 'int': value = el.value !== "" ? parseInt(el.value) : (config.allowUndefined ? undefined : (config.allowNull ? null : NaN)); break;
+                    case 'string': value = el.value.trim() !== "" ? el.value.trim() : (config.allowUndefined ? undefined : (config.allowNull ? null : "")); break;
+                    case 'checkbox_to_null': value = el.checked ? true : (config.allowNull ? null : false); break;
+                    case 'json_or_csv_list':
+                        if (el.value.trim() !== "") {
+                            try { value = JSON.parse(el.value); }
+                            catch (e) { value = el.value.split(',').map(s => s.trim()).filter(s => s); if(value.length === 0) value = config.allowNull ? null : (config.allowUndefined ? undefined : []);}
+                        } else { value = config.allowNull ? null : (config.allowUndefined ? undefined : []); }
+                        break;
+                    case 'json':
+                        if (el.value.trim() !== "") {
+                            try { value = JSON.parse(el.value); }
+                            catch (e) { alert(`Invalid JSON for ${key}`); throw new Error(`Invalid JSON for ${key}`); }
+                        } else { value = config.allowNull ? null : (config.allowUndefined ? undefined : {}); }
+                        break;
+                    case 'select_object':
+                        value = el.value ? { [config.key]: el.value } : (config.allowNull ? null : (config.allowUndefined ? undefined : {}));
+                        break;
+                    case 'json_or_string':
+                        if (el.value.trim() !== "") {
+                            if (config.validStrings && config.validStrings.includes(el.value.trim().toLowerCase())) {
+                                value = el.value.trim().toLowerCase();
                             } else {
-                                 // console.log(`Skipping form field with no/falsy value: ${key} (value: '${el.value}')`);
-                                 if(el.value === "") curlFormParts.push(`# Optional field '${key}' was empty, not sent.`);
+                                try { value = JSON.parse(el.value); }
+                                catch (e) { alert(`Invalid value for ${key}. Must be one of ${config.validStrings.join(', ')} or a valid JSON object string.`); throw new Error(`Invalid value for ${key}`); }
                             }
-                        }
-                    });
+                        } else { value = config.allowUndefined ? undefined : (config.allowNull ? null : "auto"); }
+                        break;
+                }
+                if (value !== undefined && !(typeof value === 'number' && isNaN(value))) {
+                    payload[key] = value;
+                } else if (config.allowNull && value === null) {
+                    payload[key] = null;
+                } else if (config.allowUndefined) {
+                    delete payload[key]; // Or payload[key] = undefined;
+                }
+            }
+            // Final cleanup for undefined
+            for (const key in payload) { if (payload[key] === undefined) { delete payload[key]; } }
+            return payload;
+        }
+
+        function toggleRawJson(prefix) {
+            const useRawJsonCheckbox = document.getElementById(prefix + '_useRawJson');
+            if (!useRawJsonCheckbox) return;
+            const useRawJson = useRawJsonCheckbox.checked;
+
+            const formFieldsDiv = document.getElementById(prefix + '_formFields');
+            const rawJsonContainerDiv = document.getElementById(prefix + '_rawJsonContainer');
+            const rawPayloadTextarea = document.getElementById(prefix + '_payload_raw');
+
+            if (formFieldsDiv) formFieldsDiv.style.display = useRawJson ? 'none' : 'block';
+            if (rawJsonContainerDiv) rawJsonContainerDiv.style.display = useRawJson ? 'block' : 'none';
+
+            if (useRawJson && rawPayloadTextarea) {
+                try {
+                    const currentPayload = buildPayloadFromForm(prefix);
+                    rawPayloadTextarea.value = JSON.stringify(currentPayload, null, 2);
+                } catch (e) {
+                    console.warn("Could not build payload for raw view:", e.message);
+                    rawPayloadTextarea.value = JSON.stringify({"error_building_payload": e.message, "tip": "Fix form errors or manually edit JSON."}, null, 2);
+                }
+            }
+        }
+
+        function generateChatCompletionsCurl() {
+            const endpointId = 'createChatCompletion';
+            const prefix = 'chatCompletions';
+            const curlEl = document.getElementById(endpointId + '_curl');
+            if (!curlEl) return;
+
+            const token = document.getElementById('apiKeyInput').value || "YOUR_API_TOKEN_PLACEHOLDER";
+            const baseUrl = document.getElementById('baseUrl').value;
+            let payload;
+
+            const useRawJsonCheckbox = document.getElementById(prefix + '_useRawJson');
+            if (!useRawJsonCheckbox) { curlEl.textContent = "Error: Raw JSON toggle checkbox not found."; return; }
+            const useRawJson = useRawJsonCheckbox.checked;
+
+            if (useRawJson) {
+                const rawPayloadEl = document.getElementById(prefix + '_payload_raw');
+                if (rawPayloadEl && rawPayloadEl.value.trim() !== "") {
+                     try { payload = JSON.parse(rawPayloadEl.value); }
+                     catch(e) { curlEl.textContent = "Error: Invalid Raw JSON for cURL generation."; return; }
+                } else {
+                     curlEl.textContent = "Error: Raw JSON payload for cURL is empty."; return;
+                }
+            } else {
+                try {
+                    payload = buildPayloadFromForm(prefix);
+                } catch (e) {
+                     curlEl.textContent = "Error building payload from form for cURL: " + e.message;
+                     return;
                 }
             }
 
-            let finalCurlCommandParts = [`curl -X ${method}`];
-            finalCurlCommandParts.push(...curlHeaderParts);
-            if (isStream && method === 'POST') {
-                finalCurlCommandParts.push('-N'); // For streaming with curl
+            const curlCommand = `curl -X POST "${baseUrl}/api/v1/chat/completions" \\
+-H "accept: application/json" \\
+-H "Content-Type: application/json" \\
+-H "Token: ${token.replace(/"/g, '\\"')}" \\
+-d '${escapeCurlData(JSON.stringify(payload, null, 2))}'`;
+            curlEl.textContent = curlCommand;
+        }
+
+        async function handleChatCompletionsRequest() {
+            const endpointId = 'createChatCompletion';
+            const prefix = 'chatCompletions';
+            const responseArea = document.getElementById(endpointId + '_response');
+            if (!responseArea) { console.error("Response area not found!"); return; }
+
+            responseArea.textContent = 'Sending...';
+            generateChatCompletionsCurl();
+
+            let payload;
+            const useRawJsonCheckbox = document.getElementById(prefix + '_useRawJson');
+            if (!useRawJsonCheckbox) { responseArea.textContent = "Error: Raw JSON toggle checkbox not found."; return; }
+            const useRawJson = useRawJsonCheckbox.checked;
+
+            const baseUrl = document.getElementById('baseUrl').value;
+            const token = document.getElementById('apiKeyInput').value;
+
+            if (useRawJson) {
+                const rawPayloadEl = document.getElementById(prefix + '_payload_raw');
+                if (!rawPayloadEl) { responseArea.textContent = "Error: Raw JSON textarea not found."; return; }
+                try {
+                    payload = JSON.parse(rawPayloadEl.value);
+                } catch (e) {
+                    responseArea.textContent = "Error: Invalid Raw JSON Payload.\n" + e.message;
+                    return;
+                }
+            } else {
+                 try {
+                    payload = buildPayloadFromForm(prefix);
+                } catch (e) {
+                    responseArea.textContent = "Error building payload from form: " + e.message;
+                    return;
+                }
             }
 
-            if ((bodyType === 'json' || bodyType === 'json_with_query') && bodyPayload) {
-                if (!headers['Content-Type']) { // Should have been set if bodyPayload is from JSON
-                     finalCurlCommandParts.push(`-H "Content-Type: application/json"`);
-                }
-                const payloadTextEl = document.getElementById(endpointId + '_payload');
-                if (payloadTextEl && payloadTextEl.value) {
-                    finalCurlCommandParts.push(`-d '${payloadTextEl.value.replace(/'/g, "'\\''")}'`);
-                }
-            } else if (bodyType === 'form') {
-                finalCurlCommandParts.push(...curlFormParts);
+            const isStreaming = payload.stream;
+            if (isStreaming) {
+                responseArea.textContent = '';
             }
-
-            finalCurlCommandParts.push(`"${fullUrl}"`);
-            curlEl.textContent = finalCurlCommandParts.join(' \\\n    ');
-            // console.log("Final computed URL for fetch:", fullUrl);
-            // console.log("Headers for fetch:", JSON.parse(JSON.stringify(headers))); // Clone for logging
 
             try {
-                const fetchOptions = {
-                    method: method,
-                    headers: new Headers(headers) // Use Headers object
-                };
+                const fetchResponse = await fetch(`${baseUrl}/api/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json, text/event-stream', // Accept both
+                        'Token': token
+                    },
+                    body: JSON.stringify(payload)
+                });
 
-                if (method !== 'GET' && method !== 'HEAD' && bodyPayload) {
-                    fetchOptions.body = ((bodyType === 'json' || bodyType === 'json_with_query') && bodyPayload) ? JSON.stringify(bodyPayload) : bodyPayload;
+                if (!fetchResponse.ok) {
+                    const errorData = await fetchResponse.json().catch(() => ({ detail: fetchResponse.statusText, status: fetchResponse.status }));
+                    throw new Error(`HTTP error ${fetchResponse.status}: ${JSON.stringify(errorData.detail || errorData)}`);
                 }
-                // console.log("Fetch options being sent:", fetchOptions);
 
-                const res = await fetch(fullUrl, fetchOptions);
-                // console.log("Response status:", res.status);
-                const contentTypeHeader = res.headers.get("content-type");
-                // console.log("Response Content-Type header:", contentTypeHeader);
-
-                if (isStream && res.ok && res.body) {
-                    responseEl.textContent = `Status: ${res.status} (Streaming)\n\n`;
-                    const reader = res.body.getReader();
+                const contentType = fetchResponse.headers.get("content-type");
+                if (isStreaming && contentType && contentType.includes("text/event-stream") && fetchResponse.body) {
+                    const reader = fetchResponse.body.getReader();
                     const decoder = new TextDecoder();
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-                        const chunk = decoder.decode(value, { stream: true });
-                        // console.log("Stream chunk:", chunk);
-                        responseEl.textContent += chunk;
-                        responseEl.scrollTop = responseEl.scrollHeight;
-                    }
-                    responseEl.textContent += "\n\n--- Stream ended ---";
-                } else if (contentTypeHeader && contentTypeHeader.includes("application/json")) {
-                    const responseData = await res.json();
-                    responseEl.textContent = `Status: ${res.status}\n\n` + JSON.stringify(responseData, null, 2);
-                    if (!res.ok) console.error(`API Error ${res.status} for ${endpointId}:`, responseData);
-                    // else console.log(`API Success for ${endpointId}:`, responseData);
-                } else {
-                    const responseData = await res.text();
-                    responseEl.textContent = `Status: ${res.status}\n\n` + responseData;
-                    if (!res.ok) console.error(`API Error ${res.status} for ${endpointId}:`, responseData);
-                    // else console.log(`API Success for ${endpointId}:`, responseData);
-                }
+                    let doneReading = false;
+                    let currentBuffer = "";
+                    let streamHadContent = false;
 
+                    while (!doneReading) {
+                        const { value, done } = await reader.read();
+                        doneReading = done;
+                        currentBuffer += decoder.decode(value, { stream: !doneReading });
+
+                        let eventEndIndex;
+                        while ((eventEndIndex = currentBuffer.indexOf('\n\n')) >= 0) {
+                            const eventString = currentBuffer.substring(0, eventEndIndex);
+                            currentBuffer = currentBuffer.substring(eventEndIndex + 2);
+
+                            if (eventString.startsWith('data: ')) {
+                                streamHadContent = true;
+                                const dataStr = eventString.substring(6).trim();
+                                if (dataStr === '[DONE]') {
+                                    responseArea.textContent += "\nStream finished by [DONE] signal.\n";
+                                    doneReading = true; break;
+                                }
+                                try {
+                                    const dataJson = JSON.parse(dataStr);
+                                    const contentChunk = dataJson.choices?.[0]?.delta?.content;
+                                    if (contentChunk) {
+                                        responseArea.textContent += contentChunk;
+                                    } else if (dataJson.choices?.[0]?.finish_reason) {
+                                         responseArea.textContent += `\n[Finish Reason: ${dataJson.choices[0].finish_reason}]\n`;
+                                    } else if (Object.keys(dataJson).length > 0) {
+                                         responseArea.textContent += `\n(Stream JSON: ${dataStr})\n`;
+                                    }
+                                } catch (e) {
+                                    if (dataStr) {
+                                        console.warn('Non-JSON stream data or parse error:', dataStr, e);
+                                        responseArea.textContent += `\n(Stream data: ${dataStr})\n`;
+                                    }
+                                }
+                            } else if (eventString.trim()) { // Non-data line, could be a comment or empty event
+                                console.log("Received non-data line in stream:", eventString);
+                            }
+                             responseArea.scrollTop = responseArea.scrollHeight;
+                        }
+                         if (doneReading) break; // Break outer while if [DONE] was processed
+                    }
+                    if (currentBuffer.trim()) {
+                         if (currentBuffer.startsWith('data: ')) {
+                             responseArea.textContent += `\n(Final unprocessed stream data: ${currentBuffer.substring(6).trim()})\n`;
+                         } else if (currentBuffer.trim()){
+                              responseArea.textContent += `\n(Final unprocessed stream buffer: ${currentBuffer.trim()})\n`;
+                         }
+                    }
+                    if (!responseArea.textContent.includes("[DONE]") && !responseArea.textContent.includes("Stream finished")) {
+                        responseArea.textContent += streamHadContent ? "\nStream ended.\n" : "Stream connected, but no data or [DONE] signal received.\n";
+                    }
+                } else { // Non-streaming or non-event-stream response
+                    const responseData = await fetchResponse.json();
+                    responseArea.textContent = JSON.stringify(responseData, null, 2);
+                }
             } catch (error) {
-                responseEl.textContent = 'Network Error: ' + error.message;
-                console.error(`Fetch/Network error for ${endpointId}:`, error);
+                console.error('Error during chat completion:', error);
+                responseArea.textContent = 'Error: ' + error.message;
             }
         }
 
-        async function handleChatCompletion(endpointId) {
-            const payloadTextEl = document.getElementById(endpointId + '_payload');
-            let isStream = false;
-            if (payloadTextEl && payloadTextEl.value) {
-                try {
-                    const payload = JSON.parse(payloadTextEl.value);
-                    if (payload.stream === true) {
-                        isStream = true;
-                    }
-                } catch (e) {
-                    console.warn("Could not parse chat payload to check for stream flag:", e);
-                }
+        function initializeChatCompletionsTab() {
+            const prefix = 'chatCompletions';
+            console.log("Initializing Chat Completions Tab");
+            const container = document.getElementById(prefix + '_messagesContainer');
+            if (container) {
+                container.innerHTML = ''; // Clear existing messages
+                 messageIdCounter[prefix] = 0; // Reset counter
+
+                addChatMessage(prefix, 'system', 'You are a helpful assistant.');
+                addChatMessage(prefix, 'user', 'Hello! Can you tell me a joke?');
+            } else {
+                console.warn("Messages container not found during chat completions tab initialization.");
             }
-            await makeRequest(endpointId, 'POST', '/api/v1/chat/completions', 'json', isStream);
+
+
+            const useRawJsonCheckbox = document.getElementById(prefix + '_useRawJson');
+            if (useRawJsonCheckbox) {
+                 if (useRawJsonCheckbox.checked) {
+                    toggleRawJson(prefix);
+                } else {
+                    try {
+                        const initialPayload = buildPayloadFromForm(prefix);
+                        const rawPayloadTextarea = document.getElementById(prefix + '_payload_raw');
+                        if(rawPayloadTextarea) rawPayloadTextarea.value = JSON.stringify(initialPayload, null, 2);
+                    } catch(e) { console.warn("Initial raw payload build failed for chat completions:", e.message); }
+                }
+            } else {
+                console.warn("Raw JSON toggle not found during chat completions tab init.");
+            }
+            generateChatCompletionsCurl();
         }
+
+        // Generic makeRequest (if needed for other tabs, can be adapted)
+        // For now, handleChatCompletionsRequest is specific.
+        // If you have the `makeRequest` function from your original HTML, you can keep it for other tabs,
+        // but the `handleChatCompletionsRequest` is now tailored for the new chat form.
+
     </script>
 </body>
 </html>

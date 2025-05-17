@@ -1,48 +1,167 @@
+      
 <!-- Chat Completions Tab -->
-<div id="tabChatCompletions" class="tab-content">
-    <div class="endpoint-section" id="createChatCompletion">
+<div id="tabChatCompletions" class="tab-content"> <!-- Ensure this ID matches the sub-tab button's data-content-id -->
+    <div class="endpoint-section" id="createChatCompletion"> <!-- ID for cURL and response targeting -->
         <h2>POST /api/v1/chat/completions - Create Chat Completion</h2>
-        <div class="form-group">
-            <label for="chatCompletions_payload">Payload (ChatCompletionRequest JSON):</label>
-            <textarea id="chatCompletions_payload" style="min-height: 250px;">{
-"api_provider": "openai",
-"model": "gpt-3.5-turbo",
-"messages": [
-    {
-        "role": "system",
-        "content": "You are a helpful assistant."
-    },
-    {
-        "role": "user",
-        "content": "Hello! Can you tell me a joke?"
-    }
-],
-"temperature": 0.7,
-"max_tokens": 150,
-"top_p": 1.0,
-"stream": false,
-"seed": null,
-"stop": null,
-"tools": null,
-"tool_choice": null,
-"response_format": null,
-"frequency_penalty": 0,
-"presence_penalty": 0,
-"logit_bias": null,
-"logprobs": null,
-"top_logprobs": null,
-"minp": null,
-"topk": null
-}</textarea>
-            <small>
-                Set <code>stream: true</code> to test streaming. API key for provider is configured server-side.
-                <br>Valid <code>api_provider</code> values (examples, check server config): openai, anthropic, gemini, cohere, groq, local-llm, llama.cpp, ooba, tabbyapi, kobold.
-            </small>
+
+        <div class="form-group checkbox-group">
+            <input type="checkbox" id="chatCompletions_useRawJson" onchange="toggleRawJson('chatCompletions')">
+            <label for="chatCompletions_useRawJson" style="font-weight: normal; margin-bottom:0;">Use Raw JSON Payload Instead of Form Fields</label>
         </div>
-        <button class="api-button" onclick="handleChatCompletion('createChatCompletion')">Send Request</button>
+
+        <div id="chatCompletions_formFields">
+            <div class="columns">
+                <div class="column">
+                    <div class="form-group">
+                        <label for="chatCompletions_api_provider">API Provider:</label>
+                        <select id="chatCompletions_api_provider">
+                            <option value="openai" selected>OpenAI</option>
+                            <option value="anthropic">Anthropic</option>
+                            <option value="google">Google (Gemini)</option>
+                            <option value="cohere">Cohere</option>
+                            <option value="groq">Groq</option>
+                            <option value="openrouter">OpenRouter</option>
+                            <option value="mistral">Mistral</option>
+                            <option value="deepseek">DeepSeek</option>
+                            <option value="huggingface">HuggingFace</option>
+                            <option value="local-llm">local-llm (Generic)</option>
+                            <option value="ollama">Ollama</option>
+                            <option value="llama.cpp">llama.cpp</option>
+                            <option value="ooba">Oobabooga</option>
+                            <option value="tabbyapi">TabbyAPI</option>
+                            <option value="kobold">Kobold</option>
+                            <option value="vllm">vLLM</option>
+                            <option value="custom-openai-api">Custom OpenAI API 1</option>
+                            <option value="custom-openai-api-2">Custom OpenAI API 2</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="chatCompletions_model">Model:</label>
+                        <input type="text" id="chatCompletions_model" value="gpt-4o-mini">
+                    </div>
+                </div>
+                <div class="column">
+                    <div class="form-group">
+                        <label for="chatCompletions_temperature">Temperature (0.0 - 2.0):</label>
+                        <input type="number" id="chatCompletions_temperature" value="0.7" step="0.1" min="0" max="2">
+                    </div>
+                    <div class="form-group">
+                        <label for="chatCompletions_max_tokens">Max Tokens:</label>
+                        <input type="number" id="chatCompletions_max_tokens" value="150" step="1" min="1">
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="chatCompletions_stream">
+                <label for="chatCompletions_stream" style="font-weight: normal; margin-bottom:0;">Stream Response</label>
+            </div>
+
+            <div class="form-group">
+                <h3>Messages:</h3>
+                <div id="chatCompletions_messagesContainer">
+                    <!-- Initial messages will be added by JS -->
+                </div>
+                <button class="add-message-btn" onclick="addChatMessage('chatCompletions')">Add Message</button>
+            </div>
+
+            <details>
+                <summary style="cursor: pointer; color: #0056b3; font-weight: bold;">Optional Parameters</summary>
+                <div class="optional-params">
+                    <div class="columns">
+                        <div class="column">
+                            <div class="form-group">
+                                <label for="chatCompletions_top_p">Top P (0.0 - 1.0):</label>
+                                <input type="number" id="chatCompletions_top_p" value="1.0" step="0.01" min="0" max="1">
+                            </div>
+                             <div class="form-group">
+                                <label for="chatCompletions_frequency_penalty">Frequency Penalty (-2.0 - 2.0):</label>
+                                <input type="number" id="chatCompletions_frequency_penalty" value="0" step="0.1" min="-2" max="2">
+                            </div>
+                            <div class="form-group">
+                                <label for="chatCompletions_presence_penalty">Presence Penalty (-2.0 - 2.0):</label>
+                                <input type="number" id="chatCompletions_presence_penalty" value="0" step="0.1" min="-2" max="2">
+                            </div>
+                             <div class="form-group">
+                                <label for="chatCompletions_minp">Min P (Provider Specific):</label>
+                                <input type="number" id="chatCompletions_minp" step="0.01" placeholder="e.g., 0.1">
+                            </div>
+                            <div class="form-group">
+                                <label for="chatCompletions_topk">Top K (Provider Specific):</label>
+                                <input type="number" id="chatCompletions_topk" step="1" placeholder="e.g., 40">
+                            </div>
+                        </div>
+                        <div class="column">
+                            <div class="form-group">
+                                <label for="chatCompletions_seed">Seed (Integer, Optional):</label>
+                                <input type="number" id="chatCompletions_seed" placeholder="e.g., 42">
+                            </div>
+                            <div class="form-group">
+                                <label for="chatCompletions_stop">Stop Sequences (JSON string or comma-separated):</label>
+                                <input type="text" id="chatCompletions_stop" placeholder='e.g., ["\n", "Human:"] or \n,Human:'>
+                            </div>
+                             <div class="form-group checkbox-group">
+                                <input type="checkbox" id="chatCompletions_logprobs">
+                                <label for="chatCompletions_logprobs" style="font-weight: normal; margin-bottom:0;">Logprobs</label>
+                            </div>
+                            <div class="form-group">
+                                <label for="chatCompletions_top_logprobs">Top Logprobs (if logprobs true):</label>
+                                <input type="number" id="chatCompletions_top_logprobs" step="1" min="0" max="20" placeholder="e.g., 5">
+                            </div>
+                            <div class="form-group">
+                                <label for="chatCompletions_response_format_type">Response Format Type (text or json_object):</label>
+                                <select id="chatCompletions_response_format_type">
+                                    <option value="">(Default)</option>
+                                    <option value="text">text</option>
+                                    <option value="json_object">json_object</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                     <div class="form-group">
+                        <label for="chatCompletions_tools">Tools (JSON Array string, Optional):</label>
+                        <textarea id="chatCompletions_tools" placeholder='e.g., [{"type": "function", "function": {"name": "get_weather", "description": "Get current weather", "parameters": {...}}}]'></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="chatCompletions_tool_choice">Tool Choice (string or JSON object string, Optional):</label>
+                        <input type="text" id="chatCompletions_tool_choice" placeholder='e.g., "auto", "none", or {"type": "function", "function": {"name": "my_func"}}'>
+                    </div>
+                     <div class="form-group">
+                        <label for="chatCompletions_logit_bias">Logit Bias (JSON object string, Optional):</label>
+                        <input type="text" id="chatCompletions_logit_bias" placeholder='e.g., {"123": -1.0, "456": 2.0}'>
+                    </div>
+                     <div class="form-group">
+                        <label for="chatCompletions_character_id">Character ID (Optional):</label>
+                        <input type="text" id="chatCompletions_character_id" placeholder="e.g., pirate_blackheart">
+                    </div>
+                    <div class="form-group">
+                        <label for="chatCompletions_prompt_template_name">Prompt Template Name (Optional):</label>
+                        <input type="text" id="chatCompletions_prompt_template_name" placeholder="e.g., pirate_speak_template">
+                    </div>
+                </div>
+            </details>
+        </div>
+
+        <div class="form-group" id="chatCompletions_rawJsonContainer" style="display:none;">
+            <label for="chatCompletions_payload_raw">Raw Payload (ChatCompletionRequest JSON):</label>
+            <textarea id="chatCompletions_payload_raw" class="raw-payload-textarea"></textarea>
+        </div>
+         <small>
+            API key for the selected provider is configured server-side.
+            Ensure model names are compatible with the selected provider.
+        </small>
+        <br><br>
+        <!--
+            The button now calls a more generic 'makeRequest' if we adopt that,
+            or a specific 'handleChatCompletionsRequest'
+        -->
+        <button class="api-button" onclick="handleChatCompletionsRequest()">Send Request</button>
+
         <h3>cURL Command:</h3>
-        <pre id="createChatCompletion_curl">---</pre>
+        <pre id="createChatCompletion_curl">---</pre> <!-- ID matches the old handleChatCompletion -->
         <h3>Response (or Stream):</h3>
-        <pre id="createChatCompletion_response">---</pre>
+        <pre id="createChatCompletion_response">---</pre> <!-- ID matches the old handleChatCompletion -->
     </div>
 </div>
+
+    
