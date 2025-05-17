@@ -264,16 +264,23 @@ def test_no_system_message_in_payload(
 
     app.dependency_overrides = {}
 
+VALID_ALTERNATIVE_PROVIDER_FOR_TEST = "groq"
+
 
 @pytest.mark.unit
-@patch.dict("tldw_Server_API.app.api.v1.schemas.chat_request_schemas.API_KEYS", {"openai": "key_from_config", "other_provider": "other_key"})
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")  # Mock template deps
+# Update the patch.dict to use this valid alternative provider name
+@patch.dict("tldw_Server_API.app.api.v1.schemas.chat_request_schemas.API_KEYS", {
+    "openai": "key_from_config",
+    VALID_ALTERNATIVE_PROVIDER_FOR_TEST: "alternative_key_for_test",  # Use the valid name
+    "cohere": "cohere_test_key_if_needed_separately"  # If you still have a cohere specific part
+})
+@patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.apply_template_to_string")
-def test_api_key_used_from_config(  # Added default_chat_request_data fixture
+def test_api_key_used_from_config(
         mock_apply_template, mock_load_template,
         client, default_chat_request_data, valid_auth_token, mock_media_db, mock_chat_db
 ):
-    mock_load_template.return_value = None  # Default passthrough
+    mock_load_template.return_value = None
     mock_apply_template.side_effect = lambda template_str, data: data.get("message_content", data.get(
         "original_system_message_from_request", ""))
 
@@ -281,29 +288,53 @@ def test_api_key_used_from_config(  # Added default_chat_request_data fixture
     app.dependency_overrides[get_chacha_db_for_user] = lambda: mock_chat_db
 
     with patch("tldw_Server_API.app.api.v1.endpoints.chat.chat_api_call") as mock_chat_api_call:
-        mock_chat_api_call.return_value = {"id": "res"}
+        mock_chat_api_call.return_value = {"id": "res_openai"}
 
+        # Test 1: Default provider (should pick up "openai" key from patched dict)
+        # default_chat_request_data has api_provider=None, so it will use DEFAULT_LLM_PROVIDER ("openai")
         client.post("/api/v1/chat/completions", json=default_chat_request_data.model_dump(),
                     headers={"token": valid_auth_token})
         mock_chat_api_call.assert_called_once()
-        assert mock_chat_api_call.call_args[1]["api_key"] == "key_from_config"
+        assert mock_chat_api_call.call_args.kwargs["api_key"] == "key_from_config"
+        assert mock_chat_api_call.call_args.kwargs["api_endpoint"] == "openai"  # Check target endpoint
 
         mock_chat_api_call.reset_mock()
-        request_data_other = default_chat_request_data.model_copy(update={"api_provider": "other_provider"})
-        response_other = client.post("/api/v1/chat/completions", json=request_data_other.model_dump(),
-                                     headers={"token": valid_auth_token})
-        assert response_other.status_code == status.HTTP_200_OK
-        mock_chat_api_call.assert_called_once()
-        assert mock_chat_api_call.call_args[1]["api_key"] == "other_key"
-        mock_chat_api_call.reset_mock()
-        # Test with 'cohere' (or another valid provider from SUPPORTED_API_ENDPOINTS)
-        request_data_other = default_chat_request_data.model_copy(update={"api_provider": "cohere"})
-        response_other = client.post("/api/v1/chat/completions", json=request_data_other.model_dump(),
-                                     headers={"token": valid_auth_token})
-        assert response_other.status_code == status.HTTP_200_OK  # Expect 200 now
+        mock_chat_api_call.return_value = {"id": "res_alternative"}
+
+        # Test 2: Specific valid alternative provider
+        request_data_alternative = default_chat_request_data.model_copy(
+            update={
+                "api_provider": VALID_ALTERNATIVE_PROVIDER_FOR_TEST,
+                # Ensure a model is provided if the alternative provider requires it,
+                # default_chat_request_data already includes a model='test-model-unit'
+                # which might be fine if the mock_chat_api_call doesn't care about model validity for this unit test.
+                # If it were an integration test, a valid model for the provider would be needed.
+            }
+        )
+        response_alternative = client.post("/api/v1/chat/completions", json=request_data_alternative.model_dump(),
+                                           headers={"token": valid_auth_token})
+
+        # This assertion should now pass if VALID_ALTERNATIVE_PROVIDER_FOR_TEST is correctly handled
+        assert response_alternative.status_code == status.HTTP_200_OK, \
+            f"Alternative provider '{VALID_ALTERNATIVE_PROVIDER_FOR_TEST}' failed: {response_alternative.text}"
 
         mock_chat_api_call.assert_called_once()
-        assert mock_chat_api_call.call_args[1]["api_key"] == "cohere_test_key"
+        assert mock_chat_api_call.call_args.kwargs["api_key"] == "alternative_key_for_test"
+        assert mock_chat_api_call.call_args.kwargs["api_endpoint"] == VALID_ALTERNATIVE_PROVIDER_FOR_TEST
+
+        # If you had a third part of the test for "cohere" specifically:
+        mock_chat_api_call.reset_mock()
+        mock_chat_api_call.return_value = {"id": "res_cohere"}
+        request_data_cohere = default_chat_request_data.model_copy(
+            update={"api_provider": "cohere", "model": "command-r"}  # Assuming 'cohere' is in SUPPORTED_API_ENDPOINTS
+        )
+        response_cohere = client.post("/api/v1/chat/completions", json=request_data_cohere.model_dump(),
+                                      headers={"token": valid_auth_token})
+        assert response_cohere.status_code == status.HTTP_200_OK, f"Cohere provider failed: {response_cohere.text}"
+        mock_chat_api_call.assert_called_once()
+        assert mock_chat_api_call.call_args.kwargs["api_key"] == "cohere_test_key_if_needed_separately"
+        assert mock_chat_api_call.call_args.kwargs["api_endpoint"] == "cohere"
+
     app.dependency_overrides = {}
 
 
