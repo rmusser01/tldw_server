@@ -438,5 +438,5 @@ async def create_chat_completion(
                             detail=f"An unexpected internal server error occurred. Please contact support. Error type: {type(e).__name__}")
 
 #
-# End of media.py
+# End of chat.py
 #######################################################################################################################
