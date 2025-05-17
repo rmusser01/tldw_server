@@ -181,66 +181,67 @@ PROVIDER_PARAM_MAP = {
     # Add other providers here
 }
 
-def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp=None, system_message=None, streaming=None, minp=None, maxp=None, model=None, topk=None, topp=None):
+def chat_api_call(
+    api_endpoint: str,
+    messages_payload: List[Dict[str, Any]], # CHANGED from input_data, prompt
+    api_key: Optional[str] = None,
+    temp: Optional[float] = None,
+    system_message: Optional[str] = None, # Still passed separately, some providers might use it, others expect it in messages_payload
+    streaming: Optional[bool] = None,
+    minp: Optional[float] = None,
+    maxp: Optional[float] = None, # Often maps to top_p
+    model: Optional[str] = None,
+    topk: Optional[int] = None,
+    topp: Optional[float] = None # Often maps to top_p
+):
     """
-    Acts as a sink/router to call various LLM API providers.
-
-    Args:
-        api_endpoint (str): The name of the API provider (e.g., 'openai', 'anthropic'). Case-insensitive.
-        api_key (str, optional): The API key for the provider. Defaults to None (provider function may load from config).
-        input_data (any, optional): The primary input data for the LLM (e.g., text, file path). Defaults to None.
-        prompt (str, optional): The user's prompt or instruction. Often combined with input_data. Defaults to None.
-        temp (float, optional): Temperature parameter for sampling. Defaults to None (provider function may load from config).
-        system_message (str, optional): System-level instructions for the LLM. Defaults to None (provider function may load from config or use a default).
-        streaming (bool, optional): Whether to enable streaming response. Defaults to None (provider function may load from config).
-        minp (float, optional): Minimum probability threshold (provider specific). Defaults to None.
-        maxp (float, optional): Maximum probability, often equivalent to top_p (provider specific, e.g., OpenAI, Groq). Defaults to None.
-        model (str, optional): The specific model name to use. Defaults to None (provider function may load from config).
-        topk (int, optional): Top-K sampling parameter (provider specific). Defaults to None.
-        topp (float, optional): Top-P sampling parameter (provider specific, different from maxp for some). Defaults to None.
-
-    Returns:
-        The response from the API provider, which could be a string, a generator for streaming, or an error message.
+    Acts as a sink/router to call various LLM API providers using a structured messages_payload.
     """
     endpoint_lower = api_endpoint.lower()
     logging.info(f"Chat API Call - Routing to endpoint: {endpoint_lower}")
     log_counter("chat_api_call_attempt", labels={"api_endpoint": endpoint_lower})
     start_time = time.time()
 
-    try:
-        # Log API key securely (first/last chars) only if it exists
-        if api_key and isinstance(api_key, str) and len(api_key) > 8:
-             logging.info(f"Debug - Chat API Call - API Key: {api_key[:4]}...{api_key[-4:]}")
-        elif api_key:
-             logging.info(f"Debug - Chat API Call - API Key: Provided (length <= 8)")
-        else:
-             logging.info(f"Debug - Chat API Call - API Key: Not Provided")
+    handler = API_CALL_HANDLERS.get(endpoint_lower)
+    if not handler:
+        logging.error(f"Unsupported API endpoint requested: {api_endpoint}")
+        raise ValueError(f"Unsupported API endpoint: {api_endpoint}")
 
-        handler_func = API_CALL_HANDLERS.get(endpoint_lower)
-        if not handler_func:
-            logging.error(f"Unsupported API endpoint requested: {api_endpoint}")
-            # Original code raises ValueError here, which is caught later.
-            # Let's make it more specific for clarity if we're redesigning.
-            raise ChatConfigurationError(provider=endpoint_lower, message=f"Unsupported API endpoint: {api_endpoint}")
+    params_map = PROVIDER_PARAM_MAP.get(endpoint_lower, {})
+    call_kwargs = {}
 
-        current_provider_param_map = PROVIDER_PARAM_MAP.get(endpoint_lower)
-        if not current_provider_param_map:
-            # This state implies an internal inconsistency (handler exists but no param map)
-            logging.error(f"Internal configuration error: Parameter map not found for endpoint: {endpoint_lower}")
-            raise ChatConfigurationError(provider=endpoint_lower, message=f"Internal config error: No parameter map for {endpoint_lower}")
+    # Construct kwargs for the handler function based on the map
+    # This requires careful mapping and ensuring the handler functions are adapted.
 
-        # Collect all arguments passed to chat_api_call for easy lookup
-        # Note: It's crucial that the keys here match the keys in PROVIDER_PARAM_MAP's sub-dictionaries
-        available_args = {
-            'api_key': api_key, 'input_data': input_data, 'prompt': prompt, 'temp': temp,
-            'system_message': system_message, 'streaming': streaming, 'minp': minp,
-            'maxp': maxp, 'model': model, 'topk': topk, 'topp': topp
-        }
+    # Generic parameters available from chat_api_call signature
+    available_generic_params = {
+        'api_key': api_key,
+        'messages_payload': messages_payload, # This is the core change
+        'temp': temp,
+        'system_message': system_message,
+        'streaming': streaming,
+        'minp': minp,
+        'maxp': maxp, # Will be mapped to top_p by some providers
+        'model': model,
+        'topk': topk,
+        'topp': topp, # Will be mapped to top_p by some providers
+    }
 
-        kwargs_for_handler = {}
-        for generic_name, provider_specific_name in current_provider_param_map.items():
-            if generic_name in available_args and available_args[generic_name] is not None:
-                kwargs_for_handler[provider_specific_name] = available_args[generic_name]
+    for generic_param_name, provider_param_name in params_map.items():
+        if generic_param_name in available_generic_params and available_generic_params[generic_param_name] is not None:
+            call_kwargs[provider_param_name] = available_generic_params[generic_param_name]
+        # Special case: if 'prompt' is still in a map for a simple provider,
+        # we'd need to serialize the last user message from messages_payload or handle it.
+        # For now, assuming providers expecting 'messages_payload' (or its mapped name) will parse it.
+        # If a provider (e.g. Cohere) has 'prompt' for current message and 'messages_payload' for history:
+        if generic_param_name == 'prompt' and endpoint_lower == 'cohere': # Example for Cohere
+             # Cohere might take the last user message text as 'message' and the rest as 'chat_history'
+             # This logic should ideally be INSIDE chat_with_cohere.
+             # Forcing it here makes chat_api_call less generic.
+             # For simplicity here, this example assumes chat_with_cohere handles parsing messages_payload.
+             # If chat_with_cohere expects current message separately, then messages_payload should not contain it.
+             # This illustrates the complexity of a single dispatch point.
+             pass
 
         # Special handling for providers that expect 'api_url' or similar as None to use config,
         # if chat_api_call doesn't expose a generic 'api_url' parameter.
@@ -252,10 +253,14 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
         # specific chat_with_... functions need to have `api_url=None` as a default in their signature.
         # This seems to be the case in the original structure.
 
-        # --- Actual API Call ---
-        response = handler_func(**kwargs_for_handler)
+    # Log API key securely
+    if call_kwargs.get(params_map.get('api_key', 'api_key')) and isinstance(call_kwargs.get(params_map.get('api_key', 'api_key')), str) and len(call_kwargs.get(params_map.get('api_key', 'api_key'))) > 8:
+         logging.info(f"Debug - Chat API Call - API Key: {call_kwargs[params_map.get('api_key', 'api_key')][:4]}...{call_kwargs[params_map.get('api_key', 'api_key')][-4:]}")
 
-        # --- Success Logging and Return ---
+    try:
+        logging.debug(f"Calling handler {handler.__name__} with kwargs: { {k: (type(v) if k != params_map.get('api_key') else 'key_hidden') for k,v in call_kwargs.items()} }")
+        response = handler(**call_kwargs)
+
         call_duration = time.time() - start_time
         log_histogram("chat_api_call_duration", call_duration, labels={"api_endpoint": endpoint_lower})
         log_counter("chat_api_call_success", labels={"api_endpoint": endpoint_lower})
@@ -266,12 +271,9 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
              logging.debug(f"Debug - Chat API Call - Response: Streaming Generator")
         else:
              logging.debug(f"Debug - Chat API Call - Response Type: {type(response)}")
+        return response
 
-        return response # Return successful response
-    except (ChatBadRequestError, ChatConfigurationError, ChatAPIError, ChatProviderError, ChatRateLimitError, ChatAuthenticationError) as e:
-        # Re-raise custom chat exceptions directly
-        raise
-    # --- Exception Mapping ---
+    # --- Exception Mapping (copied from your original, ensure it's still relevant) ---
     except requests.exceptions.HTTPError as e:
         status_code = getattr(e.response, 'status_code', 500)
         error_text = getattr(e.response, 'text', str(e))
@@ -307,11 +309,10 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
             raise ChatAPIError(provider=endpoint_lower,
                                message=f"Unexpected HTTP status {status_code} from {endpoint_lower}. Detail: {error_text[:200]}",
                                status_code=status_code)
-    except TypeError as e:
-        # This can catch issues where kwargs_for_handler doesn't match the handler_func's signature
-        logging.error(f"Type error calling handler for {endpoint_lower}: {e}. Args prepared: {kwargs_for_handler}", exc_info=True)
-        raise ChatConfigurationError(provider=endpoint_lower, message=f"Parameter or type mismatch for {endpoint_lower}: {e}")
-    except (ValueError, KeyError) as e: # Keep handling for general Value/Key errors during setup
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Network error connecting to {endpoint_lower}: {e}", exc_info=False)
+        raise ChatProviderError(provider=endpoint_lower, message=f"Network error: {e}", status_code=504)
+    except (ValueError, TypeError, KeyError) as e: # Catches an error from handler lookup or param issues
         logging.error(f"Value/Type/Key error during chat API call setup for {endpoint_lower}: {e}", exc_info=True)
         # Raise a configuration or bad request error
         error_type = "Configuration/Parameter Error"
@@ -334,95 +335,223 @@ def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp
                            status_code=500)
 
 
-def chat(message, history, media_content, selected_parts, api_endpoint, api_key, custom_prompt, temperature,
-         system_message=None, streaming=False, minp=None, maxp=None, model=None, topp=None, topk=None, chatdict_entries=None, max_tokens=500, strategy="sorted_evenly"):
-    log_counter("chat_attempt", labels={"api_endpoint": api_endpoint})
+def chat(
+    # Existing parameters
+    message: str,
+    # history: List[Tuple[Optional[str], Optional[str]]], # OLD HISTORY FORMAT
+    history: List[Dict[str, Any]], # NEW HISTORY FORMAT: List of OpenAI message objects
+    media_content: Optional[Dict[str, str]],
+    selected_parts: List[str],
+    api_endpoint: str,
+    api_key: Optional[str],
+    custom_prompt: Optional[str], # This might be better as part of system_message or main message text
+    temperature: float,
+    system_message: Optional[str] = None,
+    streaming: bool = False,
+    minp: Optional[float] = None,
+    maxp: Optional[float] = None,
+    model: Optional[str] = None,
+    topp: Optional[float] = None,
+    topk: Optional[int] = None,
+    chatdict_entries: Optional[List[Any]] = None,
+    max_tokens: int = 500, # Max tokens for chat dict, not LLM response
+    strategy: str = "sorted_evenly",
+
+    # +++ NEW Image-related parameters +++
+    current_image_input: Optional[Dict[str, str]] = None, # {'base64_data': '...', 'mime_type': 'image/png'}
+    image_history_mode: str = "tag_past"  # "send_all", "send_last_user_image", "tag_past", "ignore_past"
+):
+    log_counter("chat_attempt_multimodal", labels={"api_endpoint": api_endpoint, "image_mode": image_history_mode})
     start_time = time.time()
+
     try:
-        logging.info(f"Debug - Chat Function - Message: {message}")
-        logging.info(f"Debug - Chat Function - Media Content: {media_content}")
-        logging.info(f"Debug - Chat Function - Selected Parts: {selected_parts}")
-        logging.info(f"Debug - Chat Function - API Endpoint: {api_endpoint}")
-        # logging.info(f"Debug - Chat Function - Prompt: {prompt}")
+        logging.info(f"Debug - Chat Function - Input Text: '{message}', Image provided: {'Yes' if current_image_input else 'No'}")
+        logging.info(f"Debug - Chat Function - History length: {len(history)}, Image History Mode: {image_history_mode}")
 
         # Ensure selected_parts is a list
         if not isinstance(selected_parts, (list, tuple)):
             selected_parts = [selected_parts] if selected_parts else []
 
-        # logging.debug(f"Debug - Chat Function - Selected Parts (after check): {selected_parts}")
-
-        # Handle Chat Dictionary processing
-        if chatdict_entries:
-            processed_input = process_user_input(
-                message,
-                chatdict_entries,
-                max_tokens=max_tokens,
-                strategy=strategy
+        # Process message with Chat Dictionary (text only for now)
+        processed_text_message = message
+        if chatdict_entries and message:
+            processed_text_message = process_user_input(
+                message, chatdict_entries, max_tokens=max_tokens, strategy=strategy
             )
-            message = processed_input
 
-        # Combine the selected parts of the media content
-        combined_content = "\n\n".join(
-            [f"{part.capitalize()}: {media_content.get(part, '')}" for part in selected_parts if part in media_content])
-        # Print first 500 chars
-        # logging.debug(f"Debug - Chat Function - Combined Content: {combined_content[:500]}...")
+        # --- Construct messages payload for the LLM API (OpenAI format) ---
+        llm_messages_payload: List[Dict[str, Any]] = []
 
-        # Prepare the input for the API
-        input_data = f"{combined_content}\n\n" if combined_content else ""
-        for old_message, old_response in history:
-            input_data += f"{old_message}\nAssistant: {old_response}\n\n"
-        input_data += f"{message}\n"
+        # 1. System Message (if your chat_api_call doesn't handle it separately for all providers,
+        #    or if the provider needs it as the first message in the payload e.g. OpenAI).
+        #    For now, assuming chat_api_call passes `system_message` separately and providers handle it.
+        #    If OpenAI is the target, it's better to put it here:
+        # if system_message and api_endpoint.lower() == 'openai': # Or a more generic check
+        #     llm_messages_payload.append({"role": "system", "content": system_message})
 
-        if system_message:
-            print(f"System message: {system_message}")
-            logging.debug(f"Debug - Chat Function - System Message: {system_message}")
-        temperature = float(temperature) if temperature else 0.7
-        temp = temperature
+
+        # 2. Process History (now expecting list of OpenAI message dicts)
+        last_user_image_url_from_history: Optional[str] = None
+
+        for hist_msg_obj in history:
+            role = hist_msg_obj.get("role")
+            original_content = hist_msg_obj.get("content") # This can be str or list of parts
+
+            processed_hist_content_parts = []
+
+            if isinstance(original_content, str): # Simple text history message
+                processed_hist_content_parts.append({"type": "text", "text": original_content})
+            elif isinstance(original_content, list): # Already structured content
+                for part in original_content:
+                    if part.get("type") == "text":
+                        processed_hist_content_parts.append(part)
+                    elif part.get("type") == "image_url":
+                        image_url_data = part.get("image_url", {}).get("url", "") # data URI
+                        if image_history_mode == "send_all":
+                            processed_hist_content_parts.append(part)
+                            if role == "user": last_user_image_url_from_history = image_url_data
+                        elif image_history_mode == "send_last_user_image" and role == "user":
+                            last_user_image_url_from_history = image_url_data # Track, add later
+                        elif image_history_mode == "tag_past":
+                            mime_type_part = "image"
+                            if image_url_data.startswith("data:image/") and ";base64," in image_url_data:
+                                try: mime_type_part = image_url_data.split(';base64,')[0].split('/')[-1]
+                                except: pass
+                            processed_hist_content_parts.append({"type": "text", "text": f"<image: prior_history.{mime_type_part}>"})
+                        # "ignore_past": do nothing, image part is skipped
+
+            if processed_hist_content_parts: # Add if content remains
+                llm_messages_payload.append({"role": role, "content": processed_hist_content_parts})
+
+        # Handle "send_last_user_image" - append it to the last user message in payload if applicable
+        if image_history_mode == "send_last_user_image" and last_user_image_url_from_history:
+            appended_to_last = False
+            for i in range(len(llm_messages_payload) -1, -1, -1): # Iterate backwards
+                if llm_messages_payload[i]["role"] == "user":
+                    # Ensure content is a list
+                    if not isinstance(llm_messages_payload[i]["content"], list):
+                        llm_messages_payload[i]["content"] = [{"type": "text", "text": str(llm_messages_payload[i]["content"])}]
+
+                    # Avoid duplicates if already processed (e.g., if history was already "send_all" style)
+                    is_duplicate = any(p.get("type") == "image_url" and p.get("image_url", {}).get("url") == last_user_image_url_from_history for p in llm_messages_payload[i]["content"])
+                    if not is_duplicate:
+                        llm_messages_payload[i]["content"].append({"type": "image_url", "image_url": {"url": last_user_image_url_from_history}})
+                    appended_to_last = True
+                    break
+            if not appended_to_last: # No user message in history, or image already there
+                 logging.debug(f"Could not append last_user_image_from_history, no suitable prior user message or already present. Image: {last_user_image_url_from_history[:60]}...")
+
+
+        # 3. Add RAG Content (prepended to current user's text)
+        rag_text_prefix = ""
+        if media_content and selected_parts:
+            rag_text_prefix = "\n\n".join(
+                [f"{part.capitalize()}: {media_content.get(part, '')}" for part in selected_parts if media_content.get(part)]
+            ).strip()
+            if rag_text_prefix:
+                rag_text_prefix += "\n\n---\n\n"
+
+        # 4. Construct Current User Message (text + optional new image)
+        current_user_content_parts: List[Dict[str, Any]] = []
+
+        # Combine RAG, custom_prompt (if it's for current turn's text), and processed_text_message
+        # Deciding where `custom_prompt` goes: if it's a direct instruction for *this* turn,
+        # it should be part of the user's text. If it's more like a persona or ongoing rule,
+        # it's better in `system_message`. Let's assume it's for this turn.
+        final_text_for_current_message = processed_text_message
+        if custom_prompt: # Prepend custom_prompt if it exists
+            final_text_for_current_message = f"{custom_prompt}\n\n{final_text_for_current_message}"
+
+        final_text_for_current_message = f"{rag_text_prefix}{final_text_for_current_message}".strip()
+
+        if final_text_for_current_message:
+            current_user_content_parts.append({"type": "text", "text": final_text_for_current_message})
+
+        if current_image_input and current_image_input.get('base64_data') and current_image_input.get('mime_type'):
+            image_url = f"data:{current_image_input['mime_type']};base64,{current_image_input['base64_data']}"
+            current_user_content_parts.append({"type": "image_url", "image_url": {"url": image_url}})
+
+        if not current_user_content_parts: # Should only happen if message, custom_prompt, RAG, and image are all empty/None
+             logging.warning("Current user message has no text or image content parts. Sending a placeholder.")
+             current_user_content_parts.append({"type": "text", "text": "(No user input for this turn)"})
+
+        llm_messages_payload.append({"role": "user", "content": current_user_content_parts})
+
+        # Temperature and other LLM params
+        temperature_float = 0.7
+        try: temperature_float = float(temperature) if temperature is not None else 0.7
+        except ValueError: logging.warning(f"Invalid temperature '{temperature}', using 0.7.")
+
+        logging.debug(f"Debug - Chat Function - Final LLM Payload (structure, image data truncated):")
+        for i, msg_p in enumerate(llm_messages_payload):
+            content_log = []
+            if isinstance(msg_p.get("content"), list):
+                for part_idx, part_c in enumerate(msg_p["content"]):
+                    if part_c.get("type") == "text": content_log.append(f"text: '{part_c['text'][:30]}...'")
+                    elif part_c.get("type") == "image_url": content_log.append(f"image: '{part_c['image_url']['url'][:40]}...'")
+            logging.debug(f"  Msg {i}: Role: {msg_p['role']}, Content: [{', '.join(content_log)}]")
 
         logging.debug(f"Debug - Chat Function - Temperature: {temperature}")
         logging.debug(f"Debug - Chat Function - API Key: {api_key[:10]}")
         logging.debug(f"Debug - Chat Function - Prompt: {custom_prompt}")
 
-        # Use the existing API request code based on the selected endpoint
-        response = chat_api_call(api_endpoint, api_key, input_data, custom_prompt, temp, system_message, streaming, minp, maxp, model, topp, topk)
+        # --- Call the LLM via the updated chat_api_call ---
+        response = chat_api_call(
+            api_endpoint=api_endpoint,
+            api_key=api_key,
+            messages_payload=llm_messages_payload, # NEW primary input
+            temp=temperature_float,
+            system_message=system_message, # Passed separately
+            streaming=streaming,
+            minp=minp, maxp=maxp, model=model, topp=topp, topk=topk
+        )
 
         if streaming:
-            logging.debug(f"Debug - Chat Function - Response: {response}")
+            logging.debug("Chat Function - Response: Streaming Generator")
             return response
         else:
             chat_duration = time.time() - start_time
-            log_histogram("chat_duration", chat_duration, labels={"api_endpoint": api_endpoint})
-            log_counter("chat_success", labels={"api_endpoint": api_endpoint})
-            logging.debug(f"Debug - Chat Function - Response: {response}")
+            log_histogram("chat_duration_multimodal", chat_duration, labels={"api_endpoint": api_endpoint})
+            log_counter("chat_success_multimodal", labels={"api_endpoint": api_endpoint})
+            logging.debug(f"Chat Function - Response (first 500 chars): {str(response)[:500]}")
+
             loaded_config_data = load_and_log_configs()
-            post_gen_replacement = loaded_config_data['chat_dictionaries']['post_gen_replacement']
-            if post_gen_replacement:
-                post_gen_replacement_dict = loaded_config_data['chat_dictionaries']['post_gen_replacement_dict']
-                chatdict_entries = parse_user_dict_markdown_file(post_gen_replacement_dict)
-                response = process_user_input(
-                    response,
-                    chatdict_entries,
-                    # max_tokens=max_tokens(5000 default),
-                    # strategy="sorted_evenly" (default)
-                )
+            post_gen_replacement_config = loaded_config_data.get('chat_dictionaries', {}).get('post_gen_replacement')
+            if post_gen_replacement_config and isinstance(response, str):
+                post_gen_replacement_dict_path = loaded_config_data.get('chat_dictionaries', {}).get('post_gen_replacement_dict')
+                if post_gen_replacement_dict_path and os.path.exists(post_gen_replacement_dict_path):
+                    try:
+                        raw_entries = parse_user_dict_markdown_file(post_gen_replacement_dict_path)
+                        # Assuming parse_user_dict_markdown_file returns dict of key:content_string
+                        post_gen_chat_dict_entries = [ChatDictionary(key=k, content=str(v)) for k, v in raw_entries.items()]
+                        response = process_user_input(response, post_gen_chat_dict_entries)
+                        logging.debug(f"Response after post-gen replacement (first 500 chars): {str(response)[:500]}")
+                    except Exception as e_post_gen:
+                        logging.error(f"Error during post-generation replacement: {e_post_gen}", exc_info=True)
+                else:
+                    logging.warning("Post-gen replacement enabled but dict file not found/configured.")
             return response
+
     except Exception as e:
-        log_counter("chat_error", labels={"api_endpoint": api_endpoint, "error": str(e)})
-        logging.error(f"Error in chat function: {str(e)}")
-        return f"An error occurred: {str(e)}"
+        log_counter("chat_error_multimodal", labels={"api_endpoint": api_endpoint, "error": str(e)})
+        logging.error(f"Error in multimodal chat function: {str(e)}", exc_info=True)
+        # Consider if the error format should change from just a string
+        return f"An error occurred in the chat function: {str(e)}"
 
 
 def save_chat_history_to_db_wrapper(
     db: CharactersRAGDB,
-    chatbot: List[Tuple[Optional[str], Optional[str]]],
+    chatbot_history: List[Dict[str, Any]], # CHANGED: Expects List of OpenAI message objects
     conversation_id: Optional[str],
-    media_content: Optional[Dict[str, Any]],
-    media_name: Optional[str] = None,
+    # Renamed for clarity: these are for identifying the character for association,
+    # not for the content of the messages themselves.
+    media_content_for_char_assoc: Optional[Dict[str, Any]],
+    media_name_for_char_assoc: Optional[str] = None,
     character_name_for_chat: Optional[str] = None
 ) -> Tuple[Optional[str], str]:
     log_counter("save_chat_history_to_db_attempt")
     start_time = time.time()
-    logging.info(f"Attempting to save chat history. Conversation ID: {conversation_id}, Character Name for Chat: {character_name_for_chat}, Media Name: {media_name}")
+    logging.info(f"Saving chat history (OpenAI format). Conversation ID: {conversation_id}, Character: {character_name_for_chat}, Num messages: {len(chatbot_history)}")
 
     try:
         # The DB connection is managed by the CharactersRAGDB instance (`db`)
@@ -432,38 +561,35 @@ def save_chat_history_to_db_wrapper(
         associated_character_id: Optional[int] = None
         final_character_name_for_title = "Unknown Character" # For conversation title
 
-        # Determine character_id
-        # Priority: 1. character_name_for_chat, 2. media_name, 3. title from media_content
+        # --- Character Association Logic (largely same as your provided version) ---
         char_lookup_name = character_name_for_chat
-        if not char_lookup_name and media_name:
-            char_lookup_name = media_name
-        if not char_lookup_name and media_content:
-            content_details = media_content.get('content')  # This might be a JSON string or a dict
+        if not char_lookup_name and media_name_for_char_assoc:
+            char_lookup_name = media_name_for_char_assoc
+
+        # Fallback to media_content_for_char_assoc to derive char_lookup_name if others are None
+        if not char_lookup_name and media_content_for_char_assoc:
+            content_details = media_content_for_char_assoc.get('content')
             if isinstance(content_details, str):
-                try:
-                    content_details = json.loads(content_details)
-                except json.JSONDecodeError:
-                    content_details = {}  # Not a JSON string
+                try: content_details = json.loads(content_details)
+                except json.JSONDecodeError: content_details = {}
             if isinstance(content_details, dict):
-                char_lookup_name = content_details.get('title')  # Fallback to title from media content
+                char_lookup_name = content_details.get('title')
 
         if char_lookup_name:
             try:
                 character = db.get_character_card_by_name(char_lookup_name)
                 if character:
                     associated_character_id = character['id']
-                    final_character_name_for_title = character['name'] # Use the actual name from DB
+                    final_character_name_for_title = character['name']
                     logging.info(f"Chat will be associated with specific character '{final_character_name_for_title}' (ID: {associated_character_id}).")
                 else:
-                    # If a specific character was named but not found, this is an error.
-                    # The user intended a character chat, but the character is missing.
                     logging.error(f"Intended specific character '{char_lookup_name}' not found in DB. Chat save aborted.")
                     return conversation_id, f"Error: Specific character '{char_lookup_name}' intended for this chat was not found. Cannot save chat."
             except CharactersRAGDBError as e:
                 logging.error(f"DB error looking up specific character '{char_lookup_name}': {e}")
                 return conversation_id, f"DB error finding specific character: {e}"
-        else: # No specific character was named, try to use the Default Character
-            logging.info("No specific character name provided for chat. Attempting to use Default Character.")
+        else:
+            logging.info("No specific character name for chat. Using Default Character.")
             try:
                 default_char = db.get_character_card_by_name(DEFAULT_CHARACTER_NAME)
                 if default_char:
@@ -483,11 +609,13 @@ def save_chat_history_to_db_wrapper(
              # This should be an unreachable state if the logic above is correct.
              logging.critical(f"Logic error: associated_character_id is None after character lookup. Chat save aborted.")
              return conversation_id, "Critical internal error: Could not determine character for chat."
+        # --- End Character Association ---
 
         current_conversation_id = conversation_id
+        is_new_conversation = not current_conversation_id
 
-        if not current_conversation_id: # New conversation
-            # Use final_character_name_for_title for the conversation title
+        # --- Create or Prepare Conversation ---
+        if is_new_conversation:
             conv_title_base = f"Chat with {final_character_name_for_title}"
 
             timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -503,43 +631,12 @@ def save_chat_history_to_db_wrapper(
                 current_conversation_id = db.add_conversation(conv_data)
                 if not current_conversation_id:  # Should not happen if add_conversation raises on failure
                     return None, "Failed to create new conversation in DB."
-                logging.info(
-                    f"Created new conversation with ID: {current_conversation_id} for character ID: {associated_character_id}")
+                logging.info(f"Created new conv ID: {current_conversation_id} for char ID: {associated_character_id} ('{final_character_name_for_title}')")
             except (InputError, ConflictError, CharactersRAGDBError) as e:
                 logging.error(f"Error creating new conversation: {e}", exc_info=True)
                 return None, f"Error creating conversation: {e}"
-
-            # Save all messages from chatbot history to the new conversation
-            for user_msg, assistant_msg in chatbot:
-                try:
-                    if user_msg:
-                        db.add_message({
-                            'conversation_id': current_conversation_id,
-                            'sender': 'user',
-                            'content': user_msg,
-                            'client_id': db.client_id
-                        })
-                    if assistant_msg:
-                        db.add_message({
-                            'conversation_id': current_conversation_id,
-                            'sender': 'assistant',
-                            'content': assistant_msg,
-                            'client_id': db.client_id
-                        })
-                except (InputError, ConflictError, CharactersRAGDBError) as e:
-                    logging.error(f"Error saving message to new conversation {current_conversation_id}: {e}",
-                                  exc_info=True)
-                    # Decide: stop all, or try to save other messages? For now, return error.
-                    return current_conversation_id, f"Error saving messages: {e}"
-            logging.info(f"Saved all messages from chatbot history to new conversation {current_conversation_id}")
-
-        else:  # Existing conversation_id provided - "resaving" the history
-            logging.info(
-                f"Resaving history for existing conversation ID: {current_conversation_id}. Character ID: {associated_character_id}")
-            # This implies replacing all messages for the given conversation_id with the new 'chatbot' history.
-            # This is complex with versioning.
-            # 1. Soft-delete all existing messages for this conversation.
-            # 2. Add all messages from the 'chatbot' list.
+        else: # Resaving existing conversation
+            logging.info(f"Resaving history for existing conv ID: {current_conversation_id}. Char context ID: {associated_character_id} ('{final_character_name_for_title}')")
             try:
                 with db.transaction():
                     existing_conv_details = db.get_conversation_by_id(current_conversation_id)
@@ -553,6 +650,8 @@ def save_chat_history_to_db_wrapper(
                         # Fetch names for better logging
                         existing_char_of_conv = db.get_character_card_by_id(existing_conv_details.get('character_id'))
                         existing_char_name = existing_char_of_conv['name'] if existing_char_of_conv else "ID "+str(existing_conv_details.get('character_id'))
+                        logging.error(f"Cannot resave: Conv {current_conversation_id} (for char '{existing_char_name}') doesn't match current char context '{final_character_name_for_title}' (ID: {associated_character_id}).")
+                        return current_conversation_id, "Error: Mismatch in character association for resaving chat."
 
                         logging.error(f"Cannot resave: Conversation {current_conversation_id} (for char '{existing_char_name}') does not match current character context '{final_character_name_for_title}' (ID: {associated_character_id}).")
                         return current_conversation_id, "Error: Mismatch in character association for resaving chat. The conversation belongs to a different character."
@@ -561,43 +660,96 @@ def save_chat_history_to_db_wrapper(
                     logging.info(f"Found {len(existing_messages)} existing messages to soft-delete for conv {current_conversation_id}.")
                     for msg in existing_messages:
                         db.soft_delete_message(msg['id'], msg['version'])
-                    logging.info(f"Soft-deleted existing messages for conv {current_conversation_id}.")
+            except (InputError, ConflictError, CharactersRAGDBError) as e:
+                logging.error(f"Error preparing existing conversation {current_conversation_id} for resave: {e}", exc_info=True)
+                return current_conversation_id, f"Error during resave prep: {e}"
+        # --- End Create or Prepare Conversation ---
 
-                    # Add new messages from chatbot history
-                    for user_msg, assistant_msg in chatbot:
-                        if user_msg:
-                            db.add_message({
-                                'conversation_id': current_conversation_id,
-                                'sender': 'user',
-                                'content': user_msg,
-                                'client_id': db.client_id
-                            })
-                        if assistant_msg:
-                            db.add_message({
-                                'conversation_id': current_conversation_id,
-                                'sender': 'assistant',
-                                'content': assistant_msg,
-                                'client_id': db.client_id
-                            })
-                    logging.info(f"Added new set of messages from chatbot history to conv {current_conversation_id}.")
+        # --- Save Messages (Handles new OpenAI format) ---
+        try:
+            # Ensure transaction wraps message saving, especially for new conversations or full resaves.
+            # For resaves, the transaction is already started above.
+            with db.transaction() if is_new_conversation else db.transaction(): # No-op if already in transaction for resave
+                message_save_count = 0
+                for i, message_obj in enumerate(chatbot_history):
+                    sender = message_obj.get("role")
+                    if not sender or sender == "system": # Don't save system prompts as messages
+                        logging.debug(f"Skipping message with role '{sender}' at index {i}")
+                        continue
 
-                    # Update conversation metadata (last_modified, version)
-                    # Re-fetch conversation details to get the latest version after message changes (though messages don't directly alter conv version)
-                    # This is more about bumping the conversation's own version and last_modified timestamp.
+                    text_content_parts = []
+                    image_data_bytes: Optional[bytes] = None
+                    image_mime_type_str: Optional[str] = None
+
+                    content_data = message_obj.get("content")
+
+                    if isinstance(content_data, str): # Simple text content (e.g., from older history or some assistant responses)
+                        text_content_parts.append(content_data)
+                    elif isinstance(content_data, list): # OpenAI multimodal content list
+                        for part in content_data:
+                            part_type = part.get("type")
+                            if part_type == "text":
+                                text_content_parts.append(part.get("text", ""))
+                            elif part_type == "image_url":
+                                image_url_dict = part.get("image_url", {})
+                                url_str = image_url_dict.get("url", "")
+                                if url_str.startswith("data:") and ";base64," in url_str:
+                                    try:
+                                        header, b64_data = url_str.split(";base64,", 1)
+                                        image_mime_type_str = header.split("data:", 1)[1] if "data:" in header else None
+                                        if image_mime_type_str: # Ensure mime type was found
+                                            image_data_bytes = base64.b64decode(b64_data)
+                                            logging.debug(f"Decoded image for saving (MIME: {image_mime_type_str}, Size: {len(image_data_bytes) if image_data_bytes else 0}) for msg {i} in conv {current_conversation_id}")
+                                        else:
+                                            logging.warning(f"Could not parse MIME type from data URI: {url_str[:60]}...")
+                                            text_content_parts.append("<Error: Malformed image data URI in history>")
+                                    except Exception as e_b64:
+                                        logging.error(f"Error decoding base64 image from history for msg {i} in conv {current_conversation_id}: {e_b64}")
+                                        text_content_parts.append("<Error: Failed to decode image data from history>")
+                                else:
+                                    # If it's a non-data URL, store it as text.
+                                    logging.debug(f"Storing non-data image URL as text: {url_str}")
+                                    text_content_parts.append(f"<Image URL: {url_str}>")
+                    else:
+                        logging.warning(f"Unsupported message content type at index {i}: {type(content_data)}")
+                        text_content_parts.append(f"<Unsupported content type: {type(content_data)}>")
+
+                    final_text_content = "\n".join(text_content_parts).strip()
+
+                    # A message must have either text or an image to be saved.
+                    if not final_text_content and not image_data_bytes:
+                        logging.warning(f"Skipping empty message (no text or decodable image) at index {i} for conv {current_conversation_id}")
+                        continue
+
+                    db.add_message({
+                        'conversation_id': current_conversation_id,
+                        'sender': sender, # 'user' or 'assistant'
+                        'content': final_text_content,
+                        'image_data': image_data_bytes,
+                        'image_mime_type': image_mime_type_str,
+                        'client_id': db.client_id
+                        # timestamp, version, ranking, etc., handled by db.add_message
+                    })
+                    message_save_count +=1
+                logging.info(f"Successfully saved {message_save_count} messages to conversation {current_conversation_id}.")
+
+                # If resaving (not a new conversation), update conversation's last_modified and version
+                if not is_new_conversation:
                     conv_details_for_update = db.get_conversation_by_id(current_conversation_id)
                     if conv_details_for_update:
                         db.update_conversation(
                             current_conversation_id,
-                            {'title': conv_details_for_update.get('title')}, # Pass some data to ensure update call structure is met
+                            {'title': conv_details_for_update.get('title')}, # Keep title, just bump version/timestamp
                             conv_details_for_update['version']
                         )
-                    else: # Should not happen if previous checks passed
-                        logging.error(f"Conversation {current_conversation_id} disappeared before final metadata update.")
+                    else:
+                        logging.error(f"Conversation {current_conversation_id} disappeared before final metadata update during resave.")
 
 
-            except (InputError, ConflictError, CharactersRAGDBError) as e:
-                logging.error(f"Error resaving messages for conversation {current_conversation_id}: {e}", exc_info=True)
-                return current_conversation_id, f"Error resaving messages: {e}"
+        except (InputError, ConflictError, CharactersRAGDBError) as e:
+            logging.error(f"Error saving messages to conversation {current_conversation_id}: {e}", exc_info=True)
+            return current_conversation_id, f"Error saving messages: {e}"
+        # --- End Save Messages ---
 
         save_duration = time.time() - start_time
         log_histogram("save_chat_history_to_db_duration", save_duration)

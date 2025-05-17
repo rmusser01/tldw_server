@@ -1661,59 +1661,59 @@ UPDATE db_schema_version
 
     # --- Message Methods ---
     def add_message(self, msg_data: Dict[str, Any]) -> Optional[str]:
-        """Adds a new message to a conversation."""
+        """Adds a new message to a conversation, potentially with an image."""
         msg_id = msg_data.get('id') or self._generate_uuid()
 
-        required_fields = ['conversation_id', 'sender', 'content']
+        required_fields = ['conversation_id', 'sender', 'content']  # Content can be empty if image is present
         for field in required_fields:
-            if field not in msg_data or not msg_data[field]:  # Ensure content is not empty
-                raise InputError(f"Required field '{field}' is missing or empty for message.")
+            if field not in msg_data:  # Removed "not msg_data[field]" for 'content'
+                raise InputError(f"Required field '{field}' is missing for message.")
+        if not msg_data.get('content') and not msg_data.get('image_data'):
+            raise InputError("Message must have text content or image data.")
 
         client_id = msg_data.get('client_id') or self.client_id
         if not client_id:
             raise InputError("Client ID is required for message.")
 
         now = self._get_current_utc_timestamp_iso()
-        # Timestamp is the creation time, last_modified tracks actual modifications.
-        # For a new message, timestamp and last_modified will be the same initially.
         timestamp = msg_data.get('timestamp') or now
 
         query = """
-                INSERT INTO messages (id, conversation_id, parent_message_id, sender, content, timestamp, \
-                                      ranking, last_modified, client_id, version, deleted) \
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0) \
+                INSERT INTO messages (id, conversation_id, parent_message_id, sender, content,
+                                      image_data, image_mime_type,
+                                      timestamp, ranking, last_modified, client_id, version, deleted)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
                 """
         params = (
             msg_id, msg_data['conversation_id'], msg_data.get('parent_message_id'),
-            msg_data['sender'], msg_data['content'], timestamp,
-            msg_data.get('ranking'), now, client_id
+            msg_data['sender'], msg_data.get('content', ''),  # Default to empty string if no text content
+            msg_data.get('image_data'), msg_data.get('image_mime_type'),
+            timestamp, msg_data.get('ranking'), now, client_id
         )
         try:
             with self.transaction():
-                # Ensure conversation exists and is not deleted
                 conv_cursor = self.execute_query("SELECT 1 FROM conversations WHERE id = ? AND deleted = 0",
                                                  (msg_data['conversation_id'],))
                 if not conv_cursor.fetchone():
                     raise InputError(
                         f"Cannot add message: Conversation ID '{msg_data['conversation_id']}' not found or deleted.")
-
-                self.execute_query(query, params)
-            logger.info(f"Added message ID: {msg_id} to conversation {msg_data['conversation_id']}.")
+                self.execute_query(query, params)  # commit handled by transaction context
+            logger.info(
+                f"Added message ID: {msg_id} to conversation {msg_data['conversation_id']} (Image: {'Yes' if msg_data.get('image_data') else 'No'}).")
             return msg_id
         except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed: messages.id" in str(e):
-                 raise ConflictError(f"Message with ID '{msg_id}' already exists.", entity="messages", entity_id=msg_id) from e
-            # Could also be foreign key constraint on conversation_id if that check was somehow bypassed
-            # or if ON DELETE CASCADE fired elsewhere unexpectedly (unlikely for add).
+                raise ConflictError(f"Message with ID '{msg_id}' already exists.", entity="messages",
+                                    entity_id=msg_id) from e
             raise CharactersRAGDBError(f"Database integrity error adding message: {e}") from e
-        except InputError: # From conversation check
+        except InputError:
             raise
         except CharactersRAGDBError as e:
             logger.error(f"Database error adding message: {e}")
             raise
 
     def get_message_by_id(self, message_id: str) -> Optional[Dict[str, Any]]:
-        query = "SELECT * FROM messages WHERE id = ? AND deleted = 0"
+        query = "SELECT id, conversation_id, parent_message_id, sender, content, image_data, image_mime_type, timestamp, ranking, last_modified, version, client_id, deleted FROM messages WHERE id = ? AND deleted = 0"  # Explicitly list columns
         try:
             cursor = self.execute_query(query, (message_id,))
             row = cursor.fetchone()
@@ -1726,7 +1726,7 @@ UPDATE db_schema_version
                                       order_by_timestamp: str = "ASC") -> List[Dict[str, Any]]:
         if order_by_timestamp.upper() not in ["ASC", "DESC"]:
             raise InputError("order_by_timestamp must be 'ASC' or 'DESC'.")
-        query = f"SELECT * FROM messages WHERE conversation_id = ? AND deleted = 0 ORDER BY timestamp {order_by_timestamp} LIMIT ? OFFSET ?"
+        query = f"SELECT id, conversation_id, parent_message_id, sender, content, image_data, image_mime_type, timestamp, ranking, last_modified, version, client_id, deleted FROM messages WHERE conversation_id = ? AND deleted = 0 ORDER BY timestamp {order_by_timestamp} LIMIT ? OFFSET ?"  # Explicitly list columns
         try:
             cursor = self.execute_query(query, (conversation_id, limit, offset))
             return [dict(row) for row in cursor.fetchall()]
@@ -1742,70 +1742,84 @@ UPDATE db_schema_version
         fields_to_update_sql = []
         params_for_set_clause = []
 
+        # Allow updating content, ranking, parent_message_id. Image updates are less common post-creation.
+        # If image update is needed, add 'image_data' and 'image_mime_type' here.
+        if 'image_data' in update_data and update_data['image_data'] is None:
+            fields_to_update_sql.append("image_data = NULL")
+            fields_to_update_sql.append("image_mime_type = NULL")
+            # No params needed for NULL
+
         allowed_to_update = ['content', 'ranking', 'parent_message_id']
+        if 'image_data' in update_data:
+            allowed_to_update.append('image_data')
+            allowed_to_update.append('image_mime_type')
+
         for key, value in update_data.items():
             if key in allowed_to_update:
                 fields_to_update_sql.append(f"{key} = ?")
                 params_for_set_clause.append(value)
-            elif key not in ['id', 'conversation_id', 'sender', 'timestamp', 'last_modified', 'version', 'client_id',
-                             'deleted']:
-                logger.warning(
+            elif key not in ['id', 'conversation_id', 'sender', 'timestamp', 'last_modified', 'version', 'client_id', 'deleted']:
+                logging.warning(
                     f"Attempted to update immutable or unknown field '{key}' in message ID {message_id}, skipping.")
 
-        if not fields_to_update_sql:
-            logger.info(f"No updatable fields provided for message ID {message_id}.")
-            return True
+            if not fields_to_update_sql:
+                logger.info(f"No updatable fields provided for message ID {message_id}.")
+                # ensure metadata update always happens if version check passes.
+                pass # Proceed to metadata update
 
-        next_version_val = expected_version + 1
-        fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+            next_version_val = expected_version + 1
 
-        all_set_values = params_for_set_clause[:]
-        all_set_values.extend([now, next_version_val, self.client_id])
+            # Always update metadata if version check passes
+            current_fields_to_update_sql = list(fields_to_update_sql) # clone
+            current_params_for_set_clause = list(params_for_set_clause) # clone
 
-        where_values = [message_id, expected_version]
-        final_params_for_execute = tuple(all_set_values + where_values)
+            current_fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+            current_params_for_set_clause.extend([now, next_version_val, self.client_id])
 
-        query = f"UPDATE messages SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
+            where_values = [message_id, expected_version]
+            final_params_for_execute = tuple(current_params_for_set_clause + where_values)
 
-        try:
-            with self.transaction() as conn:
-                current_db_version = self._get_current_db_version(conn, "messages", "id", message_id)
+            query = f"UPDATE messages SET {', '.join(current_fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
 
-                if current_db_version != expected_version:
-                    raise ConflictError(
-                        f"Message ID {message_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
-                        entity="messages", entity_id=message_id
-                    )
+            try:
+                with self.transaction() as conn:
+                    current_db_version = self._get_current_db_version(conn, "messages", "id", message_id)
 
-                cursor = conn.execute(query, final_params_for_execute)
+                    if current_db_version != expected_version:
+                        raise ConflictError(
+                            f"Message ID {message_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                            entity="messages", entity_id=message_id
+                        )
 
-                if cursor.rowcount == 0:
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
-                                                      (message_id,))
-                    final_state = check_again_cursor.fetchone()
-                    if not final_state:
-                        msg = f"Message ID {message_id} disappeared."
-                    elif final_state['deleted']:
-                        msg = f"Message ID {message_id} was soft-deleted concurrently."
-                    elif final_state['version'] != expected_version:
-                        msg = f"Message ID {message_id} version changed to {final_state['version']} concurrently."
-                    else:
-                        msg = f"Update for message ID {message_id} (expected v{expected_version}) affected 0 rows."
-                    raise ConflictError(msg, entity="messages", entity_id=message_id)
+                    cursor = conn.execute(query, final_params_for_execute)
 
-                logger.info(
-                    f"Updated message ID {message_id} from version {expected_version} to version {next_version_val}.")
-                return True
-        except sqlite3.IntegrityError as e:  # e.g. parent_message_id FK violation
-            logger.error(f"SQLite integrity error updating message ID {message_id} (expected v{expected_version}): {e}",
-                         exc_info=True)
-            raise CharactersRAGDBError(f"Database integrity error updating message: {e}") from e
-        except ConflictError:
-            raise
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error updating message ID {message_id} (expected v{expected_version}): {e}",
-                         exc_info=True)
-            raise
+                    if cursor.rowcount == 0:
+                        check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
+                                                          (message_id,))
+                        final_state = check_again_cursor.fetchone()
+                        if not final_state:
+                            msg = f"Message ID {message_id} disappeared."
+                        elif final_state['deleted']:
+                            msg = f"Message ID {message_id} was soft-deleted concurrently."
+                        elif final_state['version'] != expected_version:
+                            msg = f"Message ID {message_id} version changed to {final_state['version']} concurrently."
+                        else:
+                            msg = f"Update for message ID {message_id} (expected v{expected_version}) affected 0 rows."
+                        raise ConflictError(msg, entity="messages", entity_id=message_id)
+
+                    logger.info(
+                        f"Updated message ID {message_id} from version {expected_version} to version {next_version_val}.")
+                    return True
+            except sqlite3.IntegrityError as e:  # e.g. parent_message_id FK violation
+                logger.error(f"SQLite integrity error updating message ID {message_id} (expected v{expected_version}): {e}",
+                             exc_info=True)
+                raise CharactersRAGDBError(f"Database integrity error updating message: {e}") from e
+            except ConflictError:
+                raise
+            except CharactersRAGDBError as e:
+                logger.error(f"Database error updating message ID {message_id} (expected v{expected_version}): {e}",
+                             exc_info=True)
+                raise
 
     def soft_delete_message(self, message_id: str, expected_version: int) -> bool:
         now = self._get_current_utc_timestamp_iso()
