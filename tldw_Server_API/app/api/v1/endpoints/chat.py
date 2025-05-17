@@ -424,13 +424,13 @@ async def create_chat_completion(
         "frequency_penalty": request_data.frequency_penalty,
         "tools": request_data.tools,
         "tool_choice": request_data.tool_choice,
+        "max_tokens": request_data.max_tokens,
+        "seed": request_data.seed,
+        "stop": request_data.stop,
+        "response_format": request_data.response_format.model_dump() if request_data.response_format else None, # Pass as dict
+        "n": request_data.n,      
+        "user_identifier": request_data.user,
         # Ensure all new schema fields that map to chat_api_call are added here
-        "max_tokens": request_data.max_tokens, # ADDED (if you implement it in chat_api_call)
-        "seed": request_data.seed,             # ADDED (if you implement it)
-        "stop": request_data.stop,             # ADDED (if you implement it)
-        "response_format": request_data.response_format, # ADDED (if you implement it, may need .type)
-        "n": request_data.n,                   # ADDED (if you implement it)
-        "user": request_data.user,             # ADDED (if you implement it)
     }
 
     # Clean chat_args: Remove None values as chat_api_call might not expect them,

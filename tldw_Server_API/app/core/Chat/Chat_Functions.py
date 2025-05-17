@@ -23,6 +23,7 @@ from loguru import logger
 #
 # Local Imports
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ResponseFormat
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError, ChatConfigurationError, ChatAPIError, \
     ChatProviderError, ChatRateLimitError, ChatAuthenticationError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError, ConflictError, CharactersRAGDBError
@@ -97,101 +98,324 @@ PROVIDER_PARAM_MAP = {
         'presence_penalty': 'presence_penalty',
         'frequency_penalty': 'frequency_penalty',
         # Note: OpenAI's chat_with_openai internally handles 'maxp' as 'top_p'
+        'max_tokens': 'max_tokens',
+        'seed': 'seed',
+        'stop': 'stop',
+        'response_format': 'response_format',  # Expects {'type': 'text' | 'json_object'}
+        'n': 'n',
+        'user_identifier': 'user',  # 'user' is the param name for OpenAI
     },
     'anthropic': {
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
-        'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
-        'model': 'model', 'topp': 'topp', 'topk': 'topk'
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_arg',
+        'temp': 'temp',
+        'system_message': 'system_prompt',
+        'streaming': 'streaming',
+        'model': 'model',
+        'topp': 'topp',
+        'topk': 'topk',
+        'max_tokens': 'max_tokens',  # Anthropic uses max_tokens
+        'stop': 'stop_sequences',  # Anthropic uses stop_sequences
     },
     'cohere': {
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
-        'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
-        'model': 'model', 'topp': 'topp', 'topk': 'topk'
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_arg',
+        'temp': 'temp',
+        'system_message': 'system_prompt',
+        'streaming': 'streaming',
+        'model': 'model',
+        'topp': 'topp',
+        'topk': 'topk',
+        'max_tokens': 'max_tokens',
+        'stop': 'stop_sequences',
+        'seed': 'seed',
+        'n': 'num_generations',
+        'frequency_penalty': 'frequency_penalty',
+        'presence_penalty': 'presence_penalty',
     },
     'groq': {
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
-        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
-        'maxp': 'maxp', 'model':'model' # Groq also uses top_p, handled by chat_with_groq
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_arg',
+        'temp': 'temp',
+        'system_message': 'system_message',
+        'streaming': 'streaming',
+        'maxp': 'maxp',
+        'model':'model', # Groq also uses top_p, handled by chat_with_groq
+        'logit_bias': 'logit_bias',
+        'presence_penalty': 'presence_penalty',
+        'frequency_penalty': 'frequency_penalty',
     },
     'openrouter': {
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
-        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
-        'topp': 'top_p', 'topk': 'top_k', 'minp': 'minp', 'model':'model'
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_arg',
+        'temp': 'temp',
+        'system_message': 'system_message',
+        'streaming': 'streaming',
+        'topp': 'top_p',
+        'topk': 'top_k',
+        'minp': 'minp',
+        'model':'model',
+        'max_tokens': 'max_tokens',
+        'seed': 'seed',
+        'stop': 'stop',
+        'response_format': 'response_format',
+        'n': 'n',
+        'user_identifier': 'user',
+        'tools': 'tools',
+        'tool_choice': 'tool_choice',
+        'logit_bias': 'logit_bias',
+        'presence_penalty': 'presence_penalty',
+        'frequency_penalty': 'frequency_penalty',
+        'logprobs': 'logprobs',
+        'top_logprobs': 'top_logprobs',
     },
     'deepseek': {
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
-        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
-        'topp': 'topp', 'model':'model'
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_arg',
+        'temp': 'temp',
+        'system_message': 'system_message',
+        'streaming': 'streaming',
+        'topp': 'topp',
+        'model':'model',
+        'max_tokens': 'max_tokens',
+        'seed': 'seed',
+        'stop': 'stop',
+        'logprobs': 'logprobs',
+        'top_logprobs': 'top_logprobs',  # if supported
+        'presence_penalty': 'presence_penalty',
+        'frequency_penalty': 'frequency_penalty',
     },
     'mistral': {
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
-        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
-        'topp': 'topp', 'model': 'model'
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_arg',
+        'temp': 'temp',
+        'system_message': 'system_message',
+        'streaming': 'streaming',
+        'topp': 'topp',
+        'model': 'model',
+        'max_tokens': 'max_tokens',
+        'seed': 'random_seed',  # Mistral uses random_seed
+        'topk': 'top_k',  # Mistral uses top_k
     },
     'google': {
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
-        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
-        'topp': 'topp', 'topk': 'topk', 'model':'model'
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_arg',
+        'temp': 'temp',
+        'system_message': 'system_message',
+        'streaming': 'streaming',
+        'topp': 'topp',
+        'topk': 'topk',
+        'model':'model',
+        'max_tokens': 'max_output_tokens',
+        'stop': 'stop_sequences',  # List of strings
+        'n': 'candidate_count',
     },
     'huggingface': {
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
-        'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
-        'model':'model'
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_arg',
+        'temp': 'temp',
+        'system_message': 'system_prompt',
+        'streaming': 'streaming',
+        'model':'model',
+        'max_tokens': 'max_new_tokens',  # Common for TGI
+        'topp': 'top_p',
+        'topk': 'top_k',
+        'seed': 'seed',
+        'stop': 'stop',  # often 'stop_sequences'
+        'n': 'num_return_sequences',  # if supported
     },
     'llama.cpp': { # Has api_url as a positional argument which needs special handling if not None
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt',
-        'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
-        'topp': 'top_p', 'topk': 'top_k', 'minp': 'min_p', 'model':'model',
-        # 'api_url' is None by default in the original, letting the function use config.
-        # If chat_api_call were to support overriding it, this map would need adjustment or
-        # the handler would need to be smarter.
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt',
+        'temp': 'temperature',
+        'system_message': 'system_prompt',
+        'streaming': 'stream',
+        'topp': 'top_p', 'topk': 'top_k',
+        'minp': 'min_p',
+        'model':'model',
+        'max_tokens': 'n_predict', # Common for llama.cpp server
+        'seed': 'seed',
+        'stop': 'stop', # list of strings
+        'response_format': 'response_format', # if OpenAI compatible endpoint
+        'logit_bias': 'logit_bias',
+        'n': 'n_probs', # if 'logprobs' is for getting top-n probabilities
+        'presence_penalty': 'presence_penalty',
+        'frequency_penalty': 'frequency_penalty',
     },
     'kobold': {
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_input',
-        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
-        'topp': 'top_p', 'topk': 'top_k', 'model':'model'
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_input',
+        'temp': 'temp',
+        'system_message': 'system_message',
+        'streaming': 'streaming',
+        'topp': 'top_p',
+        'topk': 'top_k',
+        'model':'model',
+        'max_tokens': 'max_length',  # or 'max_context_length'
+        'stop': 'stop_sequence',  # Often a list
+        'n': 'num_responses',
+        'seed': 'seed',
     },
     'ooba': { # api_url also a consideration like llama.cpp
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt',
-        'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
-        'topp': 'top_p', 'model':'model'
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt',
+        'temp': 'temperature',
+        'system_message': 'system_prompt', # often part of messages or specific param
+        'streaming': 'stream',
+        'topp': 'top_p',
+        'model':'model',
+        'topk': 'top_k',
+        'minp': 'min_p',
+        'max_tokens': 'max_tokens', # or 'max_new_tokens'
+        'seed': 'seed',
+        'stop': 'stop',
+        'response_format': 'response_format',
+        'n': 'n',
+        'user_identifier': 'user',
+        'logit_bias': 'logit_bias',
+        'presence_penalty': 'presence_penalty',
+        'frequency_penalty': 'frequency_penalty',
     },
     'tabbyapi': {
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_input',
-        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
-        'topp': 'top_p', 'topk': 'top_k', 'minp': 'min_p', 'model':'model'
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_input',
+        'temp': 'temperature',
+        'system_message': 'system_message',
+        'streaming': 'stream',
+        'topp': 'top_p',
+        'topk': 'top_k',
+        'minp': 'min_p',
+        'model':'model',
+        'max_tokens': 'max_tokens',
+        'seed': 'seed',
+        'stop': 'stop',
     },
     'vllm': { # vllm_api_url consideration
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_input',
-        'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
-        'topp': 'topp', 'topk': 'topk', 'minp': 'minp', 'model': 'model'
+                'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_input',
+        'temp': 'temperature', 'system_message': 'system_prompt', 'streaming': 'stream',
+        'topp': 'top_p', 'topk': 'top_k', 'minp': 'min_p', 'model': 'model',
+        'max_tokens': 'max_tokens',
+        'seed': 'seed',
+        'stop': 'stop',
+        'response_format': 'response_format',
+        'n': 'n',
+        'logit_bias': 'logit_bias',
+        'presence_penalty': 'presence_penalty',
+        'frequency_penalty': 'frequency_penalty',
+        'logprobs': 'logprobs',
+        'user_identifier': 'user',
     },
     'local-llm': {
-        'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg', 'temp': 'temp',
-        'system_message': 'system_message', 'streaming': 'streaming',
-        'topp': 'top_p', 'topk': 'top_k', 'minp': 'min_p', 'model':'model'
-        # No api_key for local-llm usually, if there is one, add to chat_api_call args
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_arg',
+        'temp': 'temperature',
+        'system_message': 'system_message',
+        'streaming': 'stream',
+        'topp': 'top_p',
+        'topk': 'top_k',
+        'minp': 'min_p',
+        'model':'model',
+        'max_tokens': 'max_tokens',
+        'seed': 'seed',
+        'stop': 'stop',
     },
     'ollama': { # api_url consideration
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt',
-        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
-        'topp': 'top_p', 'model': 'model'
+        'api_key': 'api_key', # api_key is not used by ollama directly, url is more important
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt', # This is 'prompt' for generate, 'messages' for chat
+        'temp': 'temperature',
+        'system_message': 'system', # Part of request body
+        'streaming': 'stream',
+        'topp': 'top_p',
+        'topk': 'top_k',
+        'model': 'model',
+        'max_tokens': 'num_predict', # For generate endpoint, chat might be different
+        'seed': 'seed',
+        'stop': 'stop', # list of strings
+        'response_format': 'format', # 'json' string
+        'presence_penalty': 'presence_penalty',
+        'frequency_penalty': 'frequency_penalty',
     },
     'aphrodite': {
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt',
-        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
-        'topp': 'topp', 'topk': 'topk', 'minp': 'minp', 'model': 'model'
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt',
+        'temp': 'temperature',
+        'system_message': 'system_message',
+        'streaming': 'stream',
+        'topp': 'top_p',
+        'topk': 'top_k',
+        'minp': 'min_p',
+        'model': 'model',
+        'max_tokens': 'max_tokens',
+        'seed': 'seed',
+        'stop': 'stop',
+        'response_format': 'response_format',
+        'n': 'n',
+        'logit_bias': 'logit_bias',
+        'presence_penalty': 'presence_penalty',
+        'frequency_penalty': 'frequency_penalty',
+        'logprobs': 'logprobs',
+        'user_identifier': 'user',
     },
     'custom-openai-api': {
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
-        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
-        'maxp': 'maxp', 'minp':'minp', 'topk':'topk', 'model': 'model'
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_arg',
+        'temp': 'temp',
+        'system_message': 'system_message',
+        'streaming': 'streaming',
+        'maxp': 'maxp',
+        'minp':'minp',
+        'topk':'topk',
+        'model': 'model',
+        'max_tokens': 'max_tokens',
+        'seed': 'seed',
+        'stop': 'stop',
+        'response_format': 'response_format',
+        'n': 'n',
+        'user_identifier': 'user',
+        'tools': 'tools',
+        'tool_choice': 'tool_choice',
+        'logit_bias': 'logit_bias',
+        'presence_penalty': 'presence_penalty',
+        'frequency_penalty': 'frequency_penalty',
+        'logprobs': 'logprobs',
+        'top_logprobs': 'top_logprobs',
     },
     'custom-openai-api-2': {
-        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
-        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
-        'model': 'model'
-        # Does not take maxp, minp, topk per original comments
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_arg',
+        'temp': 'temp',
+        'system_message': 'system_message',
+        'streaming': 'streaming',
+        'model': 'model',
+        'max_tokens': 'max_tokens',
+        'seed': 'seed',
+        'stop': 'stop',
+        'response_format': 'response_format',
+        'n': 'n',
+        'user_identifier': 'user',
+        'tools': 'tools',
+        'tool_choice': 'tool_choice',
+        'logit_bias': 'logit_bias',
+        'presence_penalty': 'presence_penalty',
+        'frequency_penalty': 'frequency_penalty',
+        'logprobs': 'logprobs',
+        'top_logprobs': 'top_logprobs',
     },
     # Add other providers here
 }
@@ -214,7 +438,13 @@ def chat_api_call(
     presence_penalty: Optional[float] = None,
     frequency_penalty: Optional[float] = None,
     tools: Optional[List[Dict[str, Any]]] = None,
-    tool_choice: Optional[Union[str, Dict[str, Any]]] = None
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+    max_tokens: Optional[int] = None,
+    seed: Optional[int] = None,
+    stop: Optional[Union[str, List[str]]] = None,
+    response_format: Optional[Dict[str, str]] = None,  # Expects {'type': 'text' | 'json_object'}
+    n: Optional[int] = None,
+    user_identifier: Optional[str] = None  # Renamed from 'user' to avoid conflict with 'user' role in messages
     ):
     """
     Acts as a sink/router to call various LLM API providers using a structured messages_payload.
@@ -254,6 +484,12 @@ def chat_api_call(
         'frequency_penalty': frequency_penalty,
         'tools': tools,
         'tool_choice': tool_choice,
+        'max_tokens': max_tokens,
+        'seed': seed,
+        'stop': stop,
+        'response_format': response_format,
+        'n': n,
+        'user_identifier': user_identifier
     }
 
     for generic_param_name, provider_param_name in params_map.items():
@@ -288,6 +524,13 @@ def chat_api_call(
 
     try:
         logging.debug(f"Calling handler {handler.__name__} with kwargs: { {k: (type(v) if k != params_map.get('api_key') else 'key_hidden') for k,v in call_kwargs.items()} }")
+        # Log the actual values for non-sensitive parameters for better debugging
+        # sensitive_keys = [params_map.get('api_key', 'api_key'), 'messages_payload'] # messages_payload can be large
+        # debug_kwargs_log = {
+        #     k: (v if k not in sensitive_keys else ( "key_hidden" if k == params_map.get('api_key', 'api_key') else f"payload_type:{type(v)}" ))
+        #     for k, v in call_kwargs.items()
+        # }
+        # logging.debug(f"Calling handler {handler.__name__} with actual kwargs (sensitive excluded/typed): {debug_kwargs_log}")
         response = handler(**call_kwargs)
 
         call_duration = time.time() - start_time
@@ -385,10 +628,24 @@ def chat(
     chatdict_entries: Optional[List[Any]] = None,
     max_tokens: int = 500, # Max tokens for chat dict, not LLM response
     strategy: str = "sorted_evenly",
-
-    # +++ NEW Image-related parameters +++
+    # +++ Image-related parameters +++
     current_image_input: Optional[Dict[str, str]] = None, # {'base64_data': '...', 'mime_type': 'image/png'}
-    image_history_mode: str = "tag_past"  # "send_all", "send_last_user_image", "tag_past", "ignore_past"
+    image_history_mode: str = "tag_past",  # "send_all", "send_last_user_image", "tag_past", "ignore_past"
+    # +++ Parameters that mirror ChatCompletionRequest for direct pass-through if needed by chat_api_call +++
+    # These would typically be set by the calling FastAPI endpoint based on ChatCompletionRequest model
+    llm_max_tokens: Optional[int] = None,
+    llm_seed: Optional[int] = None,
+    llm_stop: Optional[Union[str, List[str]]] = None,
+    llm_response_format: Optional[ResponseFormat] = None, # Pydantic model
+    llm_n: Optional[int] = None,
+    llm_user_identifier: Optional[str] = None,
+    llm_logprobs: Optional[bool] = None,
+    llm_top_logprobs: Optional[int] = None,
+    llm_logit_bias: Optional[Dict[str, float]] = None,
+    llm_presence_penalty: Optional[float] = None,
+    llm_frequency_penalty: Optional[float] = None,
+    llm_tools: Optional[List[Dict[str, Any]]] = None,
+    llm_tool_choice: Optional[Union[str, Dict[str, Any]]] = None
 ):
     log_counter("chat_attempt_multimodal", labels={"api_endpoint": api_endpoint, "image_mode": image_history_mode})
     start_time = time.time()
@@ -535,11 +792,25 @@ def chat(
         response = chat_api_call(
             api_endpoint=api_endpoint,
             api_key=api_key,
-            messages_payload=llm_messages_payload, # NEW primary input
+            messages_payload=llm_messages_payload,
             temp=temperature_float,
-            system_message=system_message, # Passed separately
+            system_message=system_message,
             streaming=streaming,
-            minp=minp, maxp=maxp, model=model, topp=topp, topk=topk
+            minp=minp, maxp=maxp, model=model, topp=topp, topk=topk,
+            # Pass through new params from ChatCompletionRequest
+            max_tokens=llm_max_tokens,
+            seed=llm_seed,
+            stop=llm_stop,
+            response_format=llm_response_format.model_dump() if llm_response_format else None,
+            n=llm_n,
+            user_identifier=llm_user_identifier,
+            logprobs=llm_logprobs,
+            top_logprobs=llm_top_logprobs,
+            logit_bias=llm_logit_bias,
+            presence_penalty=llm_presence_penalty,
+            frequency_penalty=llm_frequency_penalty,
+            tools=llm_tools,
+            tool_choice=llm_tool_choice
         )
 
         if streaming:
