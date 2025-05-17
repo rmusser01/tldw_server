@@ -438,6 +438,11 @@ async def create_chat_completion(
     chat_args_cleaned = {k: v for k, v in chat_args.items() if v is not None}
     # logger.trace(f"Arguments for chat_api_call (after templating, api_key excluded): { {k: v for k,v in chat_args_cleaned.items() if k != 'api_key'} }")
 
+    if not request_data.tools and chat_args_cleaned.get("tool_choice") == "auto":
+        logger.debug(
+            f"No tools provided and tool_choice is 'auto' for {target_endpoint}. Removing 'tool_choice' from chat_args.")
+        if "tool_choice" in chat_args_cleaned:
+            del chat_args_cleaned["tool_choice"]
 
     loop = asyncio.get_running_loop()
     try:
@@ -531,16 +536,20 @@ async def create_chat_completion(
     except ChatConfigurationError as e:  # Server-side configuration issue
         logger.error(f"Configuration error for {e.provider or target_endpoint}: {e.message}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-    except ChatProviderError as e:  # Errors from the provider itself
-        logger.error(f"Provider error from {e.provider or target_endpoint} (Status: {e.status_code}): {e.message}",
-                     exc_info=True)
-        http_status_code = e.status_code if e.status_code and 400 <= e.status_code < 600 else 502  # Default to 502 Bad Gateway
-        raise HTTPException(status_code=http_status_code, detail=str(e))
-    except ChatAPIError as e:  # More generic errors from the chat calling process
-        logger.error(f"General API error for {e.provider or target_endpoint} (Status: {e.status_code}): {e.message}",
-                     exc_info=True)
-        http_status_code = e.status_code if e.status_code and 400 <= e.status_code < 600 else 500
-        raise HTTPException(status_code=http_status_code, detail=str(e))
+    except ChatProviderError as e:  # Make sure this is caught before generic Exception
+        logging.error(f"Provider error from {e.provider} (Status {e.status_code}) in chat_api_call: {e.message}",
+                      exc_info=True)  # Log it here
+        raise  # Re-raise it so chat.py can handle it as a ChatProviderError
+
+    except ChatAPIError as e:  # Catch other ChatAPIError (like config, bad request)
+        logging.error(f"ChatAPIError in chat_api_call for {e.provider}: {e.message}", exc_info=True)
+        raise  # Re-raise
+
+    except Exception as e:  # For truly unexpected things
+        logging.exception(f"Unexpected internal error in chat_api_call for {target_endpoint}: {type(e).__name__} - {e}")
+        raise ChatAPIError(provider=target_endpoint,
+                           message=f"An unexpected internal error ({type(e).__name__}) occurred in API call router.",
+                           status_code=500) from e
 
     # --- Catching errors from `requests` ---
     except HTTPError as e: # Explicitly from requests.exceptions

@@ -116,7 +116,7 @@ PROVIDER_PARAM_MAP = {
         'topp': 'topp',
         'topk': 'topk',
         'tools': 'tools',
-        'tool_choice': 'tool_choice',
+        #'tool_choice': 'tool_choice',
         'max_tokens': 'max_tokens',  # Anthropic uses max_tokens
         'stop': 'stop_sequences',  # Anthropic uses stop_sequences
     },
@@ -131,7 +131,7 @@ PROVIDER_PARAM_MAP = {
         'topp': 'topp',
         'topk': 'topk',
         'tools': 'tools',
-        'tool_choice': 'tool_choice',
+        #'tool_choice': 'tool_choice',
         'max_tokens': 'max_tokens',
         'stop': 'stop_sequences',
         'seed': 'seed',
@@ -219,7 +219,7 @@ PROVIDER_PARAM_MAP = {
         'topp': 'topp',
         'topk': 'topk',
         'tools': 'tools',
-        'tool_choice': 'tool_choice',
+        #'tool_choice': 'tool_choice',
         'model':'model',
         'max_tokens': 'max_output_tokens',
         'stop': 'stop_sequences',  # List of strings
@@ -230,7 +230,7 @@ PROVIDER_PARAM_MAP = {
         'messages_payload': 'input_data',
         'prompt': 'custom_prompt_arg',
         'temp': 'temp',
-        'system_message': 'system_prompt',
+        'system_message': 'system_message',
         'streaming': 'streaming',
         'model':'model',
         'max_tokens': 'max_new_tokens',  # Common for TGI
@@ -238,7 +238,7 @@ PROVIDER_PARAM_MAP = {
         'topk': 'top_k',
         'seed': 'seed',
         'stop': 'stop',  # often 'stop_sequences'
-        'n': 'num_return_sequences',  # if supported
+        'n': 'n',  #generic mapping
     },
     'llama.cpp': { # Has api_url as a positional argument which needs special handling if not None
         'api_key': 'api_key',
