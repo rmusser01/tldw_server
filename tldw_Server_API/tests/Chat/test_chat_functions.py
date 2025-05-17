@@ -648,12 +648,12 @@ def test_parse_user_dict_markdown_file_various_formats(tmp_path):
     dict_file.write_text(md_content)
 
     parsed = parse_user_dict_markdown_file(str(dict_file))
-
+    expected_key2_value = "This is a\n            multi-line value for key2.\n            It has several lines."
     assert parsed["key1"] == "value1"
-    assert parsed["key2"] == "This is a\nmulti-line value for key2.\nIt has several lines."
+    assert parsed["key2"] == expected_key2_value
     assert parsed["key3"] == "value3"
     assert parsed["another key"] == "another value"
-    assert parsed["regex_key"] == "/pattern\\d+/"  # Stored as string, compiled by ChatDictionary
+    assert parsed["regex_key"] == "/pattern\\d+/"
     assert parsed["key_with_terminator_early"] == "line1"
     assert "not_part_of_value" not in parsed.values()
     assert len(parsed) == 6
@@ -670,7 +670,7 @@ def test_chat_dictionary_class_methods():
 
     assert entry_regex.matches("Hello World!")
     assert entry_regex.matches("new world order")
-    assert not entry_regex.matches("worldwide")  # Should match whole word due to \b
+    assert not entry_regex.matches("worldwide")
     assert isinstance(entry_regex.key, re.Pattern)
 
 

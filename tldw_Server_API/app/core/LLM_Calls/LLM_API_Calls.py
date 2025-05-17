@@ -23,19 +23,18 @@
 import json
 import os
 import time
-from typing import List, Any, Optional, Tuple, Dict
+from typing import List, Any, Optional, Tuple, Dict, Union
 #
 # Import 3rd-Party Libraries
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-
-from tldw_Server_API.app.core.Chat.Chat_Functions import ChatAuthenticationError, ChatRateLimitError, \
-    ChatBadRequestError, ChatProviderError, ChatConfigurationError
 #
 # Import Local libraries
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Chat.Chat_Functions import ChatAuthenticationError, ChatRateLimitError, \
+    ChatBadRequestError, ChatProviderError, ChatConfigurationError
 #
 #######################################################################################################################
 # Function Definitions
@@ -146,144 +145,238 @@ def get_openai_embeddings(input_data: str, model: str) -> List[float]:
 
 
 def chat_with_openai(
-    model: Optional[str],                 # Mapped from 'model'
-    input_data: List[Dict[str, Any]],     # Mapped from 'input_data', this is messages_payload
-    api_key: Optional[str] = None,        # Mapped from 'api_key'
-    custom_prompt_arg: Optional[str] = None, # Mapped from 'prompt', largely ignored now
-    temp: Optional[float] = None,         # Mapped from 'temp'
-    system_message: Optional[str] = None, # Mapped from 'system_message'
-    streaming: Optional[bool] = None,     # Mapped from 'streaming'
-    maxp: Optional[float] = None,          # Mapped from 'maxp' (becomes top_p)
+        input_data: List[Dict[str, Any]],  # Mapped from 'messages_payload'
+        model: Optional[str] = None,  # Mapped from 'model'
+        api_key: Optional[str] = None,  # Mapped from 'api_key'
+        system_message: Optional[str] = None,  # Mapped from 'system_message'
+        temp: Optional[float] = None,  # Mapped from 'temp' (temperature)
+        maxp: Optional[float] = None,  # Mapped from 'maxp' (top_p)
+        streaming: Optional[bool] = False,  # Mapped from 'streaming'
+        # New OpenAI specific parameters (and some from original ChatCompletionRequest schema)
+        frequency_penalty: Optional[float] = None,
+        logit_bias: Optional[Dict[str, float]] = None,
+        logprobs: Optional[bool] = None,  # True/False
+        top_logprobs: Optional[int] = None,
+        max_tokens: Optional[int] = None,  # This was already implicitly handled by config, now explicit
+        n: Optional[int] = None,  # Number of completions
+        presence_penalty: Optional[float] = None,
+        response_format: Optional[Dict[str, str]] = None,  # e.g., {"type": "json_object"}
+        seed: Optional[int] = None,
+        stop: Optional[Union[str, List[str]]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        user: Optional[str] = None,
+        # custom_prompt_arg is largely deprecated if system_message and input_data are used correctly
+        custom_prompt_arg: Optional[str] = None,
+        **kwargs  # To catch any other unexpected kwargs if PROVIDER_PARAM_MAP is too broad
 ):
+    """
+    Sends a chat completion request to the OpenAI API.
+
+    Args:
+        input_data: List of message objects (OpenAI format).
+        model: ID of the model to use.
+        api_key: OpenAI API key.
+        system_message: Optional system message to prepend.
+        temp: Sampling temperature.
+        maxp: Top-p (nucleus) sampling parameter.
+        streaming: Whether to stream the response.
+        frequency_penalty: Penalizes new tokens based on their existing frequency.
+        logit_bias: Modifies the likelihood of specified tokens appearing.
+        logprobs: Whether to return log probabilities of output tokens.
+        top_logprobs: An integer between 0 and 5 specifying the number of most likely tokens to return at each token position.
+        max_tokens: Maximum number of tokens to generate.
+        n: How many chat completion choices to generate for each input message.
+        presence_penalty: Penalizes new tokens based on whether they appear in the text so far.
+        response_format: An object specifying the format that the model must output. e.g. {"type": "json_object"}.
+        seed: This feature is in Beta. If specified, the system will make a best effort to sample deterministically.
+        stop: Up to 4 sequences where the API will stop generating further tokens.
+        tools: A list of tools the model may call.
+        tool_choice: Controls which (if any) function is called by the model.
+        user: A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse.
+        custom_prompt_arg: Legacy, largely ignored.
+        **kwargs: Catches any unexpected keyword arguments.
+    """
     loaded_config_data = load_and_log_configs()
     openai_config = loaded_config_data.get('openai_api', {})
 
-    openai_api_key = api_key or openai_config.get('api_key')
-    if not openai_api_key:
+    final_api_key = api_key or openai_config.get('api_key')
+    if not final_api_key:
         logging.error("OpenAI: API key is missing.")
         raise ChatConfigurationError(provider="openai", message="OpenAI API Key is required but not found.")
 
-    log_key = f"{openai_api_key[:5]}...{openai_api_key[-5:]}" if openai_api_key and len(openai_api_key) > 9 else "Provided Key"
-    logging.debug(f"OpenAI: Using API Key: {log_key}")
+    log_key_display = f"{final_api_key[:5]}...{final_api_key[-5:]}" if final_api_key and len(
+        final_api_key) > 9 else "Provided Key"
+    logging.debug(f"OpenAI: Using API Key: {log_key_display}")
 
-    current_model = model or openai_config.get('model', 'gpt-4o-mini')
-    current_temp = temp if temp is not None else float(openai_config.get('temperature', 0.7))
-    current_top_p = maxp if maxp is not None else float(openai_config.get('top_p', 0.95)) # 'maxp' maps to 'top_p'
-    current_streaming = streaming if streaming is not None else openai_config.get('streaming', False)
-    current_max_tokens = int(openai_config.get('max_tokens', 4096)) # OpenAI uses 'max_tokens'
+    # Resolve parameters: User-provided > Function arg default > Config default > Hardcoded default
+    final_model = model if model is not None else openai_config.get('model', 'gpt-4o-mini')
+    final_temp = temp if temp is not None else float(openai_config.get('temperature', 0.7))
+    final_top_p = maxp if maxp is not None else float(
+        openai_config.get('top_p', 0.95))  # 'maxp' from chat_api_call maps to 'top_p'
 
-    if isinstance(current_streaming, str): current_streaming = current_streaming.lower() == "true"
-    elif isinstance(current_streaming, int): current_streaming = bool(current_streaming)
-    if not isinstance(current_streaming, bool):
-        raise ChatConfigurationError(provider="openai", message=f"Invalid type for 'streaming': Expected boolean, got {type(current_streaming).__name__}")
+    # Streaming needs careful boolean conversion
+    if streaming is not None:
+        final_streaming = streaming
+    else:
+        config_streaming = openai_config.get('streaming', False)
+        if isinstance(config_streaming, str):
+            final_streaming = config_streaming.lower() == "true"
+        else:
+            final_streaming = bool(config_streaming)
 
-    logging.debug(f"OpenAI: Model: {current_model}, Streaming: {current_streaming}, Temp: {current_temp}, TopP: {current_top_p}")
+    # Other parameters with defaults from config or None
+    final_max_tokens = max_tokens if max_tokens is not None else int(
+        openai_config.get('max_tokens', 4096))  # OpenAI specific
+
     if custom_prompt_arg:
-        logging.warning("OpenAI: 'custom_prompt_arg' was provided but is generally ignored as prompts are expected to be in 'input_data' (messages_payload).")
+        logging.warning(
+            "OpenAI: 'custom_prompt_arg' was provided but is generally ignored if 'input_data' and 'system_message' are used correctly.")
 
+    # Construct messages for OpenAI API
     api_messages = []
+    has_system_message_in_input = any(msg.get("role") == "system" for msg in input_data)
+
     if system_message:
-        api_messages.append({"role": "system", "content": system_message})
+        if not has_system_message_in_input:
+            api_messages.append({"role": "system", "content": system_message})
+            api_messages.extend(input_data)
+        else:
+            # If input_data already has a system message, prioritize it or decide on a merge strategy.
+            # For now, let's assume input_data's system message takes precedence if both are provided.
+            # Or, log a warning and use the one from input_data.
+            logging.warning(
+                "OpenAI: Both 'system_message' argument and a system message in 'input_data' were provided. Using the one from 'input_data'.")
+            api_messages.extend(input_data)
+    else:  # No explicit system_message argument
+        api_messages.extend(input_data)
 
-    # input_data is the messages_payload, which can contain multimodal content
-    api_messages.extend(input_data)
+    # --- Prepare Request Payload ---
+    payload = {
+        "model": final_model,
+        "messages": api_messages,
+        "temperature": final_temp,
+        "top_p": final_top_p,
+        "stream": final_streaming,
+    }
 
-    # --- Prepare Request ---
+    # Add optional parameters if they are not None
+    if final_max_tokens is not None: payload["max_tokens"] = final_max_tokens
+    if frequency_penalty is not None: payload["frequency_penalty"] = frequency_penalty
+    if logit_bias is not None: payload["logit_bias"] = logit_bias
+    if logprobs is not None: payload["logprobs"] = logprobs  # Pass directly if not None
+    if top_logprobs is not None:  # Requires logprobs=True
+        if payload.get("logprobs") is True:
+            payload["top_logprobs"] = top_logprobs
+        else:
+            logging.warning(
+                "OpenAI: 'top_logprobs' was provided, but 'logprobs' is not true. 'top_logprobs' will be ignored by the API.")
+    if n is not None: payload["n"] = n
+    if presence_penalty is not None: payload["presence_penalty"] = presence_penalty
+    if response_format is not None: payload["response_format"] = response_format
+    if seed is not None: payload["seed"] = seed
+    if stop is not None: payload["stop"] = stop
+    if tools is not None: payload["tools"] = tools
+    if tool_choice is not None:
+        # If tool_choice is set (e.g. "auto" or a function name) but no tools are defined,
+        # OpenAI API might error. It's safer to only send tool_choice if tools are also present,
+        # or if tool_choice is "none".
+        if tools or tool_choice == "none":
+            payload["tool_choice"] = tool_choice
+        else:
+            logging.debug(
+                f"OpenAI: 'tool_choice' is '{tool_choice}' but no 'tools' provided. Not sending 'tool_choice'.")
+    if user is not None: payload["user"] = user
+
     headers = {
-        'Authorization': f'Bearer {openai_api_key}',
+        'Authorization': f'Bearer {final_api_key}',
         'Content-Type': 'application/json'
     }
 
-    # Handle input_data format (assuming it's typically message list)
-    if isinstance(input_data, list):
-        messages = input_data # Assume it's already in OpenAI message format
-        # Inject system message if not already present
-        if not any(msg.get('role') == 'system' for msg in messages):
-            messages.insert(0, {"role": "system", "content": system_message})
-        # Append custom_prompt_arg to the last user message if provided
-        if custom_prompt_arg and messages and messages[-1].get('role') == 'user':
-             messages[-1]['content'] = f"{messages[-1]['content']}\n\n{custom_prompt_arg}"
-        elif custom_prompt_arg: # If no user message or only system message
-             messages.append({"role": "user", "content": custom_prompt_arg})
-    elif isinstance(input_data, str): # If only a string is passed
-         messages = [
-             {"role": "system", "content": system_message},
-             {"role": "user", "content": f"{input_data}\n\n{custom_prompt_arg}" if custom_prompt_arg else input_data}
-         ]
-    else:
-        raise ValueError("Invalid 'input_data' format for OpenAI. Expected list of messages or string.")
-
-    data = {
-        "model": current_model,
-        "messages": api_messages,
-        "max_tokens": current_max_tokens,
-        "temperature": current_temp,
-        "stream": current_streaming,
-        "top_p": current_top_p
-    }
+    logging.debug(
+        f"OpenAI Request Payload (excluding messages): { {k: v for k, v in payload.items() if k != 'messages'} }")
+    if len(api_messages) > 0:
+        logging.debug(
+            f"OpenAI Request Messages (first and last): First: {api_messages[0]}, Last: {api_messages[-1] if len(api_messages) > 1 else api_messages[0]}")
 
     # --- Execute Request ---
     api_url = 'https://api.openai.com/v1/chat/completions'
     try:
-        if current_streaming:
+        if final_streaming:
             logging.debug("OpenAI: Posting request (streaming)")
-            # Use context manager for session
             with requests.Session() as session:
-                response = session.post(api_url, headers=headers, json=data, stream=True, timeout=180) # Increased timeout for streaming
+                response = session.post(api_url, headers=headers, json=payload, stream=True, timeout=180)
                 response.raise_for_status()
 
                 def stream_generator():
                     try:
                         for line in response.iter_lines(decode_unicode=True):
-                            if line and line.strip(): # Ensure line is not empty
-                                yield line + "\n\n"
-                        yield "data: [DONE]\n\n"
-                    except requests.exceptions.ChunkedEncodingError as e:
-                        logging.error(f"OpenAI: ChunkedEncodingError during stream: {e}", exc_info=True)
-                        error_payload = json.dumps({"error": {"message": f"Stream connection error: {str(e)}", "type": "stream_error"}})
-                        yield f"data: {error_payload}\n\n"
-                        yield "data: [DONE]\n\n"
-                    except Exception as e:
-                        logging.error(f"OpenAI: Error during stream iteration: {e}", exc_info=True)
-                        # Yield an error chunk if possible, then DONE
-                        error_payload = json.dumps({"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
-                        yield f"data: {error_payload}\n\n"
-                        yield "data: [DONE]\n\n"
+                            if line and line.strip():
+                                yield line + "\n\n"  # Adhere to SSE format for client
+                        # OpenAI stream itself does not send a final [DONE] in this way,
+                        # but our endpoint wrapper expects it.
+                        # The actual DONE event should be data: [DONE]\n\n
+                    except requests.exceptions.ChunkedEncodingError as e_chunk:
+                        logging.error(f"OpenAI: ChunkedEncodingError during stream: {e_chunk}", exc_info=True)
+                        error_content = json.dumps({"error": {"message": f"Stream connection error: {str(e_chunk)}",
+                                                              "type": "openai_stream_error"}})
+                        yield f"data: {error_content}\n\n"
+                    except Exception as e_stream:
+                        logging.error(f"OpenAI: Error during stream iteration: {e_stream}", exc_info=True)
+                        error_content = json.dumps({"error": {"message": f"Stream iteration error: {str(e_stream)}",
+                                                              "type": "openai_stream_error"}})
+                        yield f"data: {error_content}\n\n"
                     finally:
-                        response.close()
+                        # Ensure DONE is sent for the endpoint wrapper's logic
+                        yield "data: [DONE]\n\n"
+                        if response:
+                            response.close()
+
                 return stream_generator()
 
-        else:
+        else:  # Non-streaming
             logging.debug("OpenAI: Posting request (non-streaming)")
-            # Configure retry strategy
             retry_count = int(openai_config.get('api_retries', 3))
-            retry_delay = float(openai_config.get('api_retry_delay', 1))
+            retry_delay = float(openai_config.get('api_retry_delay', 1.0))  # Ensure float
+
             retry_strategy = Retry(
                 total=retry_count,
                 backoff_factor=retry_delay,
-                status_forcelist=[429, 500, 502, 503, 504], # Retry on these statuses
-                allowed_methods=["POST"] # Important: Allow retries for POST
+                status_forcelist=[429, 500, 502, 503, 504],
+                allowed_methods=["POST"]  # Changed from method_whitelist
             )
             adapter = HTTPAdapter(max_retries=retry_strategy)
-            # Use context manager for session
             with requests.Session() as session:
                 session.mount("https://", adapter)
-                session.mount("http://", adapter)
-                response = session.post(api_url, headers=headers, json=data, timeout=30) # Add timeout
+                session.mount("http://", adapter)  # Though OpenAI is https
+                response = session.post(api_url, headers=headers, json=payload,
+                                        timeout=float(openai_config.get('api_timeout', 90.0)))
 
-            logging.debug(f"Full API response status: {response.status_code}")
-            response.raise_for_status() # Raise HTTPError for 4xx/5xx AFTER retries
-
-            response_data = response.json() # Parse JSON on success
+            logging.debug(f"OpenAI: Full API response status: {response.status_code}")
+            response.raise_for_status()  # Raise HTTPError for 4xx/5xx AFTER retries
+            response_data = response.json()
             logging.debug("OpenAI: Non-streaming request successful.")
-            #logging.debug(f"OpenAI Raw Response Data: {response_data}") # Optional: Log raw response
-            return response_data # Return the full dictionary
+            return response_data
 
-    # Let RequestException and HTTPError propagate up to chat_api_call
+    except requests.exceptions.HTTPError as e:
+        error_content_text = "No response text"
+        error_content_json = None
+        if e.response is not None:
+            error_content_text = e.response.text
+            try:
+                error_content_json = e.response.json()
+            except json.JSONDecodeError:
+                pass
+        logging.error(
+            f"OpenAI HTTPError {e.response.status_code if e.response is not None else 'Unknown'}. Text: {error_content_text}. JSON: {error_content_json}",
+            exc_info=True)
+        raise
+    except requests.exceptions.RequestException as e:
+        logging.error(f"OpenAI RequestException: {e}", exc_info=True)
+        raise  # Re-raise for chat_api_call
     except (ValueError, KeyError, TypeError) as e:
-         logging.error(f"OpenAI: Configuration or data error: {e}", exc_info=True)
-         # Re-raise as ValueError which chat_api_call can map to BadRequest/Config error
-         raise ValueError(f"OpenAI config/data error: {e}") from e
+        logging.error(f"OpenAI: Configuration or data error: {e}", exc_info=True)
+        raise ValueError(f"OpenAI usage error: {e}") from e  # Re-raise as ValueError for chat_api_call
 
 
 def chat_with_anthropic(
@@ -780,7 +873,6 @@ def chat_with_cohere(
 
             return stream_generator()
         else:
-            # ... (non-streaming logic remains largely the same) ...
             logging.debug("Cohere: Non-streaming request successful.")
             response_data = response.json()
 
@@ -1100,25 +1192,54 @@ def chat_with_openrouter(
 
 
 def chat_with_huggingface(
-        model: Optional[str],  # Mapped from 'model'
-        input_data: List[Dict[str, Any]],  # Mapped from 'input_data' (messages_payload)
-        api_key: Optional[str] = None,  # Mapped from 'api_key'
-        custom_prompt_arg: Optional[str] = None,  # Mapped from 'prompt', ignored
-        temp: Optional[float] = None,  # Mapped from 'temp'
-        system_prompt: Optional[str] = None,  # Mapped from 'system_message'
-        streaming: Optional[bool] = None  # Mapped from 'streaming'
+        model: Optional[str],
+        input_data: List[Dict[str, Any]],
+        api_key: Optional[str] = None,
+        custom_prompt_arg: Optional[str] = None, # Generally ignored
+        temp: Optional[float] = None,
+        system_prompt: Optional[str] = None, # This is the mapped 'system_message'
+        streaming: Optional[bool] = None,
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
+        max_new_tokens: Optional[int] = None,
+        **kwargs # Catch-all for other params from chat_api_call if needed
 ):
     logging.debug(f"HuggingFace Chat: Chat request process starting...")
     loaded_config_data = load_and_log_configs()
     hf_config = loaded_config_data.get('huggingface_api', {})
 
-    hf_api_key = api_key or hf_config.get('api_key')
-    if not hf_api_key:
-        logging.error("HuggingFace: API key is missing.")
-        raise ChatConfigurationError(provider="huggingface", message="HuggingFace API Key is required but not found.")
+    final_api_key = api_key or hf_config.get('api_key')
+    # Note: TGI often doesn't require an API key if it's self-hosted and unsecured,
+    # but Inference Endpoints will.
+    if not final_api_key:
+        logging.warning("HuggingFace: API key is missing. Proceeding without, assuming local/unsecured TGI or endpoint allows it.")
+        # Do not raise ChatConfigurationError immediately if key can be optional for some setups.
+        # The API call will fail if the endpoint actually requires it.
 
-    log_key = f"{hf_api_key[:5]}...{hf_api_key[-5:]}" if hf_api_key and len(hf_api_key) > 9 else "Provided Key"
-    logging.debug(f"HuggingFace: Using API Key: {log_key}")
+    if final_api_key:
+        log_key_display = f"{final_api_key[:5]}...{final_api_key[-5:]}" if len(final_api_key) > 9 else "Provided Key"
+        logging.debug(f"HuggingFace: Using API Key: {log_key_display}")
+
+    # Model ID for the payload. This is what the TGI/endpoint will load.
+    # The 'model' arg to this function is the primary source.
+    final_model_id_for_payload = model or hf_config.get('model') # 'model' not 'model_id' from config
+    if not final_model_id_for_payload:
+        raise ChatConfigurationError(provider="huggingface", message="HuggingFace model ID for the payload is required but not found.")
+
+    # Construct the API URL
+    # The 'api_base_url' from config MUST be the base URL of your TGI or Inference Endpoint
+    # e.g., "http://localhost:8080" or "https://your-endpoint.hf.space"
+    configured_api_base_url = hf_config.get('api_base_url')
+    if not configured_api_base_url:
+        logging.error("HuggingFace: Critical - 'api_base_url' for a chat completions endpoint (TGI/Inference Endpoint) is not configured in 'huggingface_api' settings.")
+        raise ChatConfigurationError(provider="huggingface", message="HuggingFace API base URL for chat completions is not configured.")
+
+    # Default chat path for OpenAI-compatible endpoints
+    chat_completions_path = hf_config.get('api_chat_path', 'v1/chat/completions').strip('/')
+    api_url = f"{configured_api_base_url.rstrip('/')}/{chat_completions_path}"
+
+    logging.debug(f"HuggingFace: Targeting API URL: {api_url}")
+    logging.debug(f"HuggingFace: Model for payload: {final_model_id_for_payload}")
 
     # Model ID is critical. It can be part of the API URL for serverless or a param for TGI-like.
     # The PROVIDER_PARAM_MAP passes 'model' so we use it.
@@ -1126,23 +1247,31 @@ def chat_with_huggingface(
     if not current_model_id:
         raise ChatConfigurationError(provider="huggingface", message="HuggingFace model ID is required but not found.")
 
-    current_temp = temp if temp is not None else float(
-        hf_config.get('temperature', 0.7))  # Default from common practice
-    current_streaming = streaming if streaming is not None else hf_config.get('streaming', False)
-    # TGI specific params from config if needed
-    current_top_p = _safe_cast(hf_config.get('top_p'), float)
-    current_top_k = _safe_cast(hf_config.get('top_k'), int)
-    current_max_tokens = _safe_cast(hf_config.get('max_new_tokens', 1024), int)  # TGI uses max_new_tokens
+    # Resolve parameters
+    final_temp = temp if temp is not None else _safe_cast(hf_config.get('temperature'), float, 0.7)
 
-    if isinstance(current_streaming, str):
-        current_streaming = current_streaming.lower() == "true"
-    elif isinstance(current_streaming, int):
-        current_streaming = bool(current_streaming)
-    if not isinstance(current_streaming, bool):
-        raise ChatConfigurationError(provider="huggingface",
-                                     message=f"Invalid type for 'streaming': Expected boolean, got {type(current_streaming).__name__}")
+    if streaming is not None:
+        final_streaming = streaming
+    else:
+        config_streaming = hf_config.get('streaming', False)
+        final_streaming = str(config_streaming).lower() == "true" if isinstance(config_streaming, str) else bool(config_streaming)
 
-    logging.debug(f"HuggingFace: Model ID: {current_model_id}, Streaming: {current_streaming}, Temp: {current_temp}")
+    # Use TGI-common parameter names from config if available, or direct args
+    final_top_p = top_p if top_p is not None else _safe_cast(hf_config.get('top_p'), float)
+    final_top_k = top_k if top_k is not None else _safe_cast(hf_config.get('top_k'), int)
+    # For max tokens, TGI uses 'max_new_tokens'. OpenAI uses 'max_tokens'.
+    # ChatCompletionRequest schema has 'max_tokens'. If your chat_api_call maps it to 'max_new_tokens'
+    # for this provider, great. Otherwise, handle it here.
+    # Let's assume chat_api_call sends 'max_tokens' if present. We will use it as 'max_tokens' if the TGI
+    # endpoint is strictly OpenAI compatible, or map to 'max_new_tokens' if that's what your specific TGI needs.
+    # For now, using 'max_tokens' from ChatCompletionRequest via **kwargs if present, else from config.
+    final_max_tokens = max_new_tokens if max_new_tokens is not None else _safe_cast(hf_config.get('max_tokens', 1024), int)
+    # If 'max_tokens' comes from chat_api_call's generic params, it will be in kwargs
+    # if not explicitly in this function's signature & PROVIDER_PARAM_MAP.
+    # Let's assume 'max_tokens' (OpenAI style) is expected by the TGI endpoint.
+    if "max_tokens" in kwargs and kwargs["max_tokens"] is not None: # Passed from chat_api_call
+        final_max_tokens = int(kwargs["max_tokens"])
+
     if custom_prompt_arg:
         logging.warning("HuggingFace: 'custom_prompt_arg' was provided but is generally ignored.")
 
@@ -1154,56 +1283,34 @@ def chat_with_huggingface(
     # input_data is messages_payload. Assumes TGI OpenAI compatibility for multimodal.
     api_messages.extend(input_data)
 
-    headers = {
-        "Authorization": f"Bearer {hf_api_key}",
-        'Content-Type': 'application/json',
-    }
-    data = {
-        "model": current_model_id,  # Model ID for TGI /v1/chat/completions endpoint
+    headers = {'Content-Type': 'application/json'}
+    if final_api_key: # Only add auth header if a key is provided
+        headers["Authorization"] = f"Bearer {final_api_key}"
+
+    payload = {
+        "model": final_model_id_for_payload,
         "messages": api_messages,
-        "stream": current_streaming,
+        "stream": final_streaming,
     }
-    if current_temp is not None: data["temperature"] = current_temp
-    if current_top_p is not None: data["top_p"] = current_top_p
-    if current_top_k is not None: data["top_k"] = current_top_k
-    if current_max_tokens is not None: data["max_tokens"] = current_max_tokens  # OpenAI param name for TGI
+    # Add optional parameters if they have values
+    if final_temp is not None: payload["temperature"] = float(final_temp)
+    if final_top_p is not None: payload["top_p"] = float(final_top_p)
+    if final_top_k is not None: payload["top_k"] = int(final_top_k)
+    if final_max_tokens is not None: payload["max_tokens"] = final_max_tokens # Or "max_new_tokens" depending on your TGI
 
-    # Determine API URL. Could be Inference API or a dedicated TGI endpoint.
-    # Chat_Functions.py maps 'huggingface' to chat_with_huggingface. Assume TGI-like /v1/chat/completions.
-    # If it's a custom endpoint, it should be in config.
-    base_api_url = hf_config.get('api_base_url', 'https://api-inference.huggingface.co')  # Default to general inference
+    # Include other OpenAI compatible params from kwargs if TGI supports them
+    for param in ["frequency_penalty", "logit_bias", "logprobs", "top_logprobs",
+                  "presence_penalty", "response_format", "seed", "stop", "tools", "tool_choice", "user"]:
+        if param in kwargs and kwargs[param] is not None:
+            payload[param] = kwargs[param]
 
-    # Check if using standard inference or a TGI-like chat completions path
-    # If api_base_url already includes /v1/chat/completions or similar, use it.
-    # Otherwise, decide based on model_id or other config.
-    # For simplicity, if 'api_chat_path' is in config, append it. Default to /v1/chat/completions if not.
-    chat_path = hf_config.get('api_chat_path', '/v1/chat/completions')
-    if base_api_url.endswith('/'): base_api_url = base_api_url[:-1]
-    if chat_path.startswith('/'): chat_path = chat_path[1:]
-
-    # If the model_id is a full URL itself (for serverless inference endpoints), use that.
-    if current_model_id.startswith("https://"):
-        api_url = current_model_id  # Model ID is the endpoint URL
-        # For serverless, the payload might be different (e.g. "inputs": formatted_prompt)
-        # This needs careful configuration. Assuming /v1/chat/completions style for now.
-        # If it's a raw inference endpoint, structure is different:
-        # data = {"inputs": "formatted_prompt_string", "parameters": {...}, "stream": ...}
-        # This function is for CHAT, so it should target a chat-completions like endpoint.
-        logging.warning(
-            "HuggingFace: Model ID appears to be a full URL. Ensure it points to an OpenAI-compatible chat completions endpoint.")
-        api_url = f"{base_api_url}/{chat_path}"  # Fallback for now, this might need adjustment based on exact HF setup
-    else:  # model_id is just an ID like 'mistralai/Mistral-7B-v0.1'
-        # For the general inference API, the path is /models/{model_id} for text-generation
-        # but for /v1/chat/completions, the model is a parameter in the body.
-        api_url = f"{base_api_url}/{chat_path}"
-
-    logging.debug(f"HuggingFace: API URL: {api_url}")
+    logging.debug(f"HuggingFace Payload (excluding messages): { {k:v for k,v in payload.items() if k != 'messages'} }")
 
     try:
-        if current_streaming:
+        if final_streaming:
             logging.debug("HuggingFace: Posting request (streaming)")
             with requests.Session() as session:
-                response = session.post(api_url, headers=headers, json=data, stream=True, timeout=180)
+                response = session.post(api_url, headers=headers, json=payload, stream=True, timeout=180)
                 response.raise_for_status()
 
                 def stream_generator():
@@ -1211,22 +1318,18 @@ def chat_with_huggingface(
                         for line in response.iter_lines(decode_unicode=True):
                             if line and line.strip():
                                 yield line + "\n\n"
-                        yield "data: [DONE]\n\n"
-                    except requests.exceptions.ChunkedEncodingError as e:
-                        logging.error(f"HuggingFace: ChunkedEncodingError during stream: {e}", exc_info=True)
-                        error_payload = json.dumps(
-                            {"error": {"message": f"Stream connection error: {str(e)}", "type": "stream_error"}})
-                        yield f"data: {error_payload}\n\n"
-                        yield "data: [DONE]\n\n"
-                    except Exception as e:
-                        logging.error(f"HuggingFace: Error during stream iteration: {e}", exc_info=True)
-                        error_payload = json.dumps(
-                            {"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
-                        yield f"data: {error_payload}\n\n"
-                        yield "data: [DONE]\n\n"
+                        yield "data: [DONE]\n\n" # For endpoint wrapper
+                    except requests.exceptions.ChunkedEncodingError as e_chunk:
+                        logging.error(f"HuggingFace: ChunkedEncodingError during stream: {e_chunk}", exc_info=True)
+                        error_content = json.dumps({"error": {"message": f"Stream connection error: {str(e_chunk)}", "type": "huggingface_stream_error"}})
+                        yield f"data: {error_content}\n\n"
+                    except Exception as e_stream:
+                        logging.error(f"HuggingFace: Error during stream iteration: {e_stream}", exc_info=True)
+                        error_content = json.dumps({"error": {"message": f"Stream iteration error: {str(e_stream)}", "type": "huggingface_stream_error"}})
+                        yield f"data: {error_content}\n\n"
                     finally:
-                        response.close()
-
+                        yield "data: [DONE]\n\n"
+                        if response: response.close()
                 return stream_generator()
         else:
             logging.debug("HuggingFace: Posting request (non-streaming)")
@@ -1237,14 +1340,24 @@ def chat_with_huggingface(
             adapter = HTTPAdapter(max_retries=retry_strategy)
             with requests.Session() as session:
                 session.mount("https://", adapter)
-                response = session.post(api_url, headers=headers, json=data, timeout=120)
+                session.mount("http://", adapter)
+                response = session.post(api_url, headers=headers, json=payload, timeout=float(hf_config.get('api_timeout', 120.0)))
             response.raise_for_status()
             response_data = response.json()
             logging.debug("HuggingFace: Non-streaming request successful.")
             return response_data
-    except (ValueError, KeyError, TypeError) as e:
-        logging.error(f"HuggingFace: Configuration or data error: {e}", exc_info=True)
-        raise ChatBadRequestError(provider="huggingface", message=f"HuggingFace config/data error: {e}") from e
+
+    except requests.exceptions.HTTPError as e:
+        error_text = e.response.text if e.response is not None else "No response body"
+        logging.error(f"HuggingFace HTTPError {e.response.status_code if e.response is not None else 'Unknown'}: {error_text[:500]}", exc_info=True)
+        raise # Re-raise for chat_api_call to map to ChatProviderError etc.
+    except requests.exceptions.RequestException as e:
+        logging.error(f"HuggingFace RequestException: {e}", exc_info=True)
+        raise # Re-raise
+    except (ValueError, KeyError, TypeError) as e: # Catch issues from param processing within this func
+        logging.error(f"HuggingFace: Internal configuration or data error: {e}", exc_info=True)
+        # Raise a more specific error that chat_api_call can map
+        raise ChatBadRequestError(provider="huggingface", message=f"HuggingFace data/config error: {e}") from e
 
 
 def chat_with_deepseek(

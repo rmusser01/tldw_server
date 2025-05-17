@@ -16,10 +16,13 @@ from typing import List, Dict, Any, Tuple, Optional, Union
 #
 # 3rd-party Libraries
 import requests
+import logging
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+from loguru import logger
+
 #
 # Local Imports
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError, ChatConfigurationError, ChatAPIError, \
     ChatProviderError, ChatRateLimitError, ChatAuthenticationError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError, ConflictError, CharactersRAGDBError
@@ -683,9 +686,6 @@ def save_chat_history_to_db_wrapper(
                         # Fetch names for better logging
                         existing_char_of_conv = db.get_character_card_by_id(existing_conv_details.get('character_id'))
                         existing_char_name = existing_char_of_conv['name'] if existing_char_of_conv else "ID "+str(existing_conv_details.get('character_id'))
-                        logging.error(f"Cannot resave: Conv {current_conversation_id} (for char '{existing_char_name}') doesn't match current char context '{final_character_name_for_title}' (ID: {associated_character_id}).")
-                        return current_conversation_id, "Error: Mismatch in character association for resaving chat."
-
                         logging.error(f"Cannot resave: Conversation {current_conversation_id} (for char '{existing_char_name}') does not match current character context '{final_character_name_for_title}' (ID: {associated_character_id}).")
                         return current_conversation_id, "Error: Mismatch in character association for resaving chat. The conversation belongs to a different character."
 
@@ -1053,85 +1053,64 @@ def update_chat_content(
 #
 # Chat Dictionary Functions
 
-def parse_user_dict_markdown_file(file_path):
-    """
-    Parse a Markdown file with custom termination symbol for multi-line values.
-    Correctly handles new key definitions interrupting unterminated multi-line blocks.
-    """
+def parse_user_dict_markdown_file(file_path: str) -> Dict[str, str]:
     logger.debug(f"Parsing user dictionary file: {file_path}")
-    replacement_dict = {}
-    current_key = None
-    current_value = []
-    # Regex to match "key:", "key :", "key: value", "key : value" at the start of a line
-    # It captures the key (group 1) and the rest of the line after ':' (group 2)
+    replacement_dict: Dict[str, str] = {}
+    current_key: Optional[str] = None
+    current_value_lines: List[str] = []
+
     new_key_pattern = re.compile(r'^\s*([^:\n]+?)\s*:(.*)$')
     termination_pattern = re.compile(r'^\s*---@@@---\s*$')
 
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
-            for line_number, line in enumerate(file, 1):
-                logger.trace(f"Line {line_number}: Processing '{line.strip()}' (current_key: {current_key})")
+            for line_number, line_content_original in enumerate(file, 1):
+                line_for_logic = line_content_original.strip()  # Use for terminator/blank checks
 
-                # 1. Check for multi-line termination first
-                if termination_pattern.match(line):
+                if termination_pattern.match(line_for_logic):
                     if current_key:
-                        replacement_dict[current_key] = '\n'.join(current_value).strip()
-                        logger.debug(
-                            f"Terminated multi-line for '{current_key}' at line {line_number}. Value: '{replacement_dict[current_key][:50]}...'")
-                        current_key, current_value = None, []
-                    else:
-                        logger.trace(f"Line {line_number}: Found terminator but no active multi-line key.")
+                        replacement_dict[current_key] = '\n'.join(current_value_lines).strip()  # Final strip after join
+                        logger.trace(f"L{line_number}: Terminated multi-line for '{current_key}'.")
+                        current_key, current_value_lines = None, []
                     continue
 
-                # 2. Check if this line defines a new key
-                new_key_match = new_key_pattern.match(line)
+                new_key_match = new_key_pattern.match(line_content_original)  # Match on original line
 
                 if new_key_match:
-                    # If we were capturing a multi-line value, this new key definition finalizes it.
-                    if current_key:
-                        replacement_dict[current_key] = '\n'.join(current_value).strip()
-                        logger.debug(
-                            f"New key found, finalizing previous multi-line key '{current_key}' at line {line_number}. Value: '{replacement_dict[current_key][:50]}...'")
-                        # current_key and current_value will be reset below for the new key
+                    if current_key:  # Finalize previous multi-line key if one was active
+                        replacement_dict[current_key] = '\n'.join(current_value_lines).strip()
+                        logger.trace(f"L{line_number}: New key, finalized old '{current_key}'.")
 
                     potential_new_key = new_key_match.group(1).strip()
-                    potential_value_part = new_key_match.group(2).strip()  # Strip whitespace from value part
+                    value_part_after_colon = new_key_match.group(2).strip()  # Strip this part
 
-                    if potential_value_part == '|':  # Start of new multi-line
+                    if value_part_after_colon == '|':
                         current_key = potential_new_key
-                        current_value = []
-                        logger.debug(f"Starting multi-line for '{current_key}' at line {line_number}")
-                    else:  # Single-line value for the new key
-                        replacement_dict[potential_new_key] = potential_value_part
-                        logger.debug(
-                            f"Parsed single-line key '{potential_new_key}':'{potential_value_part}' at line {line_number}")
-                        current_key, current_value = None, []  # Ensure reset if it was a single line
-                    continue  # New key processed, move to next line
+                        current_value_lines = []
+                        logger.trace(f"L{line_number}: Starting multi-line for '{current_key}'.")
+                    else:
+                        replacement_dict[potential_new_key] = value_part_after_colon
+                        logger.trace(f"L{line_number}: Parsed single-line key '{potential_new_key}'.")
+                        current_key, current_value_lines = None, []  # Reset
+                    continue
 
-                # 3. If in multi-line mode (current_key is set) and not a terminator or new key, append
                 if current_key:
-                    # Preserve leading/trailing whitespace within the multi-line content itself, but strip the newline
-                    current_value.append(line.rstrip('\n\r'))
-                    logger.trace(
-                        f"Line {line_number}: Appended to multi-line for '{current_key}': '{line.rstrip()[:50]}...'")
-                else:
-                    logger.trace(
-                        f"Line {line_number}: Skipped (not a key, not in multi-line, not a terminator): '{line.strip()}'")
+                    # For multi-line content, append the line with only its trailing newline removed.
+                    # Leading/internal whitespace should be preserved until the final .strip() after .join().
+                    current_value_lines.append(line_content_original.rstrip('\n\r'))
 
-            # After loop, finalize any pending multi-line value
-            if current_key:
-                replacement_dict[current_key] = '\n'.join(current_value).strip()
-                logger.debug(
-                    f"Finalizing last multi-line key '{current_key}' at EOF. Value: '{replacement_dict[current_key][:50]}...'")
+            if current_key:  # Finalize any pending multi-line value at EOF
+                replacement_dict[current_key] = '\n'.join(current_value_lines).strip()
+                logger.debug(f"Finalizing last multi-line key '{current_key}' at EOF.")
 
-    except FileNotFoundError:
+    except FileNotFoundError:  # ...
         logger.error(f"Chat dictionary file not found: {file_path}")
-        return {}  # Return empty dict if file not found
-    except Exception as e:
+        return {}
+    except Exception as e:  # ...
         logger.error(f"Error parsing chat dictionary file {file_path}: {e}", exc_info=True)
-        return {}  # Return empty or partially parsed on other errors
+        return {}
 
-    logger.debug(f"Finished parsing. Dictionary keys: {list(replacement_dict.keys())}")
+    logger.debug(f"Finished parsing chat dictionary. Keys: {list(replacement_dict.keys())}")
     return replacement_dict
 
 
