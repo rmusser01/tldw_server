@@ -153,7 +153,7 @@ def chat_with_openai(
     temp: Optional[float] = None,         # Mapped from 'temp'
     system_message: Optional[str] = None, # Mapped from 'system_message'
     streaming: Optional[bool] = None,     # Mapped from 'streaming'
-    maxp: Optional[float] = None          # Mapped from 'maxp' (becomes top_p)
+    maxp: Optional[float] = None,          # Mapped from 'maxp' (becomes top_p)
 ):
     loaded_config_data = load_and_log_configs()
     openai_config = loaded_config_data.get('openai_api', {})

@@ -1,4 +1,7 @@
 # tests/unit/core/chat/test_chat_functions.py
+import base64
+import re
+
 import pytest
 from unittest.mock import patch, MagicMock, call
 from typing import List, Dict, Any
@@ -10,7 +13,7 @@ from tldw_Server_API.app.core.Chat.Chat_Functions import (
     chat,  # This is the multimodal chat coordinator
     save_chat_history_to_db_wrapper,  # Assuming you want to test this too
     API_CALL_HANDLERS,
-    PROVIDER_PARAM_MAP,
+    PROVIDER_PARAM_MAP, load_characters, save_character, ChatDictionary, parse_user_dict_markdown_file,
     # Import other functions you might want to unit test from Chat_Functions.py
     # e.g., process_user_input, parse_user_dict_markdown_file, etc.
 )
@@ -468,6 +471,331 @@ def test_save_chat_history_resave_conversation_specific_char():
     add_msg_args = mock_db.add_message.call_args.args[0]
     assert add_msg_args["content"] == "Updated question for resave."
     mock_db.update_conversation.assert_called_once()  # Called to bump version/timestamp
+
+
+@pytest.mark.unit
+def test_chat_api_call_provider_specific_params_unit(mock_llm_api_call_handlers_for_chat_functions_unit):
+    provider_name = "openrouter"  # Example of a provider with minp, topk, topp
+    mock_handler = mock_llm_api_call_handlers_for_chat_functions_unit[provider_name]
+    mock_handler.return_value = "OpenRouter success"
+
+    args = {
+        "api_endpoint": provider_name,
+        "messages_payload": [{"role": "user", "content": "Test OpenRouter"}],
+        "api_key": "or_key",
+        "temp": 0.7,
+        "model": "some/model",
+        "minp": 0.1,
+        "topk": 40,
+        "topp": 0.92  # Note: PROVIDER_PARAM_MAP maps 'topp' to 'top_p' for openrouter
+    }
+    chat_api_call(**args)
+    mock_handler.assert_called_once()
+    called_kwargs = mock_handler.call_args.kwargs
+
+    param_map = PROVIDER_PARAM_MAP[provider_name]
+    assert called_kwargs[param_map['minp']] == args['minp']
+    assert called_kwargs[param_map['topk']] == args['topk']
+    assert called_kwargs[param_map['topp']] == args['topp']  # This will be 'top_p'
+
+
+@pytest.mark.unit
+def test_chat_api_call_tools_and_tool_choice_unit(mock_llm_api_call_handlers_for_chat_functions_unit):
+    provider = "openai"  # Assuming OpenAI handler is adapted for tools
+    mock_handler = mock_llm_api_call_handlers_for_chat_functions_unit[provider]
+    mock_handler.return_value = {"id": "tool_response"}
+
+    tools_payload = [{"type": "function", "function": {"name": "get_weather"}}]
+    args = {
+        "api_endpoint": provider,
+        "messages_payload": [{"role": "user", "content": "What's the weather?"}],
+        "api_key": "key", "model": "gpt-4o-mini",
+        "tools": tools_payload,
+        "tool_choice": "auto"
+    }
+    chat_api_call(**args)
+    mock_handler.assert_called_once()
+    called_kwargs = mock_handler.call_args.kwargs
+    # Assuming the openai handler function ('chat_with_openai') directly accepts 'tools' and 'tool_choice'
+    # and PROVIDER_PARAM_MAP for openai would need to include these if names differ.
+    # If they don't differ, these params would be passed through if they are in available_generic_params
+    # and not None.
+    # For this test, let's assume the handler receives them directly.
+    # The current PROVIDER_PARAM_MAP for openai does not list 'tools' or 'tool_choice'.
+    # This means the specific chat_with_openai function needs to accept **kwargs or these specific args.
+    # For a more robust test, ensure the mock_handler is called with these or that your
+    # PROVIDER_PARAM_MAP is updated if the internal handler uses different names.
+
+    # Simplified assertion: check if tools and tool_choice are present in the call if the handler accepts them
+    # This part of the test depends on how `chat_with_openai` is implemented to receive these.
+    # If it uses **kwargs:
+    assert "tools" in called_kwargs  # This will FAIL if not explicitly mapped or handled by **kwargs in chat_with_openai
+    assert "tool_choice" in called_kwargs  # This will FAIL
+    assert called_kwargs["tools"] == tools_payload
+    assert called_kwargs["tool_choice"] == "auto"
+
+
+# --- New Tests for chat function (multimodal coordinator) ---
+
+@pytest.mark.unit
+@patch("tldw_Server_API.app.core.Chat.Chat_Functions.chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.Chat_Functions.process_user_input", side_effect=lambda x, *a, **kw: x)
+# mock_global_load_and_log_configs is already active via autouse=True
+def test_chat_function_image_history_send_all_unit(mock_process_input, mock_chat_api_call_shim):
+    mock_chat_api_call_shim.return_value = "Response"
+    history = [
+        {"role": "user", "content": [
+            {"type": "text", "text": "First image"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,img1"}}
+        ]},
+        {"role": "assistant", "content": "Got it."},
+        {"role": "user", "content": [
+            {"type": "text", "text": "Second image"},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,img2"}}
+        ]}
+    ]
+    chat(message="What about all images?", history=history, media_content=None, selected_parts=[],
+         api_endpoint="test", api_key="key", custom_prompt=None, temperature=0.1,
+         image_history_mode="send_all")
+
+    mock_chat_api_call_shim.assert_called_once()
+    payload = mock_chat_api_call_shim.call_args.kwargs["messages_payload"]
+    assert len(payload) == 4  # 3 history messages + 1 current user message
+    assert payload[0]["content"][1]["type"] == "image_url"
+    assert payload[0]["content"][1]["image_url"]["url"] == "data:image/png;base64,img1"
+    assert payload[2]["content"][1]["type"] == "image_url"
+    assert payload[2]["content"][1]["image_url"]["url"] == "data:image/jpeg;base64,img2"
+
+
+@pytest.mark.unit
+@patch("tldw_Server_API.app.core.Chat.Chat_Functions.chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.Chat_Functions.process_user_input", side_effect=lambda x, *a, **kw: x)
+def test_chat_function_image_history_send_last_user_image_unit(mock_process_input, mock_chat_api_call_shim):
+    mock_chat_api_call_shim.return_value = "Response"
+    history = [
+        {"role": "user", "content": [  # This image should be ignored
+            {"type": "text", "text": "Old image"},
+            {"type": "image_url", "image_url": {"url": "data:image/gif;base64,old_img"}}
+        ]},
+        {"role": "assistant", "content": "Noted."},
+        {"role": "user", "content": [  # This is the last user image
+            {"type": "text", "text": "Recent image"},
+            {"type": "image_url", "image_url": {"url": "data:image/bmp;base64,recent_img"}}
+        ]},
+        {"role": "assistant", "content": "Acknowledged."}
+    ]
+    chat(message="About the last one?", history=history, media_content=None, selected_parts=[],
+         api_endpoint="test", api_key="key", custom_prompt=None, temperature=0.1,
+         image_history_mode="send_last_user_image")
+
+    mock_chat_api_call_shim.assert_called_once()
+    payload = mock_chat_api_call_shim.call_args.kwargs["messages_payload"]
+    # Expected: Old image text, assistant, recent image user message (with its image), assistant, current user message
+    assert len(payload) == 5
+    # The user message that contained "recent_img" should have it.
+    # Check the message at index 2 (0-indexed)
+    assert {"type": "image_url", "image_url": {"url": "data:image/bmp;base64,recent_img"}} in payload[2]["content"]
+    # Ensure the "old_img" is not present in the first user message if it wasn't originally multi-part
+    # The current logic for "send_last_user_image" appends to the *last user message in the processed history*.
+    # It doesn't remove other images if they were part of "send_all" style history input.
+    # This test specifically ensures the "recent_img" is the one carried forward implicitly if mode is send_last_user_image.
+    # And that "old_img" isn't *added again* to the first user message.
+    first_user_msg_content = payload[0]["content"]
+    assert not any(
+        p.get("image_url", {}).get("url") == "data:image/gif;base64,old_img" for p in first_user_msg_content if
+        p["type"] == "image_url")
+
+
+@pytest.mark.unit
+@patch("tldw_Server_API.app.core.Chat.Chat_Functions.chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.Chat_Functions.process_user_input", side_effect=lambda x, *a, **kw: x)
+def test_chat_function_with_rag_content_unit(mock_process_input, mock_chat_api_call_shim):
+    mock_chat_api_call_shim.return_value = "RAG Response"
+    media_content = {"summary": "This is a summary.", "content": "Full content here."}
+    selected_parts = ["summary", "content"]
+
+    chat(message="What about this?", history=[], media_content=media_content, selected_parts=selected_parts,
+         api_endpoint="test_rag", api_key="key_rag", custom_prompt=None, temperature=0.1)
+
+    mock_chat_api_call_shim.assert_called_once()
+    payload = mock_chat_api_call_shim.call_args.kwargs["messages_payload"]
+    user_message_text = payload[0]["content"][0]["text"]
+    assert "Summary: This is a summary." in user_message_text
+    assert "Content: Full content here." in user_message_text
+    assert "\n\n---\n\nWhat about this?" in user_message_text
+
+
+# --- New Tests for Chat Dictionary processing ---
+
+@pytest.mark.unit
+def test_parse_user_dict_markdown_file_various_formats(tmp_path):
+    md_content = """
+    key1: value1
+    key2: |
+        This is a
+        multi-line value for key2.
+        It has several lines.
+    key3:value3
+    # Comment line
+    another key : another value
+    regex_key: /pattern\\d+/
+    key_with_terminator_early: |
+    line1
+    ---@@@---
+    not_part_of_value
+    """
+    dict_file = tmp_path / "test_dict.md"
+    dict_file.write_text(md_content)
+
+    parsed = parse_user_dict_markdown_file(str(dict_file))
+
+    assert parsed["key1"] == "value1"
+    assert parsed["key2"] == "This is a\nmulti-line value for key2.\nIt has several lines."
+    assert parsed["key3"] == "value3"
+    assert parsed["another key"] == "another value"
+    assert parsed["regex_key"] == "/pattern\\d+/"  # Stored as string, compiled by ChatDictionary
+    assert parsed["key_with_terminator_early"] == "line1"
+    assert "not_part_of_value" not in parsed.values()
+    assert len(parsed) == 6
+
+
+@pytest.mark.unit
+def test_chat_dictionary_class_methods():
+    entry_plain = ChatDictionary(key="hello", content="hi there")
+    entry_regex = ChatDictionary(key=r"/\bworld\b/", content="planet")  # Python re.IGNORECASE handles case
+
+    assert entry_plain.matches("hello world")
+    assert not entry_plain.matches("goodbye")
+    assert isinstance(entry_plain.key, str)
+
+    assert entry_regex.matches("Hello World!")
+    assert entry_regex.matches("new world order")
+    assert not entry_regex.matches("worldwide")  # Should match whole word due to \b
+    assert isinstance(entry_regex.key, re.Pattern)
+
+
+@pytest.mark.unit
+@patch("tldw_Server_API.app.core.Chat.Chat_Functions.load_and_log_configs")
+@patch("tldw_Server_API.app.core.Chat.Chat_Functions.parse_user_dict_markdown_file")
+def test_chat_function_with_chat_dictionary_post_replacement(
+        mock_parse_dict, mock_load_configs_chat_func, tmp_path
+):
+    # Mock config for post-gen replacement
+    mock_config_data = {
+        "chat_dictionaries": {
+            "post_gen_replacement": "True",  # String "True"
+            "post_gen_replacement_dict": str(tmp_path / "post_gen.md")
+        }
+    }
+    mock_load_configs_chat_func.return_value = mock_config_data
+
+    # Create a dummy post_gen.md file
+    post_gen_dict_file = tmp_path / "post_gen.md"
+    post_gen_dict_file.write_text("AI: Artificial Intelligence\nLLM: Large Language Model")
+
+    # Mock the return of parse_user_dict_markdown_file
+    mock_parse_dict.return_value = {
+        "AI": "Artificial Intelligence",
+        "LLM": "Large Language Model"
+    }
+
+    # Mock chat_api_call (the one inside Chat_Functions, not the one in the endpoint)
+    with patch("tldw_Server_API.app.core.Chat.Chat_Functions.chat_api_call") as mock_chat_api_call_inner:
+        raw_llm_response = "The AI assistant uses an LLM."
+        mock_chat_api_call_inner.return_value = raw_llm_response
+
+        # Call the main chat function
+        final_response = chat(
+            message="Tell me about AI.",
+            history=[],
+            media_content=None,
+            selected_parts=[],
+            api_endpoint="openai",
+            api_key="testkey",
+            custom_prompt=None,
+            temperature=0.7,
+            system_message=None,
+            streaming=False  # Important for this test case
+        )
+
+        expected_response = "The Artificial Intelligence assistant uses an Large Language Model."
+        assert final_response == expected_response
+        mock_parse_dict.assert_called_once_with(str(post_gen_dict_file))
+        mock_chat_api_call_inner.assert_called_once()
+
+
+# --- New Tests for save_character and load_characters ---
+@pytest.mark.unit
+def test_save_character_new_and_update_unit():
+    mock_db = MagicMock(spec=CharactersRAGDB)
+    mock_db.client_id = "char_test_client"
+
+    char_data_v1 = {
+        "name": "TestCharacter", "description": "A brave hero.", "system_prompt": "Be heroic.",
+        "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+        # 1x1 red pixel
+    }
+    char_data_v2_update = {
+        "name": "TestCharacter", "description": "An even braver hero.", "personality": "Bold"
+    }
+
+    # Scenario 1: Add new character
+    mock_db.get_character_card_by_name.return_value = None  # Character does not exist
+    mock_db.add_character_card.return_value = 1  # Simulate new character ID
+
+    returned_id_v1 = save_character(db=mock_db, character_data=char_data_v1)
+    assert returned_id_v1 == 1
+    mock_db.add_character_card.assert_called_once()
+    add_args = mock_db.add_character_card.call_args[0][0]
+    assert add_args["name"] == "TestCharacter"
+    assert add_args["description"] == "A brave hero."
+    assert isinstance(add_args["image"], bytes)
+
+    # Scenario 2: Update existing character
+    mock_db.reset_mock()
+    existing_char_from_db = {
+        "id": 1, "name": "TestCharacter", "description": "A brave hero.", "system_prompt": "Be heroic.",
+        "image": b"decoded_image_bytes", "version": 1, "personality": None
+    }
+    mock_db.get_character_card_by_name.return_value = existing_char_from_db
+    mock_db.update_character_card.return_value = True  # Simulate successful update
+
+    returned_id_v2 = save_character(db=mock_db, character_data=char_data_v2_update, expected_version=1)
+    assert returned_id_v2 == 1
+    mock_db.update_character_card.assert_called_once()
+    update_args = mock_db.update_character_card.call_args[0]  # (char_id, data_to_update, version)
+    assert update_args[0] == 1  # char_id
+    assert update_args[1]["description"] == "An even braver hero."
+    assert update_args[1]["personality"] == "Bold"
+    assert "system_prompt" not in update_args[1]  # Should not be in update_payload as it wasn't in char_data_v2_update
+    assert "image" not in update_args[1]  # Image wasn't in char_data_v2_update
+    assert update_args[2] == 1  # expected_version
+
+
+@pytest.mark.unit
+def test_load_characters_empty_and_with_data_unit():
+    mock_db = MagicMock(spec=CharactersRAGDB)
+
+    # Scenario 1: No characters
+    mock_db.list_character_cards.return_value = []
+    chars = load_characters(db=mock_db)
+    assert chars == {}
+
+    # Scenario 2: Characters with data (including image for encoding)
+    mock_db.reset_mock()
+    db_cards_list = [
+        {"id": 1, "name": "Hero", "description": "Good guy", "image": b"heroimagebytes"},
+        {"id": 2, "name": "Villain", "description": "Bad guy", "image": None}
+    ]
+    mock_db.list_character_cards.return_value = db_cards_list
+
+    loaded_chars_map = load_characters(db=mock_db)
+    assert len(loaded_chars_map) == 2
+    assert "Hero" in loaded_chars_map
+    assert "Villain" in loaded_chars_map
+    assert loaded_chars_map["Hero"]["description"] == "Good guy"
+    assert loaded_chars_map["Hero"]["image_base64"] == base64.b64encode(b"heroimagebytes").decode('utf-8')
+    assert loaded_chars_map["Villain"].get("image_base64") is None
 
 # Add more tests for save_chat_history_to_db_wrapper:
 # - Character not found (specific and default)
