@@ -226,6 +226,12 @@ class ChatCompletionRequest(BaseModel):
     topk: Optional[int] = Field(None, description="[Extension] Top-K sampling parameter (provider specific).")
     # topp: Optional[float] = Field(None, description="[Extension] Explicit Top-P if needed separately from top_p.") # Uncomment if needed
 
+    # --- Prompt templating ---
+    prompt_template_name: Optional[str] = Field(None, description="Name of the prompt template to apply.")
+
+    class Config:
+        extra = "allow"
+
     @model_validator(mode='before')
     def check_logprobs(cls, values):
         logprobs = values.get('logprobs')
