@@ -236,8 +236,10 @@ class ChatCompletionRequest(BaseModel):
 
     # --- Prompt templating ---
     prompt_template_name: Optional[str] = Field(None, description="Name of the prompt template to apply.")
-    character_id: Optional[str] = Field(None, description="Optional ID of the character to use for context and templating.")
 
+    # --- Optional Character Chat Parameters ---
+    character_id: Optional[str] = Field(None, description="Optional ID of the character to use for context.")
+    conversation_id: Optional[str] = Field(None, description="Optional ID of the conversation to use for context.")
     class Config:
         extra = "allow"
 

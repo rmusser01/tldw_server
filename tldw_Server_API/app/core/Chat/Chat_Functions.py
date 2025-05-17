@@ -115,6 +115,8 @@ PROVIDER_PARAM_MAP = {
         'model': 'model',
         'topp': 'topp',
         'topk': 'topk',
+        'tools': 'tools',
+        'tool_choice': 'tool_choice',
         'max_tokens': 'max_tokens',  # Anthropic uses max_tokens
         'stop': 'stop_sequences',  # Anthropic uses stop_sequences
     },
@@ -128,6 +130,8 @@ PROVIDER_PARAM_MAP = {
         'model': 'model',
         'topp': 'topp',
         'topk': 'topk',
+        'tools': 'tools',
+        'tool_choice': 'tool_choice',
         'max_tokens': 'max_tokens',
         'stop': 'stop_sequences',
         'seed': 'seed',
@@ -198,6 +202,8 @@ PROVIDER_PARAM_MAP = {
         'system_message': 'system_message',
         'streaming': 'streaming',
         'topp': 'topp',
+        'tools': 'tools',
+        'tool_choice': 'tool_choice',
         'model': 'model',
         'max_tokens': 'max_tokens',
         'seed': 'random_seed',  # Mistral uses random_seed
@@ -212,6 +218,8 @@ PROVIDER_PARAM_MAP = {
         'streaming': 'streaming',
         'topp': 'topp',
         'topk': 'topk',
+        'tools': 'tools',
+        'tool_choice': 'tool_choice',
         'model':'model',
         'max_tokens': 'max_output_tokens',
         'stop': 'stop_sequences',  # List of strings
@@ -242,12 +250,14 @@ PROVIDER_PARAM_MAP = {
         'topp': 'top_p', 'topk': 'top_k',
         'minp': 'min_p',
         'model':'model',
+        'tools': 'tools',
+        'tool_choice': 'tool_choice',
         'max_tokens': 'n_predict', # Common for llama.cpp server
         'seed': 'seed',
         'stop': 'stop', # list of strings
         'response_format': 'response_format', # if OpenAI compatible endpoint
         'logit_bias': 'logit_bias',
-        'n': 'n_probs', # if 'logprobs' is for getting top-n probabilities
+        'n': 'n_probs', # how many token probabilities to return, doesn't map cleanly FIXME
         'presence_penalty': 'presence_penalty',
         'frequency_penalty': 'frequency_penalty',
     },
