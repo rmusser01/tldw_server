@@ -804,7 +804,7 @@ def load_and_log_configs():
                 'api_retry_delay': groq_api_retry_delay
             },
             'huggingface_api': {
-                'huggingface_api_base_url': huggingface_api_base_url,
+                'api_base_url': huggingface_api_base_url,
                 'api_key': huggingface_api_key,
                 'model': huggingface_model,
                 'streaming': huggingface_streaming,
