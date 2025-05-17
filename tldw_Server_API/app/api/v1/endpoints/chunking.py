@@ -20,15 +20,15 @@ from fastapi import (
 )
 from fastapi.encoders import jsonable_encoder
 
-from tldw_Server_API.app.api.v1.schemas.chunking_schema import ChunkingResponse, ChunkingTextRequest, \
-    ChunkingOptionsRequest
+
 #
 # Local Imports
 from tldw_Server_API.app.core.Utils.Chunk_Lib import (
     improved_chunking_process,
-    chunk_options as default_chunk_options_from_lib, # Default options from your library's config
-    # Import any specific exception types if you define them in Chunk_Lib
+    DEFAULT_CHUNK_OPTIONS as default_chunk_options_from_lib,
 )
+from tldw_Server_API.app.api.v1.schemas.chunking_schema import ChunkingResponse, ChunkingTextRequest, \
+    ChunkingOptionsRequest
 #
 #######################################################################################################################
 #
