@@ -21,13 +21,13 @@ from tldw_Server_API.app.api.v1.schemas.rag_schemas import (
 #
 # Functions:
 
-retrieval_agent_router = APIRouter(
+router = APIRouter(
     prefix="/retrieval",
     tags=["Retrieval Agent"],
 )
 
 
-@retrieval_agent_router.post(
+@router.post(
     "/search",  # Endpoint path
     response_model=SearchApiResponse,
     summary="Perform a comprehensive search",
@@ -136,7 +136,7 @@ async def perform_search(
     return response
 
 
-@retrieval_agent_router.post(
+@router.post(
     "/agent",
     response_model=RetrievalAgentResponse, # Can also be Any or StreamingResponse for flexibility
     summary="RAG-powered Conversational Agent",

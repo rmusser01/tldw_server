@@ -15,21 +15,36 @@ from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 #
 # Local Imports
-# Media Endpoint
-from tldw_Server_API.app.api.v1.endpoints.media import router as media_router
 #
 # Audio Endpoint
 from tldw_Server_API.app.api.v1.endpoints.audio import router as audio_router
-# RAG Endpoint
-#from tldw_Server_API.app.api.v1.endpoints.rag import router as rag_router
 #
 # Chat Endpoint
 from tldw_Server_API.app.api.v1.endpoints.chat import router as chat_router
 #
+# Chunking Endpoint
+from tldw_Server_API.app.api.v1.endpoints.chunking import router as chunking_router
+#
 # Embedding Endpoint
 from tldw_Server_API.app.api.v1.endpoints.embeddings import router as embeddings_router
+#
+# Media Endpoint
+from tldw_Server_API.app.api.v1.endpoints.media import router as media_router
+#
 # Prompt Management Endpoint
 from tldw_Server_API.app.api.v1.endpoints.prompts import router as prompt_router
+#
+# RAG Endpoint
+from tldw_Server_API.app.api.v1.endpoints.rag import router as retrieval_agent_router
+#
+# Sync Endpoint
+from tldw_Server_API.app.api.v1.endpoints.sync import router as sync_router
+#
+# Tools Endpoint
+from tldw_Server_API.app.api.v1.endpoints.tools import router as tools_router
+## Trash Endpoint
+#from tldw_Server_API.app.api.v1.endpoints.trash import router as trash_router
+#
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 #
 ########################################################################################################################
@@ -145,19 +160,30 @@ app.include_router(media_router, prefix="/api/v1/media", tags=["media"])
 # Router for /audio/ endpoints
 app.include_router(audio_router, prefix="/api/v1/audio", tags=["audio"])
 
-# Router for RAG endpoints
-#app.include_router(rag_router, prefix="/api/v1/rag", tags=["rag"])
-
 
 # Router for chat endpoints/chat temp-file handling
 app.include_router(chat_router, prefix="/api/v1/chat", tags=["chat"])
 
 
-# Router for Prompt Management endpoints
-app.include_router(prompt_router, prefix="/api/v1/prompts", tags=["prompts]"])
+# Router for Chunking Endpoint
+app.include_router(chunking_router, prefix="/api/v1/chunking", tags=["chunking"])
+
 
 # Router for Embedding Endpoint
 app.include_router(embeddings_router, prefix="/api/v1/embedding", tags=["embedding"])
+
+
+# Router for Prompt Management endpoints
+app.include_router(prompt_router, prefix="/api/v1/prompts", tags=["prompts]"])
+
+
+# Router for RAG endpoint
+app.include_router(retrieval_agent_router, prefix="/api/v1/retrieval_agent", tags=["retrieval_agent"])
+
+
+# Router for Sync endpoint
+app.include_router(sync_router, prefix="/api/v1/sync", tags=["sync"])
+
 
 # Router for trash endpoints - deletion of media items / trash file handling (FIXME: Secure delete vs lag on delete?)
 #app.include_router(trash_router, prefix="/api/v1/trash", tags=["trash"])

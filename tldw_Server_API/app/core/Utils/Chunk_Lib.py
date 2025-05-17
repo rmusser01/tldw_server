@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union, Callable, Generator
 import xml.etree.ElementTree as ET
 #
 # Import 3rd party
-from openai import OpenAI # Will be handled later
 from tqdm import tqdm
 from langdetect import detect, LangDetectException # Import specific exception
 from transformers import AutoTokenizer, PreTrainedTokenizerBase # Using AutoTokenizer for flexibility
@@ -72,13 +71,23 @@ _default_chunk_options_from_config = {
     'adaptive': _global_config['chunking_config'].get('adaptive_chunking', False),
     'multi_level': _global_config['chunking_config'].get('multi_level', False),
     'language': _global_config['chunking_config'].get('chunk_language', None), # Can be None
-    # Add any other options from your config that improved_chunking_process or other methods might use
     'custom_chapter_pattern': _global_config['chunking_config'].get('custom_chapter_pattern', None),
     'semantic_similarity_threshold': float(_global_config['chunking_config'].get('semantic_similarity_threshold', 0.5)),
     'semantic_overlap_sentences': int(_global_config['chunking_config'].get('semantic_overlap_sentences', 3)),
     'base_adaptive_chunk_size': int(_global_config['chunking_config'].get('base_adaptive_chunk_size', 1000)),
     'min_adaptive_chunk_size': int(_global_config['chunking_config'].get('min_adaptive_chunk_size', 500)),
     'max_adaptive_chunk_size': int(_global_config['chunking_config'].get('max_adaptive_chunk_size', 2000)),
+    'tokenizer_name_or_path': _global_config['chunking_config'].get('tokenizer_name_or_path', "gpt2"),  # Add this
+    'summarization_detail': float(_global_config['chunking_config'].get('summarization_detail', 0.5)),
+    'summarize_min_chunk_tokens': int(_global_config['chunking_config'].get('summarize_min_chunk_tokens', 500)),
+    'summarize_chunk_delimiter': _global_config['chunking_config'].get('summarize_chunk_delimiter', "."),
+    'summarize_recursively': _global_config['chunking_config'].get('summarize_recursively', False),
+    'summarize_verbose': _global_config['chunking_config'].get('summarize_verbose', False),
+    'summarize_system_prompt': _global_config['chunking_config'].get('summarize_system_prompt', "Rewrite this text in summarized form."),
+    'summarize_additional_instructions': _global_config['chunking_config'].get('summarize_additional_instructions', None),
+    'summarize_temperature': float(_global_config['chunking_config'].get('summarize_temperature', 0.1)),
+    'summarization_llm_provider': _global_config['chunking_config'].get('summarization_llm_provider', 'openai'),
+    'summarization_llm_model': _global_config['chunking_config'].get('summarization_llm_model', 'gpt-4o')
 }
 # Expose the library's default options for the endpoint to use
 DEFAULT_CHUNK_OPTIONS = _default_chunk_options_from_config.copy()
@@ -1432,16 +1441,6 @@ def improved_chunking_process(text: str,
     except Exception as e:
         logging.error(f"Error creating chunk metadata: {e}", exc_info=True)
         raise ChunkingError(f"Error creating chunk metadata: {e}") from e
-
-
-# Placeholder for Chunker.chunk_text method - will be filled in next steps
-def _chunk_text_placeholder(self, text: str, method: str, **kwargs) -> List[Union[str, Dict]]:
-    logging.warning(f"Chunker.chunk_text called with method '{method}' but not fully implemented yet.")
-    if method == "words": # Minimal example
-        return text.split()[:5] # Just a dummy
-    return [text]
-
-Chunker.chunk_text = _chunk_text_placeholder
 
 
 # Example of how other functions might change or be integrated:
