@@ -48,7 +48,9 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import ingest_article_to_
 # Import Local
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_histogram, log_counter
-from tldw_Server_API.app.core.Utils.Utils import logging, load_and_log_configs
+from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.config import load_and_log_configs
+
 #
 #######################################################################################################################
 # Function Definitions

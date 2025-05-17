@@ -26,7 +26,9 @@ from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 #
 # Import Local Libraries
-from tldw_Server_API.app.core.Utils.Utils import load_and_log_configs, extract_text_from_segments, logging
+from tldw_Server_API.app.core.Utils.Utils import extract_text_from_segments, logging
+from tldw_Server_API.app.core.config import load_and_log_configs
+
 #
 #######################################################################################################################
 # Function Definitions

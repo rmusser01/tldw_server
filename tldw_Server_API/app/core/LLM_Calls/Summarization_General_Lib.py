@@ -43,9 +43,9 @@ from tldw_Server_API.app.core.LLM_Calls.Local_Summarization_Lib import (
     summarize_with_custom_openai_2
 )
 from tldw_Server_API.app.core.Utils.Utils import (
-    load_and_log_configs,
     logging
 )
+from tldw_Server_API.app.core.config import load_and_log_configs
 #
 #######################################################################################################################
 # Function Definitions

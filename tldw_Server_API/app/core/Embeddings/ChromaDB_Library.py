@@ -13,11 +13,12 @@ import numpy as np
 # Local Imports:
 from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_for_embedding, chunk_options
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import process_chunks
+#from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import process_chunks
 from tldw_Server_API.app.core.Embeddings.Embeddings_Create import create_embedding, create_embeddings_batch
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-from tldw_Server_API.app.core.Utils.Utils import get_database_path, ensure_directory_exists, load_and_log_configs, logger, \
-    logging
+from tldw_Server_API.app.core.Utils.Utils import get_database_path, ensure_directory_exists, logger,  logging
+from tldw_Server_API.app.core.config import load_and_log_configs
+
 #
 #######################################################################################################################
 #
@@ -77,7 +78,7 @@ def situate_context(api_name, doc_content: str, chunk_content: str) -> str:
     response = analyze(chunk_context_prompt, doc_content_prompt, api_name, api_key=None, temp=0, system_message=None)
     return response
 
-
+# FIXME
 # FIXME - update all uses to reflect 'api_name' parameter
 def process_and_store_content(database, content: str, collection_name: str, media_id: int, file_name: str,
                               create_embeddings: bool = True, create_contextualized: bool = True, api_name: str = "gpt-3.5-turbo",

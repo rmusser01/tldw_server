@@ -34,13 +34,15 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 
 @pytest.fixture(autouse=True)  # Applied to all tests in this module
 def mock_global_load_and_log_configs():
-    """Mocks load_and_log_configs globally for this test module."""
-    # This helps if LLM_API_Calls functions (which are mocked targets here) internally call it.
-    # If Chat_Functions.py itself calls it, then specific patches are better.
-    # For `chat` function, it *does* call it, so we'll also patch it there.
-    with patch("tldw_Server_API.app.core.Utils.Utils.load_and_log_configs", return_value={
-        "chat_dictionaries": {},  # Default empty config for chat dict part of `chat`
-        # Add other necessary default config sections if Chat_Functions directly uses them.
+    """Mocks load_and_log_configs where it's used by Chat_Functions.py."""
+    with patch("tldw_Server_API.app.core.Chat.Chat_Functions.load_and_log_configs", return_value={
+        "chat_dictionaries": {},
+        # You might need to add more default keys here if Chat_Functions or its callees expect them
+        # For example, if chat_api_call indirectly uses parts of the config via its LLM handlers:
+        "openai_api": {"api_key": "mock_key"}, # Example
+        "anthropic_api": {"api_key": "mock_key"}, # Example
+        # Add other default structures your mocked LLM handlers might try to access
+        # or ensure the LLM handlers are fully mocked not to need config.
     }) as mock_config:
         yield mock_config
 

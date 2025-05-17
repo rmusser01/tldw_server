@@ -40,9 +40,10 @@ from tldw_Server_API.app.core.Chat.Chat_Functions import process_user_input, Cha
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article  # From RAG_Library_2
 
 # Utilities & Metrics
-from tldw_Server_API.app.core.Utils.Utils import load_and_log_configs, logging
+from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_Server_API.app.core.config import RAG_SEARCH_CONFIG
+from tldw_Server_API.app.core.config import RAG_SEARCH_CONFIG, load_and_log_configs
+
 #
 ########################################################################################################################
 # Configuration Loading & Global Instances

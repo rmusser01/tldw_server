@@ -43,8 +43,11 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Diarization_Lib_v
     combine_transcription_and_diarization, DiarizationError
 #
 # Import Local
-from tldw_Server_API.app.core.Utils.Utils import sanitize_filename, load_and_log_configs, logging
+from tldw_Server_API.app.core.Utils.Utils import sanitize_filename, logging
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram, timeit
+from tldw_Server_API.app.core.config import load_and_log_configs
+
+
 #
 #######################################################################################################################
 # Function Definitions
