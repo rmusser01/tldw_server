@@ -90,8 +90,6 @@ def test_chat_api_call_routing_and_param_mapping_openai_unit(mock_llm_api_call_h
     expected_key = param_map_for_provider['messages_payload']
     print(
         f"Expected key from map for 'messages_payload': '{expected_key}' (type: {type(expected_key)})")  # Should be 'input_data'
-
-    called_kwargs = mock_openai_handler.call_args.kwargs
     print(f"Actual keys in mock's called_kwargs: {list(called_kwargs.keys())}")
 
     assert expected_key in called_kwargs, f"Key '{expected_key}' not found in mock's called_kwargs"
@@ -126,15 +124,42 @@ def test_chat_api_call_routing_and_param_mapping_anthropic_unit(mock_llm_api_cal
     called_kwargs = mock_anthropic_handler.call_args.kwargs
 
     param_map_for_provider = PROVIDER_PARAM_MAP[provider]
-    assert called_kwargs[param_map_for_provider['api_key']] == args["api_key"]
-    assert called_kwargs[param_map_for_provider['input_data']] == args["messages_payload"]
-    assert called_kwargs[param_map_for_provider['temp']] == args["temp"]
-    assert called_kwargs[param_map_for_provider['system_message']] == args[
-        "system_message"]  # 'system_message' from chat_api_call maps to 'system_prompt' for anthropic
-    assert called_kwargs[param_map_for_provider['streaming']] == args["streaming"]
-    assert called_kwargs[param_map_for_provider['model']] == args["model"]
-    assert called_kwargs[param_map_for_provider['topp']] == args["topp"]
-    assert called_kwargs[param_map_for_provider['topk']] == args["topk"]
+
+    # Corrected assertions:
+    # The key for param_map_for_provider is the GENERIC arg name from chat_api_call
+    # The value is the PROVIDER-SPECIFIC arg name, which should be in called_kwargs
+
+    # For 'api_key'
+    provider_specific_api_key_name = param_map_for_provider['api_key']
+    assert called_kwargs[provider_specific_api_key_name] == args["api_key"]
+
+    # For 'messages_payload' -> 'input_data'
+    provider_specific_messages_payload_name = param_map_for_provider['messages_payload']  # This will be 'input_data'
+    assert called_kwargs[provider_specific_messages_payload_name] == args["messages_payload"]
+
+    # For 'temp'
+    provider_specific_temp_name = param_map_for_provider['temp']
+    assert called_kwargs[provider_specific_temp_name] == args["temp"]
+
+    # For 'system_message' -> 'system_prompt'
+    provider_specific_system_message_name = param_map_for_provider['system_message']  # This will be 'system_prompt'
+    assert called_kwargs[provider_specific_system_message_name] == args["system_message"]
+
+    # For 'streaming'
+    provider_specific_streaming_name = param_map_for_provider['streaming']
+    assert called_kwargs[provider_specific_streaming_name] == args["streaming"]
+
+    # For 'model'
+    provider_specific_model_name = param_map_for_provider['model']
+    assert called_kwargs[provider_specific_model_name] == args["model"]
+
+    # For 'topp'
+    provider_specific_topp_name = param_map_for_provider['topp']
+    assert called_kwargs[provider_specific_topp_name] == args["topp"]
+
+    # For 'topk'
+    provider_specific_topk_name = param_map_for_provider['topk']
+    assert called_kwargs[provider_specific_topk_name] == args["topk"]
 
 
 @pytest.mark.unit
