@@ -113,6 +113,20 @@ async def create_chat_completion(
     # For more verbose debugging:
     # logger.trace(f"Incoming request data (full): {request_data.model_dump_json(exclude_none=True)}")
 
+    # --- API Key Check ---
+    provider_api_key = API_KEYS.get(target_endpoint.lower())
+    providers_requiring_keys = [  # This list should ideally be more centrally managed or derived
+        "openai", "anthropic", "cohere", "groq", "openrouter",
+        "deepseek", "mistral", "google", "huggingface"
+        # Add other providers that always require a key
+    ]
+    if target_endpoint in providers_requiring_keys and not provider_api_key:  # Checks for None or empty string
+        logger.error(f"API key for required provider '{target_endpoint}' is missing or empty.")
+        raise ChatConfigurationError(  # This will be caught by the except ChatConfigurationError block below
+            provider=target_endpoint,
+            message=f"API key is not configured or is empty for provider: {target_endpoint}."
+        )
+
     # --- Character and Conversation Context ---
     character_data_for_template: Optional[Dict[str, Any]] = None
     associated_character_db_id: Optional[int] = None # Actual DB primary key for the character
@@ -407,7 +421,7 @@ async def create_chat_completion(
     # --- Prepare Arguments for chat_api_call (as before, using templated_messages_payload_for_provider and final_system_message_for_provider) ---
     chat_args = {
         "api_endpoint": target_endpoint,
-        "api_key": API_KEYS.get(target_endpoint.lower()), # Get API key again, as it wasn't stored in a var before this block
+        "api_key": provider_api_key,
         "messages_payload": templated_messages_payload_for_provider,
         "temp": request_data.temperature,
         "system_message": final_system_message_for_provider, # Use templated system message
@@ -530,26 +544,27 @@ async def create_chat_completion(
     except ChatRateLimitError as e:
         logger.warning(f"Rate limit error for {e.provider or target_endpoint}: {e.message}")
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
-    except ChatBadRequestError as e:
+    except ChatBadRequestError as e:  # This will handle ChatBadRequestError raised by chat_api_call
         logger.warning(f"Bad request error for {e.provider or target_endpoint}: {e.message}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except ChatConfigurationError as e:  # Server-side configuration issue
+    except ChatConfigurationError as e:  # Server-side configuration issue (e.g., from API key check)
         logger.error(f"Configuration error for {e.provider or target_endpoint}: {e.message}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-    except ChatProviderError as e:  # Make sure this is caught before generic Exception
-        logging.error(f"Provider error from {e.provider} (Status {e.status_code}) in chat_api_call: {e.message}",
-                      exc_info=True)  # Log it here
-        raise  # Re-raise it so chat.py can handle it as a ChatProviderError
-
-    except ChatAPIError as e:  # Catch other ChatAPIError (like config, bad request)
-        logging.error(f"ChatAPIError in chat_api_call for {e.provider}: {e.message}", exc_info=True)
-        raise  # Re-raise
-
-    except Exception as e:  # For truly unexpected things
-        logging.exception(f"Unexpected internal error in chat_api_call for {target_endpoint}: {type(e).__name__} - {e}")
-        raise ChatAPIError(provider=target_endpoint,
-                           message=f"An unexpected internal error ({type(e).__name__}) occurred in API call router.",
-                           status_code=500) from e
+    except ChatProviderError as e:  # MODIFIED
+        logger.error(
+            f"Provider error from {e.provider or target_endpoint} (Status {e.status_code}) in chat_api_call: {e.message}",
+            exc_info=True)
+        raise HTTPException(status_code=e.status_code if e.status_code else 502, detail=str(e))
+    except ChatAPIError as e:  # MODIFIED - Catch other ChatAPIError (should be after ChatProviderError)
+        logger.error(f"ChatAPIError in chat_api_call for {e.provider or target_endpoint}: {e.message}", exc_info=True)
+        raise HTTPException(status_code=e.status_code if e.status_code else 500, detail=str(e))
+    except ValueError as e:  # ADDED - To handle raw ValueErrors from chat_api_call (like in test_chat_api_call_exception_handling_unit[error_type7])
+        logger.error(f"ValueError from API call for {target_endpoint}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid input or parameter: {str(e)}")
+    except HTTPException as http_exc:  # ADDED - To re-raise HTTPExceptions if chat_api_call itself raises one (e.g. from a mock)
+        logger.info(
+            f"HTTPException propagated from API call for {target_endpoint}: {http_exc.status_code} - {http_exc.detail}")
+        raise http_exc  # Re-raise it as is
 
     # --- Catching errors from `requests` ---
     except HTTPError as e: # Explicitly from requests.exceptions
@@ -574,21 +589,18 @@ async def create_chat_completion(
                             detail=f"Network error while contacting {target_endpoint}: {str(e)}")
 
     # --- Catch potential config/value/key errors during argument preparation ---
-    except (ValueError, TypeError, KeyError) as e:  # Should be less common now with Pydantic
-        logger.error(f"Data or configuration validation error in endpoint: {e}", exc_info=True)
+    except (ValueError, TypeError, KeyError) as e:  # Existing block for local errors
+        logger.error(f"Data or configuration validation error in endpoint setup: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"Invalid parameter or internal configuration error: {str(e)}")
-    except HTTPException as http_exc:  # Catch HTTPErrors specifically to re-raise them
-        raise http_exc
     # --- Final Catch-All for truly unexpected errors ---
-    except Exception as e:
+    except Exception as e:  # This will now catch genuinely unexpected errors not covered above.
         logger.critical(
             f"!!! UNEXPECTED ERROR in /completions endpoint for {target_endpoint} !!! Type: {type(e).__name__}, Error: {e}",
             exc_info=True)
-        # Include conversation ID in error if available for easier debugging
         error_detail = f"An unexpected internal server error occurred. Error type: {type(e).__name__}."
         if final_conversation_id_for_turn:
-             error_detail += f" (Context ConvID: {final_conversation_id_for_turn})"
+            error_detail += f" (Context ConvID: {final_conversation_id_for_turn})"
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_detail)
 
 #

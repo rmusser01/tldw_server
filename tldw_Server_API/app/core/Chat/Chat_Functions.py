@@ -238,7 +238,6 @@ PROVIDER_PARAM_MAP = {
         'topk': 'top_k',
         'seed': 'seed',
         'stop': 'stop',  # often 'stop_sequences'
-        'n': 'n',  #generic mapping
     },
     'llama.cpp': { # Has api_url as a positional argument which needs special handling if not None
         'api_key': 'api_key',

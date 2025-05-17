@@ -9,7 +9,7 @@
 import hashlib
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Callable, Generator
 import xml.etree.ElementTree as ET
 #
 # Import 3rd party
@@ -95,7 +95,8 @@ class Chunker:
     def __init__(self,
                  options: Optional[Dict[str, Any]] = None,
                  tokenizer_name_or_path: str = "gpt2",
-                 openai_api_key: Optional[str] = None): # Added for OpenAI client later
+                 # Specific methods needing LLMs will take them as args or use a callback.
+                 ):
         """
         Initializes the Chunker.
 
@@ -103,7 +104,6 @@ class Chunker:
             options (Optional[Dict[str, Any]]): Custom chunking options to override defaults.
             tokenizer_name_or_path (str): Name or path of the Hugging Face tokenizer to use.
                                            Defaults to "gpt2".
-            openai_api_key (Optional[str]): OpenAI API key, if using OpenAI-dependent features.
         """
         # Initialize options: start with defaults, then update with provided options
         self.options = DEFAULT_CHUNK_OPTIONS.copy()
@@ -139,19 +139,6 @@ class Chunker:
             # Fallback or raise error? For now, set to None and let methods handle it.
             self.tokenizer = None
             # raise ChunkingError(f"Failed to load tokenizer '{tokenizer_name_or_path}': {e}") from e
-
-        # Initialize OpenAI client if API key is provided (for rolling_summarize)
-        self.openai_client = None
-        self.openai_api_key = openai_api_key # Store it
-        if self.openai_api_key:
-            try:
-                self.openai_client = OpenAI(api_key=self.openai_api_key)
-                logging.info("OpenAI client initialized.")
-            except Exception as e:
-                logging.warning(f"Failed to initialize OpenAI client: {e}. OpenAI-dependent features will not work.")
-        elif 'rolling_summarize' in self.options.get('method', ''): # Check if method hints at OpenAI use
-             logging.warning("OpenAI API key not provided. Rolling summarization may not work if selected.")
-
 
     def _get_option(self, key: str, default_override: Optional[Any] = None) -> Any:
         """Helper to get an option, allowing for a dynamic default."""
@@ -210,7 +197,12 @@ class Chunker:
         """
         return [chunk.strip() for chunk in chunks if chunk and chunk.strip()]
 
-    def chunk_text(self, text: str, method: Optional[str] = None) -> List[Union[str, Dict[str, Any]]]:
+    def chunk_text(self,
+                   text: str,
+                   method: Optional[str] = None,
+                   llm_call_function: Optional[Callable[[Dict[str, Any]], Union[str, Generator[str, None, None]]]] = None,
+                   llm_api_config: Optional[Dict[str, Any]] = None,
+                   ) -> List[Union[str, Dict[str, Any]]]:
         """
         Main method to chunk text based on the specified method in options or argument.
 
@@ -280,17 +272,26 @@ class Chunker:
             # Needs to be a method
             return self._chunk_xml(text, max_size=max_size, overlap=overlap, language=language)
         elif chunk_method == 'rolling_summarize':
-            if not self.openai_client:
-                raise ChunkingError("OpenAI client not initialized. Cannot use 'rolling_summarize'. Provide OpenAI API key.")
-            # This method has a different signature and purpose.
-            # It might not fit the "chunk then return list" pattern directly for `improved_chunking_process`
-            # unless the summary itself is treated as "the chunk".
-            # For now, let's assume it returns a single string (the summary).
-            # The `improved_chunking_process` might need adjustment if this method is chosen.
-            summary = self._rolling_summarize(text,
-                                             model=self._get_option('openai_model', 'gpt-4o'), # Example of specific option
-                                             detail=self._get_option('summarization_detail', 0.5))
-            return [summary] # Wrap in list to match return type, though it's a single summary
+            if not llm_call_function:
+                raise ChunkingError("Missing 'llm_call_function' for 'rolling_summarize' method.")
+            if not self.tokenizer:  # Still need tokenizer for token counting in helper
+                raise ChunkingError("Tokenizer required for 'rolling_summarize' to estimate chunk sizes for LLM.")
+
+            summary = self._rolling_summarize(
+                text_to_summarize=text,
+                llm_summarize_step_func=llm_call_function,  # Pass the generic call function
+                llm_api_config=llm_api_config or {},  # Pass relevant API name, model, key for the call_func
+                # Other summarization-specific options from self.options
+                detail=self._get_option('summarization_detail', 0.5),
+                min_chunk_tokens=self._get_option('summarize_min_chunk_tokens', 500),
+                chunk_delimiter=self._get_option('summarize_chunk_delimiter', "."),
+                recursive_summarization=self._get_option('summarize_recursively', False),
+                verbose=self._get_option('summarize_verbose', False),
+                system_prompt_content=self._get_option('summarize_system_prompt',
+                                                       "Rewrite this text in summarized form."),
+                additional_instructions=self._get_option('summarize_additional_instructions', None)
+            )
+            return [summary]  # Wrap in list
         # Add 'hybrid' if you still need it. It was similar to token based.
         # def chunk_text_hybrid(text: str, max_tokens: int = 1000, overlap: int = 0) -> List[str]:
         else:
@@ -981,91 +982,80 @@ class Chunker:
         return chunks_output
 
 
-    def _rolling_summarize(self, text: str, model: str, detail: float, **kwargs) -> str:
-        # Placeholder - requires OpenAI client (self.openai_client)
-        # This function's logic needs to be moved here from the global scope.
-        # It was `rolling_summarize` in your original lib.
-        if not self.openai_client:
-            raise ChunkingError("OpenAI client not initialized for rolling summarization.")
+    def _rolling_summarize(self,
+                           text_to_summarize: str,
+                           llm_summarize_step_func: Callable, # The function that will call the actual LLM API
+                           llm_api_config: Dict[str, Any],    # Contains {'api_name', 'model', 'api_key', 'temp', etc.}
+                           detail: float,
+                           min_chunk_tokens: int,
+                           chunk_delimiter: str,
+                           recursive_summarization: bool,
+                           verbose: bool,
+                           system_prompt_content: str,
+                           additional_instructions: Optional[str]
+                           ) -> str:
+        if not self.tokenizer: # Should have been checked by caller (chunk_text)
+            raise ChunkingError("Tokenizer required for rolling summarization.")
 
-        logging.info(f"Rolling summarization called. Model: {model}, Detail: {detail}")
-        # Get options for summarization
-        additional_instructions = self._get_option('summarize_additional_instructions', None)
-        minimum_chunk_size_tokens = self._get_option('summarize_min_chunk_tokens', 500) # Min tokens for text to be split for summarization
-        chunk_delimiter = self._get_option('summarize_chunk_delimiter', ".") # Delimiter for splitting input text
-        summarize_recursively = self._get_option('summarize_recursively', False)
-        verbose_summarize = self._get_option('summarize_verbose', False)
-
-        # Assert detail is set correctly (0 to 1)
-        assert 0 <= detail <= 1, "Summarization detail must be between 0 and 1."
-
-        if not self.tokenizer:
-             raise ChunkingError("Tokenizer required for rolling summarization to estimate chunk sizes.")
-
-        text_token_length = len(self.tokenizer.encode(text))
-        # Interpolate the number of chunks for summarization based on detail
-        # More detail = more intermediate chunks for the LLM to process, potentially leading to a more detailed final summary.
-        # Less detail = fewer, larger chunks for the LLM, potentially more abstract summary.
-
-        # Max chunks for summarization aims to keep each summarization input manageable for the LLM.
-        # If text_token_length is 20000 and min_chunk_size is 1000, max_summarization_chunks = 20
-        max_summarization_chunks = max(1, text_token_length // minimum_chunk_size_tokens)
-        min_summarization_chunks = 1 # At least one summary operation
-
-        # num_summarization_chunks: if detail=0, it's min_chunks. if detail=1, it's max_chunks.
+        logging.info(f"Rolling summarization called. Detail: {detail}")
+        text_token_length = len(self.tokenizer.encode(text_to_summarize))
+        max_summarization_chunks = max(1, text_token_length // min_chunk_tokens)
+        min_summarization_chunks = 1
         num_summarization_chunks = int(min_summarization_chunks + detail * (max_summarization_chunks - min_summarization_chunks))
-        num_summarization_chunks = max(1, num_summarization_chunks) # Ensure at least 1
+        num_summarization_chunks = max(1, num_summarization_chunks)
+        llm_input_chunk_size_tokens = max(min_chunk_tokens, text_token_length // num_summarization_chunks)
 
-        # Effective chunk size for the LLM's input (tokens per summarization step)
-        # This is different from the general 'max_size' option for chunking text for other purposes.
-        # This is about feeding manageable pieces to the LLM for summarization.
-        llm_input_chunk_size_tokens = max(minimum_chunk_size_tokens, text_token_length // num_summarization_chunks)
-
-        # Use the existing helper `_chunk_on_delimiter_for_llm`
         text_chunks_for_llm, _, dropped_count = self._chunk_on_delimiter_for_llm(
-            text,
-            llm_input_chunk_size_tokens, # This is max_tokens for combine_chunks_with_no_minimum
-            chunk_delimiter=chunk_delimiter
+            text_to_summarize,
+            llm_input_chunk_size_tokens,
+            delimiter=chunk_delimiter
         )
-        if dropped_count > 0 and verbose_summarize:
-            logging.warning(f"{dropped_count} parts were dropped during text splitting for summarization due to token limits.")
-
-        if verbose_summarize:
+        if dropped_count > 0 and verbose:
+            logging.warning(f"{dropped_count} parts were dropped during text splitting for summarization.")
+        if verbose:
             logging.info(f"Splitting text for summarization into {len(text_chunks_for_llm)} parts.")
-            if self.tokenizer:
-                 logging.info(f"Summarization part token counts: {[len(self.tokenizer.encode(x)) for x in text_chunks_for_llm]}")
 
-        system_message_content = self._get_option('summarize_system_prompt', "Rewrite this text in summarized form.")
+        final_system_prompt = system_prompt_content
         if additional_instructions:
-            system_message_content += f"\n\n{additional_instructions}"
+            final_system_prompt += f"\n\n{additional_instructions}"
 
         accumulated_summaries = []
-        for i, chunk_to_summarize in enumerate(tqdm(text_chunks_for_llm, desc="Summarizing parts", disable=not verbose_summarize)):
-            user_message_content = chunk_to_summarize
-            if summarize_recursively and accumulated_summaries:
-                # Combine previous summary with current chunk
-                user_message_content = f"Previous summary context:\n{accumulated_summaries[-1]}\n\nNew content to summarize and integrate:\n{chunk_to_summarize}"
+        for i, chunk_for_llm in enumerate(tqdm(text_chunks_for_llm, desc="Summarizing parts", disable=not verbose)):
+            user_message_content = chunk_for_llm
+            if recursive_summarization and accumulated_summaries:
+                user_message_content = f"Previous summary context:\n{accumulated_summaries[-1]}\n\nNew content to summarize and integrate:\n{chunk_for_llm}"
 
-            messages = [
-                {"role": "system", "content": system_message_content},
-                {"role": "user", "content": user_message_content}
-            ]
-
+            # Prepare payload for the llm_summarize_step_func
+            # This payload structure should match what your `Summarization_General_Lib.analyze` or `_dispatch_to_api` expects
+            payload_for_llm_call = {
+                "api_name": llm_api_config.get("api_name", "openai"), # Default or from config
+                "input_data": user_message_content, # This is the text for the LLM
+                "custom_prompt_arg": "", # Rolling summarize manages the full prompt content
+                "api_key": llm_api_config.get("api_key"),
+                "system_message": final_system_prompt,
+                "temp": llm_api_config.get("temperature", self._get_option('summarize_temperature', 0.1)),
+                "streaming": False, # Internal steps of rolling summary should not stream to Chunker
+                # Add other params your analyze function might need from llm_api_config (model, max_tokens etc.)
+                "model": llm_api_config.get("model") # Important!
+            }
             try:
-                # Use self.openai_client.chat.completions.create
-                response = self.openai_client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=self._get_option('summarize_temperature', 0.1), # make configurable
-                )
-                summary_content = response.choices[0].message.content
-                accumulated_summaries.append(summary_content)
-            except Exception as e_openai:
-                logging.error(f"OpenAI API call failed during summarization part {i+1}: {e_openai}")
-                # Decide on error strategy: skip this chunk, use original, or raise
-                accumulated_summaries.append(f"[Summarization failed for this part: {chunk_to_summarize[:100]}...]") # Fallback
+                # `llm_summarize_step_func` should be blocking and return a string
+                summary_content = llm_summarize_step_func(payload_for_llm_call)
 
-        final_summary = '\n\n'.join(accumulated_summaries)
+                if isinstance(summary_content, str) and summary_content.startswith("Error:"):
+                    logging.error(f"LLM call for summarization part {i+1} failed: {summary_content}")
+                    accumulated_summaries.append(f"[Summarization failed for this part: {chunk_for_llm[:100]}...]")
+                elif isinstance(summary_content, str):
+                    accumulated_summaries.append(summary_content)
+                else: # Should not happen if llm_summarize_step_func is well-behaved
+                    logging.error(f"LLM call for summarization part {i+1} returned non-string: {type(summary_content)}")
+                    accumulated_summaries.append(f"[Summarization error for this part (unexpected type): {chunk_for_llm[:100]}...]")
+
+            except Exception as e_llm:
+                logging.error(f"Exception calling llm_summarize_step_func for part {i+1}: {e_llm}", exc_info=True)
+                accumulated_summaries.append(f"[Exception during summarization for this part: {chunk_for_llm[:100]}...]")
+
+        final_summary = '\n\n---\n\n'.join(accumulated_summaries) # Join with a clear separator
         return final_summary.strip()
 
     # Helper for rolling_summarize (was combine_chunks_with_no_minimum)
@@ -1235,8 +1225,9 @@ class Chunker:
 def chunk_for_embedding(text: str,
                         file_name: str,
                         custom_chunk_options: Optional[Dict[str, Any]] = None,
-                        tokenizer_name_or_path: str = "gpt2", # Pass through
-                        openai_api_key: Optional[str] = None # Pass through
+                        tokenizer_name_or_path: str = "gpt2",
+                        llm_call_function: Optional[Callable] = None, # Added
+                        llm_api_config: Optional[Dict[str, Any]] = None # Added
                         ) -> List[Dict[str, Any]]:
     """
     Prepares chunks specifically for embedding, adding headers with context.
@@ -1246,9 +1237,10 @@ def chunk_for_embedding(text: str,
     logging.info(f"Chunking for embedding. File: {file_name}. Custom options: {custom_chunk_options}")
     chunks_from_improved_process = improved_chunking_process(
         text,
-        chunk_options_dict=custom_chunk_options, # Pass the dict directly
+        chunk_options_dict=custom_chunk_options,
         tokenizer_name_or_path=tokenizer_name_or_path,
-        openai_api_key=openai_api_key
+        llm_call_function_for_chunker=llm_call_function, # Pass through
+        llm_api_config_for_chunker=llm_api_config      # Pass through
     )
     # The options used are now part of the Chunker instance within improved_chunking_process
 
@@ -1292,9 +1284,10 @@ def chunk_for_embedding(text: str,
 
 def process_document_with_metadata(text: str,
                                    chunk_options_dict: Dict[str, Any],
-                                   document_metadata: Dict[str, Any], # Overall metadata for the document
+                                   document_metadata: Dict[str, Any],
                                    tokenizer_name_or_path: str = "gpt2",
-                                   openai_api_key: Optional[str] = None
+                                   llm_call_function: Optional[Callable] = None, # Added
+                                   llm_api_config: Optional[Dict[str, Any]] = None # Added
                                    ) -> Dict[str, Any]:
     """
     Processes a document, chunks it, and associates document-level metadata with the chunked output.
@@ -1304,23 +1297,16 @@ def process_document_with_metadata(text: str,
         text,
         chunk_options_dict=chunk_options_dict,
         tokenizer_name_or_path=tokenizer_name_or_path,
-        openai_api_key=openai_api_key
-    ) # Returns List[Dict{'text': str, 'metadata': Dict}]
-
-    # Add/merge the overall document_metadata into each chunk's metadata for richer context
+        llm_call_function_for_chunker=llm_call_function, # Pass through
+        llm_api_config_for_chunker=llm_api_config      # Pass through
+    )
     for chunk_item in chunks_result:
-        # Ensure 'document_level_metadata' doesn't overwrite existing keys unless intended
         if 'document_level_metadata' not in chunk_item['metadata']:
             chunk_item['metadata']['document_level_metadata'] = {}
         chunk_item['metadata']['document_level_metadata'].update(document_metadata)
-        # Or flatten it if preferred, being careful with key collisions:
-        # for doc_key, doc_val in document_metadata.items():
-        #    if doc_key not in chunk_item['metadata']: # Avoid overwriting chunk-specific metadata
-        #        chunk_item['metadata'][doc_key] = doc_val
-
     return {
         'original_document_metadata': document_metadata,
-        'chunks': chunks_result # List of {'text': ..., 'metadata': ...}
+        'chunks': chunks_result
     }
 
 
@@ -1331,25 +1317,26 @@ def process_document_with_metadata(text: str,
 def improved_chunking_process(text: str,
                               chunk_options_dict: Optional[Dict[str, Any]] = None,
                               tokenizer_name_or_path: str = "gpt2",
-                              openai_api_key: Optional[str] = None
+                              # Parameters for LLM calls if needed by a chunking method
+                              llm_call_function_for_chunker: Optional[Callable] = None,
+                              llm_api_config_for_chunker: Optional[Dict[str, Any]] = None
                               ) -> List[Dict[str, Any]]:
     logging.debug("Improved chunking process started...")
     logging.debug(f"Received chunk_options_dict: {chunk_options_dict}")
 
-    # Instantiate the Chunker with the provided options and tokenizer
-    # The Chunker's __init__ will merge with its defaults.
     chunker_instance = Chunker(options=chunk_options_dict,
                                tokenizer_name_or_path=tokenizer_name_or_path,
-                               openai_api_key=openai_api_key)
+                                )
 
-    # Extract JSON metadata if present (this logic seems specific, could be a pre-processor)
+    # Get effective options from the chunker instance (these are now resolved)
+    effective_options = chunker_instance.options.copy() # Use a copy
+    # (JSON and header extraction logic using `text` and storing in `json_content_metadata`, `header_text_content`, update `processed_text`)
+    # This was the previous flow:
     json_content_metadata = {}
-    processed_text = text # Use a new variable for text after potential modifications
+    processed_text = text
     try:
-        # More robust JSON detection: check if it starts with '{' and ends with '}\n'
-        # and can be parsed.
         if processed_text.strip().startswith("{"):
-            json_end_match = re.search(r"\}\s*\n", processed_text) # Look for closing brace then newline
+            json_end_match = re.search(r"\}\s*\n", processed_text)
             if json_end_match:
                 json_end_index = json_end_match.end()
                 potential_json_str = processed_text[:json_end_index].strip()
@@ -1359,24 +1346,16 @@ def improved_chunking_process(text: str,
                     logging.debug(f"Extracted JSON metadata: {json_content_metadata}")
                 except json.JSONDecodeError:
                     logging.debug("Potential JSON at start, but failed to parse. Treating as normal text.")
-                    json_content_metadata = {} # Reset if parsing fails
+                    json_content_metadata = {}
             else:
                 logging.debug("Text starts with '{' but no clear '}\\n' end for JSON metadata.")
         else:
             logging.debug("No JSON metadata found at the beginning of the text.")
-    except Exception as e_json: # Catch any unexpected error during this
+    except Exception as e_json:
         logging.warning(f"Error during JSON metadata extraction: {e_json}. Proceeding without it.")
         json_content_metadata = {}
 
-    # Extract any additional header text
-    header_re = re.compile(
-        r"""^                # start of the string
-            (This[ ]text[ ]was[ ]transcribed[ ]using  # literal header
-            (?:[^\n]*\n)*?   # zero or more complete lines
-            \n)              # first completely blank line
-        """,
-        re.MULTILINE | re.VERBOSE,
-    )
+    header_re = re.compile(r"""^ (This[ ]text[ ]was[ ]transcribed[ ]using (?:[^\n]*\n)*?\n) """, re.MULTILINE | re.VERBOSE)
     header_text_content = ""
     header_match = header_re.match(processed_text)
     if header_match:
@@ -1384,78 +1363,67 @@ def improved_chunking_process(text: str,
         processed_text = processed_text[len(header_text_content):].strip()
         logging.debug(f"Extracted header text: {header_text_content}")
 
-    # Get effective options from the chunker instance (these are now resolved)
-    effective_options = chunker_instance.options.copy() # Use a copy
-
-    # Ensure language is set in effective_options for metadata, even if detected later in a method
     if not effective_options.get('language'):
         detected_lang = chunker_instance.detect_language(processed_text)
         effective_options['language'] = str(detected_lang)
         logging.debug(f"Language for overall process set to: {effective_options['language']}")
 
     try:
-        # The main chunk_text method will be part of the Chunker class
-        # We pass processed_text (after JSON/header stripping)
         raw_chunks = chunker_instance.chunk_text(
             processed_text,
-            method=effective_options['method'], # Pass method explicitly
-            # max_size and overlap are now handled by the chunker instance's options
-            # language will also be handled by the chunker instance or specific methods
+            method=effective_options['method'],
+            llm_call_function=llm_call_function_for_chunker, # Pass it down
+            llm_api_config=llm_api_config_for_chunker      # Pass it down
         )
         logging.debug(f"Created {len(raw_chunks)} raw_chunks using method {effective_options['method']}")
-    except ChunkingError as ce: # Catch custom errors from the chunker
+    except ChunkingError as ce:
         logging.error(f"ChunkingError in chunking process: {ce}")
-        raise # Re-raise to be caught by the endpoint
+        raise
     except Exception as e:
         logging.error(f"Unexpected error in chunking process: {e}", exc_info=True)
         raise ChunkingError(f"Unexpected error in chunking process: {e}") from e
-
 
     chunks_with_metadata_list = []
     total_chunks_count = len(raw_chunks)
     try:
         for i, chunk_item in enumerate(raw_chunks):
-            # Determine if chunk_item is a string or a dict (for JSON chunking)
             actual_text_content: str
             is_json_chunk = False
-            if isinstance(chunk_item, dict) and 'json' in chunk_item and 'metadata' in chunk_item:
-                # This structure comes from chunk_json_list/dict
+            chunk_specific_metadata = {} # Initialize
+
+            if isinstance(chunk_item, dict) and 'json' in chunk_item and 'metadata' in chunk_item : # From JSON methods
                 actual_text_content = json.dumps(chunk_item['json'], ensure_ascii=False)
                 chunk_specific_metadata = chunk_item['metadata']
                 is_json_chunk = True
+            elif isinstance(chunk_item, dict) and 'text' in chunk_item and 'metadata' in chunk_item: # From Ebook/XML methods
+                actual_text_content = chunk_item['text']
+                chunk_specific_metadata = chunk_item['metadata']
             elif isinstance(chunk_item, str):
                 actual_text_content = chunk_item
-                chunk_specific_metadata = {} # Base for non-JSON chunks
             else:
                 logging.warning(f"Unexpected chunk item type: {type(chunk_item)}. Skipping.")
                 continue
 
-            # Base metadata from effective_options
             current_chunk_metadata = {
                 'chunk_index': i + 1,
                 'total_chunks': total_chunks_count,
                 'chunk_method': effective_options['method'],
-                'max_size': effective_options['max_size'], # The one used by the chunker
-                'overlap': effective_options['overlap'],   # The one used by the chunker
-                'language': effective_options.get('language', 'unknown'), # Overall language
+                'max_size_setting': effective_options['max_size'],
+                'overlap_setting': effective_options['overlap'],
+                'language': effective_options.get('language', 'unknown'),
                 'relative_position': float((i + 1) / total_chunks_count) if total_chunks_count > 0 else 0.0,
-                'adaptive_chunking_enabled': effective_options.get('adaptive', False), # Add more relevant options
+                'adaptive_chunking_used': effective_options.get('adaptive', False),
             }
-            # Update with any metadata that came directly from the chunking method (e.g., json chunking)
-            current_chunk_metadata.update(chunk_specific_metadata)
+            current_chunk_metadata.update(chunk_specific_metadata) # Merge method-specific metadata
 
-            # Add extracted JSON content and header text to each chunk's metadata
             if json_content_metadata:
                 current_chunk_metadata['initial_document_json_metadata'] = json_content_metadata
             if header_text_content:
                 current_chunk_metadata['initial_document_header_text'] = header_text_content
-
-            # Add a hash of the raw text content of the chunk (before any headers are prepended by other processes)
             current_chunk_metadata['chunk_content_hash'] = hashlib.md5(actual_text_content.encode('utf-8')).hexdigest()
 
-
             chunks_with_metadata_list.append({
-                'text': actual_text_content, # This is the core content of the chunk
+                'text': actual_text_content,
                 'metadata': current_chunk_metadata
             })
 

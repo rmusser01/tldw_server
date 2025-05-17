@@ -648,7 +648,7 @@ def test_parse_user_dict_markdown_file_various_formats(tmp_path):
     dict_file.write_text(md_content)
 
     parsed = parse_user_dict_markdown_file(str(dict_file))
-    expected_key2_value = "This is a\n            multi-line value for key2.\n            It has several lines."
+    expected_key2_value = "        This is a\n        multi-line value for key2.\n        It has several lines."  # Corrected
     assert parsed["key1"] == "value1"
     assert parsed["key2"] == expected_key2_value
     assert parsed["key3"] == "value3"

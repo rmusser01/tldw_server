@@ -157,7 +157,7 @@ def test_commercial_provider_non_streaming_no_template(
     model_map = {
         "openai": "gpt-4o-mini",
         "anthropic": "claude-3-haiku-20240307",
-        "cohere": "command-light",  # or command-r if 'light' is too old/restricted
+        "cohere": "command-r",
         "groq": "llama3-8b-8192",
         "openrouter": "mistralai/mistral-7b-instruct:free",  # A known free model
         "deepseek": "deepseek-chat",
