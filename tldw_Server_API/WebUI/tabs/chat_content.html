@@ -15,7 +15,8 @@
                     <div class="form-group">
                         <label for="chatCompletions_api_provider">API Provider:</label>
                         <select id="chatCompletions_api_provider">
-                            <option value="openai" selected>OpenAI</option>
+                            <option value="" selected>Server Default</option>
+                            <option value="openai">OpenAI</option>
                             <option value="anthropic">Anthropic</option>
                             <option value="google">Google (Gemini)</option>
                             <option value="cohere">Cohere</option>
@@ -37,17 +38,17 @@
                     </div>
                     <div class="form-group">
                         <label for="chatCompletions_model">Model:</label>
-                        <input type="text" id="chatCompletions_model" value="gpt-4o-mini">
+                        <input type="text" id="chatCompletions_model" value="gpt-4o-mini" placeholder="e.g., gpt-4o-mini, claude-3-opus-20240229">
                     </div>
                 </div>
                 <div class="column">
                     <div class="form-group">
                         <label for="chatCompletions_temperature">Temperature (0.0 - 2.0):</label>
-                        <input type="number" id="chatCompletions_temperature" value="0.7" step="0.1" min="0" max="2">
+                        <input type="number" id="chatCompletions_temperature" placeholder="e.g., 0.7" step="0.1" min="0" max="2">
                     </div>
                     <div class="form-group">
                         <label for="chatCompletions_max_tokens">Max Tokens:</label>
-                        <input type="number" id="chatCompletions_max_tokens" value="150" step="1" min="1">
+                        <input type="number" id="chatCompletions_max_tokens" placeholder="e.g., 1024" step="1" min="1">
                     </div>
                 </div>
             </div>
@@ -72,15 +73,15 @@
                         <div class="column">
                             <div class="form-group">
                                 <label for="chatCompletions_top_p">Top P (0.0 - 1.0):</label>
-                                <input type="number" id="chatCompletions_top_p" value="1.0" step="0.01" min="0" max="1">
+                                <input type="number" id="chatCompletions_top_p" placeholder="e.g., 1.0" step="0.01" min="0" max="1">
                             </div>
                              <div class="form-group">
                                 <label for="chatCompletions_frequency_penalty">Frequency Penalty (-2.0 - 2.0):</label>
-                                <input type="number" id="chatCompletions_frequency_penalty" value="0" step="0.1" min="-2" max="2">
+                                <input type="number" id="chatCompletions_frequency_penalty" placeholder="e.g., 0.0" step="0.1" min="-2" max="2">
                             </div>
                             <div class="form-group">
                                 <label for="chatCompletions_presence_penalty">Presence Penalty (-2.0 - 2.0):</label>
-                                <input type="number" id="chatCompletions_presence_penalty" value="0" step="0.1" min="-2" max="2">
+                                <input type="number" id="chatCompletions_presence_penalty" placeholder="e.g., 0.0" step="0.1" min="-2" max="2">
                             </div>
                              <div class="form-group">
                                 <label for="chatCompletions_minp">Min P (Provider Specific):</label>
@@ -90,53 +91,53 @@
                                 <label for="chatCompletions_topk">Top K (Provider Specific):</label>
                                 <input type="number" id="chatCompletions_topk" step="1" placeholder="e.g., 40">
                             </div>
+                            <div class="form-group">
+                                <label for="chatCompletions_character_id">Character ID (for Templating):</label>
+                                <input type="text" id="chatCompletions_character_id" placeholder="e.g., character_db_id_123">
+                            </div>
                         </div>
                         <div class="column">
                             <div class="form-group">
                                 <label for="chatCompletions_seed">Seed (Integer, Optional):</label>
-                                <input type="number" id="chatCompletions_seed" placeholder="e.g., 42">
+                                <input type="number" id="chatCompletions_seed" placeholder="e.g., 42" step="1">
                             </div>
                             <div class="form-group">
-                                <label for="chatCompletions_stop">Stop Sequences (JSON string or comma-separated):</label>
-                                <input type="text" id="chatCompletions_stop" placeholder='e.g., ["\n", "Human:"] or \n,Human:'>
+                                <label for="chatCompletions_stop">Stop Sequences (JSON string array or single string):</label>
+                                <input type="text" id="chatCompletions_stop" placeholder='e.g., ["\n", "Human:"] or "\n"'>
                             </div>
                              <div class="form-group checkbox-group">
                                 <input type="checkbox" id="chatCompletions_logprobs">
                                 <label for="chatCompletions_logprobs" style="font-weight: normal; margin-bottom:0;">Logprobs</label>
                             </div>
                             <div class="form-group">
-                                <label for="chatCompletions_top_logprobs">Top Logprobs (if logprobs true):</label>
+                                <label for="chatCompletions_top_logprobs">Top Logprobs (if logprobs true, 0-20):</label>
                                 <input type="number" id="chatCompletions_top_logprobs" step="1" min="0" max="20" placeholder="e.g., 5">
                             </div>
                             <div class="form-group">
-                                <label for="chatCompletions_response_format_type">Response Format Type (text or json_object):</label>
+                                <label for="chatCompletions_response_format_type">Response Format Type:</label>
                                 <select id="chatCompletions_response_format_type">
                                     <option value="">(Default)</option>
                                     <option value="text">text</option>
                                     <option value="json_object">json_object</option>
                                 </select>
                             </div>
+                            <div class="form-group">
+                                <label for="chatCompletions_prompt_template_name">Prompt Template Name:</label>
+                                <input type="text" id="chatCompletions_prompt_template_name" placeholder="e.g., my_custom_template">
+                            </div>
                         </div>
                     </div>
                      <div class="form-group">
                         <label for="chatCompletions_tools">Tools (JSON Array string, Optional):</label>
-                        <textarea id="chatCompletions_tools" placeholder='e.g., [{"type": "function", "function": {"name": "get_weather", "description": "Get current weather", "parameters": {...}}}]'></textarea>
+                        <textarea id="chatCompletions_tools" placeholder='[{"type": "function", "function": {"name": "get_weather", "description": "Get current weather", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}]'></textarea>
                     </div>
                     <div class="form-group">
                         <label for="chatCompletions_tool_choice">Tool Choice (string or JSON object string, Optional):</label>
-                        <input type="text" id="chatCompletions_tool_choice" placeholder='e.g., "auto", "none", or {"type": "function", "function": {"name": "my_func"}}'>
+                        <input type="text" id="chatCompletions_tool_choice" placeholder='e.g., "auto", "none", "required", or {"type": "function", "function": {"name": "my_func"}}'>
                     </div>
                      <div class="form-group">
                         <label for="chatCompletions_logit_bias">Logit Bias (JSON object string, Optional):</label>
                         <input type="text" id="chatCompletions_logit_bias" placeholder='e.g., {"123": -1.0, "456": 2.0}'>
-                    </div>
-                     <div class="form-group">
-                        <label for="chatCompletions_character_id">Character ID (Optional):</label>
-                        <input type="text" id="chatCompletions_character_id" placeholder="e.g., pirate_blackheart">
-                    </div>
-                    <div class="form-group">
-                        <label for="chatCompletions_prompt_template_name">Prompt Template Name (Optional):</label>
-                        <input type="text" id="chatCompletions_prompt_template_name" placeholder="e.g., pirate_speak_template">
                     </div>
                 </div>
             </details>
@@ -147,21 +148,15 @@
             <textarea id="chatCompletions_payload_raw" class="raw-payload-textarea"></textarea>
         </div>
          <small>
-            API key for the selected provider is configured server-side.
+            API key for the selected provider is configured server-side (if required by provider).
             Ensure model names are compatible with the selected provider.
         </small>
         <br><br>
-        <!--
-            The button now calls a more generic 'makeRequest' if we adopt that,
-            or a specific 'handleChatCompletionsRequest'
-        -->
         <button class="api-button" onclick="handleChatCompletionsRequest()">Send Request</button>
 
         <h3>cURL Command:</h3>
-        <pre id="createChatCompletion_curl">---</pre> <!-- ID matches the old handleChatCompletion -->
+        <pre id="createChatCompletion_curl">---</pre>
         <h3>Response (or Stream):</h3>
-        <pre id="createChatCompletion_response">---</pre> <!-- ID matches the old handleChatCompletion -->
+        <pre id="createChatCompletion_response">---</pre>
     </div>
 </div>
-
-    

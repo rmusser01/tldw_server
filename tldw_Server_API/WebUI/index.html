@@ -61,35 +61,36 @@
         .column { flex: 1; min-width: 300px; }
         small { color: #666; display: block; margin-top: -5px; margin-bottom: 10px;}
 
-        /* Chat Completions Specific Styles (New) */
+        /* Chat Completions Specific Styles */
         textarea.raw-payload-textarea { min-height: 250px; font-family: monospace; }
         .message-entry {
             border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; border-radius: 4px;
             background-color: #f9f9f9;
         }
         .message-entry label { font-size: 0.9em; }
-        .message-entry select, .message-entry textarea, .message-entry input[type="text"] { margin-bottom: 5px; }
+        .message-entry select, .message-entry textarea, .message-entry input[type="text"] { margin-bottom: 5px; width: 100% !important; box-sizing: border-box; }
         .remove-message-btn {
             background-color: #dc3545; color: white; border: none; padding: 5px 10px;
             border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px;
         }
         .remove-message-btn:hover { background-color: #c82333; }
         .add-message-btn {
-            background-color: #28a745; color: white; border: none; padding: 8px 12px;
+            background-color: #17a2b8; /* Info blue */ color: white; border: none; padding: 8px 12px;
             border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-bottom: 15px;
         }
-        .add-message-btn:hover { background-color: #218838; }
+        .add-message-btn:hover { background-color: #138496; }
         .optional-params { border-left: 3px solid #007bff; padding-left: 15px; margin-top: 10px; }
+
+        /* Ensure full width for inputs inside columns and optional params for Chat tab */
         #chatCompletions_formFields .columns .column input[type="text"],
         #chatCompletions_formFields .columns .column input[type="number"],
-        #chatCompletions_formFields .columns .column select {
-             width: 100%; /* Override generic width for chat form's columns */
-        }
+        #chatCompletions_formFields .columns .column select,
         #chatCompletions_formFields .optional-params input[type="text"],
         #chatCompletions_formFields .optional-params input[type="number"],
         #chatCompletions_formFields .optional-params select,
         #chatCompletions_formFields .optional-params textarea {
-             width: 100%; /* Override generic width for chat form's optional params */
+             width: 100% !important; /* Override generic width for chat form elements */
+             box-sizing: border-box;
         }
     </style>
 </head>
@@ -119,11 +120,10 @@
         <div id="media-subtabs" class="sub-tab-row">
             <div class="sub-tab-buttons">
                 <button class="sub-tab-button" data-content-id="tabMediaManagement" data-load-group="media">Media Management</button>
-                <!-- Add other media sub-tabs here -->
-            </div>
-            <div class="sub-tab-buttons">
-                <button class="sub-tab-button" data-content-id="tabMediaManagement" data-load-group="media">Media Management</button>
-                <!-- Add other media sub-tabs here -->
+                <button class="sub-tab-button" data-content-id="tabMediaVersioning" data-load-group="media">Versioning</button>
+                <button class="sub-tab-button" data-content-id="tabMediaIngestionPersistence" data-load-group="media">Ingestion (DB)</button>
+                <button class="sub-tab-button" data-content-id="tabMediaProcessingNoDB" data-load-group="media">Processing (No DB)</button>
+                <button class="sub-tab-button" data-content-id="tabWebScraping" data-load-group="media">Web Scraping</button>
             </div>
         </div>
 
@@ -207,7 +207,6 @@
                     tc.classList.remove('active');
                     tc.style.display = 'none';
                 });
-                 // If top tab has no sub-tabs, check if it's 'general' to show 'tabGlobalSettings'
                 if (topTabName === 'general') {
                     const globalSettingsContent = document.getElementById('tabGlobalSettings');
                     if (globalSettingsContent) {
@@ -232,7 +231,7 @@
             if (loadGroup && !loadedContentGroups.has(loadGroup)) {
                 try {
                     console.log(`Loading content for group: ${loadGroup}, target content ID: ${contentId}`);
-                    await loadContentGroup(loadGroup, contentId); // Pass contentId for initialization
+                    await loadContentGroup(loadGroup, contentId);
                     loadedContentGroups.add(loadGroup);
                 } catch (error) {
                     console.error(`Failed to load content for group ${loadGroup}:`, error);
@@ -256,7 +255,6 @@
             if (contentToShow) {
                 contentToShow.classList.add('active');
                 contentToShow.style.display = 'block';
-                 // If this is the chat completions tab, ensure its dynamic elements are (re)initialized
                 if (contentId === 'tabChatCompletions' && typeof initializeChatCompletionsTab === "function") {
                     initializeChatCompletionsTab();
                 }
@@ -281,7 +279,6 @@
             const html = await response.text();
             mainContentArea.insertAdjacentHTML('beforeend', html);
 
-            // After loading content, if it's the chat group and the specific tab, initialize
             if (groupName === 'chat' && targetContentId === 'tabChatCompletions') {
                 if (typeof initializeChatCompletionsTab === "function") {
                      initializeChatCompletionsTab();
@@ -317,16 +314,17 @@
                     <option value="tool" ${role === 'tool' ? 'selected' : ''}>Tool</option>
                 </select>
                 <label for="${prefix}_message_content_${id}">Content:</label>
-                <textarea id="${prefix}_message_content_${id}" rows="3">${content}</textarea>
+                <textarea id="${prefix}_message_content_${id}" rows="3" placeholder="Enter message content...">${content}</textarea>
                 <label for="${prefix}_message_name_${id}">Name (Optional):</label>
-                <input type="text" id="${prefix}_message_name_${id}" placeholder="Participant name">
+                <input type="text" id="${prefix}_message_name_${id}" placeholder="Participant name (e.g., function name for assistant tool_calls)">
                 <div id="${prefix}_message_tool_fields_${id}" style="display: ${role === 'tool' ? 'block' : 'none'};">
-                    <label for="${prefix}_message_tool_call_id_${id}">Tool Call ID (Required for tool role):</label>
-                    <input type="text" id="${prefix}_message_tool_call_id_${id}">
+                    <label for="${prefix}_message_tool_call_id_${id}">Tool Call ID (Required for 'tool' role):</label>
+                    <input type="text" id="${prefix}_message_tool_call_id_${id}" placeholder="ID of the tool call this message is responding to">
                 </div>
                 <button class="remove-message-btn" onclick="removeChatMessage('${prefix}', ${id})">Remove</button>
             `;
             container.appendChild(entryDiv);
+            toggleToolFields(prefix, id); // Ensure correct visibility on add
         }
 
         function toggleToolFields(prefix, id) {
@@ -346,62 +344,59 @@
 
         function buildPayloadFromForm(prefix) {
             const payload = {};
+
             const apiProviderEl = document.getElementById(prefix + '_api_provider');
-            if (apiProviderEl) payload.api_provider = apiProviderEl.value || undefined;
+            if (apiProviderEl && apiProviderEl.value) {
+                payload.api_provider = apiProviderEl.value;
+            }
 
             const modelEl = document.getElementById(prefix + '_model');
-            if (modelEl) payload.model = modelEl.value || undefined;
+            if (modelEl && modelEl.value) {
+                payload.model = modelEl.value;
+            }
 
             const messages = [];
             const messagesContainer = document.getElementById(prefix + '_messagesContainer');
             if (messagesContainer) {
-                const messageEntries = messagesContainer.children;
-                for (let i = 0; i < messageEntries.length; i++) {
-                    const entryDiv = messageEntries[i];
-                    if (!entryDiv.id || !entryDiv.id.startsWith(prefix + '_message_entry_')) continue;
+                Array.from(messagesContainer.children).forEach(entryDiv => {
+                    if (!entryDiv.id || !entryDiv.id.startsWith(prefix + '_message_entry_')) return;
                     const entryId = entryDiv.id.split('_').pop();
-
-                    const roleEl = document.getElementById(`${prefix}_message_role_${entryId}`);
-                    const contentEl = document.getElementById(`${prefix}_message_content_${entryId}`);
+                    const role = document.getElementById(`${prefix}_message_role_${entryId}`).value;
+                    const content = document.getElementById(`${prefix}_message_content_${entryId}`).value;
                     const nameEl = document.getElementById(`${prefix}_message_name_${entryId}`);
-                    if (!roleEl || !contentEl) continue;
+                    const name = nameEl ? (nameEl.value.trim() || undefined) : undefined;
 
-                    const role = roleEl.value;
-                    const contentValue = contentEl.value;
-                    const name = nameEl ? (nameEl.value || undefined) : undefined;
-
-                    const message = { role, content: contentValue };
+                    const message = { role, content };
                     if (name) message.name = name;
+
                     if (role === 'tool') {
                         const toolCallIdEl = document.getElementById(`${prefix}_message_tool_call_id_${entryId}`);
-                        message.tool_call_id = toolCallIdEl ? (toolCallIdEl.value || undefined) : undefined;
-                        if (!message.tool_call_id) {
-                            alert(`Tool Call ID is required for message ${i + 1} with role 'tool'.`);
+                        const toolCallId = toolCallIdEl ? toolCallIdEl.value.trim() : "";
+                        if (!toolCallId) {
+                            alert(`Tool Call ID is required for message with role 'tool'. Please check message entry ${entryId}.`);
                             throw new Error("Missing Tool Call ID for a tool message.");
                         }
+                        message.tool_call_id = toolCallId;
                     }
                     messages.push(message);
-                }
+                });
             }
             payload.messages = messages;
+            if (messages.length === 0 && document.getElementById(prefix + '_useRawJson') && !document.getElementById(prefix + '_useRawJson').checked) {
+                 alert("At least one message is required for chat completions when not using Raw JSON.");
+                 throw new Error("No messages provided.");
+            }
 
             const temperatureEl = document.getElementById(prefix + '_temperature');
-            if (temperatureEl) {
-                const tempVal = temperatureEl.value;
-                if (tempVal !== "") payload.temperature = parseFloat(tempVal); else payload.temperature = undefined;
-            }
+            if (temperatureEl && temperatureEl.value !== "") payload.temperature = parseFloat(temperatureEl.value);
 
             const maxTokensEl = document.getElementById(prefix + '_max_tokens');
-            if (maxTokensEl) {
-                 const maxTokensVal = maxTokensEl.value;
-                if (maxTokensVal !== "") payload.max_tokens = parseInt(maxTokensVal); else payload.max_tokens = undefined;
-            }
+            if (maxTokensEl && maxTokensEl.value !== "") payload.max_tokens = parseInt(maxTokensEl.value);
 
             const streamEl = document.getElementById(prefix + '_stream');
             if (streamEl) payload.stream = streamEl.checked;
 
 
-            // Optional parameters
             const optionalFields = {
                 top_p: { type: 'float', elIdSuffix: '_top_p' },
                 frequency_penalty: { type: 'float', elIdSuffix: '_frequency_penalty' },
@@ -410,14 +405,14 @@
                 topk: { type: 'int', elIdSuffix: '_topk', allowUndefined: true },
                 seed: { type: 'int', elIdSuffix: '_seed', allowNull: true },
                 stop: { type: 'json_or_csv_list', elIdSuffix: '_stop', allowNull: true },
-                logprobs: { type: 'checkbox_to_null', elIdSuffix: '_logprobs', allowNull: true },
+                logprobs: { type: 'checkbox_to_null_if_false', elIdSuffix: '_logprobs' }, // Special: if false, send null or omit based on schema
                 top_logprobs: { type: 'int', elIdSuffix: '_top_logprobs', dependsOn: 'logprobs', allowUndefined: true },
                 response_format: { type: 'select_object', elIdSuffix: '_response_format_type', key: 'type', allowNull: true },
                 tools: { type: 'json', elIdSuffix: '_tools', allowNull: true },
-                tool_choice: { type: 'json_or_string', elIdSuffix: '_tool_choice', allowUndefined: true, validStrings: ["auto", "none", "required"] },
+                tool_choice: { type: 'json_or_string', elIdSuffix: '_tool_choice', allowUndefined: true, validStrings: ["auto", "none", "required"], defaultIfEmpty: "auto" },
                 logit_bias: { type: 'json', elIdSuffix: '_logit_bias', allowNull: true },
-                character_id: { type: 'string', elIdSuffix: '_character_id', allowUndefined: true },
-                prompt_template_name: { type: 'string', elIdSuffix: '_prompt_template_name', allowUndefined: true }
+                character_id: { type: 'string', elIdSuffix: '_character_id', allowNull: true },
+                prompt_template_name: { type: 'string', elIdSuffix: '_prompt_template_name', allowNull: true }
             };
 
             for (const key in optionalFields) {
@@ -426,27 +421,71 @@
                 if (!el) continue;
 
                 if (config.dependsOn && !document.getElementById(prefix + '_' + config.dependsOn)?.checked) {
-                    payload[key] = config.allowNull ? null : (config.allowUndefined ? undefined : payload[key]);
+                    // If dependent field is not checked/active, don't include this field or set to its "empty" state
+                    if (config.allowNull) payload[key] = null;
+                    else if (config.allowUndefined) delete payload[key];
                     continue;
                 }
 
                 let value;
                 switch (config.type) {
-                    case 'float': value = el.value !== "" ? parseFloat(el.value) : (config.allowUndefined ? undefined : (config.allowNull ? null : NaN)); break;
-                    case 'int': value = el.value !== "" ? parseInt(el.value) : (config.allowUndefined ? undefined : (config.allowNull ? null : NaN)); break;
-                    case 'string': value = el.value.trim() !== "" ? el.value.trim() : (config.allowUndefined ? undefined : (config.allowNull ? null : "")); break;
-                    case 'checkbox_to_null': value = el.checked ? true : (config.allowNull ? null : false); break;
+                    case 'float':
+                        value = el.value !== "" ? parseFloat(el.value) : (config.allowUndefined ? undefined : (config.allowNull ? null : NaN));
+                        if (isNaN(value) && el.value !== "" && !config.allowNull && !config.allowUndefined) {
+                             alert(`Invalid float value for ${key}`); throw new Error(`Invalid float for ${key}`);
+                        }
+                        break;
+                    case 'int':
+                        value = el.value !== "" ? parseInt(el.value) : (config.allowUndefined ? undefined : (config.allowNull ? null : NaN));
+                        if (isNaN(value) && el.value !== "" && !config.allowNull && !config.allowUndefined) {
+                             alert(`Invalid integer value for ${key}`); throw new Error(`Invalid int for ${key}`);
+                        }
+                        break;
+                    case 'string':
+                        value = el.value.trim() !== "" ? el.value.trim() : (config.allowUndefined ? undefined : (config.allowNull ? null : ""));
+                        break;
+                    case 'checkbox_to_null_if_false': // For logprobs specifically, based on schema
+                        value = el.checked ? true : (config.allowNull ? null : false);
+                        if (key === 'logprobs' && !el.checked) value = null; // Per schema, logprobs: Optional[bool] = False. If False, send null or omit.
+                                                                            // Sending false if unchecked. Or null if schema needs that for 'False' state.
+                                                                            // ChatCompletionRequest has `logprobs: Optional[bool] = Field(False,...)`.
+                                                                            // So if not checked, it should become False.
+                        if (key === 'logprobs') value = el.checked; // Pydantic default is False, so only send if true.
+                                                                    // If user unchecks, we can omit or send False. Let's send if explicitly set.
+                                                                    // If el.checked is false, value becomes false.
+                        break;
                     case 'json_or_csv_list':
                         if (el.value.trim() !== "") {
-                            try { value = JSON.parse(el.value); }
-                            catch (e) { value = el.value.split(',').map(s => s.trim()).filter(s => s); if(value.length === 0) value = config.allowNull ? null : (config.allowUndefined ? undefined : []);}
+                            let parsed = false;
+                            if (el.value.trim().startsWith('[') && el.value.trim().endsWith(']')) {
+                                try { value = JSON.parse(el.value); parsed = true; }
+                                catch (e) { /* will try csv next if this fails */ }
+                            }
+                            if (!parsed) { // Try CSV or single string
+                                value = el.value.split(',').map(s => s.trim()).filter(s => s);
+                                if (value.length === 0 && el.value.trim().includes(',')) { // " , , " case
+                                     value = config.allowNull ? null : (config.allowUndefined ? undefined : []);
+                                } else if (value.length === 0 && !el.value.trim().includes(',')) { // single empty or whitespace string
+                                    value = el.value.trim() || (config.allowNull ? null : (config.allowUndefined ? undefined : []));
+                                    if(value === "" && !config.allowNull && !config.allowUndefined && !Array.isArray(value)) value = [];
+                                } else if (value.length === 1 && !el.value.trim().includes(',')) { // Single item not intended as list by CSV
+                                    value = el.value.trim();
+                                }
+                            }
                         } else { value = config.allowNull ? null : (config.allowUndefined ? undefined : []); }
                         break;
                     case 'json':
-                        if (el.value.trim() !== "") {
-                            try { value = JSON.parse(el.value); }
-                            catch (e) { alert(`Invalid JSON for ${key}`); throw new Error(`Invalid JSON for ${key}`); }
-                        } else { value = config.allowNull ? null : (config.allowUndefined ? undefined : {}); }
+                        const trimmedJsonValue = el.value.trim();
+                        if (trimmedJsonValue !== "") {
+                            try {
+                                value = JSON.parse(trimmedJsonValue);
+                            } catch (e) {
+                                alert(`Invalid JSON for field '${key}' (element ID: ${el.id}). Attempted to parse: "${trimmedJsonValue}". Error: ${e.message}`);
+                                throw new Error(`Invalid JSON for ${key}`);
+                            }
+                        } else {
+                            value = config.allowNull ? null : (config.allowUndefined ? undefined : {}); // For tools, this sets to null
+                        }
                         break;
                     case 'select_object':
                         value = el.value ? { [config.key]: el.value } : (config.allowNull ? null : (config.allowUndefined ? undefined : {}));
@@ -459,19 +498,25 @@
                                 try { value = JSON.parse(el.value); }
                                 catch (e) { alert(`Invalid value for ${key}. Must be one of ${config.validStrings.join(', ')} or a valid JSON object string.`); throw new Error(`Invalid value for ${key}`); }
                             }
-                        } else { value = config.allowUndefined ? undefined : (config.allowNull ? null : "auto"); }
+                        } else { value = config.defaultIfEmpty !== undefined ? config.defaultIfEmpty : (config.allowUndefined ? undefined : (config.allowNull ? null : "auto")); }
                         break;
                 }
+
                 if (value !== undefined && !(typeof value === 'number' && isNaN(value))) {
                     payload[key] = value;
                 } else if (config.allowNull && value === null) {
                     payload[key] = null;
-                } else if (config.allowUndefined) {
-                    delete payload[key]; // Or payload[key] = undefined;
+                } else if (config.allowUndefined && value === undefined) {
+                    delete payload[key];
                 }
             }
-            // Final cleanup for undefined
+            // Final cleanup for undefined or unwanted defaults for purely optional fields
             for (const key in payload) { if (payload[key] === undefined) { delete payload[key]; } }
+
+            // Specific cleanup for logprobs: if false, server default handles it (False). Only send if true.
+            if (payload.logprobs === false) delete payload.logprobs;
+            if (payload.logprobs === null) delete payload.logprobs; // if checkbox_to_null_if_false resulted in null and we want to omit for default
+
             return payload;
         }
 
@@ -493,7 +538,7 @@
                     rawPayloadTextarea.value = JSON.stringify(currentPayload, null, 2);
                 } catch (e) {
                     console.warn("Could not build payload for raw view:", e.message);
-                    rawPayloadTextarea.value = JSON.stringify({"error_building_payload": e.message, "tip": "Fix form errors or manually edit JSON."}, null, 2);
+                    rawPayloadTextarea.value = JSON.stringify({"error_building_payload": e.message, "tip": "Fix form errors (like missing tool_call_id) or manually edit JSON."}, null, 2);
                 }
             }
         }
@@ -506,23 +551,26 @@
 
             const token = document.getElementById('apiKeyInput').value || "YOUR_API_TOKEN_PLACEHOLDER";
             const baseUrl = document.getElementById('baseUrl').value;
-            let payload;
+            let payloadString;
 
             const useRawJsonCheckbox = document.getElementById(prefix + '_useRawJson');
             if (!useRawJsonCheckbox) { curlEl.textContent = "Error: Raw JSON toggle checkbox not found."; return; }
-            const useRawJson = useRawJsonCheckbox.checked;
 
-            if (useRawJson) {
+            if (useRawJsonCheckbox.checked) {
                 const rawPayloadEl = document.getElementById(prefix + '_payload_raw');
                 if (rawPayloadEl && rawPayloadEl.value.trim() !== "") {
-                     try { payload = JSON.parse(rawPayloadEl.value); }
-                     catch(e) { curlEl.textContent = "Error: Invalid Raw JSON for cURL generation."; return; }
+                     try {
+                        JSON.parse(rawPayloadEl.value); // Validate JSON
+                        payloadString = rawPayloadEl.value;
+                     }
+                     catch(e) { curlEl.textContent = "Error: Invalid Raw JSON for cURL generation. " + e.message; return; }
                 } else {
                      curlEl.textContent = "Error: Raw JSON payload for cURL is empty."; return;
                 }
             } else {
                 try {
-                    payload = buildPayloadFromForm(prefix);
+                    const payloadObject = buildPayloadFromForm(prefix);
+                    payloadString = JSON.stringify(payloadObject, null, 2);
                 } catch (e) {
                      curlEl.textContent = "Error building payload from form for cURL: " + e.message;
                      return;
@@ -533,7 +581,7 @@
 -H "accept: application/json" \\
 -H "Content-Type: application/json" \\
 -H "Token: ${token.replace(/"/g, '\\"')}" \\
--d '${escapeCurlData(JSON.stringify(payload, null, 2))}'`;
+-d '${escapeCurlData(payloadString)}'`;
             curlEl.textContent = curlCommand;
         }
 
@@ -544,17 +592,16 @@
             if (!responseArea) { console.error("Response area not found!"); return; }
 
             responseArea.textContent = 'Sending...';
-            generateChatCompletionsCurl();
+            generateChatCompletionsCurl(); // Generate cURL before making request
 
             let payload;
             const useRawJsonCheckbox = document.getElementById(prefix + '_useRawJson');
-            if (!useRawJsonCheckbox) { responseArea.textContent = "Error: Raw JSON toggle checkbox not found."; return; }
-            const useRawJson = useRawJsonCheckbox.checked;
+             if (!useRawJsonCheckbox) { responseArea.textContent = "Error: Raw JSON toggle checkbox not found."; return; }
 
             const baseUrl = document.getElementById('baseUrl').value;
             const token = document.getElementById('apiKeyInput').value;
 
-            if (useRawJson) {
+            if (useRawJsonCheckbox.checked) {
                 const rawPayloadEl = document.getElementById(prefix + '_payload_raw');
                 if (!rawPayloadEl) { responseArea.textContent = "Error: Raw JSON textarea not found."; return; }
                 try {
@@ -574,7 +621,7 @@
 
             const isStreaming = payload.stream;
             if (isStreaming) {
-                responseArea.textContent = '';
+                responseArea.textContent = ''; // Clear for streaming
             }
 
             try {
@@ -582,41 +629,46 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Accept': 'application/json, text/event-stream', // Accept both
+                        'Accept': 'application/json, text/event-stream',
                         'Token': token
                     },
                     body: JSON.stringify(payload)
                 });
 
                 if (!fetchResponse.ok) {
-                    const errorData = await fetchResponse.json().catch(() => ({ detail: fetchResponse.statusText, status: fetchResponse.status }));
-                    throw new Error(`HTTP error ${fetchResponse.status}: ${JSON.stringify(errorData.detail || errorData)}`);
+                    // Try to parse error as JSON, fallback to text
+                    let errorDetail = fetchResponse.statusText;
+                    try {
+                        const errorData = await fetchResponse.json();
+                        errorDetail = errorData.detail || JSON.stringify(errorData);
+                    } catch (e) { /* ignore, use statusText */ }
+                    throw new Error(`HTTP error ${fetchResponse.status}: ${errorDetail}`);
                 }
 
                 const contentType = fetchResponse.headers.get("content-type");
                 if (isStreaming && contentType && contentType.includes("text/event-stream") && fetchResponse.body) {
                     const reader = fetchResponse.body.getReader();
                     const decoder = new TextDecoder();
-                    let doneReading = false;
-                    let currentBuffer = "";
+                    let buffer = "";
                     let streamHadContent = false;
 
-                    while (!doneReading) {
+                    // eslint-disable-next-line no-constant-condition
+                    while (true) {
                         const { value, done } = await reader.read();
-                        doneReading = done;
-                        currentBuffer += decoder.decode(value, { stream: !doneReading });
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
 
                         let eventEndIndex;
-                        while ((eventEndIndex = currentBuffer.indexOf('\n\n')) >= 0) {
-                            const eventString = currentBuffer.substring(0, eventEndIndex);
-                            currentBuffer = currentBuffer.substring(eventEndIndex + 2);
+                        while ((eventEndIndex = buffer.indexOf('\n\n')) >= 0) {
+                            const eventString = buffer.substring(0, eventEndIndex);
+                            buffer = buffer.substring(eventEndIndex + 2);
 
                             if (eventString.startsWith('data: ')) {
                                 streamHadContent = true;
                                 const dataStr = eventString.substring(6).trim();
                                 if (dataStr === '[DONE]') {
                                     responseArea.textContent += "\nStream finished by [DONE] signal.\n";
-                                    doneReading = true; break;
+                                    return; // Exit after [DONE]
                                 }
                                 try {
                                     const dataJson = JSON.parse(dataStr);
@@ -625,32 +677,41 @@
                                         responseArea.textContent += contentChunk;
                                     } else if (dataJson.choices?.[0]?.finish_reason) {
                                          responseArea.textContent += `\n[Finish Reason: ${dataJson.choices[0].finish_reason}]\n`;
-                                    } else if (Object.keys(dataJson).length > 0) {
+                                    } else if (dataJson.error) {
+                                        responseArea.textContent += `\n[Stream Error: ${JSON.stringify(dataJson.error)}]\n`;
+                                    } else if (Object.keys(dataJson).length > 0) { // Handle other JSON objects
                                          responseArea.textContent += `\n(Stream JSON: ${dataStr})\n`;
                                     }
-                                } catch (e) {
-                                    if (dataStr) {
+                                } catch (e) { // If dataStr is not JSON but not [DONE]
+                                    if (dataStr) { // Avoid logging empty data lines
                                         console.warn('Non-JSON stream data or parse error:', dataStr, e);
                                         responseArea.textContent += `\n(Stream data: ${dataStr})\n`;
                                     }
                                 }
-                            } else if (eventString.trim()) { // Non-data line, could be a comment or empty event
+                            } else if (eventString.trim()) {
                                 console.log("Received non-data line in stream:", eventString);
                             }
-                             responseArea.scrollTop = responseArea.scrollHeight;
+                            responseArea.scrollTop = responseArea.scrollHeight; // Auto-scroll
                         }
-                         if (doneReading) break; // Break outer while if [DONE] was processed
                     }
-                    if (currentBuffer.trim()) {
-                         if (currentBuffer.startsWith('data: ')) {
-                             responseArea.textContent += `\n(Final unprocessed stream data: ${currentBuffer.substring(6).trim()})\n`;
-                         } else if (currentBuffer.trim()){
-                              responseArea.textContent += `\n(Final unprocessed stream buffer: ${currentBuffer.trim()})\n`;
-                         }
+                     // Process any remaining buffer content after the loop (if stream ends without \n\n)
+                    if (buffer.trim()) {
+                        if (buffer.startsWith('data: ')) {
+                            const finalDataStr = buffer.substring(6).trim();
+                            if (finalDataStr === '[DONE]') {
+                                responseArea.textContent += "\nStream finished by [DONE] signal (final buffer).\n";
+                            } else {
+                                responseArea.textContent += `\n(Final unprocessed stream data: ${finalDataStr})\n`;
+                            }
+                        } else {
+                             responseArea.textContent += `\n(Final unprocessed stream buffer: ${buffer.trim()})\n`;
+                        }
                     }
+
                     if (!responseArea.textContent.includes("[DONE]") && !responseArea.textContent.includes("Stream finished")) {
-                        responseArea.textContent += streamHadContent ? "\nStream ended.\n" : "Stream connected, but no data or [DONE] signal received.\n";
+                         responseArea.textContent += streamHadContent ? "\nStream ended.\n" : "Stream connected, but no data or [DONE] signal received.\n";
                     }
+
                 } else { // Non-streaming or non-event-stream response
                     const responseData = await fetchResponse.json();
                     responseArea.textContent = JSON.stringify(responseData, null, 2);
@@ -667,14 +728,23 @@
             const container = document.getElementById(prefix + '_messagesContainer');
             if (container) {
                 container.innerHTML = ''; // Clear existing messages
-                 messageIdCounter[prefix] = 0; // Reset counter
+                messageIdCounter[prefix] = 0; // Reset counter
 
-                addChatMessage(prefix, 'system', 'You are a helpful assistant.');
-                addChatMessage(prefix, 'user', 'Hello! Can you tell me a joke?');
+                addChatMessage(prefix, 'system', 'You are a helpful assistant that provides concise answers.');
+                addChatMessage(prefix, 'user', 'What is the capital of France?');
             } else {
                 console.warn("Messages container not found during chat completions tab initialization.");
             }
 
+            // Set default values for some fields for better UX
+            const tempEl = document.getElementById(prefix + '_temperature');
+            if (tempEl && tempEl.value === "") tempEl.placeholder = "0.7"; // Use placeholder if not overriding a value
+
+            const maxTokensEl = document.getElementById(prefix + '_max_tokens');
+            if (maxTokensEl && maxTokensEl.value === "") maxTokensEl.placeholder = "1024";
+
+            const topPEl = document.getElementById(prefix + '_top_p');
+            if (topPEl && topPEl.value === "") topPEl.placeholder = "1.0";
 
             const useRawJsonCheckbox = document.getElementById(prefix + '_useRawJson');
             if (useRawJsonCheckbox) {
@@ -685,7 +755,7 @@
                         const initialPayload = buildPayloadFromForm(prefix);
                         const rawPayloadTextarea = document.getElementById(prefix + '_payload_raw');
                         if(rawPayloadTextarea) rawPayloadTextarea.value = JSON.stringify(initialPayload, null, 2);
-                    } catch(e) { console.warn("Initial raw payload build failed for chat completions:", e.message); }
+                    } catch(e) { console.warn("Initial raw payload build failed for chat completions during init:", e.message); }
                 }
             } else {
                 console.warn("Raw JSON toggle not found during chat completions tab init.");
@@ -693,10 +763,146 @@
             generateChatCompletionsCurl();
         }
 
-        // Generic makeRequest (if needed for other tabs, can be adapted)
-        // For now, handleChatCompletionsRequest is specific.
-        // If you have the `makeRequest` function from your original HTML, you can keep it for other tabs,
-        // but the `handleChatCompletionsRequest` is now tailored for the new chat form.
+        // Generic makeRequest (example, you might have this already for other tabs)
+        async function makeRequest(endpointId, method, path, bodyType = 'none', queryParams = {}) {
+            const curlEl = document.getElementById(endpointId + '_curl');
+            const responseArea = document.getElementById(endpointId + '_response');
+            if (!curlEl || !responseArea) {
+                console.error(`Missing cURL or response element for ${endpointId}`);
+                return;
+            }
+
+            responseArea.textContent = 'Sending...';
+            const baseUrl = document.getElementById('baseUrl').value;
+            const token = document.getElementById('apiKeyInput').value;
+            let fullPath = path;
+
+            // Replace path parameters
+            const pathParams = path.match(/{(\w+)}/g);
+            if (pathParams) {
+                pathParams.forEach(param => {
+                    const paramName = param.substring(1, param.length - 1);
+                    const inputEl = document.getElementById(endpointId + '_' + paramName);
+                    if (inputEl) {
+                        fullPath = fullPath.replace(param, inputEl.value);
+                    }
+                });
+            }
+
+            let url = `${baseUrl}${fullPath}`;
+            const fetchOptions = {
+                method: method,
+                headers: {
+                    'Accept': 'application/json',
+                    'Token': token
+                }
+            };
+
+            let payloadString = ''; // For cURL command
+            let queryParamsString = ''; // For cURL command and fetch URL
+
+            // Handle query parameters if bodyType is 'query' or 'json_with_query'
+            if (bodyType === 'query' || bodyType === 'json_with_query') {
+                const queryParts = [];
+                const formGroup = document.getElementById(endpointId);
+                 if (formGroup) {
+                    const inputs = formGroup.querySelectorAll('input[type="text"], input[type="number"], input[type="checkbox"], select');
+                    inputs.forEach(input => {
+                        if (input.id && input.id.startsWith(endpointId + '_')) {
+                            if (path.includes(`{${input.id.split('_').pop()}}`)) return;
+                            if (input.id.includes("_payload")) return;
+
+
+                            const paramName = input.id.substring((endpointId + '_').length);
+                            if (input.type === 'checkbox') {
+                                if (input.checked) queryParts.push(`${encodeURIComponent(paramName)}=true`);
+                            } else if (input.value.trim() !== '') {
+                                queryParts.push(`${encodeURIComponent(paramName)}=${encodeURIComponent(input.value)}`);
+                            }
+                        }
+                    });
+                }
+                if (queryParts.length > 0) {
+                    queryParamsString = '?' + queryParts.join('&');
+                    url += queryParamsString;
+                }
+            }
+
+
+            if (method === 'POST' || method === 'PUT') {
+                if (bodyType === 'json' || bodyType === 'json_with_query') {
+                    const payloadEl = document.getElementById(endpointId + '_payload');
+                    if (payloadEl) {
+                        try {
+                            JSON.parse(payloadEl.value);
+                            fetchOptions.body = payloadEl.value;
+                            payloadString = payloadEl.value;
+                        } catch (e) {
+                            responseArea.textContent = 'Error: Invalid JSON payload. ' + e.message;
+                            curlEl.textContent = 'Invalid JSON in payload field.';
+                            return;
+                        }
+                        fetchOptions.headers['Content-Type'] = 'application/json';
+                    }
+                } else if (bodyType === 'form') {
+                    const formData = new FormData();
+                    const formGroup = document.getElementById(endpointId);
+                    if (formGroup) {
+                        const inputs = formGroup.querySelectorAll('input, textarea, select');
+                        inputs.forEach(input => {
+                            if (input.name || (input.id && input.id.startsWith(endpointId + '_'))) {
+                                const key = input.name || input.id.substring((endpointId + '_').length);
+                                if (path.includes(`{${key}}`)) return;
+
+                                if (input.type === 'file') {
+                                    if (input.files.length > 0) {
+                                         Array.from(input.files).forEach(file => formData.append(key, file));
+                                    }
+                                } else if (input.type === 'checkbox') {
+                                    formData.append(key, input.checked.toString()); // Send as string 'true'/'false' for FormData
+                                } else if (input.value !== '' || input.tagName === 'TEXTAREA') {
+                                    formData.append(key, input.value);
+                                }
+                            }
+                        });
+                    }
+                    fetchOptions.body = formData;
+                }
+            }
+
+            // Generate cURL
+            let curlCommand = `curl -X ${method} "${baseUrl}${fullPath}${queryParamsString}" \\\n-H "Accept: application/json" \\\n-H "Token: ${token}"`;
+            if (fetchOptions.headers['Content-Type']) {
+                curlCommand += ` \\\n-H "Content-Type: ${fetchOptions.headers['Content-Type']}"`;
+            }
+            if ((bodyType === 'json' || bodyType === 'json_with_query') && payloadString) {
+                curlCommand += ` \\\n-d '${escapeCurlData(payloadString)}'`;
+            } else if (bodyType === 'form' && fetchOptions.body instanceof FormData) {
+                // For FormData, cURL representation is tricky due to files. This is a simplified version.
+                // It won't correctly show file uploads but will list other form fields.
+                for (let [key, value] of fetchOptions.body.entries()) {
+                    if (value instanceof File) {
+                        curlCommand += ` \\\n-F "${key}=@${value.name}"`;
+                    } else {
+                        curlCommand += ` \\\n-F "${key}=${value}"`;
+                    }
+                }
+            }
+            curlEl.textContent = curlCommand;
+
+            // Make the request
+            try {
+                const res = await fetch(url, fetchOptions);
+                const data = await res.json(); // Assumes JSON response for non-streaming
+                responseArea.textContent = JSON.stringify(data, null, 2);
+                if (!res.ok) {
+                    console.warn(`API request to ${url} failed with status ${res.status}`, data);
+                }
+            } catch (error) {
+                responseArea.textContent = 'Error: ' + error.message;
+                console.error('API request error:', error);
+            }
+        }
 
     </script>
 </body>
