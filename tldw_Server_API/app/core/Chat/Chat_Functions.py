@@ -22,7 +22,6 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHA
 # Local Imports
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError, ChatConfigurationError, ChatAPIError, \
     ChatProviderError, ChatRateLimitError, ChatAuthenticationError
-from tldw_Server_API.app.core.DB_Management.DB_Manager import start_new_conversation, delete_messages_in_conversation, save_message
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError, ConflictError, CharactersRAGDBError
 from tldw_Server_API.app.core.LLM_Calls.LLM_API_Calls import chat_with_openai, chat_with_anthropic, chat_with_cohere, \
     chat_with_groq, chat_with_openrouter, chat_with_deepseek, chat_with_mistral, chat_with_huggingface, chat_with_google
@@ -78,53 +77,58 @@ API_CALL_HANDLERS = {
 # Maps generic chat_api_call param name to provider-specific param name
 PROVIDER_PARAM_MAP = {
     'openai': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
-        'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
-        'maxp': 'maxp', 'model': 'model'
+        'api_key': 'api_key',
+        'messages_payload': 'input_data',
+        'prompt': 'custom_prompt_arg',
+        'temp': 'temp',
+        'system_message': 'system_message',
+        'streaming': 'streaming',
+        'maxp': 'maxp',
+        'model': 'model'
         # Note: OpenAI's chat_with_openai internally handles 'maxp' as 'top_p'
     },
     'anthropic': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
         'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
         'model': 'model', 'topp': 'topp', 'topk': 'topk'
     },
     'cohere': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
         'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
         'model': 'model', 'topp': 'topp', 'topk': 'topk'
     },
     'groq': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
         'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
         'maxp': 'maxp', 'model':'model' # Groq also uses top_p, handled by chat_with_groq
     },
     'openrouter': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
         'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
         'topp': 'top_p', 'topk': 'top_k', 'minp': 'minp', 'model':'model'
     },
     'deepseek': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
         'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
         'topp': 'topp', 'model':'model'
     },
     'mistral': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
         'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
         'topp': 'topp', 'model': 'model'
     },
     'google': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
         'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
         'topp': 'topp', 'topk': 'topk', 'model':'model'
     },
     'huggingface': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
         'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
         'model':'model'
     },
     'llama.cpp': { # Has api_url as a positional argument which needs special handling if not None
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt',
         'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
         'topp': 'top_p', 'topk': 'top_k', 'minp': 'min_p', 'model':'model',
         # 'api_url' is None by default in the original, letting the function use config.
@@ -132,48 +136,48 @@ PROVIDER_PARAM_MAP = {
         # the handler would need to be smarter.
     },
     'kobold': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_input',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_input',
         'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
         'topp': 'top_p', 'topk': 'top_k', 'model':'model'
     },
     'ooba': { # api_url also a consideration like llama.cpp
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt',
         'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
         'topp': 'top_p', 'model':'model'
     },
     'tabbyapi': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_input',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_input',
         'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
         'topp': 'top_p', 'topk': 'top_k', 'minp': 'min_p', 'model':'model'
     },
     'vllm': { # vllm_api_url consideration
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_input',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_input',
         'temp': 'temp', 'system_message': 'system_prompt', 'streaming': 'streaming',
         'topp': 'topp', 'topk': 'topk', 'minp': 'minp', 'model': 'model'
     },
     'local-llm': {
-        'input_data': 'input_data', 'prompt': 'custom_prompt_arg', 'temp': 'temp',
+        'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg', 'temp': 'temp',
         'system_message': 'system_message', 'streaming': 'streaming',
         'topp': 'top_p', 'topk': 'top_k', 'minp': 'min_p', 'model':'model'
         # No api_key for local-llm usually, if there is one, add to chat_api_call args
     },
     'ollama': { # api_url consideration
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt',
         'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
         'topp': 'top_p', 'model': 'model'
     },
     'aphrodite': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt',
         'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
         'topp': 'topp', 'topk': 'topk', 'minp': 'minp', 'model': 'model'
     },
     'custom-openai-api': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
         'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
         'maxp': 'maxp', 'minp':'minp', 'topk':'topk', 'model': 'model'
     },
     'custom-openai-api-2': {
-        'api_key': 'api_key', 'input_data': 'input_data', 'prompt': 'custom_prompt_arg',
+        'api_key': 'api_key', 'messages_payload': 'input_data', 'prompt': 'custom_prompt_arg',
         'temp': 'temp', 'system_message': 'system_message', 'streaming': 'streaming',
         'model': 'model'
         # Does not take maxp, minp, topk per original comments

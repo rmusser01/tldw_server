@@ -31,7 +31,7 @@ class PromptTemplate(BaseModel):
     description: Optional[str] = None
     system_message_template: Optional[str] = None
     user_message_content_template: str = "{message_content}" # Default passthrough
-    assistant_message_content_template: str = "{message_content}" # Default passthrough
+    assistant_message_content_template: Optional[str] = "{message_content}" # Default passthrough
     placeholders: Optional[PromptTemplatePlaceholders] = None
 
 _loaded_templates: Dict[str, PromptTemplate] = {}

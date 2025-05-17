@@ -428,7 +428,8 @@ async def create_chat_completion(
         logger.error(f"Data or configuration validation error in endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"Invalid parameter or internal configuration error: {str(e)}")
-
+    except HTTPException as http_exc:  # Catch HTTPErrors specifically to re-raise them
+        raise http_exc
     # --- Final Catch-All for truly unexpected errors ---
     except Exception as e:
         logger.critical(

@@ -47,20 +47,20 @@ def mock_global_load_and_log_configs():
 
 @pytest.fixture
 def mock_llm_api_call_handlers_for_chat_functions_unit():
-    """
-    Mocks all provider handlers in API_CALL_HANDLERS for unit testing chat_api_call.
-    """
     original_handlers = API_CALL_HANDLERS.copy()
-    mocked_handlers = {}
-    for provider_name in original_handlers.keys():
-        mocked_handlers[provider_name] = MagicMock(name=f"mock_{provider_name}_handler_for_chat_func_test")
+    mocked_handlers_dict = {}
+    for provider_name_key, original_func_ref in original_handlers.items():
+        # Try to get the original function's name for the mock
+        original_func_name = getattr(original_func_ref, '__name__', f"mock_{provider_name_key}_handler")
 
-    # The patch should target where API_CALL_HANDLERS is *defined and used* by chat_api_call.
-    # This is tldw_Server_API.app.core.Chat.Chat_Functions.API_CALL_HANDLERS
-    with patch("tldw_Server_API.app.core.Chat.Chat_Functions.API_CALL_HANDLERS", new=mocked_handlers):
-        yield mocked_handlers
-    # No need to restore manually, patch.dict handles it if it were used,
-    # but direct patch on the imported name is cleaner here.
+        # Create a MagicMock and explicitly set its __name__ attribute
+        # and also pass it to the name argument of MagicMock for its repr.
+        mock_handler = MagicMock(name=f"mock_for_{original_func_name}")
+        mock_handler.__name__ = original_func_name  # Explicitly set it
+        mocked_handlers_dict[provider_name_key] = mock_handler
+
+    with patch("tldw_Server_API.app.core.Chat.Chat_Functions.API_CALL_HANDLERS", new=mocked_handlers_dict):
+        yield mocked_handlers_dict
 
 
 # --- Tests for chat_api_call ---
@@ -343,9 +343,8 @@ def test_chat_function_streaming_passthrough(mock_load_configs, mock_process_inp
 
 # --- Tests for save_chat_history_to_db_wrapper ---
 @pytest.mark.unit
-@patch("tldw_Server_API.app.core.Chat.Chat_Functions.DEFAULT_CHARACTER_NAME",
-       "TestDefaultChar")  # Mock default name if needed
-def test_save_chat_history_new_conversation_default_char(mock_default_char_name):
+@patch("tldw_Server_API.app.core.Chat.Chat_Functions.DEFAULT_CHARACTER_NAME", "TestDefaultChar")
+def test_save_chat_history_new_conversation_default_char(): # Removed mock_default_char_name argument
     mock_db = MagicMock(spec=CharactersRAGDB)
     mock_db.client_id = "unit_test_client"
     mock_db.get_character_card_by_name.return_value = {"id": 99, "name": "TestDefaultChar"}  # For default char lookup

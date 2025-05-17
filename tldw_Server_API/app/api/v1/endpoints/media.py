@@ -69,19 +69,7 @@ from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import (
     get_document_version,
     check_media_exists,
     fetch_keywords_for_media,
-    search_media_db,
-    get_all_content_from_database, # Might be useful for listing
-    # Standalone functions needed for versioning endpoints:
-    # Note: These are now INSTANCE methods in Media_DB_v2:
-    # create_document_version -> db_instance.create_document_version(...)
-    # rollback_to_version -> db_instance.rollback_to_version(...)
-    # soft_delete_document_version -> db_instance.soft_delete_document_version(...)
-    # get_all_document_versions -> Needs replacement logic (likely query DocumentVersions table)
-    # fetch_item_details -> Needs replacement logic
-    # get_full_media_details2 -> Needs replacement logic
-    # get_paginated_files -> Needs replacement logic (likely query Media table with pagination)
-    # check_should_process_by_url -> Needs replacement logic (likely using check_media_exists)
-    # add_media_with_keywords -> db_instance.add_media_with_keywords(...)
+    get_all_content_from_database,
 )
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
 from tldw_Server_API.app.api.v1.schemas.media_response_models import PaginationInfo, MediaListResponse, MediaListItem, \

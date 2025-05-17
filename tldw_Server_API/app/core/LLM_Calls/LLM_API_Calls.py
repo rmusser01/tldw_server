@@ -436,7 +436,33 @@ def chat_with_anthropic(
         else:
             logging.debug("Anthropic: Non-streaming request successful.")
             response_data = response.json()
-            return response_data
+            logging.debug("Anthropic: Non-streaming request successful. Normalizing response.")
+            # response_data is Anthropic's raw response
+            # Example normalization:
+            assistant_content_parts = []
+            if response_data.get("content"):
+                for part in response_data.get("content", []):
+                    if part.get("type") == "text":
+                        assistant_content_parts.append(part.get("text", ""))
+            full_assistant_content = "\n".join(assistant_content_parts).strip()
+
+            finish_reason_map = {"end_turn": "stop", "max_tokens": "length", "tool_use": "tool_calls"}  # Basic mapping
+            openai_finish_reason = finish_reason_map.get(response_data.get("stop_reason"),
+                                                         response_data.get("stop_reason"))
+
+            normalized_response = {
+                "id": response_data.get("id", f"anthropic-{time.time_ns()}"),
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": response_data.get("model", current_model),
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": full_assistant_content},
+                    "finish_reason": openai_finish_reason
+                }],
+                "usage": response_data.get("usage")  # Anthropic usage is already OpenAI-like
+            }
+            return normalized_response
     except (ValueError, KeyError, TypeError) as e:
          logging.error(f"Anthropic: Configuration or data error: {e}", exc_info=True)
          raise ChatBadRequestError(provider="anthropic", message=f"Anthropic config/data error: {e}") from e
@@ -584,38 +610,54 @@ def chat_with_cohere(
         response.raise_for_status()
 
         if current_streaming:
-            logging.debug("Cohere: Streaming response received.")
+            logging.debug("Cohere: Streaming response received. Normalizing to OpenAI SSE.")
 
             def stream_generator():
-                buffer = ""
                 try:
-                    # Cohere's stream events are newline-separated JSON objects.
-                    for chunk in response.iter_content(chunk_size=None, decode_unicode=True):  # Iterate over raw chunks
-                        buffer += chunk
+                    completion_id = f"chatcmpl-cohere-{time.time_ns()}"
+                    created_time = int(time.time())
+                    buffer = ""  # Cohere might send partial JSON lines
+
+                    for chunk_bytes in response.iter_content(chunk_size=None):  # Iterate over raw bytes
+                        if not chunk_bytes: continue
+                        buffer += chunk_bytes.decode('utf-8', errors='replace')
+
                         while '\n' in buffer:
                             line, buffer = buffer.split('\n', 1)
-                            if line.strip():
-                                try:
-                                    event = json.loads(line)
-                                    # Re-wrap into OpenAI-like SSE for consistency if possible
-                                    # Cohere event_types: "stream-start", "text-generation", "stream-end", "search-queries-generation", "search-results", "tool-calls-generation", "tool-calls-chunk", "tool-calls"
-                                    event_type = event.get("event_type")
-                                    is_finished = event.get("is_finished", False)
+                            if not line.strip(): continue
+                            try:
+                                cohere_event = json.loads(line)
+                                event_type = cohere_event.get("event_type")
 
-                                    if event_type == "text-generation" and event.get("text"):
-                                        delta_content = event.get("text")
-                                        yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_content}}]})}\n\n"
-                                    elif event_type == "stream-end" or is_finished:
-                                        # Extract final response if present
-                                        # final_response_data = event.get("response")
-                                        # if final_response_data and final_response_data.get("text"):
-                                        #     yield f"data: {json.dumps({'choices': [{'message': {'role': 'assistant', 'content': final_response_data.get('text')}}]})}\n\n"
-                                        logging.debug(f"Cohere stream ended with event: {event_type}")
-                                        break  # Exit inner loop on stream-end
-                                    # else: # Pass through other event types as-is for now
-                                    # yield f"data: {line}\n\n"
-                                except json.JSONDecodeError:
-                                    logging.warning(f"Cohere: Could not decode JSON line from stream: {line}")
+                                if event_type == "text-generation":
+                                    delta_text = cohere_event.get("text")
+                                    if delta_text:
+                                        sse_chunk = {
+                                            "id": completion_id, "object": "chat.completion.chunk",
+                                            "created": created_time, "model": current_model,
+                                            "choices": [
+                                                {"index": 0, "delta": {"content": delta_text}, "finish_reason": None}]
+                                        }
+                                        yield f"data: {json.dumps(sse_chunk)}\n\n"
+                                elif event_type == "stream-end":
+                                    finish_reason = cohere_event.get("finish_reason", "unknown").lower()
+                                    sse_chunk = {
+                                        "id": completion_id, "object": "chat.completion.chunk",
+                                        "created": created_time, "model": current_model,
+                                        "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}]
+                                    }
+                                    yield f"data: {json.dumps(sse_chunk)}\n\n"
+                                    # No more data after stream-end
+                                    buffer = ""  # Clear buffer as stream is done for this response
+                                    break  # Break from while '\n' in buffer
+                                # You might want to break the outer loop too if cohere_event.get("is_finished")
+                                if cohere_event.get("is_finished"):
+                                    break  # Break from for chunk_bytes loop
+                            except json.JSONDecodeError:
+                                logging.warning(f"Cohere Stream: Could not decode JSON: {line}")
+                        if cohere_event.get("is_finished"):  # Check again after processing potential buffer
+                            break
+
                     yield "data: [DONE]\n\n"
                 except requests.exceptions.ChunkedEncodingError as e:
                     logging.error(f"Cohere: ChunkedEncodingError during stream: {e}", exc_info=True)
@@ -636,7 +678,37 @@ def chat_with_cohere(
         else:
             logging.debug("Cohere: Non-streaming request successful.")
             response_data = response.json()
-            return response_data
+            normalized_response = {
+                "id": response_data.get("generation_id", f"cohere-{time.time_ns()}"),
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": current_model,  # Cohere response might not echo model used in request
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": response_data.get("text", "").strip()},
+                    "finish_reason": response_data.get("finish_reason", "unknown").lower()
+                    # e.g., COMPLETE -> "complete"
+                }],
+                # Cohere provides 'meta': {'billed_units': {'input_tokens': X, 'output_tokens': Y}}
+                # or 'tokens': {'input_tokens': X, 'output_tokens': Y} in new versions
+                "usage": {
+                    "prompt_tokens": response_data.get("meta", {}).get("billed_units", {}).get(
+                        "input_tokens") or response_data.get("tokens", {}).get("input_tokens"),
+                    "completion_tokens": response_data.get("meta", {}).get("billed_units", {}).get(
+                        "output_tokens") or response_data.get("tokens", {}).get("output_tokens"),
+                    "total_tokens": (
+                            (response_data.get("meta", {}).get("billed_units", {}).get("input_tokens",
+                                                                                       0) or response_data.get("tokens",
+                                                                                                               {}).get(
+                                "input_tokens", 0)) +
+                            (response_data.get("meta", {}).get("billed_units", {}).get("output_tokens",
+                                                                                       0) or response_data.get("tokens",
+                                                                                                               {}).get(
+                                "output_tokens", 0))
+                    )
+                }
+            }
+            return normalized_response
     except (ValueError, KeyError, TypeError) as e:
         logging.error(f"Cohere: Configuration or data error: {e}", exc_info=True)
         raise ChatBadRequestError(provider="cohere", message=f"Cohere config/data error: {e}") from e
@@ -1450,9 +1522,38 @@ def chat_with_google(
         else:
             logging.debug("Google Gemini: Non-streaming request successful.")
             response_data = response.json()
-            # Normalize Gemini response to OpenAI-like if needed by callers, or document the raw format.
-            # For now, returning raw.
-            return response_data
+            assistant_content = ""
+            finish_reason = "unknown"
+            if response_data.get("candidates"):
+                candidate = response_data["candidates"][0]
+                if candidate.get("content", {}).get("parts"):
+                    for part in candidate["content"]["parts"]:
+                        assistant_content += part.get("text", "")
+                finish_reason = candidate.get("finishReason", "unknown").lower()
+                if finish_reason == "max_tokens":
+                    finish_reason = "length"
+                elif finish_reason == "stop":
+                    finish_reason = "stop"
+                # Other mappings as needed
+
+            normalized_response = {
+                "id": f"gemini-{time.time_ns()}",  # Google doesn't provide a top-level response ID
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": current_model,  # Google response doesn't echo model
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": assistant_content.strip()},
+                    "finish_reason": finish_reason
+                }],
+                "usage": {  # Map usageMetadata
+                    "prompt_tokens": response_data.get("usageMetadata", {}).get("promptTokenCount"),
+                    "completion_tokens": response_data.get("usageMetadata", {}).get("candidatesTokenCount"),
+                    # Sum if multiple candidates, but usually one
+                    "total_tokens": response_data.get("usageMetadata", {}).get("totalTokenCount")
+                }
+            }
+            return normalized_response
     except (ValueError, KeyError, TypeError) as e:
         logging.error(f"Google Gemini: Configuration or data error: {e}", exc_info=True)
         raise ChatBadRequestError(provider="google", message=f"Google Gemini config/data error: {e}") from e

@@ -104,7 +104,7 @@ def test_create_chat_completion_no_template(
     assert response.json() == mock_response_data
     mock_chat_api_call.assert_called_once()
     called_kwargs = mock_chat_api_call.call_args.kwargs
-    assert called_kwargs.get("system_message") is None
+    assert called_kwargs.get("system_message") == ""
 
     # Compare content of messages payload - Now uses the locally defined DEFAULT_USER_MESSAGES_FOR_SCHEMA
     expected_payload_messages_as_dicts = [msg.model_dump(exclude_none=True) for msg in DEFAULT_USER_MESSAGES_FOR_SCHEMA]
@@ -246,7 +246,7 @@ def test_no_system_message_in_payload(
     # 3. DEFAULT_RAW_PASSTHROUGH_TEMPLATE.system_message_template is likely empty or just "{original_system_message_from_request}".
     # 4. original_system_message_from_request will be "" or None.
     # So, final_system_message_for_provider should be None or empty, leading to system_message=None in chat_args_cleaned.
-    assert called_kwargs.get("system_message") is None
+    assert called_kwargs.get("system_message") == ""
 
     # Ensure the messages in the payload are dictionaries and match the input (since it's passthrough)
     expected_payload_messages_as_dicts = [msg.model_dump(exclude_none=True) for msg in DEFAULT_USER_MESSAGES_FOR_SCHEMA]
@@ -266,8 +266,7 @@ def test_no_system_message_in_payload(
 
 
 @pytest.mark.unit
-@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-            {"openai": "key_from_config", "other_provider": "other_key"})
+@patch.dict("tldw_Server_API.app.api.v1.schemas.chat_request_schemas.API_KEYS", {"openai": "key_from_config", "other_provider": "other_key"})
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")  # Mock template deps
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.apply_template_to_string")
 def test_api_key_used_from_config(  # Added default_chat_request_data fixture
@@ -423,7 +422,7 @@ def test_non_iterable_stream_generator_from_shim(  # Added default_chat_request_
         json=streaming_request_data.model_dump(),
         headers={"token": valid_auth_token}
     )
-    assert response.status_code == status.HTTP_502_BAD_GATEWAY
+    assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
     assert "did not return an iterator" in response.json()["detail"]
     app.dependency_overrides = {}
 

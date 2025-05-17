@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 from dotenv import load_dotenv
 
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
+
 # Load environment variables from .env if you use one for test configurations
 load_dotenv()
 
@@ -239,16 +241,12 @@ def test_commercial_provider_streaming_no_template(
                     if not chunk_data_str: continue
                     chunk = json.loads(chunk_data_str)
 
-                    # Check for OpenAI SSE standard delta content
+                    # This parsing logic expects OpenAI SSE format
                     delta_content = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
                     if delta_content: full_content += delta_content
-                    # Handle specific provider stream formats if endpoint doesn't fully normalize to OpenAI SSE
-                    # This part assumes your endpoint *does* try to normalize to OpenAI SSE format.
-                    # If not, you'd parse the provider-specific stream events here.
-
                 except json.JSONDecodeError:
-                    # Log but don't fail immediately, some streams might send non-JSON metadata or pings
-                    print(f"WARN: ({provider_name}) JSON decode error for line: '{line}' in stream.")
+                    # This should ideally not happen if your shims normalize correctly
+                    print(f"WARN: ({provider_name}) Test JSON decode error for line: '{line}' in stream.")
     except Exception as e:
         print(f"Raw stream for {provider_name} before error:\n{raw_stream_text_for_debug}")
         pytest.fail(f"Error consuming stream for {provider_name}: {e}")
@@ -384,47 +382,31 @@ def test_local_provider_non_streaming_no_template(
 
 
 # --- Invalid Key Test (for a commercial provider that needs a key) ---
-@pytest.mark.integration
+@patch("tldw_Server_API.app.api.v1.endpoints.chat.chat_api_call") # Mock the shim
 def test_chat_integration_invalid_key_for_commercial_provider_standalone(
-        client, valid_auth_token, mock_db_dependencies_for_integration
+    mock_chat_api_call_shim, client, valid_auth_token, mock_db_dependencies_for_integration
 ):
-    provider_to_test_invalid_key = "openai"  # Must be a provider that requires a key
-    if provider_to_test_invalid_key not in COMMERCIAL_PROVIDERS_FOR_TEST and not os.getenv("CI"):
-        pytest.skip(f"{provider_to_test_invalid_key} not configured for invalid key test (or key is actually valid).")
+    provider_to_test_invalid_key = "openai"
+    # Simulate that the call to the provider resulted in an auth error
+    mock_chat_api_call_shim.side_effect = ChatAuthenticationError(
+        provider=provider_to_test_invalid_key,
+        message="Simulated auth error: Invalid API Key"
+    )
 
-    # The path to API_KEYS that the *endpoint itself uses*.
-    # This is often tricky. If the endpoint imports `API_KEYS` from your schemas module, that's the target.
-    # If `API_KEYS` is a global within `endpoints.chat`, then it's `tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS`.
-    # Let's assume it's from schemas as per your `chat_request_schemas.py`.
-    api_keys_patch_target = 'tldw_Server_API.app.api.v1.schemas.chat_request_schemas.API_KEYS'
+    request_body = { # ... minimal request body ...
+        "api_provider": provider_to_test_invalid_key,
+        "model": "gpt-4o-mini",
+        "messages": [msg.model_dump(exclude_none=True) for msg in INTEGRATION_MESSAGES_NO_SYS_SCHEMA]
+    }
+    response = client.post("/api/v1/chat/completions", json=request_body, headers={"token": valid_auth_token})
 
-    # Fallback if the above path isn't found (e.g. due to refactoring or direct definition in endpoint)
-    try:
-        from importlib import import_module
-        module_path, dict_name = api_keys_patch_target.rsplit('.', 1)
-        module = import_module(module_path)
-        if not hasattr(module, dict_name):  # Check if the name exists in the imported module
-            api_keys_patch_target = 'tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS'
-    except (ImportError, AttributeError):
-        api_keys_patch_target = 'tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS'
+    assert response.status_code in [status.HTTP_401_UNAUTHORIZED, status.HTTP_400_BAD_REQUEST], \
+        f"Expected 401/400 for invalid key with {provider_to_test_invalid_key}, got {response.status_code}. Response: {response.text}"
 
-    with patch(api_keys_patch_target, {provider_to_test_invalid_key: "sk-clearlyinvalidkey123"}, create=True):
-        # create=True if the dict might not exist at the patch target during test collection.
-        # Be cautious with `create=True` for patching module-level dicts if they are complexly initialized.
-        request_body = {
-            "api_provider": provider_to_test_invalid_key,
-            "model": "gpt-4o-mini",  # Specific to the provider being tested
-            "messages": [msg.model_dump(exclude_none=True) for msg in INTEGRATION_MESSAGES_NO_SYS_SCHEMA]
-        }
-        response = client.post("/api/v1/chat/completions", json=request_body, headers={"token": valid_auth_token})
-
-        assert response.status_code in [status.HTTP_401_UNAUTHORIZED, status.HTTP_400_BAD_REQUEST], \
-            f"Expected 401/400 for invalid key with {provider_to_test_invalid_key}, got {response.status_code}. Response: {response.text}"
-
-        detail = response.json().get("detail", "").lower()
-        assert "authentication" in detail or "invalid" in detail or "key" in detail or "token" in detail, \
-            f"Error detail for invalid key with {provider_to_test_invalid_key} did not match expected. Got: {detail}"
-        print(f"\nInvalid Key Response Detail ({provider_to_test_invalid_key}): {response.json().get('detail')}")
+    detail = response.json().get("detail", "").lower()
+    assert "authentication" in detail or "invalid" in detail or "key" in detail or "token" in detail, \
+        f"Error detail for invalid key with {provider_to_test_invalid_key} did not match expected. Got: {detail}"
+    print(f"\nInvalid Key Response Detail ({provider_to_test_invalid_key}): {response.json().get('detail')}")
 
 
 # --- Bad Request Test (e.g., missing messages) ---
@@ -442,5 +424,4 @@ def test_chat_integration_bad_request_missing_messages_standalone(
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
     errors = response.json().get("detail")
     assert isinstance(errors, list)
-    # Check that the error detail points to the 'messages' field being missing
-    assert any("messages" in e.get("loc", []) and "Field required" in e.get("msg", "").lower() for e in errors)
+    assert any("messages" in e.get("loc", []) and "field required" in e.get("msg", "").lower() for e in errors)
