@@ -17,6 +17,7 @@ https://github.com/JackHopkins/factorio-learning-environment
 https://github.com/lechmazur
 https://arxiv.org/abs/2503.05244
 https://liveideabench.com/
+https://arxiv.org/abs/2504.12312
 https://arxiv.org/abs/2407.09141
 https://www.lennysnewsletter.com/p/beyond-vibe-checks-a-pms-complete
 https://arxiv.org/abs/2504.03352

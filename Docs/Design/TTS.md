@@ -30,7 +30,10 @@ https://huggingface.co/collections/stepfun-ai/step-audio-67b33accf45735bb21131b0
 https://github.com/mbzuai-oryx/LLMVoX
 https://github.com/abus-aikorea/voice-pro
 https://github.com/rmusser01/LiveBench/tree/llamacpp-api
+https://colab.research.google.com/github/ReisCook/Voice_Extractor_Colab/blob/main/Voice_Extractor_Colab.ipynb
+https://github.com/ReisCook/Voice_Extractor
 https://github.com/santinic/audiblez
+https://github.com/Capsize-Games/airunner
 https://github.com/Lex-au/Vocalis
     https://www.reddit.com/r/LocalLLaMA/comments/1jy1x1b/comment/mmvm73e/
 https://pypi.org/project/pvporcupine/

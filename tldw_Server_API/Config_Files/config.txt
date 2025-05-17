@@ -45,7 +45,7 @@ character_db_path = Databases/chatDB.db
 
 [Chunking]
 # Chunking Defaults
-chunking_method = words
+`chunking_method` = words
 # 'method' Can be 'words' / 'sentences' / 'paragraphs' / 'semantic' / 'tokens'
 chunk_max_size = 400
 chunk_overlap = 200
@@ -206,7 +206,7 @@ groq_api_retry = 3
 groq_api_retry_delay = 1
 #
 huggingface_api_key = <huggingface_api_key>
-huggingface_model = meta-llama/Llama-3.1-70B-Instruct
+huggingface_model = meta-llama/Llama-3.1-8B-Instruct
 huggingface_streaming = True
 huggingface_temperature = 0.7
 huggingface_max_tokens = 4096
@@ -223,7 +223,6 @@ mistral__api_timeout = 90
 mistral_api_retry = 3
 mistral_api_retry_delay = 1
 #
-# <openai_api_key>
 openai_api_key = <openai_api_key>
 openai_model = gpt-4o
 openai_streaming = False

@@ -169,12 +169,11 @@ def load_settings():
 
 def load_comprehensive_config():
     # Get the directory of the current script (Utils.py)
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    logging.info(f"Current directory: {current_dir}")
-
-    # Go up two levels to the project root directory (tldw)
-    project_root = os.path.dirname(os.path.dirname(current_dir))
-    logging.info(f"Project root directory: {project_root}")
+    current_file_path = Path(__file__).resolve()
+    # Assuming Config_Files is at tldw_Server_API/Config_Files
+    project_root = current_file_path.parent.parent.parent.parent  # tldw_Server_API
+    config_path = project_root / 'Config_Files' / 'config.txt'
+    logging.info(f"Config file path: {config_path}")
 
     # Construct the path to the config file
     config_path = os.path.join(project_root, 'Config_Files', 'config.txt')
