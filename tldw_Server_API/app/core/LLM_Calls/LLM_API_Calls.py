@@ -286,16 +286,17 @@ def chat_with_openai(
 
 
 def chat_with_anthropic(
-    model: Optional[str],                 # Mapped from 'model'
-    input_data: List[Dict[str, Any]],     # Mapped from 'input_data' (messages_payload)
-    api_key: Optional[str] = None,        # Mapped from 'api_key'
-    custom_prompt_arg: Optional[str] = None, # Mapped from 'prompt', ignored
-    temp: Optional[float] = None,         # Mapped from 'temp'
-    system_prompt: Optional[str] = None,  # Mapped from 'system_message'
-    streaming: Optional[bool] = None,     # Mapped from 'streaming'
-    topp: Optional[float] = None,         # Mapped from 'topp' (becomes top_p)
-    topk: Optional[int] = None            # Mapped from 'topk'
+        model: Optional[str],  # Mapped from 'model'
+        input_data: List[Dict[str, Any]],  # Mapped from 'input_data' (messages_payload)
+        api_key: Optional[str] = None,  # Mapped from 'api_key'
+        custom_prompt_arg: Optional[str] = None,  # Mapped from 'prompt', ignored
+        temp: Optional[float] = None,  # Mapped from 'temp'
+        system_prompt: Optional[str] = None,  # Mapped from 'system_message'
+        streaming: Optional[bool] = None,  # Mapped from 'streaming'
+        topp: Optional[float] = None,  # Mapped from 'topp' (becomes top_p)
+        topk: Optional[int] = None  # Mapped from 'topk'
 ):
+    # Assuming load_and_log_configs is defined elsewhere
     loaded_config_data = load_and_log_configs()
     anthropic_config = loaded_config_data.get('anthropic_api', {})
 
@@ -306,31 +307,37 @@ def chat_with_anthropic(
         logging.error("Anthropic: API key is missing.")
         raise ChatConfigurationError(provider="anthropic", message="Anthropic API Key is required but not found.")
 
-    log_key = f"{anthropic_api_key[:5]}...{anthropic_api_key[-5:]}" if anthropic_api_key and len(anthropic_api_key) > 9 else "Provided Key"
+    log_key = f"{anthropic_api_key[:5]}...{anthropic_api_key[-5:]}" if anthropic_api_key and len(
+        anthropic_api_key) > 9 else "Provided Key"
     logging.debug(f"Anthropic: Using API Key: {log_key}")
 
-    current_model = model or anthropic_config.get('model', 'claude-3-opus-20240229') # Opus for better multimodal
+    current_model = model or anthropic_config.get('model', 'claude-3-haiku-20240307')  # Adjusted default
     current_temp = temp if temp is not None else float(anthropic_config.get('temperature', 0.7))
-    current_top_p = topp # 'topp' from chat_api_call maps to Anthropic's 'top_p'
-    current_top_k = topk # 'topk' from chat_api_call maps to Anthropic's 'top_k'
+    current_top_p = topp
+    current_top_k = topk
     current_streaming = streaming if streaming is not None else anthropic_config.get('streaming', False)
-    current_system_prompt = system_prompt # Use the mapped 'system_prompt'
-    max_tokens = int(anthropic_config.get('max_tokens_to_sample', 4096)) # Anthropic uses max_tokens_to_sample or max_tokens
+    current_system_prompt = system_prompt
+    max_tokens_config = anthropic_config.get('max_tokens_to_sample', anthropic_config.get('max_tokens', 4096))
+    max_tokens = int(max_tokens_config)
 
-    if isinstance(current_streaming, str): current_streaming = current_streaming.lower() == "true"
-    elif isinstance(current_streaming, int): current_streaming = bool(current_streaming)
+    if isinstance(current_streaming, str):
+        current_streaming = current_streaming.lower() == "true"
+    elif isinstance(current_streaming, int):
+        current_streaming = bool(current_streaming)
     if not isinstance(current_streaming, bool):
-        raise ChatConfigurationError(provider="anthropic", message=f"Invalid type for 'streaming': Expected boolean, got {type(current_streaming).__name__}")
+        raise ChatConfigurationError(provider="anthropic",
+                                     message=f"Invalid type for 'streaming': Expected boolean, got {type(current_streaming).__name__}")
 
-    logging.debug(f"Anthropic: Model: {current_model}, Streaming: {current_streaming}, Temp: {current_temp}, TopP: {current_top_p}, TopK: {current_top_k}")
+    logging.debug(
+        f"Anthropic: Model: {current_model}, Streaming: {current_streaming}, Temp: {current_temp}, TopP: {current_top_p}, TopK: {current_top_k}, MaxTokens: {max_tokens}")
     if custom_prompt_arg:
-        logging.warning("Anthropic: 'custom_prompt_arg' was provided but is generally ignored as prompts are expected to be in 'input_data' (messages_payload).")
+        logging.warning(
+            "Anthropic: 'custom_prompt_arg' was provided but is generally ignored as prompts are expected to be in 'input_data' (messages_payload).")
 
-    # Transform OpenAI messages_payload to Anthropic's format
     anthropic_messages = []
     for msg in input_data:
         role = msg.get("role")
-        content = msg.get("content") # Can be string or list of parts
+        content = msg.get("content")
 
         if role not in ["user", "assistant"]:
             logging.warning(f"Anthropic: Skipping message with unsupported role: {role}")
@@ -346,99 +353,160 @@ def chat_with_anthropic(
                     anthropic_content_parts.append({"type": "text", "text": part.get("text", "")})
                 elif part_type == "image_url":
                     image_url_data = part.get("image_url", {}).get("url", "")
-                    parsed_image = _parse_data_url_for_multimodal(image_url_data)
+                    parsed_image = _parse_data_url_for_multimodal(image_url_data)  # Ensure this helper is defined
                     if parsed_image:
                         mime_type, b64_data = parsed_image
                         anthropic_content_parts.append({
                             "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": mime_type,
-                                "data": b64_data
-                            }
+                            "source": {"type": "base64", "media_type": mime_type, "data": b64_data}
                         })
                     else:
-                        logging.warning(f"Anthropic: Could not parse image_url, skipping image: {image_url_data[:60]}...")
-                        # Optionally add a placeholder text for the unparsed image
-                        # anthropic_content_parts.append({"type": "text", "text": "[Image data unparseable or not provided]"})
+                        logging.warning(
+                            f"Anthropic: Could not parse image_url, skipping image: {str(image_url_data)[:60]}...")
 
         if anthropic_content_parts:
-             anthropic_messages.append({"role": role, "content": anthropic_content_parts})
-        elif role == "user" and not anthropic_content_parts: # User message must have content
-             logging.warning(f"Anthropic: User message has no processable content parts. Adding placeholder.")
-             anthropic_messages.append({"role": role, "content": [{"type": "text", "text": "(User input was empty or only contained unparseable images)"}]})
-
+            anthropic_messages.append({"role": role, "content": anthropic_content_parts})
+        elif role == "user" and not anthropic_content_parts:
+            logging.warning("Anthropic: User message has no processable content parts. Adding placeholder.")
+            anthropic_messages.append({"role": role, "content": [
+                {"type": "text", "text": "(User input was empty or only contained unparseable images)"}]})
 
     if not any(m['role'] == 'user' for m in anthropic_messages):
-        raise ChatBadRequestError(provider="anthropic", message="No valid user messages found after processing for Anthropic.")
+        raise ChatBadRequestError(provider="anthropic",
+                                  message="No valid user messages found after processing for Anthropic.")
 
     headers = {
         'x-api-key': anthropic_api_key,
-        'anthropic-version': '2023-06-01',
+        'anthropic-version': '2023-06-01',  # Or newer like "2024-05-16" for newer features if needed
         'Content-Type': 'application/json'
     }
     data = {
         "model": current_model,
-        "max_tokens": max_tokens, # Use max_tokens (new name)
+        "max_tokens": max_tokens,
         "messages": anthropic_messages,
         "stream": current_streaming,
     }
     if current_temp is not None: data["temperature"] = current_temp
     if current_top_p is not None: data["top_p"] = current_top_p
     if current_top_k is not None: data["top_k"] = current_top_k
-    if current_system_prompt: data["system"] = current_system_prompt # Anthropic's 'system' parameter
+    if current_system_prompt: data["system"] = current_system_prompt
 
-
-    # --- Execute Request ---
     api_url = 'https://api.anthropic.com/v1/messages'
     try:
-        # Configure retry strategy
         retry_count = int(anthropic_config.get('api_retries', 3))
         retry_delay = float(anthropic_config.get('api_retry_delay', 1))
-        retry_strategy = Retry(
-            total=retry_count,
-            backoff_factor=retry_delay,
-            status_forcelist=[429, 500, 502, 503, 504], # Retry on these statuses
-            allowed_methods=["POST"]
-        )
+        retry_strategy = Retry(total=retry_count, backoff_factor=retry_delay,
+                               status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["POST"])
         adapter = HTTPAdapter(max_retries=retry_strategy)
 
         with requests.Session() as session:
             session.mount("https://", adapter)
-            session.mount("http://", adapter)
-            response = session.post(api_url, headers=headers, json=data, stream=streaming, timeout=60)
-
-            response.raise_for_status() # Check status AFTER potential retries
+            response = session.post(api_url, headers=headers, json=data, stream=current_streaming,
+                                    timeout=180)  # Increased timeout
+            response.raise_for_status()
 
         if current_streaming:
-            logging.debug("Anthropic: Streaming response received.")
+            logging.debug("Anthropic: Streaming response received. Normalizing to OpenAI SSE.")
+
             def stream_generator():
+                completion_id = f"chatcmpl-anthropic-{time.time_ns()}"
+                created_time = int(time.time())
+
+                event_name = None
+                data_buffer = []
+
                 try:
-                    for line in response.iter_lines(decode_unicode=True):
-                        if line and line.strip():
-                            yield line + "\n\n" # Anthropic SSE format is lines like event: message_delta\ndata: {...}
-                    # Anthropic stream ends when connection closes for message_stop event or error.
-                    # Sending [DONE] is good for client compatibility.
+                    for line_bytes in response.iter_lines():  # iter_lines gives bytes
+                        line = line_bytes.decode('utf-8').strip()
+
+                        if not line:  # Empty line signifies end of an event
+                            if event_name and data_buffer:
+                                data_str = "".join(data_buffer)
+                                try:
+                                    anthropic_event = json.loads(data_str)
+
+                                    # Process event based on event_name
+                                    delta_content = None
+                                    finish_reason = None
+
+                                    if event_name == "content_block_delta":
+                                        if anthropic_event.get("type") == "content_block_delta":
+                                            delta = anthropic_event.get("delta", {})
+                                            if delta.get("type") == "text_delta":
+                                                delta_content = delta.get("text")
+                                    elif event_name == "message_delta":  # Contains usage and stop_reason
+                                        stop_reason = anthropic_event.get("delta", {}).get("stop_reason")
+                                        if stop_reason:
+                                            finish_reason_map = {"end_turn": "stop", "max_tokens_reached": "length",
+                                                                 "stop_sequence": "stop", "tool_use": "tool_calls"}
+                                            finish_reason = finish_reason_map.get(stop_reason, stop_reason)
+                                    # Other events like message_start, content_block_start, content_block_stop, message_stop
+                                    # can be used for more granular control or logging if needed.
+
+                                    if delta_content:
+                                        sse_chunk = {
+                                            "id": completion_id, "object": "chat.completion.chunk",
+                                            "created": created_time, "model": current_model,
+                                            "choices": [{"index": 0, "delta": {"content": delta_content},
+                                                         "finish_reason": None}]
+                                        }
+                                        yield f"data: {json.dumps(sse_chunk)}\n\n"
+
+                                    if finish_reason:
+                                        sse_chunk = {
+                                            "id": completion_id, "object": "chat.completion.chunk",
+                                            "created": created_time, "model": current_model,
+                                            "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}]
+                                        }
+                                        yield f"data: {json.dumps(sse_chunk)}\n\n"
+
+                                except json.JSONDecodeError:
+                                    logging.warning(
+                                        f"Anthropic Stream: Could not decode JSON for event '{event_name}': {data_str}")
+
+                            event_name = None
+                            data_buffer = []
+                            continue
+
+                        if line.startswith("event:"):
+                            event_name = line[len("event:"):].strip()
+                        elif line.startswith("data:"):
+                            data_buffer.append(line[len("data:"):].strip())
+
+                    # After loop, process any remaining buffered event (if stream ends abruptly)
+                    if event_name and data_buffer:
+                        data_str = "".join(data_buffer)
+                        try:
+                            anthropic_event = json.loads(data_str)
+                            if event_name == "message_stop":  # Typically the actual end
+                                pass  # No new content, but could log
+                        except json.JSONDecodeError:
+                            logging.warning(
+                                f"Anthropic Stream: Could not decode JSON for final event '{event_name}': {data_str}")
+
                     yield "data: [DONE]\n\n"
                 except requests.exceptions.ChunkedEncodingError as e:
                     logging.error(f"Anthropic: ChunkedEncodingError during stream: {e}", exc_info=True)
-                    error_payload = json.dumps({"error": {"message": f"Stream connection error: {str(e)}", "type": "stream_error"}})
+                    error_payload = json.dumps(
+                        {"error": {"message": f"Stream connection error: {str(e)}", "type": "stream_error"}})
                     yield f"data: {error_payload}\n\n"
                     yield "data: [DONE]\n\n"
                 except Exception as e:
                     logging.error(f"Anthropic: Error during stream iteration: {e}", exc_info=True)
-                    error_payload = json.dumps({"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
+                    error_payload = json.dumps(
+                        {"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
                     yield f"data: {error_payload}\n\n"
                     yield "data: [DONE]\n\n"
                 finally:
-                    response.close()
+                    if response:
+                        response.close()
+
             return stream_generator()
         else:
+            # ... (non-streaming logic remains the same) ...
             logging.debug("Anthropic: Non-streaming request successful.")
             response_data = response.json()
             logging.debug("Anthropic: Non-streaming request successful. Normalizing response.")
-            # response_data is Anthropic's raw response
-            # Example normalization:
             assistant_content_parts = []
             if response_data.get("content"):
                 for part in response_data.get("content", []):
@@ -446,7 +514,8 @@ def chat_with_anthropic(
                         assistant_content_parts.append(part.get("text", ""))
             full_assistant_content = "\n".join(assistant_content_parts).strip()
 
-            finish_reason_map = {"end_turn": "stop", "max_tokens": "length", "tool_use": "tool_calls"}  # Basic mapping
+            finish_reason_map = {"end_turn": "stop", "max_tokens": "length", "max_tokens_reached": "length",
+                                 "stop_sequence": "stop", "tool_use": "tool_calls"}
             openai_finish_reason = finish_reason_map.get(response_data.get("stop_reason"),
                                                          response_data.get("stop_reason"))
 
@@ -455,29 +524,46 @@ def chat_with_anthropic(
                 "object": "chat.completion",
                 "created": int(time.time()),
                 "model": response_data.get("model", current_model),
-                "choices": [{
-                    "index": 0,
-                    "message": {"role": "assistant", "content": full_assistant_content},
-                    "finish_reason": openai_finish_reason
-                }],
-                "usage": response_data.get("usage")  # Anthropic usage is already OpenAI-like
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": full_assistant_content},
+                             "finish_reason": openai_finish_reason}],
+                "usage": response_data.get("usage")
             }
             return normalized_response
+
+    except requests.exceptions.HTTPError as e:
+        status_code = e.response.status_code
+        error_text = e.response.text
+        if status_code == 401:
+            raise ChatAuthenticationError(provider="anthropic",
+                                          message=f"Authentication failed. Detail: {error_text[:200]}") from e
+        elif status_code == 429:
+            raise ChatRateLimitError(provider="anthropic",
+                                     message=f"Rate limit exceeded. Detail: {error_text[:200]}") from e
+        elif 400 <= status_code < 500:
+            raise ChatBadRequestError(provider="anthropic",
+                                      message=f"Bad request (Status {status_code}). Detail: {error_text[:200]}") from e
+        else:  # 5xx or other
+            raise ChatProviderError(provider="anthropic",
+                                    message=f"API error (Status {status_code}). Detail: {error_text[:200]}",
+                                    status_code=status_code) from e
+    except requests.exceptions.RequestException as e:  # Catch network errors like ConnectionError, Timeout
+        raise ChatProviderError(provider="anthropic", message=f"Network error: {str(e)}",
+                                status_code=504) from e  # 504 Gateway Timeout
     except (ValueError, KeyError, TypeError) as e:
-         logging.error(f"Anthropic: Configuration or data error: {e}", exc_info=True)
-         raise ChatBadRequestError(provider="anthropic", message=f"Anthropic config/data error: {e}") from e
+        logging.error(f"Anthropic: Configuration or data error: {e}", exc_info=True)
+        raise ChatBadRequestError(provider="anthropic", message=f"Anthropic config/data error: {e}") from e
 
 
 def chat_with_cohere(
-        model: Optional[str],  # Mapped from 'model'
-        input_data: List[Dict[str, Any]],  # Mapped from 'input_data' (messages_payload)
-        api_key: Optional[str] = None,  # Mapped from 'api_key'
-        custom_prompt_arg: Optional[str] = None,  # Mapped from 'prompt', ignored
-        temp: Optional[float] = None,  # Mapped from 'temp'
-        system_prompt: Optional[str] = None,  # Mapped from 'system_message' (becomes preamble)
-        streaming: Optional[bool] = None,  # Mapped from 'streaming'
-        topp: Optional[float] = None,  # Mapped from 'topp' (becomes 'p')
-        topk: Optional[int] = None  # Mapped from 'topk' (becomes 'k')
+        model: Optional[str],
+        input_data: List[Dict[str, Any]],
+        api_key: Optional[str] = None,
+        custom_prompt_arg: Optional[str] = None,
+        temp: Optional[float] = None,
+        system_prompt: Optional[str] = None,
+        streaming: Optional[bool] = None,
+        topp: Optional[float] = None,
+        topk: Optional[int] = None
 ):
     loaded_config_data = load_and_log_configs()
     cohere_config = loaded_config_data.get('cohere_api', {})
@@ -493,10 +579,10 @@ def chat_with_cohere(
 
     current_model = model or cohere_config.get('model', 'command-r')
     current_temp = temp if temp is not None else float(cohere_config.get('temperature', 0.3))
-    current_p = topp  # 'topp' from chat_api_call maps to Cohere's 'p'
-    current_k = topk  # 'topk' from chat_api_call maps to Cohere's 'k'
+    current_p = topp
+    current_k = topk
     current_streaming = streaming if streaming is not None else cohere_config.get('streaming', False)
-    current_preamble = system_prompt  # 'system_prompt' from chat_api_call maps to Cohere's 'preamble'
+    current_preamble = system_prompt
 
     if isinstance(current_streaming, str):
         current_streaming = current_streaming.lower() == "true"
@@ -509,21 +595,14 @@ def chat_with_cohere(
     logging.debug(
         f"Cohere: Model: {current_model}, Streaming: {current_streaming}, Temp: {current_temp}, P: {current_p}, K: {current_k}")
     if custom_prompt_arg:
-        logging.warning(
-            "Cohere: 'custom_prompt_arg' was provided but is generally ignored as prompts are expected to be in 'input_data' (messages_payload).")
+        logging.warning("Cohere: 'custom_prompt_arg' was provided but is generally ignored.")
 
-    # Transform OpenAI messages_payload to Cohere's format
-    # Cohere wants current message separate from history.
-    # For now, Cohere chat will be text-only from this adapter. Multimodal for Cohere usually involves 'connectors' or document inputs.
     chat_history = []
     user_message_text = ""
-
     processed_messages_count = 0
     for i, msg in enumerate(input_data):
         role = msg.get("role")
         content = msg.get("content")
-
-        # Extract text from content (string or list of parts)
         current_msg_text_parts = []
         if isinstance(content, str):
             current_msg_text_parts.append(content)
@@ -534,67 +613,52 @@ def chat_with_cohere(
                     current_msg_text_parts.append(part.get("text", ""))
                 elif part.get("type") == "image_url":
                     has_image = True
-            if has_image:
-                logging.warning(
-                    f"Cohere: Message part {i} contained an image, which will be ignored for Cohere chat API via this adapter. Only text parts are used.")
-
+            if has_image: logging.warning(f"Cohere: Message {i} contained an image; ignored.")
         full_text_for_msg = "\n".join(current_msg_text_parts).strip()
 
-        if not full_text_for_msg and role == "user":  # User message must have text
-            if i == len(input_data) - 1:  # If it's the last (current) user message
-                full_text_for_msg = "(User input was empty or only contained images)"
-                logging.warning("Cohere: Current user message is empty after filtering for text. Sending placeholder.")
-            else:  # Empty historical message
-                logging.warning(
-                    f"Cohere: Historical message at index {i} (role: {role}) is empty after filtering for text. Skipping.")
+        if not full_text_for_msg and role == "user":
+            if i == len(input_data) - 1:
+                full_text_for_msg = "(User input empty/unparseable)"
+                logging.warning("Cohere: Current user message empty. Sending placeholder.")
+            else:
+                logging.warning(f"Cohere: Historical message {i} (role: {role}) empty. Skipping.")
                 continue
-
-        if i == len(input_data) - 1 and role == "user":  # Last message, if user, is the current 'message'
+        if i == len(input_data) - 1 and role == "user":
             user_message_text = full_text_for_msg
         elif role == "user":
             chat_history.append({"role": "USER", "message": full_text_for_msg})
         elif role == "assistant":
             chat_history.append({"role": "CHATBOT", "message": full_text_for_msg})
         else:
-            logging.warning(f"Cohere: Skipping message with unsupported role for history: {role}")
-
+            logging.warning(f"Cohere: Skipping message with role: {role}")
         processed_messages_count += 1
 
-    if not user_message_text and processed_messages_count > 0:  # If the last message was not a user message or was empty
-        # This case should be rare if chat() always adds a user message.
-        # If input_data ends with assistant message, what is the current "user_message"?
-        # Cohere API requires a "message" parameter.
+    if not user_message_text and not chat_history:
+        user_message_text = "(No input provided)"
+    elif not user_message_text and chat_history:  # If history exists but current message isn't user (e.g. ends with assistant)
         logging.warning(
-            "Cohere: No current user message found at the end of input_data. Using placeholder or last history user message if any.")
-        # Fallback: if chat history has a user message, could re-use last one? This is complex.
-        # For now, if last message isn't user, this will likely fail Cohere's validation unless history itself is empty
-        # and we send a dummy user_message_text.
-        if not chat_history and not user_message_text:  # Absolutely no input
-            user_message_text = "(No input provided)"
+            "Cohere: No current user message text, but history exists. This might lead to unexpected Cohere behavior or error.")
+        # Cohere's API requires a "message" field. If it's empty and history is not, it might work, or might error.
+        # Sending a placeholder if critical, or let API handle it. For now, let it be empty.
 
-    headers = {
-        'accept': 'application/json',
-        'content-type': 'application/json',
-        'Authorization': f'Bearer {cohere_api_key}'
-    }
-    data = {
-        "model": current_model,
-        "message": user_message_text,  # Current user turn
-        # "stream": current_streaming, # Cohere uses a query param for streaming in /v1/chat
-        # Parameters for generation:
-        "temperature": current_temp,
-    }
+    headers = {'accept': 'application/json', 'content-type': 'application/json',
+               'Authorization': f'Bearer {cohere_api_key}'}
+    data = {"model": current_model, "message": user_message_text, "temperature": current_temp}
     if chat_history: data["chat_history"] = chat_history
-    if current_preamble: data["preamble"] = current_preamble  # System prompt
+    if current_preamble: data["preamble"] = current_preamble
     if current_p is not None: data["p"] = current_p
     if current_k is not None: data["k"] = current_k
 
-    # Connectors for RAG (example, if you want to extend)
-    # connectors = [{"id": "web-search"}]
-    # data["connectors"] = connectors
-
+    # Cohere's /v1/chat uses a query param for streaming, not a body param.
+    # The SDK might abstract this, but with raw requests, it's a query param.
+    # The provided code uses a query param: api_url + stream_param_suffix
     api_url = 'https://api.cohere.com/v1/chat'
-    stream_param_suffix = "?stream=true" if current_streaming else ""
+    # For Cohere's newer /v2/chat which might be preferred and uses "stream": True in body:
+    # api_url = 'https://api.cohere.com/v2/chat'
+    # data["stream"] = current_streaming # If using /v2/chat
+
+    stream_param_suffix = "?stream=true" if current_streaming else ""  # For /v1/chat
+    # If using /v2/chat, remove stream_param_suffix and use data["stream"] = current_streaming
 
     try:
         retry_count = int(cohere_config.get('api_retries', 3))
@@ -606,109 +670,174 @@ def chat_with_cohere(
             session.mount("https://", adapter)
             response = session.post(api_url + stream_param_suffix, headers=headers, json=data, stream=current_streaming,
                                     timeout=180)
-
         response.raise_for_status()
 
         if current_streaming:
             logging.debug("Cohere: Streaming response received. Normalizing to OpenAI SSE.")
 
             def stream_generator():
-                try:
-                    completion_id = f"chatcmpl-cohere-{time.time_ns()}"
-                    created_time = int(time.time())
-                    buffer = ""  # Cohere might send partial JSON lines
+                completion_id = f"chatcmpl-cohere-{time.time_ns()}"
+                created_time = int(time.time())
+                buffer = ""
 
-                    for chunk_bytes in response.iter_content(chunk_size=None):  # Iterate over raw bytes
+                # Keep track of whether stream-end has been processed to avoid sending [DONE] prematurely
+                # if the stream closes before Cohere sends a "stream-end" event with is_finished: true
+                stream_truly_finished_by_cohere = False
+
+                try:
+                    for chunk_bytes in response.iter_content(chunk_size=None):
                         if not chunk_bytes: continue
                         buffer += chunk_bytes.decode('utf-8', errors='replace')
 
+                        # Process complete lines from the buffer
                         while '\n' in buffer:
                             line, buffer = buffer.split('\n', 1)
-                            if not line.strip(): continue
+                            if not line.strip(): continue  # Skip empty lines
+
                             try:
                                 cohere_event = json.loads(line)
-                                event_type = cohere_event.get("event_type")
+                                event_type = cohere_event.get("event_type")  # For v2 API /chat
+                                # For v1 /chat with stream=true, events are different:
+                                # e.g. "text-generation", "stream-end"
 
-                                if event_type == "text-generation":
+                                delta_text = None
+                                finish_reason_str = None
+                                is_finished_event = cohere_event.get("is_finished", False)  # Common in v1
+
+                                if event_type == "text-generation" or (
+                                        not event_type and "text" in cohere_event):  # v1 or general text event
                                     delta_text = cohere_event.get("text")
-                                    if delta_text:
-                                        sse_chunk = {
-                                            "id": completion_id, "object": "chat.completion.chunk",
-                                            "created": created_time, "model": current_model,
-                                            "choices": [
-                                                {"index": 0, "delta": {"content": delta_text}, "finish_reason": None}]
-                                        }
-                                        yield f"data: {json.dumps(sse_chunk)}\n\n"
-                                elif event_type == "stream-end":
-                                    finish_reason = cohere_event.get("finish_reason", "unknown").lower()
+                                elif event_type == "stream-end":  # v1 or v2
+                                    finish_reason_str = cohere_event.get("finish_reason", "UNKNOWN").lower()
+                                    is_finished_event = True  # stream-end implies finished
+                                    stream_truly_finished_by_cohere = True
+                                # Add other Cohere event types here as needed (e.g., citation generation, tool calls)
+
+                                if delta_text:
                                     sse_chunk = {
                                         "id": completion_id, "object": "chat.completion.chunk",
                                         "created": created_time, "model": current_model,
-                                        "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}]
+                                        "choices": [
+                                            {"index": 0, "delta": {"content": delta_text}, "finish_reason": None}]
                                     }
                                     yield f"data: {json.dumps(sse_chunk)}\n\n"
-                                    # No more data after stream-end
-                                    buffer = ""  # Clear buffer as stream is done for this response
-                                    break  # Break from while '\n' in buffer
-                                # You might want to break the outer loop too if cohere_event.get("is_finished")
-                                if cohere_event.get("is_finished"):
-                                    break  # Break from for chunk_bytes loop
+
+                                if finish_reason_str:
+                                    sse_chunk = {
+                                        "id": completion_id, "object": "chat.completion.chunk",
+                                        "created": created_time, "model": current_model,
+                                        "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason_str}]
+                                    }
+                                    yield f"data: {json.dumps(sse_chunk)}\n\n"
+
+                                if is_finished_event:  # Break from inner while if Cohere explicitly says it's done
+                                    stream_truly_finished_by_cohere = True
+                                    break
                             except json.JSONDecodeError:
-                                logging.warning(f"Cohere Stream: Could not decode JSON: {line}")
-                        if cohere_event.get("is_finished"):  # Check again after processing potential buffer
+                                logging.warning(f"Cohere Stream: Could not decode JSON from line: '{line}'")
+
+                        if stream_truly_finished_by_cohere:  # Break from outer for loop if stream ended
                             break
+
+                    # Process any remaining data in the buffer (e.g. if stream cut off without newline)
+                    if buffer.strip() and not stream_truly_finished_by_cohere:
+                        try:
+                            cohere_event = json.loads(buffer.strip())
+                            # Repeat parsing logic for the last bit if necessary
+                            if cohere_event.get("event_type") == "text-generation" or (
+                                    not cohere_event.get("event_type") and "text" in cohere_event):
+                                delta_text = cohere_event.get("text")
+                                if delta_text:
+                                    sse_chunk = {
+                                        "id": completion_id, "object": "chat.completion.chunk",
+                                        "created": created_time, "model": current_model,
+                                        "choices": [
+                                            {"index": 0, "delta": {"content": delta_text}, "finish_reason": None}]
+                                    }
+                                    yield f"data: {json.dumps(sse_chunk)}\n\n"
+                            # No finish reason expected here unless it's a stream-end event
+                        except json.JSONDecodeError:
+                            logging.warning(
+                                f"Cohere Stream: Could not decode JSON from final buffer: '{buffer.strip()}'")
 
                     yield "data: [DONE]\n\n"
                 except requests.exceptions.ChunkedEncodingError as e:
                     logging.error(f"Cohere: ChunkedEncodingError during stream: {e}", exc_info=True)
                     error_payload = json.dumps(
                         {"error": {"message": f"Stream connection error: {str(e)}", "type": "stream_error"}})
-                    yield f"data: {error_payload}\n\n"
+                    yield f"data: {error_payload}\n\n";
                     yield "data: [DONE]\n\n"
                 except Exception as e:
                     logging.error(f"Cohere: Error during stream iteration: {e}", exc_info=True)
                     error_payload = json.dumps(
                         {"error": {"message": f"Stream iteration error: {str(e)}", "type": "stream_error"}})
-                    yield f"data: {error_payload}\n\n"
+                    yield f"data: {error_payload}\n\n";
                     yield "data: [DONE]\n\n"
                 finally:
-                    response.close()
+                    if response:
+                        response.close()
 
             return stream_generator()
         else:
+            # ... (non-streaming logic remains largely the same) ...
             logging.debug("Cohere: Non-streaming request successful.")
             response_data = response.json()
+
+            # Normalize Cohere's non-streaming response to OpenAI's format
+            finish_reason_map = {
+                "COMPLETE": "stop", "MAX_TOKENS": "length", "ERROR_LIMIT": "length",
+                "ERROR_TOXIC": "content_filter", "ERROR": "error", "USER_CANCEL": "stop",
+                "TOOL_ERROR": "tool_calls"  # Or map more specifically if needed
+            }
+            cohere_finish_reason = response_data.get("finish_reason", "UNKNOWN")
+            openai_finish_reason = finish_reason_map.get(cohere_finish_reason, cohere_finish_reason.lower())
+
+            # Token details might be in 'meta' or 'tokens' depending on API version/setup
+            usage_info = response_data.get("meta", {}).get("billed_units", {})
+            if not usage_info:  # Fallback for newer API versions potentially
+                usage_info = response_data.get("tokens", {})
+
+            prompt_tokens = usage_info.get("input_tokens")
+            completion_tokens = usage_info.get("output_tokens")
+            total_tokens = None
+            if prompt_tokens is not None and completion_tokens is not None:
+                total_tokens = prompt_tokens + completion_tokens
+
             normalized_response = {
                 "id": response_data.get("generation_id", f"cohere-{time.time_ns()}"),
                 "object": "chat.completion",
                 "created": int(time.time()),
-                "model": current_model,  # Cohere response might not echo model used in request
+                "model": current_model,
                 "choices": [{
                     "index": 0,
                     "message": {"role": "assistant", "content": response_data.get("text", "").strip()},
-                    "finish_reason": response_data.get("finish_reason", "unknown").lower()
-                    # e.g., COMPLETE -> "complete"
+                    "finish_reason": openai_finish_reason
                 }],
-                # Cohere provides 'meta': {'billed_units': {'input_tokens': X, 'output_tokens': Y}}
-                # or 'tokens': {'input_tokens': X, 'output_tokens': Y} in new versions
                 "usage": {
-                    "prompt_tokens": response_data.get("meta", {}).get("billed_units", {}).get(
-                        "input_tokens") or response_data.get("tokens", {}).get("input_tokens"),
-                    "completion_tokens": response_data.get("meta", {}).get("billed_units", {}).get(
-                        "output_tokens") or response_data.get("tokens", {}).get("output_tokens"),
-                    "total_tokens": (
-                            (response_data.get("meta", {}).get("billed_units", {}).get("input_tokens",
-                                                                                       0) or response_data.get("tokens",
-                                                                                                               {}).get(
-                                "input_tokens", 0)) +
-                            (response_data.get("meta", {}).get("billed_units", {}).get("output_tokens",
-                                                                                       0) or response_data.get("tokens",
-                                                                                                               {}).get(
-                                "output_tokens", 0))
-                    )
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens
                 }
             }
             return normalized_response
+    except requests.exceptions.HTTPError as e:
+        status_code = e.response.status_code
+        error_text = e.response.text
+        if status_code == 401:
+            raise ChatAuthenticationError(provider="cohere",
+                                          message=f"Authentication failed. Detail: {error_text[:200]}") from e
+        elif status_code == 429:
+            raise ChatRateLimitError(provider="cohere",
+                                     message=f"Rate limit exceeded. Detail: {error_text[:200]}") from e
+        elif 400 <= status_code < 500:
+            raise ChatBadRequestError(provider="cohere",
+                                      message=f"Bad request (Status {status_code}). Detail: {error_text[:200]}") from e
+        else:  # 5xx or other
+            raise ChatProviderError(provider="cohere",
+                                    message=f"API error (Status {status_code}). Detail: {error_text[:200]}",
+                                    status_code=status_code) from e
+    except requests.exceptions.RequestException as e:
+        raise ChatProviderError(provider="cohere", message=f"Network error: {str(e)}", status_code=504) from e
     except (ValueError, KeyError, TypeError) as e:
         logging.error(f"Cohere: Configuration or data error: {e}", exc_info=True)
         raise ChatBadRequestError(provider="cohere", message=f"Cohere config/data error: {e}") from e
