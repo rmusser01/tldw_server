@@ -14,7 +14,6 @@ import os
 import re
 from typing import Dict, Callable, List, Any
 
-import gradio as gr
 from tenacity import (
     RetryError,
     Retrying,
@@ -23,6 +22,9 @@ from tenacity import (
     stop_after_attempt,
     wait_random_exponential,
 )
+
+from tldw_Server_API.app.core.Chat.Chat_Functions import chat_api_call
+
 #from tldw_Server_API.app.core.Chat.Chat_Functions import (
 #    chat_api_call
 #)
@@ -256,32 +258,6 @@ def run_geval(transcript: str, summary: str, api_key: str, api_name: str = None,
     """
 
     return formatted_result
-
-
-def create_geval_tab():
-    with gr.Tab("G-Eval", id="g-eval"):
-        gr.Markdown("# G-Eval Summarization Evaluation")
-        with gr.Row():
-            with gr.Column():
-                document_input = gr.Textbox(label="Source Document", lines=10)
-                summary_input = gr.Textbox(label="Summary", lines=5)
-                api_name_input = gr.Dropdown(
-                    choices=["OpenAI", "Anthropic", "Cohere", "Groq", "OpenRouter", "DeepSeek", "HuggingFace", "Mistral", "Llama.cpp", "Kobold", "Ooba", "Tabbyapi", "VLLM", "Local-LLM", "Ollama"],
-                    label="Select API"
-                )
-                api_key_input = gr.Textbox(label="API Key (if required)", type="password")
-                save_value = gr.Checkbox(label="Save Results to a JSON file(geval_results.json)")
-                evaluate_button = gr.Button("Evaluate Summary")
-            with gr.Column():
-                output = gr.Textbox(label="Evaluation Results", lines=10)
-
-        evaluate_button.click(
-            fn=run_geval,
-            inputs=[document_input, summary_input, api_name_input, api_key_input, save_value],
-            outputs=output
-        )
-
-    return document_input, summary_input, api_name_input, api_key_input, evaluate_button, output
 
 
 def parse_output(output: str, max: float) -> float:

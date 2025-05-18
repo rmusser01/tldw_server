@@ -31,6 +31,16 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install -r tldw_Server_API/requirements.txt
           pip check
+      - name: Test ChaChaNotesDB with pytest
+        run: |
+          pwd
+          cd ./tldw_Server_API/tests/ChaChaNotesDB/
+          pytest -s test_media_versions.py
+      - name: Test ChromaDB with pytest
+        run: |
+          pwd
+          cd ./tldw_Server_API/tests/ChromaDB/
+          pytest -s test_chromadb.py
       - name: Test Media Versioning Functions/Endpoints with pytest
         run: |
           pwd
