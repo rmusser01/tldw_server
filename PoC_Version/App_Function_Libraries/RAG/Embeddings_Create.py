@@ -264,7 +264,7 @@ def create_embeddings_batch(texts: List[str],
     start_time = time.time()
 
     try:
-        if provider.lower() == 'huggingface':
+        if provider == 'huggingface' or "Huggingface" in provider:
             if model not in embedding_models:
                 if model == "dunzhang/stella_en_400M_v5":
                     embedding_models[model] = ONNXEmbedder(model, model_dir, timeout_seconds)
