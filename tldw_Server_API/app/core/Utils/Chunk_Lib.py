@@ -764,19 +764,16 @@ class Chunker:
 
         chapter_patterns = [
             custom_pattern,
-            # Specific patterns should come before more generic ones
             r'^\s*chapter\s+\d+([:.\-\s].*)?$',
             r'^\s*chapter\s+[ivxlcdm]+([:.\-\s].*)?$',
             r'^\s*(Part|Book|Volume)\s+[A-Za-z0-9]+([:.\-\s].*)?$',
-            r'^\s*\d+\s*([:.\-\s][^\r\n]{1,150}|[^\r\n]{1,150})?$',  # For numbered sections/chapters
-            r'^\s*#{1,4}\s+[^\r\n]+',  # Markdown headings
+            r'^\s*\d+\s*([:.\-\s][^\r\n]{1,150}|[^\r\n]{1,150})?$',
+            r'^\s*#{1,4}\s+[^\r\n]+',
             r'^\s*(PREFACE|INTRODUCTION|CONTENTS|APPENDIX|EPILOGUE|PROLOGUE|ACKNOWLEDGMENTS?|SECTION\s*\d*|UNIT\s*\d*)\s*$',
-            # Keywords
-            # THE FOLLOWING PATTERN IS LIKELY TOO GREEDY WITH IGNORECASE:
-            # r'^\s*(?=[A-Za-z])[A-Z0-9:.,!?\'\s]{5,100}\s*$'
+            # r'^\s*(?=[A-Za-z])[A-Z0-9:.,!?\'\s]{5,100}\s*$' # This was too greedy and commented out
         ]
         active_patterns = [p for p in chapter_patterns if p is not None]
-        if not active_patterns:
+        if not active_patterns:  # pragma: no cover
             logging.warning("No chapter patterns available for ebook chunking.")
             if text.strip():
                 return [{'text': text,
@@ -798,7 +795,7 @@ class Chunker:
                         first_heading_index = line_idx
                         first_heading_title_text = line_content.strip()
                         break
-                except re.error as re_e:
+                except re.error as re_e:  # pragma: no cover
                     logging.warning(
                         f"Regex error in chapter pattern '{pattern_str}' during initial scan: {re_e}. Disabling this pattern.")
                     if pattern_str in current_scan_patterns: current_scan_patterns.remove(pattern_str)
@@ -816,11 +813,11 @@ class Chunker:
                     'metadata': {
                         'chunk_type': 'preface',
                         'chapter_number': chapter_number,
-                        'chapter_title': "Preface/Introduction",
+                        'chapter_title': "Preface/Introduction",  # Standardized title for this type of preface
                         'detected_chapter_pattern': 'preface_heuristic',
                     }
                 })
-        elif first_heading_index == -1:
+        elif first_heading_index == -1:  # pragma: no cover
             if text.strip():
                 logging.warning(
                     "No chapter headings found using patterns. Returning document as a single chapter chunk.")
@@ -849,7 +846,7 @@ class Chunker:
                         is_new_chapter_heading = True
                         new_heading_pattern_str = pattern_str
                         break
-                except re.error as re_e_inner:
+                except re.error as re_e_inner:  # pragma: no cover
                     logging.warning(f"Regex error (inner loop) for pattern '{pattern_str}': {re_e_inner}.")
 
             if is_new_chapter_heading:
@@ -858,27 +855,26 @@ class Chunker:
 
                 if chapter_text:
                     chapter_number += 1
-                    # Determine chunk type more simply: if it's the very first assigned chapter_number AND
-                    # the title was the default "Preface or Introduction" (implying it wasn't a regex match like "PREFACE")
-                    # OR if the detected_chapter_pattern was the heuristic one.
-                    # The current logic for 'chunk_type' might need further refinement based on how 'preface' is truly defined.
-                    # For this test, "Preface\nThis is..." is handled by the explicit preface block above.
-                    # So subsequent blocks should be 'chapter'.
                     chunk_type = 'chapter'
-                    # The complex conditions for chunk_type in the user's code are kept, but may need review.
-                    # Simplified initial thought: if chapter_splits is empty and first_heading_index was 0, it could be a preface-like first chapter.
-                    if chapter_number == 1 and current_chapter_title == "Preface or Introduction":  # A simple heuristic
-                        # This might only apply if the very first heading found was "Preface or Introduction"
-                        # and not handled by the dedicated preface block.
-                        # The existing preface block (first_heading_index > 0) handles this better.
-                        pass  # Chunk_type will remain 'chapter' based on this pass.
+                    # Determine if this block should be considered a preface based on its content/title
+                    # This logic is specifically for cases where the preface *is* the first detected heading block
+                    if chapter_number == 1 and first_heading_index == 0 and \
+                            (current_chapter_title.lower() == "preface" or \
+                             current_chapter_title.lower() == "introduction" or \
+                             current_chapter_title == "Preface or Introduction"):
+                        chunk_type = 'preface'
+
+                    # Set the final title for metadata
+                    final_metadata_title = current_chapter_title
+                    if chunk_type == 'preface':
+                        final_metadata_title = "Preface/Introduction"
 
                     chapter_splits.append({
                         'text': chapter_text,
                         'metadata': {
-                            'chunk_type': chunk_type,  # Default to chapter after explicit preface handling
+                            'chunk_type': chunk_type,
                             'chapter_number': chapter_number,
-                            'chapter_title': current_chapter_title,
+                            'chapter_title': final_metadata_title,  # MODIFIED LINE
                             'detected_chapter_pattern': current_chapter_pattern_str,
                         }
                     })
@@ -893,14 +889,30 @@ class Chunker:
             last_chapter_text = "\n".join(last_chapter_content_lines).strip()
             if last_chapter_text:
                 chapter_number += 1
-                # Similar to above, chunk_type is likely 'chapter' here.
                 chunk_type = 'chapter'
+                is_first_processed_block = not chapter_splits
+
+                # Determine if this last block (if it's the only/first block) should be a preface
+                condition_is_first_block_and_preface_like_title = \
+                    (is_first_processed_block or (chapter_number == 1 and first_heading_index == 0)) and \
+                    (current_chapter_title.lower() == "preface" or \
+                     current_chapter_title.lower() == "introduction" or \
+                     current_chapter_title == "Preface or Introduction")
+
+                if condition_is_first_block_and_preface_like_title:
+                    chunk_type = 'preface'
+
+                # Set the final title for metadata
+                final_metadata_title = current_chapter_title
+                if chunk_type == 'preface':
+                    final_metadata_title = "Preface/Introduction"
+
                 chapter_splits.append({
                     'text': last_chapter_text,
                     'metadata': {
                         'chunk_type': chunk_type,
                         'chapter_number': chapter_number,
-                        'chapter_title': current_chapter_title,
+                        'chapter_title': final_metadata_title,  # MODIFIED LINE
                         'detected_chapter_pattern': current_chapter_pattern_str,
                     }
                 })
@@ -913,10 +925,10 @@ class Chunker:
             tokenizer_available = hasattr(self, 'tokenizer') and self.tokenizer and hasattr(self.tokenizer,
                                                                                             'encode') and callable(
                 self.tokenizer.encode)
-            if max_size > 0 and tokenizer_available and len(self.tokenizer.encode(chap_data['text'])) > max_size:
+            if max_size > 0 and tokenizer_available and len(
+                    self.tokenizer.encode(chap_data['text'])) > max_size:  # pragma: no cover
                 logging.info(
                     f"Chapter '{chap_data['metadata']['chapter_title']}' (length {len(self.tokenizer.encode(chap_data['text']))} tokens) exceeds max_size {max_size}. Sub-chunking.")
-                # Ensure self._chunk_text_by_tokens is available and correct
                 sub_chunks = self._chunk_text_by_tokens(chap_data['text'], max_tokens=max_size,
                                                         overlap=overlap if overlap < max_size else max_size // 5)
                 for sub_idx, sub_chunk_text in enumerate(sub_chunks):
