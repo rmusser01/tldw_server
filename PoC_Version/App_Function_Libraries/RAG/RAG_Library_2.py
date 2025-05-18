@@ -50,6 +50,54 @@ search_functions = {
     "Character Cards": search_character_cards
 }
 
+# --- Adapter functions for search_functions ---
+def _adapt_search_media_db(query_str: str, top_k_val: int, relevant_ids_list_str: Optional[List[str]]):
+    ids_int = [int(id_val) for id_val in relevant_ids_list_str] if relevant_ids_list_str else None
+    # The call below depends on the actual signature of search_media_db_manager
+    # or a more direct SQLite_DB.search_media_db.
+    # Assuming search_media_db_manager or its underlying call expects these:
+    # This is a placeholder, you'll need to adjust based on how search_media_db_manager
+    # actually passes relevant_ids to the SQLite layer and what it expects for 'keywords'
+    # and 'search_fields'.
+    from PoC_Version.App_Function_Libraries.DB.SQLite_DB import search_media_db as sqlite_search_media_db # Direct import for clarity
+    return sqlite_search_media_db(
+        search_query=query_str,
+        search_fields=['title', 'content', 'summary', 'transcription'], # Example default fields
+        keywords=None, # This is for FTS keywords, not filtering by ID
+        page=1,
+        results_per_page=top_k_val
+    )
+
+def _adapt_search_rag_chat(query_str: str, top_k_val: int, relevant_ids_list_str: Optional[List[str]]):
+    # Assuming search_rag_chat expects relevant_ids as List[str] or List[int]
+    # Convert if necessary, or ensure search_rag_chat handles List[str]
+    ids_for_db = [int(id_val) for id_val in relevant_ids_list_str] if relevant_ids_list_str else None
+    return search_rag_chat(query=query_str) # Pass converted IDs
+
+def _adapt_search_rag_notes(query_str: str, top_k_val: int, relevant_ids_list_str: Optional[List[str]]):
+    ids_for_db = [int(id_val) for id_val in relevant_ids_list_str] if relevant_ids_list_str else None
+    return search_rag_notes(query=query_str)
+
+def _adapt_search_character_chat(query_str: str, top_k_val: int, relevant_ids_list_str: Optional[List[str]]):
+    # search_character_chat needs character_id. The generic perform_full_text_search doesn't have it.
+    # This adapter might need to search across all characters or handle character_id=None.
+    logging.warning("Character Chat search from generic FTS might not be specific to a character.")
+    ids_for_db = [int(id_val) for id_val in relevant_ids_list_str] if relevant_ids_list_str else None
+    return search_character_chat(query=query_str) # Assuming character_id=None means search all
+
+def _adapt_search_character_cards(query_str: str, top_k_val: int, relevant_ids_list_str: Optional[List[str]]):
+    ids_for_db = [int(id_val) for id_val in relevant_ids_list_str] if relevant_ids_list_str else None
+    return search_character_cards(query=query_str)
+
+# Updated search_functions dictionary
+search_functions = {
+    "Media DB": _adapt_search_media_db,
+    "RAG Chat": _adapt_search_rag_chat,
+    "RAG Notes": _adapt_search_rag_notes,
+    "Character Chat": _adapt_search_character_chat,
+    "Character Cards": _adapt_search_character_cards
+}
+
 # RAG pipeline function for web scraping
 # def rag_web_scraping_pipeline(url: str, query: str, api_choice=None) -> Dict[str, Any]:
 #     try:

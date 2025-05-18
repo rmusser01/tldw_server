@@ -34,7 +34,7 @@ config = load_and_log_configs()
 def test_fetch_relevant_media_ids_success(mocker):
     """Test fetch_relevant_media_ids with valid keywords."""
     mock_fetch_keywords_for_media = mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.fetch_keywords_for_media',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.fetch_keywords_for_media',
         side_effect=lambda keyword: {
             'geography': [1, 2],
             'cities': [2, 3, 4]
@@ -63,11 +63,11 @@ def test_perform_full_text_search_with_relevant_ids(mocker):
     search_functions_mock = {
         "Media DB": search_function_mock
     }
-    mocker.patch('App_Function_Libraries.RAG.RAG_Library_2.search_functions', search_functions_mock)
+    mocker.patch('PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.search_functions', search_functions_mock)
 
     query = 'full text query'
     database_type = "Media DB"
-    relevant_ids = "1,3"
+    relevant_ids = ["1", "3"]
 
     result = perform_full_text_search(query, database_type, relevant_ids)
 
@@ -91,11 +91,11 @@ def test_perform_full_text_search_without_relevant_ids(mocker):
     search_functions_mock = {
         "Media DB": search_function_mock
     }
-    mocker.patch('App_Function_Libraries.RAG.RAG_Library_2.search_functions', search_functions_mock)
+    mocker.patch('PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.search_functions', search_functions_mock)
 
     query = 'full text query'
     database_type = "Media DB"
-    relevant_ids = ""
+    relevant_ids = []
 
     result = perform_full_text_search(query, database_type, relevant_ids)
 
@@ -109,27 +109,27 @@ def test_perform_full_text_search_without_relevant_ids(mocker):
 @pytest.mark.parametrize("database_type,search_module_path,mock_response", [
     (
         "Media DB",
-        'App_Function_Libraries.DB.SQLite_DB.search_media_db',
+        'PoC_Version.App_Function_Libraries.DB.SQLite_DB.search_media_db',
         [{'content': 'Media DB document 1', 'metadata': {'media_id': '1'}}]
     ),
     (
         "RAG Chat",
-        'App_Function_Libraries.DB.RAG_QA_Chat_DB.search_rag_chat',
+        'PoC_Version.App_Function_Libraries.DB.RAG_QA_Chat_DB.search_rag_chat',
         [{'content': 'RAG Chat document 1', 'metadata': {'media_id': '1'}}]
     ),
     (
         "RAG Notes",
-        'App_Function_Libraries.DB.RAG_QA_Chat_DB.search_rag_notes',
+        'PoC_Version.App_Function_Libraries.DB.RAG_QA_Chat_DB.search_rag_notes',
         [{'content': 'RAG Notes document 1', 'metadata': {'media_id': '1'}}]
     ),
     (
         "Character Chat",
-        'App_Function_Libraries.DB.Character_Chat_DB.search_character_chat',
+        'PoC_Version.App_Function_Libraries.DB.Character_Chat_DB.search_character_chat',
         [{'content': 'Character Chat document 1', 'metadata': {'media_id': '1'}}]
     ),
     (
         "Character Cards",
-        'App_Function_Libraries.DB.Character_Chat_DB.search_character_cards',
+        'PoC_Version.App_Function_Libraries.DB.Character_Chat_DB.search_character_cards',
         [{'content': 'Character Cards document 1', 'metadata': {'media_id': '1'}}]
     )
 ])
@@ -139,10 +139,10 @@ def test_perform_full_text_search_different_db_types(mocker, database_type, sear
     search_functions_mock = {
         database_type: lambda query, fts_top_k, relevant_ids: mock_response
     }
-    mocker.patch('App_Function_Libraries.RAG.RAG_Library_2.search_functions', search_functions_mock)
+    mocker.patch('PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.search_functions', search_functions_mock)
 
     query = 'test query'
-    relevant_ids = "1"
+    relevant_ids = ["1"]
 
     result = perform_full_text_search(query, database_type, relevant_ids)
     assert result == mock_response
@@ -157,8 +157,8 @@ def test_enhanced_rag_pipeline_success(mocker):
     mocker.patch('App_Function_Libraries.RAG.RAG_Library_2.config', mock_config)
 
     # Mock metric functions
-    mocker.patch('App_Function_Libraries.RAG.RAG_Library_2.log_counter')
-    mocker.patch('App_Function_Libraries.RAG.RAG_Library_2.log_histogram')
+    mocker.patch('PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.log_counter')
+    mocker.patch('PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.log_histogram')
 
     # Mock search results
     mock_search_results = [
@@ -168,19 +168,19 @@ def test_enhanced_rag_pipeline_success(mocker):
 
     # Mock core functions
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.fetch_relevant_media_ids',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.fetch_relevant_media_ids',
         return_value=[1, 2, 3]
     )
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.perform_vector_search',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.perform_vector_search',
         return_value=mock_search_results
     )
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.perform_full_text_search',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.perform_full_text_search',
         return_value=mock_search_results
     )
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.generate_answer',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.generate_answer',
         return_value="Generated answer"
     )
 
@@ -190,7 +190,7 @@ def test_enhanced_rag_pipeline_success(mocker):
         {'id': 0, 'score': 0.9},
         {'id': 1, 'score': 0.8}
     ]
-    mocker.patch('App_Function_Libraries.RAG.RAG_Library_2.Ranker', return_value=mock_ranker)
+    mocker.patch('PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.Ranker', return_value=mock_ranker)
 
     result = enhanced_rag_pipeline(
         query='test query',
@@ -214,28 +214,28 @@ def test_enhanced_rag_pipeline_error_handling(mocker):
     # Mock config
     mock_config = configparser.ConfigParser()
     mock_config['Embeddings'] = {'provider': 'openai'}
-    mocker.patch('App_Function_Libraries.RAG.RAG_Library_2.config', mock_config)
+    mocker.patch('PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.config', mock_config)
 
     # Mock metric functions
-    mock_log_counter = mocker.patch('App_Function_Libraries.RAG.RAG_Library_2.log_counter')
+    mock_log_counter = mocker.patch('PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.log_counter')
 
     # Mock generate_answer to raise an exception (this will trigger the main try-catch)
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.generate_answer',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.generate_answer',
         side_effect=Exception("Critical error in answer generation")
     )
 
     # Other mocks return empty results
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.perform_vector_search',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.perform_vector_search',
         return_value=[]
     )
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.perform_full_text_search',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.perform_full_text_search',
         return_value=[]
     )
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.fetch_relevant_media_ids',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.fetch_relevant_media_ids',
         return_value=[]
     )
 
@@ -269,23 +269,23 @@ def test_enhanced_rag_pipeline_critical_error(mocker):
     # Mock config
     mock_config = configparser.ConfigParser()
     mock_config['Embeddings'] = {'provider': 'openai'}
-    mocker.patch('App_Function_Libraries.RAG.RAG_Library_2.config', mock_config)
+    mocker.patch('PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.config', mock_config)
 
     # Mock ALL functions to raise exceptions
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.fetch_relevant_media_ids',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.fetch_relevant_media_ids',
         side_effect=Exception("Database connection failed")
     )
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.perform_vector_search',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.perform_vector_search',
         side_effect=Exception("Vector search failed")
     )
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.perform_full_text_search',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.perform_full_text_search',
         side_effect=Exception("Full-text search failed")
     )
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.generate_answer',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.generate_answer',
         side_effect=Exception("Answer generation failed")
     )
 
@@ -314,19 +314,19 @@ def test_generate_answer_success(mocker):
     }
 
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.load_and_log_configs',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.load_and_log_configs',
         return_value=test_config
     )
 
     # Mock the summarization function
     mock_summarize = mocker.patch(
-        'App_Function_Libraries.Summarization.Summarization_General_Lib.summarize_with_openai',
+        'PoC_Version.App_Function_Libraries.Summarization.Summarization_General_Lib.summarize_with_openai',
         return_value='API response'
     )
 
     # Patch the function that uses the dictionary file
     mock_parse = mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.parse_user_dict_markdown_file',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.parse_user_dict_markdown_file',
         return_value={'some_key': 'some_value'}
     )
 
@@ -345,11 +345,11 @@ def test_enhanced_rag_pipeline_no_results(mocker):
 
     # Mock empty search results
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.fetch_relevant_media_ids',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.fetch_relevant_media_ids',
         return_value=[]
     )
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.perform_vector_search',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.perform_vector_search',
         return_value=[]
     )
     mocker.patch(
@@ -357,7 +357,7 @@ def test_enhanced_rag_pipeline_no_results(mocker):
         return_value=[]
     )
     mocker.patch(
-        'App_Function_Libraries.RAG.RAG_Library_2.generate_answer',
+        'PoC_Version.App_Function_Libraries.RAG.RAG_Library_2.generate_answer',
         return_value="Fallback answer"
     )
 
