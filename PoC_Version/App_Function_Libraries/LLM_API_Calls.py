@@ -38,7 +38,7 @@ from PoC_Version.App_Function_Libraries.Utils.Utils import load_and_log_configs,
 #
 
 # FIXME: Update to include full arguments
-
+loaded_config_data = load_and_log_configs()
 def extract_text_from_segments(segments):
     logging.debug(f"Segments received: {segments}")
     logging.debug(f"Type of segments: {type(segments)}")
