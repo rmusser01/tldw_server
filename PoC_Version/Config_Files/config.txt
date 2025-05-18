@@ -4,9 +4,9 @@ processing_choice = cuda
 [Chat-Dictionaries]
 enable_chat_dictionaries = True
 post_gen_replacement = False
-post_gen_replacement_dict = ./Helper_Scripts/Chat_Dictionaries/Post_Gen_Replacements.md
-chat_dictionary_chat_prompts = ./Helper_Scripts/Chat_Dictionaries/Chat_Prompts.md
-chat_dictionary_RAG_prompts = ./Helper_Scripts/Chat_Dictionaries/RAG_Prompts.md
+post_gen_replacement_dict = ./PoC_Version/Helper_Scripts/Chat_Dictionaries/Post_Gen_Replacements.md
+chat_dictionary_chat_prompts = ./PoC_Version/Helper_Scripts/Chat_Dictionaries/Chat_Prompts.md
+chat_dictionary_RAG_prompts = ./PoC_Version/Helper_Scripts/Chat_Dictionaries/RAG_Prompts.md
 strategy = character_lore_first
 max_tokens = 1000
 default_rag_prompt = simplified_promptflow_RAG_system_prompt
