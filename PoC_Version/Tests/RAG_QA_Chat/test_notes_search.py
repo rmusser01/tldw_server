@@ -9,10 +9,10 @@ from unittest.mock import MagicMock
 import sqlite3
 from datetime import datetime
 #
-# Adjust the path to the parent directory of App_Function_Libraries
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
-sys.path.append(parent_dir)
+# # Adjust the path to the parent directory of App_Function_Libraries
+# current_dir = os.path.dirname(os.path.abspath(__file__))
+# parent_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
+# sys.path.append(parent_dir)
 #
 # Local Imports
 from PoC_Version.App_Function_Libraries.DB.DB_Manager import search_notes_titles

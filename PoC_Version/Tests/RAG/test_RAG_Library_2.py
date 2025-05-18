@@ -8,10 +8,10 @@ import pytest
 #from unittest.mock import MagicMock
 #from typing import List, Dict, Any
 
-# Adjust the path to the parent directory of App_Function_Libraries
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
-sys.path.append(parent_dir)
+# # Adjust the path to the parent directory of App_Function_Libraries
+# current_dir = os.path.dirname(os.path.abspath(__file__))
+# parent_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
+# sys.path.append(parent_dir)
 
 # Import the functions to test
 from PoC_Version.App_Function_Libraries.Utils.Utils import load_and_log_configs

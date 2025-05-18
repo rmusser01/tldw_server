@@ -1298,6 +1298,408 @@ def load_chat_history_from_file_and_save_to_db(
 
     return None, None
 
+
+#################################################################################
+# Conversation and Message Management Functions
+#################################################################################
+# NOTE: This section focuses on Conversation and Message entities.
+# Functionality for managing Keywords, KeywordCollections, Notes, and their
+# links to conversations can be added here if required, by wrapping
+# the corresponding ChaChaDB methods.
+
+# --- Conversation Management ---
+
+def start_new_chat_session(
+    db: CharactersRAGDB,
+    character_id: int,
+    user_name: Optional[str], # For placeholder replacement in initial/retrieved messages
+    custom_title: Optional[str] = None
+) -> Tuple[Optional[str], Optional[Dict[str, Any]], Optional[List[Tuple[Optional[str], Optional[str]]]], Optional[Image.Image]]:
+    """
+    Starts a new chat session with a character.
+    1. Loads the character data (raw for first message, processed for UI) and image.
+    2. Creates a new conversation record in the database.
+    3. Adds the character's original (raw) first message to this new conversation in the DB.
+    4. Returns the new conversation ID, processed character data for UI,
+       initial UI history (with processed first message), and character image.
+    """
+    logger.debug(f"Starting new chat session for character_id: {character_id}, user: {user_name}")
+
+    original_first_message_content: Optional[str] = None
+    try:
+        # 1. Get raw character data first for the original first_message content
+        raw_char_data_for_first_message = db.get_character_card_by_id(character_id)
+        if raw_char_data_for_first_message:
+            original_first_message_content = raw_char_data_for_first_message.get('first_message')
+        else:
+            logger.warning(f"Could not load raw character data for ID {character_id} to get original first message. Will rely on processed version if available.")
+    except CharactersRAGDBError as e:
+        logger.warning(f"DB error fetching raw character data for ID {character_id}: {e}. Proceeding with caution.")
+
+
+    # 2. Load character for UI processing (placeholders, image etc.)
+    # This char_data will have its fields (like 'first_message') processed with placeholders.
+    char_data, initial_ui_history, img = load_character_and_image(db, character_id, user_name)
+
+    if not char_data:
+        logger.error(f"Failed to load character_id {character_id} (for UI processing) to start new chat session.")
+        return None, None, None, None
+
+    char_name = char_data.get('name', 'Character') # Should be valid if char_data exists
+
+    # Create a title for the conversation
+    conv_title = custom_title if custom_title else f"Chat with {char_name} ({time.strftime('%Y-%m-%d %H:%M')})"
+
+    try:
+        # Add conversation to DB
+        conv_payload = {
+            'character_id': character_id,
+            'title': conv_title,
+        }
+        conversation_id = db.add_conversation(conv_payload)
+
+        if not conversation_id:
+            logger.error(f"Failed to create conversation record in DB for character {char_name}.")
+            return None, char_data, initial_ui_history, img
+
+        logger.info(f"Created new conversation ID: {conversation_id} for character '{char_name}'.")
+
+        # Determine the first message content to store in the DB for the new conversation
+        message_to_store_in_db: Optional[str] = original_first_message_content
+
+        if message_to_store_in_db is None: # Fallback if raw fetch failed but processed one exists
+            if initial_ui_history and initial_ui_history[0] and initial_ui_history[0][1]:
+                # This is already processed. Storing processed message if raw isn't available.
+                # This implies the char_data['first_message'] from load_character_and_image
+                message_to_store_in_db = initial_ui_history[0][1]
+                logger.warning(f"Storing processed first message for char {char_name} in new conversation {conversation_id} as raw version was not available.")
+            elif char_data.get('first_message'): # Another fallback to the processed field from char_data
+                 message_to_store_in_db = char_data['first_message']
+                 logger.warning(f"Storing processed first_message from char_data for char {char_name} in new conversation {conversation_id}.")
+
+
+        if message_to_store_in_db:
+            db.add_message({
+                'conversation_id': conversation_id,
+                'sender': char_name, # Character's name as sender
+                'content': message_to_store_in_db, # Stored raw preferably, or processed as fallback
+            })
+            logger.debug(f"Added character's first message to new conversation {conversation_id}.")
+        else:
+            logger.warning(f"Character {char_name} (ID: {character_id}) has no first message to add to new conversation {conversation_id}.")
+            # Ensure initial_ui_history is empty if no first message was effectively determined for UI
+            if not (initial_ui_history and initial_ui_history[0] and initial_ui_history[0][1]):
+                 initial_ui_history = []
+
+        return conversation_id, char_data, initial_ui_history, img
+
+    except (CharactersRAGDBError, InputError, ConflictError) as e:
+        logger.error(f"Error during new chat session creation for char {char_name}: {e}")
+        return conversation_id if 'conversation_id' in locals() and conversation_id else None, char_data, initial_ui_history, img
+    except Exception as e:
+        logger.error(f"Unexpected error in start_new_chat_session: {e}", exc_info=True)
+        return conversation_id if 'conversation_id' in locals() and conversation_id else None, char_data, initial_ui_history, img
+
+
+def list_character_conversations(db: CharactersRAGDB, character_id: int, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+    """Lists all active conversations for a given character, ordered by last modified descending."""
+    try:
+        return db.get_conversations_for_character(character_id, limit=limit, offset=offset)
+    except CharactersRAGDBError as e:
+        logger.error(f"Failed to list conversations for character ID {character_id}: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error listing conversations for char ID {character_id}: {e}", exc_info=True)
+        return []
+
+
+def get_conversation_metadata(db: CharactersRAGDB, conversation_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieves metadata for a specific conversation."""
+    try:
+        return db.get_conversation_by_id(conversation_id)
+    except CharactersRAGDBError as e:
+        logger.error(f"Failed to get metadata for conversation ID {conversation_id}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error getting conversation metadata for ID {conversation_id}: {e}", exc_info=True)
+        return None
+
+
+def update_conversation_metadata(db: CharactersRAGDB, conversation_id: str, update_data: Dict[str, Any], expected_version: int) -> bool:
+    """Updates metadata for a conversation (e.g., title, rating)."""
+    try:
+        # Ensure client_id is not in update_data, as db layer handles it.
+        # Also, character_id, root_id, etc., are typically not changed via this simple update.
+        valid_update_keys = {'title', 'rating'} # Define what's permissible to update via this func
+        payload_to_db = {k: v for k, v in update_data.items() if k in valid_update_keys}
+
+        if not payload_to_db:
+            logger.warning(f"No valid fields to update for conversation ID {conversation_id} from data: {update_data}")
+            # Depending on desired behavior, could return True (if version matches, effectively a "touch")
+            # or False. db.update_conversation will still bump version if payload is empty.
+            # Let's proceed, db layer will handle empty payload by just bumping version.
+            pass
+
+        return db.update_conversation(conversation_id, payload_to_db, expected_version)
+    except (CharactersRAGDBError, InputError, ConflictError) as e:
+        logger.error(f"Failed to update metadata for conversation ID {conversation_id}: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error updating conversation metadata for ID {conversation_id}: {e}", exc_info=True)
+        return False
+
+
+def delete_conversation_by_id(db: CharactersRAGDB, conversation_id: str, expected_version: int) -> bool:
+    """Soft-deletes a conversation."""
+    try:
+        return db.soft_delete_conversation(conversation_id, expected_version)
+    except (CharactersRAGDBError, ConflictError) as e:
+        logger.error(f"Failed to delete conversation ID {conversation_id}: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error deleting conversation ID {conversation_id}: {e}", exc_info=True)
+        return False
+
+
+def search_conversations_by_title_query(db: CharactersRAGDB, title_query: str, character_id: Optional[int] = None, limit: int = 10) -> List[Dict[str, Any]]:
+    """Searches conversations by title."""
+    try:
+        return db.search_conversations_by_title(title_query, character_id=character_id, limit=limit)
+    except CharactersRAGDBError as e:
+        logger.error(f"Failed to search conversations with query '{title_query}': {e}")
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error searching conversations: {e}", exc_info=True)
+        return []
+
+# --- Message Management ---
+
+def post_message_to_conversation(
+    db: CharactersRAGDB,
+    conversation_id: str,
+    character_name: str, # The actual name of the character involved, used if is_user_message is False
+    message_content: str,
+    is_user_message: bool,
+    parent_message_id: Optional[str] = None,
+    ranking: Optional[int] = None,
+    image_data: Optional[bytes] = None,
+    image_mime_type: Optional[str] = None
+) -> Optional[str]: # Returns new message_id
+    """
+    Posts a new message to a conversation.
+    Content is stored raw (placeholders are not replaced before saving).
+    Sender is determined by `is_user_message` ("User" or `character_name`).
+    """
+    if not conversation_id:
+        logger.error("Cannot post message: conversation_id is required.")
+        raise InputError("conversation_id is required for posting a message.") # Raise to signal client error
+    if not character_name and not is_user_message:
+        logger.error("Cannot post character message: character_name is required.")
+        raise InputError("character_name is required for character messages.")
+
+    sender_name = "User" if is_user_message else character_name
+
+    # Ensure content or image is present, as per DB layer check
+    if not message_content and not image_data:
+        logger.error("Cannot post message: Message must have text content or image data.")
+        raise InputError("Message must have text content or image data.")
+
+
+    msg_payload = {
+        'conversation_id': conversation_id,
+        'sender': sender_name,
+        'content': message_content,
+        'parent_message_id': parent_message_id,
+        'ranking': ranking,
+        'image_data': image_data,
+        'image_mime_type': image_mime_type,
+    }
+
+    try:
+        message_id = db.add_message(msg_payload)
+        if message_id:
+            logger.info(f"Posted message ID {message_id} from '{sender_name}' to conversation {conversation_id}.")
+        else:
+            # This case should ideally be covered by exceptions from db.add_message
+            logger.error(f"Failed to post message from '{sender_name}' to conversation {conversation_id} (DB returned no ID without error).")
+        return message_id
+    except (CharactersRAGDBError, InputError, ConflictError) as e: # InputError, ConflictError from DB layer
+        logger.error(f"Error posting message from '{sender_name}' to conversation {conversation_id}: {e}")
+        raise # Re-raise client-correctable or conflict errors
+    except Exception as e:
+        logger.error(f"Unexpected error posting message to conv {conversation_id}: {e}", exc_info=True)
+        # For unexpected errors, convert to a library-specific error or return None
+        # depending on desired API contract for unhandled exceptions.
+        # For now, re-raising as a generic error or letting it propagate if not caught by CharactersRAGDBError.
+        # To be safe, wrap in CharactersRAGDBError if it's not one already.
+        if not isinstance(e, CharactersRAGDBError):
+             raise CharactersRAGDBError(f"Unexpected error posting message: {e}") from e
+        raise
+
+
+def retrieve_message_details(
+    db: CharactersRAGDB,
+    message_id: str,
+    character_name_for_placeholders: str,
+    user_name_for_placeholders: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    """
+    Retrieves a specific message by its ID and applies placeholder replacement to its content.
+    """
+    try:
+        message_data = db.get_message_by_id(message_id)
+        if not message_data:
+            return None
+
+        if 'content' in message_data and isinstance(message_data['content'], str):
+            message_data['content'] = replace_placeholders(
+                message_data['content'],
+                character_name_for_placeholders,
+                user_name_for_placeholders
+            )
+        return message_data
+    except CharactersRAGDBError as e:
+        logger.error(f"Failed to retrieve message ID {message_id}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving message ID {message_id}: {e}", exc_info=True)
+        return None
+
+
+def retrieve_conversation_messages_for_ui(
+    db: CharactersRAGDB,
+    conversation_id: str,
+    character_name: str,
+    user_name: Optional[str],
+    limit: int = 2000,
+    offset: int = 0,
+    order: str = "ASC"
+) -> List[Tuple[Optional[str], Optional[str]]]:
+    """
+    Retrieves messages for a conversation, processes them into UI format (pairs),
+    and applies placeholder replacement.
+    """
+    order_upper = order.upper()
+    if order_upper not in ["ASC", "DESC"]:
+        logger.warning(f"Invalid order '{order}' for message retrieval. Defaulting to ASC.")
+        order_upper = "ASC"
+
+    try:
+        raw_db_messages = db.get_messages_for_conversation(
+            conversation_id,
+            limit=limit,
+            offset=offset,
+            order_by_timestamp=order_upper
+        )
+
+        processed_ui_history = process_db_messages_to_ui_history(
+            raw_db_messages,
+            char_name_from_card=character_name,
+            user_name_for_placeholders=user_name,
+            actual_user_sender_id_in_db="User", # Convention from post_message_to_conversation
+            actual_char_sender_id_in_db=character_name # Convention from post_message_to_conversation
+        )
+        return processed_ui_history
+
+    except CharactersRAGDBError as e:
+        logger.error(f"Failed to retrieve and process messages for conversation ID {conversation_id}: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving UI messages for conversation {conversation_id}: {e}", exc_info=True)
+        return []
+
+
+def edit_message_content(
+    db: CharactersRAGDB,
+    message_id: str,
+    new_content: str, # Raw content; placeholders processed on display
+    expected_version: int
+) -> bool:
+    """Updates the content of a specific message."""
+    update_payload = {'content': new_content}
+    try:
+        return db.update_message(message_id, update_payload, expected_version)
+    except (CharactersRAGDBError, InputError, ConflictError) as e:
+        logger.error(f"Failed to edit content for message ID {message_id}: {e}")
+        return False # Or re-raise depending on API contract for these errors
+    except Exception as e:
+        logger.error(f"Unexpected error editing message content for ID {message_id}: {e}", exc_info=True)
+        return False
+
+
+def set_message_ranking(
+    db: CharactersRAGDB,
+    message_id: str,
+    ranking: int,
+    expected_version: int
+) -> bool:
+    """Sets the ranking of a specific message."""
+    update_payload = {'ranking': ranking}
+    try:
+        return db.update_message(message_id, update_payload, expected_version)
+    except (CharactersRAGDBError, InputError, ConflictError) as e:
+        logger.error(f"Failed to set ranking for message ID {message_id}: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error setting message ranking for ID {message_id}: {e}", exc_info=True)
+        return False
+
+def remove_message_from_conversation(
+    db: CharactersRAGDB,
+    message_id: str,
+    expected_version: int
+) -> bool:
+    """Soft-deletes a message from a conversation."""
+    try:
+        return db.soft_delete_message(message_id, expected_version)
+    except (CharactersRAGDBError, ConflictError) as e:
+        logger.error(f"Failed to remove message ID {message_id}: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error removing message ID {message_id}: {e}", exc_info=True)
+        return False
+
+
+def find_messages_in_conversation(
+    db: CharactersRAGDB,
+    conversation_id: str,
+    search_query: str,
+    character_name_for_placeholders: str,
+    user_name_for_placeholders: Optional[str],
+    limit: int = 10
+) -> List[Dict[str, Any]]:
+    """
+    Searches for messages within a specific conversation by content.
+    Applies placeholder replacement to the content of found messages.
+    """
+    try:
+        found_messages = db.search_messages_by_content(
+            content_query=search_query,
+            conversation_id=conversation_id,
+            limit=limit
+        )
+
+        processed_results = []
+        for msg_data in found_messages:
+            if 'content' in msg_data and isinstance(msg_data['content'], str):
+                msg_data['content'] = replace_placeholders(
+                    msg_data['content'],
+                    character_name_for_placeholders,
+                    user_name_for_placeholders
+                )
+            processed_results.append(msg_data)
+        return processed_results
+    except CharactersRAGDBError as e:
+        logger.error(f"Failed to search messages in conversation ID {conversation_id} for '{search_query}': {e}")
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error searching messages in conversation {conversation_id}: {e}", exc_info=True)
+        return []
+
+# End of Conversation and Message Management Functions
+#################################################################################
+
+
 #
 # End of File
 ########################################################################################################################
