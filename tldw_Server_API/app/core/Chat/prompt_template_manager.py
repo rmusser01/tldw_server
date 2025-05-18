@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+
+from jinja2.sandbox import SandboxedEnvironment
 #
 # Third-party Libraries
 from pydantic import BaseModel, Field
@@ -60,6 +62,21 @@ def load_template(template_name: str) -> Optional[PromptTemplate]:
     return None
 
 
+_SANDBOX = SandboxedEnvironment(
+    autoescape=True,                # HTML-safe by default
+    enable_async=False,             # no await, no async callables
+)
+
+def safe_render(template_str: str, data: dict[str, Any]) -> str:
+    """Render with a locked-down Jinja sandbox."""
+    try:
+        tmpl = _SANDBOX.from_string(template_str)
+        return tmpl.render(**data)
+    except Exception as exc:
+        logger.error("Template render error %s", exc, exc_info=False)
+        return template_str      # fail closed: return raw
+
+
 def apply_template_to_string(template_string: Optional[str], data: Dict[str, Any]) -> Optional[str]:
     """
     Applies data to a template string using str.format().
@@ -68,13 +85,7 @@ def apply_template_to_string(template_string: Optional[str], data: Dict[str, Any
     if template_string is None:
         return None
     try:
-        # Basic protection against formatting errors with missing keys
-        # by providing a default value for missing keys (keeps the placeholder)
-        class SafeFormatter(dict):
-            def __missing__(self, key):
-                return f"{{{key}}}" # Return the placeholder itself if key is missing
-
-        return template_string.format_map(SafeFormatter(data))
+        template_string = safe_render(template_string, data)
     except KeyError as e:
         logger.warning(f"Placeholder {e} not found in data for template string: '{template_string}'")
         # Fallback to keep the template string as is or partially formatted
@@ -83,6 +94,7 @@ def apply_template_to_string(template_string: Optional[str], data: Dict[str, Any
     except Exception as e:
         logger.error(f"Error applying template string '{template_string}': {e}", exc_info=True)
         return template_string # Return original on error
+
 
 def get_available_templates() -> List[str]:
     """Returns a list of available template names (without .json extension)."""

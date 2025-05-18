@@ -1,4 +1,0 @@
-# Wearables
-
-
-https://augmentos.org/

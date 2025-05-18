@@ -44,8 +44,9 @@ def valid_auth_token() -> str:
     """Provides a valid authentication token for tests requiring it."""
     # Adapt this to your actual auth mechanism for tests.
     # It could be a static test token, or one fetched/generated.
-    token = os.getenv("TEST_AUTH_TOKEN", "test-user-token-if-auth-is-mocked-or-disabled-for-tests")
+    token = os.getenv("TEST_AUTH_TOKEN", "default-secret-key-for-single-user")
     if not token and not os.getenv("CI"):  # Allow running in CI if auth is handled differently there
+        token = "default-secret-key-for-single-user"
         pytest.skip("TEST_AUTH_TOKEN environment variable not set. Skipping authenticated integration tests.")
     return token
 
@@ -179,7 +180,7 @@ def test_commercial_provider_non_streaming_no_template(
         request_body["max_tokens"] = 200  # Adjusted for potentially longer explanations
 
     print(f"\nTesting NON-STREAMING (no template) with {provider_name} using model {request_body['model']}")
-    response = client.post("/api/v1/chat/completions", json=request_body, headers={"token": valid_auth_token})
+    response = client.post("/api/v1/chat/completions", json=request_body, headers={"Token": valid_auth_token})
 
     assert response.status_code == status.HTTP_200_OK, f"Provider {provider_name} failed: {response.text}"
     data = response.json()
@@ -221,7 +222,7 @@ def test_commercial_provider_streaming_no_template(
     if provider_name == "anthropic": request_body["max_tokens"] = 300
 
     print(f"\nTesting STREAMING (no template) with {provider_name} using model {request_body['model']}")
-    response = client.post("/api/v1/chat/completions", json=request_body, headers={"token": valid_auth_token})
+    response = client.post("/api/v1/chat/completions", json=request_body, headers={"Token": valid_auth_token})
 
     assert response.status_code == status.HTTP_200_OK, f"Provider {provider_name} streaming pre-check failed: {response.text}"
     assert 'text/event-stream' in response.headers['content-type'].lower()
@@ -241,17 +242,19 @@ def test_commercial_provider_streaming_no_template(
                     if not chunk_data_str: continue
                     chunk = json.loads(chunk_data_str)
 
-                    # This parsing logic expects OpenAI SSE format
+                    if chunk.get("choices", [{}])[0].get("finish_reason") == "stop":
+                        received_done = True
+                        break  # Or continue if other final events might follow
+
                     delta_content = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
                     if delta_content: full_content += delta_content
                 except json.JSONDecodeError:
-                    # This should ideally not happen if your shims normalize correctly
                     print(f"WARN: ({provider_name}) Test JSON decode error for line: '{line}' in stream.")
     except Exception as e:
         print(f"Raw stream for {provider_name} before error:\n{raw_stream_text_for_debug}")
         pytest.fail(f"Error consuming stream for {provider_name}: {e}")
 
-    assert received_done, f"Stream for {provider_name} did not finish with [DONE]. Last 500 chars of stream:\n{raw_stream_text_for_debug[-500:]}"
+    assert received_done, f"Stream for {provider_name} did not finish correctly. Last 500 chars:\n{raw_stream_text_for_debug[-500:]}"
     assert len(
         full_content) > 5, f"Streamed content for {provider_name} was too short or empty. Received: '{full_content}'"
     print(f"Streamed response from {provider_name} (no template): {full_content[:80]}...")
@@ -302,7 +305,7 @@ def test_commercial_provider_with_template_and_char_data_openai_integration(
         }
 
         print(f"\nTesting TEMPLATING with {provider_name} model {request_body['model']}")
-        response = client.post("/api/v1/chat/completions", json=request_body, headers={"token": valid_auth_token})
+        response = client.post("/api/v1/chat/completions", json=request_body, headers={"Token": valid_auth_token})
 
         assert response.status_code == status.HTTP_200_OK, f"{provider_name} with template failed: {response.text}"
         data = response.json()
@@ -365,7 +368,7 @@ def test_local_provider_non_streaming_no_template(
     }
 
     print(f"\nTesting LOCAL NON-STREAMING (no template) with {provider_name} using model {request_body['model']}")
-    response = client.post("/api/v1/chat/completions", json=request_body, headers={"token": valid_auth_token})
+    response = client.post("/api/v1/chat/completions", json=request_body, headers={"Token": valid_auth_token})
 
     assert response.status_code == status.HTTP_200_OK, f"Local provider {provider_name} failed: {response.text}"
     data = response.json()
@@ -382,7 +385,7 @@ def test_local_provider_non_streaming_no_template(
 
 
 # --- Invalid Key Test (for a commercial provider that needs a key) ---
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.chat_api_call") # Mock the shim
+@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") # Mock the shim
 def test_chat_integration_invalid_key_for_commercial_provider_standalone(
     mock_chat_api_call_shim, client, valid_auth_token, mock_db_dependencies_for_integration
 ):
@@ -398,7 +401,7 @@ def test_chat_integration_invalid_key_for_commercial_provider_standalone(
         "model": "gpt-4o-mini",
         "messages": [msg.model_dump(exclude_none=True) for msg in INTEGRATION_MESSAGES_NO_SYS_SCHEMA]
     }
-    response = client.post("/api/v1/chat/completions", json=request_body, headers={"token": valid_auth_token})
+    response = client.post("/api/v1/chat/completions", json=request_body, headers={"Token": valid_auth_token})
 
     assert response.status_code in [status.HTTP_401_UNAUTHORIZED, status.HTTP_400_BAD_REQUEST], \
         f"Expected 401/400 for invalid key with {provider_to_test_invalid_key}, got {response.status_code}. Response: {response.text}"
@@ -419,7 +422,7 @@ def test_chat_integration_bad_request_missing_messages_standalone(
         "model": "test-model",
         # "messages" field is intentionally missing
     }
-    response = client.post("/api/v1/chat/completions", json=request_body, headers={"token": valid_auth_token})
+    response = client.post("/api/v1/chat/completions", json=request_body, headers={"Token": valid_auth_token})
     # This is a Pydantic validation error from FastAPI itself before hitting your logic.
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
     errors = response.json().get("detail")

@@ -1,17 +1,22 @@
 # Server_API/app/api/v1/endpoints/chat.py
 # Description: This code provides a FastAPI endpoint for all Chat-related functionalities.
-# FIXME
 #
 # Imports
+from __future__ import annotations
+# ---------------------------------------------------------------------------
+# Imports
+# ---------------------------------------------------------------------------
 import asyncio
 import base64
 import datetime
-import logging
 import json
+import logging
+import os
+from collections import deque
 from functools import partial
-from typing import List, Optional, Dict, Any, AsyncIterator, Iterator
-#
-# 3rd-party imports
+from io import BytesIO
+from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Tuple, Union
+
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -34,567 +39,538 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from loguru import logger
+from starlette.background import BackgroundTask
 from starlette.responses import JSONResponse, StreamingResponse
-#
-# Local Imports
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
+    DEFAULT_CHARACTER_NAME,
+    get_chacha_db_for_user,
+)
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest, API_KEYS, \
-    DEFAULT_LLM_PROVIDER
+from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
+    API_KEYS,
+    ChatCompletionRequest,
+    DEFAULT_LLM_PROVIDER,
+)
 from tldw_Server_API.app.core.Chat.Chat_Functions import (
-        chat_api_call,
-        ChatAuthenticationError,
-        ChatRateLimitError,
-        ChatBadRequestError,
-        ChatConfigurationError,
-        ChatProviderError,
-        ChatAPIError,
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatConfigurationError,
+    ChatDictionary,
+    ChatProviderError,
+    ChatRateLimitError,
+    chat_api_call as perform_chat_api_call,
+    process_user_input,
+    update_chat_content,
+)
+from tldw_Server_API.app.core.Chat.prompt_template_manager import (
+    DEFAULT_RAW_PASSTHROUGH_TEMPLATE,
+    PromptTemplate,
+    apply_template_to_string,
+    load_template,
 )
 from tldw_Server_API.app.core.Chat.prompt_template_manager import PromptTemplate, load_template, \
     DEFAULT_RAW_PASSTHROUGH_TEMPLATE, apply_template_to_string
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, ConflictError, \
     InputError
-
-#
-# DB Mgmt
-#from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
-#
-#
+from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib import ( # For placeholder replacement on retrieval
+    replace_placeholders
+)
+from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib import replace_placeholders
 #######################################################################################################################
 #
-# Functions:
+# ---------------------------------------------------------------------------
+# Constants & helpers
+# ---------------------------------------------------------------------------
 
-# --- FastAPI Router and Endpoint ---
 router = APIRouter()
+
+ALLOWED_IMAGE_MIME_TYPES: set[str] = {"image/png", "image/jpeg", "image/webp"}
+MAX_BASE64_BYTES: int = 3 * 1024 * 1024          # 3 MiB per image
+MAX_TEXT_LENGTH: int = 400_000                     # chars in any single text part
+MAX_MESSAGES_PER_REQUEST: int = 1000               # hard stop to bound spend
+MAX_IMAGES_PER_REQUEST: int = 10                   # New: Limit total images per request
+
+# --- Helper Functions ---
+
+def _check_mime(mime: str) -> bool:
+    return mime.lower() in ALLOWED_IMAGE_MIME_TYPES
+
+def _process_content_for_db_sync(
+    content_iterable: Any, # Can be list of dicts or string
+    conversation_id: str # For logging
+) -> tuple[list[str], list[tuple[bytes, str]]]:
+    """
+    Synchronous helper to process message content, including base64 decoding.
+    To be run in an executor.
+    """
+    text_parts_sync: list[str] = []
+    images_sync: list[tuple[bytes, str]] = []   # (bytes, mime)
+
+    processed_content_iterable: Any # Define type more specifically if possible
+    if isinstance(content_iterable, str):
+        processed_content_iterable = [{"type": "text", "text": content_iterable}]
+    elif isinstance(content_iterable, list):
+        processed_content_iterable = content_iterable
+    else:
+        logger.warning(
+            "[DB SYNC] Unsupported content type=%s for conv=%s, treating as unsupported text.",
+            type(content_iterable),
+            conversation_id
+        )
+        processed_content_iterable = [{"type": "text", "text": f"<unsupported content type: {type(content_iterable).__name__}>"}]
+
+    for part in processed_content_iterable:
+        p_type = part.get("type")
+        if p_type == "text":
+            snippet = str(part.get("text", ""))[:MAX_TEXT_LENGTH + 1] # Ensure text is string
+            if len(snippet) > MAX_TEXT_LENGTH:
+                logger.info(
+                    "[DB SYNC] Trimmed over-long text part (>%d chars) for conv=%s",
+                    MAX_TEXT_LENGTH,
+                    conversation_id
+                )
+                snippet = snippet[:MAX_TEXT_LENGTH]
+            text_parts_sync.append(snippet)
+        elif p_type == "image_url":
+            url_dict = part.get("image_url", {})
+            url_str = url_dict.get("url", "")
+
+            if url_str.startswith("data:") and ";base64," in url_str:
+                try:
+                    header, b64_body = url_str.split(";base64,", 1)
+                    mime = header.removeprefix("data:")
+                    if not _check_mime(mime):
+                        logger.warning("[DB SYNC] Blocked disallowed MIME '%s' for conv=%s", mime, conversation_id)
+                        continue
+
+                    decoded = base64.b64decode(b64_body, validate=True) # CPU intensive
+
+                    if len(decoded) > MAX_BASE64_BYTES:
+                        logger.warning("[DB SYNC] Image too large (%d B > %d B) for conv=%s", len(decoded), MAX_BASE64_BYTES, conversation_id)
+                        continue
+                    images_sync.append((decoded, mime))
+                except (base64.Binascii.Error, ValueError) as e_b64: # type: ignore[attr-defined]
+                    logger.warning("[DB SYNC] Bad base64 image for conv=%s: %s", conversation_id, e_b64)
+                    continue
+                except Exception as e_gen_img:
+                    logger.warning("[DB SYNC] Generic error processing image for conv=%s: %s", conversation_id, e_gen_img, exc_info=True)
+                    continue
+            else:
+                logger.warning(
+                    "[DB SYNC] image_url part was not a valid data URI or did not pass checks, storing as text placeholder. conv=%s, url_start='%.50s...'",
+                    conversation_id, url_str
+                )
+                text_parts_sync.append(f"<Image URL (not processed): {url_str[:200]}>")
+    return text_parts_sync, images_sync
+
+async def _save_message_turn_to_db(
+    db: CharactersRAGDB,
+    conversation_id: str,
+    message_obj: Dict[str, Any],
+) -> Optional[str]:
+    """
+    Persist a single user/assistant message.
+    - Validates size/format.
+    - CPU-bound content processing (image decoding) is run in an executor.
+    - DB write is run in an executor.
+    - Logs only metadata, never raw content.
+    """
+    current_loop = asyncio.get_running_loop()
+    role = message_obj.get("role")
+    if role not in ("user", "assistant"):
+        logger.warning("Skip DB save: invalid role='%s' for conv=%s", role, conversation_id)
+        return None
+
+    content = message_obj.get("content")
+
+    try:
+        text_parts, images = await current_loop.run_in_executor(
+            None, _process_content_for_db_sync, content, conversation_id
+        )
+    except Exception as e_proc:
+        logger.error(
+            "Error processing message content in executor for DB save. conv=%s err_type=%s err=%s",
+            conversation_id, type(e_proc).__name__, e_proc, exc_info=True
+        )
+        return None
+
+    if not text_parts and not images: # Issue 1 Fix
+        logger.debug("Empty message (no text or valid images after processing) ignored for conv=%s", conversation_id)
+        return None
+
+    db_payload = {
+        "conversation_id": conversation_id,
+        "sender": message_obj.get("name") or role,
+        "content": "\n".join(text_parts) if text_parts else None,
+        "images": [{"data": b, "mime": m} for b, m in images] or None,
+        "client_id": db.client_id,
+    }
+
+    try:
+        return await current_loop.run_in_executor(None, db.add_message, db_payload)
+    except (InputError, ConflictError, CharactersRAGDBError) as e_db:
+        logger.error("DB error saving message for conv=%s: Type=%s, Msg='%s'", conversation_id, type(e_db).__name__, e_db)
+        return None
+    except Exception as e_unexpected_db:
+        logger.error("Unexpected DB error saving message for conv=%s: %s", conversation_id, e_unexpected_db, exc_info=True)
+        return None
+
 
 @router.post(
     "/completions",
-    summary="Creates a model response via a proxy to the specified or default LLM provider.",
+    summary="Creates a model response and manages conversation state.",
     tags=["Chat"],
     responses={
-        status.HTTP_400_BAD_REQUEST: {"description": "Invalid request or error response from the backend LLM API"},
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error or backend API key missing"},
-        status.HTTP_401_UNAUTHORIZED: {"description": "Invalid authentication token"},
-        status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded"},
-        status.HTTP_502_BAD_GATEWAY: {"description": "Error from upstream provider"},
-        status.HTTP_504_GATEWAY_TIMEOUT: {"description": "Upstream provider timed out"},
+        status.HTTP_400_BAD_REQUEST: {"description": "Invalid request (e.g., empty messages, text too long, bad parameters)."},
+        status.HTTP_401_UNAUTHORIZED: {"description": "Invalid authentication token."},
+        status.HTTP_404_NOT_FOUND: {"description": "Resource not found (e.g., character)."},
+        status.HTTP_409_CONFLICT: {"description": "Data conflict (e.g., version mismatch during DB operation)."},
+        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {"description": "Request payload too large (e.g., too many messages, too many images)."},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded."},
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error."},
+        status.HTTP_502_BAD_GATEWAY: {"description": "Error received from an upstream LLM provider."},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service temporarily unavailable or misconfigured (e.g., provider API key issue)."},
+        status.HTTP_504_GATEWAY_TIMEOUT: {"description": "Upstream LLM provider timed out."},
     }
 )
 async def create_chat_completion(
     request_data: ChatCompletionRequest = Body(...),
-    media_db = Depends(get_media_db_for_user),
-    chat_db: Optional[CharactersRAGDB] = Depends(get_chacha_db_for_user),
-    Token: Optional[str] = Header(None),
+    chat_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    Token: str = Header(None, description="Bearer token for authentication."),
+    # background_tasks: BackgroundTasks = Depends(), # Replaced by starlette.background.BackgroundTask for StreamingResponse
+    # request: Request, # For rate limiting via slowapi if enabled - get_remote_address(request)
 ):
-    target_endpoint_for_logging = request_data.api_provider or DEFAULT_LLM_PROVIDER
-    final_conversation_id_for_logging: Optional[str] = request_data.conversation_id
+    current_loop = asyncio.get_running_loop()
 
-    try:
-        # --- Determine Target API Provider (actual usage) ---
-        target_endpoint = request_data.api_provider or DEFAULT_LLM_PROVIDER
-        final_conversation_id_for_turn = request_data.conversation_id # For actual use
+    if not Token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authentication token.")
+    expected_token = os.getenv("API_BEARER")
+    if not expected_token:
+        logger.critical("API_BEARER environment variable is not set. Authentication cannot be verified.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server authentication is misconfigured.")
+    if Token.replace("Bearer ", "", 1).strip() != expected_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token.")
 
-        logger.info(f"Routing chat completion request for model '{request_data.model}' to provider: '{target_endpoint}'")
-        logger.debug(
-            f"Incoming request data (brief): model={request_data.model}, provider={target_endpoint}, stream={request_data.stream}, template='{request_data.prompt_template_name}', messages_count={len(request_data.messages)}"
+    if not request_data.messages:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Messages list cannot be empty.")
+    if len(request_data.messages) > MAX_MESSAGES_PER_REQUEST:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Too many messages (max {MAX_MESSAGES_PER_REQUEST}, got {len(request_data.messages)}).",
         )
 
-        # --- API Key Check ---
-        provider_api_key = API_KEYS.get(target_endpoint.lower())
-        providers_requiring_keys = [
-            "openai", "anthropic", "cohere", "groq", "openrouter",
-            "deepseek", "mistral", "google", "huggingface"
-        ]
-        if target_endpoint in providers_requiring_keys and not provider_api_key:
-            logger.error(f"API key for required provider '{target_endpoint}' is missing or empty.")
-            raise ChatConfigurationError(
-                provider=target_endpoint,
-                message=f"API key is not configured or is empty for provider: {target_endpoint}."
-            )
+    total_image_parts = 0 # Issue 2 Fix
+    for msg_model in request_data.messages:
+        if isinstance(msg_model.content, list):
+            for part in msg_model.content:
+                if getattr(part, 'type', None) == 'image_url': # Check based on 'type' attribute
+                    total_image_parts += 1
+    if total_image_parts > MAX_IMAGES_PER_REQUEST:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Too many images in request (max {MAX_IMAGES_PER_REQUEST}, found {total_image_parts}).",
+        )
+
+    for m_idx, m in enumerate(request_data.messages): # Text length validation
+        if isinstance(m.content, str) and len(m.content) > MAX_TEXT_LENGTH:
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=f"Message at index {m_idx} text too long.")
+        elif isinstance(m.content, list):
+            for p_idx, part_obj in enumerate(m.content):
+                if getattr(part_obj, 'type', None) == 'text' and \
+                   isinstance(getattr(part_obj, 'text', None), str) and \
+                   len(getattr(part_obj, 'text')) > MAX_TEXT_LENGTH:
+                    raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=f"Text part at index {p_idx} in message {m_idx} too long.")
+
+    # Issue 3 (Schema Validator for Image Parts) is an external fix to chat_request_schemas.py.
+    # This endpoint assumes that schema validation has ensured image URLs are 'data:' URIs if intended for processing.
+
+    provider = (request_data.api_provider or DEFAULT_LLM_PROVIDER).lower()
+    user_identifier_for_log = getattr(chat_db, 'client_id', 'unknown_client') # Example from original
+    logger.info(
+        "Chat completion request. Provider=%s, Model=%s, User=%s, Stream=%s, ConvID=%s, CharID=%s",
+        provider, request_data.model, user_identifier_for_log,
+        request_data.stream, request_data.conversation_id, request_data.character_id
+    )
+
+    character_card_for_context: Optional[Dict[str, Any]] = None
+    final_conversation_id: Optional[str] = request_data.conversation_id
+    final_character_db_id: Optional[int] = None # Initialize
+
+    try:
+        target_api_provider = provider # Already determined
+        provider_api_key = API_KEYS.get(target_api_provider) # API_KEYS should be up-to-date
+
+        # Simplified list, actual check might be in Chat_Functions or per-provider
+        providers_requiring_keys = ["openai", "anthropic", "cohere", "groq", "openrouter", "deepseek", "mistral", "google", "huggingface"]
+        if target_api_provider in providers_requiring_keys and not provider_api_key:
+            logger.error(f"API key for provider '{target_api_provider}' is missing or not configured.")
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service for '{target_api_provider}' is not configured (key missing).")
+
+        conversation_created_this_turn = False
 
         # --- Character and Conversation Context ---
-        character_data_for_template: Optional[Dict[str, Any]] = None
-        associated_character_db_id: Optional[int] = None
-        conversation_created_now = False
-        historical_openai_messages: List[Dict[str, Any]] = []
-
-        if request_data.character_id and chat_db:
+        if request_data.character_id:
             try:
-                char_lookup_key = request_data.character_id
-                try:
-                    char_id_int = int(char_lookup_key)
-                    character_data_for_template = chat_db.get_character_card_by_id(char_id_int)
-                except ValueError: # Not an int, assume it's a name
-                    character_data_for_template = chat_db.get_character_card_by_name(char_lookup_key)
+                char_id_int = int(request_data.character_id)
+                character_card_for_context = await current_loop.run_in_executor(None, chat_db.get_character_card_by_id, char_id_int)
+            except ValueError:
+                character_card_for_context = await current_loop.run_in_executor(None, chat_db.get_character_card_by_name, request_data.character_id)
 
-                if character_data_for_template:
-                    associated_character_db_id = character_data_for_template.get('id')
-                    logger.info(f"Context: Character '{character_data_for_template.get('name')}' (ID: {associated_character_db_id}) loaded for templating and conversation.")
-                else:
-                    logger.warning(f"Character with identifier '{request_data.character_id}' not found in chat_db. Proceeding without character-specific conversation context.")
-            except CharactersRAGDBError as e_char_db:
-                logger.error(f"DB error fetching character '{request_data.character_id}': {e_char_db}") # Potentially raises ChatDBError
-                raise # Re-raise to be caught by outer handlers if specific DB handling is not done here
-            except Exception as e_char_fetch: # Generic catch
-                logger.error(f"Error fetching character data for '{request_data.character_id}': {e_char_fetch}", exc_info=True)
-                # Decide if this should be a specific HTTP error or fall to generic
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error fetching character data.")
+            if not character_card_for_context:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Character '{request_data.character_id}' not found.")
+            final_character_db_id = character_card_for_context['id']
+            logger.info(f"Context: Character '{character_card_for_context['name']}' (ID: {final_character_db_id}) loaded.")
+        else:
+            character_card_for_context = await current_loop.run_in_executor(None, chat_db.get_character_card_by_name, DEFAULT_CHARACTER_NAME)
+            if not character_card_for_context:
+                logger.critical(f"CRITICAL: Default character '{DEFAULT_CHARACTER_NAME}' not found in DB.")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Default character context is missing.")
+            final_character_db_id = character_card_for_context['id']
+            logger.info(f"Context: Generic chat, using Default Character '{DEFAULT_CHARACTER_NAME}' (ID: {final_character_db_id}).")
 
+        # Multi-User Security FIXME
+        client_id_from_db = getattr(chat_db, 'client_id', None)
+        # if not client_id_from_db: # Should be set by get_chacha_db_for_user
+        #      logger.critical("Client ID missing on chat_db instance. This is a server configuration issue.")
+        #      raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server error: Client identification for DB operations failed.")
 
-        if not associated_character_db_id and request_data.character_id:
-            # If a character_id was specified but no character was found or its ID couldn't be retrieved
-            logger.warning(f"Specified character_id '{request_data.character_id}' did not resolve to a character for conversation context. Chat will not use DB history for this character.")
+        if final_conversation_id:
+            conv_details = await current_loop.run_in_executor(None, chat_db.get_conversation_by_id, final_conversation_id)
+            if not conv_details:
+                logger.warning(f"Provided conv_id '{final_conversation_id}' not found. New one will be created.")
+                final_conversation_id = None
+            elif conv_details.get('character_id') != final_character_db_id or conv_details.get('client_id') != client_id_from_db:
+                logger.warning(f"Conv_id '{final_conversation_id}' (char {conv_details.get('character_id')}, client {conv_details.get('client_id')}) "
+                               f"mismatches context (char {final_character_db_id}, client {client_id_from_db}). New conv will be created.")
+                final_conversation_id = None
 
-        if associated_character_db_id and chat_db:
-            if final_conversation_id_for_turn:
-                # Validate existing conversation_id
-                try:
-                    conversation_details = chat_db.get_conversation_by_id(final_conversation_id_for_turn)
-                    if not conversation_details:
-                        logger.warning(f"Provided conversation_id '{final_conversation_id_for_turn}' not found. A new conversation will be created.")
-                        final_conversation_id_for_turn = None # Mark for creation
-                    elif conversation_details.get('character_id') != associated_character_db_id:
-                        logger.warning(f"Conversation_id '{final_conversation_id_for_turn}' belongs to character {conversation_details.get('character_id')}, not current character {associated_character_db_id}. A new conversation will be created.")
-                        final_conversation_id_for_turn = None # Mark for creation
-                    else:
-                        logger.info(f"Using existing conversation_id '{final_conversation_id_for_turn}' for character {associated_character_db_id}.")
-                except CharactersRAGDBError as e_conv_val:
-                    logger.error(f"DB error validating conversation_id '{final_conversation_id_for_turn}': {e_conv_val}. Assuming new conversation.")
-                    final_conversation_id_for_turn = None
-                except Exception as e_conv_val_generic:
-                    logger.error(f"Generic error validating conversation_id '{final_conversation_id_for_turn}': {e_conv_val_generic}", exc_info=True)
-                    final_conversation_id_for_turn = None # Safer to assume new on generic error
+        if not final_conversation_id:
+            char_name = character_card_for_context.get('name', "Chat") if character_card_for_context else "Chat"
+            timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
+            title = f"{char_name} ({timestamp})"
+            conv_data = {'character_id': final_character_db_id, 'title': title, 'client_id': client_id_from_db}
+            created_id = await current_loop.run_in_executor(None, chat_db.add_conversation, conv_data)
+            if not created_id:
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create new conversation in DB.")
+            final_conversation_id = created_id
+            conversation_created_this_turn = True
+            logger.info(f"Created new conv_id '{final_conversation_id}' for char_id {final_character_db_id}.")
 
-            if not final_conversation_id_for_turn: # Need to create a new one
-                try:
-                    char_name_for_title = character_data_for_template.get('name', 'Character') if character_data_for_template else "Unknown Character"
-                    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    new_conv_title = f"Chat with {char_name_for_title} ({timestamp_str})"
+        # --- History Loading ---
+        historical_openai_messages: List[Dict[str, Any]] = []
+        if not conversation_created_this_turn and final_conversation_id:
+            # Limit history length (e.g., 20 messages = 10 turns)
+            raw_hist = await current_loop.run_in_executor(None, chat_db.get_messages_for_conversation, final_conversation_id, 20, 0, "ASC")
+            for db_msg in raw_hist:
+                role = "user" if db_msg.get("sender", "").lower() == "user" else "assistant"
+                char_name_hist = character_card_for_context.get('name', "Char") if character_card_for_context else "Char"
 
-                    # Ensure client_id is available on chat_db or fetched separately
-                    client_id_for_conv = getattr(chat_db, 'client_id', None)
-                    if not client_id_for_conv:
-                        # This part depends on how client_id is managed. If it's tied to user token:
-                        # client_id_for_conv = await get_client_id_from_token(Token) # Example, if you have such a dependency
-                        logger.error("Client ID not found on chat_db instance for new conversation. This is a configuration issue.")
-                        raise ChatConfigurationError(provider=target_endpoint, message="Cannot create conversation due to missing client ID.")
+                text_content = db_msg.get("content", "")
+                if text_content: # Apply placeholder replacement
+                     text_content = replace_placeholders(text_content, char_name_hist, "User") # Assuming "User" for {{user}} placeholder
 
-                    new_conv_data = {
-                        'character_id': associated_character_db_id,
-                        'title': new_conv_title,
-                        'client_id': client_id_for_conv
-                    }
-                    newly_created_conv_id = chat_db.add_conversation(new_conv_data) # Returns the UUID string
-                    if newly_created_conv_id:
-                        final_conversation_id_for_turn = newly_created_conv_id
-                        conversation_created_now = True
-                        logger.info(f"Created new conversation ID '{final_conversation_id_for_turn}' for character ID '{associated_character_db_id}'.")
-                    else:
-                        logger.error("Failed to create new conversation in DB (add_conversation returned None/False). Proceeding without history.")
-                except (InputError, ConflictError, CharactersRAGDBError, ChatConfigurationError) as e_conv_create:
-                    logger.error(f"Error creating new conversation for character {associated_character_db_id}: {e_conv_create}", exc_info=True)
-                    # Proceed without history if creation fails, final_conversation_id_for_turn remains None or previous invalid value
-                    final_conversation_id_for_turn = request_data.conversation_id # Revert to original if creation failed
-                except Exception as e_unexpected_conv_create:
-                    logger.error(f"Unexpected error creating new conversation: {e_unexpected_conv_create}", exc_info=True)
-                    final_conversation_id_for_turn = request_data.conversation_id
+                msg_parts = []
+                if text_content:
+                    msg_parts.append({"type": "text", "text": text_content})
 
-            # Load history if conversation ID is valid and wasn't just created
-            if final_conversation_id_for_turn and not conversation_created_now and chat_db:
-                try:
-                    # TODO: Add configurable history length, e.g., from config or request
-                    raw_db_messages = chat_db.get_messages_for_conversation(
-                        conversation_id=final_conversation_id_for_turn,
-                        order_by_timestamp="ASC",
-                        limit=20 # Example: Load last 10 turns (20 messages)
-                    )
-                    for db_msg in raw_db_messages:
-                        role = db_msg.get("sender")
-                        if role not in ["user", "assistant"]: # We only want user/assistant turns as direct history
-                            continue
+                img_data, img_mime = db_msg.get("image_data"), db_msg.get("image_mime_type")
+                if img_data and img_mime:
+                    try:
+                        b64_img = await current_loop.run_in_executor(None, base64.b64encode, img_data)
+                        msg_parts.append({"type": "image_url", "image_url": {"url": f"data:{img_mime};base64,{b64_img.decode('utf-8')}"}})
+                    except Exception as e: logger.warning(f"Error encoding DB image for history (msg_id {db_msg.get('id')}): {e}")
 
-                        text_content = db_msg.get("content", "")
-                        image_data_bytes = db_msg.get("image_data")
-                        image_mime_type = db_msg.get("image_mime_type")
+                if msg_parts:
+                    hist_entry = {"role": role, "content": msg_parts}
+                    if role == "assistant" and character_card_for_context and character_card_for_context.get('name'):
+                        hist_entry["name"] = character_card_for_context.get('name')
+                    historical_openai_messages.append(hist_entry)
+            logger.info(f"Loaded {len(historical_openai_messages)} historical messages for conv_id '{final_conversation_id}'.")
 
-                        current_message_content_parts = []
-                        if text_content:
-                            current_message_content_parts.append({"type": "text", "text": text_content})
+        # --- User Message Processing & DB Save ---
+        current_turn_messages_for_llm: List[Dict[str, Any]] = []
+        for msg_model in request_data.messages:
+            if msg_model.role == "system": continue # Handled by templating
 
-                        if image_data_bytes and image_mime_type:
-                            try:
-                                base64_image = base64.b64encode(image_data_bytes).decode('utf-8')
-                                image_url = f"data:{image_mime_type};base64,{base64_image}"
-                                current_message_content_parts.append({
-                                    "type": "image_url",
-                                    "image_url": {"url": image_url}
-                                })
-                            except Exception as e_img_hist:
-                                logger.warning(f"Could not encode image from history (msg_id: {db_msg.get('id')} for conv {final_conversation_id_for_turn}): {e_img_hist}")
+            msg_dict = msg_model.model_dump(exclude_none=True)
+            msg_for_db = msg_dict.copy()
+            if msg_model.role == "assistant" and character_card_for_context:
+                msg_for_db["name"] = character_card_for_context.get('name', "Assistant")
 
-                        if current_message_content_parts:
-                             # Name is not stored per message in DB, so can't add it.
-                            historical_openai_messages.append({"role": role, "content": current_message_content_parts})
-                    if historical_openai_messages:
-                        logger.info(f"Loaded {len(historical_openai_messages)} messages from conversation '{final_conversation_id_for_turn}'.")
-                except CharactersRAGDBError as e_hist_load:
-                     logger.error(f"DB error loading history for conversation '{final_conversation_id_for_turn}': {e_hist_load}")
-                except Exception as e_hist_processing:
-                     logger.error(f"Error processing history for conversation '{final_conversation_id_for_turn}': {e_hist_processing}", exc_info=True)
+            await _save_message_turn_to_db(chat_db, final_conversation_id, msg_for_db) # Already handles errors internally
 
-        elif request_data.conversation_id: # conversation_id provided but no character context to use it with
-            logger.warning(f"Conversation ID '{request_data.conversation_id}' was provided, but no character context could be established. Ignoring conversation ID for history loading.")
-            final_conversation_id_for_turn = None # Cannot use or validate it
+            msg_for_llm = msg_dict.copy()
+            if msg_model.role == "assistant" and character_card_for_context and character_card_for_context.get('name'):
+                msg_for_llm["name"] = character_card_for_context.get('name')
+            current_turn_messages_for_llm.append(msg_for_llm)
 
         # --- Prompt Templating ---
-        active_template: Optional[PromptTemplate] = None
-        if request_data.prompt_template_name:
-            logger.info(f"Attempting to load prompt template: '{request_data.prompt_template_name}'")
-            active_template = load_template(request_data.prompt_template_name)
+        llm_payload_messages = historical_openai_messages + current_turn_messages_for_llm
+        active_template = load_template(request_data.prompt_template_name or DEFAULT_RAW_PASSTHROUGH_TEMPLATE)
 
-        if not active_template:
-            logger.info(f"No specific template loaded or specified for '{request_data.prompt_template_name}', using default raw passthrough.")
-            active_template = DEFAULT_RAW_PASSTHROUGH_TEMPLATE
+        template_data: Dict[str, Any] = {}
+        if character_card_for_context:
+            template_data.update({k: v for k, v in character_card_for_context.items() if isinstance(v, (str, int, float))}) # Basic fields
+            template_data["char_name"] = character_card_for_context.get("name", "Character") # Ensure common alias
+            # Add specific character fields used by templates if not covered by above
+            template_data["character_system_prompt"] = character_card_for_context.get('system_prompt', "")
 
-        # Prepare data for template placeholders
-        template_data: Dict[str, Any] = {
-            "original_system_message_from_request": "",
-            # Defaults for character-specific placeholders
-            "character_system_prompt": "",
-            "char_name": "Character",
-            "char_personality": "Default personality",
-            "char_description": "Default description",
-            "char_scenario": "Default scenario",
-            "char_first_message": "",
-            "char_message_example": ""
-            # Add other common placeholders with default empty values
-        }
+        sys_msg_from_req = next((m.content for m in request_data.messages if m.role == 'system' and isinstance(m.content, str)), "")
+        template_data["original_system_message_from_request"] = sys_msg_from_req
 
-        # If character_id is available in request_data and chat_db is available, fetch character data
-        # Assuming ChatCompletionRequest is updated to include `character_id: Optional[str] = None`
-        character_id_from_request = getattr(request_data, 'character_id', None)
-        if character_id_from_request and chat_db:
-            try:
-                logger.info(f"Fetching character data for ID: {character_id_from_request} for templating.")
-                # Note: ChaChaNotes_DB uses integer IDs for characters. Adjust if using UUIDs.
-                # For this example, assuming character_id_from_request can be cast to int if needed by get_character_card_by_id.
-                # If your character_id is a name, use get_character_card_by_name.
-                # This is a placeholder for how you'd fetch the ID.
-                # Let's assume character_id_from_request is the actual ID (int or str based on your DB).
+        final_system_message: Optional[str] = None
+        if active_template and active_template.system_message_template:
+            final_system_message = apply_template_to_string(active_template.system_message_template, template_data)
+        elif sys_msg_from_req:
+            final_system_message = sys_msg_from_req
 
-                # If get_character_card_by_id expects an int:
-                # char_id_for_db = int(character_id_from_request)
-                # Else (if it's already correct type, e.g. string UUID):
-                char_id_for_db = character_id_from_request
+        templated_llm_payload: List[Dict[str, Any]] = []
+        # ... (Rest of templating logic for user/assistant messages - simplified for brevity, assume it's complex and correct)
+        # This logic should be efficient or offloaded if it becomes a bottleneck for large histories/contents.
+        # For now, assume original logic is mostly sound but ensure it handles content lists correctly.
+        if active_template:
+            for msg in llm_payload_messages:
+                templated_msg_content = msg.get("content")
+                role = msg.get("role")
+                content_template_str = None
+                if role == "user" and active_template.user_message_content_template:
+                    content_template_str = active_template.user_message_content_template
+                elif role == "assistant" and active_template.assistant_message_content_template:
+                    content_template_str = active_template.assistant_message_content_template
 
-                character_data_for_template = chat_db.get_character_card_by_id(char_id_for_db) # Or by name if that's the identifier
-                if character_data_for_template:
-                    logger.success(f"Character data found for '{character_data_for_template.get('name', 'Unknown')}'")
-                    template_data["character_system_prompt"] = character_data_for_template.get('system_prompt', "")
-                    template_data["char_name"] = character_data_for_template.get('name', "Character")
-                    template_data["char_personality"] = character_data_for_template.get('personality', "")
-                    template_data["char_description"] = character_data_for_template.get('description', "")
-                    template_data["char_scenario"] = character_data_for_template.get('scenario', "")
-                    template_data["char_first_message"] = character_data_for_template.get('first_message', "")
-                    template_data["char_message_example"] = character_data_for_template.get('message_example', "")
-                    # Add any other fields from character_data_for_template that your templates might use
+                if content_template_str:
+                    new_content_parts = []
+                    msg_template_data = template_data.copy()
+                    if isinstance(templated_msg_content, str):
+                        msg_template_data["message_content"] = templated_msg_content
+                        new_text = apply_template_to_string(content_template_str, msg_template_data)
+                        new_content_parts.append({"type": "text", "text": new_text or templated_msg_content})
+                    elif isinstance(templated_msg_content, list):
+                        for part in templated_msg_content:
+                            if part.get("type") == "text":
+                                msg_template_data["message_content"] = part.get("text", "")
+                                new_text_part = apply_template_to_string(content_template_str, msg_template_data)
+                                new_content_parts.append({"type": "text", "text": new_text_part or part.get("text", "")})
+                            else:
+                                new_content_parts.append(part) # Keep image parts
+                    templated_llm_payload.append({**msg, "content": new_content_parts or templated_msg_content}) # type: ignore
                 else:
-                    logger.warning(f"Character with ID '{character_id_from_request}' not found in chat_db.")
-            except ValueError:
-                logger.error(f"Invalid character_id format: '{character_id_from_request}'. Could not convert to expected type for DB lookup.")
-            except Exception as e_char_fetch:
-                logger.error(f"Error fetching character data for ID '{character_id_from_request}': {e_char_fetch}", exc_info=True)
-
-
-        # --- Prepare messages_payload and Extract Original System Message for Template ---
-        # This section is now primarily about extracting the original system message
-        # and then applying the chosen template to all messages.
-
-        messages_from_current_request: List[Dict[str, Any]] = []
-        original_system_message_content: Optional[str] = None
-
-        for msg_model in request_data.messages: # Process only messages from the current request here
-            msg_dict = msg_model.model_dump(exclude_none=True)
-            if msg_model.role == 'system' and original_system_message_content is None:
-                # Capture the first system message from the request for the template placeholder
-                if isinstance(msg_model.content, str):
-                    original_system_message_content = msg_model.content
-                # ... (handle list content for system message as before) ...
-                logger.debug(f"Original system message from current request: '{str(original_system_message_content)[:100]}...'")
-                continue # Don't add system messages from request to the list that gets content-templated yet
-            messages_from_current_request.append(msg_dict)
-
-        template_data["original_system_message_from_request"] = original_system_message_content or ""
-
-        # Apply template to generate the final system message to be passed to chat_api_call
-        final_system_message_for_provider: Optional[str] = None
-        if active_template.system_message_template:
-            final_system_message_for_provider = apply_template_to_string(
-                active_template.system_message_template,
-                template_data
-            )
-            logger.info(f"Applied template to system message. Preview: '{str(final_system_message_for_provider)[:200]}...'")
-        elif original_system_message_content:
-            final_system_message_for_provider = original_system_message_content
-            logger.info("Using original system message from request as no system_message_template was in active template.")
+                    templated_llm_payload.append(msg)
         else:
-            logger.info("No system message by template and no original system message in request.")
+            templated_llm_payload = llm_payload_messages
 
-        # Combine historical messages with current request's messages for content templating
-        # History is already in OpenAI dict format. Current request messages are also dicts.
-        all_messages_for_content_templating: List[Dict[str, Any]] = historical_openai_messages + messages_from_current_request
+        # --- LLM Call ---
+        chat_api_args = {k: v for k, v in request_data.model_dump().items() if k not in ["api_provider", "messages", "character_id", "conversation_id", "prompt_template_name"]}
+        chat_api_args.update({
+            "api_endpoint": target_api_provider, "api_key": provider_api_key,
+            "messages_payload": templated_llm_payload,
+            "system_message": final_system_message,
+            # Ensure all relevant params from request_data are passed if Chat_Functions expects them
+        })
+        cleaned_args = {k:v for k,v in chat_api_args.items() if v is not None}
 
-        templated_messages_payload_for_provider: List[Dict[str, Any]] = []
-        for msg_dict in all_messages_for_content_templating: # Iterate over combined messages
-            # ... (apply user/assistant content templates as before using active_template and template_data) ...
-            # This logic (lines 170-203 approx in your original chat.py) should be applied here
-            # to each msg_dict in all_messages_for_content_templating.
-            current_content = msg_dict.get("content") # This should be List[Dict] if from history, or Str/List[Dict] if from request
-            role = msg_dict.get("role")
-            template_string_for_content = None
+        llm_call_func = partial(perform_chat_api_call, **cleaned_args)
 
-            # Create a copy of template_data for this specific message to avoid cross-contamination
-            # if we were to add message-specific placeholders in the future.
-            message_specific_template_data = template_data.copy()
-            if role == "user": template_string_for_content = active_template.user_message_content_template
-            elif role == "assistant": template_string_for_content = active_template.assistant_message_content_template
+        if request_data.stream:
+            raw_stream_iter = await current_loop.run_in_executor(None, llm_call_func)
+            if not (hasattr(raw_stream_iter, "__aiter__") or hasattr(raw_stream_iter, "__iter__")):
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Provider did not return a valid stream.")
 
-            if role == "user":
-                template_string_for_content = active_template.user_message_content_template
-            elif role == "assistant":
-                template_string_for_content = active_template.assistant_message_content_template
+            _sse_state = {'full_reply': None} # Mutable state for sse_event_generator
 
-            # If it's not user/assistant, or no template string for that role, pass through.
-            if not template_string_for_content or role not in ["user", "assistant"]:
-                templated_messages_payload_for_provider.append(msg_dict)
-                continue
+            async def sse_event_generator(
+                shared_state: dict, stream: Union[Iterator, AsyncIterator], model_name: str
+            ): # Issue 4 Fix
+                reply_parts = []
+                try:
+                    item_iterator = stream.__aiter__() if hasattr(stream, "__aiter__") else stream.__iter__() # type: ignore
+                    while True:
+                        try:
+                            chunk = await item_iterator.__anext__() if hasattr(stream, "__aiter__") else next(item_iterator) # type: ignore
+                            text_piece = chunk.decode('utf-8', errors='replace') if isinstance(chunk, bytes) else str(chunk)
+                            if text_piece:
+                                reply_parts.append(text_piece)
+                                yield f"data: {json.dumps({'choices': [{'delta': {'content': text_piece}}]})}\n\n"
+                        except (StopIteration, StopAsyncIteration): break
+                except asyncio.CancelledError:
+                    logger.info(f"SSE stream cancelled for conv_id {final_conversation_id}.")
+                    # Do not re-raise; allow finally to run. Starlette handles actual cancellation.
+                except Exception as e:
+                    logger.error(f"Error during SSE streaming for conv_id {final_conversation_id}: {e}", exc_info=True)
+                    yield f"data: {json.dumps({'error': {'message': 'Stream failed due to provider error.'}})}\n\n"
+                finally:
+                    shared_state['full_reply'] = "".join(reply_parts)
+                    done_payload = { # OpenAI-like [DONE] message
+                        "id": f"chatcmpl-{datetime.datetime.now(datetime.timezone.utc).timestamp()}", "object": "chat.completion.chunk",
+                        "created": int(datetime.datetime.now(datetime.timezone.utc).timestamp()), "model": model_name,
+                        "choices": [{"delta": {}, "finish_reason": "stop", "index": 0}],
+                        "tldw_conversation_id": final_conversation_id
+                    }
+                    yield f"data: {json.dumps(done_payload)}\n\n"
 
-            # Handle content: it could be a string (older/simpler system) or a list of parts (OpenAI format)
-            new_content_to_set = None
-            if isinstance(current_content, str): # Simple string content
-                message_specific_template_data["message_content"] = current_content
-                templated_text = apply_template_to_string(template_string_for_content, message_specific_template_data)
-                if templated_text is not None:
-                    new_content_to_set = templated_text
-            elif isinstance(current_content, list): # List of content parts (e.g. text and image)
-                new_parts_list = []
-                for part in current_content:
-                    if part.get("type") == "text" and part.get("text") is not None:
-                        message_specific_template_data["message_content"] = part["text"]
-                        templated_text_part = apply_template_to_string(template_string_for_content, message_specific_template_data)
-                        if templated_text_part is not None:
-                            new_parts_list.append({"type": "text", "text": templated_text_part})
-                        else:
-                            new_parts_list.append(part) # Keep original if template failed for text
-                    else:
-                        new_parts_list.append(part) # Keep non-text parts (e.g. images) as is
-                new_content_to_set = new_parts_list
+            async def final_save_bg_task(): # Issue 5 & 7 Fix
+                full_reply = _sse_state.get('full_reply')
+                if full_reply and final_conversation_id: # Ensure final_conversation_id is still valid
+                    asst_name = character_card_for_context.get("name", "Assistant") if character_card_for_context else "Assistant"
+                    logger.info(f"BG Task: Saving assistant reply (len {len(full_reply)}) for conv_id {final_conversation_id}")
+                    await _save_message_turn_to_db(chat_db, final_conversation_id, {"role": "assistant", "name": asst_name, "content": full_reply})
+                else:
+                    logger.info(f"BG Task: No assistant reply or conv_id to save for conv_id {final_conversation_id}.")
 
-            if new_content_to_set is not None:
-                msg_dict_copy = msg_dict.copy() # Avoid modifying the original in all_messages_for_content_templating
-                msg_dict_copy["content"] = new_content_to_set
-                templated_messages_payload_for_provider.append(msg_dict_copy)
-            else: # If content couldn't be templated for some reason, pass original
-                templated_messages_payload_for_provider.append(msg_dict)
+            async def combined_streamer():
+                yield f"event: tldw_metadata\ndata: {json.dumps({'conversation_id': final_conversation_id, 'model': request_data.model})}\n\n"
+                async for item in sse_event_generator(_sse_state, raw_stream_iter, request_data.model):
+                    yield item
 
-        if templated_messages_payload_for_provider:
-            logger.debug(f"Combined & templated messages (first message content preview): {str(templated_messages_payload_for_provider[0].get('content'))[:200]}...")
-        else:
-            logger.debug("No user/assistant messages in payload after history and templating.")
+            return StreamingResponse(combined_streamer(), media_type="text/event-stream", background=BackgroundTask(final_save_bg_task))
 
+        else: # Non-streaming
+            llm_response = await current_loop.run_in_executor(None, llm_call_func)
+            content_to_save: Optional[str] = None
+            if isinstance(llm_response, dict): # OpenAI-like
+                content_to_save = llm_response.get("choices", [{}])[0].get("message", {}).get("content")
+            elif isinstance(llm_response, str):
+                content_to_save = llm_response
 
-        # --- Prepare Arguments for chat_api_call (as before, using templated_messages_payload_for_provider and final_system_message_for_provider) ---
-        chat_args = {
-            "api_endpoint": target_endpoint,
-            "api_key": provider_api_key,
-            "messages_payload": templated_messages_payload_for_provider,
-            "temp": request_data.temperature,
-            "system_message": final_system_message_for_provider, # Use templated system message
-            "streaming": request_data.stream,
-            "minp": request_data.minp,
-            "maxp": request_data.top_p,  # chat_api_call maps 'maxp' to provider's top_p if applicable
-            "model": request_data.model,
-            "topk": request_data.topk,
-            "topp": request_data.top_p,  # chat_api_call also has 'topp' for direct top_p mapping
-            "logprobs": request_data.logprobs,
-            "top_logprobs": request_data.top_logprobs,
-            "logit_bias": request_data.logit_bias,
-            "presence_penalty": request_data.presence_penalty,
-            "frequency_penalty": request_data.frequency_penalty,
-            "tools": request_data.tools,
-            "tool_choice": request_data.tool_choice,
-            "max_tokens": request_data.max_tokens,
-            "seed": request_data.seed,
-            "stop": request_data.stop,
-            "response_format": request_data.response_format.model_dump() if request_data.response_format else None, # Pass as dict
-            "n": request_data.n,
-            "user_identifier": request_data.user,
-            # Ensure all new schema fields that map to chat_api_call are added here
-        }
+            if content_to_save:
+                asst_name = character_card_for_context.get("name", "Assistant") if character_card_for_context else "Assistant"
+                await _save_message_turn_to_db(chat_db, final_conversation_id, {"role": "assistant", "name": asst_name, "content": content_to_save})
 
-        # Clean chat_args: Remove None values as chat_api_call might not expect them,
-        # or the underlying functions have their own defaults.
-        chat_args_cleaned = {k: v for k, v in chat_args.items() if v is not None}
-        # logger.trace(f"Arguments for chat_api_call (after templating, api_key excluded): { {k: v for k,v in chat_args_cleaned.items() if k != 'api_key'} }")
+            # Issue 6 Fix: Offload jsonable_encoder
+            encoded_payload = await current_loop.run_in_executor(None, jsonable_encoder, llm_response)
+            if isinstance(encoded_payload, dict): # Ensure it's a dict to add custom fields
+                encoded_payload["tldw_conversation_id"] = final_conversation_id
+            return JSONResponse(content=encoded_payload)
 
-        if not request_data.tools and chat_args_cleaned.get("tool_choice") == "auto":
-            logger.debug(
-                f"No tools provided and tool_choice is 'auto' for {target_endpoint}. Removing 'tool_choice' from chat_args.")
-            if "tool_choice" in chat_args_cleaned:
-                del chat_args_cleaned["tool_choice"]
+    # --- Exception Handling --- Issue 8 Fix: Mask internal details in 5xx
+    except HTTPException as e_http:
+        if e_http.status_code >= 500: logger.error(f"HTTPException (Server Error): {e_http.status_code} - {e_http.detail}", exc_info=True)
+        else: logger.warning(f"HTTPException (Client Error): {e_http.status_code} - {e_http.detail}")
+        raise e_http # Re-raise, details are assumed to be client-safe or intentionally set
 
-        loop = asyncio.get_running_loop()
-        try:
-            if request_data.stream:
-                logger.info(f"Streaming requested for {target_endpoint} with model {request_data.model}.")
-                func_call = partial(chat_api_call, **chat_args_cleaned)
-                stream_generator_or_error = await loop.run_in_executor(None, func_call)
+    except (ChatAuthenticationError, ChatRateLimitError, ChatBadRequestError, ChatConfigurationError, ChatProviderError, ChatAPIError) as e_chat:
+        status_code_map = { ChatAuthenticationError: 401, ChatRateLimitError: 429, ChatBadRequestError: 400,
+                            ChatConfigurationError: 503, ChatProviderError: getattr(e_chat, 'status_code', 502),
+                            ChatAPIError: getattr(e_chat, 'status_code', 500) }
+        err_status = status_code_map.get(type(e_chat), 500)
+        logger.error(f"Chat Library Error: {type(e_chat).__name__} - '{e_chat.message}' (Provider: {e_chat.provider}, UpstreamStatus: {getattr(e_chat, 'status_code', 'N/A')})", exc_info=True)
+        client_detail = e_chat.message if err_status < 500 else "An error occurred with the chat provider or service configuration."
+        raise HTTPException(status_code=err_status, detail=client_detail)
 
-                if isinstance(stream_generator_or_error, Exception):  # Should be caught by specific exception handlers below now
-                    logger.error(
-                        f"Error from chat_api_call during streaming setup for {target_endpoint}: {stream_generator_or_error}")
-                    raise stream_generator_or_error  # Re-raise to be caught by specific handlers
+    except (InputError, ConflictError, CharactersRAGDBError) as e_db:
+        logger.error(f"Database Error: {type(e_db).__name__} - {str(e_db)}", exc_info=True)
+        err_status = status.HTTP_400_BAD_REQUEST if isinstance(e_db, InputError) else \
+                     status.HTTP_409_CONFLICT if isinstance(e_db, ConflictError) else \
+                     status.HTTP_500_INTERNAL_SERVER_ERROR
+        client_detail = str(e_db) if err_status < 500 else "A database error occurred."
+        raise HTTPException(status_code=err_status, detail=client_detail)
 
-                # Check if it's a "proper" iterator/async iterator and NOT just a string/bytes
-                is_valid_iterator_type = isinstance(stream_generator_or_error, (Iterator, AsyncIterator))
-                is_simple_string_or_bytes = isinstance(stream_generator_or_error, (str, bytes))
+    except Exception as e_final:
+        logger.critical(f"Unexpected Critical Error in /completions: {type(e_final).__name__} - {str(e_final)}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected internal server error occurred.")
 
-                is_valid_iterator = isinstance(stream_generator_or_error, (Iterator, AsyncIterator))
-                is_simple_data = isinstance(stream_generator_or_error, (str, bytes))
-                if not (is_valid_iterator and not is_simple_data):
-                    logger.error(f"chat_api_call did not return a valid generator/iterator for streaming. Type: {type(stream_generator_or_error)}")
-                    raise ChatProviderError(provider=target_endpoint, message="Streaming setup error: backend function did not return an iterator.", status_code=500)
-
-                async def async_stream_wrapper():
-                    if final_conversation_id_for_turn: # Use var from outer scope
-                        metadata_event = {"conversation_id": final_conversation_id_for_turn}
-                        if conversation_created_now: metadata_event["conversation_created"] = True # Use var from outer scope
-                        yield f"event: tldw_metadata\ndata: {json.dumps(metadata_event)}\n\n"
-                    try:
-                        gen = stream_generator_or_error
-                        if hasattr(gen, '__aiter__'):
-                            async for chunk in gen:
-                                yield chunk
-                        elif hasattr(gen, '__iter__'):
-                            for chunk in gen:
-                                yield chunk
-                                await asyncio.sleep(0.001)
-                        else:
-                            logger.error(f"Streaming error: Generator is not iterable from {target_endpoint}.")
-                            yield f"data: {json.dumps({'error': {'message': 'Internal streaming error: Not iterable', 'type': 'stream_error'}})}\n\n"
-                    except Exception as stream_e:
-                        logger.error(f"Error during streaming data generation from {target_endpoint}: {stream_e}", exc_info=True)
-                        yield f"data: {json.dumps({'error': {'message': f'Stream data generation error: {str(stream_e)}'}})}\n\n"
-                    finally:
-                        logger.debug(f"Stream from {target_endpoint} finished or errored. Sending DONE if not already done.")
-                        yield "data: [DONE]\n\n"
-
-                return StreamingResponse(async_stream_wrapper(), media_type="text/event-stream")
-
-            else:  # Non-streaming
-                logger.info(f"Non-streaming request to {target_endpoint} with model {request_data.model}.")
-                func_call = partial(chat_api_call, **chat_args_cleaned)
-                response_data_or_error = await loop.run_in_executor(None, func_call)
-
-                if isinstance(response_data_or_error, Exception):
-                    logger.error(f"Error from chat_api_call during non-streaming for {target_endpoint}: {response_data_or_error}")
-                    raise response_data_or_error # Will be caught by inner specific handlers
-
-                response_data = response_data_or_error
-                final_response_payload = jsonable_encoder(response_data)
-                if isinstance(final_response_payload, dict) and final_conversation_id_for_turn:
-                    final_response_payload["tldw_conversation_id"] = final_conversation_id_for_turn
-                    if conversation_created_now:
-                        final_response_payload["tldw_conversation_created"] = True
-                elif final_conversation_id_for_turn: # If original response wasn't a dict, wrap it
-                     final_response_payload = {
-                        "llm_response": final_response_payload,
-                        "tldw_conversation_id": final_conversation_id_for_turn
-                     }
-                     if conversation_created_now:
-                        final_response_payload["tldw_conversation_created"] = True
-
-                logger.info(f"Successfully received non-streaming response from {target_endpoint} for model: {request_data.model}")
-            return JSONResponse(content=final_response_payload)
-
-        # --- Specific Error Handling for API call execution (Inner try-except's catches) ---
-        except ChatAuthenticationError as e:
-            logger.warning(f"Inner: Authentication error for {e.provider or target_endpoint}: {e.message}")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
-        except ChatRateLimitError as e:
-            logger.warning(f"Inner: Rate limit error for {e.provider or target_endpoint}: {e.message}")
-            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
-        except ChatBadRequestError as e:
-            logger.warning(f"Inner: Bad request error for {e.provider or target_endpoint}: {e.message}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-        except ChatConfigurationError as e: # From chat_api_call if it finds a config issue itself
-            logger.error(f"Inner: Configuration error (from API call path) for {e.provider or target_endpoint}: {e.message}", exc_info=True)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-        except ChatProviderError as e: # Includes stream setup error
-            logger.error(f"Inner: Provider error from {e.provider or target_endpoint} (Status {e.status_code}): {e.message}", exc_info=True)
-            raise HTTPException(status_code=e.status_code if e.status_code else 502, detail=str(e))
-        except ChatAPIError as e: # Other errors from chat_api_call
-            logger.error(f"Inner: ChatAPIError for {e.provider or target_endpoint}: {e.message}", exc_info=True)
-            raise HTTPException(status_code=e.status_code if e.status_code else 500, detail=str(e))
-        except ValueError as e: # From chat_api_call (e.g., mock raising it)
-            logger.error(f"Inner: ValueError from API call execution for {target_endpoint}: {e}", exc_info=True)
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid input from API call: {str(e)}")
-        except HTTPException as http_exc: # If chat_api_call itself raises/propagates an HTTPException
-            logger.info(f"Inner: HTTPException propagated from API call execution for {target_endpoint}: {http_exc.status_code} - {http_exc.detail}")
-            raise http_exc # Let it be caught by the outer HTTPException handler
-        except Exception as e:  # For truly unexpected things from chat_api_call execution
-            logger.exception(f"Inner: Unexpected error in API call execution for {target_endpoint}: {type(e).__name__} - {e}")
-            raise HTTPException(status_code=500, detail=f"An unexpected internal error ({type(e).__name__}) occurred during API call execution.") from e
-
-    # --- OUTER EXCEPTION HANDLING for the entire function ---
-    # This will catch ChatConfigurationError from the API key check,
-    # HTTPExceptions re-raised from the inner block, or errors from endpoint setup logic.
-    except ChatAuthenticationError as e:  # Should ideally be caught by inner and converted to HTTPException
-        logger.warning(f"Outer: Authentication error for {e.provider or target_endpoint_for_logging}: {e.message}")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
-    except ChatRateLimitError as e:  # Should be caught by inner
-        logger.warning(f"Outer: Rate limit error for {e.provider or target_endpoint_for_logging}: {e.message}")
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
-    except ChatBadRequestError as e:  # If endpoint setup causes this, or if inner raises it and it's not converted
-        logger.warning(f"Outer: Bad request error for {e.provider or target_endpoint_for_logging}: {e.message}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except ChatConfigurationError as e:  # CATCHES API KEY CHECK ERROR
-        logger.error(f"Outer: Configuration error for {e.provider or target_endpoint_for_logging}: {e.message}",
-                     exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-    except ChatProviderError as e:  # Should be caught by inner
-        logger.error(
-            f"Outer: Provider error from {e.provider or target_endpoint_for_logging} (Status {e.status_code}): {e.message}",
-            exc_info=True)
-        raise HTTPException(status_code=e.status_code if e.status_code else 502, detail=str(e))
-    except ChatAPIError as e:  # Should be caught by inner
-        logger.error(f"Outer: ChatAPIError for {e.provider or target_endpoint_for_logging}: {e.message}", exc_info=True)
-        raise HTTPException(status_code=e.status_code if e.status_code else 500, detail=str(e))
-    except HTTPError as e: # From requests library, if not caught by chat_api_call
-        status_code_from_exc = e.response.status_code if e.response is not None else 502
-        detail_msg = f"Upstream API HTTP Error ({target_endpoint_for_logging}): Status {status_code_from_exc}"
-        try: detail_msg += f" - Details: {e.response.text[:200] if e.response is not None else 'No response body'}"
-        except: pass
-        logger.error(f"Outer: Unmapped HTTPError in endpoint: {detail_msg}", exc_info=True)
-        final_status = status_code_from_exc
-        if not (400 <= final_status < 500) and final_status not in [401, 429]: final_status = 502
-        raise HTTPException(status_code=final_status, detail=detail_msg)
-    except RequestException as e: # From requests library
-        logger.error(f"Outer: Unmapped RequestException (Network error) for {target_endpoint_for_logging}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=f"Network error while contacting {target_endpoint_for_logging}: {str(e)}")
-    except (ValueError, TypeError, KeyError) as e: # For local errors in endpoint setup (e.g. template data prep)
-        logger.error(f"Outer: Data or configuration validation error in endpoint setup: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid parameter or internal configuration error in endpoint: {str(e)}")
-    except HTTPException as http_exc: # Re-raise HTTPExceptions that were intentionally raised
-        raise http_exc
-    except Exception as e: # Final catch-all for truly unexpected errors
-        logger.critical(
-            f"!!! OUTERMOST UNEXPECTED ERROR in /completions endpoint for {target_endpoint_for_logging} !!! Type: {type(e).__name__}, Error: {e}",
-            exc_info=True)
-        error_detail = f"An unexpected internal server error occurred in endpoint. Error type: {type(e).__name__}."
-        if final_conversation_id_for_logging: # Use the early defined var
-             error_detail += f" (Context ConvID: {final_conversation_id_for_logging})"
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_detail)
 
 #
 # End of chat.py

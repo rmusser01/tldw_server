@@ -64,7 +64,7 @@ def load_openai_mappings() -> Dict:
     # Example: if your project root is one level up from 'routers'
     # and configs is at root:
     project_root = os.path.dirname(os.path.dirname(current_dir))
-    mapping_path = os.path.join(project_root, "configs", "openai_tts_mappings.json")
+    mapping_path = os.path.join(project_root, "Config_Files", "openai_tts_mappings.json")
     try:
         with open(mapping_path, "r") as f:
             return json.load(f)
