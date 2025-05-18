@@ -52,7 +52,7 @@ jobs:
           ls
           cd Chat/
           ls
-          pytest -s ./test_chat_completion_integration.py
+          pytest -s ./test_chat_completions_integration.py
       - name: Test Chat Endpoint with pytest
         run: |
           pwd
