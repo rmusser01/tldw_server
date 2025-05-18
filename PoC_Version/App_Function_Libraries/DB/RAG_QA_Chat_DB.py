@@ -27,13 +27,31 @@ def get_rag_qa_db_path():
     config_path = os.path.join(get_project_root(), 'Config_Files', 'config.txt')
     config = configparser.ConfigParser()
     config.read(config_path)
-    if config.has_section('Database') and config.has_option('Database', 'rag_qa_db_path'):
-        rag_qa_db_path = config.get('Database', 'rag_qa_db_path')
-        if not os.path.isabs(rag_qa_db_path):
-            rag_qa_db_path = get_project_relative_path(rag_qa_db_path)
-        return rag_qa_db_path
+    db_option_key = 'rag_qa_db_path'  # Or the correct key from your config for this DB
+
+    if config.has_section('Database') and config.has_option('Database', db_option_key):
+        rag_qa_db_path_from_config = config.get('Database', db_option_key)
+        if not os.path.isabs(rag_qa_db_path_from_config):
+            # Resolve relative to project root (which is PoC_Version directory)
+            final_db_path = get_project_relative_path(rag_qa_db_path_from_config)
+        else:
+            final_db_path = rag_qa_db_path_from_config
     else:
-        raise ValueError("Database path not found in config file")
+        logging.warning(f"'{db_option_key}' not found in config, using default.")
+        # Default path if not in config
+        final_db_path = get_project_relative_path('Databases/rag_qa.db')
+
+    # Ensure the directory for this specific DB exists
+    db_dir = os.path.dirname(final_db_path)
+    if not os.path.exists(db_dir):
+        try:
+            os.makedirs(db_dir, exist_ok=True)
+            logging.info(f"RAG_QA_Chat_DB: Created database directory: {db_dir}")
+        except OSError as e:
+            logging.error(f"RAG_QA_Chat_DB: Failed to create database directory {db_dir}: {e}")
+            raise  # Re-raise if directory creation fails, as connect will also fail
+    logging.debug(f"RAG_QA_Chat_DB: Database path set to: {final_db_path}")
+    return final_db_path
 
 # Database schema
 SCHEMA_SQL = '''
@@ -246,7 +264,7 @@ END;
 # Database connection management
 @contextmanager
 def get_db_connection():
-    db_path = get_rag_qa_db_path()
+    db_path = get_rag_qa_db_path() # This now ensures the directory exists
     conn = sqlite3.connect(db_path)
     try:
         yield conn

@@ -112,88 +112,108 @@ def cleanup_downloads():
 # Config loading
 #
 
+# --- Path Management ---
+_project_root_cache = None
+
+
 def get_project_root():
-    """Get the absolute path to the project root directory (likely 'tldw')."""
-    script_path = os.path.abspath(__file__)
-    # logging.debug(f"get_project_root: __file__ resolved to: {script_path}") # PoC_Version/App_Function_Libraries/Utils.py
-    level1_up = os.path.dirname(script_path) # App_Function_Libraries
-    # logging.debug(f"get_project_root: Level 1 Up: {level1_up}")
-    level2_up = os.path.dirname(level1_up) # PoC_Version
-    # logging.debug(f"get_project_root: Level 2 Up: {level2_up}")
-    # Assume the *actual* root is one level above PoC_Version
-    project_root = os.path.dirname(level2_up) # tldw
-    logging.debug(f"get_project_root: Calculated project_root (Parent of PoC_Version): {project_root}")
-    return project_root
-
-# --- Use get_project_root() inside load_comprehensive_config ---
-def load_comprehensive_config():
-    # Get the project root using the dedicated function
-    project_root = get_project_root()
-    logging.trace(f"Project root directory determined by get_project_root(): {project_root}")
-
-    # Construct the path to the config file relative to the project root
-    config_path = os.path.join(project_root, 'Config_Files', 'config.txt')
-    logging.trace(f"Attempting to load config file from: {config_path}") # Log the path being checked
-
-    # Check if the config file exists
-    if not os.path.exists(config_path):
-        logging.error(f"Config file not found at {config_path}")
-        # Optionally, you could try looking one level higher if structure is uncertain
-        # parent_root = os.path.dirname(project_root)
-        # fallback_config_path = os.path.join(parent_root, 'Config_Files', 'config.txt')
-        # if os.path.exists(fallback_config_path):
-        #     logging.warning(f"Config not found at primary location, trying fallback: {fallback_config_path}")
-        #     config_path = fallback_config_path
-        # else:
-        #     logging.error(f"Fallback config file also not found at {fallback_config_path}")
-        #     raise FileNotFoundError(f"Config file not found at expected locations: {config_path} or fallback.")
-        raise FileNotFoundError(f"Config file not found at {config_path}")
+    """
+    Get the absolute path to the 'PoC_Version' directory.
+    This is considered the root for accessing Config_Files, Databases, etc.
+    Caches the result for efficiency.
+    """
+    global _project_root_cache
+    if _project_root_cache is None:
+        # __file__ is .../PoC_Version/App_Function_Libraries/Utils/Utils.py
+        # Go up 3 levels from the directory of Utils.py to reach PoC_Version
+        current_file_path = os.path.abspath(__file__)
+        utils_dir = os.path.dirname(current_file_path)  # .../Utils
+        app_func_lib_dir = os.path.dirname(utils_dir)  # .../App_Function_Libraries
+        poc_version_dir = os.path.dirname(app_func_lib_dir)  # .../PoC_Version
+        _project_root_cache = poc_version_dir
+        logging.debug(f"Utils.get_project_root: Calculated PoC_Version root: {_project_root_cache}")
+    return _project_root_cache
 
 
-    # Read the config file
-    config = configparser.ConfigParser()
-    try:
-        config.read(config_path)
-        logging.info(f"Successfully read config file from {config_path}")
-    except configparser.Error as e:
-         logging.error(f"Error reading config file {config_path}: {e}")
-         raise # Re-raise the error
-
-    # Log the sections found in the config file
-    logging.trace(f"load_comprehensive_config(): Sections found in config: {config.sections()}")
-
-    return config
+def ensure_directory_exists(directory_path: str):
+    """Ensure that a directory exists, creating it if necessary."""
+    if directory_path and not os.path.exists(directory_path):
+        try:
+            os.makedirs(directory_path, exist_ok=True)
+            logging.debug(f"Utils.ensure_directory_exists: Created directory: {directory_path}")
+        except OSError as e:
+            logging.error(f"Utils.ensure_directory_exists: Failed to create directory {directory_path}: {e}")
+            raise  # Re-raise to indicate critical failure
 
 
-def get_database_dir():
-    """Get the absolute path to the database directory (inside PoC_Version)."""
-    # Assumes a 'Databases' folder directly under the PoC_Version root
-    db_dir = os.path.join(get_project_root(), 'Databases')
-    os.makedirs(db_dir, exist_ok=True)
-    logging.trace(f"Database directory: {db_dir}")
+def get_project_relative_path(relative_path_str: Union[str, os.PathLike[AnyStr]]) -> str:
+    """Convert a path relative to the PoC_Version root to an absolute path."""
+    root = get_project_root()
+    # Normalize the relative path to handle mixed slashes and ensure it's treated as relative
+    normalized_relative_path = os.path.normpath(str(relative_path_str))
+    # Prevent escaping the project root if relative_path_str starts with '..' or is absolute
+    if os.path.isabs(normalized_relative_path) or normalized_relative_path.startswith('..'):
+        logging.warning(
+            f"get_project_relative_path: Attempt to access path outside project root with '{relative_path_str}'. Returning as is if absolute, or raising error.")
+        if os.path.isabs(normalized_relative_path):
+            return normalized_relative_path  # It's already absolute, use it.
+        else:
+            raise ValueError(f"Relative path '{relative_path_str}' attempts to go above project root.")
+
+    path = os.path.join(root, normalized_relative_path)
+    logging.debug(f"Utils.get_project_relative_path: Resolved '{relative_path_str}' to '{path}'")
+    return path
+
+
+def get_database_dir() -> str:
+    """Get the absolute path to the 'Databases' directory (inside PoC_Version)."""
+    db_dir = os.path.join(get_project_root(), 'Databases')  # PoC_Version/Databases
+    ensure_directory_exists(db_dir)  # Ensures PoC_Version/Databases exists
+    logging.debug(f"Utils.get_database_dir: Database directory is: {db_dir}")
     return db_dir
 
 
 def get_database_path(db_name: str) -> str:
     """
-    Get the full absolute path for a database file.
-    Ensures the path is always within the Databases directory.
+    Get the full absolute path for a database file within PoC_Version/Databases.
+    Ensures the specific directory for the DB file exists if db_name includes subdirectories.
     """
-    # Remove any directory traversal attempts
-    safe_db_name = os.path.basename(db_name)
-    path = os.path.join(get_database_dir(), safe_db_name)
-    logging.trace(f"Database path for {safe_db_name}: {path}")
-    return path
+    # Basic sanitization for db_name to prevent directory traversal
+    safe_db_name = os.path.normpath(db_name)
+    if '..' in safe_db_name or os.path.isabs(safe_db_name):
+        raise ValueError(f"Invalid db_name '{db_name}'. Cannot be absolute or contain '..'.")
+
+    base_databases_dir = get_database_dir()  # Ensures PoC_Version/Databases exists
+    full_db_path = os.path.join(base_databases_dir, safe_db_name)
+
+    db_file_dir = os.path.dirname(full_db_path)
+    ensure_directory_exists(db_file_dir)  # Ensures the specific subdir like Databases/subdir exists
+
+    logging.debug(f"Utils.get_database_path: Database path for '{db_name}' resolved to: {full_db_path}")
+    return full_db_path
 
 
-def get_project_relative_path(relative_path: Union[str, os.PathLike[AnyStr]]) -> str:
-    """Convert a path relative to the project root (PoC_Version) to an absolute path."""
-    # This function should work correctly once get_project_root() is fixed.
-    # It takes a path like 'Databases/prompts.db' or 'Logs/app.log'
-    # and joins it with the project root path (e.g., .../PoC_Version)
-    path = os.path.join(get_project_root(), str(relative_path))
-    logging.trace(f"Project relative path for '{relative_path}': {path}")
-    return path
+# --- Config Loading ---
+def load_comprehensive_config():
+    # get_project_root() will return PoC_Version root
+    config_file_relative_path = os.path.join('Config_Files', 'config.txt')
+    config_path = get_project_relative_path(config_file_relative_path)
+
+    logging.debug(f"Utils.load_comprehensive_config: Attempting to load config from: {config_path}")
+
+    if not os.path.exists(config_path):
+        logging.error(f"Utils.load_comprehensive_config: Config file not found at {config_path}")
+        raise FileNotFoundError(f"Config file not found at {config_path}")
+
+    config = configparser.ConfigParser()
+    try:
+        config.read(config_path)
+        logging.info(f"Utils.load_comprehensive_config: Successfully read config file from {config_path}")
+    except configparser.Error as e:
+        logging.error(f"Utils.load_comprehensive_config: Error reading config file {config_path}: {e}")
+        raise
+    return config
+
 
 def get_chromadb_path():
     # This will now correctly point to PoC_Version/Databases/chroma_db

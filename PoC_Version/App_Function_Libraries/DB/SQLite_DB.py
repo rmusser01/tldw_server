@@ -223,7 +223,21 @@ class InputError(Exception):
 
 class Database:
     def __init__(self, db_name='media_summary.db'):
-        self.db_path = get_database_path(db_name)
+        # Resolve the full path first
+        resolved_db_path = get_database_path(db_name)
+
+        # Ensure the specific directory for this resolved_db_path exists
+        db_dir = os.path.dirname(resolved_db_path)
+        if not os.path.exists(db_dir):
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+                logging.info(f"SQLite_DB.Database: Created database directory: {db_dir}")
+            except OSError as e:
+                logging.error(f"SQLite_DB.Database: Failed to create database directory {db_dir}: {e}")
+                raise  # Re-raise if directory creation fails
+
+        self.db_path = resolved_db_path
+        logging.info(f"SQLite_DB.Database: Initialized with db_path: {self.db_path}")
         self.timeout = 10.0
         self._local = threading.local()
 

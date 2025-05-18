@@ -514,3 +514,4 @@ tldw_Server_API/app/Databases/chatDB.db
 *.db
 /user_databases
 .env
+/PoC_Version/PoC_Version/Databases/chroma_db
