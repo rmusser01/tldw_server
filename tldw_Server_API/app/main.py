@@ -22,6 +22,9 @@ from tldw_Server_API.app.api.v1.endpoints.audio import router as audio_router
 # Chat Endpoint
 from tldw_Server_API.app.api.v1.endpoints.chat import router as chat_router
 #
+# Character Endpoint
+from tldw_Server_API.app.api.v1.endpoints.chat import router as character_router
+#
 # Chunking Endpoint
 from tldw_Server_API.app.api.v1.endpoints.chunking import chunking_router as chunking_router
 #
@@ -163,6 +166,10 @@ app.include_router(audio_router, prefix="/api/v1/audio", tags=["audio"])
 
 # Router for chat endpoints/chat temp-file handling
 app.include_router(chat_router, prefix="/api/v1/chat", tags=["chat"])
+
+
+# Router for chat endpoints/chat temp-file handling
+app.include_router(character_router, prefix="/api/v1/persona", tags=["persona, character"])
 
 
 # Router for Chunking Endpoint
