@@ -134,6 +134,15 @@ async def process_text_for_chunking_json(
         provider_specific_config_key = f"{summarization_provider}_api" # e.g., "openai_api"
         api_details_from_server_config = server_configs.get(provider_specific_config_key, {})
 
+        server_task_specific_model = api_details_from_server_config.get('model_for_summarization')
+        logger.debug(f"TEMP DEBUG: server_task_specific_model = {server_task_specific_model}")
+
+        server_general_model = api_details_from_server_config.get('model')
+        logger.debug(f"TEMP DEBUG: server_general_model = {server_general_model}")
+
+        final_model_for_step = server_task_specific_model or server_general_model
+        logger.debug(f"TEMP DEBUG: final_model_for_step = {final_model_for_step}")
+
         # System Prompt for internal LLM steps:
         # Priority: Client suggested -> Server default for rolling_summarize method -> General LLM default
         client_suggested_system_prompt = requested_llm_options.get('system_prompt_for_step')
@@ -159,8 +168,8 @@ async def process_text_for_chunking_json(
         # Build llm_api_config for the call to `general_llm_analyzer`
         llm_api_config_to_use = {
             "api_name": summarization_provider,
-            "model": requested_llm_options.get('model') or api_details_from_server_config.get('model'),
-            "api_key": api_details_from_server_config.get('api_key'), # CRITICAL: Key comes from server config
+            "model": final_model_for_step or api_details_from_server_config.get('model'),
+            "api_key": api_details_from_server_config.get('api_key'),
             "temp": requested_llm_options.get('temperature'), # If None, general_llm_analyzer will use its own default/config
             "system_message": final_system_prompt_for_step,
             "max_tokens": final_max_tokens_for_step,
@@ -300,7 +309,10 @@ async def process_file_for_chunking(
                                           server_configs_file.get('llm_api_settings', {}).get('default_api', 'openai'))
         provider_specific_config_key_file = f"{internal_llm_provider_file}_api"
         api_details_server_file = server_configs_file.get(provider_specific_config_key_file, {})
-        internal_llm_model_file = api_details_server_file.get('model_for_summarization', api_details_server_file.get('model'))
+
+        server_task_specific_model_file = api_details_server_file.get('model_for_summarization')
+        server_general_model_file = api_details_server_file.get('model')
+        internal_llm_model_file = server_task_specific_model_file or server_general_model_file
 
         if not internal_llm_model_file:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Server config missing model for {internal_llm_provider_file} (file).")

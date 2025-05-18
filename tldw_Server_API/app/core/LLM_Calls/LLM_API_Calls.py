@@ -796,368 +796,6 @@ def chat_with_cohere(
         raise ChatProviderError(provider="cohere", message=f"Unexpected error: {e}")
 
 
-# https://console.groq.com/docs/quickstart
-def chat_with_groq(
-        input_data: List[Dict[str, Any]],
-        model: Optional[str] = None,
-        api_key: Optional[str] = None,
-        system_message: Optional[str] = None,
-        temp: Optional[float] = None,
-        maxp: Optional[float] = None,  # top_p
-        streaming: Optional[bool] = False,
-        max_tokens: Optional[int] = None,
-        seed: Optional[int] = None,
-        stop: Optional[Union[str, List[str]]] = None,
-        response_format: Optional[Dict[str, str]] = None,
-        n: Optional[int] = None,
-        user: Optional[str] = None,  # user_identifier
-        tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
-        logit_bias: Optional[Dict[str, float]] = None,
-        presence_penalty: Optional[float] = None,
-        frequency_penalty: Optional[float] = None,
-        logprobs: Optional[bool] = None,
-        top_logprobs: Optional[int] = None,
-        custom_prompt_arg: Optional[str] = None  # Legacy
-):
-    loaded_config_data = load_and_log_configs()
-    groq_config = loaded_config_data.get('groq_api', {})
-    final_api_key = api_key or groq_config.get('api_key')
-    if not final_api_key:
-        raise ChatConfigurationError(provider="groq", message="Groq API Key required.")
-
-    # ... (logging key, model, temp, streaming setup as before) ...
-    log_key = f"{final_api_key[:5]}...{final_api_key[-5:]}" if final_api_key and len(
-        final_api_key) > 9 else "Key Provided"
-    logging.debug(f"Groq: Using API Key: {log_key}")
-
-    current_model = model or groq_config.get('model', 'llama3-8b-8192')
-    current_temp = temp if temp is not None else float(groq_config.get('temperature', 0.2))
-    current_top_p = maxp  # Groq uses top_p
-    current_streaming_cfg = groq_config.get('streaming', False)
-    current_streaming = streaming if streaming is not None else \
-        (str(current_streaming_cfg).lower() == 'true' if isinstance(current_streaming_cfg, str) else bool(
-            current_streaming_cfg))
-
-    current_max_tokens = max_tokens if max_tokens is not None else _safe_cast(groq_config.get('max_tokens'), int)
-
-    api_messages = []
-    if system_message:
-        api_messages.append({"role": "system", "content": system_message})
-    api_messages.extend(input_data)
-
-    headers = {'Authorization': f'Bearer {final_api_key}', 'Content-Type': 'application/json'}
-    data = {
-        "model": current_model, "messages": api_messages, "stream": current_streaming,
-    }
-    if current_temp is not None: data["temperature"] = current_temp
-    if current_top_p is not None: data["top_p"] = current_top_p
-    if current_max_tokens is not None: data["max_tokens"] = current_max_tokens
-    if seed is not None: data["seed"] = seed
-    if stop is not None: data["stop"] = stop
-    if response_format is not None: data["response_format"] = response_format
-    if n is not None: data["n"] = n
-    if user is not None: data["user"] = user
-    if tools is not None: data["tools"] = tools
-    if tool_choice is not None: data["tool_choice"] = tool_choice
-    if logit_bias is not None: data["logit_bias"] = logit_bias
-    if presence_penalty is not None: data["presence_penalty"] = presence_penalty
-    if frequency_penalty is not None: data["frequency_penalty"] = frequency_penalty
-    if logprobs is not None: data["logprobs"] = logprobs
-    if top_logprobs is not None and data.get("logprobs") is True: data["top_logprobs"] = top_logprobs
-
-    api_url = groq_config.get('api_base_url', 'https://api.groq.com/openai/v1').rstrip('/') + '/chat/completions'
-    logging.debug(f"Groq Request Payload (excluding messages): {{k: v for k, v in data.items() if k != 'messages'}}")
-    try:
-        if current_streaming:
-            # ... (OpenAI-like streaming logic, ensure "Groq" in logs) ...
-            with requests.Session() as session:
-                response = session.post(api_url, headers=headers, json=data, stream=True, timeout=180)
-                response.raise_for_status()
-
-                def stream_generator():
-                    try:
-                        for line in response.iter_lines(decode_unicode=True):
-                            if line and line.strip(): yield line + "\n\n"
-                    except requests.exceptions.ChunkedEncodingError as e:  # ... error handling ...
-                        logging.error(f"Groq: ChunkedEncodingError: {e}", exc_info=True)
-                        yield f"data: {json.dumps({'error': {'message': f'Stream error: {str(e)}', 'type': 'groq_stream_error'}})}\n\n"
-                    except Exception as e:  # ... error handling ...
-                        logging.error(f"Groq: Stream iteration error: {e}", exc_info=True)
-                        yield f"data: {json.dumps({'error': {'message': f'Stream iteration error: {str(e)}', 'type': 'groq_stream_error'}})}\n\n"
-                    finally:
-                        yield "data: [DONE]\n\n"
-                        if response: response.close()
-
-                return stream_generator()
-        else:
-            # ... (non-streaming logic, retry) ...
-            retry_count = int(groq_config.get('api_retries', 3))  # ... retry setup ...
-            adapter = HTTPAdapter(
-                max_retries=Retry(total=retry_count, backoff_factor=float(groq_config.get('api_retry_delay', 1)),
-                                  status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["POST"]))
-            with requests.Session() as session:
-                session.mount("https://", adapter)
-                response = session.post(api_url, headers=headers, json=data, timeout=120)
-            response.raise_for_status()
-            return response.json()
-    except requests.exceptions.HTTPError as e:  # ... error handling ...
-        raise
-    except Exception as e:  # ... error handling ...
-        raise ChatProviderError(provider="groq", message=f"Unexpected error: {e}")
-
-
-def chat_with_openrouter(
-        input_data: List[Dict[str, Any]],
-        model: Optional[str] = None,
-        api_key: Optional[str] = None,
-        system_message: Optional[str] = None,
-        temp: Optional[float] = None,
-        streaming: Optional[bool] = False,
-        # OpenRouter specific names from your map
-        top_p: Optional[float] = None,  # from generic topp
-        top_k: Optional[int] = None,  # from generic topk
-        min_p: Optional[float] = None,  # from generic minp (OpenRouter uses min_p not minp)
-        max_tokens: Optional[int] = None,
-        seed: Optional[int] = None,
-        stop: Optional[Union[str, List[str]]] = None,
-        response_format: Optional[Dict[str, str]] = None,
-        n: Optional[int] = None,
-        user: Optional[str] = None,  # from user_identifier
-        tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
-        logit_bias: Optional[Dict[str, float]] = None,
-        presence_penalty: Optional[float] = None,
-        frequency_penalty: Optional[float] = None,
-        logprobs: Optional[bool] = None,
-        top_logprobs: Optional[int] = None,
-        custom_prompt_arg: Optional[str] = None
-):
-    loaded_config_data = load_and_log_configs()
-    openrouter_config = loaded_config_data.get('openrouter_api', {})
-    # ... (api key, model, temp, streaming setup) ...
-    final_api_key = api_key or openrouter_config.get('api_key')
-    if not final_api_key: raise ChatConfigurationError(provider='openrouter', message="OpenRouter API Key required.")
-    current_model = model or openrouter_config.get('model', 'mistralai/mistral-7b-instruct:free')
-    # ... other param resolutions ...
-    current_streaming_cfg = openrouter_config.get('streaming', False)
-    current_streaming = streaming if streaming is not None else \
-        (str(current_streaming_cfg).lower() == 'true' if isinstance(current_streaming_cfg, str) else bool(
-            current_streaming_cfg))
-
-    api_messages = []
-    if system_message: api_messages.append({"role": "system", "content": system_message})
-    api_messages.extend(input_data)
-
-    headers = {
-        "Authorization": f"Bearer {final_api_key}", "Content-Type": "application/json",
-        "HTTP-Referer": openrouter_config.get("site_url", "http://localhost"),  # OpenRouter specific
-        "X-Title": openrouter_config.get("site_name", "TLDW-API"),  # OpenRouter specific
-    }
-    data = {"model": current_model, "messages": api_messages, "stream": current_streaming}
-    # Add all other accepted parameters to data if they are not None
-    if temp is not None: data["temperature"] = temp
-    if top_p is not None: data["top_p"] = top_p
-    if top_k is not None: data["top_k"] = top_k
-    if min_p is not None: data["min_p"] = min_p  # OpenRouter uses min_p
-    if max_tokens is not None: data["max_tokens"] = max_tokens
-    if seed is not None: data["seed"] = seed
-    if stop is not None: data["stop"] = stop
-    if response_format is not None: data["response_format"] = response_format
-    if n is not None: data["n"] = n
-    if user is not None: data["user"] = user
-    if tools is not None: data["tools"] = tools
-    if tool_choice is not None: data["tool_choice"] = tool_choice
-    if logit_bias is not None: data["logit_bias"] = logit_bias
-    if presence_penalty is not None: data["presence_penalty"] = presence_penalty
-    if frequency_penalty is not None: data["frequency_penalty"] = frequency_penalty
-    if logprobs is not None: data["logprobs"] = logprobs
-    if top_logprobs is not None and data.get("logprobs"): data["top_logprobs"] = top_logprobs
-
-    api_url = openrouter_config.get('api_base_url', "https://openrouter.ai/api/v1").rstrip('/') + "/chat/completions"
-    logging.debug(
-        f"OpenRouter Request Payload (excluding messages): {{k: v for k, v in data.items() if k != 'messages'}}")
-
-    try:
-        if current_streaming:
-            # ... (OpenAI-like streaming logic, ensure "OpenRouter" in logs) ...
-            with requests.Session() as session:
-                response = session.post(api_url, headers=headers, json=data, stream=True, timeout=180)
-                response.raise_for_status()
-
-                def stream_generator():
-                    try:
-                        for line in response.iter_lines(decode_unicode=True):
-                            if line and line.strip(): yield line + "\n\n"
-                    # ... (error handling for stream) ...
-                    finally:
-                        yield "data: [DONE]\n\n"
-                        if response: response.close()
-
-                return stream_generator()
-        else:
-            # ... (non-streaming logic) ...
-            # ... (retry setup) ...
-            adapter = HTTPAdapter(max_retries=Retry(total=int(openrouter_config.get('api_retries', 3)),
-                                                    backoff_factor=float(openrouter_config.get('api_retry_delay', 1)),
-                                                    status_forcelist=[429, 500, 502, 503, 504],
-                                                    allowed_methods=["POST"]))
-            with requests.Session() as session:
-                session.mount("https://", adapter)
-                response = session.post(api_url, headers=headers, json=data, timeout=120)
-            response.raise_for_status()
-            return response.json()  # OpenRouter usually returns OpenAI compatible JSON
-    except requests.exceptions.HTTPError as e:  # ... error handling ...
-        raise
-    except Exception as e:  # ... error handling ...
-        raise ChatProviderError(provider="openrouter", message=f"Unexpected error: {e}")
-
-
-def chat_with_huggingface(
-        input_data: List[Dict[str, Any]],
-        model: Optional[str] = None,  # This will be the 'model' in the payload
-        api_key: Optional[str] = None,
-        system_message: Optional[str] = None,  # Mapped from generic system_message
-        temp: Optional[float] = None,
-        streaming: Optional[bool] = False,
-        # OpenAI-compatible parameters
-        top_p: Optional[float] = None,
-        top_k: Optional[int] = None,
-        max_tokens: Optional[int] = None,  # Generic 'max_tokens'
-        seed: Optional[int] = None,
-        stop: Optional[Union[str, List[str]]] = None,
-        response_format: Optional[Dict[str, str]] = None,
-        num_return_sequences: Optional[int] = None,  # Mapped from 'n'
-        user: Optional[str] = None,  # Mapped from user_identifier
-        tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
-        logit_bias: Optional[Dict[str, float]] = None,
-        presence_penalty: Optional[float] = None,
-        frequency_penalty: Optional[float] = None,
-        logprobs: Optional[bool] = None,
-        top_logprobs: Optional[int] = None,
-        custom_prompt_arg: Optional[str] = None  # Legacy
-):
-    logging.debug(f"HuggingFace Chat: Request process starting...")
-    loaded_config_data = load_and_log_configs()
-    hf_config = loaded_config_data.get('huggingface_api', {})
-
-    final_api_key = api_key or hf_config.get('api_key')
-    if final_api_key:
-        log_key_display = f"{final_api_key[:5]}...{final_api_key[-5:]}" if len(final_api_key) > 9 else "Key Provided"
-        logging.debug(f"HuggingFace: Using API Key: {log_key_display}")
-    else:
-        logging.warning("HuggingFace: API key is missing. Assuming local/unsecured TGI or endpoint allows it.")
-
-    # Model for the payload. The 'model' arg to this function is primary.
-    final_model_for_payload = model or hf_config.get('model')  # 'model' from config, not 'model_id'
-    if not final_model_for_payload:
-        raise ChatConfigurationError(provider="huggingface", message="HuggingFace model for payload is required.")
-
-    # --- URL Construction ---
-    # (URL construction logic from your previous version, ensure it uses final_model_for_payload if needed for path)
-    api_url: str
-    use_router_format = hf_config.get('use_router_url_format', False)
-    if use_router_format:
-        router_base = hf_config.get('router_base_url', 'https://router.huggingface.co/hf-inference').rstrip('/')
-        model_path_part = final_model_for_payload  # Using the model that will be in the payload for path consistency
-        chat_path = hf_config.get('api_chat_path', 'v1/chat/completions').strip('/')
-        api_url = f"{router_base}/models/{model_path_part}/{chat_path}"
-        logging.info(f"HuggingFace: Using Router URL format. Target URL: {api_url}")
-    else:
-        configured_api_base_url = hf_config.get('api_base_url')
-        if not configured_api_base_url:
-            raise ChatConfigurationError(provider="huggingface", message="HuggingFace 'api_base_url' not configured.")
-        chat_completions_path = hf_config.get('api_chat_path', 'v1/chat/completions').strip('/')
-        api_url = f"{configured_api_base_url.rstrip('/')}/{chat_completions_path}"
-        logging.info(f"HuggingFace: Using TGI/Endpoint URL format. Target URL: {api_url}")
-
-    # Resolve other parameters
-    final_temp = temp if temp is not None else _safe_cast(hf_config.get('temperature'), float, 0.7)
-    final_streaming_cfg = hf_config.get('streaming', False)
-    final_streaming = streaming if streaming is not None else \
-        (str(final_streaming_cfg).lower() == 'true' if isinstance(final_streaming_cfg, str) else bool(
-            final_streaming_cfg))
-
-    # For max_tokens, OpenAI standard is 'max_tokens'. TGI often uses 'max_new_tokens'.
-    # If the endpoint is OpenAI compatible (e.g. /v1/chat/completions), it likely expects 'max_tokens'.
-    # We prioritize the direct 'max_tokens' from chat_api_call.
-    final_max_tokens_val = max_tokens if max_tokens is not None \
-        else _safe_cast(hf_config.get('max_tokens', hf_config.get('max_new_tokens')), int)
-
-    api_messages = []
-    if system_message:  # This is the parameter passed from chat_api_call
-        api_messages.append({"role": "system", "content": system_message})
-    api_messages.extend(input_data)  # input_data is the messages_payload
-
-    payload = {
-        "model": final_model_for_payload,
-        "messages": api_messages,  # System message is now part of this
-        "stream": final_streaming,
-    }
-
-    if final_temp is not None: payload["temperature"] = final_temp
-    if top_p is not None: payload["top_p"] = top_p
-    if top_k is not None: payload["top_k"] = top_k
-    if final_max_tokens_val is not None: payload["max_tokens"] = final_max_tokens_val
-    if seed is not None: payload["seed"] = seed
-    if stop is not None: payload["stop"] = stop
-    if response_format is not None: payload["response_format"] = response_format
-    if num_return_sequences is not None: payload["num_return_sequences"] = num_return_sequences
-    if user is not None: payload["user"] = user
-    if tools is not None: payload["tools"] = tools
-    if tool_choice is not None:  # If it's still present after chat.py logic
-        payload["tool_choice"] = tool_choice
-    # Then conditionally add tool_choice:
-    elif tool_choice == "none":  # Allow "none" even if no tools are present
-        payload["tool_choice"] = "none"
-    if logit_bias is not None: payload["logit_bias"] = logit_bias
-    if presence_penalty is not None: payload["presence_penalty"] = presence_penalty
-    if frequency_penalty is not None: payload["frequency_penalty"] = frequency_penalty
-    if logprobs is not None: payload["logprobs"] = logprobs
-    if top_logprobs is not None and payload.get("logprobs"): payload["top_logprobs"] = top_logprobs
-
-    logging.debug(f"HuggingFace Payload (excluding messages): {{k:v for k,v in payload.items() if k != 'messages'}}")
-
-    try:
-        if final_streaming:
-            # ... (OpenAI-like streaming logic, use "HuggingFace" in logs) ...
-            logging.debug(f"HuggingFace: Posting streaming request to {api_url}")
-            with requests.Session() as session:
-                response = session.post(api_url, headers=headers, json=payload, stream=True, timeout=180)
-                response.raise_for_status()
-
-                def stream_generator():
-                    try:
-                        for line in response.iter_lines(decode_unicode=True):
-                            if line and line.strip(): yield line + "\n\n"
-                    # ... (error handling for stream) ...
-                    finally:
-                        yield "data: [DONE]\n\n"
-                        if response: response.close()
-
-                return stream_generator()
-        else:
-            # ... (non-streaming logic, retry) ...
-            logging.debug(f"HuggingFace: Posting non-streaming request to {api_url}")
-            # ... (retry setup from your file) ...
-            adapter = HTTPAdapter(max_retries=Retry(total=int(hf_config.get('api_retries', 3)),
-                                                    backoff_factor=float(hf_config.get('api_retry_delay', 1)),
-                                                    status_forcelist=[429, 500, 502, 503, 504],
-                                                    allowed_methods=["POST"]))
-            with requests.Session() as session:
-                session.mount("https://", adapter);
-                session.mount("http://", adapter)
-                response = session.post(api_url, headers=headers, json=payload,
-                                        timeout=float(hf_config.get('api_timeout', 120.0)))
-            response.raise_for_status()
-            return response.json()
-    except requests.exceptions.HTTPError as e:  # ... error handling ...
-        raise
-    except Exception as e:  # ... error handling ...
-        raise ChatProviderError(provider="huggingface", message=f"Unexpected error: {e}")
-
-
 def chat_with_deepseek(
         input_data: List[Dict[str, Any]],
         model: Optional[str] = None,
@@ -1263,106 +901,6 @@ def chat_with_deepseek(
         raise
     except Exception as e:  # ... error handling ...
         raise ChatProviderError(provider="deepseek", message=f"Unexpected error: {e}")
-
-
-def chat_with_mistral(
-        input_data: List[Dict[str, Any]],
-        model: Optional[str] = None,
-        api_key: Optional[str] = None,
-        system_message: Optional[str] = None,
-        temp: Optional[float] = None,
-        streaming: Optional[bool] = False,
-        topp: Optional[float] = None,  # top_p for Mistral
-        # Mistral specific and new params
-        max_tokens: Optional[int] = None,
-        random_seed: Optional[int] = None,  # from generic 'seed'
-        top_k: Optional[int] = None,  # from generic 'topk'
-        safe_prompt: Optional[bool] = None,  # Mistral specific, already in your config
-        tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[str] = None,  # Mistral: "auto", "any", "none"
-        response_format: Optional[Dict[str, str]] = None,  # Mistral: {"type": "json_object"}
-        custom_prompt_arg: Optional[str] = None
-):
-    loaded_config_data = load_and_log_configs()
-    mistral_config = loaded_config_data.get('mistral_api', {})
-    final_api_key = api_key or mistral_config.get('api_key')
-    if not final_api_key:
-        raise ChatConfigurationError(provider="mistral", message="Mistral API Key required.")
-
-    # ... (logging key, model, temp, streaming, top_p setup) ...
-    log_key = f"{final_api_key[:5]}...{final_api_key[-5:]}" if final_api_key and len(
-        final_api_key) > 9 else "Key Provided"
-    logging.debug(f"Mistral: Using API Key: {log_key}")
-    current_model = model or mistral_config.get('model', 'mistral-large-latest')  # or mistral-small, mistral-medium
-    current_temp = temp if temp is not None else float(
-        mistral_config.get('temperature', 0.1))  # Mistral defaults to 0.7
-    current_top_p = topp  # Mistral uses top_p
-    current_streaming_cfg = mistral_config.get('streaming', False)
-    current_streaming = streaming if streaming is not None else \
-        (str(current_streaming_cfg).lower() == 'true' if isinstance(current_streaming_cfg, str) else bool(
-            current_streaming_cfg))
-
-    current_max_tokens = max_tokens if max_tokens is not None else _safe_cast(mistral_config.get('max_tokens'), int)
-    current_safe_prompt = safe_prompt if safe_prompt is not None else bool(mistral_config.get('safe_prompt', False))
-
-    api_messages = []
-    # Mistral expects system message as the first message with role: system if provided
-    # However, their latest guidance often shows it as part of the first user message or specific instructions.
-    # For OpenAI compatibility, if system_message is given, and not already in input_data, prepend it.
-    has_system_in_input = any(msg.get("role") == "system" for msg in input_data)
-    if system_message and not has_system_in_input:
-        api_messages.append({"role": "system", "content": system_message})
-    api_messages.extend(input_data)
-
-    headers = {'Authorization': f'Bearer {final_api_key}', 'Content-Type': 'application/json',
-               'Accept': 'application/json'}
-    data = {"model": current_model, "messages": api_messages, "stream": current_streaming}
-
-    if current_temp is not None: data["temperature"] = current_temp
-    if current_top_p is not None: data["top_p"] = current_top_p
-    if current_max_tokens is not None: data["max_tokens"] = current_max_tokens
-    if random_seed is not None: data["random_seed"] = random_seed  # Mistral uses random_seed
-    if top_k is not None: data["top_k"] = top_k  # Mistral has top_k
-    if current_safe_prompt is not None: data["safe_prompt"] = current_safe_prompt  # Mistral specific
-    if tools is not None: data["tools"] = tools
-    if tool_choice is not None: data["tool_choice"] = tool_choice  # "auto", "any", "none"
-    if response_format is not None: data["response_format"] = response_format  # {"type": "json_object"}
-
-    api_url = mistral_config.get('api_base_url', 'https://api.mistral.ai/v1').rstrip('/') + '/chat/completions'
-    logging.debug(f"Mistral Request Payload (excluding messages): {{k: v for k, v in data.items() if k != 'messages'}}")
-
-    try:
-        if current_streaming:
-            # ... (OpenAI-like streaming logic, use "Mistral" in logs) ...
-            with requests.Session() as session:
-                response = session.post(api_url, headers=headers, json=data, stream=True, timeout=180)
-                response.raise_for_status()
-
-                def stream_generator():
-                    try:
-                        for line in response.iter_lines(decode_unicode=True):
-                            if line and line.strip(): yield line + "\n\n"
-                    # ... (error handling for stream) ...
-                    finally:
-                        yield "data: [DONE]\n\n"
-                        if response: response.close()
-
-                return stream_generator()
-        else:
-            # ... (non-streaming, retry) ...
-            adapter = HTTPAdapter(max_retries=Retry(total=int(mistral_config.get('api_retries', 3)),
-                                                    backoff_factor=float(mistral_config.get('api_retry_delay', 1)),
-                                                    status_forcelist=[429, 500, 502, 503, 504],
-                                                    allowed_methods=["POST"]))
-            with requests.Session() as session:
-                session.mount("https://", adapter)
-                response = session.post(api_url, headers=headers, json=data, timeout=120)
-            response.raise_for_status()
-            return response.json()
-    except requests.exceptions.HTTPError as e:  # ... error handling ...
-        raise
-    except Exception as e:  # ... error handling ...
-        raise ChatProviderError(provider="mistral", message=f"Unexpected error: {e}")
 
 
 def chat_with_google(
@@ -1575,6 +1113,469 @@ def chat_with_google(
         raise
     except Exception as e:  # ... error handling ...
         raise ChatProviderError(provider="google", message=f"Unexpected error: {e}")
+
+
+
+# https://console.groq.com/docs/quickstart
+def chat_with_groq(
+        input_data: List[Dict[str, Any]],
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        system_message: Optional[str] = None,
+        temp: Optional[float] = None,
+        maxp: Optional[float] = None,  # top_p
+        streaming: Optional[bool] = False,
+        max_tokens: Optional[int] = None,
+        seed: Optional[int] = None,
+        stop: Optional[Union[str, List[str]]] = None,
+        response_format: Optional[Dict[str, str]] = None,
+        n: Optional[int] = None,
+        user: Optional[str] = None,  # user_identifier
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        logit_bias: Optional[Dict[str, float]] = None,
+        presence_penalty: Optional[float] = None,
+        frequency_penalty: Optional[float] = None,
+        logprobs: Optional[bool] = None,
+        top_logprobs: Optional[int] = None,
+        custom_prompt_arg: Optional[str] = None  # Legacy
+):
+    loaded_config_data = load_and_log_configs()
+    groq_config = loaded_config_data.get('groq_api', {})
+    final_api_key = api_key or groq_config.get('api_key')
+    if not final_api_key:
+        raise ChatConfigurationError(provider="groq", message="Groq API Key required.")
+
+    # ... (logging key, model, temp, streaming setup as before) ...
+    log_key = f"{final_api_key[:5]}...{final_api_key[-5:]}" if final_api_key and len(
+        final_api_key) > 9 else "Key Provided"
+    logging.debug(f"Groq: Using API Key: {log_key}")
+
+    current_model = model or groq_config.get('model', 'llama3-8b-8192')
+    current_temp = temp if temp is not None else float(groq_config.get('temperature', 0.2))
+    current_top_p = maxp  # Groq uses top_p
+    current_streaming_cfg = groq_config.get('streaming', False)
+    current_streaming = streaming if streaming is not None else \
+        (str(current_streaming_cfg).lower() == 'true' if isinstance(current_streaming_cfg, str) else bool(
+            current_streaming_cfg))
+
+    current_max_tokens = max_tokens if max_tokens is not None else _safe_cast(groq_config.get('max_tokens'), int)
+
+    api_messages = []
+    if system_message:
+        api_messages.append({"role": "system", "content": system_message})
+    api_messages.extend(input_data)
+
+    headers = {'Authorization': f'Bearer {final_api_key}', 'Content-Type': 'application/json'}
+    data = {
+        "model": current_model, "messages": api_messages, "stream": current_streaming,
+    }
+    if current_temp is not None: data["temperature"] = current_temp
+    if current_top_p is not None: data["top_p"] = current_top_p
+    if current_max_tokens is not None: data["max_tokens"] = current_max_tokens
+    if seed is not None: data["seed"] = seed
+    if stop is not None: data["stop"] = stop
+    if response_format is not None: data["response_format"] = response_format
+    if n is not None: data["n"] = n
+    if user is not None: data["user"] = user
+    if tools is not None: data["tools"] = tools
+    if tool_choice is not None: data["tool_choice"] = tool_choice
+    if logit_bias is not None: data["logit_bias"] = logit_bias
+    if presence_penalty is not None: data["presence_penalty"] = presence_penalty
+    if frequency_penalty is not None: data["frequency_penalty"] = frequency_penalty
+    if logprobs is not None: data["logprobs"] = logprobs
+    if top_logprobs is not None and data.get("logprobs") is True: data["top_logprobs"] = top_logprobs
+
+    api_url = groq_config.get('api_base_url', 'https://api.groq.com/openai/v1').rstrip('/') + '/chat/completions'
+    logging.debug(f"Groq Request Payload (excluding messages): {{k: v for k, v in data.items() if k != 'messages'}}")
+    try:
+        if current_streaming:
+            # ... (OpenAI-like streaming logic, ensure "Groq" in logs) ...
+            with requests.Session() as session:
+                response = session.post(api_url, headers=headers, json=data, stream=True, timeout=180)
+                response.raise_for_status()
+
+                def stream_generator():
+                    try:
+                        for line in response.iter_lines(decode_unicode=True):
+                            if line and line.strip(): yield line + "\n\n"
+                    except requests.exceptions.ChunkedEncodingError as e:  # ... error handling ...
+                        logging.error(f"Groq: ChunkedEncodingError: {e}", exc_info=True)
+                        yield f"data: {json.dumps({'error': {'message': f'Stream error: {str(e)}', 'type': 'groq_stream_error'}})}\n\n"
+                    except Exception as e:  # ... error handling ...
+                        logging.error(f"Groq: Stream iteration error: {e}", exc_info=True)
+                        yield f"data: {json.dumps({'error': {'message': f'Stream iteration error: {str(e)}', 'type': 'groq_stream_error'}})}\n\n"
+                    finally:
+                        yield "data: [DONE]\n\n"
+                        if response: response.close()
+
+                return stream_generator()
+        else:
+            # ... (non-streaming logic, retry) ...
+            retry_count = int(groq_config.get('api_retries', 3))  # ... retry setup ...
+            adapter = HTTPAdapter(
+                max_retries=Retry(total=retry_count, backoff_factor=float(groq_config.get('api_retry_delay', 1)),
+                                  status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["POST"]))
+            with requests.Session() as session:
+                session.mount("https://", adapter)
+                response = session.post(api_url, headers=headers, json=data, timeout=120)
+            response.raise_for_status()
+            return response.json()
+    except requests.exceptions.HTTPError as e:  # ... error handling ...
+        raise
+    except Exception as e:  # ... error handling ...
+        raise ChatProviderError(provider="groq", message=f"Unexpected error: {e}")
+
+
+def chat_with_huggingface(
+        input_data: List[Dict[str, Any]],
+        model: Optional[str] = None,  # This will be the 'model' in the payload
+        api_key: Optional[str] = None,
+        system_message: Optional[str] = None,  # Mapped from generic system_message
+        temp: Optional[float] = None,
+        streaming: Optional[bool] = False,
+        # OpenAI-compatible parameters
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
+        max_tokens: Optional[int] = None,  # Generic 'max_tokens'
+        seed: Optional[int] = None,
+        stop: Optional[Union[str, List[str]]] = None,
+        response_format: Optional[Dict[str, str]] = None,
+        num_return_sequences: Optional[int] = None,  # Mapped from 'n'
+        user: Optional[str] = None,  # Mapped from user_identifier
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        logit_bias: Optional[Dict[str, float]] = None,
+        presence_penalty: Optional[float] = None,
+        frequency_penalty: Optional[float] = None,
+        logprobs: Optional[bool] = None,
+        top_logprobs: Optional[int] = None,
+        custom_prompt_arg: Optional[str] = None  # Legacy
+):
+    logging.debug(f"HuggingFace Chat: Request process starting...")
+    loaded_config_data = load_and_log_configs()
+    hf_config = loaded_config_data.get('huggingface_api', {})
+
+    final_api_key = api_key or hf_config.get('api_key')
+    if final_api_key:
+        log_key_display = f"{final_api_key[:5]}...{final_api_key[-5:]}" if len(final_api_key) > 9 else "Key Provided"
+        logging.debug(f"HuggingFace: Using API Key: {log_key_display}")
+    else:
+        logging.warning("HuggingFace: API key is missing. Assuming local/unsecured TGI or endpoint allows it.")
+
+    # Model for the payload. The 'model' arg to this function is primary.
+    final_model_for_payload = model or hf_config.get('model')  # 'model' from config, not 'model_id'
+    if not final_model_for_payload:
+        raise ChatConfigurationError(provider="huggingface", message="HuggingFace model for payload is required.")
+
+    # --- URL Construction ---
+    # (URL construction logic from your previous version, ensure it uses final_model_for_payload if needed for path)
+    api_url: str
+    use_router_format = hf_config.get('use_router_url_format', False)
+    if use_router_format:
+        router_base = hf_config.get('router_base_url', 'https://router.huggingface.co/hf-inference').rstrip('/')
+        model_path_part = final_model_for_payload  # Using the model that will be in the payload for path consistency
+        chat_path = hf_config.get('api_chat_path', 'v1/chat/completions').strip('/')
+        api_url = f"{router_base}/models/{model_path_part}/{chat_path}"
+        logging.info(f"HuggingFace: Using Router URL format. Target URL: {api_url}")
+    else:
+        configured_api_base_url = hf_config.get('api_base_url')
+        if not configured_api_base_url:
+            raise ChatConfigurationError(provider="huggingface", message="HuggingFace 'api_base_url' not configured.")
+        chat_completions_path = hf_config.get('api_chat_path', 'v1/chat/completions').strip('/')
+        api_url = f"{configured_api_base_url.rstrip('/')}/{chat_completions_path}"
+        logging.info(f"HuggingFace: Using TGI/Endpoint URL format. Target URL: {api_url}")
+
+    # Resolve other parameters
+    final_temp = temp if temp is not None else _safe_cast(hf_config.get('temperature'), float, 0.7)
+    final_streaming_cfg = hf_config.get('streaming', False)
+    final_streaming = streaming if streaming is not None else \
+        (str(final_streaming_cfg).lower() == 'true' if isinstance(final_streaming_cfg, str) else bool(
+            final_streaming_cfg))
+
+    # For max_tokens, OpenAI standard is 'max_tokens'. TGI often uses 'max_new_tokens'.
+    # If the endpoint is OpenAI compatible (e.g. /v1/chat/completions), it likely expects 'max_tokens'.
+    # We prioritize the direct 'max_tokens' from chat_api_call.
+    final_max_tokens_val = max_tokens if max_tokens is not None \
+        else _safe_cast(hf_config.get('max_tokens', hf_config.get('max_new_tokens')), int)
+
+    api_messages = []
+    if system_message:  # This is the parameter passed from chat_api_call
+        api_messages.append({"role": "system", "content": system_message})
+    api_messages.extend(input_data)  # input_data is the messages_payload
+
+    payload = {
+        "model": final_model_for_payload,
+        "messages": api_messages,  # System message is now part of this
+        "stream": final_streaming,
+    }
+
+    if final_temp is not None: payload["temperature"] = final_temp
+    if top_p is not None: payload["top_p"] = top_p
+    if top_k is not None: payload["top_k"] = top_k
+    if final_max_tokens_val is not None: payload["max_tokens"] = final_max_tokens_val
+    if seed is not None: payload["seed"] = seed
+    if stop is not None: payload["stop"] = stop
+    if response_format is not None: payload["response_format"] = response_format
+    if num_return_sequences is not None: payload["num_return_sequences"] = num_return_sequences
+    if user is not None: payload["user"] = user
+    if tools is not None: payload["tools"] = tools
+    if tool_choice is not None:  # If it's still present after chat.py logic
+        payload["tool_choice"] = tool_choice
+    # Then conditionally add tool_choice:
+    elif tool_choice == "none":  # Allow "none" even if no tools are present
+        payload["tool_choice"] = "none"
+    if logit_bias is not None: payload["logit_bias"] = logit_bias
+    if presence_penalty is not None: payload["presence_penalty"] = presence_penalty
+    if frequency_penalty is not None: payload["frequency_penalty"] = frequency_penalty
+    if logprobs is not None: payload["logprobs"] = logprobs
+    if top_logprobs is not None and payload.get("logprobs"): payload["top_logprobs"] = top_logprobs
+
+    logging.debug(f"HuggingFace Payload (excluding messages): {{k:v for k,v in payload.items() if k != 'messages'}}")
+
+    try:
+        if final_streaming:
+            # ... (OpenAI-like streaming logic, use "HuggingFace" in logs) ...
+            logging.debug(f"HuggingFace: Posting streaming request to {api_url}")
+            with requests.Session() as session:
+                response = session.post(api_url, headers=headers, json=payload, stream=True, timeout=180)
+                response.raise_for_status()
+
+                def stream_generator():
+                    try:
+                        for line in response.iter_lines(decode_unicode=True):
+                            if line and line.strip(): yield line + "\n\n"
+                    # ... (error handling for stream) ...
+                    finally:
+                        yield "data: [DONE]\n\n"
+                        if response: response.close()
+
+                return stream_generator()
+        else:
+            # ... (non-streaming logic, retry) ...
+            logging.debug(f"HuggingFace: Posting non-streaming request to {api_url}")
+            # ... (retry setup from your file) ...
+            adapter = HTTPAdapter(max_retries=Retry(total=int(hf_config.get('api_retries', 3)),
+                                                    backoff_factor=float(hf_config.get('api_retry_delay', 1)),
+                                                    status_forcelist=[429, 500, 502, 503, 504],
+                                                    allowed_methods=["POST"]))
+            with requests.Session() as session:
+                session.mount("https://", adapter);
+                session.mount("http://", adapter)
+                response = session.post(api_url, headers=headers, json=payload,
+                                        timeout=float(hf_config.get('api_timeout', 120.0)))
+            response.raise_for_status()
+            return response.json()
+    except requests.exceptions.HTTPError as e:  # ... error handling ...
+        raise
+    except Exception as e:  # ... error handling ...
+        raise ChatProviderError(provider="huggingface", message=f"Unexpected error: {e}")
+
+
+def chat_with_mistral(
+        input_data: List[Dict[str, Any]],
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        system_message: Optional[str] = None,
+        temp: Optional[float] = None,
+        streaming: Optional[bool] = False,
+        topp: Optional[float] = None,  # top_p for Mistral
+        # Mistral specific and new params
+        max_tokens: Optional[int] = None,
+        random_seed: Optional[int] = None,  # from generic 'seed'
+        top_k: Optional[int] = None,  # from generic 'topk'
+        safe_prompt: Optional[bool] = None,  # Mistral specific, already in your config
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,  # Mistral: "auto", "any", "none"
+        response_format: Optional[Dict[str, str]] = None,  # Mistral: {"type": "json_object"}
+        custom_prompt_arg: Optional[str] = None
+):
+    loaded_config_data = load_and_log_configs()
+    mistral_config = loaded_config_data.get('mistral_api', {})
+    final_api_key = api_key or mistral_config.get('api_key')
+    if not final_api_key:
+        raise ChatConfigurationError(provider="mistral", message="Mistral API Key required.")
+
+    # ... (logging key, model, temp, streaming, top_p setup) ...
+    log_key = f"{final_api_key[:5]}...{final_api_key[-5:]}" if final_api_key and len(
+        final_api_key) > 9 else "Key Provided"
+    logging.debug(f"Mistral: Using API Key: {log_key}")
+    current_model = model or mistral_config.get('model', 'mistral-large-latest')  # or mistral-small, mistral-medium
+    current_temp = temp if temp is not None else float(
+        mistral_config.get('temperature', 0.1))  # Mistral defaults to 0.7
+    current_top_p = topp  # Mistral uses top_p
+    current_streaming_cfg = mistral_config.get('streaming', False)
+    current_streaming = streaming if streaming is not None else \
+        (str(current_streaming_cfg).lower() == 'true' if isinstance(current_streaming_cfg, str) else bool(
+            current_streaming_cfg))
+
+    current_max_tokens = max_tokens if max_tokens is not None else _safe_cast(mistral_config.get('max_tokens'), int)
+    current_safe_prompt = safe_prompt if safe_prompt is not None else bool(mistral_config.get('safe_prompt', False))
+
+    api_messages = []
+    # Mistral expects system message as the first message with role: system if provided
+    # However, their latest guidance often shows it as part of the first user message or specific instructions.
+    # For OpenAI compatibility, if system_message is given, and not already in input_data, prepend it.
+    has_system_in_input = any(msg.get("role") == "system" for msg in input_data)
+    if system_message and not has_system_in_input:
+        api_messages.append({"role": "system", "content": system_message})
+    api_messages.extend(input_data)
+
+    headers = {'Authorization': f'Bearer {final_api_key}', 'Content-Type': 'application/json',
+               'Accept': 'application/json'}
+    data = {"model": current_model, "messages": api_messages, "stream": current_streaming}
+
+    if current_temp is not None: data["temperature"] = current_temp
+    if current_top_p is not None: data["top_p"] = current_top_p
+    if current_max_tokens is not None: data["max_tokens"] = current_max_tokens
+    if random_seed is not None: data["random_seed"] = random_seed  # Mistral uses random_seed
+    if top_k is not None: data["top_k"] = top_k  # Mistral has top_k
+    if current_safe_prompt is not None: data["safe_prompt"] = current_safe_prompt  # Mistral specific
+    if tools is not None: data["tools"] = tools
+    if tool_choice is not None: data["tool_choice"] = tool_choice  # "auto", "any", "none"
+    if response_format is not None: data["response_format"] = response_format  # {"type": "json_object"}
+
+    api_url = mistral_config.get('api_base_url', 'https://api.mistral.ai/v1').rstrip('/') + '/chat/completions'
+    logging.debug(f"Mistral Request Payload (excluding messages): {{k: v for k, v in data.items() if k != 'messages'}}")
+
+    try:
+        if current_streaming:
+            # ... (OpenAI-like streaming logic, use "Mistral" in logs) ...
+            with requests.Session() as session:
+                response = session.post(api_url, headers=headers, json=data, stream=True, timeout=180)
+                response.raise_for_status()
+
+                def stream_generator():
+                    try:
+                        for line in response.iter_lines(decode_unicode=True):
+                            if line and line.strip(): yield line + "\n\n"
+                    # ... (error handling for stream) ...
+                    finally:
+                        yield "data: [DONE]\n\n"
+                        if response: response.close()
+
+                return stream_generator()
+        else:
+            # ... (non-streaming, retry) ...
+            adapter = HTTPAdapter(max_retries=Retry(total=int(mistral_config.get('api_retries', 3)),
+                                                    backoff_factor=float(mistral_config.get('api_retry_delay', 1)),
+                                                    status_forcelist=[429, 500, 502, 503, 504],
+                                                    allowed_methods=["POST"]))
+            with requests.Session() as session:
+                session.mount("https://", adapter)
+                response = session.post(api_url, headers=headers, json=data, timeout=120)
+            response.raise_for_status()
+            return response.json()
+    except requests.exceptions.HTTPError as e:  # ... error handling ...
+        raise
+    except Exception as e:  # ... error handling ...
+        raise ChatProviderError(provider="mistral", message=f"Unexpected error: {e}")
+
+
+def chat_with_openrouter(
+        input_data: List[Dict[str, Any]],
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        system_message: Optional[str] = None,
+        temp: Optional[float] = None,
+        streaming: Optional[bool] = False,
+        # OpenRouter specific names from your map
+        top_p: Optional[float] = None,  # from generic topp
+        top_k: Optional[int] = None,  # from generic topk
+        min_p: Optional[float] = None,  # from generic minp (OpenRouter uses min_p not minp)
+        max_tokens: Optional[int] = None,
+        seed: Optional[int] = None,
+        stop: Optional[Union[str, List[str]]] = None,
+        response_format: Optional[Dict[str, str]] = None,
+        n: Optional[int] = None,
+        user: Optional[str] = None,  # from user_identifier
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        logit_bias: Optional[Dict[str, float]] = None,
+        presence_penalty: Optional[float] = None,
+        frequency_penalty: Optional[float] = None,
+        logprobs: Optional[bool] = None,
+        top_logprobs: Optional[int] = None,
+        custom_prompt_arg: Optional[str] = None
+):
+    loaded_config_data = load_and_log_configs()
+    openrouter_config = loaded_config_data.get('openrouter_api', {})
+    # ... (api key, model, temp, streaming setup) ...
+    final_api_key = api_key or openrouter_config.get('api_key')
+    if not final_api_key: raise ChatConfigurationError(provider='openrouter', message="OpenRouter API Key required.")
+    current_model = model or openrouter_config.get('model', 'mistralai/mistral-7b-instruct:free')
+    # ... other param resolutions ...
+    current_streaming_cfg = openrouter_config.get('streaming', False)
+    current_streaming = streaming if streaming is not None else \
+        (str(current_streaming_cfg).lower() == 'true' if isinstance(current_streaming_cfg, str) else bool(
+            current_streaming_cfg))
+
+    api_messages = []
+    if system_message: api_messages.append({"role": "system", "content": system_message})
+    api_messages.extend(input_data)
+
+    headers = {
+        "Authorization": f"Bearer {final_api_key}", "Content-Type": "application/json",
+        "HTTP-Referer": openrouter_config.get("site_url", "http://localhost"),  # OpenRouter specific
+        "X-Title": openrouter_config.get("site_name", "TLDW-API"),  # OpenRouter specific
+    }
+    data = {"model": current_model, "messages": api_messages, "stream": current_streaming}
+    # Add all other accepted parameters to data if they are not None
+    if temp is not None: data["temperature"] = temp
+    if top_p is not None: data["top_p"] = top_p
+    if top_k is not None: data["top_k"] = top_k
+    if min_p is not None: data["min_p"] = min_p  # OpenRouter uses min_p
+    if max_tokens is not None: data["max_tokens"] = max_tokens
+    if seed is not None: data["seed"] = seed
+    if stop is not None: data["stop"] = stop
+    if response_format is not None: data["response_format"] = response_format
+    if n is not None: data["n"] = n
+    if user is not None: data["user"] = user
+    if tools is not None: data["tools"] = tools
+    if tool_choice is not None: data["tool_choice"] = tool_choice
+    if logit_bias is not None: data["logit_bias"] = logit_bias
+    if presence_penalty is not None: data["presence_penalty"] = presence_penalty
+    if frequency_penalty is not None: data["frequency_penalty"] = frequency_penalty
+    if logprobs is not None: data["logprobs"] = logprobs
+    if top_logprobs is not None and data.get("logprobs"): data["top_logprobs"] = top_logprobs
+
+    api_url = openrouter_config.get('api_base_url', "https://openrouter.ai/api/v1").rstrip('/') + "/chat/completions"
+    logging.debug(
+        f"OpenRouter Request Payload (excluding messages): {{k: v for k, v in data.items() if k != 'messages'}}")
+
+    try:
+        if current_streaming:
+            # ... (OpenAI-like streaming logic, ensure "OpenRouter" in logs) ...
+            with requests.Session() as session:
+                response = session.post(api_url, headers=headers, json=data, stream=True, timeout=180)
+                response.raise_for_status()
+
+                def stream_generator():
+                    try:
+                        for line in response.iter_lines(decode_unicode=True):
+                            if line and line.strip(): yield line + "\n\n"
+                    # ... (error handling for stream) ...
+                    finally:
+                        yield "data: [DONE]\n\n"
+                        if response: response.close()
+
+                return stream_generator()
+        else:
+            # ... (non-streaming logic) ...
+            # ... (retry setup) ...
+            adapter = HTTPAdapter(max_retries=Retry(total=int(openrouter_config.get('api_retries', 3)),
+                                                    backoff_factor=float(openrouter_config.get('api_retry_delay', 1)),
+                                                    status_forcelist=[429, 500, 502, 503, 504],
+                                                    allowed_methods=["POST"]))
+            with requests.Session() as session:
+                session.mount("https://", adapter)
+                response = session.post(api_url, headers=headers, json=data, timeout=120)
+            response.raise_for_status()
+            return response.json()  # OpenRouter usually returns OpenAI compatible JSON
+    except requests.exceptions.HTTPError as e:  # ... error handling ...
+        raise
+    except Exception as e:  # ... error handling ...
+        raise ChatProviderError(provider="openrouter", message=f"Unexpected error: {e}")
 
 #
 #

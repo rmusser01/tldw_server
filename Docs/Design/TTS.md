@@ -20,6 +20,7 @@ https://github.com/RobViren/kokovoicelab
 https://decodingml.substack.com/p/deploying-agents-as-real-time-apis
 https://github.com/Nighthawk42/mOrpheus
 https://jordandarefsky.com/blog/2024/parakeet/
+https://www.tamingllms.com/notebooks/input.html#generating-long-form-content
 https://github.com/collabora/WhisperLive
 https://github.com/Lex-au/Vocalis?tab=readme-ov-file
 https://huggingface.co/moonshotai/Kimi-Audio-7B-Instruct

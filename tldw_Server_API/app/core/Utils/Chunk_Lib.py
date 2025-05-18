@@ -756,154 +756,169 @@ class Chunker:
             })
         return chunks_output
 
+        # In tldw_Server_API/app/core/Utils/Chunk_Lib.py
 
-    def _chunk_ebook_by_chapters(self, text: str, max_size: int, overlap: int, custom_pattern: Optional[str], language: str) -> List[Dict[str, Any]]:
-        # max_size and overlap here could mean sub-chunking within chapters if a chapter is too long.
-        # For now, it primarily splits by chapter. Sub-chunking is an enhancement.
+    def _chunk_ebook_by_chapters(self, text: str, max_size: int, overlap: int, custom_pattern: Optional[str],
+                                 language: str) -> List[Dict[str, Any]]:
         logging.debug(f"Chunking Ebook by Chapters. Custom pattern: {custom_pattern}, Lang: {language}")
 
         chapter_patterns = [
-            custom_pattern,  # User-provided pattern first
-            r'^\s*chapter\s+\d+\s*$',              # "Chapter 1"
-            r'^\s*chapter\s+[ivxlcdm]+\s*$',       # "Chapter I"
-            r'^\s*\d+\s*\.\s+[A-Za-z0-9]+',        # "1. Chapter Title"
-            r'^\s*#{1,3}\s+[A-Za-z0-9]+',          # Markdown H1/H2/H3
-            r'^\s*[A-Z\s]{5,}\s*$',                # All caps line (min 5 chars, potential heading)
-            # Add more patterns as needed
+            custom_pattern,
+            # Specific patterns should come before more generic ones
+            r'^\s*chapter\s+\d+([:.\-\s].*)?$',
+            r'^\s*chapter\s+[ivxlcdm]+([:.\-\s].*)?$',
+            r'^\s*(Part|Book|Volume)\s+[A-Za-z0-9]+([:.\-\s].*)?$',
+            r'^\s*\d+\s*([:.\-\s][^\r\n]{1,150}|[^\r\n]{1,150})?$',  # For numbered sections/chapters
+            r'^\s*#{1,4}\s+[^\r\n]+',  # Markdown headings
+            r'^\s*(PREFACE|INTRODUCTION|CONTENTS|APPENDIX|EPILOGUE|PROLOGUE|ACKNOWLEDGMENTS?|SECTION\s*\d*|UNIT\s*\d*)\s*$',
+            # Keywords
+            # THE FOLLOWING PATTERN IS LIKELY TOO GREEDY WITH IGNORECASE:
+            # r'^\s*(?=[A-Za-z])[A-Z0-9:.,!?\'\s]{5,100}\s*$'
         ]
-        # Filter out None from patterns list
         active_patterns = [p for p in chapter_patterns if p is not None]
         if not active_patterns:
-            logging.warning("No chapter patterns available for ebook chunking. Returning as single chunk.")
-            return [{'text': text, 'metadata': {'chunk_type': 'single_document_no_chapters'}}]
+            logging.warning("No chapter patterns available for ebook chunking.")
+            if text.strip():
+                return [{'text': text,
+                         'metadata': {'chunk_type': 'single_document_no_chapters', 'chapter_title': 'Full Document'}}]
+            return []
 
-
-        chapter_splits = [] # Stores (start_index, chapter_title_or_None)
-        processed_text_up_to = 0
-
-        # Try to split by common page break patterns first if they are very distinct, e.g., form feeds
-        # text = re.sub(r'\f', '\n\n', text) # Replace form feed with double newline
-
-        # Split text into lines to iterate and match patterns
         lines = text.splitlines()
-        current_chapter_content = []
+        chapter_splits: List[Dict[str, Any]] = []
         chapter_number = 0
 
-        # Find first chapter heading to capture any preface/intro
         first_heading_index = -1
-        first_heading_title = "Preface or Introduction"
+        first_heading_title_text = "Preface or Introduction"
+
+        current_scan_patterns = list(active_patterns)
         for line_idx, line_content in enumerate(lines):
-            for pattern_idx, pattern_str in enumerate(active_patterns):
+            for pattern_str in list(current_scan_patterns):
                 try:
                     if re.match(pattern_str, line_content, re.IGNORECASE):
                         first_heading_index = line_idx
-                        first_heading_title = line_content.strip()
-                        #logging.debug(f"First chapter heading '{first_heading_title}' found at line {line_idx} using pattern: {pattern_str}")
+                        first_heading_title_text = line_content.strip()
                         break
-                except re.error as re_e: # Catch bad regex patterns
-                    logging.warning(f"Regex error in chapter pattern '{pattern_str}': {re_e}. Skipping this pattern.")
-                    active_patterns[pattern_idx] = None # Disable faulty pattern for this run
+                except re.error as re_e:
+                    logging.warning(
+                        f"Regex error in chapter pattern '{pattern_str}' during initial scan: {re_e}. Disabling this pattern.")
+                    if pattern_str in current_scan_patterns: current_scan_patterns.remove(pattern_str)
+                    if pattern_str in active_patterns: active_patterns.remove(pattern_str)
             if first_heading_index != -1:
                 break
 
-        active_patterns = [p for p in active_patterns if p is not None] # Re-filter after potential disabling
-
         if first_heading_index > 0:
-            chapter_number += 1
-            preface_content_lines = lines[:first_heading_index]  # Lines *before* the first heading
+            preface_content_lines = lines[:first_heading_index]
             preface_text = "\n".join(preface_content_lines).strip()
-            if preface_text:  # Only add preface if it has content
+            if preface_text:
+                chapter_number += 1
                 chapter_splits.append({
                     'text': preface_text,
                     'metadata': {
-                        'chunk_type': 'preface',  # More specific type
+                        'chunk_type': 'preface',
                         'chapter_number': chapter_number,
-                        'chapter_title': "Preface/Introduction",  # Fixed title for preface
-                        'detected_chapter_pattern': 'preface/introduction',
+                        'chapter_title': "Preface/Introduction",
+                        'detected_chapter_pattern': 'preface_heuristic',
                     }
                 })
-        elif first_heading_index == -1: # No chapters found at all
-            logging.warning("No chapter headings found using patterns. Returning document as a single chapter chunk.")
-            return [{'text': text, 'metadata': {'chunk_type': 'single_document_no_chapters', 'chapter_title': 'Full Document'}}]
+        elif first_heading_index == -1:
+            if text.strip():
+                logging.warning(
+                    "No chapter headings found using patterns. Returning document as a single chapter chunk.")
+                return [{'text': text,
+                         'metadata': {'chunk_type': 'single_document_no_chapters', 'chapter_title': 'Full Document'}}]
+            return []
 
+        start_line_of_current_chapter_content = first_heading_index
+        current_chapter_title = first_heading_title_text
 
-        # Process from the first heading onwards
-        start_line_of_current_chapter = first_heading_index
-        current_chapter_title = first_heading_title
-        initial_detected_pattern = None
-        if first_heading_index != -1:
-            for pattern_str in active_patterns:
-                if re.match(pattern_str, lines[first_heading_index], re.IGNORECASE):
-                    initial_detected_pattern = pattern_str
+        current_chapter_pattern_str = "unknown"
+        if first_heading_index != -1 and first_heading_index < len(lines):
+            for p_str in active_patterns:
+                if re.match(p_str, lines[first_heading_index], re.IGNORECASE):
+                    current_chapter_pattern_str = p_str
                     break
 
         for line_idx in range(first_heading_index + 1, len(lines)):
             line_content = lines[line_idx]
             is_new_chapter_heading = False
-            detected_pattern_for_new = None
+            new_heading_pattern_str = None
 
             for pattern_str in active_patterns:
-                if re.match(pattern_str, line_content, re.IGNORECASE):
-                    is_new_chapter_heading = True
-                    detected_pattern_for_new = pattern_str
-                    break
+                try:
+                    if re.match(pattern_str, line_content, re.IGNORECASE):
+                        is_new_chapter_heading = True
+                        new_heading_pattern_str = pattern_str
+                        break
+                except re.error as re_e_inner:
+                    logging.warning(f"Regex error (inner loop) for pattern '{pattern_str}': {re_e_inner}.")
 
             if is_new_chapter_heading:
-                # Finish current chapter: content is from start_line_of_current_chapter_content up to line_idx (exclusive)
                 chapter_content_lines = lines[start_line_of_current_chapter_content: line_idx]
                 chapter_text = "\n".join(chapter_content_lines).strip()
+
                 if chapter_text:
-                    chapter_number += 1  # Increment for the chapter *being added*
+                    chapter_number += 1
+                    # Determine chunk type more simply: if it's the very first assigned chapter_number AND
+                    # the title was the default "Preface or Introduction" (implying it wasn't a regex match like "PREFACE")
+                    # OR if the detected_chapter_pattern was the heuristic one.
+                    # The current logic for 'chunk_type' might need further refinement based on how 'preface' is truly defined.
+                    # For this test, "Preface\nThis is..." is handled by the explicit preface block above.
+                    # So subsequent blocks should be 'chapter'.
+                    chunk_type = 'chapter'
+                    # The complex conditions for chunk_type in the user's code are kept, but may need review.
+                    # Simplified initial thought: if chapter_splits is empty and first_heading_index was 0, it could be a preface-like first chapter.
+                    if chapter_number == 1 and current_chapter_title == "Preface or Introduction":  # A simple heuristic
+                        # This might only apply if the very first heading found was "Preface or Introduction"
+                        # and not handled by the dedicated preface block.
+                        # The existing preface block (first_heading_index > 0) handles this better.
+                        pass  # Chunk_type will remain 'chapter' based on this pass.
+
                     chapter_splits.append({
                         'text': chapter_text,
                         'metadata': {
-                            'chunk_type': 'chapter',
+                            'chunk_type': chunk_type,  # Default to chapter after explicit preface handling
                             'chapter_number': chapter_number,
-                            'chapter_title': current_chapter_title,  # Title of the chapter just ended
-                            'detected_chapter_pattern': initial_detected_pattern if chapter_number == (
-                                1 if first_heading_index > 0 and preface_text else 0) + 1 else chapter_splits[-1][
-                                'metadata'].get('detected_chapter_pattern_of_next', 'unknown'),
+                            'chapter_title': current_chapter_title,
+                            'detected_chapter_pattern': current_chapter_pattern_str,
                         }
                     })
-                # Start new chapter
+
                 start_line_of_current_chapter_content = line_idx
                 current_chapter_title = line_content.strip()
-                # Store the pattern that detected *this new* chapter for the *next* iteration's metadata
-                if chapter_splits:  # Update the pattern for the *next* chapter in the last added metadata
-                    chapter_splits[-1]['metadata']['detected_chapter_pattern_of_next'] = detected_pattern_for_new
+                current_chapter_pattern_str = new_heading_pattern_str or "unknown"
 
-            # Add the last chapter
-        last_chapter_content_lines = lines[start_line_of_current_chapter_content:]
-        last_chapter_text = "\n".join(last_chapter_content_lines).strip()
-        if last_chapter_text:
-            chapter_number += 1
-            chapter_splits.append({
-                'text': last_chapter_text,
-                'metadata': {
-                    'chunk_type': 'chapter',
-                    'chapter_number': chapter_number,
-                    'chapter_title': current_chapter_title,
-                    'detected_chapter_pattern': initial_detected_pattern if chapter_number == (
-                        1 if first_heading_index > 0 and preface_text else 0) + 1 else chapter_splits[-1][
-                        'metadata'].get('detected_chapter_pattern_of_next', 'unknown')
-                }
-            })
+        # Add the last chapter
+        if start_line_of_current_chapter_content < len(lines):
+            last_chapter_content_lines = lines[start_line_of_current_chapter_content:]
+            last_chapter_text = "\n".join(last_chapter_content_lines).strip()
+            if last_chapter_text:
+                chapter_number += 1
+                # Similar to above, chunk_type is likely 'chapter' here.
+                chunk_type = 'chapter'
+                chapter_splits.append({
+                    'text': last_chapter_text,
+                    'metadata': {
+                        'chunk_type': chunk_type,
+                        'chapter_number': chapter_number,
+                        'chapter_title': current_chapter_title,
+                        'detected_chapter_pattern': current_chapter_pattern_str,
+                    }
+                })
 
-        # TODO: Implement sub-chunking of chapters if they exceed max_size, using overlap.
-        # For now, each chapter is one item in the list.
-        # If a chapter_text is > max_size (e.g. in characters or tokens),
-        # then call another chunking method (e.g. _chunk_text_by_tokens or _sentences)
-        # on that chapter_text and replace the single chapter_split item with multiple sub-chunks,
-        # ensuring their metadata reflects they are part of the same chapter.
-
-        final_chapter_chunks = []
+        final_chapter_chunks: List[Dict[str, Any]] = []
         for i, chap_data in enumerate(chapter_splits):
-            chap_data['metadata']['chunk_index_in_book'] = i+1 # Overall index
+            chap_data['metadata']['chunk_index_in_book'] = i + 1
             chap_data['metadata']['total_chapters_detected'] = len(chapter_splits)
-            # Sub-chunking logic (simple version by tokens)
-            if max_size > 0 and self.tokenizer and len(self.tokenizer.encode(chap_data['text'])) > max_size:
-                logging.info(f"Chapter '{chap_data['metadata']['chapter_title']}' (length {len(self.tokenizer.encode(chap_data['text']))} tokens) exceeds max_size {max_size}. Sub-chunking.")
-                sub_chunks = self._chunk_text_by_tokens(chap_data['text'], max_tokens=max_size, overlap=overlap if overlap < max_size else max_size//5)
+
+            tokenizer_available = hasattr(self, 'tokenizer') and self.tokenizer and hasattr(self.tokenizer,
+                                                                                            'encode') and callable(
+                self.tokenizer.encode)
+            if max_size > 0 and tokenizer_available and len(self.tokenizer.encode(chap_data['text'])) > max_size:
+                logging.info(
+                    f"Chapter '{chap_data['metadata']['chapter_title']}' (length {len(self.tokenizer.encode(chap_data['text']))} tokens) exceeds max_size {max_size}. Sub-chunking.")
+                # Ensure self._chunk_text_by_tokens is available and correct
+                sub_chunks = self._chunk_text_by_tokens(chap_data['text'], max_tokens=max_size,
+                                                        overlap=overlap if overlap < max_size else max_size // 5)
                 for sub_idx, sub_chunk_text in enumerate(sub_chunks):
                     sub_chunk_metadata = chap_data['metadata'].copy()
                     sub_chunk_metadata['sub_chunk_index_in_chapter'] = sub_idx + 1
@@ -912,7 +927,6 @@ class Chunker:
                     final_chapter_chunks.append({'text': sub_chunk_text, 'metadata': sub_chunk_metadata})
             else:
                 final_chapter_chunks.append(chap_data)
-
 
         return final_chapter_chunks
 
