@@ -408,8 +408,7 @@ async def create_chat_completion(
 
         # --- Prompt Templating ---
         llm_payload_messages = historical_openai_messages + current_turn_messages_for_llm
-        active_template = load_template(request_data.prompt_template_name or DEFAULT_RAW_PASSTHROUGH_TEMPLATE)
-
+        active_template = load_template(request_data.prompt_template_name or DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name)
         template_data: Dict[str, Any] = {}
         if character_card_for_context:
             template_data.update({k: v for k, v in character_card_for_context.items() if isinstance(v, (str, int, float))}) # Basic fields
@@ -462,14 +461,40 @@ async def create_chat_completion(
             templated_llm_payload = llm_payload_messages
 
         # --- LLM Call ---
-        chat_api_args = {k: v for k, v in request_data.model_dump().items() if k not in ["api_provider", "messages", "character_id", "conversation_id", "prompt_template_name"]}
-        chat_api_args.update({
-            "api_endpoint": target_api_provider, "api_key": provider_api_key,
+        call_params = request_data.model_dump(
+            exclude_none=True,
+            exclude={"api_provider", "messages", "character_id", "conversation_id", "prompt_template_name", "stream"}
+        )
+
+        # Rename keys to match chat_api_call's signature for generic params
+        if "temperature" in call_params:
+            call_params["temp"] = call_params.pop("temperature")
+
+        if "top_p" in call_params:
+            top_p_value = call_params.pop("top_p")
+            # chat_api_call has 'topp' and 'maxp' which both relate to top_p sampling.
+            # Pass the value to both, let PROVIDER_PARAM_MAP in chat_api_call pick the relevant one.
+            call_params["topp"] = top_p_value
+            call_params["maxp"] = top_p_value
+
+        if "user" in call_params:
+            call_params["user_identifier"] = call_params.pop("user")
+
+        # response_format, tools, tool_choice are already dict/list of dicts/str from model_dump if not None.
+        # They match the expected names in chat_api_call signature.
+
+        # Add other fixed arguments
+        call_params.update({
+            "api_endpoint": target_api_provider,
+            "api_key": provider_api_key,
             "messages_payload": templated_llm_payload,
-            "system_message": final_system_message,
-            # Ensure all relevant params from request_data are passed if Chat_Functions expects them
+            "system_message": final_system_message,  # This can be None
+            "streaming": request_data.stream,  # This is a boolean
         })
-        cleaned_args = {k:v for k,v in chat_api_args.items() if v is not None}
+
+        # Filter out None values before making the call, as chat_api_call's defaults handle Nones.
+        # The previous `cleaned_args` did this.
+        cleaned_args = {k: v for k, v in call_params.items() if v is not None}
 
         llm_call_func = partial(perform_chat_api_call, **cleaned_args)
 

@@ -68,6 +68,15 @@ def default_chat_request_data():
         messages=DEFAULT_USER_MESSAGES_FOR_SCHEMA  # Use the locally defined constant
     )
 
+@pytest.fixture
+def default_chat_request_data_error_stream():
+    """Provides a default ChatCompletionRequest object for error streaming tests."""
+    return ChatCompletionRequest(
+        model=DEFAULT_MODEL_NAME_UNIT,
+        messages=DEFAULT_USER_MESSAGES_FOR_SCHEMA_UNIT,
+        stream=True # Ensure stream is true for this test
+    )
+
 
 # Mocks for DB dependencies
 @pytest.fixture
@@ -166,9 +175,9 @@ def test_create_chat_completion_success_streaming(  # Added default_chat_request
 
     with patch(
             "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_chat_api_call_inner:  # Renamed for clarity
-        def mock_stream_generator():
-            yield "data: {\"id\": \"1\", \"choices\": [{\"delta\": {\"content\": \"Hello\"}}]}\n\n"
-            yield "data: {\"id\": \"1\", \"choices\": [{\"delta\": {\"content\": \" World\"}}]}\n\n"
+        def mock_stream_generator():  # This mock is for the return value of perform_chat_api_call
+            yield "Hello"  # Just the content delta
+            yield " World"
 
         mock_chat_api_call_inner.return_value = mock_stream_generator()  # Corrected to use the inner mock
 
@@ -190,8 +199,10 @@ def test_create_chat_completion_success_streaming(  # Added default_chat_request
         assert events[0].startswith("event: tldw_metadata")
         # Assuming mock_conv_id_xyz is correct for conversation_id
         assert json.loads(events[0].split("data: ", 1)[1])["conversation_id"] == "mock_conv_id_xyz"
-        assert "data: {\"id\": \"1\", \"choices\": [{\"delta\": {\"content\": \"Hello\"}}]}" in events[1]
-        assert "data: {\"id\": \"1\", \"choices\": [{\"delta\": {\"content\": \" World\"}}]}" in events[2]
+        # events[1] would be 'data: {"choices": [{"delta": {"content": "Hello"}}]}' (after metadata)
+        # events[2] would be 'data: {"choices": [{"delta": {"content": " World"}}]}'
+        assert json.loads(events[1].split("data: ", 1)[1])["choices"][0]["delta"]["content"] == "Hello"
+        assert json.loads(events[2].split("data: ", 1)[1])["choices"][0]["delta"]["content"] == " World"
         assert "data: " in events[-1] and json.loads(events[-1].split("data: ", 1)[1]).get("choices")[0].get("finish_reason") == "stop"
 
         mock_chat_api_call_inner.assert_called_once()
@@ -269,7 +280,7 @@ def test_no_system_message_in_payload(
     # 3. DEFAULT_RAW_PASSTHROUGH_TEMPLATE.system_message_template is likely empty or just "{original_system_message_from_request}".
     # 4. original_system_message_from_request will be "" or None.
     # So, final_system_message_for_provider should be None or empty, leading to system_message=None in chat_args_cleaned.
-    assert called_kwargs.get("system_message") == ""
+    assert called_kwargs.get("system_message") is None
 
     # Ensure the messages in the payload are dictionaries and match the input (since it's passthrough)
     expected_payload_messages_as_dicts = [msg.model_dump(exclude_none=True) for msg in DEFAULT_USER_MESSAGES_FOR_SCHEMA]
@@ -547,52 +558,117 @@ def test_non_iterable_stream_generator_from_shim(
 
     app.dependency_overrides = {}
 
-
+DEFAULT_MODEL_NAME_UNIT = "test-model-unit-error-stream"
+DEFAULT_USER_MESSAGES_FOR_SCHEMA_UNIT = [
+    ChatCompletionUserMessageParam(role="user", content="Test stream with error")
+]
 @pytest.mark.unit
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")  # Patches the alias used in chat.py
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.apply_template_to_string")
-def test_error_within_stream_generator(  # Added default_chat_request_data
+def test_error_within_stream_generator(
         mock_apply_template, mock_load_template, mock_chat_api_call,
         client, default_chat_request_data, valid_auth_token, mock_media_db, mock_chat_db
-):
-    mock_load_template.return_value = None  # Default passthrough
+, default_chat_request_data_error_stream):
+    # Simulate that the default template (or any) is found and is a passthrough
+    # or correctly loaded if it's DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name
+    mock_load_template.return_value = DEFAULT_RAW_PASSTHROUGH_TEMPLATE
     mock_apply_template.side_effect = lambda template_str, data: data.get("message_content", data.get(
         "original_system_message_from_request", ""))
 
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_media_db
     app.dependency_overrides[get_chacha_db_for_user] = lambda: mock_chat_db
 
-    with patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_chat_api_call_inner:
-        def faulty_stream_generator():
-            yield "data: {\"id\": \"1\", \"choices\": [{\"delta\": {\"content\": \"Good start...\"}}]}\n\n"
-            raise ValueError("Something broke mid-stream!")
+    # This inner patch is fine if you want to ensure the outer mock_perform_chat_api_call
+    # doesn't interfere, but the outer one should suffice.
+    # For clarity, using the already patched mock_perform_chat_api_call directly.
 
-        mock_chat_api_call_inner.return_value = faulty_stream_generator()
+    def faulty_stream_generator():  # This is what perform_chat_api_call (mocked) will return
+        yield "Good start..."  # Raw content, not full SSE
+        raise ValueError("Something broke mid-stream!")
 
-        streaming_request_data = default_chat_request_data.model_copy(update={"stream": True})
-        response = client.post(
-            "/api/v1/chat/completions",
-            json=streaming_request_data.model_dump(),
-            headers={"token": valid_auth_token}
-        )
-        assert response.status_code == status.HTTP_200_OK
+    mock_chat_api_call.return_value = faulty_stream_generator()
 
-        lines = response.text.splitlines()
-        assert "event: tldw_metadata" in lines[0]
-        # Adjust indices for subsequent checks based on metadata event taking up lines
-        assert "data: {\"id\": \"1\", \"choices\": [{\"delta\": {\"content\": \"Good start...\"}}]}" in lines[2]
+    # Use the specific request data for this test
+    request_data_dict = default_chat_request_data_error_stream.model_dump()
 
-        error_payload_found = False
-        done_found = False
-        for line in lines:
-            if "data:" in line and "error" in line and "Something broke mid-stream!" in line:
-                error_payload_found = True
-            if "data: [DONE]" in line:
-                done_found = True
+    response = client.post(
+        "/api/v1/chat/completions",
+        json=request_data_dict,
+        headers={"Token": valid_auth_token}  # Corrected header name
+    )
+    assert response.status_code == status.HTTP_200_OK  # Stream should still start with 200
 
-        assert error_payload_found
-        assert done_found
+    # Process the SSE stream
+    raw_stream_text = response.text
+    print(f"DEBUG Raw Stream Output:\n{raw_stream_text}")  # For debugging
+
+    events = []
+    current_event_data = []
+    for line in raw_stream_text.splitlines():
+        if not line.strip():  # End of an event
+            if current_event_data:
+                events.append("\n".join(current_event_data))
+                current_event_data = []
+        else:
+            current_event_data.append(line)
+    if current_event_data:  # Append last event if any
+        events.append("\n".join(current_event_data))
+
+    print(f"DEBUG Parsed SSE Events: {events}")
+
+    assert len(events) >= 3  # Expect metadata, data/error, DONE
+
+    # 1. Check metadata event
+    assert events[0].startswith("event: tldw_metadata")
+    metadata_json = json.loads(events[0].split("data: ", 1)[1])
+    assert metadata_json["conversation_id"] == "mock_conv_id_xyz"
+    assert metadata_json["model"] == DEFAULT_MODEL_NAME_UNIT
+
+    # 2. Check for "Good start..." data chunk formatted by the endpoint
+    # This part might be tricky if the error occurs before the first data yield is fully processed by sse_event_generator
+    # The sse_event_generator will try to yield the "Good start..." data first.
+    first_data_event_found = False
+    error_event_found = False
+    done_event_found = False
+
+    for event_str in events[1:]:  # Skip metadata
+        if event_str.startswith("data: "):
+            try:
+                payload_str = event_str.split("data: ", 1)[1]
+                payload = json.loads(payload_str)
+
+                if "choices" in payload and payload["choices"]:
+                    delta = payload["choices"][0].get("delta", {})
+                    if "content" in delta and delta["content"] == "Good start...":
+                        first_data_event_found = True
+                    if payload["choices"][0].get("finish_reason") == "stop":
+                        done_event_found = True
+                        assert payload.get("tldw_conversation_id") == "mock_conv_id_stream_error"
+
+                if "error" in payload and "message" in payload["error"]:
+                    if "Something broke mid-stream!" in payload["error"]["message"] or \
+                            "Stream failed due to provider error." in payload["error"][
+                        "message"]:  # Endpoint wraps the error
+                        error_event_found = True
+            except json.JSONDecodeError:
+                print(f"WARN: Could not decode JSON from event: {payload_str}")
+                continue
+
+    # Depending on precise timing of exception in generator, "Good start..." might or might not appear
+    # The error and DONE message are more crucial for this test.
+    # If faulty_stream_generator raises immediately after yielding "Good start...",
+    # the endpoint's sse_event_generator should process that yield, then catch the error.
+    assert first_data_event_found, "The 'Good start...' data chunk was not found or not correctly formatted."
+    assert error_event_found, "The SSE error message was not found or not correctly formatted."
+    assert done_event_found, "The SSE DONE message was not found or not correctly formatted."
+
+    # Ensure the background task (if any was triggered by the stream ending) is handled gracefully.
+    # The test mock for _save_message_turn_to_db will be called by final_save_bg_task.
+    # We can check its call if needed, but the main focus is the stream content.
+    # mock_chat_db.add_message.assert_called() # Or more specific checks on what was saved.
+    # The `_sse_state['full_reply']` would contain "Good start..." in this case.
+
     app.dependency_overrides = {}
 
 

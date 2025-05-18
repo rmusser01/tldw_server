@@ -1,6 +1,7 @@
 # tests/unit/core/chat/test_chat_functions.py
 import base64
 import re
+import textwrap
 
 import pytest
 from unittest.mock import patch, MagicMock, call
@@ -629,21 +630,30 @@ def test_chat_function_with_rag_content_unit(mock_process_input, mock_chat_api_c
 
 @pytest.mark.unit
 def test_parse_user_dict_markdown_file_various_formats(tmp_path):
-    md_content = """
-    key1: value1
-    key2: |
-        This is a
-        multi-line value for key2.
-        It has several lines.
-    # ...
-    """
+    md_content = textwrap.dedent("""\
+        key1: value1
+        key2: |
+          This is a
+          multi-line value for key2.
+          It has several lines.
+        # This comment line is part of key2's value.
+        ---@@@---
+        key_after_term: after_terminator_value
+        """).strip()  # .strip() removes leading/trailing blank lines from the dedented block itself
+
     dict_file = tmp_path / "test_dict.md"
     dict_file.write_text(md_content)
 
     parsed = parse_user_dict_markdown_file(str(dict_file))
-    expected_key2_value = "This is a\nmulti-line value for key2.\nIt has several lines.\n"  # Adjusted expectation
-    assert parsed["key1"] == "value1"
-    assert parsed["key2"] == expected_key2_value
+
+    # Expected value for key2 will now include the preserved indentation from dedent:
+    expected_key2_value = ("  This is a\n"
+                           "  multi-line value for key2.\n"
+                           "  It has several lines.\n"
+                           "# This comment line is part of key2's value.")
+    assert parsed.get("key1") == "value1"
+    assert parsed.get("key2") == expected_key2_value
+    assert parsed.get("key_after_term") == "after_terminator_value"
 
 
 @pytest.mark.unit

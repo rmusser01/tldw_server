@@ -1445,18 +1445,21 @@ def group_scoring(entries: List[ChatDictionary]) -> List[ChatDictionary]:
         grouped_entries.setdefault(entry.group, []).append(entry)
 
     selected_entries: List[ChatDictionary] = []
-    for group, group_entries_list in grouped_entries.items():
+    for group_name, group_entries_list in grouped_entries.items():
         if not group_entries_list: continue
-        # Scoring: prefer entries with more specific (longer) keys first, then by original order if keys are same pattern
-        # This is a simple heuristic. More complex scoring could be length of key string, or complexity of regex.
-        # For now, using the length of the raw key string as a proxy for specificity.
-        # If all keys in a group are plain strings, this prefers longer string matches.
-        # If regexes are mixed, this is less reliable.
-        # Max based on key_raw length
-        best_entry_in_group = max(group_entries_list, key=lambda e: len(str(e.key_raw)) if e.key_raw else 0)
-        selected_entries.append(best_entry_in_group)
+
+        if group_name is None:  # For the default group (None)
+            # Add all entries instead of just the "best" one.
+            # This allows multiple ungrouped keywords to be processed if they all match.
+            selected_entries.extend(group_entries_list)
+        else:
+            # For named groups, keep the original behavior of selecting the best.
+            best_entry_in_group = max(group_entries_list, key=lambda e: len(str(e.key_raw)) if e.key_raw else 0)
+            selected_entries.append(best_entry_in_group)
 
     logging.debug(f"Selected {len(selected_entries)} entries after group scoring.")
+    # Ensure the order is somewhat predictable if multiple entries come from the None group
+    # The apply_strategy step later will sort them.
     return selected_entries
 
 # Timed Effects

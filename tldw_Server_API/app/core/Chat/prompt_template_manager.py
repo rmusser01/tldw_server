@@ -83,7 +83,7 @@ def apply_template_to_string(template_string: Optional[str], data: Dict[str, Any
     Missing placeholders will be kept as is (e.g., "{missing_placeholder}").
     """
     if template_string is None:
-        return None
+        return ""
     try:
         template_string = safe_render(template_string, data)
     except KeyError as e:

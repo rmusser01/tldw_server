@@ -111,33 +111,62 @@ COMMERCIAL_PROVIDERS_FOR_TEST = get_commercial_providers_with_keys_integration()
 
 
 # Fixture to mock DB dependencies for integration tests if the endpoint uses them
+# In tldw_Server_API/tests/Chat/test_chat_completions_integration.py
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME # Import
+
 @pytest.fixture
 def mock_db_dependencies_for_integration():
-    mock_media_db_inst = MagicMock()  # Placeholder if get_media_db_for_user is used
+    mock_media_db_inst = MagicMock()
     mock_chat_db_inst = MagicMock(spec=CharactersRAGDB)
-    # Default behavior for character fetching: not found, so templates use defaults
-    mock_chat_db_inst.get_character_card_by_id.return_value = None
-    mock_chat_db_inst.get_character_card_by_name.return_value = None  # If you use by_name
 
-    # Store original dependencies to restore them later
+    # --- Configure mock_chat_db_inst ---
+    # For default character loading by name:
+    default_char_card_data = {
+        'id': 'default_integration_char_id', # Or an int if appropriate
+        'name': DEFAULT_CHARACTER_NAME,
+        'system_prompt': 'This is a mock default system prompt for integration tests.',
+        # Add other fields the endpoint might access from the default character
+        # e.g., client_id if it's directly on the card (though less likely)
+    }
+    def mock_get_character_card_by_name(name_or_id):
+        if name_or_id == DEFAULT_CHARACTER_NAME:
+            return default_char_card_data
+        return None # For any other name
+
+    mock_chat_db_inst.get_character_card_by_name.side_effect = mock_get_character_card_by_name
+    mock_chat_db_inst.get_character_card_by_id.return_value = None # Keep this for by_id lookups unless a test needs it
+
+    # For new conversation creation
+    mock_chat_db_inst.add_conversation.return_value = "integration_mock_conv_id"
+
+    # For saving messages
+    mock_chat_db_inst.add_message.return_value = "integration_mock_msg_id"
+
+    # <<< Crucial: Add client_id for integration tests too! >>>
+    mock_chat_db_inst.client_id = "test_client_integration"
+    # <<< Crucial: Ensure 'get_conversation_by_id' returns something sensible or None based on test needs >>>
+    # For cases where a conversation ID *is* provided in the request and is expected to exist or not.
+    # For these "no template" tests, usually no conv_id is provided initially.
+    mock_chat_db_inst.get_conversation_by_id.return_value = None # Default to not found
+
+    # --- Dependency Override ---
     original_media_db_dep = app.dependency_overrides.get(get_media_db_for_user)
     original_chat_db_dep = app.dependency_overrides.get(get_chacha_db_for_user)
 
-    # Override dependencies for the test
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_media_db_inst
     app.dependency_overrides[get_chacha_db_for_user] = lambda: mock_chat_db_inst
 
-    yield mock_media_db_inst, mock_chat_db_inst  # Provide mocks to the test if needed
+    yield mock_media_db_inst, mock_chat_db_inst
 
-    # Restore original dependencies after the test
+    # --- Restore ---
     if original_media_db_dep:
         app.dependency_overrides[get_media_db_for_user] = original_media_db_dep
-    elif get_media_db_for_user in app.dependency_overrides:  # Only delete if it was added by this fixture
+    elif get_media_db_for_user in app.dependency_overrides:
         del app.dependency_overrides[get_media_db_for_user]
 
     if original_chat_db_dep:
         app.dependency_overrides[get_chacha_db_for_user] = original_chat_db_dep
-    elif get_chacha_db_for_user in app.dependency_overrides:  # Only delete if added by this fixture
+    elif get_chacha_db_for_user in app.dependency_overrides:
         del app.dependency_overrides[get_chacha_db_for_user]
 
 
@@ -287,7 +316,17 @@ def test_commercial_provider_with_template_and_char_data_openai_integration(
         # Add other fields your template might use
     }
     # Configure the mock_chat_db_inst that the endpoint will use
-    mock_chat_db_inst.get_character_card_by_id.return_value = mock_character_data_for_template
+    mock_chat_db_inst.get_character_card_by_id.return_value = None  # Or specific if ID is int
+
+    # Ensure get_character_card_by_name returns the pirate when called with "pirate_blackheart"
+    def specific_char_by_name_lookup(name_or_id):
+        if name_or_id == test_char_id_for_template:  # "pirate_blackheart"
+            return mock_character_data_for_template
+        if name_or_id == DEFAULT_CHARACTER_NAME:  # Still handle default if needed elsewhere
+            return {'id': 'default_id', 'name': DEFAULT_CHARACTER_NAME, 'system_prompt': 'Default'}
+        return None
+
+    mock_chat_db_inst.get_character_card_by_name.side_effect = specific_char_by_name_lookup
 
     # Patch `load_template` within the endpoint's module scope
     with patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template", return_value=test_pirate_template_obj):
