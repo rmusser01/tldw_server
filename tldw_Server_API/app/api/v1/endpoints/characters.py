@@ -12,6 +12,7 @@
 # Functions:
 import base64
 import json
+from pathlib import Path
 from typing import List, Union, Any, Dict, Optional
 
 from fastapi import HTTPException, Depends, Query, UploadFile, File, APIRouter
@@ -338,24 +339,30 @@ async def create_character(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.")
 
 
+
 @router.get("/{character_id}", response_model=CharacterResponse, summary="Get a specific character by ID",
             tags=["Characters"])
 async def get_character(
-        character_id: int = FastAPIPath(..., description="The ID of the character to retrieve.", gt=0),
+        character_id: int = Path(..., description="The ID of the character to retrieve.", gt=0), # Use fastapi.Path
         db: CharactersRAGDB = Depends(get_chacha_db_for_user)
 ):
+    """
+    Retrieves the details of a specific character by their unique ID.
+    The data returned is the raw character information as stored in the database,
+    suitable for display or editing.
+    """
     try:
         char_db = db.get_character_card_by_id(character_id)
-        if not char_db:
+        if not char_db: # Corrected: Check for None if character not found
+            logger.info(f"Character with ID {character_id} not found in get_character endpoint.")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                 detail=f"Character with ID {character_id} not found.")
         return _convert_db_char_to_response_model(char_db)
-    except NotFoundError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail=f"Character with ID {character_id} not found.")
     except CharactersRAGDBError as e:
         logger.error(f"Database error getting character {character_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {e}")
+    except HTTPException: # Re-raise HTTPExceptions if they were raised intentionally
+        raise
     except Exception as e:
         logger.error(f"Unexpected error getting character {character_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.")
@@ -365,12 +372,19 @@ async def get_character(
             tags=["Characters"])
 async def update_character(
         update_data: CharacterUpdate,
-        character_id: int = FastAPIPath(..., description="The ID of the character to update.", gt=0),
+        character_id: int = Path(..., description="The ID of the character to update.", gt=0),  # Use fastapi.Path
         db: CharactersRAGDB = Depends(get_chacha_db_for_user)
 ):
+    """
+    Updates an existing character's information.
+    Only the fields provided in the request body will be updated.
+    Requires the character's current version for optimistic concurrency control.
+    If the character name is changed, it checks for conflicts with existing names.
+    """
     try:
         current_char_db = db.get_character_card_by_id(character_id)
-        if not current_char_db:
+        if not current_char_db:  # Corrected: Check for None
+            logger.info(f"Character with ID {character_id} not found for update.")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                 detail=f"Character with ID {character_id} not found for update.")
 
@@ -380,90 +394,116 @@ async def update_character(
             logger.info(f"No updatable fields provided for character {character_id}. Returning current data.")
             return _convert_db_char_to_response_model(current_char_db)
 
-        if 'name' in db_ready_update_data and db_ready_update_data['name'] != current_char_db['name']:
-            existing_char_with_new_name = db.get_character_card_by_name(db_ready_update_data['name'])
-            if existing_char_with_new_name and existing_char_with_new_name['id'] != character_id:
+        new_name = db_ready_update_data.get('name')
+        if new_name is not None and new_name != current_char_db.get('name'):
+            existing_char_with_new_name = db.get_character_card_by_name(new_name)
+            if existing_char_with_new_name and existing_char_with_new_name.get('id') != character_id:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Another character with name '{db_ready_update_data['name']}' already exists (ID: {existing_char_with_new_name['id']})."
+                    detail=f"Another character with name '{new_name}' already exists (ID: {existing_char_with_new_name['id']})."
                 )
 
+        # Corrected: Changed parameter name from 'data' to 'card_data'
         success = db.update_character_card(
             character_id=character_id,
-            data=db_ready_update_data,
+            card_data=db_ready_update_data,
             expected_version=current_char_db['version']
         )
         if not success:
+            # This path assumes update_character_card returns False on logical failure
+            # but doesn't raise an exception for it (e.g. version mismatch handled by return False).
+            # If it raises ConflictError for version mismatch, that will be caught below.
+            logger.error(
+                f"Update for character {character_id} returned false from DB layer without raising an exception for a non-conflict issue.")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail="Failed to update character in database (unexpected).")
 
         updated_char_db = db.get_character_card_by_id(character_id)
         if not updated_char_db:
+            logger.error(f"Character {character_id} not found after supposedly successful update.")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail="Failed to retrieve character after update.")
+
         return _convert_db_char_to_response_model(updated_char_db)
 
-    except NotFoundError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail=f"Character with ID {character_id} not found for update.")
-    except InputError as e:
+    except InputError as e:  # From DB layer
         logger.warning(f"Input error updating character {character_id}: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except ConflictError as e:
+    except ConflictError as e:  # From DB layer (e.g. version mismatch)
         logger.warning(f"Conflict error updating character {character_id}: {e}")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-    except CharactersRAGDBError as e:
+    except CharactersRAGDBError as e:  # General DB errors
         logger.error(f"Database error updating character {character_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {e}")
-    except Exception as e:
+    except HTTPException:  # Re-raise HTTPExceptions if they were raised intentionally (e.g. 404)
+        raise
+    except Exception as e:  # Catch-all for other unexpected errors
         logger.error(f"Unexpected error updating character {character_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.")
 
 
 @router.delete("/{character_id}", response_model=DeletionResponse, summary="Delete a character", tags=["Characters"])
 async def delete_character(
-        character_id: int = FastAPIPath(..., description="The ID of the character to delete.", gt=0),
+        character_id: int = Path(..., description="The ID of the character to delete.", gt=0),  # Use fastapi.Path
         db: CharactersRAGDB = Depends(get_chacha_db_for_user)
 ):
+    """
+    Deletes a character by their unique ID.
+    This operation uses the character's current version for optimistic concurrency.
+    Note: The `CharactersRAGDB` class must implement a `delete_character_card` method
+    for this endpoint to function correctly. Deletion might be restricted by database
+    foreign key constraints if the character is associated with other data.
+    """
     try:
         char_to_delete = db.get_character_card_by_id(character_id)
-        if not char_to_delete:
+        if not char_to_delete:  # Corrected: Check for None
+            logger.info(f"Character with ID {character_id} not found for deletion.")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                 detail=f"Character with ID {character_id} not found for deletion.")
 
-        # The library Character_Chat_Lib.py does not currently provide a delete_character_and_associated_data function.
-        # Deletion of associated conversations or notes would need to be handled by DB constraints (ON DELETE CASCADE/SET NULL)
-        # or explicitly here. Current DB schema for `conversations.character_id` has no explicit ON DELETE action.
-        # Default SQLite behavior is NO ACTION, which acts like RESTRICT.
-        # If conversations exist, this deletion might fail due to foreign key constraints.
-        logger.info(f"Attempting to delete character ID: {character_id} with version {char_to_delete['version']}.")
+        logger.info(
+            f"Attempting to delete character ID: {character_id} (Name: '{char_to_delete.get('name', 'N/A')}') with version {char_to_delete['version']}.")
         logger.warning(
-            f"Ensure database foreign key constraints for 'conversations.character_id' are set appropriately (e.g., ON DELETE SET NULL or CASCADE) if characters with active conversations need to be deleted.")
+            f"Ensure database foreign key constraints for 'conversations.character_id' are set appropriately (e.g., ON DELETE SET NULL or CASCADE) if characters with active conversations need to be deleted."
+        )
+
+        # Corrected: Check if the delete_character_card method exists before calling
+        if not hasattr(db, 'delete_character_card'):
+            logger.error(
+                "`CharactersRAGDB` class does not have a `delete_character_card` method. Deletion cannot proceed.")
+            raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                                detail="Character deletion functionality is not available on the server.")
 
         success = db.delete_character_card(character_id, version=char_to_delete['version'])
+
         if not success:
+            # Similar to update, this assumes `delete_character_card` returns False for logical non-conflict failures.
+            # If it raises ConflictError for version mismatch, it will be caught below.
+            logger.error(
+                f"Delete for character {character_id} returned false from DB layer without raising an exception for a non-conflict issue.")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail="Failed to delete character (unexpected).")
 
         return DeletionResponse(
             message=f"Character with ID {character_id} ('{char_to_delete.get('name', 'N/A')}') marked as deleted successfully.",
             character_id=character_id)
-    except NotFoundError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail=f"Character with ID {character_id} not found for deletion.")
-    except ConflictError as e:
+
+    except ConflictError as e:  # From DB layer (e.g. version mismatch or FK constraint)
         logger.warning(
-            f"Conflict error deleting character {character_id}: {e}. This might be due to existing associated data (e.g., conversations) and restrictive foreign key constraints.")
+            f"Conflict error deleting character {character_id}: {e}. "
+            f"This might be due to a version mismatch or because the character is still referenced by other data (e.g., conversations) "
+            f"and database constraints prevent deletion."
+        )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                            detail=f"Cannot delete character: {e}. It might be in use or linked to other data that prevents deletion.")
-    except CharactersRAGDBError as e:
+                            detail=f"Cannot delete character: {e}. It might be in use or a concurrent modification occurred.")
+    except CharactersRAGDBError as e:  # General DB errors
         logger.error(f"Database error deleting character {character_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {e}")
-    except Exception as e:
+    except HTTPException:  # Re-raise HTTPExceptions (e.g. 404 or 501 from above)
+        raise
+    except Exception as e:  # Catch-all for other unexpected errors
         logger.error(f"Unexpected error deleting character {character_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.")
-
-
 
 #
 # End of characters.py
