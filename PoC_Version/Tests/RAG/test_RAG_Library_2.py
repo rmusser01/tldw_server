@@ -3,6 +3,8 @@ import configparser
 import os
 import sys
 import pytest
+
+
 #from unittest.mock import MagicMock
 #from typing import List, Dict, Any
 
@@ -12,7 +14,8 @@ parent_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
 sys.path.append(parent_dir)
 
 # Import the functions to test
-from App_Function_Libraries.RAG.RAG_Library_2 import (
+from PoC_Version.App_Function_Libraries.Utils.Utils import load_and_log_configs
+from PoC_Version.App_Function_Libraries.RAG.RAG_Library_2 import (
     fetch_relevant_media_ids,
     #perform_vector_search,
     perform_full_text_search,
@@ -24,6 +27,8 @@ from App_Function_Libraries.RAG.RAG_Library_2 import (
     #filter_results_by_keywords,
     #extract_media_id_from_result
 )
+
+config = load_and_log_configs()
 
 
 def test_fetch_relevant_media_ids_success(mocker):

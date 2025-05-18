@@ -36,12 +36,47 @@ jobs:
           pwd
           cd ./tldw_Server_API/tests/ChaChaNotesDB/
           pytest -s test_media_versions.py
+      - name: Test Chat Completion Integrations with pytest
+        run: |
+          pwd
+          cd ./tldw_Server_API/tests/Chat/
+          pytest -s test_chat_completion_integration.py
+      - name: Test Chat Endpoint with pytest
+        run: |
+          pwd
+          cd ./tldw_Server_API/tests/Chat/
+          pytest -s test_chat_endpoint.py
+      - name: Test Chat Library with pytest
+        run: |
+          pwd
+          cd ./tldw_Server_API/tests/Chat/
+          pytest -s test_chat_functions.py
+      - name: Test Chat Request Schema with pytest
+        run: |
+          pwd
+          cd ./tldw_Server_API/tests/Chat/
+          pytest -s test_chat_request_schema.py
+      - name: Test Chat Prompt Template Manager with pytest
+        run: |
+          pwd
+          cd ./tldw_Server_API/tests/Chat/
+          pytest -s test_prompt_template_manager.py
       - name: Test ChromaDB with pytest
         run: |
           pwd
           cd ./tldw_Server_API/tests/ChromaDB/
           pytest -s test_chromadb.py
-      - name: Test Media Versioning Functions/Endpoints with pytest
+      - name: Test Chunking Library with pytest
+        run: |
+          pwd
+          cd ./tldw_Server_API/tests/Chunking/
+          pytest -s test_chunk_lib.py
+      - name: Test Chunking Library with pytest
+        run: |
+          pwd
+          cd ./tldw_Server_API/tests/Chunking/
+          pytest -s test_chunking_endpoint.py
+      - name: Test Media Versioning Functions with pytest
         run: |
           pwd
           cd ./tldw_Server_API/tests/Media_Ingestion_Modification/
@@ -51,6 +86,21 @@ jobs:
           pwd
           cd ./tldw_Server_API/tests/Media_Ingestion_Modification/
           pytest -s test_media_processing.py
+      - name: Test Media Endpoint functions with pytest
+        run: |
+          pwd
+          cd ./tldw_Server_API/tests/Media_Ingestion_Modification/
+          pytest -s test_media_endpoint.py
+      - name: Test MediaDB2 Library with pytest
+        run: |
+          pwd
+          cd ./tldw_Server_API/tests/MediaDB2/
+          pytest -s test_sqlite_db.py
+      - name: Test Media Endpoint functions with pytest
+        run: |
+          pwd
+          cd ./tldw_Server_API/tests/Media_Ingestion_Modification/
+          pytest -s test_media_endpoint.py
       - name: Test tldw runs
         run: |
           pwd

@@ -15,7 +15,7 @@ import unittest
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'tldw')))
 #
 # Local Imports
-from App_Function_Libraries.Personas.ccv3_parser import CharacterCardV3Parser, CCv3ParserError
+from PoC_Version.App_Function_Libraries.Personas.ccv3_parser import CharacterCardV3Parser, CCv3ParserError
 #
 #############################################################################################################
 #
