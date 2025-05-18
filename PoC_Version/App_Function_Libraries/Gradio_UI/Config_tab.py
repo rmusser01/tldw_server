@@ -2,7 +2,7 @@ import gradio as gr
 import configparser
 
 # FIXME
-CONFIG_PATH = './Config_Files/config.txt'
+CONFIG_PATH = './PoC_Version/Config_Files/config.txt'
 
 def load_config():
     config = configparser.ConfigParser()

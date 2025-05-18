@@ -13,26 +13,32 @@ import time
 # 3rd-Party Imports
 import nltk
 from loguru import logger
-
-from App_Function_Libraries.Metrics.logger_config import setup_logger
-
 #
 # Local Library Imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'App_Function_Libraries')))
-from App_Function_Libraries.Books.Book_Ingestion_Lib import ingest_folder, ingest_text_file
-from App_Function_Libraries.Chunk_Lib import  semantic_chunk_long_file#, rolling_summarize_function,
-from App_Function_Libraries.Gradio_Related import launch_ui
-from App_Function_Libraries.Local_LLM.Local_LLM_Inference_Engine_Lib import cleanup_process
-from App_Function_Libraries.Summarization.Local_Summarization_Lib import summarize_with_local_llm
-from App_Function_Libraries.Summarization.Summarization_General_Lib import summarize_with_openai, summarize_with_anthropic, \
+# Get the directory of the current script (PoC_Version)
+current_script_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the parent directory of PoC_Version (which is 'tldw')
+project_root_dir = os.path.dirname(current_script_dir)
+
+if project_root_dir not in sys.path:
+    sys.path.insert(0, project_root_dir)
+    print(f"Project root added to sys.path: {project_root_dir}") # For debugging
+
+from PoC_Version.App_Function_Libraries.Books.Book_Ingestion_Lib import ingest_folder, ingest_text_file
+from PoC_Version.App_Function_Libraries.Chunk_Lib import  semantic_chunk_long_file#, rolling_summarize_function,
+from PoC_Version.App_Function_Libraries.Gradio_Related import launch_ui
+from PoC_Version.App_Function_Libraries.Local_LLM.Local_LLM_Inference_Engine_Lib import cleanup_process
+from PoC_Version.App_Function_Libraries.Summarization.Local_Summarization_Lib import summarize_with_local_llm
+from PoC_Version.App_Function_Libraries.Summarization.Summarization_General_Lib import summarize_with_openai, summarize_with_anthropic, \
     summarize_with_cohere, summarize_with_groq, perform_transcription, perform_summarization
-from App_Function_Libraries.Audio.Audio_Transcription_Lib import speech_to_text
-from App_Function_Libraries.Local_File_Processing_Lib import read_paths_from_file, process_local_file
-from App_Function_Libraries.DB.DB_Manager import add_media_to_database
-from App_Function_Libraries.Utils.System_Checks_Lib import cuda_check, platform_check, check_ffmpeg
-from App_Function_Libraries.Utils.Utils import load_and_log_configs, create_download_directory, \
+from PoC_Version.App_Function_Libraries.Audio.Audio_Transcription_Lib import speech_to_text
+from PoC_Version.App_Function_Libraries.Local_File_Processing_Lib import read_paths_from_file, process_local_file
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_to_database
+from PoC_Version.App_Function_Libraries.Utils.System_Checks_Lib import cuda_check, platform_check, check_ffmpeg
+from PoC_Version.App_Function_Libraries.Utils.Utils import load_and_log_configs, create_download_directory, \
     extract_text_from_segments, cleanup_downloads, logging
-from App_Function_Libraries.Video_DL_Ingestion_Lib import download_video, extract_video_info
+from PoC_Version.App_Function_Libraries.Video_DL_Ingestion_Lib import download_video, extract_video_info
+from PoC_Version.App_Function_Libraries.Metrics.logger_config import setup_logger
 #
 # Code responsible for launching GUI and leading to most functionality on line 838-862: launch UI launches the Gradio UI, which starts in the `Gradio_Related.py` file, where every tab it loads proceeds to load that page in a chain,
 # this means that the `Gradio_Related.py` file is the main file for the UI, and then calls out to all the other pieces, through the individual tabs.

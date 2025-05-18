@@ -19,9 +19,13 @@ from PoC_Version.App_Function_Libraries.Utils.Utils import default_api_endpoint,
 # Functions:
 
 # Load workflows from a JSON file
-json_path = Path('./App_Function_Libraries/Workflows/Workflows.json')
-with json_path.open('r') as f:
-    workflows = json.load(f)
+try:
+    json_path = Path('./PoC_Version/App_Function_Libraries/Workflows/Workflows.json')
+    with json_path.open('r') as f:
+        workflows = json.load(f)
+except FileNotFoundError:
+    logging.error(f"Workflows.json file not found at {json_path}")
+
 
 
 def chat_workflows_tab():
