@@ -35,7 +35,7 @@ jobs:
         run: |
           pwd
           ls
-          pytest -s ./tldw_Server_API/tests/ChaChaNotesDB/test_media_versions.py
+          pytest -s ./tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
       - name: Test Chat Completion Integrations with pytest
         run: |
           pwd
