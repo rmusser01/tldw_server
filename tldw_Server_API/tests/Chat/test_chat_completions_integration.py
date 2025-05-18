@@ -41,13 +41,10 @@ def client():
 
 @pytest.fixture
 def valid_auth_token() -> str:
-    """Provides a valid authentication token for tests requiring it."""
-    # Adapt this to your actual auth mechanism for tests.
-    # It could be a static test token, or one fetched/generated.
-    token = os.getenv("TEST_AUTH_TOKEN", "default-secret-key-for-single-user")
-    if not token and not os.getenv("CI"):  # Allow running in CI if auth is handled differently there
-        token = "default-secret-key-for-single-user"
-        pytest.skip("TEST_AUTH_TOKEN environment variable not set. Skipping authenticated integration tests.")
+    # This MUST match the value of os.getenv("API_BEARER") in the app's runtime environment.
+    token = "default-secret-key-for-single-user"
+    if os.getenv("API_BEARER") != token:
+        pytest.fail(f"MISMATCH: API_BEARER is '{os.getenv('API_BEARER')}' but test token is '{token}'")
     return token
 
 

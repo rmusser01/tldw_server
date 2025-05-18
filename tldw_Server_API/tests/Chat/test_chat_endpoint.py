@@ -45,7 +45,10 @@ def client():
 
 @pytest.fixture
 def valid_auth_token() -> str:
-    token = os.getenv("API_BEARER", "default-secret-key-for-single-user") # Fallback for safety, but API_BEARER should be set
+    # This MUST match the value of os.getenv("API_BEARER") in the app's runtime environment.
+    token = "default-secret-key-for-single-user"
+    if os.getenv("API_BEARER") != token:
+        pytest.fail(f"MISMATCH: API_BEARER is '{os.getenv('API_BEARER')}' but test token is '{token}'")
     return token
 
 
@@ -128,7 +131,7 @@ def test_create_chat_completion_no_template(
 
     # Since default_chat_request_data has no system message and active_template is None,
     # final_system_message should be empty.
-    assert called_kwargs.get("system_message") == ""
+    assert "system_message" not in called_kwargs
 
     # Messages should be passed through as is because active_template is None
     expected_payload_messages_as_dicts = [msg.model_dump(exclude_none=True) for msg in DEFAULT_USER_MESSAGES_FOR_SCHEMA]
@@ -183,11 +186,13 @@ def test_create_chat_completion_success_streaming(  # Added default_chat_request
         assert "text/event-stream" in response.headers["content-type"].lower()
 
         stream_content = response.text
-        chunks = [line for line in stream_content.split("\n\n") if line.strip()]
-
-        assert "data: {\"id\": \"1\", \"choices\": [{\"delta\": {\"content\": \"Hello\"}}]}" in chunks[0]
-        assert "data: {\"id\": \"1\", \"choices\": [{\"delta\": {\"content\": \" World\"}}]}" in chunks[1]
-        assert "data: [DONE]" in chunks[-1]
+        events = [line for line in stream_content.split("\n\n") if line.strip()]
+        assert events[0].startswith("event: tldw_metadata")
+        # Assuming mock_conv_id_xyz is correct for conversation_id
+        assert json.loads(events[0].split("data: ", 1)[1])["conversation_id"] == "mock_conv_id_xyz"
+        assert "data: {\"id\": \"1\", \"choices\": [{\"delta\": {\"content\": \"Hello\"}}]}" in events[1]
+        assert "data: {\"id\": \"1\", \"choices\": [{\"delta\": {\"content\": \" World\"}}]}" in events[2]
+        assert "data: " in events[-1] and json.loads(events[-1].split("data: ", 1)[1]).get("choices")[0].get("finish_reason") == "stop"
 
         mock_chat_api_call_inner.assert_called_once()
         call_args = mock_chat_api_call_inner.call_args[1]
@@ -426,35 +431,64 @@ def test_keyless_provider_proceeds_without_key(  # Added default_chat_request_da
 
 
 @pytest.mark.unit
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")  # Corrected patch target
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.apply_template_to_string")
-@pytest.mark.parametrize("error_type, expected_status, error_message_detail", [
-    (ChatAuthenticationError(provider="test", message="Auth failed"), status.HTTP_401_UNAUTHORIZED, "Auth failed"),
-    (ChatRateLimitError(provider="test", message="Rate limit"), status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit"),
-    (ChatBadRequestError(provider="test", message="Bad request"), status.HTTP_400_BAD_REQUEST, "Bad request"),
-    (ChatConfigurationError(provider="test", message="Config error"), status.HTTP_500_INTERNAL_SERVER_ERROR,
-     "Config error"),
-    (ChatProviderError(provider="test", message="Provider issue", status_code=503), status.HTTP_503_SERVICE_UNAVAILABLE,
-     "Provider issue"),
-    (ChatProviderError(provider="test", message="Provider non-HTTP issue"), status.HTTP_502_BAD_GATEWAY,
-     "Provider non-HTTP issue"),
-    (ChatAPIError(provider="test", message="Generic API issue"), status.HTTP_500_INTERNAL_SERVER_ERROR,
-     "Generic API issue"),
-    (ValueError("Value error from shim"), status.HTTP_400_BAD_REQUEST,
-     "Invalid input from api call: Value error from shim"),
-    (HTTPException(status_code=418, detail="I'm a teapot from shim"), 418, "I'm a teapot from shim"),
+@pytest.mark.parametrize("error_type, expected_status, expected_detail_substring", [
+    (ChatAuthenticationError(provider="test", message="Auth failed detail from lib"),
+     # Error from perform_chat_api_call
+     status.HTTP_401_UNAUTHORIZED,
+     "Auth failed detail from lib"),  # Endpoint uses the lib's message for < 500 errors
+
+    (ChatRateLimitError(provider="test", message="Rate limit detail from lib"),
+     status.HTTP_429_TOO_MANY_REQUESTS,
+     "Rate limit detail from lib"),
+
+    (ChatBadRequestError(provider="test", message="Bad request detail from lib"),
+     status.HTTP_400_BAD_REQUEST,
+     "Bad request detail from lib"),
+
+    (ChatConfigurationError(provider="test", message="Config error from lib"),  # This is a 5xx type error
+     status.HTTP_503_SERVICE_UNAVAILABLE,  # Endpoint maps ChatConfigurationError to 503
+     "An error occurred with the chat provider or service configuration."),  # Endpoint masks 5xx details
+
+    (ChatProviderError(provider="test", message="Provider issue from lib", status_code=503),  # This is a 5xx type error
+     status.HTTP_503_SERVICE_UNAVAILABLE,
+     "An error occurred with the chat provider or service configuration."),
+
+    (ChatProviderError(provider="test", message="Provider non-HTTP issue from lib", status_code=502),
+     # This is a 5xx type error
+     status.HTTP_502_BAD_GATEWAY,
+     "An error occurred with the chat provider or service configuration."),
+
+    (ChatAPIError(provider="test", message="Generic API issue from lib", status_code=500),  # This is a 5xx type error
+     status.HTTP_500_INTERNAL_SERVER_ERROR,
+     "An error occurred with the chat provider or service configuration."),
+
+    # Case: A non-library, non-HTTPException error from perform_chat_api_call (e.g., a raw ValueError)
+    # The endpoint's final `except Exception` catches this.
+    (ValueError("Value error from shim"),
+     status.HTTP_500_INTERNAL_SERVER_ERROR,  # Endpoint's generic catch-all
+     "An unexpected internal server error occurred."),
+
+    # Case: An HTTPException raised directly by perform_chat_api_call
+    # The endpoint's `except HTTPException` should re-raise it.
+    (HTTPException(status_code=418, detail="I'm a teapot from shim"),
+     418,  # The status code from the raised HTTPException
+     "I'm a teapot from shim")  # The detail from the raised HTTPException
 ])
 def test_chat_api_call_exception_handling_unit(
-        mock_apply_template, mock_load_template, mock_chat_api_call,
+        mock_apply_template, mock_load_template, mock_perform_chat_api_call,  # Corrected mock name
         client, valid_auth_token, mock_media_db, mock_chat_db,
-        default_chat_request_data,  # Use the fixture
-        error_type, expected_status, error_message_detail
+        default_chat_request_data,
+        error_type, expected_status, expected_detail_substring
 ):
     mock_load_template.return_value = DEFAULT_RAW_PASSTHROUGH_TEMPLATE
     mock_apply_template.side_effect = lambda template_str, data: data.get("message_content", data.get(
         "original_system_message_from_request", ""))
-    mock_chat_api_call.side_effect = error_type
+
+    # This is the mock for perform_chat_api_call inside the endpoint
+    mock_perform_chat_api_call.side_effect = error_type
 
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_media_db
     app.dependency_overrides[get_chacha_db_for_user] = lambda: mock_chat_db
@@ -462,11 +496,23 @@ def test_chat_api_call_exception_handling_unit(
     response = client.post(
         "/api/v1/chat/completions",
         json=default_chat_request_data.model_dump(),
-        headers={"token": valid_auth_token}
+        headers={"Token": valid_auth_token}  # Ensure correct header name
     )
+
     assert response.status_code == expected_status
-    response_detail = response.json().get("detail", "")
-    assert error_message_detail.lower() in response_detail.lower()
+
+    response_json = response.json()
+    assert "detail" in response_json, "Response JSON should contain a 'detail' field"
+    response_detail_text = response_json["detail"]
+
+    # For string details, check if the expected substring is present.
+    # For dict details (e.g. Pydantic validation errors), this check might need adjustment,
+    # but for these specific exception handlings, detail is expected to be a string.
+    assert isinstance(response_detail_text,
+                      str), f"Response detail should be a string, got {type(response_detail_text)}"
+    assert expected_detail_substring.lower() in response_detail_text.lower(), \
+        f"Expected detail '{expected_detail_substring}' not found in actual detail '{response_detail_text}'"
+
     app.dependency_overrides = {}
 
 
@@ -484,7 +530,7 @@ def test_non_iterable_stream_generator_from_shim(
         "original_system_message_from_request", ""))
 
     # Simulate chat_api_call (perform_chat_api_call) returning a non-iterable/non-async-iterable
-    mock_chat_api_call.return_value = "not_a_generator_or_iterator"
+    mock_chat_api_call.return_value = 123
 
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_media_db
     app.dependency_overrides[get_chacha_db_for_user] = lambda: mock_chat_db
@@ -533,7 +579,9 @@ def test_error_within_stream_generator(  # Added default_chat_request_data
         assert response.status_code == status.HTTP_200_OK
 
         lines = response.text.splitlines()
-        assert "data: {\"id\": \"1\", \"choices\": [{\"delta\": {\"content\": \"Good start...\"}}]}" in lines[0]
+        assert "event: tldw_metadata" in lines[0]
+        # Adjust indices for subsequent checks based on metadata event taking up lines
+        assert "data: {\"id\": \"1\", \"choices\": [{\"delta\": {\"content\": \"Good start...\"}}]}" in lines[2]
 
         error_payload_found = False
         done_found = False
@@ -638,8 +686,9 @@ def test_create_chat_completion_with_tools_unit(
     assert response.status_code == status.HTTP_200_OK
     mock_chat_api_call.assert_called_once()
     called_kwargs = mock_chat_api_call.call_args.kwargs
-    assert called_kwargs["tool_choice"].model_dump() == tool_choice_payload.model_dump(exclude_none=True)
-    assert [t.model_dump() for t in called_kwargs["tools"]] == [t.model_dump(exclude_none=True) for t in tools_payload]
+    # tool_choice from request_data.model_dump() is a dict
+    assert called_kwargs.get("tool_choice") == tool_choice_payload.model_dump(exclude_none=True)
+    assert called_kwargs.get("tools") == [t.model_dump(exclude_none=True) for t in tools_payload]
 
     app.dependency_overrides = {}
 
