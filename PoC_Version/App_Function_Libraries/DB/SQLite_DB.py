@@ -60,10 +60,10 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import List, Tuple, Dict, Any, Optional
 # Local Libraries
-from PoC_Version.App_Function_Libraries.Utils.Utils import get_project_relative_path, get_database_path, \
+from App_Function_Libraries.Utils.Utils import get_project_relative_path, get_database_path, \
     get_database_dir, logger, logging
-from PoC_Version.App_Function_Libraries.Chunk_Lib import chunk_text
-from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from App_Function_Libraries.Chunk_Lib import chunk_options, chunk_text
+from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
 #
 # Third-Party Libraries
 import gradio as gr
@@ -223,21 +223,7 @@ class InputError(Exception):
 
 class Database:
     def __init__(self, db_name='media_summary.db'):
-        # Resolve the full path first
-        resolved_db_path = get_database_path(db_name)
-
-        # Ensure the specific directory for this resolved_db_path exists
-        db_dir = os.path.dirname(resolved_db_path)
-        if not os.path.exists(db_dir):
-            try:
-                os.makedirs(db_dir, exist_ok=True)
-                logging.info(f"SQLite_DB.Database: Created database directory: {db_dir}")
-            except OSError as e:
-                logging.error(f"SQLite_DB.Database: Failed to create database directory {db_dir}: {e}")
-                raise  # Re-raise if directory creation fails
-
-        self.db_path = resolved_db_path
-        logging.info(f"SQLite_DB.Database: Initialized with db_path: {self.db_path}")
+        self.db_path = get_database_path(db_name)
         self.timeout = 10.0
         self._local = threading.local()
 
@@ -279,7 +265,7 @@ class Database:
             cursor.executemany(query, params_list)
 
     def table_exists(self, table_name: str) -> bool:
-        query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+        query = 'SELECT name FROM sqlite_master WHERE type="table" AND name=?'
         result = self.execute_query(query, (table_name,))
         return bool(result)
 
@@ -345,7 +331,7 @@ def create_tables(db) -> None:
         '''
         CREATE TABLE IF NOT EXISTS MediaModifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            media_id INTEGER NOT NULL UNIQUE,
+            media_id INTEGER NOT NULL,
             prompt TEXT,
             summary TEXT,
             modification_date TEXT,

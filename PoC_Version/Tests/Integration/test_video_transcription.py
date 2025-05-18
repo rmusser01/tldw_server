@@ -3,10 +3,10 @@
 # Usage: pytest tests/integration/test_video_transcription.py
 import pytest
 import os
-from PoC_Version.App_Function_Libraries.Video_DL_Ingestion_Lib import download_video, extract_video_info
-from PoC_Version.App_Function_Libraries.Audio.Audio_Transcription_Lib import convert_to_wav, speech_to_text
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_to_database
-from PoC_Version.App_Function_Libraries.Utils.Utils import create_download_directory
+from App_Function_Libraries.Video_DL_Ingestion_Lib import download_video, extract_video_info
+from App_Function_Libraries.Audio.Audio_Transcription_Lib import convert_to_wav, speech_to_text
+from App_Function_Libraries.DB.DB_Manager import add_media_to_database
+from App_Function_Libraries.Utils.Utils import create_download_directory
 
 
 @pytest.fixture

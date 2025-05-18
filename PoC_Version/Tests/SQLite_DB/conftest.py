@@ -12,7 +12,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'tldw')))
 print("Current sys.path:", sys.path)
 
-from PoC_Version.App_Function_Libraries.DB.SQLite_DB import Database
+from App_Function_Libraries.DB.SQLite_DB import Database
 
 from pathlib import Path
 

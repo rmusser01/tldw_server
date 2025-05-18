@@ -10,7 +10,7 @@ sys.path.insert(0, project_root)
 print(f"Project root added to sys.path: {project_root}")
 
 
-from PoC_Version.App_Function_Libraries.Chunk_Lib import (
+from App_Function_Libraries.Chunk_Lib import (
     improved_chunking_process,
     chunk_text_by_words,
     chunk_text_by_sentences,

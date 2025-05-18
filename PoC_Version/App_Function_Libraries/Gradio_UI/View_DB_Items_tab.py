@@ -8,13 +8,13 @@ import html
 import gradio as gr
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import view_database, get_all_document_versions, \
-    fetch_paginated_data, fetch_item_details, get_latest_transcription
-from PoC_Version.App_Function_Libraries.DB.RAG_QA_Chat_DB import get_keywords_for_note, search_conversations_by_keywords, \
+from App_Function_Libraries.DB.DB_Manager import view_database, get_all_document_versions, \
+    fetch_paginated_data, fetch_item_details, get_latest_transcription, list_prompts, fetch_prompt_details
+from App_Function_Libraries.DB.RAG_QA_Chat_DB import get_keywords_for_note, search_conversations_by_keywords, \
     get_notes_by_keywords, get_keywords_for_conversation, get_db_connection, get_all_conversations, load_chat_history, \
     get_notes
-from PoC_Version.App_Function_Libraries.DB.SQLite_DB import get_document_version, fetch_items_by_keyword, fetch_all_keywords
-from PoC_Version.App_Function_Libraries.Utils.Utils import logging
+from App_Function_Libraries.DB.SQLite_DB import get_document_version, fetch_items_by_keyword, fetch_all_keywords
+from App_Function_Libraries.Utils.Utils import logging
 #
 ####################################################################################################
 #

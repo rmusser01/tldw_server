@@ -35,10 +35,10 @@ import trafilatura
 from tqdm import tqdm
 #
 # Import Local
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import ingest_article_to_db
-from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_histogram, log_counter
-from PoC_Version.App_Function_Libraries.Summarization.Summarization_General_Lib import summarize
-from PoC_Version.App_Function_Libraries.Utils.Utils import logging, load_and_log_configs
+from App_Function_Libraries.DB.DB_Manager import ingest_article_to_db
+from App_Function_Libraries.Metrics.metrics_logger import log_histogram, log_counter
+from App_Function_Libraries.Summarization.Summarization_General_Lib import summarize
+from App_Function_Libraries.Utils.Utils import logging
 
 #######################################################################################################################
 # Function Definitions
@@ -53,15 +53,12 @@ web_scraping_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit
 def get_page_title(url: str) -> str:
     try:
         response = requests.get(url)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            title_tag = soup.find('title')
-            title = title_tag.string.strip() if title_tag and title_tag.string else "Untitled"
-            log_counter("page_title_extracted", labels={"success": "true"})
-            return title
-        else: #debug code for problem in suceeded request but non 200 code
-            logging.error(f"Failed to fetch {url}, status code: {response.status_code}")
-            return "Untitled"
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        title_tag = soup.find('title')
+        title = title_tag.string.strip() if title_tag else "Untitled"
+        log_counter("page_title_extracted", labels={"success": "true"})
+        return title
     except requests.RequestException as e:
         logging.error(f"Error fetching page title: {e}")
         log_counter("page_title_extracted", labels={"success": "false"})
@@ -71,80 +68,30 @@ def get_page_title(url: str) -> str:
 async def scrape_article(url: str, custom_cookies: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     logging.info(f"Scraping article from URL: {url}")
     async def fetch_html(url: str) -> str:
-        # Load and log the configuration
-        loaded_config = load_and_log_configs()
-
-        # load retry count from config
-        scrape_retry_count = loaded_config['web_scraper'].get('web_scraper_retry_count', 3)
-        retries = scrape_retry_count
-        # Load retry timeout value from config
-        web_scraper_retry_timeout = loaded_config['web_scraper'].get('web_scraper_retry_timeout', 60)
-        timeout_ms = web_scraper_retry_timeout
-
-        # Whether stealth mode is enabled
-        stealth_enabled = loaded_config['web_scraper'].get('web_scraper_stealth_playwright', False)
-
-        for attempt in range(retries):  # Introduced a retry loop to attempt fetching HTML multiple times
-            browser = None
+        logging.info(f"Fetching HTML from {url}")
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
             try:
-                logging.info(f"Fetching HTML from {url} (Attempt {attempt + 1}/{retries})")
-
-                async with async_playwright() as p:
-                    browser = await p.chromium.launch(headless=True)
-                    context = await browser.new_context(
-                        user_agent=web_scraping_user_agent,
-                        # Simulating a normal browser window size for better compatibility
-                        viewport={"width": 1280, "height": 720},
-                    )
-                    if custom_cookies:
-                        # Apply cookies if provided
-                        await context.add_cookies(custom_cookies)
-
-                    page = await context.new_page()
-
-                    # Check if stealth mode is enabled in the config
-                    if stealth_enabled:
-                        from playwright_stealth import stealth_async
-                        await stealth_async(page)
-
-                    # Navigate to the URL
-                    await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-
-
-                   # If stealth is enabled, give the page extra time to finish loading/spawning content
-                    if stealth_enabled:
-                        await page.wait_for_timeout(5000)  # 5-second delay
-                    else:
-                        # Alternatively, wait for network to be idle
-                        await page.wait_for_load_state("networkidle", timeout=timeout_ms)
-
-                    # Capture final HTML
+                context = await browser.new_context(
+                    user_agent=web_scraping_user_agent,
+                #viewport = {"width": 1280, "height": 720},
+                #java_script_enabled = True
+                )
+                if custom_cookies:
+                    await context.add_cookies(custom_cookies)
+                page = await context.new_page()
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=10000)  # 10-second timeout
+                    await page.wait_for_load_state("networkidle", timeout=10000)  # 10-second timeout
                     content = await page.content()
-
                     logging.info(f"HTML fetched successfully from {url}")
                     log_counter("html_fetched", labels={"url": url})
-
-                # Return the scraped HTML
-                return content
-
-            except Exception as e:
-                logging.error(f"Error fetching HTML from {url} on attempt {attempt + 1}: {e}")
-
-                if attempt < retries - 1:
-                    logging.info("Retrying...")
-                    await asyncio.sleep(2)
-                else:
-                    logging.error("Max retries reached, giving up on this URL.")
-                    log_counter("html_fetch_error", labels={"url": url, "error": str(e)})
-                    return ""  # Return empty string on final failure
-
+                    return content
+                except Exception as e:
+                    logging.error(f"Error fetching HTML for {url}: {e}")
+                    return ""
             finally:
-                # Ensure the browser is closed before returning
-                if browser is not None:
-                    await browser.close()
-
-        # If for some reason you exit the loop without returning (unlikely), return empty string
-        return ""
+                await browser.close()
 
     def extract_article_data(html: str, url: str) -> dict:
         logging.info(f"Extracting article data from HTML for {url}")

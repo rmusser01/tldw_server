@@ -31,16 +31,16 @@ video_summarize_prompt = "Above is the transcript of a video. Please read throug
 
 [Database]
 type = sqlite
-sqlite_path = PoC_Version/Databases/media_summary.db
+sqlite_path = Databases/media_summary.db
 backup_path = ./tldw_DB_Backups/
 #Path to the backup location for the database. If the path does not exist, the backup will not be created.
 elasticsearch_host = localhost
 elasticsearch_port = 9200
 # Additionally you can use elasticsearch as the database type, just replace `sqlite` with `elasticsearch` for `type` and provide the `elasticsearch_host` and `elasticsearch_port` of your configured ES instance.
-chroma_db_path = PoC_Version\Databases\chroma_db
-prompts_db_path = PoC_Version\Databases\prompts.db
-rag_qa_db_path = PoC_Version\Databases\RAG_QA_Chat.db
-character_db_path = PoC_Version\Databases\chatDB.db
+chroma_db_path = Databases/chroma_db
+prompts_db_path = Databases/prompts.db
+rag_qa_db_path = Databases/RAG_QA_Chat.db
+character_db_path = Databases/chatDB.db
 
 
 [Chunking]
@@ -61,8 +61,6 @@ article_chunking_method = 'words'
 article_chunk_max_size = 400
 article_chunk_overlap = 200
 article_adaptive_chunking = false
-article_chunking_multi_level = false
-article_language = english
 #
 # Audio file Chunking
 audio_chunking_method = 'words'
@@ -135,7 +133,7 @@ video_chunk_overlap = 200
 video_adaptive_chunking = false
 video_chunking_multi_level = false
 video_language = english
-chunking_types = 'article', 'audio', 'book', 'document', 'mediawiki_article', 'mediawiki_dump', 'obsidian_note', 'podcast', 'text', 'video'
+chunking_types = 'article', 'audio', '
 
 
 [Embeddings]
@@ -297,7 +295,7 @@ llama_api_retry = 3
 llama_api_retry_delay = 1
 #
 ooba_api_key =
-ooba_api_IP = http://192.168.2.235:5000/v1/chat/completions
+ooba_api_IP = http://127.0.0.1:5000/v1/chat/completions
 ooba_streaming = False
 ooba_temperature = 0.7
 ooba_top_p = 0.9
@@ -496,17 +494,9 @@ search_engine_searx_api = https://search.rhscz.eu/
 # Tavily
 search_engine_api_key_tavily = <tavily_api_key>
 # Yandex
-search_engine_api_key_yandex = <yandex_api_key>
-search_engine_id_yandex = <yandex_engine_id>
+search_engine_api_key_yandex = 1e1b1b1b1b1b1b1b1
+search_engine_id_yandex = 1e1b1b1b1b1b1b1b1
 
-[Web-Scraper]
-web_scraper_api_key =
-web_scraper_api_url =
-web_scraper_api_timeout = 90
-web_scraper_api_retry = 3
-web_scraper_api_retry_delay = 1
-web_scraper_retry_count = 3
-web_scraper_stealth_playwright = False
 
 [Logging]
 log_level = INFO

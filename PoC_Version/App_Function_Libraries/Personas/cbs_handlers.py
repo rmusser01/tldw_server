@@ -3,7 +3,7 @@ import re
 import random
 from typing import List
 
-from PoC_Version.App_Function_Libraries.Personas.models import CharacterCardV3
+from App_Function_Libraries.Personas.models import CharacterCardV3
 
 
 class CBSHandler:

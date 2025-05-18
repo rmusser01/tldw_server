@@ -7,19 +7,22 @@ from typing import List
 #
 # External Imports
 from chromadb import Documents, EmbeddingFunction, Embeddings
-from chunking_evaluation import rigorous_document_search
+from chromadb.utils import embedding_functions
+from chunking_evaluation import BaseChunker, rigorous_document_search
 from chunking_evaluation import BaseChunker, GeneralEvaluation
 from chunking_evaluation.evaluation_framework.base_evaluation import BaseEvaluation
 
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Chunk_Lib import improved_chunking_process
-from PoC_Version.App_Function_Libraries.RAG.Embeddings_Create import create_embeddings_batch
-from PoC_Version.App_Function_Libraries.Utils.Utils import load_comprehensive_config
+from App_Function_Libraries.Chunk_Lib import improved_chunking_process
+from App_Function_Libraries.RAG.ChromaDB_Library import embedding_model, embedding_api_url
+from App_Function_Libraries.RAG.Embeddings_Create import create_embeddings_batch, embedding_provider
+from App_Function_Libraries.Utils.Utils import load_comprehensive_config
 #
 ########################################################################################################################
 #
 # Functions:
+import chardet
 # FIXME
 
 

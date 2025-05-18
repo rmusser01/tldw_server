@@ -26,7 +26,7 @@ import shutil
 import subprocess
 import zipfile
 
-from PoC_Version.App_Function_Libraries.Utils.Utils import logging
+from App_Function_Libraries.Utils.Utils import logging
 
 
 # Import Local Libraries
@@ -63,20 +63,16 @@ def cuda_check():
                 "Not found")
             print(f"NVIDIA GPU with CUDA Version {cuda_version} is available.")
             processing_choice = "cuda"
-            return True #fix 'Asserion error: none is not true' in Tests\Summarization\test_summarize.py
         else:
             print("CUDA is not installed or configured correctly.")
             processing_choice = "cpu"
-            return False
 
     except subprocess.CalledProcessError as e:
         print(f"Failed to run 'nvidia-smi': {str(e)}")
         processing_choice = "cpu"
-        return False
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         processing_choice = "cpu"
-        return False
 
     # Optionally, check for the CUDA_VISIBLE_DEVICES env variable as an additional check
     if "CUDA_VISIBLE_DEVICES" in os.environ:
@@ -103,95 +99,84 @@ def decide_cpugpu():
 
 # check for existence of ffmpeg
 def check_ffmpeg():
-    if shutil.which("ffmpeg"):
+    if shutil.which("ffmpeg") or (os.path.exists("Bin") and os.path.isfile(".\\Bin\\ffmpeg.exe")):
         logging.debug("ffmpeg found installed on the local system, in the local PATH, or in the './Bin' folder")
-        return True #fix 'Asserion error: none is not true' in Tests\Summarization\test_summarize.py
-    elif os.path.exists(os.path.join("", "Bin", "ffmpeg.exe")): # Splitted for clearer loggic
-        logging.debug("ffmpeg found in ./Bin directory.")
-        return True
+        pass
     else:
         logging.debug("ffmpeg not installed on the local system/in local PATH")
         print(
             "ffmpeg is not installed.\n\n You can either install it manually, or through your package manager of "
             "choice.\n Windows users, builds are here: https://www.gyan.dev/ffmpeg/builds/")
         if userOS == "Windows":
-            if download_ffmpeg(): # call and check the return
-                return True
-            else:
-                return False
-            
+            download_ffmpeg()
         elif userOS == "Linux":
             print(
                 "You should install ffmpeg using your platform's appropriate package manager, 'apt install ffmpeg',"
-                "'dnf install ffmpeg' or 'pacman', etc."
-                )
-            return False
+                "'dnf install ffmpeg' or 'pacman', etc.")
         else:
             logging.debug("running an unsupported OS")
-            print("You're running an unsupported/Un-tested OS")
+            print("You're running an unspported/Un-tested OS")
             exit_script = input("Let's exit the script, unless you're feeling lucky? (y/n)")
-            if exit_script.lower() in ["y", "yes", "1"]:  # Handles 'Y' or 'y'
-                return False
-            return False 
+            if exit_script == "y" or "yes" or "1":
+                exit()
 
 
 # Download ffmpeg
 def download_ffmpeg():
-    FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-    user_choice = input("Do you want to download ffmpeg? (y/N): ")
-    if user_choice.lower() not in ['y', 'yes', '1']:  # Simplified input check
+    user_choice = input("Do you want to download ffmpeg? (y)Yes/(n)No: ")
+    if user_choice.lower() in ['yes', 'y', '1']:
+        print("Downloading ffmpeg")
+        url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+        response = requests.get(url)
+
+        if response.status_code == 200:
+            print("Saving ffmpeg zip file")
+            logging.debug("Saving ffmpeg zip file")
+            zip_path = "ffmpeg-release-essentials.zip"
+            with open(zip_path, 'wb') as file:
+                file.write(response.content)
+
+            logging.debug("Extracting the 'ffmpeg.exe' file from the zip")
+            print("Extracting ffmpeg.exe from zip file to '/Bin' folder")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                # Find the ffmpeg.exe file within the zip
+                ffmpeg_path = None
+                for file_info in zip_ref.infolist():
+                    if file_info.filename.endswith("ffmpeg.exe"):
+                        ffmpeg_path = file_info.filename
+                        break
+
+                if ffmpeg_path is None:
+                    logging.error("ffmpeg.exe not found in the zip file.")
+                    print("ffmpeg.exe not found in the zip file.")
+                    return
+
+                logging.debug("checking if the './Bin' folder exists, creating if not")
+                bin_folder = "Bin"
+                if not os.path.exists(bin_folder):
+                    logging.debug("Creating a folder for './Bin', it didn't previously exist")
+                    os.makedirs(bin_folder)
+
+                logging.debug("Extracting 'ffmpeg.exe' to the './Bin' folder")
+                zip_ref.extract(ffmpeg_path, path=bin_folder)
+
+                logging.debug("Moving 'ffmpeg.exe' to the './Bin' folder")
+                src_path = os.path.join(bin_folder, ffmpeg_path)
+                dst_path = os.path.join(bin_folder, "ffmpeg.exe")
+                shutil.move(src_path, dst_path)
+
+            logging.debug("Removing ffmpeg zip file")
+            print("Deleting zip file (we've already extracted ffmpeg.exe, no worries)")
+            os.remove(zip_path)
+
+            logging.debug("ffmpeg.exe has been downloaded and extracted to the './Bin' folder.")
+            print("ffmpeg.exe has been successfully downloaded and extracted to the './Bin' folder.")
+        else:
+            logging.error("Failed to download the zip file.")
+            print("Failed to download the zip file.")
+    else:
+        logging.debug("User chose to not download ffmpeg")
         print("ffmpeg will not be downloaded.")
-        return False
-
-    print("Downloading ffmpeg...")
-    try:
-        response = requests.get(FFMPEG_DOWNLOAD_URL, stream=True)
-        # Raise an exception for bad HTTP status codes (4xx or 5xx).
-        response.raise_for_status()
-
-        zip_path = "ffmpeg-release-essentials.zip"
-        with open(zip_path, 'wb') as file:
-            # Write the downloaded content in chunks to avoid memory issues.
-            for chunk in response.iter_content(chunk_size=8192):
-                file.write(chunk)
-
-        print("Extracting ffmpeg.exe...")
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            ffmpeg_path = None
-            for file_info in zip_ref.infolist():
-                if file_info.filename.endswith("ffmpeg.exe"):
-                    ffmpeg_path = file_info.filename
-                    break
-            if ffmpeg_path is None:
-                # Raise a FileNotFoundError if ffmpeg.exe is not found in the zip.
-                raise FileNotFoundError("ffmpeg.exe not found in the zip file.")
-            bin_folder = os.path.join("", "Bin")
-            if not os.path.exists(bin_folder):
-                os.makedirs(bin_folder)
-
-            zip_ref.extract(ffmpeg_path, path=bin_folder)
-            
-            src_path = os.path.join(bin_folder, ffmpeg_path)
-            dst_path = os.path.join(bin_folder, "ffmpeg.exe")
-            shutil.move(src_path, dst_path)  # Move to the correct location (./Bin/ffmpeg.exe).
-
-        os.remove(zip_path)  # Clean up: Delete the downloaded zip file.
-        print("ffmpeg.exe has been successfully downloaded and extracted to the './Bin' folder.")
-        return True # returns if the process was succesful
-
-    # Handle potential errors during the download and extraction process.
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error downloading ffmpeg: {e}")
-        print(f"Error downloading ffmpeg: {e}")
-        return False
-    except (FileNotFoundError, zipfile.BadZipFile, OSError) as e:
-        logging.error(f"Error extracting or moving ffmpeg: {e}")
-        print(f"Error extracting or moving ffmpeg: {e}")
-        return False
-    except Exception as e:
-        logging.error(f"An unexpected error occurred: {e}")
-        print(f"An unexpected error occurred: {e}")
-        return False
 
 #
 #

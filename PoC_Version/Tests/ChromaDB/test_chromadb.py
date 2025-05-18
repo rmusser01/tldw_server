@@ -23,7 +23,7 @@ print(f"Project root added to sys.path: {project_root}")
 
 # Local Imports
 #from App_Function_Libraries.Utils.Utils import load_and_log_configs
-from PoC_Version.App_Function_Libraries.RAG.ChromaDB_Library import (
+from App_Function_Libraries.RAG.ChromaDB_Library import (
     process_and_store_content, check_embedding_status,
     reset_chroma_collection, vector_search, store_in_chroma, batched, embedding_api_url
 )

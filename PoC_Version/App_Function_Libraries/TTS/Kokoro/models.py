@@ -1,12 +1,15 @@
 # https://huggingface.co/hexgrad/Kokoro-82M/blob/main/models.py
 # https://github.com/yl4579/StyleTTS2/blob/main/models.py
-from PoC_Version.App_Function_Libraries.TTS.Kokoro.istftnet import AdaIN1d, Decoder
+from App_Function_Libraries.TTS.Kokoro.kokoro import generate_full
+from App_Function_Libraries.TTS.Kokoro.istftnet import AdaIN1d, Decoder
 from munch import Munch
 from pathlib import Path
-from PoC_Version.App_Function_Libraries.TTS.Kokoro.plberty import load_plbert
-from torch.nn.utils import weight_norm
+from App_Function_Libraries.TTS.Kokoro.plberty import load_plbert
+from torch.nn.utils import weight_norm, spectral_norm
 import json
 import numpy as np
+import os
+import os.path as osp
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

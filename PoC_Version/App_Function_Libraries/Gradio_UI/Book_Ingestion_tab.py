@@ -14,8 +14,8 @@ import os
 import gradio as gr
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Books.Book_Ingestion_Lib import import_file_handler, read_epub
-from PoC_Version.App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
+from App_Function_Libraries.Books.Book_Ingestion_Lib import import_file_handler, read_epub, read_epub_filtered
+from App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
 
 
 #

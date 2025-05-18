@@ -9,23 +9,16 @@ import signal
 import sys
 import threading
 import time
-
-# Imports required by Tests\Summarization\test_summarize.py
-import sqlite3
-import subprocess
-import requests
-import torch
-import yt_dlp
-import platform
-
 #
 # 3rd-Party Imports
 import nltk
 from loguru import logger
+
+from App_Function_Libraries.Metrics.logger_config import setup_logger
+
 #
 # Local Library Imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'App_Function_Libraries')))
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))  # Add the directory containing summarize.py (PoC_Version)
 from App_Function_Libraries.Books.Book_Ingestion_Lib import ingest_folder, ingest_text_file
 from App_Function_Libraries.Chunk_Lib import  semantic_chunk_long_file#, rolling_summarize_function,
 from App_Function_Libraries.Gradio_Related import launch_ui
@@ -40,7 +33,6 @@ from App_Function_Libraries.Utils.System_Checks_Lib import cuda_check, platform_
 from App_Function_Libraries.Utils.Utils import load_and_log_configs, create_download_directory, \
     extract_text_from_segments, cleanup_downloads, logging
 from App_Function_Libraries.Video_DL_Ingestion_Lib import download_video, extract_video_info
-from App_Function_Libraries.Metrics.logger_config import setup_logger
 #
 # Code responsible for launching GUI and leading to most functionality on line 838-862: launch UI launches the Gradio UI, which starts in the `Gradio_Related.py` file, where every tab it loads proceeds to load that page in a chain,
 # this means that the `Gradio_Related.py` file is the main file for the UI, and then calls out to all the other pieces, through the individual tabs.

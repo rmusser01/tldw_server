@@ -11,7 +11,7 @@ import yaml
 from ruamel.yaml import YAML
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.MediaWiki.Media_Wiki import import_mediawiki_dump, media_wiki_import_config
+from App_Function_Libraries.MediaWiki.Media_Wiki import import_mediawiki_dump, media_wiki_import_config
 #
 #######################################################################################################################
 #

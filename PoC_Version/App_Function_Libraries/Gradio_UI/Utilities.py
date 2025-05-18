@@ -6,7 +6,7 @@ from pathlib import Path
 import gradio as gr
 import yt_dlp
 
-from PoC_Version.App_Function_Libraries.Utils.Utils import sanitize_filename, downloaded_files
+from App_Function_Libraries.Utils.Utils import sanitize_filename, downloaded_files
 
 
 def create_utilities_yt_video_tab():
@@ -40,7 +40,7 @@ def create_utilities_yt_audio_tab():
                 output_file_audio = gr.File(label="Download Audio")
                 output_message_audio = gr.Textbox(label="Status")
 
-        from PoC_Version.App_Function_Libraries.Audio.Audio_Files import download_youtube_audio
+        from App_Function_Libraries.Audio.Audio_Files import download_youtube_audio
         download_button_audio.click(
             fn=download_youtube_audio,
             inputs=youtube_url_input_audio,
@@ -60,7 +60,7 @@ def create_utilities_yt_timestamp_tab():
             with gr.Column():
                 output_url = gr.Textbox(label="Timestamped URL")
 
-        from PoC_Version.App_Function_Libraries.Video_DL_Ingestion_Lib import generate_timestamped_url
+        from App_Function_Libraries.Video_DL_Ingestion_Lib import generate_timestamped_url
         generate_button.click(
             fn=generate_timestamped_url,
             inputs=[url_input, hours_input, minutes_input, seconds_input],

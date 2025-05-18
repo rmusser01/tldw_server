@@ -1,4 +1,11 @@
 # tests/test_performance.py
+import os
+
+import pytest
+import time
+from App_Function_Libraries.DB.DB_Manager import search_media_database, add_media_to_database
+from App_Function_Libraries.DB.SQLite_DB import Database, create_tables
+from App_Function_Libraries.Utils import Utils
 
 
 #

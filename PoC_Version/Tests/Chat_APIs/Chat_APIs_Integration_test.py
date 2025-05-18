@@ -25,7 +25,7 @@ print(f"Project root added to sys.path: {project_root}")
 
 
 print(f"Project root added to sys.path: {project_root}")
-from PoC_Version.App_Function_Libraries.LLM_API_Calls import (
+from App_Function_Libraries.LLM_API_Calls import (
     chat_with_openai,
     chat_with_anthropic,
     chat_with_cohere,

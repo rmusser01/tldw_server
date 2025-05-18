@@ -15,8 +15,8 @@ from PIL import Image, PngImagePlugin
 # Add the tldw directory (one level up from Tests) to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'tldw')))
 # Local Imports
-from PoC_Version.App_Function_Libraries.Personas.ccv3_parser import CharacterCardV3Parser, CCv3ParserError
-from PoC_Version.App_Function_Libraries.Personas.cbs_handlers import CBSHandler
+from App_Function_Libraries.Personas.ccv3_parser import CharacterCardV3Parser, CCv3ParserError
+from App_Function_Libraries.Personas.cbs_handlers import CBSHandler
 #
 ############################################################################################################
 #

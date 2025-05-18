@@ -12,7 +12,7 @@ parent_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
 sys.path.append(parent_dir)
 
 # Import the functions to test
-from PoC_Version.App_Function_Libraries.RAG.RAG_Library_2 import (
+from App_Function_Libraries.RAG.RAG_Library_2 import (
     fetch_relevant_media_ids,
     #perform_vector_search,
     perform_full_text_search,

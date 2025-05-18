@@ -12,21 +12,19 @@ import time
 import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Dict
-
 #
 # External Imports
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import start_new_conversation, delete_messages_in_conversation, save_message
-from PoC_Version.App_Function_Libraries.DB.RAG_QA_Chat_DB import get_db_connection, get_conversation_name
-from PoC_Version.App_Function_Libraries.LLM_API_Calls import chat_with_openai, chat_with_anthropic, chat_with_cohere, \
+from App_Function_Libraries.DB.DB_Manager import start_new_conversation, delete_messages_in_conversation, save_message
+from App_Function_Libraries.DB.RAG_QA_Chat_DB import get_db_connection, get_conversation_name
+from App_Function_Libraries.LLM_API_Calls import chat_with_openai, chat_with_anthropic, chat_with_cohere, \
     chat_with_groq, chat_with_openrouter, chat_with_deepseek, chat_with_mistral, chat_with_huggingface, chat_with_google
-from PoC_Version.App_Function_Libraries.LLM_API_Calls_Local import chat_with_aphrodite, chat_with_local_llm, chat_with_ollama, \
+from App_Function_Libraries.LLM_API_Calls_Local import chat_with_aphrodite, chat_with_local_llm, chat_with_ollama, \
     chat_with_kobold, chat_with_llama, chat_with_oobabooga, chat_with_tabbyapi, chat_with_vllm, chat_with_custom_openai
-from PoC_Version.App_Function_Libraries.DB.SQLite_DB import load_media_content
-from PoC_Version.App_Function_Libraries.Utils.Utils import generate_unique_filename, load_and_log_configs, logging
-from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from App_Function_Libraries.DB.SQLite_DB import load_media_content
+from App_Function_Libraries.Utils.Utils import generate_unique_filename, load_and_log_configs, logging
+from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
 #
 ####################################################################################################
 #
@@ -47,25 +45,7 @@ def approximate_token_count(history):
         return 0
 
 
-def chat_api_call(
-        api_endpoint,
-        api_key=None,
-        input_data=None,
-        prompt=None,
-        temp=None,
-        system_message=None,
-        streaming=None,
-        minp=None,
-        maxp=None,
-        model=None,
-        topk=None,
-        topp=None,
-        logprobs: Optional[bool] = None,
-        top_logprobs: Optional[int] = None,
-        logit_bias: Optional[Dict[str, float]] = None,
-        presence_penalty: Optional[float] = None,
-        frequency_penalty: Optional[float] = None,
-):
+def chat_api_call(api_endpoint, api_key=None, input_data=None, prompt=None, temp=None, system_message=None, streaming=None, minp=None, maxp=None, model=None, topk=None, topp=None):
     logging.info(f"Debug - Chat API Call - API Endpoint: {api_endpoint}")
     log_counter("chat_api_call_attempt", labels={"api_endpoint": api_endpoint})
     start_time = time.time()
@@ -772,7 +752,7 @@ def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_ev
 #
 # Character Card Functions
 
-CHARACTERS_FILE = Path('', 'Helper_Scripts', 'Character_Cards', 'Characters.json')
+CHARACTERS_FILE = Path('.', 'Helper_Scripts', 'Character_Cards', 'Characters.json')
 
 def save_character(character_data):
     log_counter("save_character_attempt")

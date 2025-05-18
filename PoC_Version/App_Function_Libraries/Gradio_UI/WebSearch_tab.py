@@ -2,6 +2,7 @@
 # Gradio UI for performing web searches with aggregated results
 #
 # Imports
+import asyncio
 from typing import Dict
 #
 # External Imports
@@ -9,8 +10,8 @@ import gradio as gr
 
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Web_Scraping.WebSearch_APIs import generate_and_search, analyze_and_aggregate
-from PoC_Version.App_Function_Libraries.Utils.Utils import loaded_config_data, logging
+from App_Function_Libraries.Web_Scraping.WebSearch_APIs import generate_and_search, analyze_and_aggregate
+from App_Function_Libraries.Utils.Utils import loaded_config_data, logging
 
 
 #

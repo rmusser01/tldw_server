@@ -3,8 +3,8 @@
 from itertools import chain
 from typing import List, Dict
 
-from PoC_Version.App_Function_Libraries.RAG.ChromaDB_Library import store_in_chroma, create_embedding, vector_search, chroma_client
-from PoC_Version.App_Function_Libraries.Chunk_Lib import improved_chunking_process, recursive_summarize_chunks
+from App_Function_Libraries.RAG.ChromaDB_Library import store_in_chroma, create_embedding, vector_search, chroma_client
+from App_Function_Libraries.Chunk_Lib import improved_chunking_process, recursive_summarize_chunks
 import logging
 from sklearn.mixture import GaussianMixture
 import umap

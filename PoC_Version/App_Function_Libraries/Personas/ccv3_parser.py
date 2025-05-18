@@ -8,9 +8,9 @@ import re
 # External Imports
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Personas.models import Lorebook, Asset, CharacterCardV3, CharacterCardV3Data, Decorator, \
+from App_Function_Libraries.Personas.models import Lorebook, Asset, CharacterCardV3, CharacterCardV3Data, Decorator, \
     LorebookEntry
-from PoC_Version.App_Function_Libraries.Personas.utils import validate_iso_639_1, extract_json_from_charx, parse_json_file, \
+from App_Function_Libraries.Personas.utils import validate_iso_639_1, extract_json_from_charx, parse_json_file, \
     extract_text_chunks_from_png, decode_base64
 #
 ############################################################################################################

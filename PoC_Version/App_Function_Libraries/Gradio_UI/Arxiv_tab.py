@@ -6,12 +6,12 @@ import tempfile
 from datetime import datetime
 import requests
 
-from PoC_Version.App_Function_Libraries.PDF.PDF_Ingestion_Lib import extract_text_and_format_from_pdf
+from App_Function_Libraries.PDF.PDF_Ingestion_Lib import extract_text_and_format_from_pdf
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Third_Party.Arxiv import convert_xml_to_markdown, fetch_arxiv_xml, parse_arxiv_feed, \
+from App_Function_Libraries.Third_Party.Arxiv import convert_xml_to_markdown, fetch_arxiv_xml, parse_arxiv_feed, \
     build_query_url, ARXIV_PAGE_SIZE, fetch_arxiv_pdf_url
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_with_keywords
+from App_Function_Libraries.DB.DB_Manager import add_media_with_keywords
 #
 import gradio as gr
 #

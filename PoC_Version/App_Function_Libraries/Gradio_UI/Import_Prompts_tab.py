@@ -7,8 +7,8 @@
 import gradio as gr
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import list_prompts, insert_prompt_to_db
-from PoC_Version.App_Function_Libraries.Prompt_Handling import import_prompts_from_zip, import_prompt_from_file
+from App_Function_Libraries.DB.DB_Manager import list_prompts, insert_prompt_to_db
+from App_Function_Libraries.Prompt_Handling import import_prompts_from_zip, import_prompt_from_file
 #
 #######################################################################################################################
 #

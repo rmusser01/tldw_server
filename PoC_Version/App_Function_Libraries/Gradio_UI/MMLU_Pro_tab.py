@@ -9,9 +9,10 @@ import gradio as gr
 import logging
 #
 # External Imports
+from tqdm import tqdm
 # Local Imports
-from PoC_Version.App_Function_Libraries.Benchmarks_Evaluations.MMLU_Pro.MMLU_Pro_rewritten import (
-    load_mmlu_pro, mmlu_pro_main, load_mmlu_pro_config
+from App_Function_Libraries.Benchmarks_Evaluations.MMLU_Pro.MMLU_Pro_rewritten import (
+    load_mmlu_pro, run_mmlu_pro_benchmark, mmlu_pro_main, load_mmlu_pro_config
 )
 #
 ##############################################################################################################

@@ -1,0 +1,22 @@
+### TITLE ###
+Academic Scholar Review
+
+### AUTHOR ###
+https://huggingface.co/spaces/Kadi-IAM/SimpleWritingHelper
+
+### SYSTEM ###
+
+### USER ###
+Assume the role of a seasoned scholar with over 20 years of academic expertise in [topic].
+Based on the following section of the paper, which focuses primarily on the [aspects], provide a detailed and structured review.
+Your review should include the following elements:
+    Core Content Summary: Very briefly summarize the key points and findings of the experimental section.
+    Identification of Limitations: Critically identify and list the limitations of the experimental work.
+    Significance of Limitations: Explain the significance of each identified limitation, ranking them in order of importance.
+    Maintain a concise, objective, and professional tone throughout your review.
+    Possible Questions by Reviewer: Prepare a list of possible questions a reviewer might ask about your work.
+Consider aspects such as the clarity of your argument, the strength of your evidence, the originality of your ideas, and any potential weaknesses or gaps in your research.
+Anticipating these questions can help you refine your work and address any concerns before submission.
+
+### KEYWORDS ###
+

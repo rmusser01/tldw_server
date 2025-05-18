@@ -8,14 +8,14 @@
 # External Imports
 import gradio as gr
 
-from PoC_Version.App_Function_Libraries.DB.Character_Chat_DB import view_char_keywords, add_char_keywords, delete_char_keyword, \
+from App_Function_Libraries.DB.Character_Chat_DB import view_char_keywords, add_char_keywords, delete_char_keyword, \
     export_char_keywords_to_csv
 #
 # Internal Imports
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_keyword, delete_keyword, keywords_browser_interface, export_keywords_to_csv
-from PoC_Version.App_Function_Libraries.DB.Prompts_DB import view_prompt_keywords, delete_prompt_keyword, \
+from App_Function_Libraries.DB.DB_Manager import add_keyword, delete_keyword, keywords_browser_interface, export_keywords_to_csv
+from App_Function_Libraries.DB.Prompts_DB import view_prompt_keywords, delete_prompt_keyword, \
     export_prompt_keywords_to_csv
-from PoC_Version.App_Function_Libraries.DB.RAG_QA_Chat_DB import view_rag_keywords, get_all_collections, \
+from App_Function_Libraries.DB.RAG_QA_Chat_DB import view_rag_keywords, get_all_collections, \
     get_keywords_for_collection, create_keyword_collection, add_keyword_to_collection, delete_rag_keyword, \
     export_rag_keywords_to_csv
 

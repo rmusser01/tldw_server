@@ -9,13 +9,13 @@ from typing import Tuple, Optional
 import gradio as gr
 #
 # Local imports
-from PoC_Version.App_Function_Libraries.Local_LLM.Local_LLM_Inference_Engine_Lib import (
+from App_Function_Libraries.Local_LLM.Local_LLM_Inference_Engine_Lib import (
     download_llm_model,
     llm_models,
     start_llamafile,
     get_gguf_llamafile_files
 )
-from PoC_Version.App_Function_Libraries.Utils.Utils import logging
+from App_Function_Libraries.Utils.Utils import logging
 #
 #######################################################################################################################
 #

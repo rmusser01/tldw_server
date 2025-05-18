@@ -13,8 +13,8 @@ import json
 import gradio as gr
 #
 # Import Local libraries
-from PoC_Version.App_Function_Libraries.Plaintext.Plaintext_Files import final_ingest_handler, preview_import_handler
-from PoC_Version.App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
+from App_Function_Libraries.Plaintext.Plaintext_Files import final_ingest_handler, preview_import_handler
+from App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
 
 
 #

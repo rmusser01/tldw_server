@@ -4,13 +4,14 @@
 # Imports
 import pytest
 import sqlite3
-from unittest.mock import patch
-from PoC_Version.App_Function_Libraries.DB.SQLite_DB import (
+from unittest.mock import patch, MagicMock
+from App_Function_Libraries.DB.SQLite_DB import (
     create_document_version,
     get_document_version,
     get_all_document_versions,
     delete_document_version,
     rollback_to_version,
+    DatabaseError,
 )
 #
 ################################################################################################################################################################

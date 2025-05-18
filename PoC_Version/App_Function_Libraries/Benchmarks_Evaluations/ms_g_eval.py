@@ -24,7 +24,7 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from PoC_Version.App_Function_Libraries.Chat.Chat_Functions import chat_api_call
+from App_Function_Libraries.Chat.Chat_Functions import chat_api_call
 
 #
 #######################################################################################################################

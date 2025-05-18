@@ -13,7 +13,7 @@ import json
 # Add the parent directory to the Python path to import the module
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PoC_Version.App_Function_Libraries.Video_DL_Ingestion_Lib import (
+from App_Function_Libraries.Video_DL_Ingestion_Lib import (
     normalize_title,
     get_video_info,
     parse_and_expand_urls,

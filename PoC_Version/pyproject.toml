@@ -1,0 +1,152 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tldw"
+version = "0.0.11.1"
+description = "A naive attempt at 'A Young Lady's Illustrated Primer'."
+requires-python = ">=3.9"
+readme = "README.md"
+license = { file = "LICENSE.txt" }
+
+authors = [
+  { name = "Robert Musser", email = "contact@tldwproject.com" }
+]
+
+dependencies = [
+  'arxiv',
+  'playwright',
+  "beautifulsoup4",
+  'trafilatura',
+  "bert_score",
+  "chardet",
+  "chromadb",
+  "docx2txt",
+  "EbookLib",
+  "faster_whisper",
+  "fire",
+  "FlashRank",
+  "fugashi",
+  'genanki',
+  'gradio',
+  "html2text",
+  "jieba",
+  "Jinja2",
+  "joblib",
+  "langdetect",
+  "lxml_html_clean",
+  "mwparserfromhell",
+  "mwxml",
+  "nltk",
+  "numpy",
+  "openai",
+  "pandas",
+  "Pillow",
+  "psutil",
+  "pyannote.audio",
+  "PyAudio",
+  "pymupdf",
+  "pymupdf4llm",
+  "docling",
+  "pypandoc",
+  "pypandoc_binary",
+  "pytest",
+  "python-json-logger",
+  "Requests",
+  "rouge_score",
+  "scikit_learn",
+  "sentence_transformers",
+  "textstat",
+  "tiktoken",
+  "toml",
+  "tqdm",
+  "transformers",
+  "urllib3",
+  "yt_dlp",
+  "datasets",
+  "tqdm"
+]
+
+[project.optional-dependencies]
+gradio = [
+  "fastapi",
+  "gradio"
+]
+media_wiki = [
+  "mwparserfromhell",
+  "mwxml"
+]
+web_research = [
+  "placeholder",
+  "Placeholder",
+  "arxiv",
+  "genanki",
+  "playwright",
+  "trafilatura"
+]
+audio_recording_windows = [
+  'PyAudioWPatch',
+  "placeholder',"
+]
+STT_All = [
+  "placeholder",
+  "blah"
+]
+STT_Parakeet = [
+  "nemo_toolkit[asr]",
+  "cython"
+]
+TTS_All = [
+  "pydub"
+]
+TTS_kokoro = [
+  "pydub",
+  "phonemizer",
+  "scipy",
+  "munch",
+  "pydub"
+]
+TTS_kokoro_onnx = [
+  "pydub",
+  "onnxruntime",
+  "kokoro-onnx"
+]
+TTS_sovits = [
+  "pydub"
+]
+backend_onnx = [
+  "onnxruntime",
+]
+backend_llama = [
+  "scikit-learn>=0.24.0",
+  "scipy>=1.6.0"
+]
+backend_vllm = [
+  "scikit-learn>=0.24.0",
+  "scipy>=1.6.0"
+]
+db_postgres = [
+  "psycopg2-binary",
+  "psycopg2"
+]
+db_opensearch = [
+  "opensearch",
+  "elasticsearch"
+]
+all = [
+  "numpy>=1.20.0",
+  "pandas>=1.2.0",
+  "matplotlib>=3.4.0",
+  "seaborn>=0.11.0",
+  "scikit-learn>=0.24.0",
+  "scipy>=1.6.0"
+]
+
+[project.urls]
+Homepage = "https://tldwproject.com"
+Documentation = "https://docs.tldwproject.com"
+Repository = "https://github.com/rmusser01/tldw"
+
+[tool.setuptools.packages.find]
+where = ["App_Function_Libraries"]

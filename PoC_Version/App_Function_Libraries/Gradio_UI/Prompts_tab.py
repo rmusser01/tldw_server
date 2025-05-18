@@ -8,8 +8,8 @@ import html
 import gradio as gr
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import fetch_prompt_details, list_prompts
-from PoC_Version.App_Function_Libraries.Utils.Utils import logging
+from App_Function_Libraries.DB.DB_Manager import fetch_prompt_details, list_prompts
+from App_Function_Libraries.Utils.Utils import logging
 
 
 #
@@ -242,7 +242,7 @@ def create_prompts_export_tab():
                         template = markdown_template
 
                 # Perform export
-                from PoC_Version.App_Function_Libraries.DB.Prompts_DB import export_prompts
+                from App_Function_Libraries.DB.Prompts_DB import export_prompts
                 status, file_path = export_prompts(
                     export_format=export_format.split()[0].lower(),  # 'csv' or 'markdown'
                     filter_keywords=keyword_list,

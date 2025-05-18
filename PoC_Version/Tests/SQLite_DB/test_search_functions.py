@@ -1,7 +1,11 @@
 # tests/test_search_functions.py
+import pytest
+import sqlite3
+from unittest.mock import patch, MagicMock
+from typing import List, Tuple
 #
 # Updated import statement
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import search_media_db, search_media_database
+from App_Function_Libraries.DB.DB_Manager import search_media_db, search_media_database, db
 #
 #
 ####################################################################################################
@@ -11,6 +15,7 @@ from PoC_Version.App_Function_Libraries.DB.DB_Manager import search_media_db, se
 import pytest
 from unittest.mock import patch, MagicMock
 import sqlite3
+from contextlib import contextmanager
 
 
 # Modify the functions to accept a connection parameter for testing

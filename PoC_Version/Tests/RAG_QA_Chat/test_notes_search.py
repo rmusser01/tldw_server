@@ -15,7 +15,7 @@ parent_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
 sys.path.append(parent_dir)
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import search_notes_titles
+from App_Function_Libraries.DB.DB_Manager import search_notes_titles
 #
 ####################################################################################################
 #

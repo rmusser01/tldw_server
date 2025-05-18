@@ -9,8 +9,8 @@ import os
 import sys
 from typing import List, Dict, Optional, Tuple, Any, Union
 
-from PoC_Version.App_Function_Libraries.Utils.Utils import get_database_dir, get_project_relative_path, get_database_path
-from PoC_Version.Tests.Chat_APIs.Chat_APIs_Integration_test import logging
+from App_Function_Libraries.Utils.Utils import get_database_dir, get_project_relative_path, get_database_path
+from Tests.Chat_APIs.Chat_APIs_Integration_test import logging
 
 #
 #######################################################################################################################
@@ -31,22 +31,7 @@ config = configparser.ConfigParser()
 config.read(config_path)
 
 # Get the chat db path from the config, or use the default if not specified
-chat_DB_PATH_from_config = config.get('Database', 'chatDB_path', fallback='Databases/chatDB.db')
-if not os.path.isabs(chat_DB_PATH_from_config):
-    chat_DB_PATH = get_project_relative_path(chat_DB_PATH_from_config)
-else:
-    chat_DB_PATH = chat_DB_PATH_from_config
-
-# Ensure the specific directory for chat_DB_PATH exists
-chat_db_dir = os.path.dirname(chat_DB_PATH)
-if not os.path.exists(chat_db_dir):
-    try:
-        os.makedirs(chat_db_dir, exist_ok=True)
-        logging.info(f"Character_Chat_DB: Created database directory: {chat_db_dir}")
-    except OSError as e:
-        logging.error(f"Character_Chat_DB: Failed to create database directory {chat_db_dir}: {e}")
-        raise # Re-raise if directory creation fails
-
+chat_DB_PATH = config.get('Database', 'chatDB_path', fallback=get_database_path('chatDB.db'))
 print(f"Chat Database path: {chat_DB_PATH}")
 
 ########################################################################################################

@@ -1,13 +1,13 @@
 # Tests/Books/test_Book_Ingestion_tab.py
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import tempfile
 import os
 # Add the tldw directory (one level up from Tests) to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'tldw')))
 #
-from PoC_Version.App_Function_Libraries.Gradio_UI.Book_Ingestion_tab import import_file_handler
+from App_Function_Libraries.Gradio_UI.Book_Ingestion_tab import import_file_handler
 
 class TestBookIngestionTab(unittest.TestCase):
 

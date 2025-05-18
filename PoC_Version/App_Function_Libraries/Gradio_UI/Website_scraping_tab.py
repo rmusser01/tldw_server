@@ -16,12 +16,12 @@ from playwright.async_api import TimeoutError, async_playwright
 from playwright.sync_api import sync_playwright
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Web_Scraping.Article_Extractor_Lib import scrape_from_sitemap, scrape_by_url_level, \
+from App_Function_Libraries.Web_Scraping.Article_Extractor_Lib import scrape_from_sitemap, scrape_by_url_level, \
     scrape_article, collect_bookmarks, scrape_and_summarize_multiple, collect_urls_from_file
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import list_prompts
-from PoC_Version.App_Function_Libraries.Gradio_UI.Chat_ui import update_user_prompt
-from PoC_Version.App_Function_Libraries.Summarization.Summarization_General_Lib import summarize
-from PoC_Version.App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
+from App_Function_Libraries.DB.DB_Manager import list_prompts
+from App_Function_Libraries.Gradio_UI.Chat_ui import update_user_prompt
+from App_Function_Libraries.Summarization.Summarization_General_Lib import summarize
+from App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
 
 
 #

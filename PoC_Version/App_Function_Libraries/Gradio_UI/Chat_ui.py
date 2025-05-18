@@ -21,7 +21,7 @@ from PoC_Version.App_Function_Libraries.Audio.Audio_Transcription_Lib import tra
 from PoC_Version.App_Function_Libraries.Chat.Chat_Functions import approximate_token_count, chat, save_chat_history, \
     update_chat_content, save_chat_history_to_db_wrapper, parse_user_dict_markdown_file, ChatDictionary, \
     process_user_input
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import load_chat_history, start_new_conversation, \
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import db, load_chat_history, start_new_conversation, \
     save_message, search_conversations_by_keywords, \
     get_all_conversations, delete_messages_in_conversation, search_media_db, list_prompts
 from PoC_Version.App_Function_Libraries.DB.RAG_QA_Chat_DB import get_db_connection
@@ -29,7 +29,7 @@ from PoC_Version.App_Function_Libraries.Gradio_UI.Gradio_Shared import update_dr
 from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
 from PoC_Version.App_Function_Libraries.TTS.TTS_Providers import generate_audio
 from PoC_Version.App_Function_Libraries.Utils.Utils import default_api_endpoint, format_api_name, global_api_endpoints, \
-    logging
+    loaded_config_data, logging
 
 
 #

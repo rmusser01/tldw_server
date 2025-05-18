@@ -15,7 +15,7 @@ import torch
 from transformers import AutoTokenizer
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Utils.Utils import download_file, logging
+from App_Function_Libraries.Utils.Utils import load_and_log_configs, loaded_config_data, download_file, logging
 # Kokoro-Specific Imports
 from scipy.io import wavfile
 from pydub import AudioSegment, effects  # For optional post-processing
@@ -130,9 +130,9 @@ def get_kokoro_model(device: str) -> torch.nn.Module:
     global _kokoro_model_cache
     logging.debug("Getting Kokoro model...")
     try:
-        from PoC_Version.App_Function_Libraries.TTS.Kokoro.kokoro import generate
-        from PoC_Version.App_Function_Libraries.TTS.Kokoro.models import build_model
-        from PoC_Version.App_Function_Libraries.TTS.Kokoro import istftnet
+        from App_Function_Libraries.TTS.Kokoro.kokoro import generate
+        from App_Function_Libraries.TTS.Kokoro.models import build_model
+        from App_Function_Libraries.TTS.Kokoro import istftnet
     except ImportError:
         raise ImportError(
             "The required packages needed for Kokoro are not currently installed, . Please follow the instructions in the README to install them.")
@@ -317,9 +317,9 @@ def _handle_pytorch_generation(
     """Handle PyTorch model audio generation with chunking."""
     logging.debug("Using PyTorch model for Kokoro TTS...")
     try:
-        from PoC_Version.App_Function_Libraries.TTS.Kokoro.kokoro import generate
-        from PoC_Version.App_Function_Libraries.TTS.Kokoro.models import build_model
-        from PoC_Version.App_Function_Libraries.TTS.Kokoro import istftnet
+        from App_Function_Libraries.TTS.Kokoro.kokoro import generate
+        from App_Function_Libraries.TTS.Kokoro.models import build_model
+        from App_Function_Libraries.TTS.Kokoro import istftnet
     except ImportError:
         raise ImportError(
             "The required packages needed for Kokoro are not currently installed. Please follow the instructions in the README to install them.")

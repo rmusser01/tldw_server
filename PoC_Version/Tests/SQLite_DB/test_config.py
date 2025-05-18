@@ -1,5 +1,6 @@
 # tests/test_config.py
-from PoC_Version.App_Function_Libraries.Utils.Utils import load_comprehensive_config
+import pytest
+from App_Function_Libraries.Utils.Utils import load_comprehensive_config
 
 def test_load_comprehensive_config():
     config = load_comprehensive_config()

@@ -19,12 +19,12 @@ from PIL import Image
 import gradio as gr
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Character_Chat.Character_Chat_Lib import validate_character_book, validate_v2_card, \
+from App_Function_Libraries.Character_Chat.Character_Chat_Lib import validate_character_book, validate_v2_card, \
     replace_placeholders, replace_user_placeholder, extract_json_from_image, load_chat_and_character, \
     load_chat_history, load_character_and_image, extract_character_id, load_character_wrapper, \
     load_character_card, parse_v2_card, parse_v1_card
-from PoC_Version.App_Function_Libraries.Chat.Chat_Functions import chat, approximate_token_count
-from PoC_Version.App_Function_Libraries.DB.Character_Chat_DB import (
+from App_Function_Libraries.Chat.Chat_Functions import chat, approximate_token_count
+from App_Function_Libraries.DB.Character_Chat_DB import (
     add_character_card,
     get_character_cards,
     get_character_card_by_id,
@@ -36,8 +36,8 @@ from PoC_Version.App_Function_Libraries.DB.Character_Chat_DB import (
     delete_character_card,
     update_character_card, search_character_chats, save_chat_history_to_character_db,
 )
-from PoC_Version.App_Function_Libraries.TTS.TTS_Providers import generate_audio
-from PoC_Version.App_Function_Libraries.Utils.Utils import sanitize_user_input, format_api_name, global_api_endpoints, \
+from App_Function_Libraries.TTS.TTS_Providers import generate_audio
+from App_Function_Libraries.Utils.Utils import sanitize_user_input, format_api_name, global_api_endpoints, \
     default_api_endpoint, load_and_log_configs, logging
 #
 #######################################################################################################################

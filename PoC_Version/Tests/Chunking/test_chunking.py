@@ -16,7 +16,7 @@ sys.path.insert(0, project_root)
 print(f"Project root added to sys.path: {project_root}")
 #
 # Local imports
-from PoC_Version.App_Function_Libraries.Chunk_Lib import improved_chunking_process
+from App_Function_Libraries.Chunk_Lib import improved_chunking_process
 #
 ################################################################################################################################################################
 #

@@ -1,0 +1,5 @@
+flask
+langdetect
+ntlk
+jieba
+fugashi

@@ -8,7 +8,7 @@ from typing import List, Dict
 # 3rd party imports
 #
 # Local imports
-from PoC_Version.App_Function_Libraries.Web_Scraping.WebSearch_APIs import search_web_ddg
+from App_Function_Libraries.Web_Scraping.WebSearch_APIs import search_web_ddg
 #
 #######################################################################################################################
 #

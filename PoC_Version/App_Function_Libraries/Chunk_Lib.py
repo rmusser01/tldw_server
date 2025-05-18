@@ -18,12 +18,12 @@ from tqdm import tqdm
 from langdetect import detect
 from transformers import GPT2Tokenizer
 import nltk
-from nltk.tokenize import sent_tokenize
+from nltk.tokenize import sent_tokenize, word_tokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 #
 # Import Local
-from PoC_Version.App_Function_Libraries.Utils.Utils import load_and_log_configs, logging
+from App_Function_Libraries.Utils.Utils import load_and_log_configs, logging
 
 
 #
@@ -228,10 +228,6 @@ def chunk_text(text: str, method: str, max_size: int, overlap: int, language: st
     elif method == 'semantic':
         logging.debug("Chunking by semantic similarity...")
         return semantic_chunking(text, max_chunk_size=max_size)
-    elif method == 'recursive':
-        logging.debug("Chunking recursively...")
-        return recursive_summarize_chunks(text, summarize_func=rolling_summarize, custom_prompt=None,
-                                          temp=None, system_prompt=None)
     else:
         logging.warning(f"Unknown chunking method '{method}'. Returning full text as a single chunk.")
         return [text]

@@ -1,9 +1,10 @@
 # test_character_chat_lib.py
+import base64
 import os
 import sys
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock, mock_open
 
 from PIL.PngImagePlugin import PngInfo
 
@@ -14,7 +15,7 @@ parent_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
 sys.path.append(parent_dir)
 
 # Local Libraries
-from PoC_Version.App_Function_Libraries.Character_Chat.Character_Chat_Lib import *
+from App_Function_Libraries.Character_Chat.Character_Chat_Lib import *
 #
 ########################################################################################################################
 #

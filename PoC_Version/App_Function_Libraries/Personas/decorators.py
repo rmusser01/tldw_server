@@ -1,7 +1,7 @@
 # decorators.py
 from typing import List, Optional
 
-from PoC_Version.App_Function_Libraries.Personas.models import Decorator
+from App_Function_Libraries.Personas.models import Decorator
 
 
 # Assume Decorator class is already defined in models.py

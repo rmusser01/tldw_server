@@ -13,7 +13,7 @@ import shutil
 import gradio as gr
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Utils.Utils import logging
+from App_Function_Libraries.Utils.Utils import logging
 #
 #######################################################################################################################
 #
@@ -194,20 +194,16 @@ def create_ollama_tab():
 
         def async_update_model_lists():
             """
-            Asynchronously updates the model lists using a background thread.
-            Ensures the updates are properly returned to Gradio instead of being handled outside its function scope.
+            Asynchronously updates the model lists to prevent blocking.
             """
             def task():
-                choices1, choices2 = update_model_lists()  # Fetch updated model lists
-                model_list.update(choices=choices1['choices'], value=choices1.get('value'))  # Update UI component
-                serve_model.update(choices=choices2['choices'], value=choices2.get('value'))  # Update UI component
+                choices1, choices2 = update_model_lists()
+                model_list.update(choices=choices1['choices'], value=choices1.get('value'))
+                serve_model.update(choices=choices2['choices'], value=choices2.get('value'))
+            threading.Thread(target=task).start()
 
-            thread = threading.Thread(target=task, daemon=True)  # Use daemon thread to avoid hanging issues
-            thread.start()
-            return thread  # Return the thread object (optional for debugging)
-            
-        # Bind the refresh button to a gradio function that properly updates outputs
-        refresh_button.click(fn=update_model_lists, inputs=[], outputs=[model_list, serve_model])
+        # Bind the refresh button to the asynchronous update function
+        refresh_button.click(fn=async_update_model_lists, inputs=[], outputs=[])
 
         # Bind the pull, serve, and stop buttons to their respective functions
         pull_button.click(fn=pull_ollama_model, inputs=[new_model_name], outputs=[pull_output])

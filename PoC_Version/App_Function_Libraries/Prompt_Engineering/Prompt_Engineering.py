@@ -4,7 +4,7 @@
 # Imports
 import re
 
-from PoC_Version.App_Function_Libraries.Chat.Chat_Functions import chat_api_call
+from App_Function_Libraries.Chat.Chat_Functions import chat_api_call
 #
 # Local Imports
 #

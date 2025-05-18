@@ -12,7 +12,7 @@ from urllib3 import Retry
 
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_with_keywords
+from App_Function_Libraries.DB.DB_Manager import add_media_with_keywords
 #
 #####################################################################################################
 #

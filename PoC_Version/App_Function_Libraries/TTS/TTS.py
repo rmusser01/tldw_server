@@ -11,8 +11,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 # External Imports
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.TTS.TTS_Providers import generate_audio_openai, generate_audio_elevenlabs
-from PoC_Version.App_Function_Libraries.Utils.Utils import load_comprehensive_config, load_and_log_configs, logging
+from App_Function_Libraries.TTS.TTS_Providers import generate_audio_openai, generate_audio_elevenlabs
+from App_Function_Libraries.Utils.Utils import load_comprehensive_config, load_and_log_configs, logging
 
 #
 #######################################################################################################################

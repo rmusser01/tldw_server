@@ -10,8 +10,8 @@ import tempfile
 import requests
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Utils.Utils import load_and_log_configs, loaded_config_data, logging
-from PoC_Version.App_Function_Libraries.TTS.TTS_Providers_Local import play_mp3, generate_audio_kokoro
+from App_Function_Libraries.Utils.Utils import load_and_log_configs, loaded_config_data, logging
+from App_Function_Libraries.TTS.TTS_Providers_Local import play_mp3, generate_audio_kokoro
 #
 #######################################################################################################################
 #

@@ -8,13 +8,13 @@
 # External Imports
 #
 # Local Imports
-from tldw_Server_API.app.core.Chat.Chat_Functions import chat_api_call
-from tldw_Server_API.app.core.Evaluations.ms_g_eval import validate_inputs, detailed_api_error
 #
 #
 ####################################################################################################
 #
 # Functions:
+from App_Function_Libraries.Chat import chat_api_call
+from App_Function_Libraries.Benchmarks_Evaluations.ms_g_eval import validate_inputs, detailed_api_error
 
 
 def simplified_geval(transcript: str, summary: str, api_name: str, api_key: str, temp: float = 0.7) -> str:

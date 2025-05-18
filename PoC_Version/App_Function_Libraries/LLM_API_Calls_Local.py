@@ -4,7 +4,7 @@
 # This library is used to perform summarization with a 'local' inference engine.
 #
 ####
-from typing import Any, Generator
+from typing import Union, Any, Generator
 
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry

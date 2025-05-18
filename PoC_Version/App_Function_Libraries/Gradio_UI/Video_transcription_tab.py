@@ -11,22 +11,22 @@ from datetime import datetime
 import gradio as gr
 import yt_dlp
 
-from PoC_Version.App_Function_Libraries.Chunk_Lib import improved_chunking_process
+from App_Function_Libraries.Chunk_Lib import improved_chunking_process
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_to_database, \
+from App_Function_Libraries.DB.DB_Manager import add_media_to_database, \
     check_media_and_whisper_model, check_existing_media, update_media_content_with_version, list_prompts
-from PoC_Version.App_Function_Libraries.Gradio_UI.Gradio_Shared import whisper_models, update_user_prompt
-from PoC_Version.App_Function_Libraries.Gradio_UI.Gradio_Shared import error_handler
-from PoC_Version.App_Function_Libraries.Summarization.Summarization_General_Lib import perform_transcription, perform_summarization, \
+from App_Function_Libraries.Gradio_UI.Gradio_Shared import whisper_models, update_user_prompt
+from App_Function_Libraries.Gradio_UI.Gradio_Shared import error_handler
+from App_Function_Libraries.Summarization.Summarization_General_Lib import perform_transcription, perform_summarization, \
     save_transcription_and_summary
-from PoC_Version.App_Function_Libraries.Utils.Utils import convert_to_seconds, safe_read_file, format_transcription, \
+from App_Function_Libraries.Utils.Utils import convert_to_seconds, safe_read_file, format_transcription, \
     create_download_directory, generate_unique_identifier, extract_text_from_segments, default_api_endpoint, \
     global_api_endpoints, format_api_name, load_and_log_configs, logging
-from PoC_Version.App_Function_Libraries.Video_DL_Ingestion_Lib import parse_and_expand_urls, extract_metadata, download_video
-from PoC_Version.App_Function_Libraries.Benchmarks_Evaluations.ms_g_eval import run_geval
+from App_Function_Libraries.Video_DL_Ingestion_Lib import parse_and_expand_urls, extract_metadata, download_video
+from App_Function_Libraries.Benchmarks_Evaluations.ms_g_eval import run_geval
 # Import metrics logging
-from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
 #
 #######################################################################################################################
 #

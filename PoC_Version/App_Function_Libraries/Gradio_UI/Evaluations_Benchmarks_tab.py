@@ -4,8 +4,8 @@
 import logging
 
 import gradio as gr
-from PoC_Version.App_Function_Libraries.Benchmarks_Evaluations.ms_g_eval import run_geval
-from PoC_Version.App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name
+from App_Function_Libraries.Benchmarks_Evaluations.ms_g_eval import run_geval
+from App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name
 
 
 def create_geval_tab():

@@ -3,13 +3,13 @@ import logging
 import os
 import pytest
 import sqlite3
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 #
 ####################################################################################################
 # Test Status:
 # FIXME
 #
-from PoC_Version.App_Function_Libraries.DB.SQLite_DB import (
+from App_Function_Libraries.DB.SQLite_DB import (
     add_media_with_keywords, ingest_article_to_db, add_keyword, delete_keyword,
     fetch_all_keywords, keywords_browser_interface, display_keywords,
     export_keywords_to_csv, fetch_keywords_for_media, update_keywords_for_media,

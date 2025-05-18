@@ -3,12 +3,12 @@ import sys
 import unittest
 import tempfile
 import os
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import zipfile
 # Add the tldw directory (one level up from Tests) to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'tldw')))
 
-from PoC_Version.App_Function_Libraries.Books.Book_Ingestion_Lib import (
+from App_Function_Libraries.Books.Book_Ingestion_Lib import (
     import_file_handler,
     import_epub,
     process_zip_file

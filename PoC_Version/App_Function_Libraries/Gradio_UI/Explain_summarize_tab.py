@@ -8,16 +8,16 @@ import gradio as gr
 
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Summarization.Local_Summarization_Lib import summarize_with_llama, summarize_with_kobold, \
+from App_Function_Libraries.Summarization.Local_Summarization_Lib import summarize_with_llama, summarize_with_kobold, \
     summarize_with_oobabooga, summarize_with_tabbyapi, summarize_with_vllm, summarize_with_local_llm, \
     summarize_with_ollama
-from PoC_Version.App_Function_Libraries.Summarization.Summarization_General_Lib import summarize_with_openai, \
+from App_Function_Libraries.Summarization.Summarization_General_Lib import summarize_with_openai, \
     summarize_with_anthropic, \
     summarize_with_cohere, summarize_with_groq, summarize_with_openrouter, summarize_with_deepseek, \
     summarize_with_huggingface, summarize_with_mistral, summarize_with_google
-from PoC_Version.App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import list_prompts
-from PoC_Version.App_Function_Libraries.Gradio_UI.Gradio_Shared import update_user_prompt
+from App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
+from App_Function_Libraries.DB.DB_Manager import list_prompts
+from App_Function_Libraries.Gradio_UI.Gradio_Shared import update_user_prompt
 #
 #
 ############################################################################################################

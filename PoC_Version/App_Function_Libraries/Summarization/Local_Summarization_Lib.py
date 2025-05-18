@@ -20,6 +20,8 @@
 # Import necessary libraries
 import json
 import os
+import time
+from typing import Union, Any, Generator
 
 # Import 3rd-party Libraries
 import requests
@@ -28,7 +30,7 @@ from urllib3 import Retry
 
 #
 # Import Local Libraries
-from PoC_Version.App_Function_Libraries.Utils.Utils import load_and_log_configs, extract_text_from_segments, logging
+from App_Function_Libraries.Utils.Utils import load_and_log_configs, extract_text_from_segments, logging
 
 #
 #######################################################################################################################
@@ -1247,16 +1249,33 @@ def summarize_with_ollama(
         # 9) Parse/prepare input_data
         logging.debug("Ollama: Attempting to parse the input data for summarization.")
         text_content = None
-        # Input data is not a file path, treat as raw text or list
-        if isinstance(input_data, dict) and 'summary' in input_data:
-            logging.debug("Ollama: 'summary' already present in input_data dict.")
-            return input_data['summary']
-        elif isinstance(input_data, list):
-            text_content = extract_text_from_segments(input_data)
-        elif isinstance(input_data, str):
-            text_content = input_data
+        if isinstance(input_data, str) and os.path.isfile(input_data):
+            # Load from file
+            logging.debug(f"Ollama: Loading from file: {input_data}")
+            with open(input_data, 'r') as f:
+                file_data = json.load(f)
+            # If we have a dict with 'summary', short-circuit
+            if isinstance(file_data, dict) and 'summary' in file_data:
+                logging.debug("Ollama: Found existing 'summary' in file data.")
+                return file_data['summary']
+            elif isinstance(file_data, list):
+                # Possibly a list of segments
+                text_content = extract_text_from_segments(file_data)
+            elif isinstance(file_data, str):
+                text_content = file_data
+            else:
+                raise ValueError("Ollama: Invalid JSON file content format.")
         else:
-            raise ValueError("Ollama: Invalid input_data format; must be str or list/dict with summary.")
+            # Input data is not a file path, treat as raw text or list
+            if isinstance(input_data, dict) and 'summary' in input_data:
+                logging.debug("Ollama: 'summary' already present in input_data dict.")
+                return input_data['summary']
+            elif isinstance(input_data, list):
+                text_content = extract_text_from_segments(input_data)
+            elif isinstance(input_data, str):
+                text_content = input_data
+            else:
+                raise ValueError("Ollama: Invalid input_data format; must be str or list/dict with summary.")
 
         if not text_content:
             logging.error("Ollama: No valid text content found to summarize.")
@@ -1386,7 +1405,7 @@ def summarize_with_ollama(
                 # Mount adapters for both HTTP and HTTPS
                 session.mount("http://", adapter)
                 session.mount("https://", adapter)
-                response_data = response.json() #corrected object to get an json method(not avaliable in the session object)
+                response_data = session.json()
             except json.JSONDecodeError:
                 logging.error("Ollama: Failed to parse JSON response.")
                 return "Ollama: JSON parse error from summarization API."

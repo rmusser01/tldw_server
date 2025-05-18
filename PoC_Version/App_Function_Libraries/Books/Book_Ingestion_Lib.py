@@ -19,6 +19,7 @@ import zipfile
 from datetime import datetime
 import xml.etree.ElementTree as ET
 import html2text
+import csv
 #
 # External Imports
 import ebooklib
@@ -26,15 +27,18 @@ from bs4 import BeautifulSoup
 from ebooklib import epub
 #
 # Import Local
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_with_keywords, add_media_to_database
-from PoC_Version.App_Function_Libraries.Summarization.Summarization_General_Lib import perform_summarization
-from PoC_Version.App_Function_Libraries.Chunk_Lib import chunk_ebook_by_chapters
-from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
-from PoC_Version.App_Function_Libraries.Utils.Utils import logging
+from App_Function_Libraries.DB.DB_Manager import add_media_with_keywords, add_media_to_database
+from App_Function_Libraries.Summarization.Summarization_General_Lib import perform_summarization
+from App_Function_Libraries.Chunk_Lib import chunk_ebook_by_chapters
+from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from App_Function_Libraries.Utils.Utils import logging
+
+
 #
 #######################################################################################################################
 # Function Definitions
 #
+
 def import_epub(file_path,
                 title=None,
                 author=None,

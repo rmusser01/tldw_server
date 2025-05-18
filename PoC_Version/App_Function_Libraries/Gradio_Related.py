@@ -13,74 +13,74 @@ import webbrowser
 import gradio as gr
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.DB.DB_Manager import get_db_config, backup_dir
-from PoC_Version.App_Function_Libraries.DB.RAG_QA_Chat_DB import create_tables
-from PoC_Version.App_Function_Libraries.Gradio_UI.Anki_tab import create_anki_validation_tab, create_anki_generator_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Arxiv_tab import create_arxiv_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Audio_ingestion_tab import create_audio_processing_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Backup_RAG_Notes_Character_Chat_tab import create_database_management_interface
-from PoC_Version.App_Function_Libraries.Gradio_UI.Book_Ingestion_tab import create_import_book_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Character_Chat_tab import create_character_card_interaction_tab, create_character_chat_mgmt_tab, create_custom_character_card_tab, \
+from App_Function_Libraries.DB.DB_Manager import get_db_config, backup_dir
+from App_Function_Libraries.DB.RAG_QA_Chat_DB import create_tables
+from App_Function_Libraries.Gradio_UI.Anki_tab import create_anki_validation_tab, create_anki_generator_tab
+from App_Function_Libraries.Gradio_UI.Arxiv_tab import create_arxiv_tab
+from App_Function_Libraries.Gradio_UI.Audio_ingestion_tab import create_audio_processing_tab
+from App_Function_Libraries.Gradio_UI.Backup_RAG_Notes_Character_Chat_tab import create_database_management_interface
+from App_Function_Libraries.Gradio_UI.Book_Ingestion_tab import create_import_book_tab
+from App_Function_Libraries.Gradio_UI.Character_Chat_tab import create_character_card_interaction_tab, create_character_chat_mgmt_tab, create_custom_character_card_tab, \
     create_character_card_validation_tab, create_export_characters_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Character_interaction_tab import create_narrator_controlled_conversation_tab, \
+from App_Function_Libraries.Gradio_UI.Character_interaction_tab import create_narrator_controlled_conversation_tab, \
     create_multiple_character_chat_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Chat_ui import create_chat_interface_four, create_chat_interface_multi_api, \
+from App_Function_Libraries.Gradio_UI.Chat_ui import create_chat_interface_four, create_chat_interface_multi_api, \
     create_chat_interface_stacked, create_chat_interface
-from PoC_Version.App_Function_Libraries.Gradio_UI.Config_tab import create_config_editor_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Explain_summarize_tab import create_summarize_explain_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Export_Functionality import create_export_tabs
-from PoC_Version.App_Function_Libraries.Gradio_UI.Import_Obsidian import create_import_obsidian_vault_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Import_Prompts_tab import create_import_single_prompt_tab, \
+from App_Function_Libraries.Gradio_UI.Config_tab import create_config_editor_tab
+from App_Function_Libraries.Gradio_UI.Explain_summarize_tab import create_summarize_explain_tab
+from App_Function_Libraries.Gradio_UI.Export_Functionality import create_export_tabs
+from App_Function_Libraries.Gradio_UI.Import_Obsidian import create_import_obsidian_vault_tab
+from App_Function_Libraries.Gradio_UI.Import_Prompts_tab import create_import_single_prompt_tab, \
     create_import_multiple_prompts_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Import_RAG_Chat import create_conversation_import_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Import_Text_MD import create_import_item_tab
+from App_Function_Libraries.Gradio_UI.Import_RAG_Chat import create_conversation_import_tab
+from App_Function_Libraries.Gradio_UI.Import_Text_MD import create_import_item_tab
 #from App_Function_Libraries.Gradio_UI.Backup_Functionality import create_backup_tab, create_view_backups_tab, \
 #    create_restore_backup_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Introduction_tab import create_introduction_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Keywords import create_view_keywords_tab, create_add_keyword_tab, \
+from App_Function_Libraries.Gradio_UI.Introduction_tab import create_introduction_tab
+from App_Function_Libraries.Gradio_UI.Keywords import create_view_keywords_tab, create_add_keyword_tab, \
     create_delete_keyword_tab, create_export_keywords_tab, create_rag_qa_keywords_tab, create_character_keywords_tab, \
     create_meta_keywords_tab, create_prompt_keywords_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Live_Recording import create_live_recording_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Llamafile_tab import create_chat_with_llamafile_tab
+from App_Function_Libraries.Gradio_UI.Live_Recording import create_live_recording_tab
+from App_Function_Libraries.Gradio_UI.Llamafile_tab import create_chat_with_llamafile_tab
 #from App_Function_Libraries.Gradio_UI.MMLU_Pro_tab import create_mmlu_pro_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Media_edit import create_prompt_clone_tab, create_prompt_edit_tab, \
+from App_Function_Libraries.Gradio_UI.Media_edit import create_prompt_clone_tab, create_prompt_edit_tab, \
     create_media_edit_and_clone_tab, create_media_edit_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Media_wiki_tab import create_mediawiki_import_tab, create_mediawiki_config_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Mind_Map_tab import create_mindmap_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.PDF_ingestion_tab import create_pdf_ingestion_tab, create_pdf_ingestion_test_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Plaintext_tab_import import create_plain_text_import_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Podcast_tab import create_podcast_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Prompt_Suggestion_tab import create_prompt_suggestion_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.RAG_QA_Chat_tab import create_rag_qa_chat_tab, create_rag_qa_notes_management_tab, \
+from App_Function_Libraries.Gradio_UI.Media_wiki_tab import create_mediawiki_import_tab, create_mediawiki_config_tab
+from App_Function_Libraries.Gradio_UI.Mind_Map_tab import create_mindmap_tab
+from App_Function_Libraries.Gradio_UI.PDF_ingestion_tab import create_pdf_ingestion_tab, create_pdf_ingestion_test_tab
+from App_Function_Libraries.Gradio_UI.Plaintext_tab_import import create_plain_text_import_tab
+from App_Function_Libraries.Gradio_UI.Podcast_tab import create_podcast_tab
+from App_Function_Libraries.Gradio_UI.Prompt_Suggestion_tab import create_prompt_suggestion_tab
+from App_Function_Libraries.Gradio_UI.RAG_QA_Chat_tab import create_rag_qa_chat_tab, create_rag_qa_notes_management_tab, \
     create_rag_qa_chat_management_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Re_summarize_tab import create_resummary_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Search_Tab import create_prompt_search_tab, \
+from App_Function_Libraries.Gradio_UI.Re_summarize_tab import create_resummary_tab
+from App_Function_Libraries.Gradio_UI.Search_Tab import create_prompt_search_tab, \
     create_search_summaries_tab, create_search_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.RAG_Chat_tab import create_rag_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Embeddings_tab import create_embeddings_tab, create_view_embeddings_tab, \
+from App_Function_Libraries.Gradio_UI.RAG_Chat_tab import create_rag_tab
+from App_Function_Libraries.Gradio_UI.Embeddings_tab import create_embeddings_tab, create_view_embeddings_tab, \
     create_purge_embeddings_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Semantic_Scholar_tab import create_semantic_scholar_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.TTS_Playground import create_audio_generation_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Trash import create_view_trash_tab, create_empty_trash_tab, \
+from App_Function_Libraries.Gradio_UI.Semantic_Scholar_tab import create_semantic_scholar_tab
+from App_Function_Libraries.Gradio_UI.TTS_Playground import create_audio_generation_tab
+from App_Function_Libraries.Gradio_UI.Trash import create_view_trash_tab, create_empty_trash_tab, \
     create_delete_trash_tab, create_search_and_mark_trash_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Utilities import create_utilities_yt_timestamp_tab, create_utilities_yt_audio_tab, \
+from App_Function_Libraries.Gradio_UI.Utilities import create_utilities_yt_timestamp_tab, create_utilities_yt_audio_tab, \
     create_utilities_yt_video_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Video_transcription_tab import create_video_transcription_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.View_tab import create_manage_items_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.WebSearch_tab import create_websearch_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Website_scraping_tab import create_website_scraping_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Workflows_tab import chat_workflows_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.View_DB_Items_tab import create_view_all_mediadb_with_versions_tab, \
+from App_Function_Libraries.Gradio_UI.Video_transcription_tab import create_video_transcription_tab
+from App_Function_Libraries.Gradio_UI.View_tab import create_manage_items_tab
+from App_Function_Libraries.Gradio_UI.WebSearch_tab import create_websearch_tab
+from App_Function_Libraries.Gradio_UI.Website_scraping_tab import create_website_scraping_tab
+from App_Function_Libraries.Gradio_UI.Workflows_tab import chat_workflows_tab
+from App_Function_Libraries.Gradio_UI.View_DB_Items_tab import create_view_all_mediadb_with_versions_tab, \
     create_viewing_mediadb_tab, create_view_all_rag_notes_tab, create_viewing_ragdb_tab, \
     create_mediadb_keyword_search_tab, create_ragdb_keyword_items_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.Prompts_tab import create_prompt_view_tab, create_prompts_export_tab
+from App_Function_Libraries.Gradio_UI.Prompts_tab import create_prompt_view_tab, create_prompts_export_tab
 #
 # Gradio UI Imports
-from PoC_Version.App_Function_Libraries.Gradio_UI.Evaluations_Benchmarks_tab import create_geval_tab, create_infinite_bench_tab
-from PoC_Version.App_Function_Libraries.Gradio_UI.XML_Ingestion_Tab import create_xml_import_tab
+from App_Function_Libraries.Gradio_UI.Evaluations_Benchmarks_tab import create_geval_tab, create_infinite_bench_tab
+from App_Function_Libraries.Gradio_UI.XML_Ingestion_Tab import create_xml_import_tab
 #from App_Function_Libraries.Local_LLM.Local_LLM_huggingface import create_huggingface_tab
-from PoC_Version.App_Function_Libraries.Local_LLM.Local_LLM_ollama import create_ollama_tab
-from PoC_Version.App_Function_Libraries.Utils.Utils import load_and_log_configs, logging
+from App_Function_Libraries.Local_LLM.Local_LLM_ollama import create_ollama_tab
+from App_Function_Libraries.Utils.Utils import load_and_log_configs, logging
 
 #
 #######################################################################################################################
@@ -462,15 +462,15 @@ def launch_ui(share_public=None, server_mode=False):
                 create_export_characters_tab()
 
             with gr.TabItem("Writing Tools", id="writing_tools group", visible=True):
-                from PoC_Version.App_Function_Libraries.Gradio_UI.Writing_tab import create_document_feedback_tab
+                from App_Function_Libraries.Gradio_UI.Writing_tab import create_document_feedback_tab
                 create_document_feedback_tab()
-                from PoC_Version.App_Function_Libraries.Gradio_UI.Writing_tab import create_grammar_style_check_tab
+                from App_Function_Libraries.Gradio_UI.Writing_tab import create_grammar_style_check_tab
                 create_grammar_style_check_tab()
-                from PoC_Version.App_Function_Libraries.Gradio_UI.Writing_tab import create_tone_adjustment_tab
+                from App_Function_Libraries.Gradio_UI.Writing_tab import create_tone_adjustment_tab
                 create_tone_adjustment_tab()
-                from PoC_Version.App_Function_Libraries.Gradio_UI.Writing_tab import create_creative_writing_tab
+                from App_Function_Libraries.Gradio_UI.Writing_tab import create_creative_writing_tab
                 create_creative_writing_tab()
-                from PoC_Version.App_Function_Libraries.Gradio_UI.Writing_tab import create_mikupad_tab
+                from App_Function_Libraries.Gradio_UI.Writing_tab import create_mikupad_tab
                 create_mikupad_tab()
 
             with gr.TabItem("Search/View DB Items", id="view db items group", visible=True):

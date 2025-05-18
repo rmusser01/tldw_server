@@ -26,8 +26,9 @@ from typing import List, Dict, Tuple, Optional
 # 3rd-Party Imports
 #
 # Local Imports
-from PoC_Version.App_Function_Libraries.Chat.Chat_Functions import chat
-from PoC_Version.App_Function_Libraries.Utils.Utils import logging
+from App_Function_Libraries.Chat.Chat_Functions import chat
+from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from App_Function_Libraries.Utils.Utils import logging
 
 #
 #######################################################################################################################
