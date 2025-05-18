@@ -26,7 +26,6 @@ pydantic_core
 pytest
 python-dotenv
 python_magic
-pywin32
 PyYAML
 redis
 scikit_learn
