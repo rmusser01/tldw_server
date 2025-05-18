@@ -355,8 +355,8 @@ def test_commercial_provider_with_template_and_char_data_openai_integration(
             f"Response from {provider_name} with pirate template didn't sound pirate-y enough! Got: '{content}'"
         print(f"Templated response from {provider_name} (integration): {content[:100]}...")
 
-        # Verify that the (mocked) DB was called correctly for character data
-        mock_chat_db_inst.get_character_card_by_id.assert_called_once_with(test_char_id_for_template)
+        mock_chat_db_inst.get_character_card_by_name.assert_called_once_with(test_char_id_for_template)
+        mock_chat_db_inst.get_character_card_by_id.assert_not_called()
 
 
 # --- Local Provider Tests ---

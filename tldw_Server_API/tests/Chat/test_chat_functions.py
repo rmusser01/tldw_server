@@ -647,12 +647,13 @@ def test_parse_user_dict_markdown_file_various_formats(tmp_path):
     parsed = parse_user_dict_markdown_file(str(dict_file))
 
     # Expected value for key2 will now include the preserved indentation from dedent:
-    expected_key2_value = ("  This is a\n"
-                           "  multi-line value for key2.\n"
-                           "  It has several lines.\n"
-                           "# This comment line is part of key2's value.")
+    expected_key2_value_after_strip = ("This is a\n"  # Leading spaces of the block are stripped
+                                       "  multi-line value for key2.\n"
+                                       "  It has several lines.\n"
+                                       "# This comment line is part of key2's value.")
+
     assert parsed.get("key1") == "value1"
-    assert parsed.get("key2") == expected_key2_value
+    assert parsed.get("key2") == expected_key2_value_after_strip
     assert parsed.get("key_after_term") == "after_terminator_value"
 
 

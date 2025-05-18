@@ -622,7 +622,8 @@ def test_error_within_stream_generator(
     # 1. Check metadata event
     assert events[0].startswith("event: tldw_metadata")
     metadata_json = json.loads(events[0].split("data: ", 1)[1])
-    assert metadata_json["conversation_id"] == "mock_conv_id_xyz"
+    expected_conv_id = metadata_json["conversation_id"]  # Get the actual conv_id from metadata
+    assert expected_conv_id == "mock_conv_id_xyz"
     assert metadata_json["model"] == DEFAULT_MODEL_NAME_UNIT
 
     # 2. Check for "Good start..." data chunk formatted by the endpoint
@@ -805,7 +806,8 @@ def test_create_chat_completion_character_not_found_uses_defaults(
         "system_message") is not None  # It will be at least "" if DEFAULT_RAW_PASSTHROUGH_TEMPLATE is used
 
     # Verify DB was called
-    mock_chat_db.get_character_card_by_id.assert_called_once_with("non_existent_char_id")
+    mock_chat_db.get_character_card_by_name.assert_called_once_with("non_existent_char_id")
+    mock_chat_db.get_character_card_by_id.assert_not_called()
 
     app.dependency_overrides = {}
 
