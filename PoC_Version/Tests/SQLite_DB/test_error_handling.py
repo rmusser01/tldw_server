@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 import os
 import sqlite3
-from App_Function_Libraries.DB.SQLite_DB import Database, DatabaseError, InputError, add_keyword, delete_keyword, \
+from PoC_Version.App_Function_Libraries.DB.SQLite_DB import Database, DatabaseError, InputError, add_keyword, delete_keyword, \
     add_media_with_keywords, search_media_db
 
 

@@ -15,7 +15,7 @@ parent_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
 sys.path.append(parent_dir)
 
 # Local Libraries
-from App_Function_Libraries.Character_Chat.Character_Chat_Lib import *
+from PoC_Version.App_Function_Libraries.Character_Chat.Character_Chat_Lib import *
 #
 ########################################################################################################################
 #

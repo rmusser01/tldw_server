@@ -19,8 +19,8 @@ import requests
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'tldw')))
 #
 # Local Imports
-from App_Function_Libraries.Utils import Utils
-from App_Function_Libraries.Utils.Utils import (
+from PoC_Version.App_Function_Libraries.Utils import Utils
+from PoC_Version.App_Function_Libraries.Utils.Utils import (
     extract_text_from_segments, verify_checksum, create_download_directory,
     normalize_title, convert_to_seconds, is_valid_url, generate_unique_identifier,
     safe_read_file, cleanup_downloads, format_metadata_as_text, download_file,

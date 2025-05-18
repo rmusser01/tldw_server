@@ -5,8 +5,8 @@ import tempfile
 import time
 
 import pytest
-from App_Function_Libraries.DB.SQLite_DB import DatabaseError, create_tables, Database
-from App_Function_Libraries.Utils import Utils
+from PoC_Version.App_Function_Libraries.DB.SQLite_DB import DatabaseError, create_tables, Database
+from PoC_Version.App_Function_Libraries.Utils import Utils
 #
 ####################################################################################################
 # Test Status:

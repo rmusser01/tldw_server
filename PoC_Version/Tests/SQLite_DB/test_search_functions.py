@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 from typing import List, Tuple
 #
 # Updated import statement
-from App_Function_Libraries.DB.DB_Manager import search_media_db, search_media_database, db
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import search_media_db, search_media_database, db
 #
 #
 ####################################################################################################

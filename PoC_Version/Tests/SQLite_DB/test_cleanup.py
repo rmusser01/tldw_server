@@ -2,7 +2,7 @@
 import pytest
 import os
 from unittest.mock import patch
-from App_Function_Libraries.Utils.Utils import cleanup_downloads
+from PoC_Version.App_Function_Libraries.Utils.Utils import cleanup_downloads
 
 @pytest.fixture
 def temp_download_files():

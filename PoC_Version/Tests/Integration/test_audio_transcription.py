@@ -5,9 +5,9 @@ import pytest
 import os
 import requests
 from pydub import AudioSegment
-from App_Function_Libraries.Audio.Audio_Transcription_Lib import speech_to_text
-from App_Function_Libraries.DB.DB_Manager import add_media_to_database
-from App_Function_Libraries.Utils.Utils import create_download_directory
+from PoC_Version.App_Function_Libraries.Audio.Audio_Transcription_Lib import speech_to_text
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_to_database
+from PoC_Version.App_Function_Libraries.Utils.Utils import create_download_directory
 
 
 @pytest.fixture

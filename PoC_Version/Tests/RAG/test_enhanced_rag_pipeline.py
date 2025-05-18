@@ -9,9 +9,9 @@ parent_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
 sys.path.append(parent_dir)
 
 # Now import the necessary modules
-from App_Function_Libraries.RAG.RAG_Library_2 import enhanced_rag_pipeline
-from App_Function_Libraries.RAG.Embeddings_Create import create_embeddings_batch
-from App_Function_Libraries.RAG.ChromaDB_Library import vector_search
+from PoC_Version.App_Function_Libraries.RAG.RAG_Library_2 import enhanced_rag_pipeline
+from PoC_Version.App_Function_Libraries.RAG.Embeddings_Create import create_embeddings_batch
+from PoC_Version.App_Function_Libraries.RAG.ChromaDB_Library import vector_search
 
 class TestEnhancedRagPipeline(unittest.TestCase):
 
