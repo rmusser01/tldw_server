@@ -27,6 +27,7 @@ from flashrank import Ranker, RerankRequest
 ########################################################################################################################
 #
 # Functions:
+loaded_config_data = load_and_log_configs()
 
 # Initialize OpenAI client (adjust this based on your API key management)
 openai.api_key = "your-openai-api-key"
