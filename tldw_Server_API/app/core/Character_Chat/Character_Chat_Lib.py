@@ -3,12 +3,15 @@
 #
 # Imports
 import base64
+import binascii
 import io
 import json
 import os
 import re
 import time  # For default titles, etc.
 from typing import Dict, List, Optional, Tuple, Any, Union, Set
+
+import yaml
 #
 # Third-Party Libraries
 from PIL import Image  # For image processing
@@ -76,14 +79,14 @@ def replace_user_placeholder(history: List[Tuple[Optional[str], Optional[str]]],
 #
 # Functions for character interaction (DB focused):
 
-def get_character_list_for_ui(db: CharactersRAGDB) -> List[Dict[str, Any]]:
+def get_character_list_for_ui(db: CharactersRAGDB, limit: int = 1000) -> List[Dict[str, Any]]:
     """
     Fetches a list of characters (ID and name) suitable for UI dropdowns.
     """
     try:
         # Assuming CharactersRAGDB.list_character_cards returns more fields,
         # we select only what's needed.
-        all_chars = db.list_character_cards(limit=1000)  # Adjust limit as needed
+        all_chars = db.list_character_cards(limit=limit)  # Use parameter
         ui_list = [{"id": char.get("id"), "name": char.get("name")} for char in all_chars if
                    char.get("id") and char.get("name")]
         return sorted(ui_list, key=lambda x: x["name"].lower() if x["name"] else "")
@@ -113,7 +116,7 @@ def extract_character_id_from_ui_choice(choice: str) -> int:
         # If no match, assume the whole string might be an ID
         character_id_str = choice.strip()
         if not character_id_str.isdigit():
-            raise ValueError(f"Invalid choice format: '{choice}'. Expected 'Name (ID: 123)' or just an ID number.")
+            raise ValueError(f"Invalid choice format: '{choice}'. Expected 'Name (ID: 123)' or just a numeric ID.")
 
     try:
         character_id = int(character_id_str)
@@ -241,13 +244,14 @@ def process_db_messages_to_ui_history(
 def load_chat_and_character(
         db: CharactersRAGDB,
         conversation_id_str: str,
-        user_name: Optional[str]
+        user_name: Optional[str],
+        messages_limit: int = 2000  # Added parameter with default
 ) -> Tuple[Optional[Dict[str, Any]], List[Tuple[Optional[str], Optional[str]]], Optional[Image.Image]]:
     """
     Load an existing chat (conversation) and its associated character data and image.
     Chat history is returned in the List[Tuple[user_msg, bot_msg]] format.
     """
-    logger.debug(f"Loading chat/conversation ID: {conversation_id_str}, User: {user_name}")
+    logger.debug(f"Loading chat/conversation ID: {conversation_id_str}, User: {user_name}, Msg Limit: {messages_limit}")
     try:
         conversation_data = db.get_conversation_by_id(conversation_id_str)
         if not conversation_data:
@@ -258,8 +262,9 @@ def load_chat_and_character(
         if not character_id:
             logger.error(f"Conversation {conversation_id_str} has no character_id associated.")
             # Attempt to load messages anyway, but character data will be missing.
-            raw_db_messages = db.get_messages_for_conversation(conversation_id_str, limit=2000,
-                                                               order_by_timestamp="ASC")  # High limit
+            raw_db_messages = db.get_messages_for_conversation(conversation_id_str, limit=messages_limit,
+                                                               # Use parameter
+                                                               order_by_timestamp="ASC")
             processed_ui_history = process_db_messages_to_ui_history(raw_db_messages, "Unknown Character", user_name)
             return None, processed_ui_history, None
 
@@ -269,7 +274,8 @@ def load_chat_and_character(
         if not char_data:
             logger.warning(f"No character card found for char_id {character_id} (from conv {conversation_id_str})")
             # Load messages with a placeholder character name
-            raw_db_messages = db.get_messages_for_conversation(conversation_id_str, limit=2000,
+            raw_db_messages = db.get_messages_for_conversation(conversation_id_str, limit=messages_limit,
+                                                               # Use parameter
                                                                order_by_timestamp="ASC")
             processed_ui_history = process_db_messages_to_ui_history(raw_db_messages, "Unknown Character", user_name)
             return None, processed_ui_history, img  # img might be None if char_data was None
@@ -277,8 +283,8 @@ def load_chat_and_character(
         char_name_from_card = char_data.get('name', 'Character')  # Should be valid if char_data exists
 
         # Fetch all messages for this conversation
-        raw_db_messages = db.get_messages_for_conversation(conversation_id_str, limit=2000,
-                                                           order_by_timestamp="ASC")  # High limit
+        raw_db_messages = db.get_messages_for_conversation(conversation_id_str, limit=messages_limit,  # Use parameter
+                                                           order_by_timestamp="ASC")
 
         # Convert DB messages to UI history format.
         # The application layer that calls db.add_message needs to set sender consistently.
@@ -422,16 +428,17 @@ def extract_json_from_image_file(image_file_input: Union[str, bytes, io.BytesIO]
             logger.warning(
                 f"Image '{file_name_for_log}' is not in PNG format (format: {img_obj.format}). 'chara' metadata extraction may fail or not be applicable.")
 
+
         # 'text' attribute in Pillow Image objects holds metadata chunks.
         # For PNGs, these are tEXt, zTXt, or iTXt chunks.
-        if isinstance(img_obj.text, dict) and 'chara' in img_obj.text:
-            chara_base64_str = img_obj.text['chara']
+        if hasattr(img_obj, 'info') and isinstance(img_obj.info, dict) and 'chara' in img_obj.info:
+            chara_base64_str = img_obj.info['chara']
             try:
                 decoded_chara_json_str = base64.b64decode(chara_base64_str).decode('utf-8')
                 json.loads(decoded_chara_json_str)  # Validate it's JSON
                 logger.info(f"Successfully extracted and decoded 'chara' JSON from '{file_name_for_log}'.")
                 return decoded_chara_json_str
-            except (base64.binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as decode_err:
+            except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as decode_err:
                 logger.error(
                     f"Error decoding 'chara' metadata from '{file_name_for_log}': {decode_err}. Content (start): {str(chara_base64_str)[:100]}...")
                 return None  # Explicitly return None on decode error
@@ -441,7 +448,7 @@ def extract_json_from_image_file(image_file_input: Union[str, bytes, io.BytesIO]
                 return None
         else:
             logger.debug(
-                f"'chara' key not found in image metadata for '{file_name_for_log}'. Available metadata keys: {list(img_obj.text.keys()) if isinstance(img_obj.text, dict) else 'N/A'}")
+                f"'chara' key not found in image metadata for '{file_name_for_log}'. Available metadata keys: {list(img_obj.info.keys()) if isinstance(img_obj.info, dict) else 'N/A'}")
             return None
 
     except FileNotFoundError:
@@ -463,22 +470,22 @@ def parse_v2_card(card_data_json: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Parse a V2 character card (spec_version '2.0').
     Outputs a dictionary with keys matching the DB schema (e.g., 'first_message').
+    Assumes basic structural validation (e.g., presence of 'data' node if 'spec' implies V2)
+    has already been done by the caller or a higher-level validation function.
     """
     try:
-        spec = card_data_json.get('spec')
-        spec_version = card_data_json.get('spec_version')
-
-        # The actual character data can be directly under 'data' or at the root for some V2 variants.
+        # data_node can be 'data' or root for some V2 variants (parsing flexibility)
         data_node = card_data_json.get('data', card_data_json)
         if not isinstance(data_node, dict):
-            logger.error("V2 card 'data' node is missing or not a dictionary.")
+            logger.error("V2 card 'data' node is missing or not a dictionary during parsing.")
             return None
 
-        # Required fields in the source V2 card (using original spec names)
+        # Required fields in the source V2 card (using original spec names for parsing)
+        # This parsing function relies on these fields existing as per V2 spec.
         required_spec_fields = ['name', 'description', 'personality', 'scenario', 'first_mes', 'mes_example']
         for field in required_spec_fields:
-            if field not in data_node or data_node[field] is None:  # Allow empty strings, but not None or missing
-                logger.error(f"Missing required field '{field}' in V2 card data node.")
+            if field not in data_node or data_node[field] is None:
+                logger.error(f"Missing required field '{field}' in V2 card data node during parsing.")
                 return None
 
         # Map to DB schema names
@@ -487,8 +494,8 @@ def parse_v2_card(card_data_json: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             'description': data_node['description'],
             'personality': data_node['personality'],
             'scenario': data_node['scenario'],
-            'first_message': data_node['first_mes'],  # Map first_mes -> first_message
-            'message_example': data_node['mes_example'],  # Map mes_example -> message_example
+            'first_message': data_node['first_mes'],
+            'message_example': data_node['mes_example'],
 
             'creator_notes': data_node.get('creator_notes', ''),
             'system_prompt': data_node.get('system_prompt', ''),
@@ -497,28 +504,28 @@ def parse_v2_card(card_data_json: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             'tags': data_node.get('tags', []),
             'creator': data_node.get('creator', ''),
             'character_version': data_node.get('character_version', ''),
-            'extensions': data_node.get('extensions', {}),  # Ensure extensions is a dict
-            # Image might be a base64 string here, will be converted to bytes later if needed.
-            'image_base64': data_node.get('char_image') or data_node.get('image')  # Common keys for base64 image
+            'extensions': data_node.get('extensions', {}),
+            'image_base64': data_node.get('char_image') or data_node.get('image')
         }
 
         if 'character_book' in data_node and isinstance(data_node['character_book'], dict):
-            if not isinstance(parsed_data['extensions'], dict): parsed_data['extensions'] = {}
-            # The character_book itself is stored as a JSON string within extensions in the DB schema
-            # So, here we just assign the parsed book dictionary. The DB layer will handle JSON serialization.
+            if not isinstance(parsed_data['extensions'], dict):
+                parsed_data['extensions'] = {}
             parsed_data['extensions']['character_book'] = parse_character_book(data_node['character_book'])
 
-        # Validate spec and spec_version if they exist at the top level
+        # Log spec/version from top level if present, for info, but parsing proceeds based on data_node content.
+        spec = card_data_json.get('spec')
+        spec_version = card_data_json.get('spec_version')
         if spec and spec != 'chara_card_v2':
-            logger.warning(f"V2 card has unexpected 'spec': {spec}. Proceeding with parsing.")
+            logger.warning(f"Parsing V2-like card with unexpected 'spec': {spec}.")
         if spec_version and spec_version != '2.0':
-            logger.warning(f"V2 card has 'spec_version': {spec_version} (expected '2.0'). Proceeding with parsing.")
+            logger.warning(f"Parsing V2-like card with 'spec_version': {spec_version} (expected '2.0').")
 
         return parsed_data
     except KeyError as e:
-        logger.error(f"Missing key in V2 card structure: {e}")
+        logger.error(f"Missing key during V2 card parsing: {e}")
     except Exception as e:
-        logger.error(f"Error parsing V2 card: {e}", exc_info=True)
+        logger.error(f"Error parsing V2 card data: {e}", exc_info=True)
     return None
 
 
@@ -526,12 +533,13 @@ def parse_v1_card(card_data_json: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Convert a V1 card (flat JSON) into a V2-like dictionary structure,
     with keys matching the DB schema.
+    Raises ValueError if required V1 fields are missing.
     """
     try:
         # Required fields in the source V1 card (using original spec names)
         required_spec_fields = ['name', 'description', 'personality', 'scenario', 'first_mes', 'mes_example']
         for field in required_spec_fields:
-            if field not in card_data_json:
+            if field not in card_data_json:  # V1 cards are flat, check directly in card_data_json
                 raise ValueError(f"Missing required field in V1 card: {field}")
 
         # Map to DB schema names
@@ -566,20 +574,17 @@ def parse_v1_card(card_data_json: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 extra_extensions[key] = value
 
         if extra_extensions:
-            # If 'extensions' key already exists from a V1 card (unlikely but possible), merge.
             if isinstance(v2_like_data.get('extensions'), dict):
                 v2_like_data['extensions'].update(extra_extensions)
-            else:
+            else:  # Should be a dict due to initialization
                 v2_like_data['extensions'] = extra_extensions
 
-        # Ensure extensions is a dict if it ended up as None
-        if v2_like_data['extensions'] is None:
+        if v2_like_data['extensions'] is None:  # Defensive
             v2_like_data['extensions'] = {}
 
         return v2_like_data
-    except ValueError as ve:  # For missing required fields
-        logger.error(f"V1 card parsing failed: {ve}")
-        raise  # Re-raise to be caught by importer
+    except ValueError:  # Re-raise from missing required fields check
+        raise
     except Exception as e:
         logger.error(f"Unexpected error parsing V1 card: {e}", exc_info=True)
     return None
@@ -749,8 +754,9 @@ def validate_v2_card(card_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
         try:
             # Spec version should be a string like "2.0"
             if isinstance(card_data['spec_version'], str):
-                spec_version_float = float(card_data['spec_version'])
-                if spec_version_float < 2.0:  # Or specific checks like == '2.0'
+                spec_version_float = float(
+                    card_data['spec_version'])  # TODO: More robust version comparison if needed (e.g., major.minor)
+                if spec_version_float < 2.0:
                     validation_messages.append(
                         f"'spec_version' must be '2.0' or higher. Found '{card_data['spec_version']}'.")
             else:
@@ -760,30 +766,25 @@ def validate_v2_card(card_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
             validation_messages.append(
                 f"Invalid 'spec_version' format: {card_data['spec_version']}. Must be a number as a string (e.g., '2.0').")
 
-    if 'data' not in card_data or not isinstance(card_data['data'], dict):
+    if 'data' not in card_data or not isinstance(card_data.get('data'), dict):  # Use .get for safety before isinstance
         validation_messages.append(
             "Missing 'data' field, or it's not a dictionary. V2 spec requires character data under a 'data' key.")
-        return False, validation_messages  # Cannot proceed without 'data' field being a dict
-
-    data_node = card_data['data']
+        # If 'data' is missing, further checks on data_node will likely fail or be irrelevant.
+        # However, some V2 cards might be flat if spec is missing, so we don't hard return here
+        # unless spec explicitly stated V2. The calling function will decide based on results.
+        data_node = {}  # Avoid None for data_node if it's missing for subsequent checks to not error out
+    else:
+        data_node = card_data['data']
 
     # Required fields in 'data' node
-    # Using original spec field names ('first_mes', 'mes_example') for validation here
-    # as this function validates the *input format*. Mapping happens during parsing.
     required_data_fields = ['name', 'description', 'personality', 'scenario', 'first_mes', 'mes_example']
     for field in required_data_fields:
         if field not in data_node:
             validation_messages.append(f"Missing required field in 'data': '{field}'.")
         elif not isinstance(data_node[field], str):
-            # Allow empty strings, but field must exist and be string type
-            validation_messages.append(f"Field '{field}' must be a string.")
-        # Allowing empty strings for fields like description, scenario, etc.
-        # `name` however should not be empty if we add that constraint.
-        # The original code checked `not data_node[field].strip()` which means empty strings fail.
-        # Adjust if empty strings are permissible for some fields.
-        elif field in ['name', 'first_mes'] and not data_node[
-            field].strip():  # Name and first_mes shouldn't be just whitespace
-            validation_messages.append(f"Field '{field}' cannot be empty or just whitespace.")
+            validation_messages.append(f"Field 'data.{field}' must be a string.")
+        elif field in ['name', 'first_mes'] and not data_node[field].strip():
+            validation_messages.append(f"Field 'data.{field}' cannot be empty or just whitespace.")
 
     # Optional fields with expected types in 'data' node
     optional_data_fields = {
@@ -795,36 +796,32 @@ def validate_v2_card(card_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
         'creator': str,
         'character_version': str,
         'extensions': dict,
-        'character_book': dict,  # If present, should be a dict
-        'char_image': str,  # Base64 image string, common in V2
-        'image': str,  # Alternative key for base64 image
+        'character_book': dict,
+        'char_image': str,
+        'image': str,
     }
 
     for field, expected_type in optional_data_fields.items():
-        if field in data_node and data_node[field] is not None:  # Check type only if field exists and is not None
+        if field in data_node and data_node[field] is not None:
             if not isinstance(data_node[field], expected_type):
                 validation_messages.append(f"Field 'data.{field}' must be of type '{expected_type.__name__}'.")
-            elif field == 'extensions':
-                # Validate that extensions keys are properly namespaced (convention)
+            elif field == 'extensions' and isinstance(data_node[field], dict):  # Check only if it's a dict
                 for ext_key in data_node[field].keys():
                     if not isinstance(ext_key, str) or (
                             '/' not in ext_key and '_' not in ext_key and ':' not in ext_key):
                         validation_messages.append(
                             f"Extension key '{ext_key}' in 'data.extensions' should be namespaced (e.g., 'myorg/mykey').")
 
-    # If 'alternate_greetings' is present, check that it's a list of non-empty strings
     if 'alternate_greetings' in data_node and isinstance(data_node.get('alternate_greetings'), list):
         for idx, greeting in enumerate(data_node['alternate_greetings']):
             if not isinstance(greeting, str) or not greeting.strip():
                 validation_messages.append(f"Element {idx} in 'data.alternate_greetings' must be a non-empty string.")
 
-    # If 'tags' is present, check that it's a list of non-empty strings
     if 'tags' in data_node and isinstance(data_node.get('tags'), list):
         for idx, tag_val in enumerate(data_node['tags']):
             if not isinstance(tag_val, str) or not tag_val.strip():
                 validation_messages.append(f"Element {idx} in 'data.tags' must be a non-empty string.")
 
-    # Validate 'character_book' if present
     if 'character_book' in data_node and data_node['character_book'] is not None:
         if isinstance(data_node['character_book'], dict):
             is_valid_book, book_messages = validate_character_book(data_node['character_book'])
@@ -839,8 +836,8 @@ def validate_v2_card(card_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
 def import_character_card_from_json_string(json_content_str: str) -> Optional[Dict[str, Any]]:
     """
-    Import and parse a character card from a JSON string. Detects V1 vs V2.
-    Returns a dictionary mapped to DB schema names, or None on failure.
+    Import and parse a character card from a JSON string. Validates V2 structure first if applicable.
+    Detects V1 vs V2. Returns a dictionary mapped to DB schema names, or None on failure.
     """
     if not json_content_str or not json_content_str.strip():
         logger.error("JSON content string is empty or whitespace.")
@@ -848,41 +845,65 @@ def import_character_card_from_json_string(json_content_str: str) -> Optional[Di
     try:
         card_data_dict = json.loads(json_content_str.strip())
 
-        # Try to detect V2 by spec field or presence of 'data' field as a dict
-        is_likely_v2 = (card_data_dict.get('spec') == 'chara_card_v2' or
-                        card_data_dict.get('spec_version') == '2.0' or
-                        (isinstance(card_data_dict.get('data'), dict) and 'name' in card_data_dict['data']))
+        parsed_card: Optional[Dict[str, Any]] = None
 
-        if is_likely_v2:
-            logger.info("Attempting to parse JSON string as V2 character card.")
-            parsed_card = parse_v2_card(card_data_dict)
-            if parsed_card:
-                # Basic validation after parsing to V2 structure
-                if not parsed_card.get('name'):  # Name is fundamental
-                    logger.error("Parsed V2 card is missing 'name'. Import failed.")
+        # Determine if V2 validation should be attempted
+        is_explicit_v2_spec = card_data_dict.get('spec') == 'chara_card_v2'
+        # Consider "2.0", "2.1", etc. as valid V2 versions for initial check
+        is_explicit_v2_version_str = str(card_data_dict.get('spec_version', ''))
+        is_explicit_v2_version = is_explicit_v2_version_str.startswith("2.")
+
+        has_data_node_heuristic = isinstance(card_data_dict.get('data'), dict) and \
+                                  'name' in card_data_dict['data']  # Heuristic for implicit V2
+
+        attempt_v2_processing = is_explicit_v2_spec or is_explicit_v2_version or \
+                                (has_data_node_heuristic and not is_explicit_v2_spec and not is_explicit_v2_version)
+
+        if attempt_v2_processing:
+            logger.debug("Attempting V2 validation based on card structure/spec.")
+            is_valid_v2_struct, v2_errors = validate_v2_card(card_data_dict)
+
+            if not is_valid_v2_struct:
+                logger.error(f"V2 Card structural validation failed: {'; '.join(v2_errors)}.")
+                if is_explicit_v2_spec or is_explicit_v2_version:
+                    logger.error("Card explicitly declared as V2 but failed V2 structural validation. Import aborted.")
                     return None
-                return parsed_card
-            else:
-                logger.warning("Failed to parse as V2. Trying V1 as fallback.")
-                # Fallback to V1 if V2 parsing failed (e.g., malformed V2)
-                parsed_card_v1_fallback = parse_v1_card(card_data_dict)
-                if parsed_card_v1_fallback and parsed_card_v1_fallback.get('name'):
-                    return parsed_card_v1_fallback
-                logger.error("V2 parsing failed, and V1 fallback also failed or produced invalid card.")
-                return None
+                else:  # Implicit V2 guess failed validation
+                    logger.warning(
+                        "Heuristically identified V2 card failed V2 structural validation. Will attempt V1 parsing as fallback.")
+                    # No 'return None' here, proceed to V1 attempt below
+            else:  # V2 structural validation passed
+                logger.info("V2 Card structural validation passed. Attempting to parse as V2 character card.")
+                parsed_card = parse_v2_card(card_data_dict)
+                if not parsed_card:
+                    logger.warning(
+                        "V2 parsing failed despite passing V2 structural validation. This might indicate an issue with the parser or an edge case. Attempting V1 parsing as fallback.")
+                    # `parsed_card` is None, will fall through to V1 attempt
+
+        # Fallback to V1 if V2 processing was not attempted, or if it was attempted but `parsed_card` is still None
+        if parsed_card is None:
+            logger.info("Attempting to parse as V1 character card.")
+            try:
+                # parse_v1_card raises ValueError if required fields are missing, or returns None on other errors
+                parsed_card = parse_v1_card(card_data_dict)
+            except ValueError as ve_v1:
+                logger.error(f"V1 card parsing error (likely missing required V1 fields): {ve_v1}")
+                parsed_card = None  # Ensure parsed_card is None on this error
+
+        # Final check and return
+        if parsed_card and parsed_card.get('name'):  # Name is fundamental
+            logger.info(f"Successfully parsed card: '{parsed_card.get('name')}'")
+            return parsed_card
         else:
-            logger.info("Assuming V1 character card from JSON string (or V2 without standard indicators).")
-            parsed_card = parse_v1_card(card_data_dict)  # parse_v1_card raises ValueError if required fields missing
-            if parsed_card and parsed_card.get('name'):
-                return parsed_card
-            logger.error("Failed to parse as V1 card or parsed card is invalid.")
+            if parsed_card and not parsed_card.get('name'):
+                logger.error("Parsed card is missing 'name'. Import failed.")
+            else:  # parsed_card is None
+                logger.error("All parsing attempts (V2 and V1) failed to produce a valid card.")
             return None
 
     except json.JSONDecodeError as e:
         logger.error(f"JSON decode error from string: {e}. Content (start): {json_content_str[:150]}...")
-    except ValueError as ve:  # From parse_v1_card if required fields are missing
-        logger.error(f"Card parsing error (likely V1 missing fields): {ve}")
-    except Exception as e:
+    except Exception as e:  # Catch any other unexpected errors during the process
         logger.error(f"Unexpected error parsing card from JSON string: {e}", exc_info=True)
     return None
 
@@ -907,7 +928,6 @@ def load_character_card_from_string_content(content_str: str) -> Optional[Dict[s
             json_card_data_str = content
         elif content.startswith('---'):  # Likely Markdown with YAML frontmatter
             try:
-                import yaml  # PyYAML
                 # Regex to match YAML front matter strictly at the start, allowing for optional whitespace before ---
                 yaml_match = re.match(r"^\s*---\s*\n(.*?)\n\s*---\s*", content, re.DOTALL)
                 if yaml_match:
@@ -962,7 +982,7 @@ def import_and_save_character_from_file(
 ) -> Optional[int]:
     """
     Loads character card from a JSON/MD text file, or a PNG/WEBP image file with embedded data.
-    Parses the card data, validates it (optional, V2 only for now), and saves to the database.
+    Parses and validates the card data, and saves to the database.
     Returns the character_id from the database if successful, otherwise None.
     """
     parsed_card_dict: Optional[Dict[str, Any]] = None
@@ -981,32 +1001,42 @@ def import_and_save_character_from_file(
             if ext in ['.png', '.webp']:  # Image file
                 with open(filename_for_log, 'rb') as f_img:
                     image_bytes_for_db = f_img.read()  # The file itself is the image
-                # Extract JSON from this image's metadata
                 card_json_str = extract_json_from_image_file(io.BytesIO(image_bytes_for_db))
                 if not card_json_str:
-                    logger.error(f"No character JSON data extracted from image file: {filename_for_log}")
-                    return None
+                    logger.warning(
+                        f"No character JSON data extracted from image file: {filename_for_log}. Image itself will be used if JSON is found elsewhere or card has default image handling.")
+                    # If no JSON in image, card_json_str will be None. Parsing might happen from a text file later if this function is adapted
+                    # For current design, if image has no JSON, it must be a text file for card data.
+                    # If the intent is to load image AND then separately load a JSON file, this function would need changes.
+                    # Assuming for now: if image, JSON must be in it or it's an error for *this specific path*.
+                    # Re-evaluating based on typical use: if image file, json expected inside.
+                    # If no JSON inside, we don't then try to read the image file as text.
+                    # So, if card_json_str is None here, and it's an image, then we lack card data.
+                    if ext in ['.png', '.webp'] and not card_json_str:  # Explicitly state no card data from image
+                        logger.error(
+                            f"Image file {filename_for_log} provided, but no character JSON metadata found within it.")
+                        return None
             else:  # Assume text file (JSON/MD)
                 with open(filename_for_log, 'r', encoding='utf-8') as f_text:
                     card_json_str = f_text.read()
 
         elif isinstance(file_input, bytes):  # Raw bytes input
-            # Try to treat as image first, then as text if image parsing fails
             try:
                 temp_image_stream = io.BytesIO(file_input)
-                # Check if it's a recognizable image using Pillow, without fully opening if not needed
-                # A more robust sniffing might be needed (e.g. python-magic)
-                # For now, rely on extract_json_from_image_file's PIL open
                 potential_json_from_bytes_img = extract_json_from_image_file(temp_image_stream)
                 if potential_json_from_bytes_img:
                     card_json_str = potential_json_from_bytes_img
-                    image_bytes_for_db = file_input  # The input bytes are the image
-                else:  # Not an image with chara data, or not an image; try as text
+                    image_bytes_for_db = file_input
+                else:
+                    logger.debug("Input bytes not an image with chara data, or not an image; trying as text.")
                     card_json_str = file_input.decode('utf-8')
+                    # If it was an image but without chara, image_bytes_for_db would still be None.
+                    # We could try to set image_bytes_for_db = file_input here if we confirm it IS an image
+                    # even if chara extraction failed. For now, only if chara data is from image.
             except UnicodeDecodeError:
                 logger.error("Input bytes are not valid UTF-8 text and didn't yield chara data as an image.")
                 return None
-            except Exception as e_bytes_img:  # Catch PIL errors if it's not image
+            except Exception as e_bytes_img:
                 logger.debug(f"Input bytes not processed as image ({e_bytes_img}), trying as text.")
                 try:
                     card_json_str = file_input.decode('utf-8')
@@ -1017,17 +1047,18 @@ def import_and_save_character_from_file(
         elif hasattr(file_input, 'read'):  # File-like object (e.g., BytesIO from upload)
             if hasattr(file_input, 'name') and file_input.name: filename_for_log = file_input.name
             file_input.seek(0)
-            # Read all bytes to allow multiple processing attempts (image then text)
             stream_bytes = file_input.read()
-            file_input.seek(0)  # Reset original stream if it's to be used again outside
+            file_input.seek(0)
 
             try:
                 temp_image_stream_from_obj = io.BytesIO(stream_bytes)
                 potential_json_from_stream_img = extract_json_from_image_file(temp_image_stream_from_obj)
                 if potential_json_from_stream_img:
                     card_json_str = potential_json_from_stream_img
-                    image_bytes_for_db = stream_bytes  # The stream content is the image
-                else:  # Not image with chara, or not image; try as text
+                    image_bytes_for_db = stream_bytes
+                else:
+                    logger.debug(
+                        f"Stream {filename_for_log} not an image with chara data, or not an image; trying as text.")
                     card_json_str = stream_bytes.decode('utf-8')
             except UnicodeDecodeError:
                 logger.error(
@@ -1048,27 +1079,19 @@ def import_and_save_character_from_file(
             logger.error(f"Could not obtain character card JSON string from input: {filename_for_log}")
             return None
 
-        # 2. Parse the extracted JSON string into a dictionary (V1 or V2)
-        # This will map fields to DB schema names (e.g. first_mes -> first_message)
+        # 2. Parse and Validate the extracted JSON string.
+        # load_character_card_from_string_content now incorporates validation.
         parsed_card_dict = load_character_card_from_string_content(card_json_str)
-        if not parsed_card_dict:
-            logger.error(f"Failed to parse character data from content of: {filename_for_log}")
+        if not parsed_card_dict:  # This means parsing or validation failed.
+            logger.error(f"Failed to parse or validate character data from content of: {filename_for_log}")
             return None
 
-        # 3. Validate the parsed card data (example for V2, can be extended)
-        # The original V2 validation expects the full card object with 'spec' and 'data'
-        # If load_character_card_from_string_content already normalized it (e.g. to a flat dict),
-        # this validation step might need adjustment or to operate on the pre-normalized dict.
-        # For now, assume parsed_card_dict is what we want to validate if it *were* a V2 file structure.
-        # This part is a bit tricky if `parsed_card_dict` is already heavily normalized.
-        # A better approach: validate the `card_data_dict` obtained from `json.loads(card_json_str)`
-        # *before* parsing it into `parsed_card_dict`.
-        #
-        # Let's assume for now `parsed_card_dict` is the one to check for essential fields.
+        # 3. Post-parsing check (essential fields on the *parsed and mapped* dictionary)
         if not parsed_card_dict.get('name'):
-            logger.error("Character import failed: 'name' is missing in the parsed card data.")
+            logger.error(
+                "Character import failed: 'name' is missing in the successfully parsed and DB-schema-mapped card data.")
             return None
-        # Add more critical field checks here if needed, beyond what parsers do.
+        # Add more critical field checks here on `parsed_card_dict` if needed.
 
         # 4. Handle image if it's base64 in the JSON and not already set from image file
         if not image_bytes_for_db and parsed_card_dict.get('image_base64'):
@@ -1081,24 +1104,23 @@ def import_and_save_character_from_file(
 
         # 5. Prepare the payload for the database, using DB schema field names
         db_payload = {
-            'name': parsed_card_dict['name'],  # Name is confirmed to exist
+            'name': parsed_card_dict['name'],
             'description': parsed_card_dict.get('description'),
             'personality': parsed_card_dict.get('personality'),
             'scenario': parsed_card_dict.get('scenario'),
             'system_prompt': parsed_card_dict.get('system_prompt'),
-            'image': image_bytes_for_db,  # This is now bytes or None
+            'image': image_bytes_for_db,
             'post_history_instructions': parsed_card_dict.get('post_history_instructions'),
-            'first_message': parsed_card_dict.get('first_message'),  # Already mapped from first_mes
-            'message_example': parsed_card_dict.get('message_example'),  # Already mapped from mes_example
+            'first_message': parsed_card_dict.get('first_message'),
+            'message_example': parsed_card_dict.get('message_example'),
             'creator_notes': parsed_card_dict.get('creator_notes'),
             'alternate_greetings': parsed_card_dict.get('alternate_greetings', []),
             'tags': parsed_card_dict.get('tags', []),
             'creator': parsed_card_dict.get('creator'),
             'character_version': parsed_card_dict.get('character_version'),
-            'extensions': parsed_card_dict.get('extensions', {})  # Should be a dict
+            'extensions': parsed_card_dict.get('extensions', {})
         }
 
-        # Ensure list/dict fields are correctly typed for DB's JSON serialization
         if not isinstance(db_payload['alternate_greetings'], list): db_payload['alternate_greetings'] = []
         if not isinstance(db_payload['tags'], list): db_payload['tags'] = []
         if not isinstance(db_payload['extensions'], dict): db_payload['extensions'] = {}
@@ -1107,24 +1129,25 @@ def import_and_save_character_from_file(
         char_id = db.add_character_card(db_payload)
         if char_id:
             logger.info(f"Successfully imported character '{db_payload['name']}' with DB ID: {char_id}")
-        else:  # Should not happen if add_character_card raises on failure or returns ID
-            logger.error(f"Failed to save character '{db_payload['name']}' to DB (add_character_card returned None).")
+        else:
+            logger.error(
+                f"Failed to save character '{db_payload['name']}' to DB (add_character_card returned None without error).")  # Should ideally not happen
         return char_id
 
-    except ConflictError as ce:  # From db.add_character_card if name is not unique
+    except ConflictError as ce:
         logger.warning(f"Conflict importing character: {ce}. Name likely already exists.")
-        # Optionally, try to fetch and return existing ID
-        if parsed_card_dict and parsed_card_dict.get('name'):
+        if parsed_card_dict and parsed_card_dict.get(
+                'name'):  # parsed_card_dict might be None if error happened before it was set
             existing_char = db.get_character_card_by_name(parsed_card_dict['name'])
             if existing_char and existing_char.get('id'):
                 logger.info(f"Character '{parsed_card_dict['name']}' already exists with ID {existing_char['id']}.")
                 return existing_char['id']
-        return None  # Or re-raise ConflictError(ce)
+        return None
     except (CharactersRAGDBError, InputError) as db_e:
         logger.error(f"Database or input error importing character from {filename_for_log}: {db_e}")
-    except ImportError as imp_err:  # PyYAML missing
+    except ImportError as imp_err:
         logger.error(f"Import error during character import: {imp_err}. A required library might be missing.")
-        raise  # Re-raise to alert user of missing dependency
+        raise
     except Exception as e:
         logger.error(f"Unexpected error importing character from {filename_for_log}: {e}", exc_info=True)
     return None
@@ -1222,8 +1245,6 @@ def load_chat_history_from_file_and_save_to_db(
         if not character_db_entry or not character_db_entry.get('id'):
             logger.error(
                 f"Character '{char_name_from_log}' from chat log '{filename_for_log}' not found in the database.")
-            # Optionally, you could offer to import the character here if a card is also provided,
-            # or create a placeholder character. For now, failing.
             return None, None
 
         character_id_from_db: int = character_db_entry['id']
@@ -1234,7 +1255,6 @@ def load_chat_history_from_file_and_save_to_db(
         new_conv_id = db.add_conversation({
             'character_id': character_id_from_db,
             'title': conv_title
-            # 'root_id' will be auto-set to new_conv_id if not provided
         })
 
         if not new_conv_id:
@@ -1244,19 +1264,15 @@ def load_chat_history_from_file_and_save_to_db(
         logger.info(
             f"Created new conversation (ID: {new_conv_id}) for imported chat with '{actual_char_name_from_db}'.")
 
-        # Add messages to the new conversation
-        # Use a transaction to ensure all messages are added or none are.
         with db.transaction():
             for user_msg_str, char_msg_str in history_pairs:
-                # Replace placeholders in the messages from the log *before* saving to DB
-                # User name for placeholders might come from the log or be a default
                 log_user_name = chat_data_dict.get('user_name') or user_name_for_placeholders
 
                 if user_msg_str and user_msg_str.strip():
                     processed_user_msg = replace_placeholders(user_msg_str, actual_char_name_from_db, log_user_name)
                     db.add_message({
                         'conversation_id': new_conv_id,
-                        'sender': default_user_sender_in_db,  # Standardized sender name for user
+                        'sender': default_user_sender_in_db,
                         'content': processed_user_msg
                     })
 
@@ -1264,7 +1280,7 @@ def load_chat_history_from_file_and_save_to_db(
                     processed_char_msg = replace_placeholders(char_msg_str, actual_char_name_from_db, log_user_name)
                     db.add_message({
                         'conversation_id': new_conv_id,
-                        'sender': actual_char_name_from_db,  # Use character's actual name as sender
+                        'sender': actual_char_name_from_db,
                         'content': processed_char_msg
                     })
             logger.info(f"Successfully imported {len(history_pairs)} message pairs into conversation ID {new_conv_id}.")
@@ -1273,7 +1289,7 @@ def load_chat_history_from_file_and_save_to_db(
 
     except json.JSONDecodeError as e:
         logger.error(f"Error decoding JSON from chat log '{filename_for_log}': {e}")
-    except ValueError as ve:  # From custom validation or type issues
+    except ValueError as ve:
         logger.error(f"Invalid data or format in chat log '{filename_for_log}': {ve}")
     except CharactersRAGDBError as dbe:
         logger.error(f"Database error during chat history import from '{filename_for_log}': {dbe}")
