@@ -1044,8 +1044,8 @@ class Chunker:
                 "system_message": final_system_prompt,
                 "temp": llm_api_config.get("temperature", self._get_option('summarize_temperature', 0.1)),
                 "streaming": False, # Internal steps of rolling summary should not stream to Chunker
-                # Add other params your analyze function might need from llm_api_config (model, max_tokens etc.)
-                "model": llm_api_config.get("model") # Important!
+                "model": llm_api_config.get("model"),
+                "max_tokens": llm_api_config.get("max_tokens")
             }
             try:
                 # `llm_summarize_step_func` should be blocking and return a string

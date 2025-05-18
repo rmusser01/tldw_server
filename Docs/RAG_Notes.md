@@ -26,6 +26,7 @@ https://engineeringblog.yelp.com/2025/02/search-query-understanding-with-LLMs.ht
 https://github.com/ibm-granite/granite-io/blob/main/docs/design.md
 https://www.jeremykun.com/2015/04/06/markov-chain-monte-carlo-without-all-the-bullshit/
 https://mode-rag.readthedocs.io/en/latest/
+https://productiv-ai.guide/start/multi-source-rag-openwebui/
 https://huggingface.co/posts/Kseniase/836565977783893
 https://github.com/nishchaljs/MobiRAG
 https://huggingface.co/PleIAs/Pleias-RAG-1B-gguf

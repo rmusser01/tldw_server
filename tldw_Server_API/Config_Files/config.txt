@@ -163,6 +163,7 @@ anthropic_max_tokens = 4096
 anthropic_api_timeout = 90
 anthropic_api_retry = 3
 anthropic_api_retry_delay = 1
+model_for_summarization = claude-3-5-sonnet-20240620
 #
 # <cohere_api_key>
 cohere_api_key = <cohere_api_key>
@@ -184,11 +185,11 @@ deepseek_max_tokens = 4096
 deepseek_api_timeout = 90
 deepseek_api_retry = 3
 deepseek_api_retry_delay = 1
-
+model_for_summarization = deepseek-chat
 #
 google_api_key = <google_api_key>
 # Available Model Options:
-google_model = gemini-1.5-pro
+google_model = gemini-2-5-pro
 google_streaming = True
 google_temperature = 0.7
 google_max_tokens = 4096
@@ -236,6 +237,7 @@ openai_max_tokens = 4096
 openai_api_timeout = 90
 openai_api_retry = 3
 openai_api_retry_delay = 1
+model_for_summarization = gpt-4o
 #
 openrouter_api_key = <openrouter_api_key>
 openrouter_model = mistralai/mistral-7b-instruct:free
@@ -273,7 +275,7 @@ custom_openai2_api_api_retry_delay = 1
 
 #
 default_api = openai
-
+default_api_for_tasks = anthropic
 
 [Local-API]
 kobold_api_IP = http://127.0.0.1:5001/api/v1/generate

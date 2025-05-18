@@ -40,81 +40,6 @@ from tldw_Server_API.app.core.config import load_and_log_configs as load_server_
 # --- FastAPI Router ---
 router = APIRouter()
 
-# --- Pydantic Schemas for Request and Response ---
-
-class LLMOptionsForChunking(BaseModel):
-    """Optional LLM parameters if a chunking method uses an LLM (e.g., rolling_summarize)."""
-    provider: Optional[str] = Field(None, description="LLM provider for internal chunking steps (e.g., 'openai', 'anthropic'). Server default if None.")
-    model: Optional[str] = Field(None, description="LLM model for internal chunking steps. Server default if None.")
-    temperature: Optional[float] = Field(None, description="Temperature for LLM. Server default if None.")
-    # Add other relevant LLM params you might want to control, e.g., system_prompt for summarization step
-
-class ChunkingOptionsRequest(BaseModel):
-    method: Optional[str] = Field(default_chunk_options_from_lib.get('method'),
-                                  description="Chunking method (e.g., 'words', 'sentences', 'json', 'semantic', 'xml', 'ebook_chapters', 'rolling_summarize').")
-    max_size: Optional[int] = Field(default_chunk_options_from_lib.get('max_size'),
-                                   description="Max size of chunks (meaning depends on method).")
-    overlap: Optional[int] = Field(default_chunk_options_from_lib.get('overlap'),
-                                  description="Overlap between chunks (meaning depends on method).")
-    language: Optional[str] = Field(default_chunk_options_from_lib.get('language'),
-                                    description="Language of the text (e.g., 'en', 'zh'). Auto-detected if None.")
-    adaptive: Optional[bool] = Field(default_chunk_options_from_lib.get('adaptive'),
-                                     description="Enable adaptive chunking.")
-    multi_level: Optional[bool] = Field(default_chunk_options_from_lib.get('multi_level'),
-                                        description="Enable multi-level chunking.")
-    custom_chapter_pattern: Optional[str] = Field(None,
-                                                  description="Custom regex pattern for 'ebook_chapters' method.")
-    tokenizer_name_or_path: Optional[str] = Field("gpt2",
-                                                  description="Tokenizer model name or path (e.g., 'gpt2', 'bert-base-uncased').")
-    # Options for LLM-dependent chunking methods like 'rolling_summarize'
-    llm_options_for_internal_steps: Optional[LLMOptionsForChunking] = Field(None,
-                                                                         description="LLM configurations if the chunking method itself uses an LLM.")
-
-    # Add other specific options from DEFAULT_CHUNK_OPTIONS if you want them client-configurable
-    semantic_similarity_threshold: Optional[float] = Field(default_chunk_options_from_lib.get('semantic_similarity_threshold'), description="Threshold for semantic chunking breaks.")
-    semantic_overlap_sentences: Optional[int] = Field(default_chunk_options_from_lib.get('semantic_overlap_sentences'), description="Sentence overlap for semantic_chunking.")
-    json_chunkable_data_key: Optional[str] = Field(default_chunk_options_from_lib.get('json_chunkable_data_key', 'data'), description="Key in JSON dict to chunk.")
-    # Options for rolling_summarize if not covered by llm_options_for_internal_steps
-    summarization_detail: Optional[float] = Field(default_chunk_options_from_lib.get('summarization_detail'), ge=0, le=1, description="Detail level for rolling_summarize (0.0-1.0).")
-
-
-    @field_validator('max_size', 'overlap', 'semantic_overlap_sentences', mode='before')
-    @classmethod
-    def ensure_int_type(cls, value: Any, field) -> Optional[int]: # Added field argument for context
-        if value is None:
-            return None
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            # Pydantic will raise its own validation error with field name, which is good.
-            # This custom validator mostly handles explicit type conversion if string numbers are sent.
-            raise ValueError(f"{field.name} must be an integer or convertible to an integer")
-
-    @field_validator('semantic_similarity_threshold', 'summarization_detail', mode='before')
-    @classmethod
-    def ensure_float_type(cls, value: Any, field) -> Optional[float]:
-        if value is None:
-            return None
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            raise ValueError(f"{field.name} must be a float or convertible to a float")
-
-class ChunkingTextRequest(BaseModel):
-    text_content: str = Field(..., description="Text content to be chunked.")
-    file_name: Optional[str] = Field("input_text.txt",
-                                     description="Optional name for the input, used in some metadata/logging.")
-    options: Optional[ChunkingOptionsRequest] = Field(None, description="Chunking parameters. Library defaults will be used if not provided or partially provided.")
-
-class ChunkedContentResponse(BaseModel):
-    text: str
-    metadata: Dict[str, Any]
-
-class ChunkingResponse(BaseModel):
-    chunks: List[ChunkedContentResponse]
-    original_file_name: Optional[str]
-    applied_options: ChunkingOptionsRequest # Shows the actual options used
-
 # --- Endpoint to Chunk Text (JSON input) ---
 @router.post(
     "/chunk_text",
@@ -209,14 +134,36 @@ async def process_text_for_chunking_json(
         provider_specific_config_key = f"{summarization_provider}_api" # e.g., "openai_api"
         api_details_from_server_config = server_configs.get(provider_specific_config_key, {})
 
+        # System Prompt for internal LLM steps:
+        # Priority: Client suggested -> Server default for rolling_summarize method -> General LLM default
+        client_suggested_system_prompt = requested_llm_options.get('system_prompt_for_step')
+        # Get the method-specific default from Chunker's options (which came from global config)
+        method_default_system_prompt = effective_options.get('summarize_system_prompt')  # Specific to rolling_summarize
+
+        final_system_prompt_for_step = client_suggested_system_prompt or method_default_system_prompt
+        # If still None, your general_llm_analyzer might have its own ultimate default.
+
+        # Max tokens per LLM step:
+        client_suggested_max_tokens = requested_llm_options.get('max_tokens_per_step')
+        # Server might have a cap or default for this specific internal operation
+        server_default_max_tokens_step = api_details_from_server_config.get('max_tokens_for_summarization_step',
+                                                                            1024)  # Example key in your config
+
+        final_max_tokens_for_step = client_suggested_max_tokens or server_default_max_tokens_step
+        # Optional: Apply a server-enforced cap
+        # server_cap_max_tokens = 2048
+        # if final_max_tokens_for_step > server_cap_max_tokens:
+        #     logger.warning(f"Client suggested max_tokens_per_step {final_max_tokens_for_step} capped to {server_cap_max_tokens}")
+        #     final_max_tokens_for_step = server_cap_max_tokens
+
         # Build llm_api_config for the call to `general_llm_analyzer`
         llm_api_config_to_use = {
             "api_name": summarization_provider,
             "model": requested_llm_options.get('model') or api_details_from_server_config.get('model'),
             "api_key": api_details_from_server_config.get('api_key'), # CRITICAL: Key comes from server config
             "temp": requested_llm_options.get('temperature'), # If None, general_llm_analyzer will use its own default/config
-            # Add other parameters that general_llm_analyzer might expect or that need to be overridden
-            # e.g., "system_message" could be derived from effective_options.get('summarize_system_prompt')
+            "system_message": final_system_prompt_for_step,
+            "max_tokens": final_max_tokens_for_step,
         }
 
         if not llm_api_config_to_use.get("api_key"):
@@ -282,22 +229,20 @@ async def process_file_for_chunking(
     method: Optional[str] = Form(default_chunk_options_from_lib.get('method')),
     max_size: Optional[int] = Form(default_chunk_options_from_lib.get('max_size')),
     overlap: Optional[int] = Form(default_chunk_options_from_lib.get('overlap')),
-    language: Optional[str] = Form(default_chunk_options_from_lib.get('language')),
+    language: Optional[str] = Form(None), # Default to None for auto-detection
+    tokenizer_name_or_path: Optional[str] = Form(default_chunk_options_from_lib.get('tokenizer_name_or_path', "gpt2")),
     adaptive: Optional[bool] = Form(default_chunk_options_from_lib.get('adaptive')),
     multi_level: Optional[bool] = Form(default_chunk_options_from_lib.get('multi_level')),
     custom_chapter_pattern: Optional[str] = Form(None),
-    tokenizer_name_or_path: Optional[str] = Form("gpt2"),
-    # LLM options for methods like rolling_summarize (optional, server defaults often preferred)
-    llm_provider_for_internal: Optional[str] = Form(None),
-    llm_model_for_internal: Optional[str] = Form(None),
-    llm_temperature_for_internal: Optional[float] = Form(None),
-    summarization_detail_for_internal: Optional[float] = Form(None),
-    # Add other form fields corresponding to ChunkingOptionsRequest if needed
+    semantic_similarity_threshold: Optional[float] = Form(default_chunk_options_from_lib.get('semantic_similarity_threshold')),
+    semantic_overlap_sentences: Optional[int] = Form(default_chunk_options_from_lib.get('semantic_overlap_sentences')),
+    json_chunkable_data_key: Optional[str] = Form(default_chunk_options_from_lib.get('json_chunkable_data_key', 'data')),
+    summarization_detail: Optional[float] = Form(default_chunk_options_from_lib.get('summarization_detail')),
+    # Flattened client suggestions for LLM options for internal steps
+    llm_step_temperature: Optional[float] = Form(None, description="Client suggested temp for internal LLM steps."),
+    llm_step_system_prompt: Optional[str] = Form(None, description="Client suggested system prompt for internal LLM steps."),
+    llm_step_max_tokens: Optional[int] = Form(None, description="Client suggested max tokens for internal LLM steps."),
 ):
-    """
-    Accepts a file upload and chunking options via form data.
-    Returns the file content divided into chunks with associated metadata.
-    """
     logger.info(f"Received file upload for chunking: '{file.filename}'. Method from form: {method}.")
 
     if not file.filename: # Should not happen with File(...) but good check
@@ -305,102 +250,103 @@ async def process_file_for_chunking(
 
     try:
         text_content_bytes = await file.read()
-        text_content = text_content_bytes.decode('utf-8') # Assuming UTF-8, add error handling or encoding detection if needed
+        text_content = text_content_bytes.decode('utf-8')
     except Exception as e:
         logger.error(f"Error reading uploaded file '{file.filename}': {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Could not read or decode file: {e}")
     finally:
         await file.close()
 
-    # Consolidate form options into a dictionary, similar to how Pydantic model would be built
-    form_options = {
-        'method': method,
-        'max_size': max_size,
-        'overlap': overlap,
-        'language': language,
-        'adaptive': adaptive,
-        'multi_level': multi_level,
+    # Consolidate form options
+    form_options_dict = {
+        'method': method, 'max_size': max_size, 'overlap': overlap, 'language': language,
+        'tokenizer_name_or_path': tokenizer_name_or_path, 'adaptive': adaptive, 'multi_level': multi_level,
         'custom_chapter_pattern': custom_chapter_pattern,
-        'tokenizer_name_or_path': tokenizer_name_or_path,
-        'llm_options_for_internal_steps': { # Construct the nested dict
-            'provider': llm_provider_for_internal,
-            'model': llm_model_for_internal,
-            'temperature': llm_temperature_for_internal,
-        } if llm_provider_for_internal or llm_model_for_internal or llm_temperature_for_internal else None, # Only add if any LLM option is given
-        'summarization_detail': summarization_detail_for_internal,
+        'semantic_similarity_threshold': semantic_similarity_threshold,
+        'semantic_overlap_sentences': semantic_overlap_sentences,
+        'json_chunkable_data_key': json_chunkable_data_key,
+        'summarization_detail': summarization_detail,
     }
-    # Filter out None values from the top level to allow library defaults to take precedence cleanly
-    form_options_cleaned = {k: v for k, v in form_options.items() if v is not None}
-    if form_options_cleaned.get('llm_options_for_internal_steps') is not None:
-        form_options_cleaned['llm_options_for_internal_steps'] = {
-            k:v for k,v in form_options_cleaned['llm_options_for_internal_steps'].items() if v is not None
-        }
-        if not form_options_cleaned['llm_options_for_internal_steps']: # If all nested are None
-            del form_options_cleaned['llm_options_for_internal_steps']
+    # Build the nested llm_options_for_internal_steps from flattened form fields
+    internal_llm_opts_from_form = {}
+    if llm_step_temperature is not None: internal_llm_opts_from_form['temperature'] = llm_step_temperature
+    if llm_step_system_prompt is not None: internal_llm_opts_from_form['system_prompt_for_step'] = llm_step_system_prompt
+    if llm_step_max_tokens is not None: internal_llm_opts_from_form['max_tokens_per_step'] = llm_step_max_tokens
 
+    if internal_llm_opts_from_form:
+        form_options_dict['llm_options_for_internal_steps'] = internal_llm_opts_from_form
 
-    # Prepare effective_options: Start with library defaults, then update with form options
+    # Filter out None values from the top level to allow library defaults
+    form_options_cleaned = {k: v for k, v in form_options_dict.items() if v is not None}
+
     effective_processing_options = default_chunk_options_from_lib.copy()
     effective_processing_options.update(form_options_cleaned)
-    logger.debug(f"Effective chunking options from form data: {effective_processing_options}")
+    logger.debug(f"Effective chunking options from form data for file: {effective_processing_options}")
 
-    # Similar LLM config setup as in the JSON endpoint
-    llm_call_func_to_use = None
-    llm_api_config_to_use = None
+    # LLM config setup for file endpoint (mirroring the JSON endpoint logic)
+    llm_call_func_to_use_file = None
+    llm_api_config_to_use_file = None
     tokenizer_for_chunker_file = effective_processing_options.get("tokenizer_name_or_path", "gpt2")
 
     current_chunking_method_file = effective_processing_options.get('method')
     if current_chunking_method_file == 'rolling_summarize':
-        llm_call_func_to_use = general_llm_analyzer
-        server_configs = load_server_configs()
-        if not server_configs:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server configuration error for LLM step.")
+        llm_call_func_to_use_file = general_llm_analyzer
+        server_configs_file = load_server_configs()
+        if not server_configs_file:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server configuration error for LLM step (file).")
 
-        requested_llm_options_file = effective_processing_options.get('llm_options_for_internal_steps', {})
-        if requested_llm_options_file is None: requested_llm_options_file = {}
+        internal_llm_provider_file = server_configs_file.get('llm_api_settings', {}).get('default_api_for_tasks',
+                                          server_configs_file.get('llm_api_settings', {}).get('default_api', 'openai'))
+        provider_specific_config_key_file = f"{internal_llm_provider_file}_api"
+        api_details_server_file = server_configs_file.get(provider_specific_config_key_file, {})
+        internal_llm_model_file = api_details_server_file.get('model_for_summarization', api_details_server_file.get('model'))
 
-        default_summarization_provider_file = server_configs.get('llm_api_settings', {}).get('default_api', 'openai')
-        summarization_provider_file = requested_llm_options_file.get('provider') or default_summarization_provider_file
-        provider_specific_config_key_file = f"{summarization_provider_file}_api"
-        api_details_from_server_config_file = server_configs.get(provider_specific_config_key_file, {})
+        if not internal_llm_model_file:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Server config missing model for {internal_llm_provider_file} (file).")
+        api_key_server_file = api_details_server_file.get('api_key')
+        if not api_key_server_file:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Server config missing API key for {internal_llm_provider_file} (file).")
 
-        llm_api_config_to_use = {
-            "api_name": summarization_provider_file,
-            "model": requested_llm_options_file.get('model') or api_details_from_server_config_file.get('model'),
-            "api_key": api_details_from_server_config_file.get('api_key'),
-            "temp": requested_llm_options_file.get('temperature'),
+        requested_llm_params_file = effective_processing_options.get('llm_options_for_internal_steps', {})
+        if requested_llm_params_file is None: requested_llm_params_file = {}
+
+        client_suggested_system_prompt_file = requested_llm_params_file.get('system_prompt_for_step')
+        method_default_system_prompt_file = effective_processing_options.get('summarize_system_prompt')
+        final_system_prompt_step_file = client_suggested_system_prompt_file or method_default_system_prompt_file
+
+        client_suggested_max_tokens_file = requested_llm_params_file.get('max_tokens_per_step')
+        server_default_max_tokens_step_file = int(api_details_server_file.get('max_tokens_for_summarization_step', 1024))
+        final_max_tokens_step_file = client_suggested_max_tokens_file or server_default_max_tokens_step_file
+
+        llm_api_config_to_use_file = {
+            "api_name": internal_llm_provider_file, "model": internal_llm_model_file,
+            "api_key": api_key_server_file,
+            "temp": requested_llm_params_file.get('temperature'),
+            "system_message": final_system_prompt_step_file,
+            "max_tokens": final_max_tokens_step_file,
         }
-        if not llm_api_config_to_use.get("api_key"):
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Server config missing API key for {summarization_provider_file}.")
-        if not llm_api_config_to_use.get("model"):
-             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Server config missing model for {summarization_provider_file}.")
-        logger.info(f"'{current_chunking_method_file}' for file will use LLM: {summarization_provider_file}, Model: {llm_api_config_to_use['model']}")
+        logger.info(f"'{current_chunking_method_file}' for file will use server LLM: {internal_llm_provider_file}, Model: {internal_llm_model_file}.")
 
 
     loop = asyncio.get_running_loop()
     try:
         chunk_results: List[Dict[str, Any]] = await loop.run_in_executor(
-            None,
-            improved_chunking_process,
-            text_content,
-            effective_processing_options, # Pass the constructed options dict
-            tokenizer_for_chunker_file,
-            llm_call_func_to_use,
-            llm_api_config_to_use
+            None, improved_chunking_process, text_content,
+            effective_processing_options, tokenizer_for_chunker_file,
+            llm_call_func_to_use_file, llm_api_config_to_use_file
         )
-    except (ChunkingError, InvalidInputError, InvalidChunkingMethodError) as lib_error:
+    except (ChunkingError, InvalidInputError, InvalidChunkingMethodError) as lib_error: # Catch specific errors
         logger.warning(f"Chunking library error for file '{file.filename}': {lib_error}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(lib_error))
-    except ValueError as ve:
+    except ValueError as ve: # General value errors
         logger.warning(f"ValueError during chunking file '{file.filename}': {ve}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
     except Exception as e:
         logger.error(f"Unexpected error during chunking file '{file.filename}': {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"An internal error occurred during file chunking: {type(e).__name__}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal error during file chunking: {type(e).__name__}")
 
     return ChunkingResponse(
         chunks=chunk_results,
         original_file_name=file.filename,
-        applied_options=ChunkingOptionsRequest(**effective_processing_options) # Show actual options used
+        applied_options=ChunkingOptionsRequest(**effective_processing_options)
     )
