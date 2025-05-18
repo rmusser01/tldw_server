@@ -8,13 +8,13 @@ import json
 import gradio as gr
 #
 # Local Imports
-from App_Function_Libraries.Chunk_Lib import improved_chunking_process
-from App_Function_Libraries.DB.DB_Manager import update_media_content, list_prompts
-from App_Function_Libraries.Gradio_UI.Chat_ui import update_user_prompt
-from App_Function_Libraries.Gradio_UI.Gradio_Shared import fetch_item_details, fetch_items_by_keyword, \
+from PoC_Version.App_Function_Libraries.Chunk_Lib import improved_chunking_process
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import update_media_content, list_prompts
+from PoC_Version.App_Function_Libraries.Gradio_UI.Chat_ui import update_user_prompt
+from PoC_Version.App_Function_Libraries.Gradio_UI.Gradio_Shared import fetch_item_details, fetch_items_by_keyword, \
     fetch_items_by_content, fetch_items_by_title_or_url
-from App_Function_Libraries.Summarization.Summarization_General_Lib import summarize_chunk
-from App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
+from PoC_Version.App_Function_Libraries.Summarization.Summarization_General_Lib import summarize_chunk
+from PoC_Version.App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
 
 
 #

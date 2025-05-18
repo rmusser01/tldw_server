@@ -13,16 +13,16 @@ import wave
 import gradio as gr
 #
 # Local Imports
-from App_Function_Libraries.Audio.Audio_Files import process_audio_files
-from App_Function_Libraries.Audio.Audio_Transcription_Lib import PartialTranscriptionThread
-from App_Function_Libraries.DB.DB_Manager import list_prompts
-from App_Function_Libraries.Gradio_UI.Chat_ui import update_user_prompt
-from App_Function_Libraries.Gradio_UI.Gradio_Shared import whisper_models
-from App_Function_Libraries.Utils.Utils import cleanup_temp_files, default_api_endpoint, global_api_endpoints, \
+from PoC_Version.App_Function_Libraries.Audio.Audio_Files import process_audio_files
+from PoC_Version.App_Function_Libraries.Audio.Audio_Transcription_Lib import PartialTranscriptionThread
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import list_prompts
+from PoC_Version.App_Function_Libraries.Gradio_UI.Chat_ui import update_user_prompt
+from PoC_Version.App_Function_Libraries.Gradio_UI.Gradio_Shared import whisper_models
+from PoC_Version.App_Function_Libraries.Utils.Utils import cleanup_temp_files, default_api_endpoint, global_api_endpoints, \
     format_api_name, logging
 # Import metrics logging
-from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
-from App_Function_Libraries.Metrics.logger_config import logger
+from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from PoC_Version.App_Function_Libraries.Metrics.logger_config import logger
 #
 #######################################################################################################################
 # Functions:
@@ -326,7 +326,7 @@ def create_audio_processing_tab():
             if not final_wav_path or not os.path.exists(final_wav_path):
                 return "[No valid recorded WAV]", None
 
-            from App_Function_Libraries.Audio.Audio_Transcription_Lib import transcribe_audio
+            from PoC_Version.App_Function_Libraries.Audio.Audio_Transcription_Lib import transcribe_audio
             import wave
             import numpy as np
 

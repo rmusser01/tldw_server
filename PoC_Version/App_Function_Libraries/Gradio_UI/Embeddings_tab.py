@@ -11,14 +11,14 @@ import numpy as np
 from tqdm import tqdm
 #
 # Local Imports
-from App_Function_Libraries.DB.DB_Manager import get_all_content_from_database, get_all_conversations, \
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import get_all_content_from_database, get_all_conversations, \
     get_conversation_text, get_note_by_id
-from App_Function_Libraries.DB.RAG_QA_Chat_DB import get_all_notes
-from App_Function_Libraries.RAG.ChromaDB_Library import chroma_client, \
+from PoC_Version.App_Function_Libraries.DB.RAG_QA_Chat_DB import get_all_notes
+from PoC_Version.App_Function_Libraries.RAG.ChromaDB_Library import chroma_client, \
     store_in_chroma, situate_context
-from App_Function_Libraries.RAG.Embeddings_Create import create_embedding, create_embeddings_batch
-from App_Function_Libraries.Chunk_Lib import improved_chunking_process, chunk_for_embedding
-from App_Function_Libraries.Utils.Utils import load_and_log_configs, logging
+from PoC_Version.App_Function_Libraries.RAG.Embeddings_Create import create_embedding, create_embeddings_batch
+from PoC_Version.App_Function_Libraries.Chunk_Lib import improved_chunking_process, chunk_for_embedding
+from PoC_Version.App_Function_Libraries.Utils.Utils import load_and_log_configs, logging
 
 
 #

@@ -7,9 +7,9 @@
 import gradio as gr
 #
 # Local Imports
-from App_Function_Libraries.DB.DB_Manager import get_transcripts
-from App_Function_Libraries.Gradio_UI.Gradio_Shared import browse_items
-from App_Function_Libraries.Utils.Utils import format_transcription, logging
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import get_transcripts
+from PoC_Version.App_Function_Libraries.Gradio_UI.Gradio_Shared import browse_items
+from PoC_Version.App_Function_Libraries.Utils.Utils import format_transcription, logging
 
 
 def get_transcript_options(media_id):

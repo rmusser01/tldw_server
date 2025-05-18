@@ -7,7 +7,7 @@
 import gradio as gr
 #
 # Internal Libraries
-from App_Function_Libraries.Third_Party.Semantic_Scholar import search_and_display, FIELDS_OF_STUDY, PUBLICATION_TYPES
+from PoC_Version.App_Function_Libraries.Third_Party.Semantic_Scholar import search_and_display, FIELDS_OF_STUDY, PUBLICATION_TYPES
 
 
 #

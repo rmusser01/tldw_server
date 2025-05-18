@@ -16,7 +16,7 @@ from typing import List, Dict, Any, Tuple, Optional
 # (No external imports)
 #
 # Local Imports
-from App_Function_Libraries.Utils.Utils import get_project_relative_path, get_project_root, logger, logging
+from PoC_Version.App_Function_Libraries.Utils.Utils import get_project_relative_path, get_project_root, logger, logging
 
 
 #

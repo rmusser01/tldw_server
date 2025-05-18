@@ -16,9 +16,9 @@ import mwxml
 import yaml
 #
 # Local Imports
-from App_Function_Libraries.DB.DB_Manager import add_media_with_keywords
-from App_Function_Libraries.RAG.ChromaDB_Library import process_and_store_content
-from App_Function_Libraries.Utils.Utils import logging
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_with_keywords
+from PoC_Version.App_Function_Libraries.RAG.ChromaDB_Library import process_and_store_content
+from PoC_Version.App_Function_Libraries.Utils.Utils import logging
 #
 #######################################################################################################################
 #

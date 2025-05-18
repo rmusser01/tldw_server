@@ -5,7 +5,7 @@ import tempfile
 import zipfile
 import re
 
-from App_Function_Libraries.Utils.Utils import get_database_path
+from PoC_Version.App_Function_Libraries.Utils.Utils import get_database_path
 
 
 def import_prompt_from_file(file):

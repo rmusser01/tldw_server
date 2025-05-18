@@ -60,10 +60,10 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import List, Tuple, Dict, Any, Optional
 # Local Libraries
-from App_Function_Libraries.Utils.Utils import get_project_relative_path, get_database_path, \
+from PoC_Version.App_Function_Libraries.Utils.Utils import get_project_relative_path, get_database_path, \
     get_database_dir, logger, logging
-from App_Function_Libraries.Chunk_Lib import chunk_options, chunk_text
-from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from PoC_Version.App_Function_Libraries.Chunk_Lib import chunk_options, chunk_text
+from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
 #
 # Third-Party Libraries
 import gradio as gr

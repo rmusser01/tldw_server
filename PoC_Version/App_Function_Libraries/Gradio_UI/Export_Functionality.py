@@ -13,11 +13,11 @@ from typing import List, Dict, Optional, Tuple, Any
 import gradio as gr
 #
 # Local Imports
-from App_Function_Libraries.DB.DB_Manager import DatabaseError, fetch_all_notes, fetch_all_conversations, \
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import DatabaseError, fetch_all_notes, fetch_all_conversations, \
     get_keywords_for_note, fetch_notes_by_ids, fetch_conversations_by_ids
-from App_Function_Libraries.DB.RAG_QA_Chat_DB import get_keywords_for_conversation
-from App_Function_Libraries.Gradio_UI.Gradio_Shared import fetch_item_details, fetch_items_by_keyword, browse_items
-from App_Function_Libraries.Utils.Utils import logger, logging
+from PoC_Version.App_Function_Libraries.DB.RAG_QA_Chat_DB import get_keywords_for_conversation
+from PoC_Version.App_Function_Libraries.Gradio_UI.Gradio_Shared import fetch_item_details, fetch_items_by_keyword, browse_items
+from PoC_Version.App_Function_Libraries.Utils.Utils import logger, logging
 
 
 #

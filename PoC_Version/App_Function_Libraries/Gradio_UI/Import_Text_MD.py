@@ -6,7 +6,7 @@
 # External Imports
 import gradio as gr
 
-from App_Function_Libraries.Plaintext.Plaintext_Files import import_data
+from PoC_Version.App_Function_Libraries.Plaintext.Plaintext_Files import import_data
 
 
 #

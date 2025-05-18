@@ -13,11 +13,11 @@ import numpy as np
 import pyaudio
 #
 # Local Imports
-from App_Function_Libraries.Audio.Audio_Transcription_Lib import (record_audio, speech_to_text, save_audio_temp,
+from PoC_Version.App_Function_Libraries.Audio.Audio_Transcription_Lib import (record_audio, speech_to_text, save_audio_temp,
                                                                  stop_recording_infinite, transcribe_audio)
-from App_Function_Libraries.DB.DB_Manager import add_media_to_database
-from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
-from App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_to_database
+from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from PoC_Version.App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
 
 #
 #######################################################################################################################

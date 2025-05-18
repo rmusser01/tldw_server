@@ -13,9 +13,9 @@ from docling.document_converter import DocumentConverter
 
 #
 # Local Imports
-from App_Function_Libraries.DB.DB_Manager import list_prompts
-from App_Function_Libraries.Gradio_UI.Chat_ui import update_user_prompt
-from App_Function_Libraries.PDF.PDF_Ingestion_Lib import extract_metadata_from_pdf, extract_text_and_format_from_pdf, \
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import list_prompts
+from PoC_Version.App_Function_Libraries.Gradio_UI.Chat_ui import update_user_prompt
+from PoC_Version.App_Function_Libraries.PDF.PDF_Ingestion_Lib import extract_metadata_from_pdf, extract_text_and_format_from_pdf, \
     process_and_cleanup_pdf
 #
 #

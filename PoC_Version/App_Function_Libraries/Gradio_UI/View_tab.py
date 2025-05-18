@@ -7,7 +7,7 @@
 import gradio as gr
 #
 # Local Imports
-from App_Function_Libraries.DB.DB_Manager import (
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import (
     search_media_database, mark_as_trash, get_specific_prompt, delete_specific_transcript,
     delete_specific_summary, delete_specific_prompt, get_specific_transcript, get_specific_summary,
     get_media_transcripts, get_media_summaries, get_media_prompts

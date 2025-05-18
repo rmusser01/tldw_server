@@ -13,12 +13,12 @@ import gradio as gr
 from PIL import Image
 #
 # Local Imports
-from App_Function_Libraries.Chat.Chat_Functions import load_characters, save_chat_history_to_db_wrapper
-from App_Function_Libraries.DB.DB_Manager import add_character_card, get_character_cards
-from App_Function_Libraries.Gradio_UI.Chat_ui import chat_wrapper
-from App_Function_Libraries.Gradio_UI.Writing_tab import generate_writing_feedback
-from App_Function_Libraries.Utils.Utils import default_api_endpoint, format_api_name, global_api_endpoints, logging
-from App_Function_Libraries.Character_Chat.Character_Chat_Lib import load_character_card, parse_v2_card, parse_v1_card
+from PoC_Version.App_Function_Libraries.Chat.Chat_Functions import load_characters, save_chat_history_to_db_wrapper
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_character_card, get_character_cards
+from PoC_Version.App_Function_Libraries.Gradio_UI.Chat_ui import chat_wrapper
+from PoC_Version.App_Function_Libraries.Gradio_UI.Writing_tab import generate_writing_feedback
+from PoC_Version.App_Function_Libraries.Utils.Utils import default_api_endpoint, format_api_name, global_api_endpoints, logging
+from PoC_Version.App_Function_Libraries.Character_Chat.Character_Chat_Lib import load_character_card, parse_v2_card, parse_v1_card
 #
 ########################################################################################################################
 #

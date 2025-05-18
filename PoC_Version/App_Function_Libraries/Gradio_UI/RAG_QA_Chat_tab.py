@@ -14,22 +14,22 @@ import docx2txt
 import gradio as gr
 #
 # Local Imports
-from App_Function_Libraries.Books.Book_Ingestion_Lib import read_epub
-from App_Function_Libraries.DB.Character_Chat_DB import search_character_chat, search_character_cards
-from App_Function_Libraries.DB.DB_Manager import DatabaseError, get_paginated_files, add_media_with_keywords, \
+from PoC_Version.App_Function_Libraries.Books.Book_Ingestion_Lib import read_epub
+from PoC_Version.App_Function_Libraries.DB.Character_Chat_DB import search_character_chat, search_character_cards
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import DatabaseError, get_paginated_files, add_media_with_keywords, \
     get_all_conversations, get_note_by_id, get_notes_by_keywords, start_new_conversation, update_note, save_notes, \
     clear_keywords_from_note, add_keywords_to_note, load_chat_history, save_message, add_keywords_to_conversation, \
     get_keywords_for_note, delete_note, search_conversations_by_keywords, get_conversation_title, delete_conversation, \
     update_conversation_title, fetch_all_conversations, fetch_all_notes, fetch_conversations_by_ids, fetch_notes_by_ids, \
     search_media_db, search_notes_titles, list_prompts
-from App_Function_Libraries.DB.RAG_QA_Chat_DB import get_notes, delete_messages_in_conversation, search_rag_notes, \
+from PoC_Version.App_Function_Libraries.DB.RAG_QA_Chat_DB import get_notes, delete_messages_in_conversation, search_rag_notes, \
     search_rag_chat, get_conversation_rating, set_conversation_rating
-from App_Function_Libraries.Gradio_UI.Gradio_Shared import update_user_prompt
-from App_Function_Libraries.PDF.PDF_Ingestion_Lib import extract_text_and_format_from_pdf
-from App_Function_Libraries.RAG.RAG_Library_2 import generate_answer, enhanced_rag_pipeline
-from App_Function_Libraries.RAG.RAG_QA_Chat import search_database, rag_qa_chat
-from App_Function_Libraries.TTS.TTS_Providers import play_mp3, generate_audio
-from App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, \
+from PoC_Version.App_Function_Libraries.Gradio_UI.Gradio_Shared import update_user_prompt
+from PoC_Version.App_Function_Libraries.PDF.PDF_Ingestion_Lib import extract_text_and_format_from_pdf
+from PoC_Version.App_Function_Libraries.RAG.RAG_Library_2 import generate_answer, enhanced_rag_pipeline
+from PoC_Version.App_Function_Libraries.RAG.RAG_QA_Chat import search_database, rag_qa_chat
+from PoC_Version.App_Function_Libraries.TTS.TTS_Providers import generate_audio
+from PoC_Version.App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, \
     load_and_log_configs, logging
 #
 ########################################################################################################################

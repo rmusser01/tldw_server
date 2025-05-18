@@ -7,7 +7,7 @@ from typing import Tuple, List
 import gradio as gr
 #
 # Local Imports
-from App_Function_Libraries.DB.DB_Manager import (
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import (
     get_trashed_items, user_delete_item, empty_trash,
     get_transcripts, fetch_item_details,
     search_media_database, mark_as_trash,

@@ -7,8 +7,8 @@
 import gradio as gr
 #
 # Local Imports
-from App_Function_Libraries.RAG.RAG_Library_2 import enhanced_rag_pipeline
-from App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
+from PoC_Version.App_Function_Libraries.RAG.RAG_Library_2 import enhanced_rag_pipeline
+from PoC_Version.App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
 #
 ########################################################################################################################
 #

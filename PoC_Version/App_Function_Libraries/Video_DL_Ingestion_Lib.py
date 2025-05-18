@@ -32,8 +32,8 @@ from urllib.parse import urlparse, parse_qs
 import yt_dlp
 import unicodedata
 # Import Local
-from App_Function_Libraries.DB.DB_Manager import check_media_and_whisper_model
-from App_Function_Libraries.Utils.Utils import logging
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import check_media_and_whisper_model
+from PoC_Version.App_Function_Libraries.Utils.Utils import logging
 
 
 #

@@ -15,7 +15,7 @@ import torch
 from transformers import AutoTokenizer
 #
 # Local Imports
-from App_Function_Libraries.Utils.Utils import load_and_log_configs, loaded_config_data, download_file, logging
+from PoC_Version.App_Function_Libraries.Utils.Utils import load_and_log_configs, loaded_config_data, download_file, logging
 # Kokoro-Specific Imports
 from scipy.io import wavfile
 from pydub import AudioSegment, effects  # For optional post-processing

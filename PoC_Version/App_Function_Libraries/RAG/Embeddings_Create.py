@@ -16,9 +16,9 @@ from transformers import AutoTokenizer, AutoModel
 import torch
 #
 # Local Imports:
-from App_Function_Libraries.LLM_API_Calls import get_openai_embeddings
-from App_Function_Libraries.Utils.Utils import load_and_log_configs, logging
-from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from PoC_Version.App_Function_Libraries.LLM_API_Calls import get_openai_embeddings
+from PoC_Version.App_Function_Libraries.Utils.Utils import load_and_log_configs, logging
+from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
 #
 #######################################################################################################################
 #

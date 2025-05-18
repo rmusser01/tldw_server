@@ -7,7 +7,7 @@
 import gradio as gr
 #
 # Local Imports
-from App_Function_Libraries.DB.DB_Manager import get_db_config
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import get_db_config
 #
 ####################################################################################################
 #

@@ -16,15 +16,15 @@ from pathlib import Path
 # External Imports
 #
 # Local Imports
-from App_Function_Libraries.DB.DB_Manager import start_new_conversation, delete_messages_in_conversation, save_message
-from App_Function_Libraries.DB.RAG_QA_Chat_DB import get_db_connection, get_conversation_name
-from App_Function_Libraries.LLM_API_Calls import chat_with_openai, chat_with_anthropic, chat_with_cohere, \
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import start_new_conversation, delete_messages_in_conversation, save_message
+from PoC_Version.App_Function_Libraries.DB.RAG_QA_Chat_DB import get_db_connection, get_conversation_name
+from PoC_Version.App_Function_Libraries.LLM_API_Calls import chat_with_openai, chat_with_anthropic, chat_with_cohere, \
     chat_with_groq, chat_with_openrouter, chat_with_deepseek, chat_with_mistral, chat_with_huggingface, chat_with_google
-from App_Function_Libraries.LLM_API_Calls_Local import chat_with_aphrodite, chat_with_local_llm, chat_with_ollama, \
+from PoC_Version.App_Function_Libraries.LLM_API_Calls_Local import chat_with_aphrodite, chat_with_local_llm, chat_with_ollama, \
     chat_with_kobold, chat_with_llama, chat_with_oobabooga, chat_with_tabbyapi, chat_with_vllm, chat_with_custom_openai
-from App_Function_Libraries.DB.SQLite_DB import load_media_content
-from App_Function_Libraries.Utils.Utils import generate_unique_filename, load_and_log_configs, logging
-from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from PoC_Version.App_Function_Libraries.DB.SQLite_DB import load_media_content
+from PoC_Version.App_Function_Libraries.Utils.Utils import generate_unique_filename, load_and_log_configs, logging
+from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
 #
 ####################################################################################################
 #

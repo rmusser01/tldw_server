@@ -13,8 +13,8 @@
 ####################################################################################################
 #
 # Functions:
-from App_Function_Libraries.Chat import chat_api_call
-from App_Function_Libraries.Benchmarks_Evaluations.ms_g_eval import validate_inputs, detailed_api_error
+from PoC_Version.App_Function_Libraries.Benchmarks_Evaluations.ms_g_eval import validate_inputs, detailed_api_error
+from PoC_Version.App_Function_Libraries.Chat.Chat_Functions import chat_api_call
 
 
 def simplified_geval(transcript: str, summary: str, api_name: str, api_key: str, temp: float = 0.7) -> str:

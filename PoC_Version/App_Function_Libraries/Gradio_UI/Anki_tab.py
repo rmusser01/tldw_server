@@ -12,16 +12,16 @@ import genanki
 import gradio as gr
 #
 # Local Imports
-from App_Function_Libraries.Chat.Chat_Functions import approximate_token_count, update_chat_content, save_chat_history, \
+from PoC_Version.App_Function_Libraries.Chat.Chat_Functions import approximate_token_count, update_chat_content, save_chat_history, \
     save_chat_history_to_db_wrapper
-from App_Function_Libraries.DB.DB_Manager import list_prompts
-from App_Function_Libraries.Gradio_UI.Chat_ui import update_dropdown_multiple, chat_wrapper, update_selected_parts, \
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import list_prompts
+from PoC_Version.App_Function_Libraries.Gradio_UI.Chat_ui import update_dropdown_multiple, chat_wrapper, update_selected_parts, \
     search_conversations, regenerate_last_message, load_conversation, debug_output
-from App_Function_Libraries.Third_Party.Anki import sanitize_html, generate_card_choices, \
+from PoC_Version.App_Function_Libraries.Third_Party.Anki import sanitize_html, generate_card_choices, \
     export_cards, load_card_for_editing, handle_file_upload, \
     validate_for_ui, update_card_with_validation, update_card_choices, enhanced_file_upload, \
     handle_validation
-from App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
+from PoC_Version.App_Function_Libraries.Utils.Utils import default_api_endpoint, global_api_endpoints, format_api_name, logging
 
 
 #

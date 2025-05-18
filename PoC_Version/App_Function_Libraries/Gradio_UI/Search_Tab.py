@@ -9,10 +9,10 @@ import sqlite3
 import gradio as gr
 #
 # Local Imports
-from App_Function_Libraries.DB.DB_Manager import search_and_display_items, get_all_document_versions, \
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import search_and_display_items, get_all_document_versions, \
     fetch_item_details, get_latest_transcription, search_prompts, get_document_version
-from App_Function_Libraries.Gradio_UI.Gradio_Shared import update_dropdown
-from App_Function_Libraries.Utils.Utils import logging
+from PoC_Version.App_Function_Libraries.Gradio_UI.Gradio_Shared import update_dropdown
+from PoC_Version.App_Function_Libraries.Utils.Utils import logging
 #
 ###################################################################################################
 #

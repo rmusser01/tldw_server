@@ -10,10 +10,10 @@ import time
 from typing import List, Tuple, IO, Union
 #
 # Local Imports
-from App_Function_Libraries.DB.DB_Manager import db, search_media_db, DatabaseError, get_media_content
-from App_Function_Libraries.RAG.RAG_Library_2 import generate_answer, enhanced_rag_pipeline
-from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
-from App_Function_Libraries.Utils.Utils import logging
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import db, search_media_db, DatabaseError, get_media_content
+from PoC_Version.App_Function_Libraries.RAG.RAG_Library_2 import generate_answer, enhanced_rag_pipeline
+from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from PoC_Version.App_Function_Libraries.Utils.Utils import logging
 #
 ########################################################################################################################
 #

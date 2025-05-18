@@ -23,7 +23,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 #
 # Import Local
-from App_Function_Libraries.Utils.Utils import load_and_log_configs, logging
+from PoC_Version.App_Function_Libraries.Utils.Utils import load_and_log_configs, logging
 
 
 #

@@ -20,10 +20,10 @@
 
 # Import necessary libraries
 # Import Local
-from App_Function_Libraries.Audio.Audio_Transcription_Lib import convert_to_wav
-from App_Function_Libraries.Video_DL_Ingestion_Lib import *
-from App_Function_Libraries.Video_DL_Ingestion_Lib import get_youtube
-from App_Function_Libraries.Utils.Utils import normalize_title, create_download_directory
+from PoC_Version.App_Function_Libraries.Audio.Audio_Transcription_Lib import convert_to_wav
+from PoC_Version.App_Function_Libraries.Video_DL_Ingestion_Lib import *
+from PoC_Version.App_Function_Libraries.Video_DL_Ingestion_Lib import get_youtube
+from PoC_Version.App_Function_Libraries.Utils.Utils import normalize_title, create_download_directory
 
 #######################################################################################################################
 # Function Definitions

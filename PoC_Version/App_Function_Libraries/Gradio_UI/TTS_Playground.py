@@ -6,9 +6,9 @@ import time
 import gradio as gr
 #
 # Local Imports
-from App_Function_Libraries.TTS.TTS_Providers import generate_audio
-from App_Function_Libraries.DB.DB_Manager import add_media_to_database
-from App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
+from PoC_Version.App_Function_Libraries.TTS.TTS_Providers import generate_audio
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import add_media_to_database
+from PoC_Version.App_Function_Libraries.Metrics.metrics_logger import log_counter, log_histogram
 #
 ########################################################################################################################
 # Constants and Configuration

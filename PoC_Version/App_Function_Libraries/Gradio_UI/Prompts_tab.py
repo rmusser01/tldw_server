@@ -8,8 +8,8 @@ import html
 import gradio as gr
 #
 # Local Imports
-from App_Function_Libraries.DB.DB_Manager import fetch_prompt_details, list_prompts
-from App_Function_Libraries.Utils.Utils import logging
+from PoC_Version.App_Function_Libraries.DB.DB_Manager import fetch_prompt_details, list_prompts
+from PoC_Version.App_Function_Libraries.Utils.Utils import logging
 
 
 #
