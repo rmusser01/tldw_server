@@ -16,10 +16,10 @@ import pytest
 # Status: FIXME
 
 # Add the project root (parent directory of App_Function_Libraries) to sys.path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.path.insert(0, project_root)
+# project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+# sys.path.insert(0, project_root)
 
-print(f"Project root added to sys.path: {project_root}")
+# print(f"Project root added to sys.path: {project_root}")
 
 # Local Imports
 #from App_Function_Libraries.Utils.Utils import load_and_log_configs

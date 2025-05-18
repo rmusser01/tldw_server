@@ -37,63 +37,63 @@ jobs:
           ls
           cd tldw_Server_API/
           ls
-          cd Tests/
+          cd tests/
           ls
           cd ChaChaNotesDB/
           ls
-          pytest -s ./tldw_Server_API/Tests/ChaChaNotesDB/test_chachanotes_db.py
+          pytest -s ./tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
       - name: Test Chat Completion Integrations with pytest
         run: |
           pwd
-          pytest -s ./tldw_Server_API/Tests/Chat/test_chat_completion_integration.py
+          pytest -s ./tldw_Server_API/tests/Chat/test_chat_completion_integration.py
       - name: Test Chat Endpoint with pytest
         run: |
           pwd
-          pytest -s ./tldw_Server_API/Tests/Chat/test_chat_endpoint.py
+          pytest -s ./tldw_Server_API/tests/Chat/test_chat_endpoint.py
       - name: Test Chat Library with pytest
         run: |
           pwd
-          pytest -s ./tldw_Server_API/Tests/Chat/test_chat_functions.py
+          pytest -s ./tldw_Server_API/tests/Chat/test_chat_functions.py
       - name: Test Chat Request Schema with pytest
         run: |
           pwd
-          pytest -s ./tldw_Server_API/Tests/Chat/test_chat_request_schema.py
+          pytest -s ./tldw_Server_API/tests/Chat/test_chat_request_schema.py
       - name: Test Chat Prompt Template Manager with pytest
         run: |
           pwd
-          pytest -s ./tldw_Server_API/Tests/Chat/test_prompt_template_manager.py
+          pytest -s ./tldw_Server_API/tests/Chat/test_prompt_template_manager.py
       - name: Test ChromaDB with pytest
         run: |
           pwd
-          pytest -s ./tldw_Server_API/Tests/ChromaDB/test_chromadb.py
+          pytest -s ./tldw_Server_API/tests/ChromaDB/test_chromadb.py
       - name: Test Chunking Library with pytest
         run: |
           pwd
-          pytest -s ./tldw_Server_API/Tests/Chunking/test_chunk_lib.py
+          pytest -s ./tldw_Server_API/tests/Chunking/test_chunk_lib.py
       - name: Test Chunking Library with pytest
         run: |
           pwd
-          pytest -s ./tldw_Server_API/Tests/Chunking/test_chunking_endpoint.py
+          pytest -s ./tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
       - name: Test Media Versioning Functions with pytest
         run: |
           pwd
-          pytest -s ./tldw_Server_API/Tests/Media_Ingestion_Modification/test_media_versions.py
+          pytest -s ./tldw_Server_API/tests/Media_Ingestion_Modification/test_media_versions.py
       - name: Test Media Processing Endpoint functions with pytest
         run: |
           pwd
-          pytest -s ./tldw_Server_API/Tests/Media_Ingestion_Modification/test_media_processing.py
+          pytest -s ./tldw_Server_API/tests/Media_Ingestion_Modification/test_media_processing.py
       - name: Test Media Endpoint functions with pytest
         run: |
           pwd
-          pytest -s ./tldw_Server_API/Tests/Media_Ingestion_Modification/test_media_endpoint.py
+          pytest -s ./tldw_Server_API/tests/Media_Ingestion_Modification/test_media_endpoint.py
       - name: Test MediaDB2 Library with pytest
         run: |
           pwd
-          pytest -s ./tldw_Server_API/Tests/MediaDB2/test_sqlite_db.py
+          pytest -s ./tldw_Server_API/tests/MediaDB2/test_sqlite_db.py
       - name: Test Media Endpoint functions with pytest
         run: |
           pwd
-          pytest -s ./tldw_Server_API/Tests/Media_Ingestion_Modification/test_media_endpoint.py
+          pytest -s ./tldw_Server_API/tests/Media_Ingestion_Modification/test_media_endpoint.py
       - name: Test tldw runs
         run: |
           pwd

@@ -8,6 +8,9 @@ https://www.bespokelabs.ai/blog/bespoke-minichart-7b
 https://careersatdoordash.com/blog/doordash-llm-transcribe-menu/
 https://huggingface.co/Qwen/Qwen2.5-Omni-3B
 https://huggingface.co/collections/Qwen/qwen25-omni-67de1e5f0f9464dc6314b36e
+https://docs.inferless.com/how-to-guides/deploy-gemma-27b-it
+
+
 
 MAMBA
     https://ivy-lvlm.github.io/Video-MA2MBA/
