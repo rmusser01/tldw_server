@@ -38,7 +38,7 @@
                     </div>
                     <div class="form-group">
                         <label for="chatCompletions_model">Model:</label>
-                        <input type="text" id="chatCompletions_model" value="gpt-4o-mini" placeholder="e.g., gpt-4o-mini, claude-3-opus-20240229">
+                        <input type="text" id="chatCompletions_model" value="gpt-4o-mini" placeholder="e.g., gpt-4o-mini, claude-3-opus-20240229, llava, ...">
                     </div>
                 </div>
                 <div class="column">
@@ -61,7 +61,7 @@
             <div class="form-group">
                 <h3>Messages:</h3>
                 <div id="chatCompletions_messagesContainer">
-                    <!-- Initial messages will be added by JS -->
+                    <!-- Initial messages will be added by JS with image input capabilities -->
                 </div>
                 <button class="add-message-btn" onclick="addChatMessage('chatCompletions')">Add Message</button>
             </div>
@@ -95,6 +95,10 @@
                                 <label for="chatCompletions_character_id">Character ID (for Templating):</label>
                                 <input type="text" id="chatCompletions_character_id" placeholder="e.g., character_db_id_123">
                             </div>
+                            <div class="form-group">
+                                <label for="chatCompletions_conversation_id">Conversation ID (for Context):</label>
+                                <input type="text" id="chatCompletions_conversation_id" placeholder="e.g., conv_uuid_abc_123">
+                            </div>
                         </div>
                         <div class="column">
                             <div class="form-group">
@@ -125,6 +129,14 @@
                                 <label for="chatCompletions_prompt_template_name">Prompt Template Name:</label>
                                 <input type="text" id="chatCompletions_prompt_template_name" placeholder="e.g., my_custom_template">
                             </div>
+                            <div class="form-group">
+                                <label for="chatCompletions_n">N (Completions, 1-128):</label>
+                                <input type="number" id="chatCompletions_n" placeholder="e.g., 1" step="1" min="1" max="128">
+                            </div>
+                            <div class="form-group">
+                                <label for="chatCompletions_user">User Identifier (Optional):</label>
+                                <input type="text" id="chatCompletions_user" placeholder="e.g., user_12345">
+                            </div>
                         </div>
                     </div>
                      <div class="form-group">
@@ -149,7 +161,8 @@
         </div>
          <small>
             API key for the selected provider is configured server-side (if required by provider).
-            Ensure model names are compatible with the selected provider.
+            Ensure model names are compatible with the selected provider (e.g., multimodal models like gpt-4-vision-preview, llava).
+            The "character_id" and "conversation_id" fields are primarily for use with custom server logic involving templating and conversation history management.
         </small>
         <br><br>
         <button class="api-button" onclick="handleChatCompletionsRequest()">Send Request</button>

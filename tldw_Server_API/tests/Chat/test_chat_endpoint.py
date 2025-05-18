@@ -418,7 +418,7 @@ def test_keyless_provider_proceeds_without_key(  # Added default_chat_request_da
     (ChatAPIError(provider="test", message="Generic API issue"), status.HTTP_500_INTERNAL_SERVER_ERROR,
      "Generic API issue"),
     (ValueError("Value error from shim"), status.HTTP_400_BAD_REQUEST,
-     "Invalid input or parameter: Value error from shim"),
+     "Invalid input from api call: Value error from shim"),
     (HTTPException(status_code=418, detail="I'm a teapot from shim"), 418, "I'm a teapot from shim"),
 ])
 def test_chat_api_call_exception_handling_unit(

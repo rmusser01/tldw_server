@@ -683,13 +683,12 @@ def chat_with_cohere(
             logging.debug("Cohere: Streaming response received. Normalizing to OpenAI SSE.")
 
             def stream_generator():
-                # ... (your existing Cohere stream normalization logic) ...
                 completion_id = f"chatcmpl-cohere-{time.time_ns()}"
                 created_time = int(time.time())
                 buffer = ""
                 stream_truly_finished_by_cohere = False
                 try:
-                    for chunk_bytes in response.iter_content(chunk_size=None):  # Cohere stream is line-delimited JSONs
+                    for chunk_bytes in response.iter_content(chunk_size=None):
                         if not chunk_bytes: continue
                         buffer += chunk_bytes.decode('utf-8', errors='replace')
                         while '\n' in buffer:
@@ -697,37 +696,63 @@ def chat_with_cohere(
                             if not line.strip(): continue
                             try:
                                 cohere_event = json.loads(line)
+                                event_type = cohere_event.get("event_type")
                                 delta_text = None
                                 finish_reason_str = None
-                                # Cohere v1 streaming format might differ, check their docs
-                                # This assumes events like {"text": "...", "is_finished": false}
-                                # or {"event_type": "text-generation", "text": "..."}
-                                # or {"event_type": "stream-end", "finish_reason": "..."}
-                                if "text" in cohere_event and not cohere_event.get("is_finished"):
+
+                                if event_type == "text-generation":
                                     delta_text = cohere_event.get("text")
-                                if cohere_event.get("is_finished"):
+                                elif event_type == "stream-end":
                                     stream_truly_finished_by_cohere = True
-                                    finish_reason_str = cohere_event.get("finish_reason", "COMPLETE").lower()
-                                    if finish_reason_str == "complete":
+                                    # Cohere's finish_reason from the 'response' object in stream-end event
+                                    # or directly if it's at the top level of the stream-end event.
+                                    # Let's assume it might be at the top level of the event first
+                                    raw_finish_reason = cohere_event.get("finish_reason", "COMPLETE")
+                                    # Or from the nested response object if available
+                                    if "response" in cohere_event and isinstance(cohere_event["response"], dict):
+                                        raw_finish_reason = cohere_event["response"].get("finish_reason", raw_finish_reason)
+
+                                    finish_reason_str = str(raw_finish_reason).upper() # Ensure uppercase for map
+                                    # Map to OpenAI like finish reasons
+                                    if finish_reason_str == "COMPLETE":
                                         finish_reason_str = "stop"
-                                    elif finish_reason_str == "max_tokens":
+                                    elif finish_reason_str == "MAX_TOKENS":
                                         finish_reason_str = "length"
+                                    elif finish_reason_str == "ERROR_LIMIT": # Example, adjust if needed
+                                        finish_reason_str = "length"
+                                    elif finish_reason_str == "ERROR_TOXIC": # Example
+                                        finish_reason_str = "content_filter"
+                                    else: # For other Cohere reasons, pass them lowercased or map specifically
+                                        finish_reason_str = finish_reason_str.lower()
+
 
                                 if delta_text:
                                     sse_chunk = {"id": completion_id, "object": "chat.completion.chunk",
                                                  "created": created_time, "model": current_model, "choices": [
                                             {"index": 0, "delta": {"content": delta_text}, "finish_reason": None}]}
+                                    logging.debug(f"Cohere Stream Yielding Text: {delta_text[:50]}")
                                     yield f"data: {json.dumps(sse_chunk)}\n\n"
-                                if finish_reason_str:
+
+                                if finish_reason_str and stream_truly_finished_by_cohere: # Only yield finish reason at the actual end
                                     sse_chunk = {"id": completion_id, "object": "chat.completion.chunk",
                                                  "created": created_time, "model": current_model, "choices": [
                                             {"index": 0, "delta": {}, "finish_reason": finish_reason_str}]}
+                                    logging.debug(f"Cohere Stream Yielding Finish Reason: {finish_reason_str}")
                                     yield f"data: {json.dumps(sse_chunk)}\n\n"
-                                if stream_truly_finished_by_cohere: break
+
+                                if stream_truly_finished_by_cohere:
+                                    break
                             except json.JSONDecodeError:
                                 logging.warning(f"Cohere Stream: Could not decode JSON from line: '{line}'")
-                        if stream_truly_finished_by_cohere: break
-                    yield "data: [DONE]\n\n"
+                            except Exception as e_parse:
+                                logging.error(f"Cohere Stream: Error parsing event '{line}': {e_parse}", exc_info=True)
+
+                        if stream_truly_finished_by_cohere:
+                            break
+                    # Ensure [DONE] is sent if the loop finishes without a stream-end event (less ideal)
+                    if not stream_truly_finished_by_cohere:
+                        logging.warning("Cohere stream finished without explicit stream-end event.")
+
                 except requests.exceptions.ChunkedEncodingError as e:  # ... error handling ...
                     logging.error(f"Cohere: ChunkedEncodingError: {e}", exc_info=True)
                     yield f"data: {json.dumps({'error': {'message': f'Stream error: {str(e)}', 'type': 'cohere_stream_error'}})}\n\n"
@@ -735,9 +760,9 @@ def chat_with_cohere(
                     logging.error(f"Cohere: Stream iteration error: {e}", exc_info=True)
                     yield f"data: {json.dumps({'error': {'message': f'Stream iteration error: {str(e)}', 'type': 'cohere_stream_error'}})}\n\n"
                 finally:
+                    logging.debug("Cohere Stream: Sending final [DONE] event.")
                     yield "data: [DONE]\n\n"
                     if response: response.close()
-
             return stream_generator()
         else:
             # ... (non-streaming normalization from your file, ensure "Cohere" in logs) ...
@@ -1262,6 +1287,18 @@ def chat_with_huggingface(
         logging.debug(f"HuggingFace: Using API Key: {log_key_display}")
     else:
         logging.warning("HuggingFace: API key is missing. Assuming local/unsecured TGI or endpoint allows it.")
+    if not final_api_key:  # Ensure this check is appropriate for your HF setup
+        logging.warning("HuggingFace: API key is missing. Calls might fail if the endpoint requires authentication.")
+        # Depending on your setup, you might want to raise ChatAuthenticationError here if a key is always needed.
+
+    headers = {
+        "Content-Type": "application/json"
+    }
+    if final_api_key:  # Only add Authorization header if a key is present
+        headers["Authorization"] = f"Bearer {final_api_key}"
+
+    logging.debug(f"HuggingFace Payload (excluding messages): {{k:v for k,v in payload.items() if k != 'messages'}}")
+    logging.debug(f"HuggingFace Headers: {headers}")
 
     # Model for the payload. The 'model' arg to this function is primary.
     final_model_for_payload = model or hf_config.get('model')  # 'model' from config, not 'model_id'
@@ -1335,9 +1372,9 @@ def chat_with_huggingface(
 
     try:
         if final_streaming:
-            # ... (OpenAI-like streaming logic, use "HuggingFace" in logs) ...
             logging.debug(f"HuggingFace: Posting streaming request to {api_url}")
             with requests.Session() as session:
+                # Use the defined headers
                 response = session.post(api_url, headers=headers, json=payload, stream=True, timeout=180)
                 response.raise_for_status()
 
@@ -1352,9 +1389,7 @@ def chat_with_huggingface(
 
                 return stream_generator()
         else:
-            # ... (non-streaming logic, retry) ...
             logging.debug(f"HuggingFace: Posting non-streaming request to {api_url}")
-            # ... (retry setup from your file) ...
             adapter = HTTPAdapter(max_retries=Retry(total=int(hf_config.get('api_retries', 3)),
                                                     backoff_factor=float(hf_config.get('api_retry_delay', 1)),
                                                     status_forcelist=[429, 500, 502, 503, 504],
@@ -1362,6 +1397,7 @@ def chat_with_huggingface(
             with requests.Session() as session:
                 session.mount("https://", adapter);
                 session.mount("http://", adapter)
+                # Use the defined headers
                 response = session.post(api_url, headers=headers, json=payload,
                                         timeout=float(hf_config.get('api_timeout', 120.0)))
             response.raise_for_status()

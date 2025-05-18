@@ -23,7 +23,7 @@ from tldw_Server_API.app.api.v1.endpoints.audio import router as audio_router
 from tldw_Server_API.app.api.v1.endpoints.chat import router as chat_router
 #
 # Chunking Endpoint
-from tldw_Server_API.app.api.v1.endpoints.chunking import router as chunking_router
+from tldw_Server_API.app.api.v1.endpoints.chunking import chunking_router as chunking_router
 #
 # Embedding Endpoint
 from tldw_Server_API.app.api.v1.endpoints.embeddings import router as embeddings_router

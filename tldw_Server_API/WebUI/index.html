@@ -47,6 +47,10 @@
             width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px;
             box-sizing: border-box; font-size: 0.95em;
         }
+        input[type="file"] { /* Style file inputs slightly differently */
+            width: calc(100% - 22px); padding: 8px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px;
+            box-sizing: border-box; font-size: 0.9em;
+        }
         textarea { min-height: 80px; resize: vertical; }
         button.api-button { /* Differentiate API call buttons from tab buttons */
             background-color: #28a745; color: white; padding: 10px 15px; border: none; border-radius: 4px;
@@ -68,12 +72,22 @@
             background-color: #f9f9f9;
         }
         .message-entry label { font-size: 0.9em; }
-        .message-entry select, .message-entry textarea, .message-entry input[type="text"] { margin-bottom: 5px; width: 100% !important; box-sizing: border-box; }
-        .remove-message-btn {
+        .message-entry select, .message-entry textarea, .message-entry input[type="text"], .message-entry input[type="file"] {
+            margin-bottom: 5px; width: 100% !important; box-sizing: border-box;
+        }
+        .message-image-upload {
+            margin-top: 8px;
+            padding: 8px;
+            border: 1px dashed #ccc;
+            border-radius: 3px;
+        }
+        .message-image-upload label { font-size: 0.85em; margin-top: 0;}
+
+        .remove-message-btn, .remove-image-btn {
             background-color: #dc3545; color: white; border: none; padding: 5px 10px;
             border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px;
         }
-        .remove-message-btn:hover { background-color: #c82333; }
+        .remove-message-btn:hover, .remove-image-btn:hover { background-color: #c82333; }
         .add-message-btn {
             background-color: #17a2b8; /* Info blue */ color: white; border: none; padding: 8px 12px;
             border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-bottom: 15px;
@@ -172,12 +186,11 @@
                 btn.addEventListener('click', () => activateSubTab(btn));
             });
 
-            // Activate the "Chat" top tab and its "Chat Completions" sub-tab by default
             const defaultTopTab = document.getElementById('top-tab-chat');
             if (defaultTopTab) {
                 activateTopTab(defaultTopTab);
             } else if (topTabButtons.length > 0) {
-                activateTopTab(topTabButtons[0]); // Fallback to first top tab
+                activateTopTab(topTabButtons[0]);
             }
         }
 
@@ -196,7 +209,7 @@
                 subTabRowToShow.classList.add('active');
                 const firstSubTabButton = subTabRowToShow.querySelector('.sub-tab-buttons button');
                 if (firstSubTabButton) {
-                    await activateSubTab(firstSubTabButton); // Make sure content loading completes
+                    await activateSubTab(firstSubTabButton);
                 }
             } else {
                 if (activeSubTabButton) {
@@ -292,6 +305,7 @@
 
         // --- Chat Completions UI Specific Functions ---
         function escapeCurlData(data) {
+            // More robust escaping for single quotes in JSON data for cURL
             return data.replace(/'/g, "'\\''");
         }
 
@@ -307,14 +321,22 @@
             entryDiv.id = `${prefix}_message_entry_${id}`;
             entryDiv.innerHTML = `
                 <label for="${prefix}_message_role_${id}">Role:</label>
-                <select id="${prefix}_message_role_${id}" onchange="toggleToolFields('${prefix}', ${id})">
+                <select id="${prefix}_message_role_${id}" onchange="toggleToolFields('${prefix}', ${id}); toggleImageUploadUI('${prefix}', ${id})">
                     <option value="system" ${role === 'system' ? 'selected' : ''}>System</option>
                     <option value="user" ${role === 'user' ? 'selected' : ''}>User</option>
                     <option value="assistant" ${role === 'assistant' ? 'selected' : ''}>Assistant</option>
                     <option value="tool" ${role === 'tool' ? 'selected' : ''}>Tool</option>
                 </select>
-                <label for="${prefix}_message_content_${id}">Content:</label>
-                <textarea id="${prefix}_message_content_${id}" rows="3" placeholder="Enter message content...">${content}</textarea>
+                <label for="${prefix}_message_content_${id}">Content (Text):</label>
+                <textarea id="${prefix}_message_content_${id}" rows="3" placeholder="Enter message text...">${content}</textarea>
+
+                <div class="form-group message-image-upload" id="${prefix}_message_image_upload_container_${id}">
+                    <label for="${prefix}_message_image_${id}">Image (Optional, for 'user' role):</label>
+                    <input type="file" id="${prefix}_message_image_${id}" accept="image/*" onchange="previewMessageImage('${prefix}', ${id})">
+                    <img id="${prefix}_message_image_preview_${id}" src="#" alt="Image Preview" style="max-width: 100px; max-height: 100px; display: none; margin-top: 5px;">
+                    <button type="button" class="remove-image-btn" id="${prefix}_message_image_clear_${id}" onclick="clearMessageImage('${prefix}', ${id})" style="display: none; font-size:0.8em; padding: 3px 6px;">Clear Image</button>
+                </div>
+
                 <label for="${prefix}_message_name_${id}">Name (Optional):</label>
                 <input type="text" id="${prefix}_message_name_${id}" placeholder="Participant name (e.g., function name for assistant tool_calls)">
                 <div id="${prefix}_message_tool_fields_${id}" style="display: ${role === 'tool' ? 'block' : 'none'};">
@@ -324,7 +346,8 @@
                 <button class="remove-message-btn" onclick="removeChatMessage('${prefix}', ${id})">Remove</button>
             `;
             container.appendChild(entryDiv);
-            toggleToolFields(prefix, id); // Ensure correct visibility on add
+            toggleToolFields(prefix, id);
+            toggleImageUploadUI(prefix, id); // Call after appending to set initial state
         }
 
         function toggleToolFields(prefix, id) {
@@ -335,12 +358,56 @@
             }
         }
 
-        function removeChatMessage(prefix, id) {
-            const entryDiv = document.getElementById(`${prefix}_message_entry_${id}`);
-            if (entryDiv) {
-                entryDiv.remove();
+        function toggleImageUploadUI(prefix, id) {
+            const roleSelect = document.getElementById(`${prefix}_message_role_${id}`);
+            const imageUploadContainer = document.getElementById(`${prefix}_message_image_upload_container_${id}`);
+            if (roleSelect && imageUploadContainer) {
+                imageUploadContainer.style.display = roleSelect.value === 'user' ? 'block' : 'none';
+                if (roleSelect.value !== 'user') { // If role changed away from user, clear any selected image
+                    clearMessageImage(prefix, id);
+                }
             }
         }
+
+        function previewMessageImage(prefix, id) {
+            const fileInput = document.getElementById(`${prefix}_message_image_${id}`);
+            const previewImg = document.getElementById(`${prefix}_message_image_preview_${id}`);
+            const clearButton = document.getElementById(`${prefix}_message_image_clear_${id}`);
+
+            if (fileInput && previewImg && clearButton && fileInput.files && fileInput.files[0]) {
+                const file = fileInput.files[0];
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewImg.src = e.target.result;
+                    previewImg.style.display = 'block';
+                    clearButton.style.display = 'inline-block';
+                    // Store the data URL directly on a data attribute of the file input
+                    fileInput.dataset.imageDataUrl = e.target.result;
+                }
+                reader.readAsDataURL(file);
+            } else if (previewImg) { // No file selected or input not found
+                clearMessageImage(prefix, id); // Ensure UI is cleared
+            }
+        }
+
+        function clearMessageImage(prefix, id) {
+            const fileInput = document.getElementById(`${prefix}_message_image_${id}`);
+            const previewImg = document.getElementById(`${prefix}_message_image_preview_${id}`);
+            const clearButton = document.getElementById(`${prefix}_message_image_clear_${id}`);
+
+            if (fileInput) {
+                fileInput.value = null; // Clear the file input
+                delete fileInput.dataset.imageDataUrl; // Remove stored data
+            }
+            if (previewImg) {
+                previewImg.style.display = 'none';
+                previewImg.src = '#';
+            }
+            if (clearButton) {
+                clearButton.style.display = 'none';
+            }
+        }
+
 
         function buildPayloadFromForm(prefix) {
             const payload = {};
@@ -362,12 +429,45 @@
                     if (!entryDiv.id || !entryDiv.id.startsWith(prefix + '_message_entry_')) return;
                     const entryId = entryDiv.id.split('_').pop();
                     const role = document.getElementById(`${prefix}_message_role_${entryId}`).value;
-                    const content = document.getElementById(`${prefix}_message_content_${entryId}`).value;
+                    const textContent = document.getElementById(`${prefix}_message_content_${entryId}`).value;
                     const nameEl = document.getElementById(`${prefix}_message_name_${entryId}`);
                     const name = nameEl ? (nameEl.value.trim() || undefined) : undefined;
 
-                    const message = { role, content };
+                    const imageInput = document.getElementById(`${prefix}_message_image_${entryId}`);
+                    const imageDataUrl = imageInput ? imageInput.dataset.imageDataUrl : null;
+
+                    let messageContentParts = [];
+                    if (textContent.trim() !== "") {
+                        messageContentParts.push({ type: "text", text: textContent });
+                    }
+
+                    if (role === 'user' && imageDataUrl) { // Images only for user role typically
+                        messageContentParts.push({
+                            type: "image_url",
+                            image_url: { url: imageDataUrl }
+                        });
+                    }
+
+                    const message = { role };
                     if (name) message.name = name;
+
+                    // Determine final content structure
+                    if (messageContentParts.length === 0 && role !== 'assistant') { // Assistant can have empty content if using tool_calls
+                        // If no text and no image (and not assistant potentially using tools), send empty text part for user/system/tool for some APIs
+                        // Or make it an error to submit an empty message for these roles unless raw JSON is used
+                        if (role === 'user' || role === 'system' || role === 'tool') {
+                             message.content = ""; // Or [{ type: "text", text: "" }] if API strictly wants array for user
+                        }
+                    } else if (messageContentParts.length === 1 && messageContentParts[0].type === "text") {
+                        message.content = messageContentParts[0].text; // Content as string
+                    } else if (messageContentParts.length > 0) {
+                        message.content = messageContentParts; // Content as array of parts
+                    } else if (role === 'assistant') {
+                        // Assistant message can have null content if tool_calls are present
+                        // This part will be handled by the later logic that adds tool_calls
+                        message.content = null;
+                    }
+
 
                     if (role === 'tool') {
                         const toolCallIdEl = document.getElementById(`${prefix}_message_tool_call_id_${entryId}`);
@@ -405,14 +505,17 @@
                 topk: { type: 'int', elIdSuffix: '_topk', allowUndefined: true },
                 seed: { type: 'int', elIdSuffix: '_seed', allowNull: true },
                 stop: { type: 'json_or_csv_list', elIdSuffix: '_stop', allowNull: true },
-                logprobs: { type: 'checkbox_to_null_if_false', elIdSuffix: '_logprobs' }, // Special: if false, send null or omit based on schema
+                logprobs: { type: 'checkbox', elIdSuffix: '_logprobs' },
                 top_logprobs: { type: 'int', elIdSuffix: '_top_logprobs', dependsOn: 'logprobs', allowUndefined: true },
                 response_format: { type: 'select_object', elIdSuffix: '_response_format_type', key: 'type', allowNull: true },
                 tools: { type: 'json', elIdSuffix: '_tools', allowNull: true },
                 tool_choice: { type: 'json_or_string', elIdSuffix: '_tool_choice', allowUndefined: true, validStrings: ["auto", "none", "required"], defaultIfEmpty: "auto" },
                 logit_bias: { type: 'json', elIdSuffix: '_logit_bias', allowNull: true },
                 character_id: { type: 'string', elIdSuffix: '_character_id', allowNull: true },
-                prompt_template_name: { type: 'string', elIdSuffix: '_prompt_template_name', allowNull: true }
+                conversation_id: { type: 'string', elIdSuffix: '_conversation_id', allowNull: true },
+                prompt_template_name: { type: 'string', elIdSuffix: '_prompt_template_name', allowNull: true },
+                n: { type: 'int', elIdSuffix: '_n', allowNull: true, min: 1, max: 128 },
+                user: { type: 'string', elIdSuffix: '_user', allowNull: true }
             };
 
             for (const key in optionalFields) {
@@ -421,7 +524,6 @@
                 if (!el) continue;
 
                 if (config.dependsOn && !document.getElementById(prefix + '_' + config.dependsOn)?.checked) {
-                    // If dependent field is not checked/active, don't include this field or set to its "empty" state
                     if (config.allowNull) payload[key] = null;
                     else if (config.allowUndefined) delete payload[key];
                     continue;
@@ -440,19 +542,17 @@
                         if (isNaN(value) && el.value !== "" && !config.allowNull && !config.allowUndefined) {
                              alert(`Invalid integer value for ${key}`); throw new Error(`Invalid int for ${key}`);
                         }
+                        if (config.min !== undefined && value < config.min) value = config.min;
+                        if (config.max !== undefined && value > config.max) value = config.max;
                         break;
                     case 'string':
                         value = el.value.trim() !== "" ? el.value.trim() : (config.allowUndefined ? undefined : (config.allowNull ? null : ""));
                         break;
-                    case 'checkbox_to_null_if_false': // For logprobs specifically, based on schema
-                        value = el.checked ? true : (config.allowNull ? null : false);
-                        if (key === 'logprobs' && !el.checked) value = null; // Per schema, logprobs: Optional[bool] = False. If False, send null or omit.
-                                                                            // Sending false if unchecked. Or null if schema needs that for 'False' state.
-                                                                            // ChatCompletionRequest has `logprobs: Optional[bool] = Field(False,...)`.
-                                                                            // So if not checked, it should become False.
-                        if (key === 'logprobs') value = el.checked; // Pydantic default is False, so only send if true.
-                                                                    // If user unchecks, we can omit or send False. Let's send if explicitly set.
-                                                                    // If el.checked is false, value becomes false.
+                    case 'checkbox': // General checkbox, sends true/false or null
+                        value = el.checked ? true : (config.allowNullIfFalse ? null : false);
+                         if (key === 'logprobs' && !el.checked) { // For logprobs, omit if false as per OpenAI
+                            value = undefined;
+                        }
                         break;
                     case 'json_or_csv_list':
                         if (el.value.trim() !== "") {
@@ -461,14 +561,14 @@
                                 try { value = JSON.parse(el.value); parsed = true; }
                                 catch (e) { /* will try csv next if this fails */ }
                             }
-                            if (!parsed) { // Try CSV or single string
+                            if (!parsed) {
                                 value = el.value.split(',').map(s => s.trim()).filter(s => s);
-                                if (value.length === 0 && el.value.trim().includes(',')) { // " , , " case
+                                if (value.length === 0 && el.value.trim().includes(',')) {
                                      value = config.allowNull ? null : (config.allowUndefined ? undefined : []);
-                                } else if (value.length === 0 && !el.value.trim().includes(',')) { // single empty or whitespace string
+                                } else if (value.length === 0 && !el.value.trim().includes(',')) {
                                     value = el.value.trim() || (config.allowNull ? null : (config.allowUndefined ? undefined : []));
                                     if(value === "" && !config.allowNull && !config.allowUndefined && !Array.isArray(value)) value = [];
-                                } else if (value.length === 1 && !el.value.trim().includes(',')) { // Single item not intended as list by CSV
+                                } else if (value.length === 1 && !el.value.trim().includes(',')) {
                                     value = el.value.trim();
                                 }
                             }
@@ -484,11 +584,12 @@
                                 throw new Error(`Invalid JSON for ${key}`);
                             }
                         } else {
-                            value = config.allowNull ? null : (config.allowUndefined ? undefined : {}); // For tools, this sets to null
+                            value = config.allowNull ? null : (config.allowUndefined ? undefined : (key === 'tools' ? null : {}));
                         }
                         break;
                     case 'select_object':
                         value = el.value ? { [config.key]: el.value } : (config.allowNull ? null : (config.allowUndefined ? undefined : {}));
+                         if (el.value === "") value = config.allowNull ? null : undefined; // If empty, treat as null/undefined
                         break;
                     case 'json_or_string':
                         if (el.value.trim() !== "") {
@@ -510,12 +611,22 @@
                     delete payload[key];
                 }
             }
-            // Final cleanup for undefined or unwanted defaults for purely optional fields
-            for (const key in payload) { if (payload[key] === undefined) { delete payload[key]; } }
 
-            // Specific cleanup for logprobs: if false, server default handles it (False). Only send if true.
-            if (payload.logprobs === false) delete payload.logprobs;
-            if (payload.logprobs === null) delete payload.logprobs; // if checkbox_to_null_if_false resulted in null and we want to omit for default
+            for (const key in payload) { if (payload[key] === undefined) { delete payload[key]; } }
+            if (payload.response_format && Object.keys(payload.response_format).length === 0) delete payload.response_format;
+
+
+            // Assistant messages can have null content if tool_calls are present (not handled here, but server schema allows)
+            // Ensure that if a role=assistant message has no tool_calls (from form), and content is also null/empty, it might need cleanup
+            payload.messages = payload.messages.map(msg => {
+                if (msg.role === 'assistant' && msg.content === null) {
+                    // If backend requires content even if null, this is fine.
+                    // If backend prefers omitting content if null and no tool_calls, add logic here.
+                    // For now, keep as is. The ChatCompletionAssistantMessageParam schema has `content: Optional[str] = Field(None,...)`
+                }
+                return msg;
+            });
+
 
             return payload;
         }
@@ -534,7 +645,7 @@
 
             if (useRawJson && rawPayloadTextarea) {
                 try {
-                    const currentPayload = buildPayloadFromForm(prefix);
+                    const currentPayload = buildPayloadFromForm(prefix); // This is now synchronous
                     rawPayloadTextarea.value = JSON.stringify(currentPayload, null, 2);
                 } catch (e) {
                     console.warn("Could not build payload for raw view:", e.message);
@@ -560,7 +671,7 @@
                 const rawPayloadEl = document.getElementById(prefix + '_payload_raw');
                 if (rawPayloadEl && rawPayloadEl.value.trim() !== "") {
                      try {
-                        JSON.parse(rawPayloadEl.value); // Validate JSON
+                        JSON.parse(rawPayloadEl.value);
                         payloadString = rawPayloadEl.value;
                      }
                      catch(e) { curlEl.textContent = "Error: Invalid Raw JSON for cURL generation. " + e.message; return; }
@@ -569,7 +680,7 @@
                 }
             } else {
                 try {
-                    const payloadObject = buildPayloadFromForm(prefix);
+                    const payloadObject = buildPayloadFromForm(prefix); // Synchronous
                     payloadString = JSON.stringify(payloadObject, null, 2);
                 } catch (e) {
                      curlEl.textContent = "Error building payload from form for cURL: " + e.message;
@@ -577,11 +688,14 @@
                 }
             }
 
+            // Escape single quotes in the payload string for the cURL command
+            const escapedPayloadString = payloadString.replace(/'/g, "'\\''");
+
             const curlCommand = `curl -X POST "${baseUrl}/api/v1/chat/completions" \\
 -H "accept: application/json" \\
 -H "Content-Type: application/json" \\
 -H "Token: ${token.replace(/"/g, '\\"')}" \\
--d '${escapeCurlData(payloadString)}'`;
+-d '${escapedPayloadString}'`; // Use the escaped string
             curlEl.textContent = curlCommand;
         }
 
@@ -592,7 +706,7 @@
             if (!responseArea) { console.error("Response area not found!"); return; }
 
             responseArea.textContent = 'Sending...';
-            generateChatCompletionsCurl(); // Generate cURL before making request
+            generateChatCompletionsCurl();
 
             let payload;
             const useRawJsonCheckbox = document.getElementById(prefix + '_useRawJson');
@@ -612,7 +726,7 @@
                 }
             } else {
                  try {
-                    payload = buildPayloadFromForm(prefix);
+                    payload = buildPayloadFromForm(prefix); // Synchronous
                 } catch (e) {
                     responseArea.textContent = "Error building payload from form: " + e.message;
                     return;
@@ -621,7 +735,7 @@
 
             const isStreaming = payload.stream;
             if (isStreaming) {
-                responseArea.textContent = ''; // Clear for streaming
+                responseArea.textContent = '';
             }
 
             try {
@@ -636,7 +750,6 @@
                 });
 
                 if (!fetchResponse.ok) {
-                    // Try to parse error as JSON, fallback to text
                     let errorDetail = fetchResponse.statusText;
                     try {
                         const errorData = await fetchResponse.json();
@@ -668,7 +781,7 @@
                                 const dataStr = eventString.substring(6).trim();
                                 if (dataStr === '[DONE]') {
                                     responseArea.textContent += "\nStream finished by [DONE] signal.\n";
-                                    return; // Exit after [DONE]
+                                    return;
                                 }
                                 try {
                                     const dataJson = JSON.parse(dataStr);
@@ -679,22 +792,43 @@
                                          responseArea.textContent += `\n[Finish Reason: ${dataJson.choices[0].finish_reason}]\n`;
                                     } else if (dataJson.error) {
                                         responseArea.textContent += `\n[Stream Error: ${JSON.stringify(dataJson.error)}]\n`;
-                                    } else if (Object.keys(dataJson).length > 0) { // Handle other JSON objects
+                                    } else if (Object.keys(dataJson).length > 0) {
                                          responseArea.textContent += `\n(Stream JSON: ${dataStr})\n`;
                                     }
-                                } catch (e) { // If dataStr is not JSON but not [DONE]
-                                    if (dataStr) { // Avoid logging empty data lines
+                                } catch (e) {
+                                    if (dataStr) {
                                         console.warn('Non-JSON stream data or parse error:', dataStr, e);
                                         responseArea.textContent += `\n(Stream data: ${dataStr})\n`;
+                                    }
+                                }
+                            } else if (eventString.trim().startsWith('event: tldw_metadata')) { // Handle custom metadata event
+                                const dataLine = buffer.substring(eventString.length).split('\n').find(line => line.startsWith('data: '));
+                                if (dataLine) {
+                                    const metaDataStr = dataLine.substring(6).trim();
+                                    try {
+                                        const metaDataJson = JSON.parse(metaDataStr);
+                                        responseArea.textContent += `\n[TLDW Metadata: ${JSON.stringify(metaDataJson)}]\n`;
+                                        // Optionally update UI elements with conversation_id, etc.
+                                        if (metaDataJson.conversation_id) {
+                                            const convIdEl = document.getElementById(prefix + '_conversation_id');
+                                            if (convIdEl && !convIdEl.value) { // Only set if not already set by user
+                                                convIdEl.value = metaDataJson.conversation_id;
+                                                if (metaDataJson.conversation_created) {
+                                                    convIdEl.style.backgroundColor = "#e6ffe6"; // Light green for new
+                                                }
+                                            }
+                                        }
+                                    } catch (e) {
+                                        console.warn('Error parsing tldw_metadata JSON:', metaDataStr, e);
+                                        responseArea.textContent += `\n(Raw tldw_metadata: ${metaDataStr})\n`;
                                     }
                                 }
                             } else if (eventString.trim()) {
                                 console.log("Received non-data line in stream:", eventString);
                             }
-                            responseArea.scrollTop = responseArea.scrollHeight; // Auto-scroll
+                            responseArea.scrollTop = responseArea.scrollHeight;
                         }
                     }
-                     // Process any remaining buffer content after the loop (if stream ends without \n\n)
                     if (buffer.trim()) {
                         if (buffer.startsWith('data: ')) {
                             const finalDataStr = buffer.substring(6).trim();
@@ -712,9 +846,19 @@
                          responseArea.textContent += streamHadContent ? "\nStream ended.\n" : "Stream connected, but no data or [DONE] signal received.\n";
                     }
 
-                } else { // Non-streaming or non-event-stream response
+                } else {
                     const responseData = await fetchResponse.json();
                     responseArea.textContent = JSON.stringify(responseData, null, 2);
+                     // For non-streaming, check for tldw_conversation_id directly in response
+                    if (responseData.tldw_conversation_id) {
+                        const convIdEl = document.getElementById(prefix + '_conversation_id');
+                        if (convIdEl && !convIdEl.value) {
+                            convIdEl.value = responseData.tldw_conversation_id;
+                            if (responseData.tldw_conversation_created) {
+                                convIdEl.style.backgroundColor = "#e6ffe6";
+                            }
+                        }
+                    }
                 }
             } catch (error) {
                 console.error('Error during chat completion:', error);
@@ -727,8 +871,8 @@
             console.log("Initializing Chat Completions Tab");
             const container = document.getElementById(prefix + '_messagesContainer');
             if (container) {
-                container.innerHTML = ''; // Clear existing messages
-                messageIdCounter[prefix] = 0; // Reset counter
+                container.innerHTML = '';
+                messageIdCounter[prefix] = 0;
 
                 addChatMessage(prefix, 'system', 'You are a helpful assistant that provides concise answers.');
                 addChatMessage(prefix, 'user', 'What is the capital of France?');
@@ -736,15 +880,18 @@
                 console.warn("Messages container not found during chat completions tab initialization.");
             }
 
-            // Set default values for some fields for better UX
             const tempEl = document.getElementById(prefix + '_temperature');
-            if (tempEl && tempEl.value === "") tempEl.placeholder = "0.7"; // Use placeholder if not overriding a value
+            if (tempEl && tempEl.value === "") tempEl.placeholder = "0.7";
 
             const maxTokensEl = document.getElementById(prefix + '_max_tokens');
             if (maxTokensEl && maxTokensEl.value === "") maxTokensEl.placeholder = "1024";
 
             const topPEl = document.getElementById(prefix + '_top_p');
             if (topPEl && topPEl.value === "") topPEl.placeholder = "1.0";
+
+            const nEl = document.getElementById(prefix + '_n');
+            if (nEl && nEl.value === "") nEl.placeholder = "1";
+
 
             const useRawJsonCheckbox = document.getElementById(prefix + '_useRawJson');
             if (useRawJsonCheckbox) {
@@ -763,7 +910,6 @@
             generateChatCompletionsCurl();
         }
 
-        // Generic makeRequest (example, you might have this already for other tabs)
         async function makeRequest(endpointId, method, path, bodyType = 'none', queryParams = {}) {
             const curlEl = document.getElementById(endpointId + '_curl');
             const responseArea = document.getElementById(endpointId + '_response');
@@ -777,7 +923,6 @@
             const token = document.getElementById('apiKeyInput').value;
             let fullPath = path;
 
-            // Replace path parameters
             const pathParams = path.match(/{(\w+)}/g);
             if (pathParams) {
                 pathParams.forEach(param => {
@@ -798,10 +943,9 @@
                 }
             };
 
-            let payloadString = ''; // For cURL command
-            let queryParamsString = ''; // For cURL command and fetch URL
+            let payloadString = '';
+            let queryParamsString = '';
 
-            // Handle query parameters if bodyType is 'query' or 'json_with_query'
             if (bodyType === 'query' || bodyType === 'json_with_query') {
                 const queryParts = [];
                 const formGroup = document.getElementById(endpointId);
@@ -816,7 +960,7 @@
                             const paramName = input.id.substring((endpointId + '_').length);
                             if (input.type === 'checkbox') {
                                 if (input.checked) queryParts.push(`${encodeURIComponent(paramName)}=true`);
-                            } else if (input.value.trim() !== '') {
+                            } else if (input.value && input.value.trim() !== '') { // Ensure value is not empty
                                 queryParts.push(`${encodeURIComponent(paramName)}=${encodeURIComponent(input.value)}`);
                             }
                         }
@@ -859,18 +1003,22 @@
                                          Array.from(input.files).forEach(file => formData.append(key, file));
                                     }
                                 } else if (input.type === 'checkbox') {
-                                    formData.append(key, input.checked.toString()); // Send as string 'true'/'false' for FormData
-                                } else if (input.value !== '' || input.tagName === 'TEXTAREA') {
-                                    formData.append(key, input.value);
+                                    // Send boolean as string for FormData, or just append if checked
+                                    if (input.checked) formData.append(key, 'true');
+                                    else formData.append(key, 'false'); // Explicitly send false
+                                } else if (input.value !== '' || input.tagName === 'TEXTAREA' || input.type === 'select-one') { // Include select-one
+                                     if (input.value !== null && input.value !== undefined) { // Ensure not sending nulls unless intended
+                                        formData.append(key, input.value);
+                                     }
                                 }
                             }
                         });
                     }
                     fetchOptions.body = formData;
+                    // Content-Type for FormData is set automatically by fetch, do not set it manually
                 }
             }
 
-            // Generate cURL
             let curlCommand = `curl -X ${method} "${baseUrl}${fullPath}${queryParamsString}" \\\n-H "Accept: application/json" \\\n-H "Token: ${token}"`;
             if (fetchOptions.headers['Content-Type']) {
                 curlCommand += ` \\\n-H "Content-Type: ${fetchOptions.headers['Content-Type']}"`;
@@ -878,8 +1026,6 @@
             if ((bodyType === 'json' || bodyType === 'json_with_query') && payloadString) {
                 curlCommand += ` \\\n-d '${escapeCurlData(payloadString)}'`;
             } else if (bodyType === 'form' && fetchOptions.body instanceof FormData) {
-                // For FormData, cURL representation is tricky due to files. This is a simplified version.
-                // It won't correctly show file uploads but will list other form fields.
                 for (let [key, value] of fetchOptions.body.entries()) {
                     if (value instanceof File) {
                         curlCommand += ` \\\n-F "${key}=@${value.name}"`;
@@ -890,10 +1036,9 @@
             }
             curlEl.textContent = curlCommand;
 
-            // Make the request
             try {
                 const res = await fetch(url, fetchOptions);
-                const data = await res.json(); // Assumes JSON response for non-streaming
+                const data = await res.json();
                 responseArea.textContent = JSON.stringify(data, null, 2);
                 if (!res.ok) {
                     console.warn(`API request to ${url} failed with status ${res.status}`, data);
