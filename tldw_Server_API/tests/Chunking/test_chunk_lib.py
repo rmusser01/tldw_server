@@ -75,7 +75,7 @@ def default_chunker_options():
 @pytest.fixture
 def default_chunker(default_chunker_options):
     # Mock tokenizer loading for most tests unless specific tokenizer behavior is tested
-    with patch('tldw_Server_API.app.core.Chunk_Lib.AutoTokenizer.from_pretrained') as mock_tokenizer_load:
+    with patch('tldw_Server_API.app.core.Utils.Chunk_Lib.AutoTokenizer.from_pretrained') as mock_tokenizer_load:
         mock_tokenizer_instance = MagicMock()
         # Mock common tokenizer methods if they are used directly and not just for encode/decode
         mock_tokenizer_instance.encode = lambda text: [len(c) for c in text.split()] # Dummy encode
@@ -88,14 +88,14 @@ def default_chunker(default_chunker_options):
 class TestChunker:
 
     def test_chunker_initialization_default(self, default_chunker_options):
-        with patch('tldw_Server_API.app.core.Chunk_Lib.AutoTokenizer.from_pretrained', MagicMock()):
+        with patch('tldw_Server_API.app.core.Utils.Chunk_Lib.AutoTokenizer.from_pretrained', MagicMock()):
             chunker = Chunker() # Test with no options
         assert chunker.options['method'] == default_chunker_options['method']
         assert chunker.tokenizer is not None
 
     def test_chunker_initialization_custom_options(self):
         custom_opts = {"method": "sentences", "max_size": 5, "overlap": 1, "language": "fr"}
-        with patch('tldw_Server_API.app.core.Chunk_Lib.AutoTokenizer.from_pretrained', MagicMock()):
+        with patch('tldw_Server_API.app.core.Utils.Chunk_Lib.AutoTokenizer.from_pretrained', MagicMock()):
             chunker = Chunker(options=custom_opts)
         assert chunker.options['method'] == "sentences"
         assert chunker.options['max_size'] == 5
@@ -103,11 +103,11 @@ class TestChunker:
         assert chunker.options['language'] == "fr"
 
     def test_chunker_initialization_tokenizer_failure(self, mocker):
-        mocker.patch('tldw_Server_API.app.core.Chunk_Lib.AutoTokenizer.from_pretrained', side_effect=Exception("Load failed"))
+        mocker.patch('tldw_Server_API.app.core.Utils.Chunk_Lib.AutoTokenizer.from_pretrained', side_effect=Exception("Load failed"))
         chunker = Chunker()
         assert chunker.tokenizer is None # Should handle gracefully for non-token methods
 
-    @patch('tldw_Server_API.app.core.Chunk_Lib.detect') # Mock langdetect.detect
+    @patch('tldw_Server_API.app.core.Utils.Chunk_Lib.detect') # Mock langdetect.detect
     def test_detect_language(self, mock_lang_detect, default_chunker, sample_text_en):
         mock_lang_detect.return_value = "en"
         assert default_chunker.detect_language(sample_text_en) == "en"
@@ -141,7 +141,7 @@ class TestChunker:
             overlap_words = chunks[0].split()[-2:] # Last 2 words of first chunk
             assert overlap_words[0] in chunks[1].split() or overlap_words[1] in chunks[1].split() # Basic overlap check
 
-    @patch('tldw_Server_API.app.core.Chunk_Lib.sent_tokenize')
+    @patch('tldw_Server_API.app.core.Utils.Chunk_Lib.sent_tokenize')
     def test_chunk_text_by_sentences(self, mock_sent_tokenize, default_chunker, sample_text_en):
         # Mock NLTK's sentence tokenizer to return predictable sentences
         sentences = re.split(r'(?<=[.!?])\s+', sample_text_en.replace("\n\n", " "))
@@ -175,8 +175,15 @@ class TestChunker:
 
         # Make tokenizer mock more specific for this test if needed
         default_chunker.tokenizer.encode = lambda text: list(range(len(text))) # Simple tokenization: 1 token per char
-        default_chunker.tokenizer.decode = lambda token_ids: "".join([chr(x+ord('a')) for x in token_ids[:5]]) # Dummy decode
+        default_chunker.tokenizer.encode = lambda text: list(range(len(text)))
 
+        # A more robust mock decode that accepts skip_special_tokens
+        def mock_decode_func(token_ids, skip_special_tokens=True):
+            # Dummy decode: just join string representations of token IDs
+            # In a real scenario, this would convert IDs back to text.
+            return " ".join(map(str, token_ids))
+
+        default_chunker.tokenizer.decode = mock_decode_func
         default_chunker.options.update({"max_size": 5, "overlap": 1}) # max_size is max_tokens
         chunks = default_chunker._chunk_text_by_tokens(sample_text_short, # "Short text." -> len 11
                                                       max_tokens=default_chunker.options['max_size'],
@@ -192,29 +199,44 @@ class TestChunker:
         chunk_dicts = default_chunker._chunk_text_by_json(sample_json_list_text,
                                                         max_size=default_chunker.options['max_size'],
                                                         overlap=default_chunker.options['overlap'])
-        assert len(chunk_dicts) == 2
-        # chunk_dicts is like [{'json': [...], 'metadata': {...}}, ...]
+        assert len(chunk_dicts) == 2  # This should be 3
+        # The actual number of chunks for a list is ceil(total_items / step) if overlap is handled by extending the end,
+        # or more precisely, (total_items - max_size) / step + 1 if max_size <= total_items, then handle remainder.
+        # For loop range(0, total_items, step):
+        # If total_items = 3, max_size = 2, overlap = 1 => step = 1. Loop is for i = 0, 1, 2. Thus 3 chunks.
+        # Chunk 1: items[0:2]
+        # Chunk 2: items[1:3]
+        # Chunk 3: items[2:4] (which becomes items[2:3])
+        assert len(chunk_dicts) == 3  # Corrected expectation
         assert len(chunk_dicts[0]['json']) == 2
-        assert len(chunk_dicts[1]['json']) == 2 # item2 (overlap), item3
+        assert len(chunk_dicts[1]['json']) == 2
+        assert len(chunk_dicts[2]['json']) == 1  # Last chunk
         assert chunk_dicts[0]['json'][0]['id'] == 1
-        assert chunk_dicts[1]['json'][0]['id'] == 2 # Overlapped item
+        assert chunk_dicts[1]['json'][0]['id'] == 2  # First item of second chunk
+        assert chunk_dicts[2]['json'][0]['id'] == 3
 
     def test_chunk_json_dict(self, default_chunker, sample_json_dict_text):
         default_chunker.options.update({"max_size": 2, "overlap": 1, "json_chunkable_data_key": "data"})
         chunk_dicts = default_chunker._chunk_text_by_json(sample_json_dict_text,
                                                         max_size=default_chunker.options['max_size'],
                                                         overlap=default_chunker.options['overlap'])
-        assert len(chunk_dicts) == 2
+        assert len(chunk_dicts) == 3  # Corrected expectation
         assert "key1" in chunk_dicts[0]['json']['data']
         assert "key2" in chunk_dicts[0]['json']['data']
-        assert "key2" in chunk_dicts[1]['json']['data'] # Overlap
+        assert len(chunk_dicts[0]['json']['data']) == 2
+
+        assert "key2" in chunk_dicts[1]['json']['data']
         assert "key3" in chunk_dicts[1]['json']['data']
+        assert len(chunk_dicts[1]['json']['data']) == 2
+
+        assert "key3" in chunk_dicts[2]['json']['data']
+        assert len(chunk_dicts[2]['json']['data']) == 1
         assert chunk_dicts[0]['json']['metadata']['source'] == "test_doc" # Preserved key
 
 
-    @patch('tldw_Server_API.app.core.Chunk_Lib.TfidfVectorizer')
-    @patch('tldw_Server_API.app.core.Chunk_Lib.cosine_similarity')
-    @patch('tldw_Server_API.app.core.Chunk_Lib.sent_tokenize')
+    @patch('tldw_Server_API.app.core.Utils.Chunk_Lib.TfidfVectorizer')
+    @patch('tldw_Server_API.app.core.Utils.Chunk_Lib.cosine_similarity')
+    @patch('tldw_Server_API.app.core.Utils.Chunk_Lib.sent_tokenize')
     def test_semantic_chunking(self, mock_sent_tokenize, mock_cosine_similarity, mock_tfidf, default_chunker, sample_text_en):
         mock_sent_tokenize.return_value = ["Sentence one.", "Sentence two.", "Sentence three.", "Sentence four.", "Sentence five is different."]
         # Mock TF-IDF and cosine similarity to control splits
@@ -251,11 +273,15 @@ class TestChunker:
         chunk_dicts = default_chunker._chunk_ebook_by_chapters(sample_ebook_text,
                                                               max_size=0, overlap=0,
                                                               custom_pattern=None, language='en')
-        assert len(chunk_dicts) == 4 # Preface, Chap 1, Chap II, Section as Chapter
-        assert "Preface" in chunk_dicts[0]['metadata']['chapter_title']
-        assert "Chapter 1" in chunk_dicts[1]['metadata']['chapter_title']
-        assert "CHAPTER II: A New Beginning" in chunk_dicts[2]['metadata']['chapter_title']
-        assert "Section as Chapter" in chunk_dicts[3]['metadata']['chapter_title']
+        assert len(chunk_dicts) == 4
+        assert "Preface" in chunk_dicts[0]['text']  # Check content now
+        assert chunk_dicts[0]['metadata']['chapter_title'] == "Preface/Introduction"
+        assert "Chapter 1" in chunk_dicts[1]['text']
+        assert chunk_dicts[1]['metadata']['chapter_title'] == "Chapter 1"
+        assert "CHAPTER II: A New Beginning" in chunk_dicts[2]['text']
+        assert chunk_dicts[2]['metadata']['chapter_title'] == "CHAPTER II: A New Beginning"
+        assert "# Section as Chapter" in chunk_dicts[3]['text']
+        assert chunk_dicts[3]['metadata']['chapter_title'] == "# Section as Chapter"
 
     def test_xml_chunking_basic(self, default_chunker, sample_xml_text):
         default_chunker.options.update({"max_size": 5, "overlap": 1}) # max_size in words, overlap in elements
@@ -325,7 +351,7 @@ class TestChunker:
 
 # --- Tests for improved_chunking_process (more like integration for this function) ---
 
-@patch('tldw_Server_API.app.core.Chunk_Lib.Chunker') # Mock the Chunker class itself
+@patch('tldw_Server_API.app.core.Utils.Chunk_Lib.Chunker') # Mock the Chunker class itself
 def test_improved_chunking_process_basic_flow(mock_chunker_class, sample_text_short, default_chunker_options):
     # Setup mock Chunker instance and its methods
     mock_chunker_instance = MagicMock()
@@ -375,7 +401,7 @@ def test_improved_chunking_process_with_json_header(default_chunker_options):
 
     # Patch the Chunker's specific chunking method to control its output
     with patch.object(Chunker, '_chunk_text_by_words', return_value=["This is the", "main content to", "be chunked. It", "has several words."]) as mock_word_chunker:
-        with patch('tldw_Server_API.app.core.Chunk_Lib.AutoTokenizer.from_pretrained', MagicMock()): # Mock tokenizer loading
+        with patch('tldw_Server_API.app.core.Utils.Chunk_Lib.AutoTokenizer.from_pretrained', MagicMock()): # Mock tokenizer loading
             results = improved_chunking_process(full_text_input, chunk_options_dict=test_options)
 
     # Check that _chunk_text_by_words was called with the *actual_content*
@@ -392,7 +418,7 @@ def test_improved_chunking_process_with_json_header(default_chunker_options):
 # TODO: Add tests for chunk_for_embedding and process_document_with_metadata
 # These are higher-level and might involve more mocking or specific input files.
 # Example for chunk_for_embedding:
-@patch('tldw_Server_API.app.core.Chunk_Lib.improved_chunking_process')
+@patch('tldw_Server_API.app.core.Utils.Chunk_Lib.improved_chunking_process')
 def test_chunk_for_embedding(mock_improved_process):
     from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_for_embedding # Import here if not at top
 

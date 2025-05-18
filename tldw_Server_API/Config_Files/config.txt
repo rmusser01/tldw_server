@@ -163,7 +163,6 @@ anthropic_max_tokens = 4096
 anthropic_api_timeout = 90
 anthropic_api_retry = 3
 anthropic_api_retry_delay = 1
-model_for_summarization = claude-3-5-sonnet-20240620
 #
 # <cohere_api_key>
 cohere_api_key = <cohere_api_key>
@@ -185,7 +184,6 @@ deepseek_max_tokens = 4096
 deepseek_api_timeout = 90
 deepseek_api_retry = 3
 deepseek_api_retry_delay = 1
-model_for_summarization = deepseek-chat
 #
 google_api_key = <google_api_key>
 # Available Model Options:

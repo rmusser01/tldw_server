@@ -38,10 +38,10 @@ from tldw_Server_API.app.core.config import load_and_log_configs as load_server_
 # Functions:
 
 # --- FastAPI Router ---
-router = APIRouter()
+chunking_router = APIRouter()
 
 # --- Endpoint to Chunk Text (JSON input) ---
-@router.post(
+@chunking_router.post(
     "/chunk_text",
     summary="Chunks provided text content based on specified options.",
     tags=["Text Processing", "Chunking"],
@@ -204,6 +204,7 @@ async def process_text_for_chunking_json(
     if not chunk_results:
         logger.info(f"Chunking produced no results for '{request_data.file_name}'. Returning empty list.")
 
+    # FIXME chunks incorrect type
     return ChunkingResponse(
         chunks=chunk_results,
         original_file_name=request_data.file_name,
@@ -212,7 +213,7 @@ async def process_text_for_chunking_json(
 
 
 # --- Endpoint to Chunk Uploaded File ---
-@router.post(
+@chunking_router.post(
     "/chunk_file",
     summary="Uploads a file, chunks its content, and returns the chunks.",
     tags=["Text Processing", "Chunking"],
@@ -345,6 +346,7 @@ async def process_file_for_chunking(
         logger.error(f"Unexpected error during chunking file '{file.filename}': {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal error during file chunking: {type(e).__name__}")
 
+    # FIXME chunks incorrect type
     return ChunkingResponse(
         chunks=chunk_results,
         original_file_name=file.filename,

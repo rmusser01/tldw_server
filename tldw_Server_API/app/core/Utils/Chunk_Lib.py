@@ -808,18 +808,20 @@ class Chunker:
 
         active_patterns = [p for p in active_patterns if p is not None] # Re-filter after potential disabling
 
-        if first_heading_index > 0: # Content before the first recognized chapter
+        if first_heading_index > 0:
             chapter_number += 1
-            preface_content = "\n".join(lines[:first_heading_index])
-            chapter_splits.append({
-                'text': preface_content.strip(),
-                'metadata': {
-                    'chunk_type': 'chapter',
-                    'chapter_number': chapter_number,
-                    'chapter_title': first_heading_title, # Title of the *next* chapter, or "Preface"
-                    'detected_chapter_pattern': 'preface/introduction',
-                }
-            })
+            preface_content_lines = lines[:first_heading_index]  # Lines *before* the first heading
+            preface_text = "\n".join(preface_content_lines).strip()
+            if preface_text:  # Only add preface if it has content
+                chapter_splits.append({
+                    'text': preface_text,
+                    'metadata': {
+                        'chunk_type': 'preface',  # More specific type
+                        'chapter_number': chapter_number,
+                        'chapter_title': "Preface/Introduction",  # Fixed title for preface
+                        'detected_chapter_pattern': 'preface/introduction',
+                    }
+                })
         elif first_heading_index == -1: # No chapters found at all
             logging.warning("No chapter headings found using patterns. Returning document as a single chapter chunk.")
             return [{'text': text, 'metadata': {'chunk_type': 'single_document_no_chapters', 'chapter_title': 'Full Document'}}]
@@ -828,44 +830,50 @@ class Chunker:
         # Process from the first heading onwards
         start_line_of_current_chapter = first_heading_index
         current_chapter_title = first_heading_title
+        initial_detected_pattern = None
+        if first_heading_index != -1:
+            for pattern_str in active_patterns:
+                if re.match(pattern_str, lines[first_heading_index], re.IGNORECASE):
+                    initial_detected_pattern = pattern_str
+                    break
 
         for line_idx in range(first_heading_index + 1, len(lines)):
             line_content = lines[line_idx]
-            is_new_chapter = False
+            is_new_chapter_heading = False
             detected_pattern_for_new = None
 
             for pattern_str in active_patterns:
-                try:
-                    if re.match(pattern_str, line_content, re.IGNORECASE):
-                        is_new_chapter = True
-                        detected_pattern_for_new = pattern_str
-                        break
-                except re.error: # Already logged, skip
-                    continue
+                if re.match(pattern_str, line_content, re.IGNORECASE):
+                    is_new_chapter_heading = True
+                    detected_pattern_for_new = pattern_str
+                    break
 
-            if is_new_chapter:
-                # Finish current chapter
-                chapter_content_lines = lines[start_line_of_current_chapter:line_idx]
+            if is_new_chapter_heading:
+                # Finish current chapter: content is from start_line_of_current_chapter_content up to line_idx (exclusive)
+                chapter_content_lines = lines[start_line_of_current_chapter_content: line_idx]
                 chapter_text = "\n".join(chapter_content_lines).strip()
-                if chapter_text: # Only add if there's content
-                    chapter_number += 1
+                if chapter_text:
+                    chapter_number += 1  # Increment for the chapter *being added*
                     chapter_splits.append({
                         'text': chapter_text,
                         'metadata': {
                             'chunk_type': 'chapter',
                             'chapter_number': chapter_number,
-                            'chapter_title': current_chapter_title.strip(),
-                            'detected_chapter_pattern': chapter_splits[-1]['metadata'].get('detected_chapter_pattern', 'unknown') if chapter_splits else 'unknown', # Pattern of previous
+                            'chapter_title': current_chapter_title,  # Title of the chapter just ended
+                            'detected_chapter_pattern': initial_detected_pattern if chapter_number == (
+                                1 if first_heading_index > 0 and preface_text else 0) + 1 else chapter_splits[-1][
+                                'metadata'].get('detected_chapter_pattern_of_next', 'unknown'),
                         }
                     })
                 # Start new chapter
-                start_line_of_current_chapter = line_idx
+                start_line_of_current_chapter_content = line_idx
                 current_chapter_title = line_content.strip()
-                #logging.debug(f"New chapter '{current_chapter_title}' found at line {line_idx} using pattern: {detected_pattern_for_new}")
+                # Store the pattern that detected *this new* chapter for the *next* iteration's metadata
+                if chapter_splits:  # Update the pattern for the *next* chapter in the last added metadata
+                    chapter_splits[-1]['metadata']['detected_chapter_pattern_of_next'] = detected_pattern_for_new
 
-
-        # Add the last chapter
-        last_chapter_content_lines = lines[start_line_of_current_chapter:]
+            # Add the last chapter
+        last_chapter_content_lines = lines[start_line_of_current_chapter_content:]
         last_chapter_text = "\n".join(last_chapter_content_lines).strip()
         if last_chapter_text:
             chapter_number += 1
@@ -874,8 +882,10 @@ class Chunker:
                 'metadata': {
                     'chunk_type': 'chapter',
                     'chapter_number': chapter_number,
-                    'chapter_title': current_chapter_title.strip(),
-                    'detected_chapter_pattern': detected_pattern_for_new or (chapter_splits[-1]['metadata'].get('detected_chapter_pattern') if chapter_splits else 'unknown')
+                    'chapter_title': current_chapter_title,
+                    'detected_chapter_pattern': initial_detected_pattern if chapter_number == (
+                        1 if first_heading_index > 0 and preface_text else 0) + 1 else chapter_splits[-1][
+                        'metadata'].get('detected_chapter_pattern_of_next', 'unknown')
                 }
             })
 

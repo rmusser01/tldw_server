@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from fastapi.testclient import TestClient
 #
 # Local Imports
+from tldw_Server_API.app.api.v1.endpoints.chunking import chunking_router as actual_chunking_endpoint_router
 from tldw_Server_API.app.core.Utils.Chunk_Lib import (
     DEFAULT_CHUNK_OPTIONS as default_chunk_options_from_lib_real,  # Use a different alias to avoid clash
     improved_chunking_process as improved_chunking_process_real,
@@ -24,47 +25,47 @@ from tldw_Server_API.app.core.Utils.Chunk_Lib import (
 #
 # Functions:
 
-# We will mock general_llm_analyzer and load_server_configs
-
 # --- Mock versions of external dependencies for the endpoint ---
-def mock_load_server_configs():
-    """Returns mock server configurations, especially API keys."""
+def mock_load_server_configs_for_test():
     return {
         "llm_api_settings": {"default_api_for_tasks": "mock_llm", "default_api": "mock_llm"},
-        "mock_llm_api": {  # Matches default_api_for_tasks
+        "mock_llm_api": {
             "api_key": "mock_api_key_for_tests",
-            "model": "mock_model_for_tasks",
-            "model_for_summarization": "mock_model_for_sum_tasks",  # Example specific model
-            "temperature": 0.1,
-            "max_tokens_for_summarization_step": 50  # Small for testing
+            "model": "mock_model_general", # General model for the provider
+            "model_for_summarization": "mock_model_for_sum_tasks_server_default", # Specific for this task
+            "temperature": 0.15, # Server's default temperature for this provider/task
+            "max_tokens_for_summarization_step": 60, # Server's default max tokens for step
+            "cap_max_tokens_summarization_step": 100 # Server's hard cap
         },
-        "openai_api": {  # Example of another provider for completeness
-            "api_key": "fake_openai_key", "model": "gpt-test"
+        "openai_api": {"api_key": "fake_openai_key", "model": "gpt-test-override"},
+        "chunking_llm_defaults": { # Example new section for task-specific LLM
+            "provider": "mock_llm_task_provider",
+            "model": "mock_model_task_specific"
         }
-        # Add other configs your endpoint might read during its setup phase
     }
 
-
-mock_general_llm_analyzer_call_history = []
-
-
-def mock_general_llm_analyzer(payload: Dict[str, Any]) -> Union[str, Generator[str, None, None]]:
-    """Mock for Summarization_General_Lib.analyze."""
-    global mock_general_llm_analyzer_call_history
-    mock_general_llm_analyzer_call_history.append(payload)  # Record the call
+mock_general_llm_analyzer_call_history_for_test = []
+def mock_general_llm_analyzer_for_test(payload: Dict[str, Any]) -> Union[str, Generator[str,None,None]]:
+    global mock_general_llm_analyzer_call_history_for_test
+    mock_general_llm_analyzer_call_history_for_test.append(payload.copy())
 
     api_name = payload.get("api_name")
     input_text = str(payload.get("input_data", ""))
     system_msg = payload.get("system_message", "")
+    streaming = payload.get("streaming", False)
+    temp = payload.get("temp")
+    max_tok = payload.get("max_tokens")
 
-    # Simple mock response
-    if payload.get("streaming", False):
+    response_text = (
+        f"[Mock Summary from {api_name}, model {payload.get('model')}]: "
+        f"Input '{input_text[:30]}...' processed. "
+        f"SysPrompt: '{system_msg[:30]}...'. Temp: {temp}. MaxTokens: {max_tok}"
+    )
+    if streaming:
         def stream_gen():
-            yield f"[Mock Stream for {api_name}]: Summarizing part of '{input_text[:20]}...' with system: '{system_msg[:20]}...'"
-
+            yield response_text
         return stream_gen()
-    else:
-        return f"[Mock Summary from {api_name}]: Input '{input_text[:30]}...' processed with system: '{system_msg[:30]}...'"
+    return response_text
 
 
 # --- Pydantic models (copy from your endpoint file) ---
@@ -115,183 +116,212 @@ class ChunkingResponse(BaseModel):
     applied_options: ChunkingOptionsRequest
 
 
-# --- Define a minimal app with the router ---
-# In a real setup, you import `app` from `main.py`
-# For self-contained test:
-test_app_router = APIRouter()
+# --- FastAPI App with the actual router for testing ---
+app_for_testing_with_real_router = FastAPI()
+app_for_testing_with_real_router.include_router(actual_chunking_endpoint_router, prefix="/api/v1/chunking")
+
+# Apply dependency overrides to this app instance
+app_for_testing_with_real_router.dependency_overrides[server_config_loader_actual] = mock_load_server_configs_for_test
+app_for_testing_with_real_router.dependency_overrides[general_llm_analyzer_actual] = mock_general_llm_analyzer_for_test
 
 
-# Copy the endpoint implementation here or import it
-# This is the code from your `text_processing.py` that we are testing.
-# For this example, I'll assume the endpoint functions `process_text_for_chunking_json`
-# and `process_file_for_chunking` are defined here or imported.
-# To make this truly runnable, you'd copy those functions here,
-# and ensure they use `default_chunk_options_from_lib_real` and `improved_chunking_process_real`
-
-# For this example, let's define stubs for the endpoint functions
-# and assume the real ones would be used when you integrate this.
-# This is NOT how you'd usually do it, you'd import your actual router.
-@test_app_router.post("/chunk_text", response_model=ChunkingResponse)
-async def process_text_for_chunking_json_stub(request_data: ChunkingTextRequest = Body(...)):
-    # This is where your actual endpoint logic would go.
-    # For testing, we need to ensure it calls improved_chunking_process correctly.
-    # We will patch 'improved_chunking_process_real' when testing specific interactions.
-    if request_data.text_content == "error_trigger":
-        raise HTTPException(status_code=500, detail="Simulated server error")
-
-    # Simulate a successful call for basic tests
-    mock_chunk_data = {"text": "mocked chunk",
-                       "metadata": {"method": request_data.options.method if request_data.options else "words"}}
-    return ChunkingResponse(
-        chunks=[ChunkedContentResponse(**mock_chunk_data)],
-        original_file_name=request_data.file_name,
-        applied_options=request_data.options if request_data.options else ChunkingOptionsRequest()
-    )
-
-
-@test_app_router.post("/chunk_file", response_model=ChunkingResponse)
-async def process_file_for_chunking_stub(file: UploadFile = File(...), method: Optional[str] = Form("words")):
-    content = await file.read()
-    await file.close()
-    if content == b"error_trigger_file":
-        raise HTTPException(status_code=500, detail="Simulated file error")
-
-    mock_chunk_data = {"text": "mocked file chunk " + content.decode()[:10], "metadata": {"method": method}}
-    return ChunkingResponse(
-        chunks=[ChunkedContentResponse(**mock_chunk_data)],
-        original_file_name=file.filename,
-        applied_options=ChunkingOptionsRequest(method=method)  # Simplified
-    )
-
-
-app_for_testing = FastAPI()
-app_for_testing.include_router(test_app_router, prefix="/api/v1/process")
-
-# --- Test Client Fixture ---
+# --- Test Client Fixture using the app with the real router ---
 @pytest.fixture
-def client():
-    # Reset call history for each test
-    global mock_general_llm_analyzer_call_history
-    mock_general_llm_analyzer_call_history = []
-    with TestClient(app_for_testing) as c:  # Use the app with overrides
+def client():  # Renamed from client_real_router for consistency
+    global mock_general_llm_analyzer_call_history_for_test
+    mock_general_llm_analyzer_call_history_for_test = []  # Reset for each test
+    with TestClient(app_for_testing_with_real_router) as c:
         yield c
+
+
+# --- Path for Patching `improved_chunking_process` ---
+# This path MUST point to where `improved_chunking_process` is imported and used
+# by your ACTUAL endpoint router module (e.g., chunking_router.py).
+# Example: if chunking_router.py has `from tldw_Server_API.app.core.Chunk_Lib import improved_chunking_process`
+PATH_TO_ICP_IN_ENDPOINT_ROUTER_MODULE = 'tldw_Server_API.app.api.v1.endpoints.chunking_router.improved_chunking_process'
 
 
 # --- Endpoint Test Cases ---
 
-def test_chunk_text_endpoint_simple(client: TestClient):
-    payload = {
-        "text_content": "This is a simple test.",
-        "options": {"method": "words", "max_size": 2}
-    }
-    # Patch the actual improved_chunking_process that the *real* endpoint would call
-    with patch('tldw_Server_API.app.v1.endpoints.text_processing.improved_chunking_process_real',
-               # Path to where real endpoint imports it
-               return_value=[{'text': 'This is', 'metadata': {'method': 'words'}},
-                             {'text': 'a simple', 'metadata': {'method': 'words'}}]) as mock_icp:
-        response = client.post("/api/v1/process/chunk_text", json=payload)
-
+@patch(PATH_TO_ICP_IN_ENDPOINT_ROUTER_MODULE)
+def test_chunk_text_simple_words(mock_icp, client: TestClient):
+    mock_icp.return_value = [{'text': 'This is', 'metadata': {'method': 'words'}},
+                             {'text': 'a test.', 'metadata': {'method': 'words'}}]
+    payload = {"text_content": "This is a test.", "options": {"method": "words", "max_size": 2}}
+    response = client.post("/api/v1/chunking/chunk_text", json=payload)
     assert response.status_code == 200
     data = response.json()
-    assert data["original_file_name"] == "input_text.txt"
-    assert len(data["chunks"]) > 0  # Or == 2 if mock_icp is precise
+    assert len(data["chunks"]) == 2
     assert data["chunks"][0]["text"] == "This is"
     assert data["applied_options"]["method"] == "words"
     mock_icp.assert_called_once()
-    # inspect call args to mock_icp to verify options were passed correctly from endpoint
+    # Verify options passed to the mocked improved_chunking_process
+    _, passed_options, _, _, _ = mock_icp.call_args[0]
+    assert passed_options["method"] == "words"
+    assert passed_options["max_size"] == 2
 
 
-def test_chunk_text_endpoint_rolling_summarize(client: TestClient):
-    global mock_general_llm_analyzer_call_history
+@patch(PATH_TO_ICP_IN_ENDPOINT_ROUTER_MODULE)
+def test_chunk_text_method_sentences(mock_icp, client: TestClient):
+    mock_icp.return_value = [{'text': 'Sentence one.', 'metadata': {'method': 'sentences'}}]
+    payload = {"text_content": "Sentence one. Sentence two.", "options": {"method": "sentences", "max_size": 1}}
+    response = client.post("/api/v1/chunking/chunk_text", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["applied_options"]["method"] == "sentences"
+    assert data["chunks"][0]["text"] == "Sentence one."
+    _, passed_options, _, _, _ = mock_icp.call_args[0]
+    assert passed_options["method"] == "sentences"
+
+
+@patch(PATH_TO_ICP_IN_ENDPOINT_ROUTER_MODULE)
+def test_chunk_text_method_paragraphs(mock_icp, client: TestClient):
+    mock_icp.return_value = [{'text': 'Paragraph one.\n\nParagraph two.', 'metadata': {'method': 'paragraphs'}}]
+    payload = {"text_content": "Paragraph one.\n\nParagraph two.", "options": {"method": "paragraphs", "max_size": 1}}
+    response = client.post("/api/v1/chunking/chunk_text", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["applied_options"]["method"] == "paragraphs"
+    _, passed_options, _, _, _ = mock_icp.call_args[0]
+    assert passed_options["method"] == "paragraphs"
+
+
+# Add similar tests for "semantic", "json", "xml", "ebook_chapters" by mocking icp's return
+
+def test_chunk_text_validation_error_max_size_string(client: TestClient):
+    payload = {"text_content": "test", "options": {"method": "words", "max_size": "not-an-int"}}
+    response = client.post("/api/v1/chunking/chunk_text", json=payload)
+    assert response.status_code == 422
+    data = response.json()
+    assert any("max_size" in error["loc"] and "integer" in error.get("msg", "").lower() for error in data["detail"])
+
+
+def test_chunk_text_validation_overlap_too_large(client: TestClient):
+    payload = {"text_content": "test", "options": {"method": "words", "max_size": 5, "overlap": 10}}
+    response = client.post("/api/v1/chunking/chunk_text", json=payload)
+    assert response.status_code == 422
+    assert "Overlap (10) must be less than max_size (5)" in response.json()["detail"][0]["msg"]
+
+
+@patch(PATH_TO_ICP_IN_ENDPOINT_ROUTER_MODULE)
+def test_chunk_text_empty_content(mock_icp, client: TestClient):
+    mock_icp.return_value = []
+    payload = {"text_content": "", "options": {"method": "words"}}
+    response = client.post("/api/v1/chunking/chunk_text", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["chunks"] == []
+    mock_icp.assert_called_once()
+    call_args_list = mock_icp.call_args[0]  # Get the positional arguments
+    assert call_args_list[0] == ""  # text_content
+    assert call_args_list[1]["method"] == "words"  # effective_options
+
+
+@patch(PATH_TO_ICP_IN_ENDPOINT_ROUTER_MODULE)
+def test_chunk_text_rolling_summarize_server_determines_llm(mock_icp, client: TestClient):
+    global mock_general_llm_analyzer_call_history_for_test
+    mock_icp.return_value = [{"text": "[Mock Rolling Summary From Test]", "metadata": {"method": "rolling_summarize"}}]
     payload = {
-        "text_content": "This is a test for rolling summarization feature. It needs an LLM.",
+        "text_content": "Content for server-determined LLM rolling summarize.",
         "options": {
             "method": "rolling_summarize",
-            "tokenizer_name_or_path": "gpt2",  # Important for rolling_summarize
-            "summarization_detail": 0.1,
-            "llm_options_for_internal_steps": {  # Client suggestions
-                "temperature": 0.5,
-                "system_prompt_for_step": "Client suggested system prompt for step.",
-                "max_tokens_per_step": 20
+            "tokenizer_name_or_path": "distilgpt2",  # Different tokenizer
+            "summarization_detail": 0.2,
+            "llm_options_for_internal_steps": {  # Client suggestions for non-provider/model aspects
+                "temperature": 0.6,
+                "system_prompt_for_step": "Client custom step prompt.",
+                "max_tokens_per_step": 25
             }
         }
     }
-
-    # Mock the core chunking library's improved_chunking_process
-    # This allows us to check what the endpoint prepares *for* improved_chunking_process
-    # The unit tests for Chunk_Lib already test improved_chunking_process internals.
-    mock_chunk_result = [
-        {"text": "[Mock Rolling Summary of the input...]", "metadata": {"method": "rolling_summarize"}}]
-    with patch('tldw_Server_API.app.v1.endpoints.text_processing.improved_chunking_process_real',
-               return_value=mock_chunk_result) as mock_icp:
-        response = client.post("/api/v1/process/chunk_text", json=payload)
-
+    response = client.post("/api/v1/chunking/chunk_text", json=payload)
     assert response.status_code == 200
     data = response.json()
-    assert data["chunks"][0]["text"] == "[Mock Rolling Summary of the input...]"
+    assert data["chunks"][0]["text"] == "[Mock Rolling Summary From Test]"
 
-    # Verify what improved_chunking_process was called with by the endpoint
     mock_icp.assert_called_once()
     args_to_icp, _ = mock_icp.call_args
-    passed_text_content, passed_effective_options, passed_tokenizer, passed_llm_func, passed_llm_config = args_to_icp
+    passed_text, passed_opts, passed_tokenizer, passed_llm_func, passed_llm_config = args_to_icp
 
-    assert passed_text_content == payload["text_content"]
-    assert passed_effective_options["method"] == "rolling_summarize"
-    assert passed_tokenizer == "gpt2"
-    assert passed_llm_func is mock_general_llm_analyzer  # Check it's our (overridden) mock
+    assert passed_text == payload["text_content"]
+    assert passed_opts["method"] == "rolling_summarize"
+    assert passed_opts["summarization_detail"] == 0.2
+    assert passed_tokenizer == "distilgpt2"
+    assert passed_llm_func is general_llm_analyzer_actual  # Checking it's the (overridden) actual analyzer
 
-    # Check that llm_api_config_to_use was built correctly by the endpoint (Option A)
+    # Verify server-determined LLM (Option A) and client suggestions for other params
     assert passed_llm_config["api_name"] == "mock_llm"  # From mock_load_server_configs
-    assert passed_llm_config["model"] == "mock_model_for_sum_tasks"  # Server-determined
+    assert passed_llm_config["model"] == "mock_model_for_sum_tasks_server_default"  # Server-determined
     assert passed_llm_config["api_key"] == "mock_api_key_for_tests"  # Server-determined
-    assert passed_llm_config["temp"] == 0.5  # Client suggested
-    assert passed_llm_config["system_message"] == "Client suggested system prompt for step."
-    assert passed_llm_config["max_tokens"] == 20
-
-    # If you wanted to test that mock_general_llm_analyzer was called by the *real* improved_chunking_process,
-    # you would NOT patch improved_chunking_process. Instead, you'd let it run and then check
-    # mock_general_llm_analyzer_call_history. This makes it a deeper integration test.
-    # For this example, we isolated the endpoint's logic of preparing args FOR improved_chunking_process.
+    assert passed_llm_config["temp"] == 0.6  # Client-suggested
+    assert passed_llm_config["system_message"] == "Client custom step prompt."  # Client-suggested
+    assert passed_llm_config["max_tokens"] == 25  # Client-suggested (and within server cap if implemented)
 
 
-def test_chunk_text_endpoint_invalid_method(client: TestClient):
-    # To test this properly, improved_chunking_process should raise InvalidChunkingMethodError
-    # which the endpoint then converts to a 400.
-    # So, we mock improved_chunking_process to raise that error.
-    with patch('tldw_Server_API.app.v1.endpoints.text_processing.improved_chunking_process_real',
-               side_effect=InvalidChunkingMethodError("Test invalid method")) as mock_icp:
-        payload = {"text_content": "test", "options": {"method": "invalid_method"}}
-        response = client.post("/api/v1/process/chunk_text", json=payload)
+@patch(PATH_TO_ICP_IN_ENDPOINT_ROUTER_MODULE)
+def test_chunk_file_rolling_summarize(mock_icp_file, client: TestClient):
+    global mock_general_llm_analyzer_call_history_for_test
+    mock_icp_file.return_value = [{"text": "[Mock File Rolling Summary]", "metadata": {"method": "rolling_summarize"}}]
 
-    assert response.status_code == 400
-    assert "Test invalid method" in response.json()["detail"]
-
-
-def test_chunk_file_endpoint_simple(client: TestClient):
-    # Create a dummy file for upload
-    dummy_file_content = b"Content from uploaded file."
-    files = {'file': ('testfile.txt', dummy_file_content, 'text/plain')}
-    form_data = {'method': 'sentences', 'max_size': '1'}  # max_size as string, Pydantic should convert
-
-    # Patch the actual improved_chunking_process for the file endpoint
-    mock_file_chunk_result = [{'text': 'Content from', 'metadata': {'method': 'sentences'}}]
-    with patch('tldw_Server_API.app.v1.endpoints.text_processing.improved_chunking_process_real',
-               return_value=mock_file_chunk_result) as mock_icp_file:
-        response = client.post("/api/v1/process/chunk_file", files=files, data=form_data)
+    dummy_content = b"File content for rolling summarize test via file upload."
+    files = {'file': ('test_roll_file.txt', dummy_content, 'text/plain')}
+    form_data = {
+        'method': 'rolling_summarize',
+        'tokenizer_name_or_path': 'gpt2-medium',
+        'summarization_detail': '0.3',
+        'llm_step_temperature': '0.75',  # Flattened llm_options
+        'llm_step_system_prompt': 'File step prompt.',
+        'llm_step_max_tokens': '35'
+    }
+    response = client.post("/api/v1/chunking/chunk_file", files=files, data=form_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data["original_file_name"] == "testfile.txt"
-    assert data["chunks"][0]["text"] == "Content from"
-    assert data["applied_options"]["method"] == "sentences"
-    mock_icp_file.assert_called_once()
-    # Inspect args to mock_icp_file, especially the options dict built from form data
+    assert data["chunks"][0]["text"] == "[Mock File Rolling Summary]"
+    assert data["original_file_name"] == "test_roll_file.txt"
 
-# TODO: Add more tests for:
-# - Different chunking methods via endpoint
-# - Validation errors (e.g., non-integer max_size if Pydantic doesn't catch it first)
-# - Empty text_content
-# - File upload with LLM-dependent method like rolling_summarize (similar setup to the JSON one)
+    mock_icp_file.assert_called_once()
+    args_to_icp, _ = mock_icp_file.call_args
+    passed_text_file, passed_opts_file, passed_tokenizer_file, passed_llm_func_file, passed_llm_config_file = args_to_icp
+
+    assert passed_text_file == dummy_content.decode()
+    assert passed_opts_file["method"] == "rolling_summarize"
+    assert passed_opts_file["tokenizer_name_or_path"] == "gpt2-medium"
+    assert passed_opts_file["llm_options_for_internal_steps"]["temperature"] == 0.75  # Check nested construction
+    assert passed_llm_func_file is general_llm_analyzer_actual
+
+    assert passed_llm_config_file["api_name"] == "mock_llm"
+    assert passed_llm_config_file["model"] == "mock_model_for_sum_tasks_server_default"
+    assert passed_llm_config_file["temp"] == 0.75
+    assert passed_llm_config_file["system_message"] == "File step prompt."
+    assert passed_llm_config_file["max_tokens"] == 35
+
+
+# @patch(PATH_TO_ICP_IN_ENDPOINT_ROUTER_MODULE)
+# def test_chunk_text_endpoint_no_options(mock_icp, client: TestClient):
+#     # Test when no 'options' are provided in the payload, relying on defaults
+#     mock_icp.return_value = [
+#         {'text': 'Default chunked', 'metadata': {'method': default_chunk_options_from_lib_actual.get('method')}}]
+#     payload = {"text_content": "Text with no options."}  # No "options" key
+#
+#     response = client.post("/api/v1/chunking/chunk_text", json=payload)
+#     assert response.status_code == 200
+#     data = response.json()
+#     assert data["applied_options"]["method"] == default_chunk_options_from_lib_actual.get(
+#         'method')  # Should use library default
+#
+#     mock_icp.assert_called_once()
+#     _, passed_options, _, _, _ = mock_icp.call_args[0]
+#     # Check that passed_options reflects the library defaults merged with request (which is empty for options)
+#     assert passed_options["method"] == default_chunk_options_from_lib_actual.get('method')
+#     assert passed_options["max_size"] == default_chunk_options_from_lib_actual.get('max_size')
+
+
+def test_chunk_text_endpoint_invalid_payload_missing_text(client: TestClient):
+    payload = {"options": {"method": "words"}}  # Missing "text_content"
+    response = client.post("/api/v1/chunking/chunk_text", json=payload)
+    assert response.status_code == 422  # Pydantic validation for missing required field
+    assert "text_content" in response.json()["detail"][0]["loc"]
 
 #
 # End of test_chunking_endpoint.py
