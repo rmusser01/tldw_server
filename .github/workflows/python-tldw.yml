@@ -29,7 +29,7 @@ jobs:
           pip install pytest pytest-mock
           sudo apt install portaudio19-dev python3-all-dev
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install -r requirements.txt
+          pip install -r tldw_Server_API/requirements.txt
           pip check
       - name: Test Media Versioning Functions/Endpoints with pytest
         run: |
