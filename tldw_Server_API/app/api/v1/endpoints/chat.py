@@ -70,12 +70,17 @@ from tldw_Server_API.app.core.Chat.prompt_template_manager import (
     apply_template_to_string,
     load_template,
 )
-from tldw_Server_API.app.core.Chat.prompt_template_manager import PromptTemplate, load_template, \
-    DEFAULT_RAW_PASSTHROUGH_TEMPLATE, apply_template_to_string
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, ConflictError, \
-    InputError
-from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib import ( # For placeholder replacement on retrieval
-    replace_placeholders
+from tldw_Server_API.app.core.Chat.prompt_template_manager import (
+    PromptTemplate,
+    load_template,
+    DEFAULT_RAW_PASSTHROUGH_TEMPLATE,
+    apply_template_to_string,
+)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+    InputError,
 )
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib import replace_placeholders
 #######################################################################################################################

@@ -79,18 +79,19 @@ def safe_render(template_str: str, data: dict[str, Any]) -> str:
 
 def apply_template_to_string(template_string: Optional[str], data: Dict[str, Any]) -> Optional[str]:
     """
-    Applies data to a template string using str.format().
-    Missing placeholders will be kept as is (e.g., "{missing_placeholder}").
+    Applies data to a template string using Jinja2 safe rendering.
+    Missing placeholders will typically render as empty strings by Jinja2 default.
     """
     if template_string is None:
-        return ""
+        return "" # Returns an empty string if the template_string itself is None
     try:
-        template_string = safe_render(template_string, data)
-    except KeyError as e:
+        # The original was: template_string = safe_render(template_string, data)
+        # This needs to assign to a new variable and return it.
+        rendered_string = safe_render(template_string, data)
+        return rendered_string
+    except KeyError as e: # This exception type might not be commonly raised by Jinja's render for missing vars
         logger.warning(f"Placeholder {e} not found in data for template string: '{template_string}'")
-        # Fallback to keep the template string as is or partially formatted
-        # This should be handled by SafeFormatter now.
-        return template_string
+        return template_string # Fallback to original
     except Exception as e:
         logger.error(f"Error applying template string '{template_string}': {e}", exc_info=True)
         return template_string # Return original on error
@@ -106,9 +107,9 @@ def get_available_templates() -> List[str]:
 DEFAULT_RAW_PASSTHROUGH_TEMPLATE = PromptTemplate(
     name="raw_passthrough",
     description="Default template that makes no changes to the prompts.",
-    system_message_template="{original_system_message_from_request}", # Or a more complex default if needed
-    user_message_content_template="{message_content}",
-    assistant_message_content_template="{message_content}"
+    system_message_template="{{original_system_message_from_request}}",
+    user_message_content_template="{{message_content}}",
+    assistant_message_content_template="{{message_content}}"
 )
 _loaded_templates["raw_passthrough"] = DEFAULT_RAW_PASSTHROUGH_TEMPLATE
 

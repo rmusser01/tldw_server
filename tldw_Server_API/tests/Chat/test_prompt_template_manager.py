@@ -84,18 +84,21 @@ def test_load_template_empty_json_fails_validation(mock_templates_dir):
 
 
 @pytest.mark.unit
+# Inside test_apply_template_to_string():
 def test_apply_template_to_string():
-    template_str = "Hello {name}, welcome to {place}."
+    template_str_jinja = "Hello {{name}}, welcome to {{place}}." # Use Jinja
     data_full = {"name": "Alice", "place": "Wonderland"}
-    data_partial = {"name": "Bob"}
-    data_empty = {}
+    assert apply_template_to_string(template_str_jinja, data_full) == "Hello Alice, welcome to Wonderland."
 
-    assert apply_template_to_string(template_str, data_full) == "Hello Alice, welcome to Wonderland."
-    # Missing 'place' should keep placeholder
-    assert apply_template_to_string(template_str, data_partial) == "Hello Bob, welcome to {place}."
-    assert apply_template_to_string(template_str, data_empty) == "Hello {name}, welcome to {place}."
-    assert apply_template_to_string(None, data_full) is None
-    assert apply_template_to_string("No placeholders here.", data_full) == "No placeholders here."
+    template_partial_jinja = "Hello {{name}}." # Use Jinja
+    data_partial = {"name": "Bob"}
+    assert apply_template_to_string(template_partial_jinja, data_partial) == "Hello Bob."
+
+    # Test with missing data - Jinja renders empty for missing by default if not strict
+    assert apply_template_to_string(template_partial_jinja, {}) == "Hello ."
+
+    # Test with None template string
+    assert apply_template_to_string(None, data_full) == ""
 
 
 @pytest.mark.unit
@@ -121,7 +124,19 @@ def test_default_raw_passthrough_template():
     assert DEFAULT_RAW_PASSTHROUGH_TEMPLATE is not None
     assert DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name == "raw_passthrough"
     data = {"message_content": "test content", "original_system_message_from_request": "system content"}
+
+    # User message template (is "{{message_content}}")
     assert apply_template_to_string(DEFAULT_RAW_PASSTHROUGH_TEMPLATE.user_message_content_template,
                                     data) == "test content"
-    assert apply_template_to_string(DEFAULT_RAW_PASSTHROUGH_TEMPLATE.system_message_template, data) == "system content"
+    # System message template (is "{{original_system_message_from_request}}")
+    assert apply_template_to_string(DEFAULT_RAW_PASSTHROUGH_TEMPLATE.system_message_template,
+                                    data) == "system content"
+
+    data_empty_sys = {"original_system_message_from_request": ""}
+    assert apply_template_to_string(DEFAULT_RAW_PASSTHROUGH_TEMPLATE.system_message_template,
+                                    data_empty_sys) == ""
+
+    data_missing_sys = {"message_content": "some_content"}  # original_system_message_from_request is missing
+    assert apply_template_to_string(DEFAULT_RAW_PASSTHROUGH_TEMPLATE.system_message_template,
+                                    data_missing_sys) == ""  # Jinja renders missing as empty
 

@@ -280,7 +280,7 @@ def test_no_system_message_in_payload(
     # 3. DEFAULT_RAW_PASSTHROUGH_TEMPLATE.system_message_template is likely empty or just "{original_system_message_from_request}".
     # 4. original_system_message_from_request will be "" or None.
     # So, final_system_message_for_provider should be None or empty, leading to system_message=None in chat_args_cleaned.
-    assert called_kwargs.get("system_message") is None
+    assert mock_chat_api_call.get("system_message") == ""
 
     # Ensure the messages in the payload are dictionaries and match the input (since it's passthrough)
     expected_payload_messages_as_dicts = [msg.model_dump(exclude_none=True) for msg in DEFAULT_USER_MESSAGES_FOR_SCHEMA]
