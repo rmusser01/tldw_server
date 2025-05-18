@@ -10,14 +10,13 @@ from typing import List, Dict, Any, Tuple
 from PoC_Version.App_Function_Libraries.RAG.Embeddings_Create import create_embedding, embedding_provider, embedding_model, \
     embedding_api_url
 from PoC_Version.App_Function_Libraries.RAG.ChromaDB_Library import chroma_client, store_in_chroma
-from PoC_Version.App_Function_Libraries.Utils.Utils import logging
-
+from PoC_Version.App_Function_Libraries.Utils.Utils import logging, load_and_log_configs
 
 #
 #######################################################################################################################
 #
 # RAG Chat Embeddings
-
+config = load_and_log_configs()
 def perform_vector_search_chat(query: str, relevant_chat_ids: List[int], k: int = 10) -> List[Dict[str, Any]]:
     """
     Perform a vector search within the specified chat IDs.
