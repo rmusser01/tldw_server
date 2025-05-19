@@ -34,6 +34,9 @@ from tldw_Server_API.app.api.v1.endpoints.embeddings import router as embeddings
 # Media Endpoint
 from tldw_Server_API.app.api.v1.endpoints.media import router as media_router
 #
+# Notes Endpoint
+from tldw_Server_API.app.api.v1.endpoints.notes import router as notes_router
+#
 # Prompt Management Endpoint
 from tldw_Server_API.app.api.v1.endpoints.prompts import router as prompt_router
 #
@@ -169,7 +172,7 @@ app.include_router(chat_router, prefix="/api/v1/chat", tags=["chat"])
 
 
 # Router for chat endpoints/chat temp-file handling
-app.include_router(character_router, prefix="/api/v1/persona", tags=["persona, character"])
+app.include_router(character_router, prefix="/api/v1/persona", tags=["character, persona"])
 
 
 # Router for Chunking Endpoint
@@ -178,6 +181,10 @@ app.include_router(chunking_router, prefix="/api/v1/chunking", tags=["chunking"]
 
 # Router for Embedding Endpoint
 app.include_router(embeddings_router, prefix="/api/v1/embedding", tags=["embedding"])
+
+
+# Router for Note Management endpoints
+app.include_router(prompt_router, prefix="/api/v1/notes", tags=["notes]"])
 
 
 # Router for Prompt Management endpoints

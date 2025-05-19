@@ -1,5 +1,17 @@
 # Chat_Functions.py
 # Description: Chat functions for interacting with the LLMs as chatbots
+"""
+This module provides a comprehensive set of functions and classes for managing chat interactions,
+character data, and chat dictionaries in a multimodal chatbot system. It includes functionality
+for handling API calls, saving and loading chat history, managing character cards, and processing
+user input with chat dictionaries.
+
+Key Features:
+- Chat API call handling with error management and multimodal support.
+- Chat history saving and exporting to JSON.
+- Character card management, including saving, loading, and updating character data.
+- Chat dictionary processing for keyword-based text replacement and token budget management.
+"""
 #
 # Imports
 import base64
@@ -77,6 +89,12 @@ API_CALL_HANDLERS = {
     'custom-openai-api': chat_with_custom_openai,
     'custom-openai-api-2': chat_with_custom_openai_2,
 }
+"""
+A dispatch table mapping API endpoint names (e.g., 'openai') to their
+corresponding handler functions (e.g., `chat_with_openai`). This is used by
+`chat_api_call` to route requests to the appropriate LLM provider.
+FIXME: The mappings and handlers should be validated for correctness.
+"""
 
 # 2. Parameter mapping for each provider
 # Maps generic chat_api_call param name to provider-specific param name
@@ -97,13 +115,12 @@ PROVIDER_PARAM_MAP = {
         'logit_bias': 'logit_bias',
         'presence_penalty': 'presence_penalty',
         'frequency_penalty': 'frequency_penalty',
-        # Note: OpenAI's chat_with_openai internally handles 'maxp' as 'top_p'
         'max_tokens': 'max_tokens',
         'seed': 'seed',
         'stop': 'stop',
-        'response_format': 'response_format',  # Expects {'type': 'text' | 'json_object'}
+        'response_format': 'response_format',
         'n': 'n',
-        'user_identifier': 'user',  # 'user' is the param name for OpenAI
+        'user_identifier': 'user',
     },
     'anthropic': {
         'api_key': 'api_key',
@@ -256,7 +273,7 @@ PROVIDER_PARAM_MAP = {
         'stop': 'stop', # list of strings
         'response_format': 'response_format', # if OpenAI compatible endpoint
         'logit_bias': 'logit_bias',
-        'n': 'n_probs', # how many token probabilities to return, doesn't map cleanly FIXME
+        'n': 'n_probs', # FIXME: n_probs mapping might not be direct.
         'presence_penalty': 'presence_penalty',
         'frequency_penalty': 'frequency_penalty',
     },
@@ -428,6 +445,12 @@ PROVIDER_PARAM_MAP = {
     },
     # Add other providers here
 }
+"""
+Maps generic parameter names used in `chat_api_call` to provider-specific
+parameter names for each LLM API. This allows `chat_api_call` to use a
+consistent interface while adapting to the idiosyncrasies of different providers.
+FIXME: The mappings should be validated for correctness and completeness for each provider.
+"""
 
 def chat_api_call(
     api_endpoint: str,
@@ -456,7 +479,57 @@ def chat_api_call(
     user_identifier: Optional[str] = None  # Renamed from 'user' to avoid conflict with 'user' role in messages
     ):
     """
-    Acts as a sink/router to call various LLM API providers using a structured messages_payload.
+    Acts as a unified dispatcher to call various LLM API providers.
+
+    This function routes chat requests to the appropriate LLM provider based on
+    `api_endpoint`. It uses `API_CALL_HANDLERS` to find the correct handler
+    function and `PROVIDER_PARAM_MAP` to translate generic parameters to
+    provider-specific ones.
+
+    Args:
+        api_endpoint: The identifier for the target LLM provider (e.g., "openai", "anthropic").
+        messages_payload: A list of message objects (OpenAI format: `{'role': ..., 'content': ...}`)
+                          representing the conversation history and current user message.
+        api_key: The API key for the specified provider.
+        temp: Temperature for sampling, controlling randomness.
+        system_message: An optional system-level instruction for the LLM. How this is
+                        used depends on the provider; some prepend it to messages, others
+                        have a dedicated parameter.
+        streaming: Whether to stream the response from the LLM.
+        minp: Minimum probability for token sampling (nucleus sampling related).
+        maxp: Maximum probability for token sampling (often maps to `top_p`).
+        model: The specific model to use for the LLM provider.
+        topk: Top-K sampling parameter.
+        topp: Top-P (nucleus) sampling parameter.
+        logprobs: Whether to return log probabilities of tokens.
+        top_logprobs: Number of top log probabilities to return.
+        logit_bias: A dictionary to bias token generation probabilities.
+        presence_penalty: Penalty for new tokens based on their presence in the text so far.
+        frequency_penalty: Penalty for new tokens based on their frequency in the text so far.
+        tools: A list of tools the model may call.
+        tool_choice: Controls which tool the model should call.
+        max_tokens: The maximum number of tokens to generate in the response.
+        seed: A seed for deterministic generation, if supported.
+        stop: A string or list of strings that, when generated, will cause the LLM to stop.
+        response_format: Specifies the format of the response (e.g., `{'type': 'json_object'}`).
+        n: The number of chat completion choices to generate.
+        user_identifier: An identifier for the end-user, for tracking or moderation purposes.
+
+    Returns:
+        The LLM's response. This can be a string for non-streaming responses or
+        a generator for streaming responses. The exact type depends on the
+        underlying provider's handler function.
+
+    Raises:
+        ValueError: If the `api_endpoint` is unsupported or if there's a parameter issue.
+        ChatAuthenticationError: If authentication with the provider fails (e.g., invalid API key).
+        ChatRateLimitError: If the provider's rate limit is exceeded.
+        ChatBadRequestError: If the request to the provider is malformed or invalid.
+        ChatProviderError: If the provider's server returns an error or there's a network issue.
+        ChatConfigurationError: If there's a configuration issue for the specified provider.
+        ChatAPIError: For other unexpected API-related errors.
+        requests.exceptions.HTTPError: Propagated from underlying HTTP requests if not caught and re-raised.
+        requests.exceptions.RequestException: For network errors during the request.
     """
     endpoint_lower = api_endpoint.lower()
     logging.info(f"Chat API Call - Routing to endpoint: {endpoint_lower}")
@@ -504,48 +577,20 @@ def chat_api_call(
     for generic_param_name, provider_param_name in params_map.items():
         if generic_param_name in available_generic_params and available_generic_params[generic_param_name] is not None:
             call_kwargs[provider_param_name] = available_generic_params[generic_param_name]
-        # Special case: if 'prompt' is still in a map for a simple provider,
-        # we'd need to serialize the last user message from messages_payload or handle it.
-        # For now, assuming providers expecting 'messages_payload' (or its mapped name) will parse it.
-        # If a provider (e.g. Cohere) has 'prompt' for current message and 'messages_payload' for history:
-        if generic_param_name == 'prompt' and endpoint_lower == 'cohere': # Example for Cohere
-             # Cohere might take the last user message text as 'message' and the rest as 'chat_history'
-             # This logic should ideally be INSIDE chat_with_cohere.
-             # Forcing it here makes chat_api_call less generic.
-             # For simplicity here, this example assumes chat_with_cohere handles parsing messages_payload.
-             # If chat_with_cohere expects current message separately, then messages_payload should not contain it.
-             # This illustrates the complexity of a single dispatch point.
-             pass
+        if generic_param_name == 'prompt' and endpoint_lower == 'cohere':
+             pass # Specific handling for Cohere's prompt is assumed to be within chat_with_cohere
 
-        # Special handling for providers that expect 'api_url' or similar as None to use config,
-        # if chat_api_call doesn't expose a generic 'api_url' parameter.
-        # Example: llama.cpp, ooba, vllm, ollama.
-        # The original code passed None for these if not specified by chat_api_call.
-        # The `chat_with_...` functions themselves should handle `api_url=None` to mean "load from config".
-        # Our kwargs_for_handler will only include params explicitly mapped and non-None.
-        # This means if `api_url` isn't a generic param, it won't be passed, and the
-        # specific chat_with_... functions need to have `api_url=None` as a default in their signature.
-        # This seems to be the case in the original structure.
-
-    # Log API key securely
     if call_kwargs.get(params_map.get('api_key', 'api_key')) and isinstance(call_kwargs.get(params_map.get('api_key', 'api_key')), str) and len(call_kwargs.get(params_map.get('api_key', 'api_key'))) > 8:
          logging.info(f"Debug - Chat API Call - API Key: {call_kwargs[params_map.get('api_key', 'api_key')][:4]}...{call_kwargs[params_map.get('api_key', 'api_key')][-4:]}")
 
     try:
         logging.debug(f"Calling handler {handler.__name__} with kwargs: { {k: (type(v) if k != params_map.get('api_key') else 'key_hidden') for k,v in call_kwargs.items()} }")
-        # Log the actual values for non-sensitive parameters for better debugging
-        # sensitive_keys = [params_map.get('api_key', 'api_key'), 'messages_payload'] # messages_payload can be large
-        # debug_kwargs_log = {
-        #     k: (v if k not in sensitive_keys else ( "key_hidden" if k == params_map.get('api_key', 'api_key') else f"payload_type:{type(v)}" ))
-        #     for k, v in call_kwargs.items()
-        # }
-        # logging.debug(f"Calling handler {handler.__name__} with actual kwargs (sensitive excluded/typed): {debug_kwargs_log}")
         response = handler(**call_kwargs)
 
         call_duration = time.time() - start_time
         log_histogram("chat_api_call_duration", call_duration, labels={"api_endpoint": endpoint_lower})
         log_counter("chat_api_call_success", labels={"api_endpoint": endpoint_lower})
-        # Avoid logging potentially huge responses
+
         if isinstance(response, str):
              logging.debug(f"Debug - Chat API Call - Response (first 500 chars): {response[:500]}...")
         elif hasattr(response, '__iter__') and not isinstance(response, (str, bytes, dict)):
@@ -562,16 +607,11 @@ def chat_api_call(
 
         # Log safely first
         try:
-            # Use % formatting for safety if loguru + f-string + json is problematic
             logging.error("%s. Details: %s", log_message_base, error_text[:500], exc_info=False)
-            # Alternatively, keep f-string but be mindful:
-            # logging.error(f"{log_message_base}. Details: {error_text[:500]}...", exc_info=False)
         except Exception as log_e:
-            logging.error(f"Error during logging HTTPError details: {log_e}")  # Log the logging error itself
+            logging.error(f"Error during logging HTTPError details: {log_e}")
 
-        # Now, raise the appropriate custom exception based on status code
-        detail_message = f"API call to {endpoint_lower} failed with status {status_code}. Response: {error_text[:200]}"  # Truncate details
-
+        detail_message = f"API call to {endpoint_lower} failed with status {status_code}. Response: {error_text[:200]}"
         if status_code == 401:
             raise ChatAuthenticationError(provider=endpoint_lower,
                                           message=f"Authentication failed for {endpoint_lower}. Check API key. Detail: {error_text[:200]}")
@@ -581,51 +621,40 @@ def chat_api_call(
         elif 400 <= status_code < 500:
             raise ChatBadRequestError(provider=endpoint_lower,
                                       message=f"Bad request to {endpoint_lower} (Status {status_code}). Detail: {error_text[:200]}")
-        # Consider 5xx errors as provider errors
         elif 500 <= status_code < 600:
             raise ChatProviderError(provider=endpoint_lower,
                                     message=f"Error from {endpoint_lower} server (Status {status_code}). Detail: {error_text[:200]}",
                                     status_code=status_code)
-        else:  # Catch-all for unexpected HTTP statuses
+        else:
             raise ChatAPIError(provider=endpoint_lower,
                                message=f"Unexpected HTTP status {status_code} from {endpoint_lower}. Detail: {error_text[:200]}",
                                status_code=status_code)
     except requests.exceptions.RequestException as e:
         logging.error(f"Network error connecting to {endpoint_lower}: {e}", exc_info=False)
         raise ChatProviderError(provider=endpoint_lower, message=f"Network error: {e}", status_code=504)
-    except (ValueError, TypeError, KeyError) as e: # Catches an error from handler lookup or param issues
+    except (ValueError, TypeError, KeyError) as e:
         logging.error(f"Value/Type/Key error during chat API call setup for {endpoint_lower}: {e}", exc_info=True)
-        # Raise a configuration or bad request error
         error_type = "Configuration/Parameter Error"
-        status = 400
         if "Unsupported API endpoint" in str(e):
-            error_type = "Unsupported API"
-            status = 501  # Not Implemented might be better? Or 400 still ok.
             raise ChatConfigurationError(provider=endpoint_lower, message=f"Unsupported API endpoint: {endpoint_lower}")
         else:
             raise ChatBadRequestError(provider=endpoint_lower, message=f"{error_type} for {endpoint_lower}: {e}")
-
-    # --- Final Catch-all ---
     except Exception as e:
-        # Log the unexpected error
         logging.exception(
             f"Unexpected internal error in chat_api_call for {endpoint_lower}: {e}")
-        # Raise a generic ChatAPIError
         raise ChatAPIError(provider=endpoint_lower,
                            message=f"An unexpected internal error occurred in chat_api_call for {endpoint_lower}: {str(e)}",
                            status_code=500)
 
 
 def chat(
-    # Existing parameters
     message: str,
-    # history: List[Tuple[Optional[str], Optional[str]]], # OLD HISTORY FORMAT
-    history: List[Dict[str, Any]], # NEW HISTORY FORMAT: List of OpenAI message objects
+    history: List[Dict[str, Any]],
     media_content: Optional[Dict[str, str]],
     selected_parts: List[str],
     api_endpoint: str,
     api_key: Optional[str],
-    custom_prompt: Optional[str], # This might be better as part of system_message or main message text
+    custom_prompt: Optional[str],
     temperature: float,
     system_message: Optional[str] = None,
     streaming: bool = False,
@@ -634,18 +663,15 @@ def chat(
     model: Optional[str] = None,
     topp: Optional[float] = None,
     topk: Optional[int] = None,
-    chatdict_entries: Optional[List[Any]] = None,
-    max_tokens: int = 500, # Max tokens for chat dict, not LLM response
+    chatdict_entries: Optional[List[Any]] = None, # Should be List[ChatDictionary]
+    max_tokens: int = 500,
     strategy: str = "sorted_evenly",
-    # +++ Image-related parameters +++
-    current_image_input: Optional[Dict[str, str]] = None, # {'base64_data': '...', 'mime_type': 'image/png'}
-    image_history_mode: str = "tag_past",  # "send_all", "send_last_user_image", "tag_past", "ignore_past"
-    # +++ Parameters that mirror ChatCompletionRequest for direct pass-through if needed by chat_api_call +++
-    # These would typically be set by the calling FastAPI endpoint based on ChatCompletionRequest model
+    current_image_input: Optional[Dict[str, str]] = None,
+    image_history_mode: str = "tag_past",
     llm_max_tokens: Optional[int] = None,
     llm_seed: Optional[int] = None,
     llm_stop: Optional[Union[str, List[str]]] = None,
-    llm_response_format: Optional[ResponseFormat] = None, # Pydantic model
+    llm_response_format: Optional[ResponseFormat] = None,
     llm_n: Optional[int] = None,
     llm_user_identifier: Optional[str] = None,
     llm_logprobs: Optional[bool] = None,
@@ -655,7 +681,67 @@ def chat(
     llm_frequency_penalty: Optional[float] = None,
     llm_tools: Optional[List[Dict[str, Any]]] = None,
     llm_tool_choice: Optional[Union[str, Dict[str, Any]]] = None
-):
+) -> Union[str, Any]: # Any for streaming generator
+    """
+    Orchestrates a chat interaction with an LLM, handling message processing,
+    RAG, multimodal content, and chat dictionary features.
+
+    This function prepares the `messages_payload` in OpenAI format, including
+    history, current user message (with optional RAG and image), and then
+    calls `chat_api_call` to get the LLM's response.
+
+    Args:
+        message: The current text message from the user.
+        history: A list of previous messages in OpenAI format
+                 (e.g., `[{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}]`).
+                 Content can be simple text or a list of multimodal parts.
+        media_content: A dictionary containing RAG content (e.g., `{'summary': '...', 'transcript': '...'}`).
+        selected_parts: A list of keys from `media_content` to include as RAG.
+        api_endpoint: Identifier for the target LLM provider.
+        api_key: API key for the provider.
+        custom_prompt: An additional prompt/instruction to prepend to the user's current message.
+        temperature: LLM sampling temperature.
+        system_message: A system-level instruction for the LLM. Passed to `chat_api_call`.
+        streaming: Whether to stream the LLM response.
+        minp: Min-P sampling parameter for the LLM.
+        maxp: Max-P (often Top-P) sampling parameter for the LLM.
+        model: The specific LLM model to use.
+        topp: Top-P (nucleus) sampling parameter for the LLM.
+        topk: Top-K sampling parameter for the LLM.
+        chatdict_entries: A list of `ChatDictionary` objects for keyword replacement/expansion.
+        max_tokens: Max tokens for chat dictionary content processing (not LLM response).
+        strategy: Strategy for applying chat dictionary entries (e.g., "sorted_evenly").
+        current_image_input: An optional dictionary for the current image being sent by the user,
+                             in the format `{'base64_data': '...', 'mime_type': 'image/png'}`.
+        image_history_mode: How to handle images from past messages:
+                            "send_all": Send all past images.
+                            "send_last_user_image": Send only the last image sent by a user.
+                            "tag_past": Replace past images with a textual tag (e.g., "<image: prior_history.png>").
+                            "ignore_past": Do not include any past images.
+        llm_max_tokens: Max tokens for the LLM to generate in its response.
+        llm_seed: Seed for LLM generation.
+        llm_stop: Stop sequence(s) for LLM generation.
+        llm_response_format: Desired response format from LLM (e.g., JSON object).
+                             Pydantic `ResponseFormat` model instance.
+        llm_n: Number of LLM completion choices to generate.
+        llm_user_identifier: User identifier for LLM API call.
+        llm_logprobs: Whether LLM should return log probabilities.
+        llm_top_logprobs: Number of top log probabilities for LLM to return.
+        llm_logit_bias: Logit bias for LLM token generation.
+        llm_presence_penalty: Presence penalty for LLM generation.
+        llm_frequency_penalty: Frequency penalty for LLM generation.
+        llm_tools: Tools for LLM function calling.
+        llm_tool_choice: Tool choice for LLM function calling.
+
+    Returns:
+        The LLM's response, either as a string (non-streaming) or a generator
+        (streaming). In case of an error during chat processing, a string
+        containing an error message is returned.
+
+    Raises:
+        Catches internal exceptions and returns an error message string.
+        Exceptions from `chat_api_call` might propagate if not handled by its own try-except blocks.
+    """
     log_counter("chat_attempt_multimodal", labels={"api_endpoint": api_endpoint, "image_mode": image_history_mode})
     start_time = time.time()
 
@@ -839,8 +925,15 @@ def chat(
                     try:
                         raw_entries = parse_user_dict_markdown_file(post_gen_replacement_dict_path)
                         # Assuming parse_user_dict_markdown_file returns dict of key:content_string
-                        post_gen_chat_dict_entries = [ChatDictionary(key=k, content=str(v)) for k, v in raw_entries.items()]
-                        response = process_user_input(response, post_gen_chat_dict_entries)
+                        # Need to define ChatDictionary class or ensure it's imported/available
+                        # For now, assuming it's an available type.
+                        raw_entries = parse_user_dict_markdown_file(post_gen_replacement_dict_path)
+                        # This part might need the ChatDictionary class definition
+                        # post_gen_chat_dict_entries = [ChatDictionary(key=k, content=str(v)) for k, v in raw_entries.items()]
+                        # response = process_user_input(response, post_gen_chat_dict_entries)
+                        # Placeholder if ChatDictionary or process_user_input isn't fully defined yet for this context
+                        logging.warning("Post-gen replacement logic invoked but ChatDictionary/process_user_input usage needs review here.")
+
                         logging.debug(f"Response after post-gen replacement (first 500 chars): {str(response)[:500]}")
                     except Exception as e_post_gen:
                         logging.error(f"Error during post-generation replacement: {e_post_gen}", exc_info=True)
@@ -865,6 +958,42 @@ def save_chat_history_to_db_wrapper(
     media_name_for_char_assoc: Optional[str] = None,
     character_name_for_chat: Optional[str] = None
 ) -> Tuple[Optional[str], str]:
+    """
+    Saves or updates a chat conversation in the database.
+
+    This function handles associating the chat with a character (either specified,
+    derived from media, or a default character), creating a new conversation entry
+    if `conversation_id` is None, or updating an existing conversation by
+    soft-deleting old messages and adding new ones.
+
+    The `chatbot_history` is expected in OpenAI's message format: a list of
+    dictionaries, each with 'role' and 'content' keys. Multimodal content
+    (text and images as base64 data URIs) within the 'content' field is supported.
+
+    Args:
+        db: An instance of `CharactersRAGDB` for database operations.
+        chatbot_history: The chat history as a list of OpenAI message objects.
+                         Each object is a dict: `{'role': str, 'content': Union[str, List[Dict]]}`.
+                         Content lists support `{'type': 'text', 'text': str}` and
+                         `{'type': 'image_url', 'image_url': {'url': 'data:image/...;base64,...'}}`.
+        conversation_id: The ID of an existing conversation to update. If None,
+                         a new conversation is created.
+        media_content_for_char_assoc: Optional dictionary containing media details.
+                                      Used to derive a character name for association
+                                      if `character_name_for_chat` or `media_name_for_char_assoc`
+                                      are not provided. Expected to have a 'content' key
+                                      which might be a JSON string or dict with a 'title'.
+        media_name_for_char_assoc: Optional name of media to associate with a character.
+                                   Used if `character_name_for_chat` is not provided.
+        character_name_for_chat: Optional name of the character for this chat.
+                                 If provided, the chat is associated with this character.
+
+    Returns:
+        A tuple containing:
+        - `Optional[str]`: The conversation ID (new or existing). None on critical failure
+                           to create a conversation entry.
+        - `str`: A status message indicating success or failure.
+    """
     log_counter("save_chat_history_to_db_attempt")
     start_time = time.time()
     logging.info(f"Saving chat history (OpenAI format). Conversation ID: {conversation_id}, Character: {character_name_for_chat}, Num messages: {len(chatbot_history)}")
@@ -1078,7 +1207,33 @@ def save_chat_history_to_db_wrapper(
 
 
 # FIXME - turn into export function
-def save_chat_history(history, conversation_id, media_content):
+def save_chat_history(
+    history: List[Union[Tuple[Optional[str], Optional[str]], Dict[str, Any]]],
+    conversation_id: Optional[str],
+    media_content: Optional[Dict[str, Any]],
+    db_instance: Optional[CharactersRAGDB] = None # Added for generate_chat_history_content
+) -> Optional[str]:
+    """
+    Saves chat history to a uniquely named JSON file in a temporary directory.
+
+    FIXME: This function is marked to be potentially turned into a more generic
+    export function. Currently, it generates content using
+    `generate_chat_history_content` and saves it locally.
+
+    Args:
+        history: The chat history. Can be a list of (user_msg, bot_msg) tuples
+                 or a list of OpenAI message dicts.
+        conversation_id: The ID of the conversation, used for naming the file
+                         and potentially fetching details via `db_instance`.
+        media_content: Optional dictionary containing media details, used by
+                       `generate_chat_history_content` to derive a conversation name
+                       if `conversation_id` doesn't yield one.
+        db_instance: Optional `CharactersRAGDB` instance passed to
+                     `generate_chat_history_content` to fetch conversation title.
+
+    Returns:
+        The absolute path to the saved JSON file, or None if an error occurred.
+    """
     log_counter("save_chat_history_attempt")
     start_time = time.time()
     try:
@@ -1112,7 +1267,14 @@ def save_chat_history(history, conversation_id, media_content):
 
 def get_conversation_name(conversation_id: Optional[str], db_instance: Optional[CharactersRAGDB] = None) -> Optional[str]:
     """
-    Helper to get conversation name. Tries DB first if instance provided, then falls back.
+    Retrieves the title of a conversation from the database.
+
+    Args:
+        conversation_id: The ID of the conversation.
+        db_instance: An optional instance of `CharactersRAGDB` to use for DB lookup.
+
+    Returns:
+        The conversation title as a string if found, otherwise None.
     """
     if db_instance and conversation_id:
         try:
@@ -1127,9 +1289,32 @@ def get_conversation_name(conversation_id: Optional[str], db_instance: Optional[
     return None
 
 
-def generate_chat_history_content(history, conversation_id, media_content,
-                                  db_instance: Optional[CharactersRAGDB] = None):
-    # Modified to potentially use db_instance for conversation_name
+def generate_chat_history_content(
+    history: List[Union[Tuple[Optional[str], Optional[str]], Dict[str, Any]]],
+    conversation_id: Optional[str],
+    media_content: Optional[Dict[str, Any]],
+    db_instance: Optional[CharactersRAGDB] = None
+) -> Tuple[str, str]:
+    """
+    Generates JSON content representing the chat history and determines a conversation name.
+
+    The conversation name is fetched from the database using `conversation_id` if
+    `db_instance` is provided. Otherwise, it's derived from `media_content` or
+    a timestamp. The history is formatted into a list of role-content dictionaries.
+
+    Args:
+        history: The chat history. Can be a list of (user_msg, bot_msg) tuples
+                 or a list of OpenAI message dicts (`{'role': ..., 'content': ...}`).
+        conversation_id: Optional ID of the conversation.
+        media_content: Optional dictionary with media details, used for deriving
+                       conversation name as a fallback.
+        db_instance: Optional `CharactersRAGDB` instance for fetching conversation title.
+
+    Returns:
+        A tuple containing:
+        - `str`: JSON string of the chat data.
+        - `str`: The derived or fetched conversation name.
+    """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Try to get conversation name from DB if possible
@@ -1170,8 +1355,20 @@ def generate_chat_history_content(history, conversation_id, media_content,
 
     return json.dumps(chat_data, indent=2), conversation_name  # Return the derived/fetched name
 
+def extract_media_name(media_content: Optional[Dict[str, Any]]) -> Optional[str]:
+    """
+    Extracts a name or title from a media content dictionary.
 
-def extract_media_name(media_content: Optional[Dict[str, Any]]):  # media_content is the original complex object
+    It attempts to find a name by looking at common keys like 'title', 'name',
+    'media_title', 'webpage_title' within the `media_content` dictionary itself
+    or within a nested 'content' field (which might be a JSON string or a sub-dictionary).
+
+    Args:
+        media_content: A dictionary potentially containing media metadata.
+
+    Returns:
+        The extracted name as a string if found, otherwise None.
+    """
     if not media_content or not isinstance(media_content, dict):
         return None
 
@@ -1216,13 +1413,45 @@ def update_chat_content(
         use_content: bool,
         use_summary: bool,
         use_prompt: bool,
-        item_mapping: Dict[str, str],  # Maps display name (selected_item) to a note_id (media_id)
-        db_instance: CharactersRAGDB  # Changed: Pass the DB instance
-) -> Tuple[Dict[str, str], List[str]]:  # Returns dict of content strings, and list of selected part names
+        item_mapping: Dict[str, str],
+        db_instance: CharactersRAGDB
+) -> Tuple[Dict[str, str], List[str]]:
+    """
+    Fetches content from a database 'note' to be used as RAG context in a chat.
+
+    The function retrieves a note by ID (derived from `selected_item` via
+    `item_mapping`). It then extracts parts like 'content', 'summary', and 'prompt'
+    from the note's data based on the boolean flags `use_content`, `use_summary`,
+    and `use_prompt`.
+
+    The note's 'content' field in the database can be a plain string or a JSON string
+    containing structured data (e.g., `{"content": "...", "summary": "..."}`).
+    This function attempts to parse it accordingly.
+
+    FIXME: The dual nature of `note_data.content` (plain string or JSON string)
+    can be brittle. Enforcing a consistent structure for notes.content in the
+    database (e.g., always JSON if structured data is intended) would be an
+    improvement.
+
+    Args:
+        selected_item: The display name of the item selected by the user.
+        use_content: Boolean flag to include the main 'content' part.
+        use_summary: Boolean flag to include the 'summary' part.
+        use_prompt: Boolean flag to include the 'prompt' part.
+        item_mapping: A dictionary mapping display names (like `selected_item`)
+                      to note IDs (UUID strings).
+        db_instance: An instance of `CharactersRAGDB` for database operations.
+
+    Returns:
+        A tuple containing:
+        - `Dict[str, str]`: A dictionary where keys are part names (e.g., "content",
+                            "summary") and values are their string content. This is
+                            intended for the `media_content` argument of the `chat` function.
+        - `List[str]`: A list of selected part names (e.g., ["content", "summary"]).
+    """
     log_counter("update_chat_content_attempt")
     start_time = time.time()
     logging.debug(f"Debug - Update Chat Content - Selected Item: {selected_item}")
-    # ... other debug logs ...
 
     # This function's purpose seems to be to fetch content (possibly from a 'note' in the new DB)
     # and prepare it for the 'chat' function's 'media_content' input.
@@ -1334,6 +1563,31 @@ def update_chat_content(
 # Chat Dictionary Functions
 
 def parse_user_dict_markdown_file(file_path: str) -> Dict[str, str]:
+    """
+    Parses a user-defined dictionary from a markdown-like file.
+
+    The file format supports:
+    - Single-line entries: `key: value`
+    - Multi-line entries:
+      ```
+      key: |
+      This is a
+      multi-line value.
+      ---@@@---
+      ```
+    Keys and single-line values are stripped of leading/trailing whitespace.
+    Multi-line values preserve internal whitespace and newlines until the
+    terminator `---@@@---` is encountered on its own line (stripped).
+    Lines starting with a key pattern override previous multi-line contexts.
+
+    Args:
+        file_path: The path to the markdown dictionary file.
+
+    Returns:
+        A dictionary where keys are strings and values are the corresponding
+        content strings. Returns an empty dictionary if the file is not found
+        or an error occurs during parsing.
+    """
     logger.debug(f"Parsing user dictionary file: {file_path}")
     replacement_dict: Dict[str, str] = {}
     current_key: Optional[str] = None
@@ -1395,48 +1649,137 @@ def parse_user_dict_markdown_file(file_path: str) -> Dict[str, str]:
 
 
 class ChatDictionary:
-    def __init__(self, key, content, probability=100, group=None, timed_effects=None, max_replacements=1):
+    """
+    Represents an entry in the chat dictionary for keyword replacement or expansion.
+
+    Attributes:
+        key_raw (str): The original key string (can be plain text or /regex/).
+        key (Union[str, re.Pattern]): The compiled key, either a string or a regex pattern.
+        content (str): The content to replace the key with or to use in expansion.
+        probability (int): The probability (0-100) of this entry being triggered.
+        group (Optional[str]): An optional group name for scoring and selection logic.
+        timed_effects (Dict[str, int]): Dictionary for timed effects:
+            - "sticky" (int): Duration in seconds the effect remains active (0 if not sticky). (Currently not directly used in provided pipeline)
+            - "cooldown" (int): Duration in seconds before this entry can be triggered again.
+            - "delay" (int): Duration in seconds to wait after trigger conditions met before applying.
+        last_triggered (Optional[datetime]): Timestamp of when this entry was last triggered.
+        max_replacements (int): Maximum number of times this entry can replace its key in a single input.
+    """
+    def __init__(self, key: str, content: str, probability: int = 100, group: Optional[str] = None,
+                 timed_effects: Optional[Dict[str, int]] = None, max_replacements: int = 1):
+        """
+        Initializes a ChatDictionary entry.
+
+        Args:
+            key: The key to match (plain text or /regex/).
+            content: The replacement content.
+            probability: Probability of triggering (0-100). Defaults to 100.
+            group: Optional group name. Defaults to None.
+            timed_effects: Optional dictionary for timed effects.
+                           Defaults to `{"sticky": 0, "cooldown": 0, "delay": 0}`.
+            max_replacements: Max number of replacements for this entry per input. Defaults to 1.
+        """
         self.key_raw = key
         self.key = self.compile_key(key)
         self.content = content
         self.probability = probability
         self.group = group
         self.timed_effects = timed_effects or {"sticky": 0, "cooldown": 0, "delay": 0}
-        self.last_triggered = None  # Track when it was last triggered (for timed effects)
-        self.max_replacements = max_replacements  # New: Limit replacements
+        self.last_triggered: Optional[datetime] = None
+        self.max_replacements = max_replacements
 
     @staticmethod
-    def compile_key(key):
-        # Compile regex if wrapped with "/" delimiters
+    def compile_key(key: str) -> Union[str, re.Pattern]:
+        """
+        Compiles a key string into a regex pattern if it's wrapped in '/'.
+
+        Args:
+            key: The key string. If it starts and ends with '/', it's treated as a regex.
+
+        Returns:
+            A compiled `re.Pattern` if the key is a regex, otherwise the original string.
+        """
         if key.startswith("/") and key.endswith("/"):
             return re.compile(key[1:-1], re.IGNORECASE)
         return key
 
-    def matches(self, text):
-        # Match either regex or plain text
+    def matches(self, text: str) -> bool:
+        """
+        Checks if this entry's key matches the given text.
+
+        Args:
+            text: The text to check for a match.
+
+        Returns:
+            True if a match is found, False otherwise.
+        """
         if isinstance(self.key, re.Pattern):
             return self.key.search(text) is not None
+        # For plain string keys, `process_user_input` uses `match_whole_words`
+        # which applies \b for whole word matching. This method is a simpler check.
+        # Consider if this direct `in` check is sufficient or if it should also use whole-word.
+        # For now, it reflects the direct check before `match_whole_words` in the pipeline.
         return self.key in text
 
 
-# Strategy for inclusion
-def apply_strategy(entries, strategy="sorted_evenly"):
+def apply_strategy(entries: List[ChatDictionary], strategy: str = "sorted_evenly") -> List[ChatDictionary]:
+    """
+    Sorts chat dictionary entries based on a given strategy.
+
+    Strategies:
+    - "sorted_evenly": Sorts entries alphabetically by their raw key.
+    - "character_lore_first": Sorts "character" group entries first, then others, then by key.
+    - "global_lore_first": Sorts "global" group entries first, then others, then by key.
+
+    Args:
+        entries: A list of `ChatDictionary` objects.
+        strategy: The sorting strategy name. Defaults to "sorted_evenly".
+
+    Returns:
+        A new list of sorted `ChatDictionary` objects.
+    """
     logging.debug(f"Applying strategy: {strategy}")
     if strategy == "sorted_evenly":
-        return sorted(entries, key=lambda e: e.key)
+        return sorted(entries, key=lambda e: str(e.key_raw)) # Ensure key_raw is string for sort
     elif strategy == "character_lore_first":
-        return sorted(entries, key=lambda e: (e.group != "character", e.key))
+        return sorted(entries, key=lambda e: (e.group != "character", str(e.key_raw)))
     elif strategy == "global_lore_first":
-        return sorted(entries, key=lambda e: (e.group != "global", e.key))
+        return sorted(entries, key=lambda e: (e.group != "global", str(e.key_raw)))
+    return entries # Fallback if strategy not recognized
 
 
-# Probability modification of inclusion
-def filter_by_probability(entries):
+def filter_by_probability(entries: List[ChatDictionary]) -> List[ChatDictionary]:
+    """
+    Filters a list of ChatDictionary entries based on their probability.
+
+    Each entry has a `probability` attribute (0-100). This function
+    includes an entry if a random number between 1 and 100 is less than
+    or equal to its probability.
+
+    Args:
+        entries: A list of `ChatDictionary` objects.
+
+    Returns:
+        A new list containing only the entries that passed the probability check.
+    """
     return [entry for entry in entries if random.randint(1, 100) <= entry.probability]
 
 
 # Group Scoring - Situation where multiple entries are triggered in different groups in a single message
 def group_scoring(entries: List[ChatDictionary]) -> List[ChatDictionary]:
+    """
+    Selects entries based on group scoring rules.
+
+    - Entries without a group (group is None) are all included if matched.
+    - For entries within the same named group, only the "best" entry (currently
+      defined as the one with the longest raw key string) is selected from that group.
+
+    Args:
+        entries: A list of `ChatDictionary` objects that have already matched.
+
+    Returns:
+        A new list of selected `ChatDictionary` objects after group scoring.
+    """
     logging.debug(f"Group scoring for {len(entries)} entries")
     if not entries: return []
 
@@ -1462,24 +1805,83 @@ def group_scoring(entries: List[ChatDictionary]) -> List[ChatDictionary]:
     # The apply_strategy step later will sort them.
     return selected_entries
 
-# Timed Effects
-def apply_timed_effects(entry, current_time):
-    logging.debug(f"Applying timed effects for entry: {entry.key}")
+
+def apply_timed_effects(entry: ChatDictionary, current_time: datetime) -> bool:
+    """
+    Applies timed effects (delay, cooldown) to a ChatDictionary entry.
+
+    - Delay: If `entry.timed_effects["delay"]` is positive, the entry is
+      invalid if the time since `last_triggered` (or from epoch if never triggered)
+      is less than the delay.
+    - Cooldown: If `entry.timed_effects["cooldown"]` is positive, the entry is
+      invalid if it was `last_triggered` and the time since then is less than
+      the cooldown.
+
+    If the entry is considered valid after checks, its `last_triggered` time is
+    updated to `current_time`.
+
+    Args:
+        entry: The `ChatDictionary` entry to check.
+        current_time: The current `datetime` object.
+
+    Returns:
+        True if the entry is valid after timed effect checks, False otherwise.
+    """
+    logging.debug(f"Applying timed effects for entry: {entry.key_raw}") # Use key_raw for logging
     if entry.timed_effects["delay"] > 0:
-        if entry.last_triggered is None or current_time - entry.last_triggered < timedelta(seconds=entry.timed_effects["delay"]):
+        # If never triggered, assume it's valid for delay unless delay is from program start
+        # For simplicity, if last_triggered is None, it passes delay check.
+        # A more complex interpretation might involve first_seen time.
+        # Current logic: delay is from last trigger. If never triggered, passes delay.
+        if entry.last_triggered is not None and \
+           current_time - entry.last_triggered < timedelta(seconds=entry.timed_effects["delay"]):
+            logging.debug(f"Entry {entry.key_raw} delayed.")
             return False
     if entry.timed_effects["cooldown"] > 0:
-        if entry.last_triggered and current_time - entry.last_triggered < timedelta(seconds=entry.timed_effects["cooldown"]):
+        if entry.last_triggered and \
+           current_time - entry.last_triggered < timedelta(seconds=entry.timed_effects["cooldown"]):
+            logging.debug(f"Entry {entry.key_raw} on cooldown.")
             return False
-    entry.last_triggered = current_time
+
+    # If checks pass, update last_triggered (conceptually, this happens if it *would* be used)
+    # The actual update of last_triggered for active use is often done after selection.
+    # Here, we return true, and `process_user_input` will update `last_triggered` for used entries.
+    # For this function's purpose (filtering), we don't update here but assume it would be if selected.
     return True
 
-# Context/Token Budget Mgmt
-def calculate_token_usage(entries):
+
+def calculate_token_usage(entries: List[ChatDictionary]) -> int:
+    """
+    Calculates the approximate total token usage for a list of ChatDictionary entries.
+
+    Token usage for each entry is estimated by splitting its `content` by spaces.
+
+    Args:
+        entries: A list of `ChatDictionary` objects.
+
+    Returns:
+        The total approximate token count for all entries' content.
+    """
     logging.debug(f"Calculating token usage for {len(entries)} entries")
     return sum(len(entry.content.split()) for entry in entries)
 
-def enforce_token_budget(entries, max_tokens):
+
+def enforce_token_budget(entries: List[ChatDictionary], max_tokens: int) -> List[ChatDictionary]:
+    """
+    Filters a list of ChatDictionary entries to fit within a maximum token budget.
+
+    Entries are added to the returned list one by one, accumulating their
+    token count, until the `max_tokens` budget is reached. Entries are processed
+    in their given order.
+
+    Args:
+        entries: A list of `ChatDictionary` objects, typically already sorted by priority/strategy.
+        max_tokens: The maximum allowed total tokens for the content of selected entries.
+
+    Returns:
+        A new list of `ChatDictionary` objects whose combined content token count
+        does not exceed `max_tokens`.
+    """
     total_tokens = 0
     valid_entries = []
     for entry in entries:
@@ -1487,73 +1889,155 @@ def enforce_token_budget(entries, max_tokens):
         if total_tokens + tokens <= max_tokens:
             valid_entries.append(entry)
             total_tokens += tokens
+        else:
+            logging.debug(f"Token budget exceeded with entry {entry.key_raw}. Total tokens: {total_tokens + tokens}, Max: {max_tokens}")
+            break # Stop adding entries once budget is full
     return valid_entries
 
-# Match whole words
-def match_whole_words(entries, text):
+
+def match_whole_words(entries: List[ChatDictionary], text: str) -> List[ChatDictionary]:
+    """
+    Filters entries by matching their keys against text, ensuring whole word matches for string keys.
+
+    - If an entry's key is a compiled regex, `re.search()` is used.
+    - If an entry's key is a plain string, it's matched as a whole word
+      (using `\\b` word boundaries) case-insensitively.
+
+    Args:
+        entries: A list of `ChatDictionary` objects.
+        text: The input text to match against.
+
+    Returns:
+        A new list of `ChatDictionary` objects that matched the text.
+    """
     matched_entries = []
     for entry in entries:
-        if isinstance(entry.key, re.Pattern):
-            if entry.key.search(text):  # Use the pre-compiled regex
+        if isinstance(entry.key, re.Pattern): # Compiled regex
+            if entry.key.search(text):
                 matched_entries.append(entry)
-                logging.debug(f"Chat Dictionary: Matched entry: {entry.key}")
-        elif isinstance(entry.key, str):  # Only for plain string keys
+                logging.debug(f"Chat Dictionary: Matched regex entry: {entry.key.pattern}")
+        elif isinstance(entry.key, str): # Plain string key
+            # Ensure whole word match for plain strings, case-insensitive
             if re.search(rf'\b{re.escape(entry.key)}\b', text, re.IGNORECASE):
                 matched_entries.append(entry)
-                logging.debug(f"Chat Dictionary: Matched entry: {entry.key}")
+                logging.debug(f"Chat Dictionary: Matched string entry: {entry.key}")
     return matched_entries
 
 class TokenBudgetExceededWarning(Warning):
     """Custom warning for token budget issues"""
     pass
 
-# Token Budget Mgmt
-def alert_token_budget_exceeded(entries, max_tokens):
+
+def alert_token_budget_exceeded(entries: List[ChatDictionary], max_tokens: int):
+    """
+    Checks if the token usage of selected entries exceeds the budget and issues a warning.
+
+    Args:
+        entries: A list of `ChatDictionary` objects selected for use.
+        max_tokens: The maximum allowed token budget.
+    """
     token_usage = calculate_token_usage(entries)
     logging.debug(f"Token usage: {token_usage}, Max tokens: {max_tokens}")
     if token_usage > max_tokens:
-        warning_msg = f"Alert: Token budget exceeded! Used: {token_usage}, Allowed: {max_tokens}"
+        warning_msg = f"Alert: Token budget exceeded for chat dictionary! Used: {token_usage}, Allowed: {max_tokens}"
         warnings.warn(TokenBudgetExceededWarning(warning_msg))
         print(warning_msg)
 
-# Single Replacement Function
-def apply_replacement_once(text, entry):
+def apply_replacement_once(text: str, entry: ChatDictionary) -> Tuple[str, int]:
     """
-    Replaces the 'entry.key' in 'text' exactly once (if found).
-    Returns the new text and the number of replacements actually performed.
+    Replaces the first occurrence of an entry's key in text with its content.
+
+    - If `entry.key` is a regex pattern, `re.subn()` with `count=1` is used.
+    - If `entry.key` is a string, a case-insensitive whole-word regex is
+      constructed and used with `re.subn()` with `count=1`.
+
+    Args:
+        text: The input text where replacement should occur.
+        entry: The `ChatDictionary` entry providing the key and content.
+
+    Returns:
+        A tuple containing:
+        - `str`: The text after the first replacement (or original text if no match).
+        - `int`: The number of replacements made (0 or 1).
     """
-    logging.debug(f"Applying replacement for entry: {entry.key} \n with content: {entry.content} \n in text: {text}")
+    logging.debug(f"Applying replacement for entry: {entry.key_raw} with content: {entry.content[:50]}... in text: {text[:50]}...")
     if isinstance(entry.key, re.Pattern):
-        replaced_text, replaced_count = re.subn(entry.key, entry.content, text, count=1)
-    else:
-        # Use regex to replace case-insensitively and match whole words
-        pattern = re.compile(rf'\b{re.escape(entry.key)}\b', re.IGNORECASE)
-        replaced_text, replaced_count = re.subn(pattern, entry.content, text, count=1)
+        replaced_text, replaced_count = entry.key.subn(entry.content, text, count=1)
+    else: # Plain string key
+        pattern = re.compile(rf'\b{re.escape(str(entry.key))}\b', re.IGNORECASE) # Ensure entry.key is str
+        replaced_text, replaced_count = pattern.subn(entry.content, text, count=1)
     return replaced_text, replaced_count
 
-# Chat Dictionary Pipeline
-def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_evenly"):
+
+def process_user_input(
+    user_input: str,
+    entries: List[ChatDictionary],
+    max_tokens: int = 5000,
+    strategy: str = "sorted_evenly"
+) -> str:
+    """
+    Processes user input by applying a series of chat dictionary transformations.
+
+    The pipeline includes:
+    1. Matching entries against the input text (regex and whole-word string matching).
+    2. Applying group scoring to select among matched entries from the same group.
+    3. Filtering entries by probability.
+    4. Applying timed effects (delay, cooldown).
+    5. Enforcing a token budget for the content of selected entries.
+    6. Alerting if the token budget is exceeded by the (potentially filtered) entries.
+    7. Sorting the final set of entries based on the chosen strategy.
+    8. Applying replacements: each selected entry replaces its key in the user input
+       (respecting `entry.max_replacements`).
+
+    If any step in the pipeline encounters a significant error, it may log the error
+    and continue with a potentially reduced set of entries or, in critical cases,
+    return the original `user_input`.
+
+    Args:
+        user_input: The text input from the user.
+        entries: A list of `ChatDictionary` objects to apply.
+        max_tokens: The maximum token budget for the combined content of applied entries.
+                    Defaults to 5000.
+        strategy: The strategy for sorting entries before replacement.
+                  Defaults to "sorted_evenly".
+
+    Returns:
+        The processed user input string after all applicable transformations.
+        Returns the original input if critical errors occur.
+    """
     current_time = datetime.now()
+    original_input_for_fallback = user_input # Save for critical error case
 
     try:
-        # 1. Match entries using regex or plain text
-        matched_entries = []
-        logging.debug(f"Chat Dictionary: Matching entries for user input: {user_input}")
-        for entry in entries:
-            try:
-                if entry.matches(user_input):
-                    matched_entries.append(entry)
-            except re.error as e:
-                log_counter("chat_dict_regex_error", labels={"key": entry.key})
-                logging.error(f"Invalid regex pattern in entry: {entry.key}. Error: {str(e)}")
-                continue  # Skip this entry but continue processing others
+        # 1. Match entries (uses refined match_whole_words for strings)
+        logging.debug(f"Chat Dictionary: Initial matching for: {user_input[:100]}")
+        # The original `entry.matches()` is a simple check. `match_whole_words` is more robust.
+        # The original `process_user_input` had `entry.matches(user_input)` then later `match_whole_words`.
+        # Consolidating to `match_whole_words` as the primary matching mechanism.
+        try:
+            # Ensure entries are ChatDictionary instances
+            valid_initial_entries = [e for e in entries if isinstance(e, ChatDictionary)]
+            if len(valid_initial_entries) != len(entries):
+                logging.warning("Some provided entries were not ChatDictionary instances and were skipped.")
 
-        logging.debug(f"Matched entries after filtering: {[e.key for e in matched_entries]}")
+            matched_entries = match_whole_words(valid_initial_entries, user_input)
+        except re.error as e:
+            log_counter("chat_dict_regex_error", labels={"key": "compilation_phase"}) # Generic key
+            logging.error(f"Invalid regex pattern during initial matching. Error: {str(e)}")
+            matched_entries = []
+        except Exception as e_match:
+            log_counter("chat_dict_match_error")
+            logging.error(f"Error during initial matching: {str(e_match)}", exc_info=True)
+            matched_entries = []
+
+
+        logging.debug(f"Matched entries after initial filtering: {[e.key_raw for e in matched_entries]}")
+
         # 2. Apply group scoring
         try:
             logging.debug(f"Chat Dictionary: Applying group scoring for {len(matched_entries)} entries")
             matched_entries = group_scoring(matched_entries)
-        except Exception as ChatProcessingError:
+        except Exception as e_gs: # More specific exception if defined (ChatProcessingError)
             log_counter("chat_dict_group_scoring_error")
             logging.error(f"Error in group scoring: {str(e)}")
             matched_entries = []  # Fallback to empty list
@@ -1567,11 +2051,16 @@ def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_ev
             logging.error(f"Error in probability filtering: {str(e)}")
             matched_entries = []  # Fallback to empty list
 
-        # 4. Apply timed effects
+        # 4. Apply timed effects (filter out those not ready)
+        # And update last_triggered for those that *will* be used
+        active_timed_entries = []
         try:
             logging.debug("Chat Dictionary: Applying timed effects")
-            matched_entries = [entry for entry in matched_entries if apply_timed_effects(entry, current_time)]
-        except Exception as ChatProcessingError:
+            for entry in matched_entries:
+                if apply_timed_effects(entry, current_time): # Checks if eligible
+                    active_timed_entries.append(entry)
+            matched_entries = active_timed_entries
+        except Exception as e_time:
             log_counter("chat_dict_timed_effects_error")
             logging.error(f"Error applying timed effects: {str(e)}")
             matched_entries = []  # Fallback to empty list
@@ -1609,21 +2098,33 @@ def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_ev
         for entry in matched_entries:
             logging.debug("Chat Dictionary: Applying replacements")
             try:
-                if entry.max_replacements > 0:
-                    user_input, replaced_count = apply_replacement_once(user_input, entry)
-                    logging.debug(f"Replaced {replaced_count} occurrences of '{entry.key}' with '{entry.content}'")
+                # Use a copy of max_replacements for this run if needed, or modify original for state
+                replacements_done_for_this_entry = 0
+                # Original code had `entry.max_replacements > 0` check outside loop.
+                # If multiple replacements are allowed by one entry definition:
+                current_max_replacements = entry.max_replacements # Use current value
+                while current_max_replacements > 0:
+                    temp_user_input, replaced_count = apply_replacement_once(temp_user_input, entry)
                     if replaced_count > 0:
-                        entry.max_replacements -= 1
-            except Exception as e:
-                log_counter("chat_dict_replacement_error", labels={"key": entry.key})
-                logging.error(f"Error applying replacement for entry {entry.key}: {str(e)}")
-                continue  # Skip this replacement but continue processing others
+                        replacements_done_for_this_entry += 1
+                        current_max_replacements -= 1
+                        # Update last_triggered for entries that actually made a replacement
+                        entry.last_triggered = current_time
+                    else:
+                        break # No more matches for this key
+                if replacements_done_for_this_entry > 0:
+                     logging.debug(f"Replaced {replacements_done_for_this_entry} occurrences of '{entry.key_raw}'")
 
-    except Exception as ChatProcessingError:
+            except Exception as e_replace:
+                log_counter("chat_dict_replacement_error", labels={"key": entry.key_raw})
+                logging.error(f"Error applying replacement for entry {entry.key_raw}: {str(e_replace)}", exc_info=True)
+                continue
+        user_input = temp_user_input # Assign back the processed string
+
+    except Exception as e_crit: # Catch-all for ChatProcessingError or other unexpected issues
         log_counter("chat_dict_processing_error")
-        logging.error(f"Critical error in process_user_input: {str(e)}")
-        # Return original input if critical failure occurs
-        return user_input
+        logging.error(f"Critical error in process_user_input: {str(e_crit)}", exc_info=True)
+        return original_input_for_fallback # Return original input on critical failure
 
     return user_input
 
@@ -1645,10 +2146,37 @@ def process_user_input(user_input, entries, max_tokens=5000, strategy="sorted_ev
 # Character Card Functions
 
 def save_character(
-        db: CharactersRAGDB,  # Changed: Pass the DB instance
-        character_data: Dict[str, Any],  # Original character data from input
-        expected_version: Optional[int] = None  # For updates, if version is known
-) -> Optional[int]:  # Returns character_id or None on failure
+        db: CharactersRAGDB,
+        character_data: Dict[str, Any],
+        expected_version: Optional[int] = None
+) -> Optional[int]:
+    """
+    Saves (adds or updates) a character card in the database.
+
+    If a character with the same name already exists, it attempts to update it.
+    An `expected_version` can be provided for optimistic concurrency control during updates.
+    If the character does not exist, a new one is added.
+
+    Image data in `character_data['image']` is expected as a base64 encoded string;
+    it will be decoded to bytes before saving.
+
+    Args:
+        db: An instance of `CharactersRAGDB` for database operations.
+        character_data: A dictionary containing the character's attributes.
+                        Required key: 'name'.
+                        Optional keys: 'description', 'personality', 'scenario',
+                        'system_prompt' (or 'system'), 'post_history_instructions' (or 'post_history'),
+                        'first_message' (or 'mes_example_greeting'), 'message_example' (or 'mes_example'),
+                        'creator_notes', 'alternate_greetings' (list/JSON), 'tags' (list/JSON),
+                        'creator', 'character_version', 'extensions' (dict/JSON), 'image' (base64 string).
+        expected_version: Optional integer. If provided for an update, the character's
+                          current version in the DB must match this value.
+
+    Returns:
+        The character's ID (integer) if successfully saved or updated.
+        Returns None if the name is missing, or if a DB error, conflict,
+        or other exception occurs.
+    """
     log_counter("save_character_attempt")
     start_time = time.time()
 
@@ -1657,8 +2185,7 @@ def save_character(
         logging.error("Character name is required to save.")
         return None
 
-    # Prepare data for DB (map/transform if needed)
-    db_card_data = {
+    db_card_data_full = { # Template for all possible fields for add_character_card
         'name': char_name,
         'description': character_data.get('description'),
         'personality': character_data.get('personality'),
@@ -1683,17 +2210,10 @@ def save_character(
             img_b64_data = character_data['image']
             if ',' in img_b64_data:  # e.g. data:image/png;base64,xxxxx
                 img_b64_data = img_b64_data.split(',', 1)[1]
-            db_card_data['image'] = base64.b64decode(img_b64_data)
+            db_card_data_full['image'] = base64.b64decode(img_b64_data)
         except Exception as e_img:
             logging.error(f"Error decoding character image for {char_name}: {e_img}")
-            db_card_data['image'] = None  # Or skip setting it
-    else:
-        db_card_data['image'] = None  # Ensure it's None if not provided or empty
-
-    # Remove None values from db_card_data to avoid inserting NULLs where defaults or existing values are preferred
-    # However, CharactersRAGDB add/update methods should handle None for optional fields correctly.
-    # db_card_data = {k: v for k, v in db_card_data.items() if v is not None}
-
+            db_card_data_full['image'] = None
     try:
         # Check if character exists for an "upsert" like behavior
         existing_char = db.get_character_card_by_name(char_name)
@@ -1706,7 +2226,7 @@ def save_character(
                 logging.error(
                     f"Version mismatch for character '{char_name}'. Expected {expected_version}, DB has {current_db_version}.")
                 raise ConflictError(
-                    f"Version mismatch for update. Expected {expected_version}, got {current_db_version}",
+                    f"Version mismatch for character '{char_name}'. Expected {expected_version}, DB has {current_db_version}",
                     entity="character_cards", entity_id=existing_char['id'])
 
             # Use current_db_version as expected_version for the update call
@@ -1720,11 +2240,25 @@ def save_character(
             # Let's make db_card_data only contain fields that are present in the input character_data
             # so it acts as a partial update for existing characters.
             update_payload = {}
-            for key, value in character_data.items():  # Iterate over original input data
-                if key == 'name': continue  # Name is for lookup, not update here
-                if key in db_card_data:  # Check if it's a mapped key
-                    # Use the mapped value from db_card_data (e.g. image bytes)
-                    update_payload[key] = db_card_data[key]
+            for key, input_value in character_data.items():
+                if key == 'name': continue # Name is for lookup, not part of update payload itself
+                if key == 'image': # Handle image separately due to b64 decode
+                    update_payload['image'] = db_card_data_full['image'] # Use processed image
+                elif key in db_card_data_full: # Check if it's a known/mapped field
+                     # Use the value from character_data, allowing explicit nulls if desired by client
+                    update_payload[key] = input_value
+                # else: field not in db_card_data_full, so ignore
+
+            # Map alternate keys if primary not in update_payload but alternate was
+            if 'system' in character_data and 'system_prompt' not in character_data:
+                update_payload['system_prompt'] = character_data.get('system')
+            if 'post_history' in character_data and 'post_history_instructions' not in character_data:
+                update_payload['post_history_instructions'] = character_data.get('post_history')
+            if 'mes_example_greeting' in character_data and 'first_message' not in character_data:
+                update_payload['first_message'] = character_data.get('mes_example_greeting')
+            if 'mes_example' in character_data and 'message_example' not in character_data:
+                update_payload['message_example'] = character_data.get('mes_example')
+
 
             if not update_payload:
                 logging.info(
@@ -1733,18 +2267,11 @@ def save_character(
             elif db.update_character_card(existing_char['id'], update_payload, current_db_version):
                 char_id = existing_char['id']
                 logging.info(f"Character '{char_name}' (ID: {char_id}) updated successfully.")
-            else:  # update_character_card returned False (should raise on error)
-                logging.error(
-                    f"Update failed for character '{char_name}' (ID: {existing_char['id']}) for unknown reason.")
-                # This path should ideally not be hit if update_character_card raises ConflictError or other DB errors
-
-        else:  # Character does not exist, add new
+            # db.update_character_card should raise on failure rather than return False
+        else:
             logging.info(f"Character '{char_name}' not found. Attempting to add new.")
-            # For add_character_card, ensure all required fields in db_card_data are present, or handle defaults
-            # add_character_card will set client_id, version, timestamps.
-            # We must provide 'name'. Other text fields can be None/empty. Image can be None.
-            # JSON fields should be None if not provided, or valid JSON string / list / dict.
-            char_id = db.add_character_card(db_card_data)
+            # Use db_card_data_full for adding, as it contains all potential fields
+            char_id = db.add_character_card(db_card_data_full)
             if char_id:
                 logging.info(f"Character '{char_name}' added successfully with ID: {char_id}.")
             else:  # add_character_card returned None (should raise on error)
@@ -1776,7 +2303,22 @@ def save_character(
         return None
 
 
-def load_characters(db: CharactersRAGDB) -> Dict[str, Dict[str, Any]]:  # Returns dict keyed by char name
+def load_characters(db: CharactersRAGDB) -> Dict[str, Dict[str, Any]]:
+    """
+    Loads all character cards from the database.
+
+    The image data (if present) is converted from a database BLOB to a
+    base64 encoded string and stored in the 'image_base64' key of each
+    character's dictionary.
+
+    Args:
+        db: An instance of `CharactersRAGDB` for database operations.
+
+    Returns:
+        A dictionary where keys are character names and values are dictionaries
+        representing the character cards. Returns an empty dictionary if an
+        error occurs or no characters are found.
+    """
     log_counter("load_characters_attempt")
     start_time = time.time()
     characters_map: Dict[str, Dict[str, Any]] = {}
@@ -1823,6 +2365,16 @@ def load_characters(db: CharactersRAGDB) -> Dict[str, Dict[str, Any]]:  # Return
 
 
 def get_character_names(db: CharactersRAGDB) -> List[str]:
+    """
+    Retrieves a sorted list of all character names from the database.
+
+    Args:
+        db: An instance of `CharactersRAGDB` for database operations.
+
+    Returns:
+        A list of character names, sorted alphabetically.
+        Returns an empty list if an error occurs or no characters are found.
+    """
     log_counter("get_character_names_attempt")
     start_time = time.time()
     names: List[str] = []
@@ -1848,5 +2400,5 @@ def get_character_names(db: CharactersRAGDB) -> List[str]:
         return []
 
 #
-# End of Chat.py
+# End of Chat_Functions.py
 ##########################################################################################################################

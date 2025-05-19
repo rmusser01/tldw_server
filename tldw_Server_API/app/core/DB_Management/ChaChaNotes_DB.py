@@ -1,6 +1,38 @@
 # ChaChaNotes_DB.py
 # Description: DB Library for Character Cards, Chats, and Notes.
 #
+"""
+ChaChaNotes_DB.py
+-----------------
+
+A comprehensive SQLite-based library for managing data related to character cards,
+chat conversations, messages, notes, keywords, and their interconnections.
+
+This library provides a structured approach to database interactions, including:
+- Schema management with versioning.
+- Thread-safe database connections using `threading.local`.
+- CRUD (Create, Read, Update, Delete) operations for all major entities.
+- Optimistic locking for concurrent update and delete operations using a `version` field.
+- Soft deletion for records, preserving data history.
+- Full-Text Search (FTS5) capabilities for character cards, conversations, messages,
+  notes, keywords, and keyword collections, primarily managed by SQL triggers.
+- Automated change tracking via a `sync_log` table, largely populated by SQL triggers,
+  with manual logging for linking table modifications.
+- A transaction context manager for safe and explicit transaction handling.
+- Custom exceptions for database-specific errors, schema issues, input validation,
+  and concurrency conflicts.
+
+Key entities managed:
+- Character Cards: Detailed profiles for characters.
+- Conversations: Chat sessions, potentially linked to characters.
+- Messages: Individual messages within conversations, supporting text and images.
+- Notes: Free-form text notes.
+- Keywords: Tags or labels that can be associated with conversations, notes, and collections.
+- Keyword Collections: Groupings of keywords.
+
+The library requires a `client_id` upon initialization, which is used to attribute
+changes in the `sync_log` and in individual records.
+"""
 # Imports
 import sqlite3
 import json
@@ -47,7 +79,17 @@ class InputError(ValueError):
 
 
 class ConflictError(CharactersRAGDBError):
-    """Indicates a conflict due to concurrent modification (version mismatch or unique constraint)."""
+    """
+    Indicates a conflict due to concurrent modification or unique constraint violation.
+
+    This can occur if a record's version doesn't match an expected version during
+    an update/delete operation (optimistic locking), or if an insert/update
+    violates a unique constraint (e.g., duplicate name).
+
+    Attributes:
+        entity (Optional[str]): The type of entity involved in the conflict (e.g., "character_cards").
+        entity_id (Any): The ID or unique identifier of the entity involved.
+    """
 
     def __init__(self, message="Conflict detected.", entity: Optional[str] = None, entity_id: Any = None):
         super().__init__(message)
@@ -67,18 +109,35 @@ class ConflictError(CharactersRAGDBError):
 # --- Database Class ---
 class CharactersRAGDB:
     """
-    Manages SQLite connection and operations for the Characters and RAG database.
-    Handles sync metadata updates. Requires client_id on initialization.
-    Includes schema versioning.
-    Relies on SQL triggers for FTS updates and sync_log entries for most main tables.
-    Link table sync logs are handled by Python methods.
+    Manages SQLite connections and operations for the Character Cards, Chats, and Notes database.
+
+    This class provides a high-level API for interacting with the SQLite database,
+    encapsulating schema management, connection handling, and data manipulation.
+    It ensures thread-safety for database connections through `threading.local`.
+
+    Key features:
+    - Initialization with a specific database path and a unique `client_id`.
+    - Automatic schema creation and version checking/migration (currently to V4).
+    - Thread-local SQLite connection management, including WAL mode and checkpointing.
+    - Methods for CRUD operations on all entities, many featuring optimistic locking.
+    - Soft deletion for most entities.
+    - Full-Text Search (FTS5) support, with updates primarily handled by database triggers.
+    - Synchronization logging to `sync_log` table, mostly via triggers, except for
+      many-to-many link table changes which are logged by Python methods.
+    - A transaction context manager for grouping operations.
+
+    Attributes:
+        db_path (Path): The absolute path to the SQLite database file, or Path(":memory:").
+        client_id (str): The identifier for the client instance using this database.
+        is_memory_db (bool): True if the database is in-memory.
+        db_path_str (str): String representation of the database path for SQLite connection.
     """
     _CURRENT_SCHEMA_VERSION = 4 # Incremented schema version
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
 
     _FULL_SCHEMA_SQL_V4 = """
 /*───────────────────────────────────────────────────────────────
-  RAG Character-Chat Schema  –  Version 3   (2025-05-14)
+  RAG Character-Chat Schema  –  Version 4   (2025-05-14)
 ───────────────────────────────────────────────────────────────*/
 PRAGMA foreign_keys = ON;
 
@@ -220,8 +279,8 @@ CREATE TABLE IF NOT EXISTS messages(
   parent_message_id TEXT  REFERENCES messages(id)     ON DELETE SET NULL,
   sender            TEXT  NOT NULL,
   content           TEXT  NOT NULL, -- Text content of the message
-  image_data        BLOB DEFAULT NULL,             -- +++ NEW +++
-  image_mime_type   TEXT DEFAULT NULL,             -- +++ NEW +++
+  image_data        BLOB DEFAULT NULL,
+  image_mime_type   TEXT DEFAULT NULL,
   timestamp         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   ranking           INTEGER,
   last_modified     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -498,29 +557,23 @@ DROP TRIGGER IF EXISTS keyword_collections_sync_delete;
 DROP TRIGGER IF EXISTS keyword_collections_sync_undelete;
 
 /*—— sync triggers: messages ———————————————*/
-/* IMPORTANT: Storing full image_data BLOBs in sync_log payloads can be very inefficient.
-   Consider storing a flag, a URI, or omitting for large blobs in a real-world sync scenario.
-   For this example, I'll include them but with this caution.
-*/
 CREATE TRIGGER messages_sync_create
 AFTER INSERT ON messages BEGIN
   INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
   VALUES('messages',NEW.id,'create',NEW.last_modified,NEW.client_id,NEW.version,
          json_object('id',NEW.id,'conversation_id',NEW.conversation_id,'parent_message_id',NEW.parent_message_id,
                      'sender',NEW.sender,'content',NEW.content,
-                     'image_mime_type',NEW.image_mime_type, -- +++ NEW +++
-                     -- 'image_data_present', CASE WHEN NEW.image_data IS NOT NULL THEN 1 ELSE 0 END, -- Alternative to full blob
+                     'image_mime_type',NEW.image_mime_type,
                      'timestamp',NEW.timestamp,'ranking',NEW.ranking,
                      'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
-                     -- Potentially add 'image_data': hex(NEW.image_data) if small, or a flag/URI
 END;
 
 CREATE TRIGGER messages_sync_update
 AFTER UPDATE ON messages
 WHEN OLD.deleted = NEW.deleted AND (
      OLD.content IS NOT NEW.content OR
-     OLD.image_data IS NOT NEW.image_data OR          -- +++ NEW +++ (BLOB comparison might be tricky/slow)
-     OLD.image_mime_type IS NOT NEW.image_mime_type OR -- +++ NEW +++
+     OLD.image_data IS NOT NEW.image_data OR
+     OLD.image_mime_type IS NOT NEW.image_mime_type OR
      OLD.ranking IS NOT NEW.ranking OR
      OLD.parent_message_id IS NOT NEW.parent_message_id OR
      OLD.last_modified IS NOT NEW.last_modified OR
@@ -530,10 +583,19 @@ BEGIN
   VALUES('messages',NEW.id,'update',NEW.last_modified,NEW.client_id,NEW.version,
          json_object('id',NEW.id,'conversation_id',NEW.conversation_id,'parent_message_id',NEW.parent_message_id,
                      'sender',NEW.sender,'content',NEW.content,
-                     'image_mime_type',NEW.image_mime_type, -- +++ NEW +++
+                     'image_mime_type',NEW.image_mime_type,
                      'timestamp',NEW.timestamp,'ranking',NEW.ranking,
                      'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
-                     -- Again, consider how to handle image_data in payload
+END;
+
+CREATE TRIGGER messages_sync_delete
+AFTER UPDATE ON messages
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('messages',NEW.id,'delete',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
 END;
 
 /* messages_sync_delete and messages_sync_undelete don't strictly need image_data in payload
@@ -548,7 +610,7 @@ BEGIN
   VALUES('messages',NEW.id,'update',NEW.last_modified,NEW.client_id,NEW.version,
          json_object('id',NEW.id,'conversation_id',NEW.conversation_id,'parent_message_id',NEW.parent_message_id,
                      'sender',NEW.sender,'content',NEW.content,
-                     'image_mime_type',NEW.image_mime_type, -- +++ NEW +++
+                     'image_mime_type',NEW.image_mime_type,
                      'timestamp',NEW.timestamp,'ranking',NEW.ranking,
                      'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
 END;
@@ -716,6 +778,49 @@ BEGIN
                      'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
 END;
 
+/*—— sync triggers: keywords ————*/
+CREATE TRIGGER keywords_sync_create
+AFTER INSERT ON keywords BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('keywords',CAST(NEW.id AS TEXT),'create',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'keyword',NEW.keyword,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER keywords_sync_update
+AFTER UPDATE ON keywords
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.keyword IS NOT NEW.keyword OR -- Though keyword itself is unlikely to change if it's the unique identifier
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('keywords',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'keyword',NEW.keyword,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER keywords_sync_delete
+AFTER UPDATE ON keywords
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('keywords',CAST(NEW.id AS TEXT),'delete',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER keywords_sync_undelete
+AFTER UPDATE ON keywords
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('keywords',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'keyword',NEW.keyword,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+
 /*—— sync triggers: keyword_collections ————*/
 CREATE TRIGGER keyword_collections_sync_create
 AFTER INSERT ON keyword_collections BEGIN
@@ -769,6 +874,25 @@ UPDATE db_schema_version
 """
 
     def __init__(self, db_path: Union[str, Path], client_id: str):
+        """
+        Initializes the CharactersRAGDB instance.
+
+        Sets up the database path, client ID, and ensures the schema is
+        initialized or migrated to the current version (_CURRENT_SCHEMA_VERSION).
+
+        Args:
+            db_path: Path to the SQLite database file (e.g., "data/app.db")
+                     or ":memory:" for an in-memory database.
+            client_id: A unique identifier for this client instance. Used for
+                       tracking changes in the sync log and records. Must not be empty.
+
+        Raises:
+            ValueError: If `client_id` is empty or None.
+            CharactersRAGDBError: If database directory creation fails, or if
+                                  database initialization/schema setup encounters
+                                  a critical error.
+            SchemaError: If schema migration or versioning issues occur.
+        """
         if isinstance(db_path, Path):
             self.is_memory_db = False
             self.db_path = db_path.resolve()
@@ -804,6 +928,20 @@ UPDATE db_schema_version
 
     # --- Connection Management ---
     def _get_thread_connection(self) -> sqlite3.Connection:
+        """
+        Retrieves or creates a thread-local SQLite connection.
+
+        Ensures that each thread has its own independent connection to the database.
+        If an existing connection is closed or unusable, it's reopened.
+        Enables WAL mode for file-based databases and sets PRAGMA foreign_keys=ON.
+        Sets a timeout for database operations.
+
+        Returns:
+            A thread-local sqlite3.Connection object.
+
+        Raises:
+            CharactersRAGDBError: If connecting to the database fails.
+        """
         conn = getattr(self._local, 'conn', None)
         if conn:
             try:
@@ -840,9 +978,26 @@ UPDATE db_schema_version
         return self._local.conn
 
     def get_connection(self) -> sqlite3.Connection:
+        """
+        Public method to get the current thread's database connection.
+
+        This is a convenience wrapper around `_get_thread_connection`.
+
+        Returns:
+            The active sqlite3.Connection for the current thread.
+        """
         return self._get_thread_connection()
 
     def close_connection(self):
+        """
+        Closes the current thread's database connection.
+
+        If the database is file-based and in WAL mode, it attempts to perform
+        a WAL checkpoint (TRUNCATE) before closing to commit changes from the WAL file
+        to the main database file.
+        If a transaction is active and uncommitted on this connection, it attempts a rollback.
+        Clears the connection reference from `threading.local` for the current thread.
+        """
         conn = getattr(self._local, 'conn', None)
         if conn is not None:
             try:
@@ -885,6 +1040,26 @@ UPDATE db_schema_version
     # --- Query Execution ---
     def execute_query(self, query: str, params: Optional[Union[tuple, Dict[str, Any]]] = None, *, commit: bool = False,
                       script: bool = False) -> sqlite3.Cursor:
+        """
+        Executes a single SQL query or an entire SQL script.
+
+        Args:
+            query: The SQL query string or script.
+            params: Optional parameters for the query (tuple or dict).
+                    Not used if `script` is True. Defaults to None.
+            commit: If True, and not within an explicit transaction context managed
+                    by `with db.transaction():`, commits the transaction after execution.
+                    Defaults to False.
+            script: If True, executes the query string as an SQL script using `executescript`.
+                    `params` are ignored if `script` is True. Defaults to False.
+
+        Returns:
+            The sqlite3.Cursor object after execution.
+
+        Raises:
+            ConflictError: If an SQLite IntegrityError due to a "unique constraint failed" occurs.
+            CharactersRAGDBError: For other SQLite errors or general query execution failures.
+        """
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
@@ -912,6 +1087,23 @@ UPDATE db_schema_version
             raise CharactersRAGDBError(f"Query execution failed: {e}") from e
 
     def execute_many(self, query: str, params_list: List[tuple], *, commit: bool = False) -> Optional[sqlite3.Cursor]:
+        """
+        Executes a parameterized SQL query multiple times with a list of parameter sets.
+
+        Args:
+            query: The SQL query string.
+            params_list: A list of tuples, where each tuple contains parameters for one execution.
+                         If empty or invalid, the method returns None without executing.
+            commit: If True, and not within an explicit transaction context,
+                    commits the transaction after execution. Defaults to False.
+
+        Returns:
+            The sqlite3.Cursor object after execution, or None if params_list is empty/invalid.
+
+        Raises:
+            ConflictError: If an SQLite IntegrityError due to a "unique constraint failed" occurs during batch.
+            CharactersRAGDBError: For other SQLite errors or general batch execution failures.
+        """
         conn = self.get_connection()
         if not isinstance(params_list, list) or not params_list:
             logger.debug("execute_many called with empty or invalid params_list.")
@@ -935,10 +1127,37 @@ UPDATE db_schema_version
 
     # --- Transaction Context ---
     def transaction(self) -> 'TransactionContextManager':
+        """
+        Returns a context manager for database transactions.
+
+        Usage:
+            with db.transaction() as conn:
+                # Database operations using conn.execute(...)
+                # Commit is handled automatically on successful exit,
+                # rollback on exception.
+
+        Returns:
+            TransactionContextManager: An object to be used in a `with` statement.
+        """
         return TransactionContextManager(self)
 
     # --- Schema Initialization and Migration ---
     def _get_db_version(self, conn: sqlite3.Connection) -> int:
+        """
+        Retrieves the current schema version from the `db_schema_version` table
+        for the schema named `self._SCHEMA_NAME`.
+
+        Args:
+            conn: The active sqlite3.Connection.
+
+        Returns:
+            The current schema version as an integer, or 0 if the table or entry
+            for `self._SCHEMA_NAME` does not exist (indicating a fresh database).
+
+        Raises:
+            SchemaError: If there's an unexpected SQL error while querying the version,
+                         other than "no such table".
+        """
         try:
             cursor = conn.execute("SELECT version FROM db_schema_version WHERE schema_name = ? LIMIT 1",
                                   (self._SCHEMA_NAME,))
@@ -950,8 +1169,22 @@ UPDATE db_schema_version
             logger.error(f"Could not determine database schema version for '{self._SCHEMA_NAME}': {e}", exc_info=True)
             raise SchemaError(f"Could not determine schema version for '{self._SCHEMA_NAME}': {e}") from e
 
-    # FIXME - Fixup to use f-strings; ya.
-    def _apply_schema_v4(self, conn: sqlite3.Connection): # Renamed from _apply_schema_v1
+    def _apply_schema_v4(self, conn: sqlite3.Connection):
+        """
+        Applies the full SQL schema for version `_CURRENT_SCHEMA_VERSION` (V4).
+
+        This method executes the `_FULL_SCHEMA_SQL_V4` script, which defines
+        all tables, FTS tables, triggers, and updates the schema version record in
+        `db_schema_version` to `_CURRENT_SCHEMA_VERSION`.
+
+        Args:
+            conn: The active sqlite3.Connection. The operations are performed
+                  within the transaction context managed by the caller (e.g., `_initialize_schema`).
+
+        Raises:
+            SchemaError: If the schema script execution fails or the version
+                         is not correctly updated to `_CURRENT_SCHEMA_VERSION` in `db_schema_version`.
+        """
         logger.info(f"Applying schema Version {self._CURRENT_SCHEMA_VERSION} for '{self._SCHEMA_NAME}' to DB: {self.db_path_str}...")
         try:
             # Using conn.executescript directly as it manages its own transaction
@@ -961,54 +1194,77 @@ UPDATE db_schema_version
             final_version = self._get_db_version(conn)
             if final_version != self._CURRENT_SCHEMA_VERSION:
                 raise SchemaError(
-                    f"[{self._SCHEMA_NAME} {self._CURRENT_SCHEMA_VERSION} Schema version update check failed. Expected 4, got: {final_version}")
-            logger.info(f"[{self._SCHEMA_NAME} {self._CURRENT_SCHEMA_VERSION}] Schema {self._CURRENT_SCHEMA_VERSION} applied and version confirmed for DB: {self.db_path_str}.")
+                    f"[{self._SCHEMA_NAME} V{self._CURRENT_SCHEMA_VERSION}] Schema version update check failed. Expected {self._CURRENT_SCHEMA_VERSION}, got: {final_version}")
+            logger.info(f"[{self._SCHEMA_NAME} V{self._CURRENT_SCHEMA_VERSION}] Schema {self._CURRENT_SCHEMA_VERSION} applied and version confirmed for DB: {self.db_path_str}.")
         except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME} V4] Schema application failed: {e}", exc_info=True)
-            raise SchemaError(f"DB schema V4 setup failed for '{self._SCHEMA_NAME}': {e}") from e
+            logger.error(f"[{self._SCHEMA_NAME} V{self._CURRENT_SCHEMA_VERSION}] Schema application failed: {e}", exc_info=True)
+            raise SchemaError(f"DB schema V{self._CURRENT_SCHEMA_VERSION} setup failed for '{self._SCHEMA_NAME}': {e}") from e
         except SchemaError:
             raise
         except Exception as e:
-            logger.error(f"[{self._SCHEMA_NAME} V4] Unexpected error during schema V4 application: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error applying schema V4 for '{self._SCHEMA_NAME}': {e}") from e
+            logger.error(f"[{self._SCHEMA_NAME} V{self._CURRENT_SCHEMA_VERSION}] Unexpected error during schema V{self._CURRENT_SCHEMA_VERSION} application: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error applying schema V{self._CURRENT_SCHEMA_VERSION} for '{self._SCHEMA_NAME}': {e}") from e
 
     def _initialize_schema(self):
+        """
+        Initializes or migrates the database schema to `_CURRENT_SCHEMA_VERSION`.
+
+        Checks the existing schema version.
+        - If 0 (new DB): Applies the full current schema (`_apply_schema_v4`).
+        - If current: Logs that schema is up to date.
+        - If older: Raises SchemaError (migration paths not yet implemented beyond initial creation).
+        - If newer: Raises SchemaError (database is newer than code supports).
+
+        This method is called during `CharactersRAGDB` instantiation.
+        Operations are performed within a transaction.
+
+        Raises:
+            SchemaError: If the database schema version is newer than supported by the code,
+                         if a migration path is undefined for an older schema version,
+                         or if any step in schema application/migration fails.
+            CharactersRAGDBError: For unexpected errors during schema initialization.
+        """
         conn = self.get_connection()
-        current_initial_version = 0  # To track version before applying schema
+        current_initial_version = 0
         try:
-            current_db_version = self._get_db_version(conn)
-            current_initial_version = self._get_db_version(conn)
-            target_version = self._CURRENT_SCHEMA_VERSION
-            logger.info(
-                f"Checking DB schema '{self._SCHEMA_NAME}'. Current version: {current_db_version}. Code supports: {target_version}")
+            with TransactionContextManager(self): # Ensures atomicity for schema changes
+                current_db_version = self._get_db_version(conn)
+                current_initial_version = current_db_version # Store initial for messages
+                target_version = self._CURRENT_SCHEMA_VERSION
+                logger.info(
+                    f"Checking DB schema '{self._SCHEMA_NAME}'. Current version: {current_db_version}. Code supports: {target_version}")
 
-            if current_db_version == target_version:
-                logger.debug(f"Database schema '{self._SCHEMA_NAME}' is up to date.")
-                return
-            if current_db_version > target_version:
-                raise SchemaError(
-                    f"Database schema '{self._SCHEMA_NAME}' version ({current_db_version}) is newer than supported by code ({target_version}). Aborting.")
+                if current_db_version == target_version:
+                    logger.debug(f"Database schema '{self._SCHEMA_NAME}' is up to date (Version {target_version}).")
+                    return
+                if current_db_version > target_version:
+                    raise SchemaError(
+                        f"Database schema '{self._SCHEMA_NAME}' version ({current_db_version}) is newer than supported by code ({target_version}). Aborting.")
 
-            if current_db_version == 0:
-                self._apply_schema_v4(conn)
-            # Add future migrations here:
-            # if current_db_version =< {self._SCHEMA_NAME}: self._migrate_schema(conn); current_db_version = {self._SCHEMA_NAME}
-            elif current_initial_version < target_version:
-                # This means an older schema exists (e.g., V1) and no direct migration path
-                # is defined in this simplified _initialize_schema function to bring it to V4.
-                raise SchemaError(
-                    f"Migration path undefined for '{self._SCHEMA_NAME}' from version {current_initial_version} to {target_version}. "
-                    f"Manual migration or a new database may be required.")
-            else: # Should not be reached due to prior checks
-                 raise SchemaError(f"Unexpected schema state: current {current_initial_version}, target {target_version}")
+                if current_db_version == 0:
+                    self._apply_schema_v4(conn) # This will apply version _CURRENT_SCHEMA_VERSION
+                # Example for future migrations:
+                # elif current_db_version == 1:
+                #     self._migrate_from_v1_to_v2(conn)
+                #     current_db_version = self._get_db_version(conn) # Refresh version
+                #     if current_db_version == 2 and target_version > 2: # Continue if more migrations needed
+                #         self._migrate_from_v2_to_v3(conn)
+                #         # ...and so on
+                elif current_initial_version < target_version: # An older schema exists
+                    # Current simple logic: if not 0 and not target, and older, it's an unhandled migration.
+                    raise SchemaError(
+                        f"Migration path undefined for '{self._SCHEMA_NAME}' from version {current_initial_version} to {target_version}. "
+                        f"Manual migration or a new database may be required.")
+                else: # Should not be reached due to prior checks
+                    raise SchemaError(f"Unexpected schema state: current {current_initial_version}, target {target_version}")
 
+                final_version_check = self._get_db_version(conn)
+                if final_version_check != target_version:
+                    raise SchemaError(
+                        f"Schema migration process completed, but final DB version is {final_version_check}, expected {target_version}. Manual check required.")
+                logger.info(
+                    f"Database schema '{self._SCHEMA_NAME}' successfully initialized/migrated to version {final_version_check}.")
 
-            final_version_check = self._get_db_version(conn)
-            if final_version_check != target_version:
-                raise SchemaError(
-                    f"Schema migration process completed, but final DB version is {final_version_check}, expected {target_version}. Manual check required.")
-            logger.info(
-                f"Database schema '{self._SCHEMA_NAME}' successfully initialized/migrated to version {final_version_check}.")
         except (SchemaError, sqlite3.Error) as e:
             logger.error(f"Schema initialization/migration failed for '{self._SCHEMA_NAME}': {e}", exc_info=True)
             raise SchemaError(f"Schema initialization/migration for '{self._SCHEMA_NAME}' failed: {e}") from e
@@ -1018,17 +1274,44 @@ UPDATE db_schema_version
 
     # --- Internal Helpers ---
     def _get_current_utc_timestamp_iso(self) -> str:
+        """
+        Generates the current UTC timestamp in ISO 8601 format with 'Z' for UTC.
+
+        Example: "2023-10-27T10:30:00.123Z"
+
+        Returns:
+            A string representing the current UTC timestamp with millisecond precision.
+        """
         return datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
     def _generate_uuid(self) -> str:
+        """
+        Generates a new UUID version 4.
+
+        Returns:
+            A string representation of the UUID.
+        """
         return str(uuid.uuid4())
 
     def _get_current_db_version(self, conn: sqlite3.Connection, table_name: str, pk_col_name: str,
                                 pk_value: Any) -> int:
         """
         Fetches the current version of an active (not soft-deleted) record.
-        Raises ConflictError if the record is not found or is soft-deleted.
-        Returns the version number if found and active.
+
+        Used for optimistic locking checks before an update or soft delete.
+
+        Args:
+            conn: The active sqlite3.Connection.
+            table_name: The name of the table to query.
+            pk_col_name: The name of the primary key column.
+            pk_value: The value of the primary key for the record.
+
+        Returns:
+            The version number (integer) of the record if found and active.
+
+        Raises:
+            ConflictError: If the record is not found (with `entity` and `entity_id` attributes
+                           set in the exception) or if the record is found but is soft-deleted.
         """
         cursor = conn.execute(f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?", (pk_value,))
         row = cursor.fetchone()
@@ -1044,6 +1327,17 @@ UPDATE db_schema_version
         return row['version']
 
     def _ensure_json_string(self, data: Optional[Union[List, Dict, Set]]) -> Optional[str]:
+        """
+        Serializes Python list, dict, or set to a JSON string.
+
+        If data is None, returns None. Converts sets to lists before serialization.
+
+        Args:
+            data: The Python object (list, dict, set) to serialize, or None.
+
+        Returns:
+            A JSON string representation of the data, or None if input was None.
+        """
         if data is None:
             return None
         if isinstance(data, Set):
@@ -1051,6 +1345,22 @@ UPDATE db_schema_version
         return json.dumps(data)
 
     def _deserialize_row_fields(self, row: sqlite3.Row, json_fields: List[str]) -> Optional[Dict[str, Any]]:
+        """
+        Converts a sqlite3.Row object to a dictionary, deserializing specified JSON fields.
+
+        If a field listed in `json_fields` contains a string, it attempts to
+        parse it as JSON. If parsing fails, the field's value is set to None
+        and a warning is logged.
+
+        Args:
+            row: The sqlite3.Row object to convert. If None, returns None.
+            json_fields: A list of field names that should be treated as JSON strings
+                         and deserialized.
+
+        Returns:
+            A dictionary representing the row with specified fields deserialized,
+            or None if the input `row` is None.
+        """
         if not row:
             return None
         item = dict(row)
@@ -1068,7 +1378,26 @@ UPDATE db_schema_version
     _CHARACTER_CARD_JSON_FIELDS = ['alternate_greetings', 'tags', 'extensions']
 
     # --- Character Card Methods ---
+    @staticmethod
     def _ensure_json_string_from_mixed(data: Optional[Union[List, Dict, Set, str]]) -> Optional[str]:
+        """
+        Serializes Python list, dict, or set to a JSON string, or passes through an existing string.
+
+        - If data is None, returns None.
+        - If data is a list, dict, or set (converted to list), it's serialized to JSON.
+        - If data is already a string, it attempts to validate it as JSON.
+          - If valid JSON, the string is returned as is.
+          - If not valid JSON, the string is returned as is (logged with DEBUG level).
+          This behavior assumes that if a string is passed, it's either pre-formatted JSON
+          or a plain string intended for a text field that happens to be JSON-serializable.
+
+        Args:
+            data: The Python object (list, dict, set, str) to process, or None.
+
+        Returns:
+            A JSON string representation of the data, the original string if it's
+            valid JSON or a plain string, or None if input `data` was None.
+        """
         if data is None:
             return None
         if isinstance(data, str):  # If it's already a string, assume it's valid JSON or pass it through
@@ -1076,9 +1405,8 @@ UPDATE db_schema_version
                 json.loads(data)  # Validate if it's a JSON string
                 return data
             except json.JSONDecodeError:
-                # If it's a plain string not meant to be JSON, this logic might need adjustment
-                # For now, let's assume if it's a string, it's intended as a pre-formatted JSON string
-                return data  # Or raise an error if non-JSON strings are not allowed for these fields
+                logger.debug(f"Input string is not valid JSON, passing through: '{data[:100]}...'")
+                return data
         if isinstance(data, Set):
             new_data = list(data)
             return json.dumps(new_data)
@@ -1087,12 +1415,32 @@ UPDATE db_schema_version
     def add_character_card(self, card_data: Dict[str, Any]) -> Optional[int]:
         """
         Adds a new character card to the database.
-        The `client_id` is taken from the DB instance.
-        `version` defaults to 1. `last_modified` is set to current time.
-        `alternate_greetings`, `tags`, `extensions` are stored as JSON strings.
-        Relies on SQL triggers for sync_log and FTS updates.
-        """
 
+        The `client_id` for the new record is taken from the `CharactersRAGDB` instance.
+        `version` defaults to 1. `created_at` and `last_modified` are set to the
+        current UTC time. Fields like `alternate_greetings`, `tags`, and `extensions`
+        (from `_CHARACTER_CARD_JSON_FIELDS`) are stored as JSON strings.
+
+        FTS updates (`character_cards_fts`) and `sync_log` entries for creations
+        are handled automatically by SQL triggers.
+
+        Args:
+            card_data: A dictionary containing the character card's data.
+                       Required fields: 'name'.
+                       Optional fields include: 'description', 'personality', 'scenario', 'image',
+                       'post_history_instructions', 'first_message', 'message_example',
+                       'creator_notes', 'system_prompt', 'alternate_greetings' (list/set/JSON str),
+                       'tags' (list/set/JSON str), 'creator', 'character_version',
+                       'extensions' (dict/JSON str).
+
+        Returns:
+            The integer ID of the newly created character card.
+
+        Raises:
+            InputError: If required fields (e.g., 'name') are missing or empty.
+            ConflictError: If a character card with the same 'name' already exists.
+            CharactersRAGDBError: For other database-related errors during insertion.
+        """
         required_fields = ['name']
         for field in required_fields:
             if field not in card_data or not card_data[field]:
@@ -1115,16 +1463,16 @@ UPDATE db_schema_version
                 INSERT INTO character_cards (name, description, personality, scenario, image, post_history_instructions, \
                                              first_message, message_example, creator_notes, system_prompt, \
                                              alternate_greetings, tags, creator, character_version, extensions, \
-                                             last_modified, client_id, version, deleted) \
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0) \
-                """
+                                             created_at, last_modified, client_id, version, deleted) \
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0) \
+                """ # created_at added
         params = (
             card_data['name'], card_data.get('description'), card_data.get('personality'),
             card_data.get('scenario'), card_data.get('image'), card_data.get('post_history_instructions'),
             card_data.get('first_message'), card_data.get('message_example'), card_data.get('creator_notes'),
             card_data.get('system_prompt'), alt_greetings_json, tags_json,
             card_data.get('creator'), card_data.get('character_version'), extensions_json,
-            now, self.client_id, 1  # version defaults to 1, deleted to 0
+            now, now, self.client_id, # created_at, last_modified, client_id
         )
         try:
             with self.transaction() as conn:
@@ -1132,18 +1480,7 @@ UPDATE db_schema_version
                 char_id = cursor.lastrowid
                 logger.info(f"Added character card '{card_data['name']}' with ID: {char_id}.")
                 return char_id
-        except ConflictError as e:
-            if "character_cards.name" in str(e).lower(): # This check is specific to execute_query's ConflictError re-raising
-                # If using conn.execute directly, the original sqlite3.IntegrityError is caught by transaction manager.
-                # The transaction manager will re-raise based on its own logic or a generic CharactersRAGDBError.
-                # For specific handling of 'character_cards.name' conflict, we might need to catch sqlite3.IntegrityError here
-                # and inspect it, or ensure execute_query's logic for raising ConflictError is robust.
-                # Assuming ConflictError is raised correctly by transaction manager or execute_query for unique constraints.
-                logger.warning(f"Character card with name '{card_data['name']}' already exists.")
-                raise ConflictError(f"Character card with name '{card_data['name']}' already exists.",
-                                    entity="character_cards", entity_id=card_data['name']) from e
-            raise
-        except sqlite3.IntegrityError as e: # Catching this if conn.execute is used directly
+        except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed: character_cards.name" in str(e):
                 logger.warning(f"Character card with name '{card_data['name']}' already exists.")
                 raise ConflictError(f"Character card with name '{card_data['name']}' already exists.",
@@ -1152,8 +1489,26 @@ UPDATE db_schema_version
         except CharactersRAGDBError as e:
             logger.error(f"Database error adding character card '{card_data.get('name')}': {e}")
             raise
+        return None # Should not be reached
 
     def get_character_card_by_id(self, character_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves a specific character card by its ID.
+
+        Only non-deleted cards are returned. JSON fields (`alternate_greetings`,
+        `tags`, `extensions` as defined in `_CHARACTER_CARD_JSON_FIELDS`)
+        are deserialized from strings to Python objects.
+
+        Args:
+            character_id: The integer ID of the character card.
+
+        Returns:
+            A dictionary containing the character card's data if found and not deleted,
+            otherwise None.
+
+        Raises:
+            CharactersRAGDBError: For database errors during fetching.
+        """
         query = "SELECT * FROM character_cards WHERE id = ? AND deleted = 0"
         try:
             cursor = self.execute_query(query, (character_id,))
@@ -1164,6 +1519,23 @@ UPDATE db_schema_version
             raise
 
     def get_character_card_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves a specific character card by its unique name.
+
+        Only non-deleted cards are returned. JSON fields (see `_CHARACTER_CARD_JSON_FIELDS`)
+        are deserialized. Name comparison is case-sensitive as per default SQLite behavior
+        (schema's `name` column does not specify `COLLATE NOCASE`).
+
+        Args:
+            name: The unique name of the character card.
+
+        Returns:
+            A dictionary containing the character card's data if found and not deleted,
+            otherwise None.
+
+        Raises:
+            CharactersRAGDBError: For database errors during fetching.
+        """
         query = "SELECT * FROM character_cards WHERE name = ? AND deleted = 0"
         try:
             cursor = self.execute_query(query, (name,))
@@ -1174,6 +1546,23 @@ UPDATE db_schema_version
             raise
 
     def list_character_cards(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        Lists character cards, ordered by name.
+
+        Only non-deleted cards are returned. JSON fields (see `_CHARACTER_CARD_JSON_FIELDS`)
+        are deserialized.
+
+        Args:
+            limit: The maximum number of cards to return. Defaults to 100.
+            offset: The number of cards to skip before starting to return. Defaults to 0.
+
+        Returns:
+            A list of dictionaries, each representing a character card.
+            The list may be empty if no cards are found.
+
+        Raises:
+            CharactersRAGDBError: For database errors during listing.
+        """
         query = "SELECT * FROM character_cards WHERE deleted = 0 ORDER BY name LIMIT ? OFFSET ?"
         try:
             cursor = self.execute_query(query, (limit, offset))
@@ -1184,6 +1573,42 @@ UPDATE db_schema_version
             raise
 
     def update_character_card(self, character_id: int, card_data: Dict[str, Any], expected_version: int) -> bool:
+        """
+        Updates an existing character card using optimistic locking.
+
+        The update will only succeed if `expected_version` matches the card's current
+        version in the database. Upon successful update, the card's `version`
+        is incremented, `last_modified` is updated to the current UTC time, and
+        `client_id` is set to the DB instance's `client_id`.
+
+        If `card_data` is empty, the method logs this and returns True immediately
+        without performing any database operations or version checks.
+
+        Updatable fields: "name", "description", "personality", "scenario", "image",
+        "post_history_instructions", "first_message", "message_example",
+        "creator_notes", "system_prompt", "creator", "character_version",
+        and JSON fields: "alternate_greetings", "tags", "extensions".
+        Other fields in `card_data` (like 'id', 'created_at') are ignored.
+
+        FTS updates (`character_cards_fts`) and `sync_log` entries for updates
+        are handled automatically by SQL triggers.
+
+        Args:
+            character_id: The ID of the character card to update.
+            card_data: A dictionary containing the fields to update.
+                       If empty, the method returns True without making changes.
+            expected_version: The version number the client expects the record to have.
+
+        Returns:
+            True if the update was successful.
+
+        Raises:
+            ConflictError: If the character card is not found, is soft-deleted,
+                           or if `expected_version` does not match the current database version
+                           (indicating a concurrent modification). Also raised if an update to
+                           'name' violates its unique constraint.
+            CharactersRAGDBError: For other database-related errors.
+        """
         logger.debug(
             f"Starting update_character_card for ID {character_id}, expected_version {expected_version} (SINGLE UPDATE STRATEGY)")
 
@@ -1267,7 +1692,7 @@ UPDATE db_schema_version
                     check_again_cursor = conn.execute("SELECT version, deleted FROM character_cards WHERE id = ?",
                                                       (character_id,))
                     final_state = check_again_cursor.fetchone()
-
+                    msg = f"Update for character_cards ID {character_id} (expected v{expected_version}) affected 0 rows."
                     if not final_state:
                         msg = f"Character card ID {character_id} disappeared before update completion (expected v{expected_version})."
                     elif final_state['deleted']:
@@ -1284,9 +1709,16 @@ UPDATE db_schema_version
                     f"Updated character card ID {character_id} (SINGLE UPDATE) from client-expected version {expected_version} to final DB version {next_version_val}. {log_msg_fields_updated}")
                 return True
 
-        except sqlite3.DatabaseError as e:  # Catching this specifically for robustness
-            logger.critical(f"DATABASE ERROR during update_character_card (SINGLE UPDATE STRATEGY)!")
-            logger.critical(f"Error details: {str(e)}")
+        except sqlite3.IntegrityError as e: # Catch unique constraint violation for name
+            if "UNIQUE constraint failed: character_cards.name" in str(e):
+                updated_name = card_data.get("name", "[name not in update_data]")
+                logger.warning(f"Update for character card ID {character_id} failed: name '{updated_name}' already exists.")
+                raise ConflictError(f"Cannot update character card ID {character_id}: name '{updated_name}' already exists.",
+                                    entity="character_cards", entity_id=updated_name) from e # Use name as entity_id for this specific conflict
+            logger.critical(f"DATABASE IntegrityError during update_character_card (SINGLE UPDATE STRATEGY) for ID {character_id}: {e}", exc_info=True)
+            raise CharactersRAGDBError(f"Database integrity error during single update: {e}") from e
+        except sqlite3.DatabaseError as e:
+            logger.critical(f"DATABASE ERROR during update_character_card (SINGLE UPDATE STRATEGY) for ID {character_id}: {e}", exc_info=True)
             raise CharactersRAGDBError(f"Database error during single update: {e}") from e
         except ConflictError:  # Re-raise ConflictErrors from _get_current_db_version or manual checks
             logger.warning(f"ConflictError during update_character_card for ID {character_id}.",
@@ -1302,6 +1734,32 @@ UPDATE db_schema_version
             raise CharactersRAGDBError(f"Unexpected error updating character card: {e}") from e
 
     def soft_delete_character_card(self, character_id: int, expected_version: int) -> bool:
+        """
+        Soft-deletes a character card using optimistic locking.
+
+        Sets the `deleted` flag to 1, updates `last_modified`, increments `version`,
+        and sets `client_id`. The operation succeeds only if `expected_version` matches
+        the current database version and the card is not already deleted.
+
+        If the card is already soft-deleted (idempotency check), the method considers
+        this a success and returns True.
+
+        FTS updates (removal from `character_cards_fts`) and `sync_log` entries for
+        deletions (which are technically updates marking as deleted) are handled by SQL triggers.
+
+        Args:
+            character_id: The ID of the character card to soft-delete.
+            expected_version: The version number the client expects the record to have.
+
+        Returns:
+            True if the soft-delete was successful or if the card was already soft-deleted.
+
+        Raises:
+            ConflictError: If the card is not found (and not already deleted), or
+                           if `expected_version` does not match (and the card is active),
+                           or if a concurrent modification prevents the update.
+            CharactersRAGDBError: For other database-related errors.
+        """
         now = self._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
 
@@ -1338,7 +1796,7 @@ UPDATE db_schema_version
                     check_again_cursor = conn.execute("SELECT version, deleted FROM character_cards WHERE id = ?",
                                                       (character_id,))
                     final_state = check_again_cursor.fetchone()
-
+                    msg = f"Soft delete for Character ID {character_id} (expected v{expected_version}) affected 0 rows."
                     if not final_state:
                         msg = f"Character card ID {character_id} disappeared before soft delete (expected active version {expected_version})."
                     elif final_state['deleted']:
@@ -1364,10 +1822,25 @@ UPDATE db_schema_version
             raise
 
     def search_character_cards(self, search_term: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Searches character_cards_fts. Returns full card details for matches."""
-        # FTS query matches against name, description, personality, scenario, system_prompt
-        # FTS table columns: name, description, personality, scenario, system_prompt
-        # Content table: character_cards, content_rowid: id
+        """
+        Searches character cards using Full-Text Search (FTS).
+
+        The search is performed on the `character_cards_fts` table, matching against
+        'name', 'description', 'personality', 'scenario', and 'system_prompt' fields.
+        Returns full card details for matching, non-deleted cards, ordered by relevance (rank).
+        JSON fields (see `_CHARACTER_CARD_JSON_FIELDS`) in the results are deserialized.
+
+        Args:
+            search_term: The term(s) to search for. Supports FTS query syntax (e.g., "dragon lore").
+            limit: The maximum number of results to return. Defaults to 10.
+
+        Returns:
+            A list of dictionaries, each representing a matching character card.
+            The list can be empty.
+
+        Raises:
+            CharactersRAGDBError: For database errors during the search.
+        """
         query = """
                 SELECT cc.*
                 FROM character_cards_fts fts
@@ -1387,9 +1860,32 @@ UPDATE db_schema_version
     # --- Conversation Methods ---
     def add_conversation(self, conv_data: Dict[str, Any]) -> Optional[str]:
         """
-        Adds a new conversation.
-        `id` and `root_id` must be provided (UUIDs).
-        If `root_id` is not provided, `id` is used as `root_id`.
+        Adds a new conversation to the database.
+
+        `id` (UUID string) can be provided; if not, it's auto-generated.
+        `root_id` (UUID string) should be provided; if not, `id` is used as `root_id`.
+        `character_id` is required in `conv_data`.
+        `client_id` defaults to the DB instance's `client_id` if not provided in `conv_data`.
+        `version` defaults to 1. `created_at` and `last_modified` are set to current UTC time.
+
+        FTS updates (`conversations_fts` for the title) and `sync_log` entries for creations
+        are handled automatically by SQL triggers.
+
+        Args:
+            conv_data: A dictionary containing conversation data.
+                       Required: 'character_id'.
+                       Recommended: 'id' (if providing own UUID), 'root_id'.
+                       Optional: 'forked_from_message_id', 'parent_conversation_id',
+                                 'title', 'rating' (1-5), 'client_id'.
+
+        Returns:
+            The string UUID of the newly created conversation.
+
+        Raises:
+            InputError: If required fields like 'character_id' are missing, or if
+                        'client_id' is missing and not set on the DB instance.
+            ConflictError: If a conversation with the provided 'id' already exists.
+            CharactersRAGDBError: For other database-related errors.
         """
         conv_id = conv_data.get('id') or self._generate_uuid()
         root_id = conv_data.get('root_id') or conv_id  # If root_id not given, this is a new root.
@@ -1399,35 +1895,52 @@ UPDATE db_schema_version
 
         client_id = conv_data.get('client_id') or self.client_id
         if not client_id:
-            raise InputError("Client ID is required for conversation.")
+            raise InputError("Client ID is required for conversation (either in conv_data or DB instance).")
 
         now = self._get_current_utc_timestamp_iso()
         query = """
                 INSERT INTO conversations (id, root_id, forked_from_message_id, parent_conversation_id, \
                                            character_id, title, rating, \
-                                           last_modified, client_id, version, deleted) \
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0) \
-                """
+                                           created_at, last_modified, client_id, version, deleted) \
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0) \
+                """ # created_at added
         params = (
             conv_id, root_id, conv_data.get('forked_from_message_id'),
             conv_data.get('parent_conversation_id'), conv_data['character_id'],
             conv_data.get('title'), conv_data.get('rating'),
-            now, client_id
+            now, now, client_id # created_at, last_modified, client_id
         )
         try:
             with self.transaction() as conn:
-                conn.execute(query, params) # Use conn.execute
+                conn.execute(query, params)
             logger.info(f"Added conversation ID: {conv_id}.")
             return conv_id
-        except sqlite3.IntegrityError as e: # Catch specific error if PK (id) is duplicated
+        except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed: conversations.id" in str(e):
                  raise ConflictError(f"Conversation with ID '{conv_id}' already exists.", entity="conversations", entity_id=conv_id) from e
+            # Could also be FK violation for character_id, etc.
             raise CharactersRAGDBError(f"Database integrity error adding conversation: {e}") from e
         except CharactersRAGDBError as e:
             logger.error(f"Database error adding conversation: {e}")
             raise
+        return None # Should not be reached
 
     def get_conversation_by_id(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves a specific conversation by its UUID.
+
+        Only non-deleted conversations are returned.
+
+        Args:
+            conversation_id: The string UUID of the conversation.
+
+        Returns:
+            A dictionary containing the conversation's data if found and not deleted,
+            otherwise None.
+
+        Raises:
+            CharactersRAGDBError: For database errors during fetching.
+        """
         query = "SELECT * FROM conversations WHERE id = ? AND deleted = 0"
         try:
             cursor = self.execute_query(query, (conversation_id,))
@@ -1439,6 +1952,22 @@ UPDATE db_schema_version
 
     def get_conversations_for_character(self, character_id: int, limit: int = 50, offset: int = 0) -> List[
         Dict[str, Any]]:
+        """
+        Lists conversations associated with a specific character ID.
+
+        Only non-deleted conversations are returned, ordered by `last_modified` descending.
+
+        Args:
+            character_id: The integer ID of the character.
+            limit: The maximum number of conversations to return. Defaults to 50.
+            offset: The number of conversations to skip. Defaults to 0.
+
+        Returns:
+            A list of dictionaries, each representing a conversation. Can be empty.
+
+        Raises:
+            CharactersRAGDBError: For database errors.
+        """
         query = "SELECT * FROM conversations WHERE character_id = ? AND deleted = 0 ORDER BY last_modified DESC LIMIT ? OFFSET ?"
         try:
             cursor = self.execute_query(query, (character_id, limit, offset))
@@ -1448,17 +1977,41 @@ UPDATE db_schema_version
             raise
 
     def update_conversation(self, conversation_id: str, update_data: Dict[str, Any], expected_version: int) -> bool:
+        """
+        Updates an existing conversation using optimistic locking.
+
+        The update succeeds if `expected_version` matches the current database version.
+        `version` is incremented, `last_modified` updated to current UTC time,
+        and `client_id` set to the DB instance's `client_id`.
+
+        Updatable fields from `update_data`: 'title', 'rating'. Other fields are ignored.
+        If `update_data` is empty or contains no updatable fields, metadata (version,
+        last_modified, client_id) is still updated if the version check passes.
+
+        FTS updates (`conversations_fts` for title changes) and `sync_log` entries
+        are handled by SQL triggers.
+
+        Args:
+            conversation_id: The UUID of the conversation to update.
+            update_data: Dictionary with fields to update (e.g., 'title', 'rating').
+            expected_version: The client's expected version of the record.
+
+        Returns:
+            True if the update was successful.
+
+        Raises:
+            ConflictError: If the conversation is not found, is soft-deleted,
+                           or if `expected_version` does not match the current database version.
+            CharactersRAGDBError: For other database-related errors (e.g., rating out of range
+                                  if not caught by this method but by DB constraint).
+        """
         logger.debug(
             f"Starting update_conversation for ID {conversation_id}, expected_version {expected_version} (FTS handled by DB triggers)")
 
-        if not update_data:
-            # If update_data is empty, it implies only metadata (last_modified, version) might be updated.
-            # The logic below will handle this by not finding specific fields and then constructing
-            # an update query that only touches last_modified, version, and client_id.
-            logger.info(
-                f"No specific fields in update_data for conversation {conversation_id}. Will update metadata if version matches.")
-            # Allow processing to continue to the transaction block.
-            # The update query construction will adapt.
+        if 'rating' in update_data and update_data['rating'] is not None:
+             # Basic check, DB has CHECK constraint too
+            if not (1 <= update_data['rating'] <= 5):
+                raise InputError(f"Rating must be between 1 and 5. Got: {update_data['rating']}")
 
         now = self._get_current_utc_timestamp_iso()
 
@@ -1545,6 +2098,7 @@ UPDATE db_schema_version
                     check_again_cursor = conn.execute("SELECT version, deleted FROM conversations WHERE id = ?",
                                                       (conversation_id,))
                     final_state = check_again_cursor.fetchone()
+                    msg = f"Main update for conversation ID {conversation_id} (expected v{expected_version}) affected 0 rows."
                     if not final_state:
                         msg = f"Conversation ID {conversation_id} disappeared before update completion (expected v{expected_version})."
                     elif final_state['deleted']:
@@ -1562,6 +2116,8 @@ UPDATE db_schema_version
                     f"Updated conversation ID {conversation_id} from version {expected_version} to version {next_version_val} (FTS handled by DB triggers). Title changed: {title_changed_flag}")
                 return True
 
+        except sqlite3.IntegrityError as e: # e.g. rating check constraint
+            raise CharactersRAGDBError(f"Database integrity error during update_conversation: {e}") from e
         except sqlite3.DatabaseError as e:
             # This broad catch is for unexpected SQLite errors, including potential "malformed" if it still occurs.
             logger.critical(f"DATABASE ERROR during update_conversation (FTS handled by DB triggers): {e}")
@@ -1570,7 +2126,9 @@ UPDATE db_schema_version
             raise CharactersRAGDBError(f"Database error during update_conversation: {e}") from e
         except ConflictError:  # Re-raise ConflictErrors for tests or callers to handle
             raise
-        except CharactersRAGDBError as e:  # Other custom DB errors
+        except InputError:
+            raise
+        except CharactersRAGDBError as e:
             logger.error(f"Application-level database error in update_conversation for ID {conversation_id}: {e}",
                          exc_info=True)
             raise
@@ -1579,6 +2137,28 @@ UPDATE db_schema_version
             raise CharactersRAGDBError(f"Unexpected error during update_conversation: {e}") from e
 
     def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool:
+        """
+        Soft-deletes a conversation using optimistic locking.
+
+        Sets the `deleted` flag to 1, updates `last_modified`, increments `version`,
+        and sets `client_id`. Succeeds if `expected_version` matches the current
+        DB version and the record is active.
+        If already soft-deleted, returns True (idempotent).
+
+        FTS updates (removal from `conversations_fts`) and `sync_log` entries
+        are handled by SQL triggers.
+
+        Args:
+            conversation_id: The UUID of the conversation to soft-delete.
+            expected_version: The client's expected version of the record.
+
+        Returns:
+            True if the soft-delete was successful or if the conversation was already soft-deleted.
+
+        Raises:
+            ConflictError: If not found (and not already deleted), or if active with a version mismatch.
+            CharactersRAGDBError: For other database errors.
+        """
         now = self._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
 
@@ -1596,7 +2176,7 @@ UPDATE db_schema_version
                     if record_status and record_status['deleted']:
                         logger.info(f"Conversation ID {conversation_id} already soft-deleted. Success (idempotent).")
                         return True
-                    raise e
+                    raise e # Re-raise if not found or other conflict
 
                 if current_db_version != expected_version:
                     raise ConflictError(
@@ -1610,6 +2190,7 @@ UPDATE db_schema_version
                     check_again_cursor = conn.execute("SELECT version, deleted FROM conversations WHERE id = ?",
                                                       (conversation_id,))
                     final_state = check_again_cursor.fetchone()
+                    msg = f"Soft delete for conversation ID {conversation_id} (expected v{expected_version}) affected 0 rows."
                     if not final_state:
                         msg = f"Conversation ID {conversation_id} disappeared."
                     elif final_state['deleted']:
@@ -1634,13 +2215,28 @@ UPDATE db_schema_version
 
     def search_conversations_by_title(self, title_query: str, character_id: Optional[int] = None, limit: int = 10) -> \
             List[Dict[str, Any]]:
-        """Searches conversations_fts (title). Corrected JOIN condition."""
-        # FTS table: conversations_fts, content_rowid: rowid (maps to conversations.rowid)
-        # Content table: conversations, PK is 'id' (TEXT)
+        """
+        Searches conversations by title using FTS.
+
+        Matches against the 'title' field in `conversations_fts`.
+        Optionally filters by `character_id`. Returns non-deleted conversations,
+        ordered by relevance (rank).
+
+        Args:
+            title_query: The search term for the title. Supports FTS query syntax.
+            character_id: Optional character ID to filter results.
+            limit: Maximum number of results. Defaults to 10.
+
+        Returns:
+            A list of matching conversation dictionaries. Can be empty.
+
+        Raises:
+            CharactersRAGDBError: For database search errors.
+        """
         base_query = """
                      SELECT c.*
                      FROM conversations_fts fts
-                              JOIN conversations c ON fts.rowid = c.rowid -- Corrected Join condition
+                              JOIN conversations c ON fts.rowid = c.rowid
                      WHERE fts.conversations_fts MATCH ? \
                        AND c.deleted = 0 \
                      """
@@ -1661,7 +2257,33 @@ UPDATE db_schema_version
 
     # --- Message Methods ---
     def add_message(self, msg_data: Dict[str, Any]) -> Optional[str]:
-        """Adds a new message to a conversation, potentially with an image."""
+        """
+        Adds a new message to a conversation, optionally with image data.
+
+        `id` (UUID string) is auto-generated if not provided in `msg_data`.
+        Requires 'conversation_id', 'sender'. Message must have 'content' (text) or 'image_data'.
+        `client_id` defaults to DB instance's `client_id`. `version` is set to 1.
+        `timestamp` defaults to current UTC time if not provided; `last_modified` is set to current UTC time.
+
+        Verifies that the parent conversation (given by `conversation_id`) exists and is not deleted.
+        FTS updates (`messages_fts` for content) and `sync_log` entries are handled by SQL triggers.
+
+        Args:
+            msg_data: Dictionary with message data.
+                      Required: 'conversation_id', 'sender'. At least one of 'content' or 'image_data'.
+                      Optional: 'id', 'parent_message_id', 'content' (str),
+                                'image_data' (bytes), 'image_mime_type' (str, required if image_data present),
+                                'timestamp', 'ranking', 'client_id'.
+
+        Returns:
+            The string UUID of the newly added message.
+
+        Raises:
+            InputError: If required fields are missing, if both 'content' and 'image_data' are absent,
+                        or if the parent conversation is not found or is deleted.
+            ConflictError: If a message with the provided 'id' (if any) already exists.
+            CharactersRAGDBError: For other database errors (e.g., FK violation for conversation_id).
+        """
         msg_id = msg_data.get('id') or self._generate_uuid()
 
         required_fields = ['conversation_id', 'sender', 'content']  # Content can be empty if image is present
@@ -1670,6 +2292,9 @@ UPDATE db_schema_version
                 raise InputError(f"Required field '{field}' is missing for message.")
         if not msg_data.get('content') and not msg_data.get('image_data'):
             raise InputError("Message must have text content or image data.")
+        if msg_data.get('image_data') and not msg_data.get('image_mime_type'):
+            raise InputError("image_mime_type is required if image_data is provided.")
+
 
         client_id = msg_data.get('client_id') or self.client_id
         if not client_id:
@@ -1713,7 +2338,22 @@ UPDATE db_schema_version
             raise
 
     def get_message_by_id(self, message_id: str) -> Optional[Dict[str, Any]]:
-        query = "SELECT id, conversation_id, parent_message_id, sender, content, image_data, image_mime_type, timestamp, ranking, last_modified, version, client_id, deleted FROM messages WHERE id = ? AND deleted = 0"  # Explicitly list columns
+        """
+        Retrieves a specific message by its UUID.
+
+        Only non-deleted messages are returned. Includes all fields, such as
+        `image_data` (BLOB) and `image_mime_type` if present.
+
+        Args:
+            message_id: The string UUID of the message.
+
+        Returns:
+            A dictionary with message data if found and not deleted, else None.
+
+        Raises:
+            CharactersRAGDBError: For database errors.
+        """
+        query = "SELECT id, conversation_id, parent_message_id, sender, content, image_data, image_mime_type, timestamp, ranking, last_modified, version, client_id, deleted FROM messages WHERE id = ? AND deleted = 0"
         try:
             cursor = self.execute_query(query, (message_id,))
             row = cursor.fetchone()
@@ -1724,6 +2364,26 @@ UPDATE db_schema_version
 
     def get_messages_for_conversation(self, conversation_id: str, limit: int = 100, offset: int = 0,
                                       order_by_timestamp: str = "ASC") -> List[Dict[str, Any]]:
+        """
+        Lists messages for a specific conversation.
+
+        Returns non-deleted messages, ordered by `timestamp` according to `order_by_timestamp`.
+        Includes all fields, including `image_data` and `image_mime_type`.
+
+        Args:
+            conversation_id: The UUID of the conversation.
+            limit: Maximum number of messages to return. Defaults to 100.
+            offset: Number of messages to skip. Defaults to 0.
+            order_by_timestamp: Sort order for 'timestamp' field ("ASC" or "DESC").
+                                Defaults to "ASC".
+
+        Returns:
+            A list of message dictionaries. Can be empty.
+
+        Raises:
+            InputError: If `order_by_timestamp` has an invalid value.
+            CharactersRAGDBError: For database errors.
+        """
         if order_by_timestamp.upper() not in ["ASC", "DESC"]:
             raise InputError("order_by_timestamp must be 'ASC' or 'DESC'.")
         query = f"SELECT id, conversation_id, parent_message_id, sender, content, image_data, image_mime_type, timestamp, ranking, last_modified, version, client_id, deleted FROM messages WHERE conversation_id = ? AND deleted = 0 ORDER BY timestamp {order_by_timestamp} LIMIT ? OFFSET ?"  # Explicitly list columns
@@ -1735,6 +2395,37 @@ UPDATE db_schema_version
             raise
 
     def update_message(self, message_id: str, update_data: Dict[str, Any], expected_version: int) -> bool:
+        """
+        Updates an existing message using optimistic locking.
+
+        Succeeds if `expected_version` matches the current database version.
+        `version` is incremented, `last_modified` updated, and `client_id` set.
+        Updatable fields from `update_data`: 'content', 'ranking', 'parent_message_id'.
+        Image data can also be updated: 'image_data' and 'image_mime_type'.
+        If 'image_data' is set to `None` in `update_data`, both 'image_data' and
+        'image_mime_type' columns will be set to NULL in the database.
+        Other fields in `update_data` are ignored. `update_data` must not be empty.
+
+        FTS updates (`messages_fts` for content changes) and `sync_log` entries
+        are handled by SQL triggers.
+
+        Args:
+            message_id: The UUID of the message to update.
+            update_data: Dictionary with fields to update. Must not be empty.
+                         If 'image_data' is updated, 'image_mime_type' should also be
+                         provided, unless 'image_data' is set to None.
+            expected_version: The client's expected version of the record.
+
+        Returns:
+            True if the update was successful.
+
+        Raises:
+            InputError: If `update_data` is empty.
+            ConflictError: If the message is not found, is soft-deleted, or if `expected_version`
+                           does not match the current database version.
+            CharactersRAGDBError: For database integrity errors (e.g., invalid `parent_message_id`)
+                                  or other database issues.
+        """
         if not update_data:
             raise InputError("No data provided for message update.")
 
@@ -1742,17 +2433,17 @@ UPDATE db_schema_version
         fields_to_update_sql = []
         params_for_set_clause = []
 
-        # Allow updating content, ranking, parent_message_id. Image updates are less common post-creation.
-        # If image update is needed, add 'image_data' and 'image_mime_type' here.
+        allowed_to_update = ['content', 'ranking', 'parent_message_id', 'image_data', 'image_mime_type']
+
+        # Special handling for clearing image
         if 'image_data' in update_data and update_data['image_data'] is None:
             fields_to_update_sql.append("image_data = NULL")
             fields_to_update_sql.append("image_mime_type = NULL")
-            # No params needed for NULL
-
-        allowed_to_update = ['content', 'ranking', 'parent_message_id']
-        if 'image_data' in update_data:
-            allowed_to_update.append('image_data')
-            allowed_to_update.append('image_mime_type')
+            # Remove these keys from update_data to avoid processing them again
+            # in the loop if they were explicitly set to None
+            # This isn't strictly necessary with current loop logic but good for clarity
+            update_data.pop('image_data', None)
+            update_data.pop('image_mime_type', None)
 
         for key, value in update_data.items():
             if key in allowed_to_update:
@@ -1762,66 +2453,85 @@ UPDATE db_schema_version
                 logging.warning(
                     f"Attempted to update immutable or unknown field '{key}' in message ID {message_id}, skipping.")
 
-            if not fields_to_update_sql:
-                logger.info(f"No updatable fields provided for message ID {message_id}.")
-                # ensure metadata update always happens if version check passes.
-                pass # Proceed to metadata update
+        if not fields_to_update_sql: # If only image was cleared, this list might be empty now if no other fields
+            logger.info(f"No updatable content fields provided for message ID {message_id}, but metadata will be updated if version matches.")
+            # Proceed to metadata update; SQL query will be constructed accordingly
 
-            next_version_val = expected_version + 1
+        next_version_val = expected_version + 1
 
-            # Always update metadata if version check passes
-            current_fields_to_update_sql = list(fields_to_update_sql) # clone
-            current_params_for_set_clause = list(params_for_set_clause) # clone
+        current_fields_to_update_sql = list(fields_to_update_sql)
+        current_params_for_set_clause = list(params_for_set_clause)
 
-            current_fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
-            current_params_for_set_clause.extend([now, next_version_val, self.client_id])
+        current_fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+        current_params_for_set_clause.extend([now, next_version_val, self.client_id])
 
-            where_values = [message_id, expected_version]
-            final_params_for_execute = tuple(current_params_for_set_clause + where_values)
+        where_values = [message_id, expected_version]
+        final_params_for_execute = tuple(current_params_for_set_clause + where_values)
 
-            query = f"UPDATE messages SET {', '.join(current_fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
+        query = f"UPDATE messages SET {', '.join(current_fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"
 
-            try:
-                with self.transaction() as conn:
-                    current_db_version = self._get_current_db_version(conn, "messages", "id", message_id)
+        try:
+            with self.transaction() as conn:
+                current_db_version = self._get_current_db_version(conn, "messages", "id", message_id)
 
-                    if current_db_version != expected_version:
-                        raise ConflictError(
-                            f"Message ID {message_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
-                            entity="messages", entity_id=message_id
-                        )
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Message ID {message_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
+                        entity="messages", entity_id=message_id
+                    )
 
-                    cursor = conn.execute(query, final_params_for_execute)
+                cursor = conn.execute(query, final_params_for_execute)
 
-                    if cursor.rowcount == 0:
-                        check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
-                                                          (message_id,))
-                        final_state = check_again_cursor.fetchone()
-                        if not final_state:
-                            msg = f"Message ID {message_id} disappeared."
-                        elif final_state['deleted']:
-                            msg = f"Message ID {message_id} was soft-deleted concurrently."
-                        elif final_state['version'] != expected_version:
-                            msg = f"Message ID {message_id} version changed to {final_state['version']} concurrently."
-                        else:
-                            msg = f"Update for message ID {message_id} (expected v{expected_version}) affected 0 rows."
-                        raise ConflictError(msg, entity="messages", entity_id=message_id)
+                if cursor.rowcount == 0:
+                    check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
+                                                      (message_id,))
+                    final_state = check_again_cursor.fetchone()
+                    msg = f"Update for message ID {message_id} (expected v{expected_version}) affected 0 rows."
+                    if not final_state:
+                        msg = f"Message ID {message_id} disappeared."
+                    elif final_state['deleted']:
+                        msg = f"Message ID {message_id} was soft-deleted concurrently."
+                    elif final_state['version'] != expected_version:
+                        msg = f"Message ID {message_id} version changed to {final_state['version']} concurrently."
+                    raise ConflictError(msg, entity="messages", entity_id=message_id)
 
-                    logger.info(
-                        f"Updated message ID {message_id} from version {expected_version} to version {next_version_val}.")
-                    return True
-            except sqlite3.IntegrityError as e:  # e.g. parent_message_id FK violation
-                logger.error(f"SQLite integrity error updating message ID {message_id} (expected v{expected_version}): {e}",
-                             exc_info=True)
-                raise CharactersRAGDBError(f"Database integrity error updating message: {e}") from e
-            except ConflictError:
-                raise
-            except CharactersRAGDBError as e:
-                logger.error(f"Database error updating message ID {message_id} (expected v{expected_version}): {e}",
-                             exc_info=True)
-                raise
+                logger.info(
+                    f"Updated message ID {message_id} from version {expected_version} to version {next_version_val}. Fields updated: {fields_to_update_sql if fields_to_update_sql else 'None'}")
+                return True
+        except sqlite3.IntegrityError as e:
+            logger.error(f"SQLite integrity error updating message ID {message_id} (expected v{expected_version}): {e}",
+                         exc_info=True)
+            raise CharactersRAGDBError(f"Database integrity error updating message: {e}") from e
+        except ConflictError:
+            raise
+        except InputError: # Should not be raised from here directly, but for completeness
+            raise
+        except CharactersRAGDBError as e:
+            logger.error(f"Database error updating message ID {message_id} (expected v{expected_version}): {e}",
+                         exc_info=True)
+            raise
 
     def soft_delete_message(self, message_id: str, expected_version: int) -> bool:
+        """
+        Soft-deletes a message using optimistic locking.
+
+        Sets `deleted` to 1, updates `last_modified`, increments `version`, and sets `client_id`.
+        Succeeds if `expected_version` matches the current DB version and the record is active.
+        If already soft-deleted, returns True (idempotent).
+
+        FTS updates (removal from `messages_fts`) and `sync_log` entries are handled by SQL triggers.
+
+        Args:
+            message_id: The UUID of the message to soft-delete.
+            expected_version: The client's expected version of the record.
+
+        Returns:
+            True if the soft-delete was successful or if the message was already soft-deleted.
+
+        Raises:
+            ConflictError: If not found (and not already deleted), or if active with a version mismatch.
+            CharactersRAGDBError: For other database errors.
+        """
         now = self._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
 
@@ -1839,7 +2549,7 @@ UPDATE db_schema_version
                     if record_status and record_status['deleted']:
                         logger.info(f"Message ID {message_id} already soft-deleted. Success (idempotent).")
                         return True
-                    raise e
+                    raise e # Re-raise if not found or other conflict
 
                 if current_db_version != expected_version:
                     raise ConflictError(
@@ -1853,6 +2563,7 @@ UPDATE db_schema_version
                     check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
                                                       (message_id,))
                     final_state = check_again_cursor.fetchone()
+                    msg = f"Soft delete for message ID {message_id} (expected v{expected_version}) affected 0 rows."
                     if not final_state:
                         msg = f"Message ID {message_id} disappeared."
                     elif final_state['deleted']:
@@ -1875,6 +2586,24 @@ UPDATE db_schema_version
             raise
 
     def search_messages_by_content(self, content_query: str, conversation_id: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Searches messages by content using FTS.
+
+        Matches against the 'content' field in `messages_fts`.
+        Optionally filters by `conversation_id`. Returns non-deleted messages,
+        ordered by relevance (rank).
+
+        Args:
+            content_query: The search term for content. Supports FTS query syntax.
+            conversation_id: Optional conversation UUID to filter results.
+            limit: Maximum number of results. Defaults to 10.
+
+        Returns:
+            A list of matching message dictionaries. Can be empty.
+
+        Raises:
+            CharactersRAGDBError: For database search errors.
+        """
         base_query = """
                      SELECT m.*
                      FROM messages_fts fts
@@ -1908,7 +2637,35 @@ UPDATE db_schema_version
 
     def _add_generic_item(self, table_name: str, unique_col_name: str, item_data: Dict[str, Any], main_col_value: str,
                           other_fields_map: Dict[str, str]) -> Optional[int]:
-        """Helper for adding keywords, collections, notes - tables with autoinc ID and a unique text column."""
+        """
+        Internal helper to add items to tables with an auto-increment ID and a unique text column.
+
+        Handles creation or undeletion if an item with the `main_col_value` exists
+        but is soft-deleted. `version` is set to 1 on new creation or incremented on undelete.
+        `last_modified` and `client_id` (from `item_data` or instance) are set.
+        `created_at` is set on new creation or remains from original on undelete (implicitly).
+
+        FTS and sync_log entries are expected to be handled by SQL triggers for these tables.
+
+        Args:
+            table_name: Name of the database table (e.g., "keywords").
+            unique_col_name: Name of the column that must be unique (e.g., "keyword").
+                             This column usually has `COLLATE NOCASE` in schema.
+            item_data: Dictionary possibly containing 'client_id' or other values
+                       mapped by `other_fields_map`.
+            main_col_value: The value for the `unique_col_name` (e.g., the keyword text).
+                            This value is typically stripped of whitespace before use.
+            other_fields_map: A map of DB column names to keys in `item_data` for additional fields.
+                              Example: {"parent_id_db_col": "parent_id_item_data_key"}.
+
+        Returns:
+            The integer ID of the added or undeleted item.
+
+        Raises:
+            ConflictError: If an active item with `main_col_value` already exists,
+                           or if undelete fails due to version mismatch or concurrent activation.
+            CharactersRAGDBError: For other database errors.
+        """
         now = self._get_current_utc_timestamp_iso()
         client_id_to_use = item_data.get('client_id', self.client_id)
 
@@ -1922,15 +2679,18 @@ UPDATE db_schema_version
             cols_str_list.extend(other_cols)
             placeholders_str_list.extend(other_placeholders_list)
 
-        cols_str = ", ".join(cols_str_list)
-        placeholders_str = ", ".join(placeholders_str_list)
+        # Add created_at for new inserts
+        cols_str_list_insert = cols_str_list + ['created_at', 'last_modified', 'client_id', 'version', 'deleted']
+        placeholders_str_list_insert = placeholders_str_list + ['?', '?', '?', '1', '0']
 
         query = f"""
             INSERT INTO {table_name} (
-                {cols_str}, last_modified, client_id, version, deleted
-            ) VALUES ({placeholders_str}, ?, ?, 1, 0)
+                {', '.join(cols_str_list_insert)}
+            ) VALUES ({', '.join(placeholders_str_list_insert)})
         """
-        params_tuple = tuple([main_col_value] + other_values + [now, client_id_to_use])
+        # Params for INSERT: main_value, other_values..., created_at, last_modified, client_id
+        params_tuple_insert = tuple([main_col_value] + other_values + [now, now, client_id_to_use])
+
 
         try:
             with self.transaction() as conn:
@@ -1949,25 +2709,28 @@ UPDATE db_schema_version
                         update_set_parts.append(f"{col_db} = ?")
                         update_params_list.append(other_values[i])
                     update_set_parts.extend(["deleted = 0", "last_modified = ?", "version = ?", "client_id = ?"])
-                    update_params_list.extend([now, next_version, client_id_to_use, item_id, current_version])
+                    # WHERE clause params for undelete
+                    undelete_where_params = [item_id, current_version]
+                    full_undelete_params = tuple(update_params_list + [now, next_version, client_id_to_use] + undelete_where_params)
 
                     undelete_query = f"UPDATE {table_name} SET {', '.join(update_set_parts)} WHERE id = ? AND version = ?"
 
-                    row_count = conn.execute(undelete_query, tuple(update_params_list)).rowcount
-                    if row_count == 0:
+                    row_count_undelete = conn.execute(undelete_query, full_undelete_params).rowcount
+                    if row_count_undelete == 0:
                         raise ConflictError(
-                            f"Failed to undelete {table_name} '{main_col_value}' due to version mismatch or it became active.",
+                            f"Failed to undelete {table_name} '{main_col_value}' due to version mismatch or it became active/disappeared.",
                             entity=table_name, entity_id=main_col_value)
                     logger.info(
                         f"Undeleted and updated {table_name} '{main_col_value}' with ID: {item_id}, new version {next_version}.")
                     return item_id
 
-                cursor = conn.execute(query, params_tuple)
-                item_id = cursor.lastrowid
-                logger.info(f"Added {table_name} '{main_col_value}' with ID: {item_id}.")
-                return item_id
+                # If not undeleting, proceed with insert
+                cursor_insert = conn.execute(query, params_tuple_insert)
+                item_id_insert = cursor_insert.lastrowid
+                logger.info(f"Added {table_name} '{main_col_value}' with ID: {item_id_insert}.")
+                return item_id_insert
         except sqlite3.IntegrityError as e:
-             if f"UNIQUE constraint failed: {table_name}.{unique_col_name}" in str(e):
+             if f"unique constraint failed: {table_name}.{unique_col_name}" in str(e).lower(): # Use lower for robustness
                 logger.warning(f"{table_name} with {unique_col_name} '{main_col_value}' already exists and is active.")
                 raise ConflictError(f"{table_name} '{main_col_value}' already exists and is active.", entity=table_name,
                                     entity_id=main_col_value) from e
@@ -1980,6 +2743,19 @@ UPDATE db_schema_version
         return None  # Should not be reached if exceptions are raised properly
 
     def _get_generic_item_by_id(self, table_name: str, item_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Internal helper: Retrieves a non-deleted item by its auto-increment integer ID.
+
+        Args:
+            table_name: The database table name.
+            item_id: The integer ID of the item.
+
+        Returns:
+            A dictionary of the item's data if found and active, else None.
+
+        Raises:
+            CharactersRAGDBError: For database errors.
+        """
         query = f"SELECT * FROM {table_name} WHERE id = ? AND deleted = 0"
         try:
             cursor = self.execute_query(query, (item_id,))
@@ -1990,6 +2766,21 @@ UPDATE db_schema_version
             raise
 
     def _get_generic_item_by_unique_text(self, table_name: str, unique_col_name: str, value: str) -> Optional[Dict[str, Any]]:
+        """
+        Internal helper: Retrieves a non-deleted item by a unique text column value.
+        Assumes the column has `COLLATE NOCASE` if case-insensitive search is desired.
+
+        Args:
+            table_name: The database table name.
+            unique_col_name: The name of the unique text column.
+            value: The text value to search for.
+
+        Returns:
+            A dictionary of the item's data if found and active, else None.
+
+        Raises:
+            CharactersRAGDBError: For database errors.
+        """
         query = f"SELECT * FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 0"
         try:
             cursor = self.execute_query(query, (value,))
@@ -2000,6 +2791,21 @@ UPDATE db_schema_version
             raise
 
     def _list_generic_items(self, table_name: str, order_by_col: str, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        Internal helper: Lists non-deleted items from a table, with specified ordering.
+
+        Args:
+            table_name: The database table name.
+            order_by_col: The column (and direction) to order by (e.g., "name ASC", "keyword COLLATE NOCASE DESC").
+            limit: Maximum number of items.
+            offset: Number of items to skip.
+
+        Returns:
+            A list of item dictionaries.
+
+        Raises:
+            CharactersRAGDBError: For database errors.
+        """
         query = f"SELECT * FROM {table_name} WHERE deleted = 0 ORDER BY {order_by_col} LIMIT ? OFFSET ?"
         try:
             cursor = self.execute_query(query, (limit, offset))
@@ -2012,6 +2818,29 @@ UPDATE db_schema_version
                              update_data: Dict[str, Any], expected_version: int,
                              allowed_fields: List[str], pk_col_name: str = "id",
                              unique_col_name_in_data: Optional[str] = None) -> bool:
+        """
+        Internal helper: Updates an item in a table using optimistic locking.
+
+        Args:
+            table_name: The table to update.
+            item_id: The ID (PK) of the item to update (int or str for UUIDs).
+            update_data: Dictionary containing data to update. Must not be empty.
+            expected_version: Client's expected version for optimistic locking.
+            allowed_fields: List of field names that are permitted to be updated from `update_data`.
+            pk_col_name: Name of the primary key column. Defaults to "id".
+            unique_col_name_in_data: If an updatable field has a unique constraint
+                                     (e.g., 'name' for collections), specify its data key name
+                                     here for targeted ConflictError on unique violation.
+
+        Returns:
+            True if the update was successful.
+
+        Raises:
+            InputError: If `update_data` is empty or contains no allowed fields to update.
+            ConflictError: For version mismatch, record not found/deleted, or unique constraint violation
+                           if `unique_col_name_in_data` is specified and violated.
+            CharactersRAGDBError: For other database errors.
+        """
         if not update_data:
             raise InputError(f"No data provided for update of {table_name} ID {item_id}.")
 
@@ -2032,22 +2861,29 @@ UPDATE db_schema_version
                     f"Attempted to update immutable or unknown field '{key}' in {table_name} ID {item_id}, skipping.")
 
         if not fields_to_update_sql:
-            logger.info(f"No updatable fields provided for {table_name} ID {item_id}.")
-            return True  # Or False, depending on desired behavior for no-op update
+            # This means update_data either was empty (caught above) or contained only non-allowed fields.
+            # Depending on desired behavior, this could be an error or a "no fields to update" success.
+            # Current behavior implies if allowed_fields are updated, it proceeds. If not, it may not update anything.
+            # For safety, ensure metadata is only updated if there are actual field changes or if it's an explicit "touch".
+            # The calling methods (e.g., update_note) handle this: "if not fields_to_update_sql: return True"
+            # This helper should proceed if there's anything to set.
+            logger.info(f"No recognized updatable fields provided in update_data for {table_name} ID {item_id}. Will only update metadata if version matches.")
+            # If we must update metadata anyway if version matches:
+            # Fall through to add metadata updates. The query will work fine.
+
 
         next_version_val = expected_version + 1
-        fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+        current_fields_to_update_sql = list(fields_to_update_sql) # clone
+        current_params_for_set_clause = list(params_for_set_clause) # clone
 
-        # Values for the SET clause
-        final_set_values = params_for_set_clause[:]
-        final_set_values.extend([now, next_version_val, self.client_id])
+        current_fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+        current_params_for_set_clause.extend([now, next_version_val, self.client_id])
 
         # Values for the WHERE clause
         where_clause_values = [item_id, expected_version]
+        final_query_params = tuple(current_params_for_set_clause + where_clause_values)
 
-        final_query_params = tuple(final_set_values + where_clause_values)
-
-        query = f"UPDATE {table_name} SET {', '.join(fields_to_update_sql)} WHERE {pk_col_name} = ? AND version = ? AND deleted = 0"
+        query = f"UPDATE {table_name} SET {', '.join(current_fields_to_update_sql)} WHERE {pk_col_name} = ? AND version = ? AND deleted = 0"
 
         try:
             with self.transaction() as conn:
@@ -2056,7 +2892,7 @@ UPDATE db_schema_version
 
                 if current_db_version != expected_version:
                     raise ConflictError(
-                        f"{table_name} ID {item_id} was modified by another client (version mismatch: db has {current_db_version}, client expected {expected_version}).",
+                        f"{table_name} ID {item_id} was modified: version mismatch (db has {current_db_version}, client expected {expected_version}).",
                         entity=table_name, entity_id=item_id
                     )
 
@@ -2069,42 +2905,36 @@ UPDATE db_schema_version
                     check_again_cursor = conn.execute(
                         f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?", (item_id,))
                     final_state = check_again_cursor.fetchone()
-
+                    msg = f"Update for {table_name} ID {item_id} (expected version {expected_version}) affected 0 rows."
                     if not final_state:
-                        raise ConflictError(
-                            f"{table_name} ID {item_id} disappeared before update completion (was present at version {expected_version}).",
-                            entity=table_name, entity_id=item_id)
-                    if final_state['deleted']:
-                        raise ConflictError(
-                            f"{table_name} ID {item_id} was soft-deleted concurrently while attempting update from version {expected_version}.",
-                            entity=table_name, entity_id=item_id)
-                    if final_state['version'] != expected_version:  # Version changed from expected
-                        raise ConflictError(
-                            f"{table_name} ID {item_id} version changed to {final_state['version']} concurrently, expected {expected_version} for update.",
-                            entity=table_name, entity_id=item_id)
-
-                    raise ConflictError(
-                        f"Update for {table_name} ID {item_id} (expected version {expected_version}) affected 0 rows for an unknown reason after passing initial checks.",
-                        entity=table_name, entity_id=item_id)
+                        msg = f"{table_name} ID {item_id} disappeared before update completion (was version {expected_version})."
+                    elif final_state['deleted']:
+                        msg = f"{table_name} ID {item_id} was soft-deleted concurrently (expected version {expected_version} for update)."
+                    elif final_state['version'] != expected_version:
+                        msg = f"{table_name} ID {item_id} version changed to {final_state['version']} concurrently (expected {expected_version} for update)."
+                    raise ConflictError(msg, entity=table_name, entity_id=item_id)
 
                 logger.info(
                     f"Updated {table_name} ID {item_id} from version {expected_version} to version {next_version_val}.")
                 return True
         except sqlite3.IntegrityError as e:
-            if unique_col_name_in_data and unique_col_name_in_data in update_data and \
-                    f"UNIQUE constraint failed: {table_name}.{unique_col_name_in_data}" in str(
-                e).lower():  # Use lower() for broader match
-                val = update_data[unique_col_name_in_data]
-                logger.warning(
-                    f"Update failed for {table_name} ID {item_id}: {unique_col_name_in_data} '{val}' already exists.")
-                raise ConflictError(
-                    f"Cannot update {table_name} ID {item_id}: {unique_col_name_in_data} '{val}' already exists.",
-                    entity=table_name, entity_id=val) from e  # Pass val as entity_id for unique conflict
+            if unique_col_name_in_data and unique_col_name_in_data in update_data:
+                # More specific check for the unique column mentioned
+                db_unique_col_name = unique_col_name_in_data # Assuming it matches DB col name for this check
+                if f"UNIQUE constraint failed: {table_name}.{db_unique_col_name}" in str(e).lower():
+                    val = update_data[unique_col_name_in_data]
+                    logger.warning(
+                        f"Update failed for {table_name} ID {item_id}: {db_unique_col_name} '{val}' already exists.")
+                    raise ConflictError(
+                        f"Cannot update {table_name} ID {item_id}: {db_unique_col_name} '{val}' already exists.",
+                        entity=table_name, entity_id=val) from e
             logger.error(
                 f"SQLite integrity error during update of {table_name} ID {item_id} (expected version {expected_version}): {e}",
                 exc_info=True)
             raise CharactersRAGDBError(f"Database integrity error updating {table_name} ({item_id}): {e}") from e
         except ConflictError:
+            raise
+        except InputError: # Should be caught by callers if they check 'update_data' emptiness first
             raise
         except CharactersRAGDBError as e:
             logger.error(
@@ -2115,6 +2945,25 @@ UPDATE db_schema_version
 
     def _soft_delete_generic_item(self, table_name: str, item_id: Union[int, str],
                                   expected_version: int, pk_col_name: str = "id") -> bool:
+        """
+        Internal helper: Soft-deletes an item in a table using optimistic locking.
+
+        Sets `deleted = 1`, updates `last_modified`, `version`, `client_id`.
+
+        Args:
+            table_name: The table to update.
+            item_id: The ID (PK) of the item to soft-delete (int or str).
+            expected_version: Client's expected version for optimistic locking.
+            pk_col_name: Name of the primary key column. Defaults to "id".
+
+        Returns:
+            True if successful or if the item was already soft-deleted.
+
+        Raises:
+            ConflictError: For version mismatch if active, or if record not found (and not already deleted),
+                           or if a concurrent modification prevents the update.
+            CharactersRAGDBError: For other database errors.
+        """
         now = self._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
 
@@ -2137,8 +2986,7 @@ UPDATE db_schema_version
                         logger.info(
                             f"{table_name} ID {item_id} already soft-deleted. Operation considered successful (idempotent).")
                         return True
-                    # If it was not found, or some other conflict from _get_current_db_version, re-raise.
-                    raise e
+                    raise e # Re-raise if not found or other conflict
 
                 if current_db_version != expected_version:
                     raise ConflictError(
@@ -2154,7 +3002,7 @@ UPDATE db_schema_version
                     check_again_cursor = conn.execute(
                         f"SELECT deleted, version FROM {table_name} WHERE {pk_col_name} = ?", (item_id,))
                     changed_record = check_again_cursor.fetchone()
-
+                    msg = f"Soft delete for {table_name} ID {item_id} (expected version {expected_version}) affected 0 rows."
                     if not changed_record:
                         raise ConflictError(
                             f"{table_name} ID {item_id} disappeared before soft-delete completion (expected version {expected_version}).",
@@ -2194,11 +3042,40 @@ UPDATE db_schema_version
 
     def _search_generic_items_fts(self, fts_table_name: str, main_table_name: str, fts_match_cols_or_table: str,
                                   search_term: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """ Helper for FTS search on simple tables like keywords, notes, collections """
+        """
+        Internal helper: Performs FTS search on tables like keywords, notes, collections.
+
+        Assumes the main table's PK is `id` (for keywords, collections) or `rowid` maps
+        correctly (for notes via `content_rowid='rowid'`).
+        The join condition is `fts.rowid = main.id` or `fts.rowid = main.rowid` depending on FTS setup.
+        Schema shows `content_rowid='id'` for keywords/collections and `content_rowid='rowid'` for notes.
+        This helper uses `fts.rowid = main.id` which is fine for keywords/collections.
+        For notes, `search_notes` uses `fts.rowid = main.rowid` which is correct.
+        This helper is mainly for tables where PK `id` is the FTS `rowid`.
+
+        Args:
+            fts_table_name: Name of the FTS virtual table.
+            main_table_name: Name of the main content table.
+            fts_match_cols_or_table: The column(s) in FTS table to match against (e.g., "keyword"),
+                                     or the FTS table name if using table-name matching
+                                     (e.g., "notes_fts MATCH ?").
+            search_term: The FTS search query string.
+            limit: Max number of results.
+
+        Returns:
+            List of matching item dictionaries from the main table. Can be empty.
+
+        Raises:
+            CharactersRAGDBError: For database search errors.
+        """
+        # The join condition ON fts.rowid = main.id is generally for tables where 'id' is an alias for rowid
+        # or FTS is configured with content_rowid='id'.
+        # For tables like 'notes' where 'id' is TEXT UUID and FTS uses 'rowid', the join is different.
+        # This helper as written is best for keywords and keyword_collections.
         query = f"""
             SELECT main.*
             FROM {fts_table_name} fts
-            JOIN {main_table_name} main ON fts.rowid = main.id -- Assumes main.id is PK and matches fts.rowid (content_rowid)
+            JOIN {main_table_name} main ON fts.rowid = main.id
             WHERE fts.{fts_match_cols_or_table} MATCH ? AND main.deleted = 0
             ORDER BY rank
             LIMIT ?
@@ -2212,39 +3089,85 @@ UPDATE db_schema_version
 
     # Keywords
     def add_keyword(self, keyword_text: str) -> Optional[int]:
+        """
+        Adds a new keyword or undeletes an existing soft-deleted one.
+
+        Keyword text is stripped of leading/trailing whitespace.
+        Uniqueness is case-insensitive due to `COLLATE NOCASE` on the `keyword` column (schema).
+        FTS and sync_log entries are handled by SQL triggers.
+
+        Args:
+            keyword_text: The text of the keyword. Cannot be empty or whitespace only.
+
+        Returns:
+            The integer ID of the keyword.
+
+        Raises:
+            InputError: If `keyword_text` is empty or effectively empty after stripping.
+            ConflictError: If an active keyword with the same text already exists, or if undelete fails.
+            CharactersRAGDBError: For other database errors.
+        """
         if not keyword_text or not keyword_text.strip():
             raise InputError("Keyword text cannot be empty.")
         return self._add_generic_item("keywords", "keyword", {}, keyword_text.strip(), {})  # No other_fields_map
 
     def get_keyword_by_id(self, keyword_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves a keyword by its integer ID. Returns active (non-deleted) keywords only.
+
+        Args:
+            keyword_id: The ID of the keyword.
+
+        Returns:
+            Keyword data as a dictionary, or None if not found/deleted.
+        """
         return self._get_generic_item_by_id("keywords", keyword_id)
 
     def get_keyword_by_text(self, keyword_text: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves a keyword by its text (case-insensitive due to schema).
+        Returns active (non-deleted) keywords only.
+
+        Args:
+            keyword_text: The text of the keyword (stripped before query).
+
+        Returns:
+            Keyword data as a dictionary, or None if not found/deleted.
+        """
         return self._get_generic_item_by_unique_text("keywords", "keyword", keyword_text.strip())
 
     def list_keywords(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
-        return self._list_generic_items("keywords", "keyword COLLATE NOCASE", limit, offset) # Order with NOCASE for consistency
+        """
+        Lists active keywords, ordered by text (case-insensitively).
 
-    # Keyword text is unique and COLLATE NOCASE, so update is usually for undelete or metadata if any.
-    # The _add_generic_item handles undelete. If keyword text itself could change (rare), a specific update method would be needed.
+        Args:
+            limit: Max number of keywords.
+            offset: Number to skip.
+
+        Returns:
+            A list of keyword dictionaries.
+        """
+        return self._list_generic_items("keywords", "keyword COLLATE NOCASE", limit, offset)
+
     def soft_delete_keyword(self, keyword_id: int, expected_version: int) -> bool:
         """
-        Soft-deletes a keyword with optimistic locking.
+        Soft-deletes a keyword using optimistic locking.
+
+        Sets `deleted = 1`, updates metadata. Succeeds if `expected_version` matches
+        and record is active. Idempotent if already deleted.
+        FTS and sync_log handled by triggers.
 
         Args:
             keyword_id: The ID of the keyword to soft-delete.
             expected_version: The version number the client expects the record to have.
 
         Returns:
-            True if the soft-delete was successful or if the keyword was already soft-deleted.
+            True if successful or already deleted.
 
         Raises:
-            ConflictError: If the record is not found, or if (it's active and)
-                           the expected_version does not match the current database version.
-            CharactersRAGDBError: For other database-related errors.
+            ConflictError: If not found (not deleted), or active with version mismatch.
+            CharactersRAGDBError: For other database errors.
         """
-        # pk_col_name for 'keywords' is 'id' (default in _soft_delete_generic_item)
-        # item_id is int.
         return self._soft_delete_generic_item(
             table_name="keywords",
             item_id=keyword_id,
@@ -2253,22 +3176,81 @@ UPDATE db_schema_version
         )
 
     def search_keywords(self, search_term: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Searches keywords by text using FTS.
+
+        Matches against the 'keyword' field in `keywords_fts`.
+        Returns active keywords, ordered by relevance.
+
+        Args:
+            search_term: FTS query string for keyword text.
+            limit: Max number of results.
+
+        Returns:
+            A list of matching keyword dictionaries.
+        """
         return self._search_generic_items_fts("keywords_fts", "keywords", "keyword", search_term, limit)
 
     # Keyword Collections
     def add_keyword_collection(self, name: str, parent_id: Optional[int] = None) -> Optional[int]:
+        """
+        Adds a new keyword collection or undeletes an existing one.
+
+        Collection name is stripped. Uniqueness is case-insensitive (`COLLATE NOCASE` in schema).
+        FTS and sync_log handled by triggers.
+
+        Args:
+            name: The name of the collection. Cannot be empty or whitespace only.
+            parent_id: Optional integer ID of a parent collection for hierarchy.
+
+        Returns:
+            The integer ID of the collection.
+
+        Raises:
+            InputError: If `name` is empty.
+            ConflictError: If an active collection with the same name exists, or undelete fails.
+            CharactersRAGDBError: For other DB errors.
+        """
         if not name or not name.strip():
             raise InputError("Collection name cannot be empty.")
         return self._add_generic_item("keyword_collections", "name", {"parent_id": parent_id}, name.strip(),
-                                      {"parent_id": "parent_id"})
+                                      {"parent_id": "parent_id"}) # Maps DB 'parent_id' to item_data['parent_id']
 
     def get_keyword_collection_by_id(self, collection_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves a keyword collection by ID. Active collections only.
+
+        Args:
+            collection_id: ID of the collection.
+
+        Returns:
+            Collection data as dictionary, or None.
+        """
         return self._get_generic_item_by_id("keyword_collections", collection_id)
 
     def get_keyword_collection_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves a keyword collection by name (case-insensitive). Active collections only.
+
+        Args:
+            name: Name of the collection (stripped).
+
+        Returns:
+            Collection data as dictionary, or None.
+        """
         return self._get_generic_item_by_unique_text("keyword_collections", "name", name.strip())
 
     def list_keyword_collections(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        Lists active keyword collections, ordered by name (case-insensitively).
+
+        Args:
+            limit: Max number of collections.
+            offset: Number to skip.
+
+        Returns:
+            A list of collection dictionaries.
+        """
         return self._list_generic_items("keyword_collections", "name COLLATE NOCASE", limit, offset)
 
     def update_keyword_collection(self, collection_id: int, update_data: Dict[str, Any], expected_version: int) -> bool:

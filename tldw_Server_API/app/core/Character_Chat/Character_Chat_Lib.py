@@ -26,8 +26,23 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 # Placeholder functions:
 
 def replace_placeholders(text: Optional[str], char_name: Optional[str], user_name: Optional[str]) -> str:
-    """
-    Replace placeholders in the given text with appropriate values.
+    """Replaces predefined placeholders in a text string.
+
+    The function substitutes placeholders like '{{char}}', '{{user}}',
+    '{{random_user}}', '<USER>', and '<CHAR>' with the provided character
+    and user names. If names are not provided, default values ("Character", "User")
+    are used. Returns an empty string if the input text is None or empty.
+
+    Args:
+        text (Optional[str]): The input string, possibly containing placeholders.
+        char_name (Optional[str]): The name of the character to substitute for
+            '{{char}}' and '<CHAR>'. Defaults to "Character" if None.
+        user_name (Optional[str]): The name of the user to substitute for
+            '{{user}}', '{{random_user}}', and '<USER>'. Defaults to "User" if None.
+
+    Returns:
+        str: The text with placeholders replaced. If the input `text` is None or
+        an empty string, an empty string is returned.
     """
     if not text:  # Guard against None or empty string
         return ""  # Return empty string if input is None or empty
@@ -52,9 +67,20 @@ def replace_placeholders(text: Optional[str], char_name: Optional[str], user_nam
 
 def replace_user_placeholder(history: List[Tuple[Optional[str], Optional[str]]], user_name: Optional[str]) -> List[
     Tuple[Optional[str], Optional[str]]]:
-    """
-    Replaces all instances of '{{user}}' in the chat history with the actual user name.
-    This function processes the List[Tuple(user_msg, bot_msg)] format.
+    """Replaces '{{user}}' placeholders in chat history with the actual user name.
+
+    This function processes chat history provided in a list of tuples,
+    where each tuple is (user_message, bot_message).
+
+    Args:
+        history (List[Tuple[Optional[str], Optional[str]]]): The chat history,
+            a list of (user_message, bot_message) tuples. Messages can be None.
+        user_name (Optional[str]): The actual user name to replace '{{user}}'.
+            Defaults to "User" if None.
+
+    Returns:
+        List[Tuple[Optional[str], Optional[str]]]: The updated chat history with
+        '{{user}}' placeholders replaced in both user and bot messages.
     """
     user_name_actual = user_name if user_name else "User"  # Default name if none provided
 
@@ -80,8 +106,20 @@ def replace_user_placeholder(history: List[Tuple[Optional[str], Optional[str]]],
 # Functions for character interaction (DB focused):
 
 def get_character_list_for_ui(db: CharactersRAGDB, limit: int = 1000) -> List[Dict[str, Any]]:
-    """
-    Fetches a list of characters (ID and name) suitable for UI dropdowns.
+    """Fetches a simplified list of characters suitable for UI display.
+
+    Retrieves character IDs and names from the database, sorts them by name
+    (case-insensitive), and returns them in a format commonly used for UI
+    dropdowns or lists.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        limit (int): The maximum number of characters to fetch. Defaults to 1000.
+
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries, where each dictionary
+        contains 'id' (character ID) and 'name' (character name).
+        Returns an empty list if an error occurs or no characters are found.
     """
     try:
         # Assuming CharactersRAGDB.list_character_cards returns more fields,
@@ -99,10 +137,22 @@ def get_character_list_for_ui(db: CharactersRAGDB, limit: int = 1000) -> List[Di
 
 
 def extract_character_id_from_ui_choice(choice: str) -> int:
-    """
-    Extract the character ID from a UI dropdown-like selection string.
-    Example: "My Character (ID: 123)" -> 123
-    Also handles if `choice` is just an integer string.
+    """Extracts a character ID from a UI selection string.
+
+    Parses strings typically used in UI dropdowns, such as
+    "My Character (ID: 123)", to extract the numerical ID.
+    It also handles cases where the `choice` string is just the numeric ID.
+
+    Args:
+        choice (str): The UI selection string. Expected formats are
+            "Character Name (ID: <number>)" or "<number>".
+
+    Returns:
+        int: The extracted character ID.
+
+    Raises:
+        ValueError: If `choice` is empty, in an invalid format, or the ID
+            cannot be parsed as an integer.
     """
     logger.debug(f"Choice received for ID extraction: {choice}")
     if not choice:
@@ -131,10 +181,29 @@ def load_character_and_image(
         character_id: int,
         user_name: Optional[str]
 ) -> Tuple[Optional[Dict[str, Any]], List[Tuple[Optional[str], Optional[str]]], Optional[Image.Image]]:
-    """
-    Load a character, its first message as initial chat history, and its image from the database.
-    Performs placeholder replacement on relevant character fields and the first message.
-    The output chat_history is List[Tuple[user_message, bot_message]]
+    """Loads character data, initial message, and image from the database.
+
+    Retrieves a character's details by ID, processes its text fields (like
+    description, first message) by replacing placeholders, and loads its
+    associated image. The character's first message is formatted as the
+    initial entry in a chat history list.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        character_id (int): The ID of the character to load.
+        user_name (Optional[str]): The current user's name, used for
+            placeholder replacement in character data.
+
+    Returns:
+        Tuple[Optional[Dict[str, Any]], List[Tuple[Optional[str], Optional[str]]], Optional[Image.Image]]:
+        A tuple containing:
+            - Optional[Dict[str, Any]]: The character's data as a dictionary,
+              with placeholders replaced. None if character not found or error.
+            - List[Tuple[Optional[str], Optional[str]]]: The initial chat history,
+              containing the character's first message as `(None, first_message)`.
+              An empty list if no character or first message, or on error.
+            - Optional[Image.Image]: The character's image as a PIL Image object.
+              None if no image is associated or an error occurs.
     """
     logger.debug(f"Loading character and image for ID: {character_id}, User: {user_name}")
     try:
@@ -197,10 +266,34 @@ def process_db_messages_to_ui_history(
         actual_user_sender_id_in_db: str = "User",
         actual_char_sender_id_in_db: Optional[str] = None
 ) -> List[Tuple[Optional[str], Optional[str]]]:
-    """
-    Processes a list of message dictionaries from the DB into the UI's paired chat history format.
-    Handles placeholder replacement. Assumes messages are ordered by timestamp.
-    Output format: List of (user_message, bot_message_or_none_if_user_is_last)
+    """Converts database messages to UI-friendly paired chat history format.
+
+    Takes a list of message dictionaries (as stored in the database) and
+    transforms them into a list of (user_message, bot_message) tuples.
+    It handles placeholder replacement in message content and correctly pairs
+    consecutive messages from the same sender or different senders.
+
+    Args:
+        db_messages (List[Dict[str, Any]]): A list of message dictionaries
+            retrieved from the database, ordered by timestamp. Each dictionary
+            should contain at least 'sender' and 'content'.
+        char_name_from_card (str): The name of the character, used for
+            placeholder replacement and identifying character messages.
+        user_name_for_placeholders (Optional[str]): The user's name, for
+            placeholder replacement.
+        actual_user_sender_id_in_db (str): The identifier string used for
+            the user's messages in the 'sender' field of `db_messages`.
+            Defaults to "User".
+        actual_char_sender_id_in_db (Optional[str]): The identifier string used
+            for the character's messages in the 'sender' field. If None,
+            `char_name_from_card` is used. Defaults to None.
+
+    Returns:
+        List[Tuple[Optional[str], Optional[str]]]: A list of tuples, where each
+        tuple represents a turn or a sequence of messages. The format is
+        (user_message_content, bot_message_content). If a turn only has one
+        type of message, the other will be None (e.g., (user_msg, None) or
+        (None, bot_msg)).
     """
     processed_history: List[Tuple[Optional[str], Optional[str]]] = []
     # If char_sender_id is not provided, use the character's name from the card
@@ -247,9 +340,31 @@ def load_chat_and_character(
         user_name: Optional[str],
         messages_limit: int = 2000  # Added parameter with default
 ) -> Tuple[Optional[Dict[str, Any]], List[Tuple[Optional[str], Optional[str]]], Optional[Image.Image]]:
-    """
-    Load an existing chat (conversation) and its associated character data and image.
-    Chat history is returned in the List[Tuple[user_msg, bot_msg]] format.
+    """Loads an existing chat conversation and associated character data.
+
+    Retrieves a conversation by its ID, fetches the associated character's
+    details (including image and performing placeholder replacements), and
+    loads the conversation's message history. The history is processed into
+    a UI-friendly paired format.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        conversation_id_str (str): The ID of the conversation to load.
+        user_name (Optional[str]): The current user's name, for placeholder
+            replacement in character data and message content.
+        messages_limit (int): The maximum number of messages to retrieve for
+            the conversation. Defaults to 2000.
+
+    Returns:
+        Tuple[Optional[Dict[str, Any]], List[Tuple[Optional[str], Optional[str]]], Optional[Image.Image]]:
+        A tuple containing:
+            - Optional[Dict[str, Any]]: The character's data, with placeholders
+              replaced. None if character or conversation not found or error.
+            - List[Tuple[Optional[str], Optional[str]]]: The chat history in
+              UI format `(user_msg, bot_msg)`. Empty list on error or if no messages.
+            - Optional[Image.Image]: The character's image. None if no image
+              or error.
+        Returns (None, [], None) if the conversation itself is not found.
     """
     logger.debug(f"Loading chat/conversation ID: {conversation_id_str}, User: {user_name}, Msg Limit: {messages_limit}")
     try:
@@ -314,7 +429,29 @@ def load_character_wrapper(
         character_id_or_ui_choice: Union[int, str],
         user_name: Optional[str]
 ) -> Tuple[Optional[Dict[str, Any]], List[Tuple[Optional[str], Optional[str]]], Optional[Image.Image]]:
-    """Wrapper function to load character and image using either an ID or a UI choice string."""
+    """Wraps character loading to accept either an ID or a UI choice string.
+
+    This function serves as a convenience wrapper around
+    `load_character_and_image`. It first parses `character_id_or_ui_choice`
+    to an integer ID if it's a string, then calls the main loading function.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        character_id_or_ui_choice (Union[int, str]): Either an integer
+            character ID or a UI selection string (e.g., "Name (ID: 123)").
+        user_name (Optional[str]): The current user's name, for placeholder
+            replacement.
+
+    Returns:
+        Tuple[Optional[Dict[str, Any]], List[Tuple[Optional[str], Optional[str]]], Optional[Image.Image]]:
+        The result from `load_character_and_image`:
+            (character_data, initial_chat_history, character_image).
+
+    Raises:
+        ValueError: If `character_id_or_ui_choice` is an invalid string format
+            or not an int/string.
+        Exception: Propagates other exceptions from underlying functions.
+    """
     try:
         char_id_int: int
         if isinstance(character_id_or_ui_choice, str):
@@ -338,8 +475,19 @@ def load_character_wrapper(
 # Character Book parsing (copied from original, assumed correct for V2 spec)
 #
 def parse_character_book(book_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Parse the character book data from a V2 character card.
+    """Parses character book data from a V2 character card structure.
+
+    This function processes the 'character_book' section of a character card,
+    extracting its properties and entries according to the V2 specification.
+
+    Args:
+        book_data (Dict[str, Any]): A dictionary representing the
+            'character_book' field from a character card's data node.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing the parsed character book data,
+        including 'name', 'description', 'entries', and other book properties.
+        Entries are parsed into a structured list.
     """
     parsed_book = {
         'name': book_data.get('name', ''),
@@ -392,9 +540,20 @@ def parse_character_book(book_data: Dict[str, Any]) -> Dict[str, Any]:
 
 # FIXME
 def extract_json_from_image_file(image_file_input: Union[str, bytes, io.BytesIO]) -> Optional[str]:
-    """
-    Extracts 'chara' metadata (base64 encoded JSON) from a PNG image.
-    Input can be file path, raw bytes, or a BytesIO stream.
+    """Extracts 'chara' metadata (Base64 encoded JSON) from an image file.
+
+    Typically used for PNG character cards (e.g., TavernAI format) that embed
+    character data in a 'chara' metadata chunk.
+
+    Args:
+        image_file_input (Union[str, bytes, io.BytesIO]): The image data,
+            which can be a file path (str), raw image bytes, or a BytesIO stream.
+
+    Returns:
+        Optional[str]: The decoded JSON string from the 'chara' metadata if
+        found, valid, and successfully decoded. Returns None if the 'chara'
+        metadata is not found, the image cannot be processed, or if there's
+        an error during decoding or JSON validation.
     """
     img_obj: Optional[Image.Image] = None
     file_name_for_log = "image_stream"
@@ -467,11 +626,24 @@ def extract_json_from_image_file(image_file_input: Union[str, bytes, io.BytesIO]
 
 
 def parse_v2_card(card_data_json: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
-    Parse a V2 character card (spec_version '2.0').
-    Outputs a dictionary with keys matching the DB schema (e.g., 'first_message').
-    Assumes basic structural validation (e.g., presence of 'data' node if 'spec' implies V2)
-    has already been done by the caller or a higher-level validation function.
+    """Parses a V2 character card (spec_version '2.0') JSON data.
+
+    This function takes a dictionary representing a V2 character card,
+    extracts relevant fields from its 'data' node (or root if 'data' is
+    absent but structure is V2-like), and maps them to a new dictionary
+    with keys corresponding to the application's database schema.
+    It assumes basic structural validity (e.g., presence of key fields)
+    may have been checked by a prior validation step.
+
+    Args:
+        card_data_json (Dict[str, Any]): The dictionary parsed from a V2
+            character card JSON. This should be the entire card object.
+
+    Returns:
+        Optional[Dict[str, Any]]: A dictionary containing the parsed and
+        mapped character data (e.g., 'first_mes' becomes 'first_message').
+        Returns None if essential V2 fields are missing or if an unexpected
+        error occurs during parsing.
     """
     try:
         # data_node can be 'data' or root for some V2 variants (parsing flexibility)
@@ -530,10 +702,26 @@ def parse_v2_card(card_data_json: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def parse_v1_card(card_data_json: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
-    Convert a V1 card (flat JSON) into a V2-like dictionary structure,
-    with keys matching the DB schema.
-    Raises ValueError if required V1 fields are missing.
+    """Parses a V1 character card (flat JSON) into a V2-like structure.
+
+    This function converts a V1 character card, which has a flat JSON structure,
+    into a dictionary format that aligns with the V2 card structure and the
+    application's database schema. Fields are renamed (e.g., 'first_mes' to
+    'first_message'), and any non-standard V1 fields are collected into an
+    'extensions' dictionary.
+
+    Args:
+        card_data_json (Dict[str, Any]): The dictionary parsed from a V1
+            character card JSON.
+
+    Returns:
+        Optional[Dict[str, Any]]: A dictionary containing the parsed and
+        mapped character data. Returns None if an unexpected error occurs.
+
+    Raises:
+        ValueError: If any of the required V1 fields ('name', 'description',
+            'personality', 'scenario', 'first_mes', 'mes_example') are missing
+            from `card_data_json`.
     """
     try:
         # Required fields in the source V1 card (using original spec names)
@@ -592,13 +780,27 @@ def parse_v1_card(card_data_json: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 #
 #################################################################################
-# Character card parsing & Validation functions (Copied from original):
+# Character card parsing & Validation functions
 # These validate the *structure* of the card data, typically after parsing from JSON.
 
 def validate_character_book(book_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
-    """
-    Validate the 'character_book' field in the character card.
-    (Copied from original Character_Chat_Lib)
+    """Validates the structure and content of a 'character_book' dictionary.
+
+    Checks for required fields, correct data types, and valid values within
+    the character book data, including its entries. This is typically part
+    of validating a V2 character card.
+
+    Args:
+        book_data (Dict[str, Any]): The character book dictionary to validate.
+            This usually comes from the 'character_book' field of a character
+            card's 'data' node.
+
+    Returns:
+        Tuple[bool, List[str]]: A tuple where:
+            - The first element (bool) is `True` if the book data is valid,
+              `False` otherwise.
+            - The second element (List[str]) is a list of error messages
+              describing validation failures. Empty if valid.
     """
     validation_messages = []
 
@@ -642,9 +844,27 @@ def validate_character_book(book_data: Dict[str, Any]) -> Tuple[bool, List[str]]
 
 def validate_character_book_entry(entry: Dict[str, Any], idx: int, entry_ids: Set[Union[int, float]]) -> Tuple[
     bool, List[str]]:
-    """
-    Validate an entry in the 'character_book.entries' list.
-    (Copied from original Character_Chat_Lib)
+    """Validates a single entry within a 'character_book.entries' list.
+
+    Checks an individual character book entry for required fields (like 'keys',
+    'content'), correct data types, valid 'position' values, constraints
+    related to 'selective' entries, and uniqueness of 'id' if present.
+
+    Args:
+        entry (Dict[str, Any]): The character book entry dictionary to validate.
+        idx (int): The index of the entry within its parent list, used for
+            error reporting.
+        entry_ids (Set[Union[int, float]]): A set of 'id' values encountered so
+            far within the same character book, used to check for uniqueness of
+            the current entry's 'id'. This set will be updated by this function
+            if the current entry has a unique, valid ID.
+
+    Returns:
+        Tuple[bool, List[str]]: A tuple where:
+            - The first element (bool) is `True` if the entry is valid,
+              `False` otherwise.
+            - The second element (List[str]) is a list of error messages
+              describing validation failures. Empty if valid.
     """
     validation_messages = []
     required_fields_entry = {
@@ -736,9 +956,22 @@ def validate_character_book_entry(entry: Dict[str, Any], idx: int, entry_ids: Se
 
 
 def validate_v2_card(card_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
-    """
-    Validate a character card according to the V2 specification.
-    (Copied from original Character_Chat_Lib, assumes card_data is the full card object)
+    """Validates a character card dictionary against the V2 specification.
+
+    Checks top-level fields like 'spec' and 'spec_version', the presence and
+    type of the 'data' node, and required/optional fields within 'data'.
+    It also invokes `validate_character_book` if a 'character_book' is present.
+
+    Args:
+        card_data (Dict[str, Any]): The full character card dictionary (parsed
+            from JSON) to validate.
+
+    Returns:
+        Tuple[bool, List[str]]: A tuple where:
+            - The first element (bool) is `True` if the card is valid according
+              to V2 spec, `False` otherwise.
+            - The second element (List[str]) is a list of error messages
+              describing validation failures. Empty if valid.
     """
     validation_messages = []
 
@@ -835,9 +1068,26 @@ def validate_v2_card(card_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
 
 def import_character_card_from_json_string(json_content_str: str) -> Optional[Dict[str, Any]]:
-    """
-    Import and parse a character card from a JSON string. Validates V2 structure first if applicable.
-    Detects V1 vs V2. Returns a dictionary mapped to DB schema names, or None on failure.
+    """Imports and parses a character card from a JSON string.
+
+    This function attempts to parse a character card from the provided JSON
+    string. It automatically detects whether the card is V1 or V2 format.
+    For V2 cards (identified by 'spec' or 'spec_version' fields, or
+    heuristically by a 'data' node), it performs V2 structural validation.
+    If V2 processing fails or is not applicable, it attempts V1 parsing.
+    The parsed data is then mapped to a dictionary with keys corresponding
+    to the application's database schema.
+
+    Args:
+        json_content_str (str): A string containing the character card data
+            in JSON format.
+
+    Returns:
+        Optional[Dict[str, Any]]: A dictionary with character data mapped to
+        DB schema field names (e.g., 'first_message', 'message_example') if
+        parsing and validation are successful. Returns None if the JSON is
+        invalid, the card structure is unrecognized, critical fields are
+        missing (like 'name' after parsing), or any other parsing error occurs.
     """
     if not json_content_str or not json_content_str.strip():
         logger.error("JSON content string is empty or whitespace.")
@@ -909,10 +1159,31 @@ def import_character_card_from_json_string(json_content_str: str) -> Optional[Di
 
 
 def load_character_card_from_string_content(content_str: str) -> Optional[Dict[str, Any]]:
-    """
-    Load a character card from a string (JSON, or Markdown with YAML/JSON block).
-    Returns a parsed card dictionary (mapped to DB schema names), or None on failure.
-    This function *only* parses the string content, it does not save to DB.
+    """Loads a character card from various string formats (JSON, Markdown).
+
+    This function parses character card data from a string. It supports:
+    1.  Direct JSON content.
+    2.  Markdown with YAML frontmatter (requires PyYAML).
+    3.  Markdown with a JSON code block (e.g., ```json ... ```).
+
+    The extracted JSON data is then processed by
+    `import_character_card_from_json_string` for V1/V2 detection,
+    validation, and mapping to DB schema names. This function *only* parses
+    the string; it does not save anything to a database.
+
+    Args:
+        content_str (str): The string content potentially containing character
+            card data in JSON, YAML frontmatter, or a JSON code block.
+
+    Returns:
+        Optional[Dict[str, Any]]: A dictionary with parsed character data mapped
+        to DB schema field names if successful. Returns None if no valid card
+        data can be extracted, if parsing fails, or if required dependencies
+        like PyYAML (for YAML frontmatter) are missing and needed.
+
+    Raises:
+        ImportError: If PyYAML is required for parsing YAML frontmatter but is
+            not installed. This exception is propagated.
     """
     if not content_str or not content_str.strip():
         logger.error("Cannot load character card from empty or whitespace string content.")
@@ -940,9 +1211,9 @@ def load_character_card_from_string_content(content_str: str) -> Optional[Dict[s
                         logger.error("YAML frontmatter did not parse into a dictionary.")
                 else:  # If frontmatter malformed, check for JSON block in the rest of the content
                     logger.debug("Markdown frontmatter not found or malformed, checking for JSON code block.")
-            except ImportError:
+            except ImportError: # PyYAML not installed
                 logger.error("PyYAML is required for loading YAML front matter. Install it via 'pip install PyYAML'.")
-                # Fall through to check for JSON block if YAML is not available or fails
+                raise # Re-raise to notify caller of missing dependency
             except yaml.YAMLError as ye:
                 logger.error(f"Error parsing YAML frontmatter: {ye}")
                 # Fall through
@@ -980,10 +1251,32 @@ def import_and_save_character_from_file(
         db: CharactersRAGDB,
         file_input: Union[str, io.BytesIO, bytes]  # File path, BytesIO stream, or raw bytes
 ) -> Optional[int]:
-    """
-    Loads character card from a JSON/MD text file, or a PNG/WEBP image file with embedded data.
-    Parses and validates the card data, and saves to the database.
-    Returns the character_id from the database if successful, otherwise None.
+    """Imports a character card from a file, saves it to DB, and returns ID.
+
+    This function handles multiple input types for character cards:
+    - Text files (e.g., .json, .md) containing character data.
+    - Image files (e.g., .png, .webp) with embedded 'chara' JSON metadata.
+    - Raw bytes or BytesIO streams representing either text or image content.
+
+    It extracts the character data, parses and validates it (V1/V2 auto-detection),
+    handles an embedded or base64 image, and then saves the character to the
+    database using `db.add_character_card`.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        file_input (Union[str, io.BytesIO, bytes]): The source of the character
+            card. Can be a file path (str), a BytesIO stream, or raw bytes.
+
+    Returns:
+        Optional[int]: The database ID of the newly imported character if
+        successful. Returns the ID of an existing character if a conflict
+        (e.g., duplicate name) occurs and the character already exists.
+        Returns None if the import or save process fails for any other reason
+        (e.g., file not found, invalid format, DB error).
+
+    Raises:
+        ImportError: If PyYAML is required for parsing (e.g., Markdown with
+            YAML frontmatter in a text file input) but is not installed.
     """
     parsed_card_dict: Optional[Dict[str, Any]] = None
     image_bytes_for_db: Optional[bytes] = None  # This will hold the avatar image for the DB
@@ -1156,27 +1449,59 @@ def import_and_save_character_from_file(
 def load_chat_history_from_file_and_save_to_db(
         db: CharactersRAGDB,
         file_path_or_obj: Union[str, io.BytesIO],
-        user_name_for_placeholders: Optional[str] = "User",  # Used if placeholders are in old log
-        default_user_sender_in_db: str = "User"  # How to label user messages in the DB
+        user_name_for_placeholders: Optional[str] = "User",
+        default_user_sender_in_db: str = "User"
 ) -> Tuple[Optional[str], Optional[int]]:
-    """
-    Loads chat history from a JSON file (TavernAI/SillyTavern format),
-    finds/verifies the character in the DB, creates a new conversation,
-    and adds all messages to this conversation in the database.
+    """Loads chat history from a JSON file and saves it to the database.
 
-    Expected JSON format:
+    This function imports chat history from a JSON file, typically in
+    TavernAI or SillyTavern format. It identifies the character mentioned
+    in the log, verifies their existence in the database, creates a new
+    conversation record, and then adds all messages from the log to this
+    new conversation. Placeholders in message content can be replaced using
+    `user_name_for_placeholders` and the character's name.
+
+    Expected JSON formats include:
+    ```json
     {
-      "char_name": "Character Name", // or "character"
-      "user_name": "User Name", // optional
-      "history": { // or "chat"
-        "internal": [ ["User message 1", "Char message 1"], ["User message 2", "Char message 2"] ],
-        "visible": [ ... ] // same structure
+      "char_name": "Character Name", // or "character", or "name"
+      "user_name": "User Name",      // optional, used for placeholders
+      "history": {                   // or "chat"
+        "internal": [
+          ["User message 1", "Char message 1"],
+          ["User message 2", "Char message 2"]
+        ],
+        "visible": [ /* similar structure, 'internal' usually preferred */ ]
       }
     }
-    Or simpler: {"history": [["user_msg1", "bot_msg1"], ...], "character": "CharName"}
+    ```
+    Or simpler formats like:
+    ```json
+    {
+      "character": "CharName",
+      "history": [["user_msg1", "bot_msg1"], ...]
+    }
+    ```
 
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        file_path_or_obj (Union[str, io.BytesIO]): The path to the JSON chat
+            log file, or a file-like object (e.g., BytesIO) containing the
+            JSON content.
+        user_name_for_placeholders (Optional[str]): The name to use for user
+            placeholders (e.g., `{{user}}`) found in the log messages.
+            Defaults to "User".
+        default_user_sender_in_db (str): The identifier to use for the 'sender'
+            field when saving user messages to the database. Defaults to "User".
 
-    Returns (new_conversation_id_str, character_id_int) or (None, None) on failure.
+    Returns:
+        Tuple[Optional[str], Optional[int]]: A tuple containing:
+            - Optional[str]: The ID of the newly created conversation in the
+              database if successful.
+            - Optional[int]: The ID of the character associated with the chat
+              if successful.
+        Returns (None, None) if any part of the process fails (e.g., file
+        error, JSON parsing error, character not found in DB, DB error).
     """
     filename_for_log = "chat_log_stream"
     try:
@@ -1303,9 +1628,6 @@ def load_chat_history_from_file_and_save_to_db(
 # Conversation and Message Management Functions
 #################################################################################
 # NOTE: This section focuses on Conversation and Message entities.
-# Functionality for managing Keywords, KeywordCollections, Notes, and their
-# links to conversations can be added here if required, by wrapping
-# the corresponding ChaChaDB methods.
 
 # --- Conversation Management ---
 
@@ -1315,13 +1637,43 @@ def start_new_chat_session(
     user_name: Optional[str], # For placeholder replacement in initial/retrieved messages
     custom_title: Optional[str] = None
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]], Optional[List[Tuple[Optional[str], Optional[str]]]], Optional[Image.Image]]:
-    """
-    Starts a new chat session with a character.
-    1. Loads the character data (raw for first message, processed for UI) and image.
-    2. Creates a new conversation record in the database.
-    3. Adds the character's original (raw) first message to this new conversation in the DB.
-    4. Returns the new conversation ID, processed character data for UI,
-       initial UI history (with processed first message), and character image.
+    """Starts a new chat session with a specified character.
+
+    This function performs the following steps:
+    1.  Loads the character's data and image. Raw character data is fetched first
+        to obtain the original 'first_message' content for DB storage. Then,
+        `load_character_and_image` is called to get placeholder-processed
+        character data for UI and the initial UI history.
+    2.  Creates a new conversation record in the database associated with the
+        character. A title is generated if `custom_title` is not provided.
+    3.  Adds the character's original (raw, if available, otherwise processed)
+        first message to this new conversation in the database.
+    4.  Returns the new conversation ID, the processed character data for UI,
+        the initial UI chat history (containing the processed first message),
+        and the character's image.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        character_id (int): The ID of the character to start a chat with.
+        user_name (Optional[str]): The current user's name, used for placeholder
+            replacement in the character's data and first message (for UI).
+        custom_title (Optional[str]): An optional custom title for the new
+            conversation. If None, a default title is generated.
+
+    Returns:
+        Tuple[Optional[str], Optional[Dict[str, Any]], Optional[List[Tuple[Optional[str], Optional[str]]]], Optional[Image.Image]]:
+        A tuple containing:
+            - Optional[str]: The ID of the newly created conversation. None on failure.
+            - Optional[Dict[str, Any]]: Processed character data for UI. None if
+              character loading fails.
+            - Optional[List[Tuple[Optional[str], Optional[str]]]]: Initial UI chat
+              history `[(None, processed_first_message)]`. Can be empty or None
+              if character/first message issues.
+            - Optional[Image.Image]: The character's image. None if no image or
+              loading fails.
+        If character loading fails initially, (None, None, None, None) is returned.
+        If conversation creation or message adding fails, some elements might
+        still be populated from the successful character load.
     """
     logger.debug(f"Starting new chat session for character_id: {character_id}, user: {user_name}")
 
@@ -1350,19 +1702,20 @@ def start_new_chat_session(
     # Create a title for the conversation
     conv_title = custom_title if custom_title else f"Chat with {char_name} ({time.strftime('%Y-%m-%d %H:%M')})"
 
+    conversation_id_val: Optional[str] = None # Ensure it's defined for return in except block
     try:
         # Add conversation to DB
         conv_payload = {
             'character_id': character_id,
             'title': conv_title,
         }
-        conversation_id = db.add_conversation(conv_payload)
+        conversation_id_val = db.add_conversation(conv_payload)
 
-        if not conversation_id:
+        if not conversation_id_val:
             logger.error(f"Failed to create conversation record in DB for character {char_name}.")
             return None, char_data, initial_ui_history, img
 
-        logger.info(f"Created new conversation ID: {conversation_id} for character '{char_name}'.")
+        logger.info(f"Created new conversation ID: {conversation_id_val} for character '{char_name}'.")
 
         # Determine the first message content to store in the DB for the new conversation
         message_to_store_in_db: Optional[str] = original_first_message_content
@@ -1372,37 +1725,55 @@ def start_new_chat_session(
                 # This is already processed. Storing processed message if raw isn't available.
                 # This implies the char_data['first_message'] from load_character_and_image
                 message_to_store_in_db = initial_ui_history[0][1]
-                logger.warning(f"Storing processed first message for char {char_name} in new conversation {conversation_id} as raw version was not available.")
+                logger.warning(f"Storing processed first message for char {char_name} in new conversation {conversation_id_val} as raw version was not available.")
             elif char_data.get('first_message'): # Another fallback to the processed field from char_data
                  message_to_store_in_db = char_data['first_message']
-                 logger.warning(f"Storing processed first_message from char_data for char {char_name} in new conversation {conversation_id}.")
+                 logger.warning(f"Storing processed first_message from char_data for char {char_name} in new conversation {conversation_id_val}.")
 
 
         if message_to_store_in_db:
             db.add_message({
-                'conversation_id': conversation_id,
+                'conversation_id': conversation_id_val,
                 'sender': char_name, # Character's name as sender
                 'content': message_to_store_in_db, # Stored raw preferably, or processed as fallback
             })
-            logger.debug(f"Added character's first message to new conversation {conversation_id}.")
+            logger.debug(f"Added character's first message to new conversation {conversation_id_val}.")
         else:
-            logger.warning(f"Character {char_name} (ID: {character_id}) has no first message to add to new conversation {conversation_id}.")
+            logger.warning(f"Character {char_name} (ID: {character_id}) has no first message to add to new conversation {conversation_id_val}.")
             # Ensure initial_ui_history is empty if no first message was effectively determined for UI
             if not (initial_ui_history and initial_ui_history[0] and initial_ui_history[0][1]):
                  initial_ui_history = []
 
-        return conversation_id, char_data, initial_ui_history, img
+        return conversation_id_val, char_data, initial_ui_history, img
 
     except (CharactersRAGDBError, InputError, ConflictError) as e:
         logger.error(f"Error during new chat session creation for char {char_name}: {e}")
-        return conversation_id if 'conversation_id' in locals() and conversation_id else None, char_data, initial_ui_history, img
+        return conversation_id_val, char_data, initial_ui_history, img
     except Exception as e:
         logger.error(f"Unexpected error in start_new_chat_session: {e}", exc_info=True)
-        return conversation_id if 'conversation_id' in locals() and conversation_id else None, char_data, initial_ui_history, img
+        return conversation_id_val, char_data, initial_ui_history, img
 
 
 def list_character_conversations(db: CharactersRAGDB, character_id: int, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
-    """Lists all active conversations for a given character, ordered by last modified descending."""
+    """Lists active conversations for a given character.
+
+    Retrieves a paginated list of conversation metadata dictionaries associated
+    with the specified character ID. Conversations are typically ordered by
+    their last modification time in descending order by the DB layer.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        character_id (int): The ID of the character whose conversations are to be listed.
+        limit (int): The maximum number of conversations to return. Defaults to 50.
+        offset (int): The number of conversations to skip (for pagination).
+            Defaults to 0.
+
+    Returns:
+        List[Dict[str, Any]]: A list of conversation metadata dictionaries.
+        Each dictionary typically includes 'id', 'title', 'character_id',
+        'last_modified_at', etc. Returns an empty list if no conversations
+        are found or an error occurs.
+    """
     try:
         return db.get_conversations_for_character(character_id, limit=limit, offset=offset)
     except CharactersRAGDBError as e:
@@ -1414,7 +1785,20 @@ def list_character_conversations(db: CharactersRAGDB, character_id: int, limit: 
 
 
 def get_conversation_metadata(db: CharactersRAGDB, conversation_id: str) -> Optional[Dict[str, Any]]:
-    """Retrieves metadata for a specific conversation."""
+    """Retrieves metadata for a specific conversation.
+
+    Fetches the metadata associated with a given conversation ID from the database.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        conversation_id (str): The ID of the conversation to retrieve.
+
+    Returns:
+        Optional[Dict[str, Any]]: A dictionary containing the conversation's
+        metadata (e.g., 'id', 'title', 'character_id', 'last_modified_at',
+        'version') if found. Returns None if the conversation does not exist
+        or an error occurs.
+    """
     try:
         return db.get_conversation_by_id(conversation_id)
     except CharactersRAGDBError as e:
@@ -1426,7 +1810,25 @@ def get_conversation_metadata(db: CharactersRAGDB, conversation_id: str) -> Opti
 
 
 def update_conversation_metadata(db: CharactersRAGDB, conversation_id: str, update_data: Dict[str, Any], expected_version: int) -> bool:
-    """Updates metadata for a conversation (e.g., title, rating)."""
+    """Updates metadata for a specific conversation.
+
+    Allows modification of permissible fields of a conversation's metadata,
+    such as 'title' or 'rating'. Uses optimistic locking via `expected_version`.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        conversation_id (str): The ID of the conversation to update.
+        update_data (Dict[str, Any]): A dictionary containing the fields to
+            update and their new values. Only specific keys (e.g., 'title',
+            'rating') are typically allowed for update by this function.
+        expected_version (int): The version number of the conversation record
+            that the client expects to be updating, for optimistic concurrency control.
+
+    Returns:
+        bool: `True` if the update was successful. `False` if the update failed,
+        which could be due to a version mismatch (ConflictError), invalid input,
+        database error, or if no valid fields were provided for update.
+    """
     try:
         # Ensure client_id is not in update_data, as db layer handles it.
         # Also, character_id, root_id, etc., are typically not changed via this simple update.
@@ -1450,7 +1852,22 @@ def update_conversation_metadata(db: CharactersRAGDB, conversation_id: str, upda
 
 
 def delete_conversation_by_id(db: CharactersRAGDB, conversation_id: str, expected_version: int) -> bool:
-    """Soft-deletes a conversation."""
+    """Soft-deletes a conversation from the database.
+
+    Marks a conversation as deleted rather than physically removing it.
+    Uses optimistic locking via `expected_version`.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        conversation_id (str): The ID of the conversation to soft-delete.
+        expected_version (int): The version number of the conversation record
+            that the client expects to be deleting, for optimistic concurrency control.
+
+    Returns:
+        bool: `True` if the conversation was successfully soft-deleted.
+        `False` if the deletion failed, e.g., due to a version mismatch
+        (ConflictError), or a database error.
+    """
     try:
         return db.soft_delete_conversation(conversation_id, expected_version)
     except (CharactersRAGDBError, ConflictError) as e:
@@ -1462,7 +1879,25 @@ def delete_conversation_by_id(db: CharactersRAGDB, conversation_id: str, expecte
 
 
 def search_conversations_by_title_query(db: CharactersRAGDB, title_query: str, character_id: Optional[int] = None, limit: int = 10) -> List[Dict[str, Any]]:
-    """Searches conversations by title."""
+    """Searches for conversations by their title.
+
+    Performs a search for conversations whose titles match (partially or fully,
+    depending on DB implementation) the `title_query`. Can be filtered by
+    `character_id`.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        title_query (str): The text to search for in conversation titles.
+        character_id (Optional[int]): If provided, limits the search to
+            conversations associated with this character ID. Defaults to None.
+        limit (int): The maximum number of matching conversations to return.
+            Defaults to 10.
+
+    Returns:
+        List[Dict[str, Any]]: A list of conversation metadata dictionaries
+        for matching conversations. Returns an empty list if no matches are
+        found or an error occurs.
+    """
     try:
         return db.search_conversations_by_title(title_query, character_id=character_id, limit=limit)
     except CharactersRAGDBError as e:
@@ -1484,11 +1919,43 @@ def post_message_to_conversation(
     ranking: Optional[int] = None,
     image_data: Optional[bytes] = None,
     image_mime_type: Optional[str] = None
-) -> Optional[str]: # Returns new message_id
-    """
-    Posts a new message to a conversation.
-    Content is stored raw (placeholders are not replaced before saving).
-    Sender is determined by `is_user_message` ("User" or `character_name`).
+) -> Optional[str]:
+    """Posts a new message to a specified conversation.
+
+    Adds a message to the database for the given `conversation_id`. The message
+    content is stored raw (placeholders are typically not replaced at this stage).
+    The sender is determined by `is_user_message`: if `True`, sender is "User";
+    otherwise, it's the provided `character_name`.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        conversation_id (str): The ID of the conversation to post the message to.
+        character_name (str): The name of the character involved in the
+            conversation. Used as the sender if `is_user_message` is `False`.
+        message_content (str): The text content of the message.
+        is_user_message (bool): `True` if the message is from the user, `False`
+            if it's from the character.
+        parent_message_id (Optional[str]): The ID of the parent message if this
+            message is a reply in a threaded structure. Defaults to None.
+        ranking (Optional[int]): An optional ranking for the message (e.g., for
+            alternative AI responses). Defaults to None.
+        image_data (Optional[bytes]): Optional binary image data associated with
+            the message. Defaults to None.
+        image_mime_type (Optional[str]): The MIME type of the `image_data`
+            (e.g., "image/png"), required if `image_data` is provided.
+            Defaults to None.
+
+    Returns:
+        Optional[str]: The ID of the newly created message if successful.
+        Returns None if the message posting fails.
+
+    Raises:
+        InputError: If `conversation_id` is missing, or if `character_name` is
+            missing for a character message, or if both `message_content` and
+            `image_data` are missing.
+        CharactersRAGDBError: For other database-related errors during message addition.
+        ConflictError: If a conflict occurs (e.g. parent_message_id not found,
+            depending on DB constraints).
     """
     if not conversation_id:
         logger.error("Cannot post message: conversation_id is required.")
@@ -1543,8 +2010,25 @@ def retrieve_message_details(
     character_name_for_placeholders: str,
     user_name_for_placeholders: Optional[str]
 ) -> Optional[Dict[str, Any]]:
-    """
-    Retrieves a specific message by its ID and applies placeholder replacement to its content.
+    """Retrieves a specific message by its ID and processes its content.
+
+    Fetches a message from the database using its unique ID. If the message
+    has text content, placeholders within it are replaced using the provided
+    character and user names.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        message_id (str): The ID of the message to retrieve.
+        character_name_for_placeholders (str): The name of the character,
+            used for replacing '{{char}}' placeholders in the message content.
+        user_name_for_placeholders (Optional[str]): The name of the user,
+            used for replacing '{{user}}' placeholders.
+
+    Returns:
+        Optional[Dict[str, Any]]: A dictionary containing the message's data
+        (e.g., 'id', 'sender', 'content', 'timestamp', 'image_data') if found.
+        The 'content' field will have placeholders replaced. Returns None if
+        the message is not found or an error occurs.
     """
     try:
         message_data = db.get_message_by_id(message_id)
@@ -1575,9 +2059,33 @@ def retrieve_conversation_messages_for_ui(
     offset: int = 0,
     order: str = "ASC"
 ) -> List[Tuple[Optional[str], Optional[str]]]:
-    """
-    Retrieves messages for a conversation, processes them into UI format (pairs),
-    and applies placeholder replacement.
+    """Retrieves and processes conversation messages for UI display.
+
+    Fetches messages for a given conversation from the database, then
+    processes them using `process_db_messages_to_ui_history` into a
+    UI-friendly paired format (user_message, bot_message). Placeholder
+    replacement is applied to message content during this processing.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        conversation_id (str): The ID of the conversation whose messages
+            are to be retrieved.
+        character_name (str): The name of the character involved in the
+            conversation. Used for placeholder replacement and identifying
+            character messages during processing.
+        user_name (Optional[str]): The name of the user, for placeholder
+            replacement.
+        limit (int): The maximum number of messages to retrieve (before
+            pairing). Defaults to 2000.
+        offset (int): The number of messages to skip (for pagination, applied
+            before pairing). Defaults to 0.
+        order (str): The order in which to retrieve messages by timestamp
+            ("ASC" for ascending, "DESC" for descending). Defaults to "ASC".
+
+    Returns:
+        List[Tuple[Optional[str], Optional[str]]]: A list of
+        (user_message, bot_message) tuples, suitable for UI display.
+        Returns an empty list if an error occurs or no messages are found.
     """
     order_upper = order.upper()
     if order_upper not in ["ASC", "DESC"]:
@@ -1615,7 +2123,24 @@ def edit_message_content(
     new_content: str, # Raw content; placeholders processed on display
     expected_version: int
 ) -> bool:
-    """Updates the content of a specific message."""
+    """Updates the text content of a specific message.
+
+    Modifies the 'content' field of an existing message in the database.
+    The `new_content` is stored raw; placeholder replacement happens
+    during display/retrieval. Uses optimistic locking via `expected_version`.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        message_id (str): The ID of the message to edit.
+        new_content (str): The new raw text content for the message.
+        expected_version (int): The version number of the message record
+            that the client expects to be updating, for optimistic concurrency control.
+
+    Returns:
+        bool: `True` if the message content was successfully updated. `False`
+        if the update failed, e.g., due to a version mismatch (ConflictError),
+        invalid input, or a database error.
+    """
     update_payload = {'content': new_content}
     try:
         return db.update_message(message_id, update_payload, expected_version)
@@ -1633,7 +2158,24 @@ def set_message_ranking(
     ranking: int,
     expected_version: int
 ) -> bool:
-    """Sets the ranking of a specific message."""
+    """Sets or updates the ranking of a specific message.
+
+    Modifies the 'ranking' field of an existing message. This can be used, for
+    example, to rate alternative AI responses. Uses optimistic locking via
+    `expected_version`.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        message_id (str): The ID of the message whose ranking is to be set.
+        ranking (int): The new ranking value for the message.
+        expected_version (int): The version number of the message record
+            that the client expects to be updating, for optimistic concurrency control.
+
+    Returns:
+        bool: `True` if the message ranking was successfully updated. `False`
+        if the update failed, e.g., due to a version mismatch (ConflictError),
+        invalid input, or a database error.
+    """
     update_payload = {'ranking': ranking}
     try:
         return db.update_message(message_id, update_payload, expected_version)
@@ -1649,7 +2191,22 @@ def remove_message_from_conversation(
     message_id: str,
     expected_version: int
 ) -> bool:
-    """Soft-deletes a message from a conversation."""
+    """Soft-deletes a message from a conversation.
+
+    Marks a message as deleted in the database rather than physically removing it.
+    Uses optimistic locking via `expected_version`.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        message_id (str): The ID of the message to soft-delete.
+        expected_version (int): The version number of the message record
+            that the client expects to be deleting, for optimistic concurrency control.
+
+    Returns:
+        bool: `True` if the message was successfully soft-deleted. `False`
+        if the deletion failed, e.g., due to a version mismatch
+        (ConflictError), or a database error.
+    """
     try:
         return db.soft_delete_message(message_id, expected_version)
     except (CharactersRAGDBError, ConflictError) as e:
@@ -1668,9 +2225,29 @@ def find_messages_in_conversation(
     user_name_for_placeholders: Optional[str],
     limit: int = 10
 ) -> List[Dict[str, Any]]:
-    """
-    Searches for messages within a specific conversation by content.
-    Applies placeholder replacement to the content of found messages.
+    """Searches for messages within a specific conversation by content.
+
+    Finds messages in the given `conversation_id` whose text content matches
+    (partially or fully, depending on DB implementation) the `search_query`.
+    Placeholder replacement is applied to the 'content' field of the
+    found messages.
+
+    Args:
+        db (CharactersRAGDB): An instance of the character database manager.
+        conversation_id (str): The ID of the conversation to search within.
+        search_query (str): The text to search for in message content.
+        character_name_for_placeholders (str): The name of the character,
+            used for replacing '{{char}}' placeholders in the content of
+            found messages.
+        user_name_for_placeholders (Optional[str]): The name of the user,
+            used for replacing '{{user}}' placeholders.
+        limit (int): The maximum number of matching messages to return.
+            Defaults to 10.
+
+    Returns:
+        List[Dict[str, Any]]: A list of message data dictionaries for matching
+        messages. The 'content' field in each dictionary will have placeholders
+        replaced. Returns an empty list if no matches are found or an error occurs.
     """
     try:
         found_messages = db.search_messages_by_content(

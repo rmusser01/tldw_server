@@ -3378,6 +3378,181 @@ class Database:
             logger.error(f"Unexpected error batch inserting chunks for media {media_id}: {e}", exc_info=True)
             raise DatabaseError(f"An unexpected error occurred during batch chunk insertion: {e}") from e
 
+    def process_chunks(self, media_id: int, chunks: List[Dict[str, Any]], batch_size: int = 100):
+        """
+        Process chunks in batches and insert them into the MediaChunks table.
+
+        This method is part of the Database class and works with the V2 schema
+        for MediaChunks. It generates necessary IDs (a UUID for 'chunk_id' and
+        another for 'uuid') and sync metadata for each chunk.
+
+        Args:
+            media_id (int): ID of the media these chunks belong to.
+            chunks (List[Dict[str, Any]]): List of chunk dictionaries. Each dictionary is
+                                           expected to have 'text', 'start_index',
+                                           and 'end_index' keys.
+            batch_size (int): Number of chunks to process in each database transaction.
+
+        Raises:
+            InputError: If the parent media_id is not found or is deleted, or if
+                        a chunk dictionary is missing required keys.
+            DatabaseError: If there's an error during database operations (e.g.,
+                           integrity constraints) or sync logging.
+            Exception: For other unexpected errors during processing.
+        """
+        log_counter("process_chunks_attempt", labels={"media_id": media_id})
+        start_time = time.time()
+        total_chunks_to_process = len(chunks)
+        successfully_inserted_chunks = 0
+
+        # Initial check for parent media_id existence and active status.
+        # This uses a direct query. An alternative is self.get_media_by_id(media_id).
+        conn_for_check = self.get_connection()
+        cursor_check = conn_for_check.execute("SELECT 1 FROM Media WHERE id = ? AND deleted = 0", (media_id,))
+        if not cursor_check.fetchone():
+            logging.error(f"Parent Media ID {media_id} not found or is deleted. Cannot process chunks.")
+            log_counter("process_chunks_error", labels={"media_id": media_id, "error_type": "ParentMediaNotFound"})
+            duration = time.time() - start_time  # Log duration even for this early exit
+            log_histogram("process_chunks_duration", duration, labels={"media_id": media_id})
+            raise InputError(f"Parent Media ID {media_id} not found or is deleted.")
+
+        try:
+            for i in range(0, total_chunks_to_process, batch_size):
+                batch_of_input_chunks = chunks[i:i + batch_size]
+
+                db_insert_params_list = []
+                # Store tuples of (entity_uuid, version, payload) for logging after successful insert
+                sync_log_data_for_batch = []
+
+                current_timestamp = self._get_current_utc_timestamp_str()
+                # Assumes self.client_id is available from the Database instance
+                client_id = self.client_id
+
+                for input_chunk_dict in batch_of_input_chunks:
+                    try:
+                        chunk_text = input_chunk_dict['text']
+                        start_index = input_chunk_dict['start_index']
+                        end_index = input_chunk_dict['end_index']
+                    except KeyError as e:
+                        logging.warning(
+                            f"Skipping chunk for media_id {media_id} due to missing key '{e}': {str(input_chunk_dict)[:100]}")
+                        log_counter("process_chunks_item_skipped",
+                                    labels={"media_id": media_id, "reason": "missing_key", "key": str(e)})
+                        continue  # Skip this malformed chunk
+
+                    # Generate fields required by the MediaChunks schema.
+                    # MediaChunks.chunk_id has a TEXT UNIQUE constraint. We generate a UUID for it.
+                    generated_chunk_id_for_db = self._generate_uuid()
+                    # MediaChunks.uuid also has a TEXT UNIQUE NOT NULL constraint.
+                    generated_uuid_for_db = self._generate_uuid()
+
+                    chunk_version = 1  # Initial sync version for new records
+                    deleted_status = 0  # New chunks are not deleted
+
+                    # Parameters order must match the INSERT statement columns
+                    params_tuple = (
+                        media_id,
+                        chunk_text,
+                        start_index,
+                        end_index,
+                        generated_chunk_id_for_db,  # value for 'chunk_id' column
+                        generated_uuid_for_db,  # value for 'uuid' column
+                        current_timestamp,  # last_modified
+                        chunk_version,  # version
+                        client_id,  # client_id
+                        deleted_status  # deleted
+                    )
+                    db_insert_params_list.append(params_tuple)
+
+                    # Prepare data for sync logging (payload should reflect the inserted row)
+                    sync_payload = {
+                        'media_id': media_id,
+                        'chunk_text': chunk_text,
+                        'start_index': start_index,
+                        'end_index': end_index,
+                        'chunk_id': generated_chunk_id_for_db,
+                        'uuid': generated_uuid_for_db,
+                        'last_modified': current_timestamp,
+                        'version': chunk_version,
+                        'client_id': client_id,
+                        'deleted': deleted_status
+                        # prev_version and merge_parent_uuid are typically NULL/None on creation
+                    }
+                    # Store data needed for _log_sync_event: (entity_uuid, version, payload_dict)
+                    sync_log_data_for_batch.append((generated_uuid_for_db, chunk_version, sync_payload))
+
+                if not db_insert_params_list:  # If all chunks in the current batch were skipped
+                    logging.info(
+                        f"Batch starting at index {i} for media_id {media_id} resulted in no valid chunks to insert.")
+                    continue
+
+                try:
+                    # Each batch is processed in its own transaction for atomicity of that batch
+                    with self.transaction() as conn:  # `conn` is yielded by the transaction context manager
+                        insert_sql = """
+                                     INSERT INTO MediaChunks
+                                     (media_id, chunk_text, start_index, end_index, chunk_id, uuid,
+                                      last_modified, version, client_id, deleted)
+                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+                                     """
+                        # self.execute_many is called within the transaction.
+                        # The default commit=False for execute_many is correct here.
+                        self.execute_many(insert_sql, db_insert_params_list)
+
+                        # If execute_many succeeded, log sync events for this batch
+                        for entity_uuid, version_val, payload_dict in sync_log_data_for_batch:
+                            self._log_sync_event(
+                                conn=conn,  # Pass the connection from the transaction
+                                entity="MediaChunks",
+                                entity_uuid=entity_uuid,  # The UUID of the MediaChunk record
+                                operation="create",
+                                version=version_val,  # The sync version of the MediaChunk
+                                payload=payload_dict
+                            )
+
+                    successfully_inserted_chunks += len(db_insert_params_list)
+                    logging.info(
+                        f"Successfully processed batch for media_id {media_id}. Total inserted so far: {successfully_inserted_chunks}/{total_chunks_to_process}")
+                    log_counter("process_chunks_batch_success", labels={"media_id": media_id})
+
+                except sqlite3.IntegrityError as e:
+                    # This could be a FOREIGN KEY constraint failure if media_id became invalid
+                    # or a UNIQUE constraint failure.
+                    logging.error(f"Database integrity error inserting chunk batch for media_id {media_id}: {e}")
+                    log_counter("process_chunks_batch_error",
+                                labels={"media_id": media_id, "error_type": "IntegrityError"})
+                    # Re-raise to stop processing further batches, as this indicates a critical issue.
+                    raise DatabaseError(
+                        f"Integrity error during chunk batch insertion for media_id {media_id}: {e}") from e
+                except Exception as e:  # Catch other errors from DB operation or sync logging
+                    logging.error(f"Error processing chunk batch for media_id {media_id}: {e}", exc_info=True)
+                    log_counter("process_chunks_batch_error",
+                                labels={"media_id": media_id, "error_type": type(e).__name__})
+                    raise  # Re-raise to be caught by the outer try-except, stopping further processing.
+
+            logging.info(
+                f"Finished processing all chunks for media_id {media_id}. Total successfully inserted: {successfully_inserted_chunks}")
+            duration = time.time() - start_time
+            log_histogram("process_chunks_duration", duration, labels={"media_id": media_id})
+            log_counter("process_chunks_success", labels={"media_id": media_id})
+            # No explicit return value, matching the original function's behavior.
+
+        except Exception as e:  # Catches errors from loop setup or re-raised errors from batch processing
+            duration = time.time() - start_time
+            # Log duration even if the overall process failed or exited early
+            log_histogram("process_chunks_duration", duration, labels={"media_id": media_id})
+            log_counter("process_chunks_error", labels={"media_id": media_id, "error_type": type(e).__name__})
+            logging.error(f"Overall error processing chunks for media_id {media_id}: {e}", exc_info=True)
+
+            # Re-raise the exception so the caller is aware of the failure.
+            # Wrap in DatabaseError if it's not already one of our specific DB errors.
+            if not isinstance(e, (DatabaseError, InputError)):  # Check if e is already a known custom error
+                raise DatabaseError(
+                    f"An unexpected error occurred while processing chunks for media_id {media_id}: {e}") from e
+            else:
+                raise
+
+
 # =========================================================================
 # Standalone Functions (REQUIRE db_instance passed explicitly)
 # =========================================================================

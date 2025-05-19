@@ -11,9 +11,9 @@ from itertools import islice
 import numpy as np
 #
 # Local Imports:
-from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_for_embedding, chunk_options
+from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_for_embedding
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
-#from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import process_chunks
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database
 from tldw_Server_API.app.core.Embeddings.Embeddings_Create import create_embedding, create_embeddings_batch
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Utils.Utils import get_database_path, ensure_directory_exists, logger,  logging
@@ -89,8 +89,9 @@ def process_and_store_content(database, content: str, collection_name: str, medi
 
         chunks = chunk_for_embedding(content, file_name, chunk_options)
 
+        # FIXME - Change to use proper function
         # Process chunks synchronously
-        process_chunks(database, chunks, media_id)
+        Database.process_chunks(database, chunks, media_id)
 
         if create_embeddings:
             texts = []
@@ -319,7 +320,8 @@ def vector_search(collection_name: str, query: str, k: int = 10) -> List[Dict[st
 
 def schedule_embedding(media_id: int, content: str, media_name: str):
     try:
-        chunks = chunk_for_embedding(content, media_name, chunk_options)
+        # FIXME - Change to use proper function
+        chunks = chunk_for_embedding(content, media_name, )
         texts = [chunk['text'] for chunk in chunks]
         embeddings = create_embeddings_batch(texts, embedding_provider, embedding_model, embedding_api_url)
         ids = [f"{media_id}_chunk_{i}" for i in range(len(chunks))]

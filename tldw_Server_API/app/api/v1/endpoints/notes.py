@@ -1,7 +1,11 @@
 # app/api/v1/endpoints/notes.py
+#
+#
+# Imports
 import logging
 from typing import List, Optional, Dict, Any
-
+#
+# 3rd-party Libraries
 from fastapi import (
     APIRouter,
     Depends,
@@ -12,13 +16,13 @@ from fastapi import (
     Header  # Keep Header for expected_version
 )
 from loguru import logger  # Using loguru as in your chat example
-
-# Local Imports from your project structure
+#
+# Local Imports
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (  # Corrected import path if needed
     CharactersRAGDB, InputError, ConflictError, CharactersRAGDBError
 )
-
-# Schemas for notes (assuming this path is correct)
+#
+# Schemas for notes
 from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     NoteCreate, NoteUpdate, NoteResponse,
     KeywordCreate, KeywordResponse,
@@ -27,8 +31,11 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
 )
 # Dependency to get user-specific ChaChaNotes_DB instance
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-
-# We don't need get_current_user_id explicitly if get_chacha_db_for_user handles user context
+#
+#
+#######################################################################################################################
+#
+# Functions:
 
 router = APIRouter()
 

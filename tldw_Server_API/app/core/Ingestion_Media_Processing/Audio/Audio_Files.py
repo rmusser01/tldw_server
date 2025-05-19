@@ -1,12 +1,24 @@
 # Audio_Files.py
 #########################################
 # Audio Processing Library
-# This library is used to download or load audio files from a local directory.
+# This library is used to download or load audio files from a local directory,
+# process them through transcription, chunking, and optionally, AI-driven analysis.
 #
-####
+# Key Features:
+# - Download audio from direct URLs and YouTube.
+# - Process local audio files.
+# - Convert audio to WAV format for consistent processing.
+# - Transcribe audio using Whisper models, with options for diarization and VAD.
+# - Chunk transcribed text using various configurable methods.
+# - Perform summarization/analysis on transcribed text via external LLM APIs.
+# - Handle temporary file management.
 #
-# Functions:
-#
+# Main Functions:
+# - download_audio_file: Downloads an audio file from a generic URL.
+# - download_youtube_audio: Downloads audio specifically from a YouTube URL.
+# - process_audio_files: A comprehensive batch processing pipeline for multiple audio inputs.
+# - process_podcast: A specialized pipeline for processing a single podcast URL.
+# - format_transcription_with_timestamps: Utility to format transcription segments.
 #
 #########################################
 # Imports
@@ -38,28 +50,42 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcripti
 from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
 #
 #######################################################################################################################
-# Function Definitions
+# Constants
 #
 
 MAX_FILE_SIZE = 500 * 1024 * 1024
+"""int: Maximum allowed file size for downloads and local files in bytes (500MB)."""
 
-def download_audio_file(url: str, target_temp_dir: str, use_cookies: bool = False, cookies: Optional[str] = None) -> str:
+#######################################################################################################################
+# Function Definitions
+#
+
+def download_audio_file(url: str, target_temp_dir: str, use_cookies: bool = False, cookies: Optional[str | Dict] = None) -> str:
     """
-    Downloads an audio file from a URL.
+    Downloads an audio file from a URL into a specified temporary directory.
+
+    It handles HTTP GET requests, respects cookies for authenticated sessions,
+    checks for file size limits, and attempts to derive a sensible filename.
 
     Args:
-        :param url: The URL of the audio file.
-        :param target_temp_dir:
-        :param use_cookies: Whether to use cookies for the download.
-        :param cookies: A JSON string of cookies if use_cookies is True.
+        url: The URL of the audio file to download.
+        target_temp_dir: The path to the directory where the downloaded file
+                         will be saved. This directory must exist or be creatable.
+        use_cookies: If True, cookies will be included in the download request.
+                     Defaults to False.
+        cookies: A JSON string or a dictionary of cookies to use if `use_cookies` is True.
+                 Defaults to None.
 
     Returns:
-        The local path to the downloaded audio file.
+        The absolute local path to the downloaded audio file.
 
     Raises:
-        requests.RequestException: If the download fails due to network issues or bad status codes.
-        ValueError: If the file size exceeds the limit or cookies are invalid JSON.
-        Exception: For other unexpected errors.
+        requests.exceptions.RequestException: If the download fails due to network issues,
+                                              bad HTTP status codes, or timeouts.
+        ValueError: If the file size exceeds `MAX_FILE_SIZE`, or if `cookies`
+                    are provided in an invalid JSON format when `use_cookies` is True.
+        TypeError: If `cookies` is not a string or dictionary when `use_cookies` is True.
+        Exception: For other unexpected errors during the download process.
     """
     try:
         logging.info(f"Attempting audio download from: {url} into {target_temp_dir}")
@@ -76,6 +102,9 @@ def download_audio_file(url: str, target_temp_dir: str, use_cookies: bool = Fals
                 logging.debug("Using cookies for download.")
             except (json.JSONDecodeError, TypeError) as e:
                 logging.warning(f"Invalid cookie format provided for {url}. Proceeding without cookies. Error: {e}")
+                # Raise ValueError to signal bad input if cookies were intended but unusable
+                if isinstance(cookies, str): # Only raise if it was a string that failed to parse
+                    raise ValueError(f"Invalid JSON format for cookies: {e}") from e
 
         response = requests.get(url, headers=headers, stream=True, timeout=120)
         response.raise_for_status()
@@ -99,8 +128,8 @@ def download_audio_file(url: str, target_temp_dir: str, use_cookies: bool = Fals
                 original_filename = f"downloaded_audio_{uuid.uuid4().hex[:8]}"
 
         base_name = sanitize_filename(Path(original_filename).stem)
-        extension = Path(original_filename).suffix or ".mp3"
-        base_name = base_name[:50] if base_name else "audio" # Ensure base_name is not empty
+        extension = Path(original_filename).suffix or ".mp3" # Default to .mp3 if no extension
+        base_name = base_name[:50] if base_name else "audio" # Ensure base_name is not empty and not too long
         unique_id = uuid.uuid4().hex[:8]
         file_name = f"{base_name}_{unique_id}{extension}"
 
@@ -110,7 +139,7 @@ def download_audio_file(url: str, target_temp_dir: str, use_cookies: bool = Fals
 
         # Download the file efficiently
         downloaded_bytes = 0
-        log_interval = 5 * 1024 * 1024
+        log_interval = 5 * 1024 * 1024  # Log every 5MB
         next_log_thresh = log_interval
         logging.info(f"Downloading {url} to: {save_path}")
         with open(save_path, 'wb') as f:
@@ -134,9 +163,12 @@ def download_audio_file(url: str, target_temp_dir: str, use_cookies: bool = Fals
         # Optionally include response details if available
         err_msg = f"Error downloading audio: {e.response.status_code}" if e.response else str(e)
         raise requests.RequestException(f"Download failed for {url}. Reason: {err_msg}") from e
-    except ValueError as e:
+    except ValueError as e: # Handles file size and cookie format issues
         logging.error(f"Value error during download from {url}: {e}")
-        raise # Re-raise specific value errors (file size, cookies)
+        raise
+    except TypeError as e: # Handles cookie type issues
+        logging.error(f"Type error with cookies for {url}: {e}")
+        raise
     except Exception as e:
         logging.error(f"Unexpected error downloading audio file from {url}: {type(e).__name__} - {e}", exc_info=True)
         raise Exception(f"Unexpected download error for {url}") from e # Re-raise generic
@@ -171,63 +203,91 @@ def process_audio_files(
     # Optional metadata overrides (less common here, usually handled by API layer)
     custom_title: Optional[str] = None,
     author: Optional[str] = None,
-    temp_dir: Optional[str] = None # Explicit temp dir passed from API
-) -> dict[str, int | list[Any | None] | list[dict[str, Any]]] | None:
+    temp_dir: Optional[str] = None
+) -> Dict[str, Any]:
     """
-    Processes a list of audio inputs (URLs or local file paths). Handles download,
-    conversion, transcription, chunking, and analysis (summarization). Returns
-    structured results suitable for API response, without DB interaction.
+    Processes a list of audio inputs (URLs or local file paths).
+
+    This function orchestrates a pipeline that can include:
+    1. Downloading audio from URLs or using local files.
+    2. Converting audio to WAV format.
+    3. Transcribing audio to text using a specified Whisper model.
+    4. Optionally chunking the transcribed text.
+    5. Optionally performing analysis (e.g., summarization) on the text using an LLM API.
+
+    It manages temporary files, logs progress, and returns a structured dictionary
+    containing the results and status for each processed item. This function does
+    NOT interact directly with any database.
 
     Args:
-        inputs: List of strings, where each string is either a URL or a local file path.
-        transcription_model: Name of the Whisper model to use.
+        inputs: A list of strings, where each string is either a URL to an audio file
+                or an absolute local file path.
+        transcription_model: Name of the Whisper model to use for transcription
+                             (e.g., "base", "medium", "large-v3").
         transcription_language: Target language for transcription (e.g., 'en', 'es').
-        perform_chunking: Whether to chunk the transcription.
-        chunk_method: Method for chunking ('words', 'sentences', 'recursive', etc.).
-        max_chunk_size: Max characters/tokens per chunk.
-        chunk_overlap: Overlap between chunks.
-        use_adaptive_chunking: Use adaptive chunking methods.
-        use_multi_level_chunking: Use multi-level chunking.
-        chunk_language: Language for chunking logic (defaults to transcription language).
-        diarize: Perform speaker diarization.
-        vad_use: Use Voice Activity Detection (VAD) filter during transcription.
-        timestamp_option: Include timestamps in the final transcript.
-        perform_analysis: Whether to perform summarization/analysis.
-        api_name: Name of the LLM API to use for analysis (e.g., 'openai').
-        api_key: API key for the LLM API.
-        custom_prompt_input: Custom prompt for the summarization task.
-        system_prompt_input: System prompt for the summarization task.
-        summarize_recursively: Use recursive summarization strategy.
-        use_cookies: Pass cookies when downloading URLs.
-        cookies: Cookie string (JSON format) or dictionary.
-        keep_original: If False, temporary downloaded/converted files are deleted.
-        custom_title: Optional title override (primarily for context).
-        author: Optional author override (primarily for context).
-        temp_dir: Optional path to a directory for temporary files. If None, uses OS default.
-
+                                Defaults to 'en'. If None, language detection may be attempted
+                                by the transcription backend.
+        perform_chunking: If True, the transcribed text will be chunked. Defaults to True.
+        chunk_method: Method for chunking (e.g., 'sentences', 'words', 'recursive').
+                      Defaults to 'sentences' if language is 'en', otherwise 'sentences'.
+                      Effective only if `perform_chunking` is True.
+        max_chunk_size: Maximum size of each chunk (e.g., characters, tokens, depending on method).
+                        Defaults to 500. Effective only if `perform_chunking` is True.
+        chunk_overlap: Number of overlapping units between consecutive chunks. Defaults to 200.
+                       Effective only if `perform_chunking` is True.
+        use_adaptive_chunking: If True, use adaptive chunking methods. Defaults to False.
+                               Effective only if `perform_chunking` is True.
+        use_multi_level_chunking: If True, use multi-level chunking. Defaults to False.
+                                  Effective only if `perform_chunking` is True.
+        chunk_language: Language for chunking logic (e.g., 'en', 'de'). Defaults to
+                        `transcription_language` or 'en'. Effective only if `perform_chunking` is True.
+        diarize: If True, perform speaker diarization during transcription. Defaults to False.
+        vad_use: If True, use Voice Activity Detection (VAD) filter during transcription.
+                 Defaults to False.
+        timestamp_option: If True, include timestamps in the final transcript. Defaults to True.
+        perform_analysis: If True, perform analysis (e.g., summarization) on the
+                          transcribed/chunked text. Defaults to True. Requires `api_name`.
+        api_name: Name of the LLM API to use for analysis (e.g., 'openai', 'anthropic').
+                  Required if `perform_analysis` is True. Defaults to None.
+        api_key: API key for the specified LLM API. Defaults to None.
+        custom_prompt_input: Custom user prompt for the analysis task. Defaults to None.
+        system_prompt_input: System prompt/message for the analysis task. Defaults to None.
+        summarize_recursively: If True, use a recursive summarization strategy for long texts.
+                               Defaults to False. Effective only if `perform_analysis` is True.
+        use_cookies: If True, pass cookies when downloading audio from URLs. Defaults to False.
+        cookies: Cookie string (JSON format) or dictionary for URL downloads. Defaults to None.
+        keep_original: If True, temporary downloaded and converted files are not deleted.
+                       Defaults to False.
+        custom_title: Optional title override for the media. Used for context. Defaults to None.
+        author: Optional author override for the media. Used for context. Defaults to None.
+        temp_dir: Optional path to a directory for temporary files. If None, a system-default
+                  temporary directory is created and managed. Defaults to None.
 
     Returns:
-        A dictionary containing:
-          - 'processed_count': Number of successfully processed items.
-          - 'errors_count': Number of failed items.
-          - 'errors': List of error messages for failed items.
-          - 'results': A list of dictionaries, one for each input item, containing:
-            - 'input_ref': The original URL or filename provided.
-            * 'processing_source': The actual file path used after download/upload.
-            - 'status': 'Success', 'Error', or 'Warning'.
-            - 'input_ref': Original URL or filename.
-            - 'processing_source': Final path used for processing (e.g., WAV file).
-            - 'media_type': 'audio'.
-            - 'metadata': Dict with title, author etc.
-            - 'content': Full transcribed text (string or None).
-            - 'segments': List of transcribed segments (or None).
-            - 'chunks': List of text chunks if chunking performed (or None).
-            - 'analysis': Generated summary/analysis (string or None).
-            - 'analysis_details': Dict with details (e.g., detected language).
-            - 'error': Error message if processing failed (string or None).
-            - 'warnings': List of non-fatal warnings.
-            - 'db_id': Always None for this function.
-            - 'db_message': Always None for this function.
+        A dictionary containing the batch processing results:
+        - 'processed_count' (int): Number of successfully processed items (status 'Success' or 'Warning').
+        - 'errors_count' (int): Number of failed items (status 'Error').
+        - 'errors' (List[str | None]): List of error messages for failed items.
+        - 'results' (List[Dict[str, Any]]): A list of dictionaries, one for each input item.
+          Each item dictionary contains:
+            - 'status' (str): 'Success', 'Error', or 'Warning'.
+            - 'input_ref' (str): The original URL or filename provided.
+            - 'processing_source' (str): The actual file path used for processing (e.g., path to WAV file).
+            - 'media_type' (str): Always 'audio'.
+            - 'metadata' (Dict[str, Any]): Dictionary with 'title', 'author'.
+            - 'content' (Optional[str]): Full transcribed text.
+            - 'segments' (Optional[List[Dict]]): List of transcribed segments with timecodes.
+            - 'chunks' (Optional[List[Dict]]): List of text chunks if chunking was performed.
+            - 'analysis' (Optional[str]): Generated summary or analysis result.
+            - 'analysis_details' (Dict[str, Any]): Details about the analysis (e.g., model used).
+            - 'error' (Optional[str]): Error message if processing failed for this item.
+            - 'warnings' (List[str]): List of non-fatal warnings for this item.
+            - 'db_id' (None): Always None, as this function does not interact with a DB.
+            - 'db_message' (None): Always None.
+
+    Raises:
+        RuntimeError: Can be raised if critical setup like temporary directory creation fails.
+                      Individual item processing errors are caught and reported in the 'results' list.
     """
     batch_items_results: List[Dict[str, Any]] = []
     progress_log: List[str] = []
@@ -245,11 +305,18 @@ def process_audio_files(
         processing_temp_dir_path.mkdir(parents=True, exist_ok=True)
         logging.info(f"Using provided temporary directory: {processing_temp_dir_path}")
     else:
-        # Create a managed temporary directory if none provided
-        # It will be cleaned up automatically unless keep_original is True
-        temp_directory_manager = tempfile.TemporaryDirectory(prefix="audio_proc_")
-        processing_temp_dir_path = Path(temp_directory_manager.name)
-        logging.info(f"Created managed temporary directory: {processing_temp_dir_path}")
+        try:
+            temp_directory_manager = tempfile.TemporaryDirectory(prefix="audio_proc_")
+            processing_temp_dir_path = Path(temp_directory_manager.name)
+            logging.info(f"Created managed temporary directory: {processing_temp_dir_path}")
+        except Exception as e:
+            logging.error(f"Failed to create temporary directory: {e}", exc_info=True)
+            # Cannot proceed without a temp directory
+            return {
+                "processed_count": 0, "errors_count": len(inputs),
+                "errors": [f"Fatal setup error: Failed to create temporary directory: {e}"],
+                "results": [{"input_ref": item, "status": "Error", "error": f"Fatal setup error: {e}", "media_type": "audio"} for item in inputs]
+            }
 
     # Helper to track progress messages
     def update_progress(message: str):
@@ -529,13 +596,25 @@ def process_audio_files(
 
         # --- End of Loop ---
 
-    except Exception as outer_exc: # Catch setup errors before the loop
-         logging.error(f"Fatal error during audio processing setup: {outer_exc}", exc_info=True)
+    except Exception as outer_exc:
+         logging.error(f"Fatal error during audio processing batch setup or loop: {outer_exc}", exc_info=True)
+         # This case is for errors *outside* the item processing loop, e.g., in setup.
+         # If it occurs, remaining items won't be processed.
+         # Populate error for any items not yet in batch_items_results
+         num_processed_items = len(batch_items_results)
+         for k in range(num_processed_items, len(inputs)):
+             batch_items_results.append({
+                 "input_ref": inputs[k] if k < len(inputs) else "Unknown",
+                 "status": "Error",
+                 "error": f"Batch processing aborted due to fatal error: {outer_exc}",
+                 "media_type": "audio"
+             })
+         # Ensure the return dict reflects the fatal error
          return {
-            "processed_count": 0, "errors_count": len(inputs),
-            "errors": [f"Fatal setup error: {outer_exc}"],
-            # Use the renamed list name here too
-            "results": [{"input_ref": item, "status": "Error", "error": f"Fatal setup error: {outer_exc}", "media_type": "audio"} for item in inputs]
+            "processed_count": sum(1 for r in batch_items_results if r.get("status") in ["Success", "Warning"]),
+            "errors_count": sum(1 for r in batch_items_results if r.get("status") == "Error"),
+            "errors": [f"Fatal batch error: {outer_exc}"] + [r.get("error") for r in batch_items_results if r.get("status") == "Error" and r.get("error")],
+            "results": batch_items_results
          }
     finally:
         # --- Cleanup Temporary Files ---
@@ -550,19 +629,24 @@ def process_audio_files(
                     if file_path.exists() and file_path.is_file(): # Check if it's a file
                          # Security check: Ensure it's within the temp directory
                          try:
-                              is_safe = file_path.resolve().is_relative_to(processing_temp_dir_path.resolve())
-                         except ValueError: # Python < 3.9
-                              is_safe = str(file_path.resolve()).startswith(str(processing_temp_dir_path.resolve()))
+                             # Security: Ensure file is within the processing_temp_dir_path
+                             is_safe_to_delete = False
+                             try: # Python 3.9+
+                                 is_safe_to_delete = file_path.resolve().is_relative_to(processing_temp_dir_path.resolve())
+                             except AttributeError: # Older Python
+                                 is_safe_to_delete = str(file_path.resolve()).startswith(str(processing_temp_dir_path.resolve()))
+                             except ValueError: # Path is not relative (e.g. different drive on Windows)
+                                 is_safe_to_delete = False
 
-                         if is_safe:
-                              try:
-                                   file_path.unlink()
-                                   cleaned_count += 1
-                                   logging.debug(f"Removed temp file: {file_path}")
-                              except OSError as e:
-                                   update_progress(f"Warning: Failed to remove temporary file {file_path}: {e}")
-                         else:
-                              logging.warning(f"Skipping deletion of file outside temp dir: {file_path}")
+
+                             if is_safe_to_delete:
+                                 file_path.unlink()
+                                 cleaned_count += 1
+                                 logging.debug(f"Removed temp file: {file_path}")
+                             else:
+                                 logging.warning(f"Skipping deletion of file potentially outside designated temp dir: {file_path}")
+                         except OSError as e:
+                               update_progress(f"Warning: Failed to remove temporary file {file_path}: {e}")
             update_progress(f"Attempted removal of {cleaned_count} temporary files.")
         else:
             update_progress("Skipping temporary file cleanup (keep_original=True).")
@@ -595,17 +679,31 @@ def process_audio_files(
     return final_output
 
 
-def format_transcription_with_timestamps(segments, keep_timestamps=True):
+def format_transcription_with_timestamps(segments: List[Dict[str, Any]], keep_timestamps: bool = True) -> str:
     """
-    Formats the transcription segments with or without timestamps.
+    Formats transcription segments into a single string, optionally with timestamps.
 
-    Parameters:
-        segments (list): List of transcription segments.
-        keep_timestamps (bool): Whether to include timestamps.
+    Each segment is expected to be a dictionary with 'Time_Start', 'Time_End',
+    and 'Text' keys. Timestamps are formatted as HH:MM:SS. If 'Time_Start' or
+    'Time_End' are already strings in HH:MM:SS format, they are used directly.
+    Otherwise, they are assumed to be numeric seconds and converted.
+
+    Args:
+        segments: A list of dictionaries, where each dictionary represents a
+                  transcription segment. Expected keys: 'Time_Start' (float/str),
+                  'Time_End' (float/str), 'Text' (str).
+        keep_timestamps: If True, timestamps [HH:MM:SS-HH:MM:SS] are prepended
+                         to each segment's text. If False, only the text is joined.
+                         Defaults to True.
 
     Returns:
-        str: Formatted transcription.
+        A single string representing the formatted transcription. Segments are
+        joined by newline characters.
     """
+    if not segments:
+        return ""
+
+    formatted_lines = []
     if keep_timestamps:
         formatted_segments = []
         for segment in segments:
@@ -634,7 +732,30 @@ def format_transcription_with_timestamps(segments, keep_timestamps=True):
         return "\n".join([segment.get('Text', '').strip() for segment in segments])
 
 
-def download_youtube_audio(url):
+def download_youtube_audio(url: str) -> tuple[Optional[str], str]:
+    """
+    Downloads audio from a YouTube URL using yt-dlp.
+
+    It attempts to download the best M4A audio stream or, failing that, the best
+    video stream up to 480p, and then extracts the audio as an MP3 file.
+    The downloaded MP3 is saved to a "downloads" subdirectory in the current
+    working directory.
+
+    Args:
+        url: The YouTube video URL.
+
+    Returns:
+        A tuple (file_path, message):
+        - `file_path` (Optional[str]): The absolute path to the downloaded MP3 file
+          if successful, otherwise None.
+        - `message` (str): A status message indicating success or failure.
+
+    Note:
+        This function requires `ffmpeg` to be installed and accessible in the
+        system's PATH (or `ffmpeg.exe` in `./Bin/` on Windows).
+        Downloaded files are stored in a `downloads/` directory created in the
+        current working directory.
+    """
     try:
         # Determine ffmpeg path based on the operating system.
         ffmpeg_path = './Bin/ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
@@ -730,13 +851,61 @@ def process_podcast(
     temp_dir: Optional[str] = None # Explicit temp dir
 ) -> dict[str, None | dict[str, str | None] | list[Any] | dict[Any, Any] | str | float | Any] | None:
     """
-    Processes a podcast URL: downloads, extracts metadata, transcribes, chunks, summarizes.
-    Returns a dictionary with processed data and status, without DB interaction.
+    Processes a single podcast URL from download through to optional analysis.
+
+    This function orchestrates the following steps:
+    1. Downloads the podcast audio from the given URL.
+    2. Attempts to extract metadata (title, author, series, etc.) from the URL.
+    3. Uses `process_audio_files` internally to handle conversion, transcription,
+       chunking, and summarization.
+    4. Manages temporary files and logs progress.
+
+    This function does NOT interact directly with any database. Metrics for
+    podcast processing are logged.
+
+    Args:
+        url: The URL of the podcast audio file.
+        title: Optional override for the podcast title. If None, attempts to extract.
+        author: Optional override for the podcast author. If None, attempts to extract.
+        keywords: Optional. Comma-separated string or list of strings for keywords.
+                  These are augmented with extracted metadata like series/episode.
+        whisper_model: Name of the Whisper model for transcription. Defaults to "distil-large-v3".
+        enable_diarization: If True, perform speaker diarization. Defaults to False.
+        keep_timestamps: If True, include timestamps in transcript. Defaults to True.
+        custom_prompt: Custom user prompt for LLM analysis. Defaults to None.
+        system_prompt: System prompt for LLM analysis. Defaults to None.
+        api_name: Name of LLM API for analysis (e.g., 'openai'). Defaults to None (no analysis).
+        api_key: API key for the LLM. Defaults to None.
+        summarize_recursively: Use recursive summarization. Defaults to False.
+        perform_chunking: Whether to chunk the transcript. Defaults to True.
+        chunk_method: Chunking method. Defaults to None (library default).
+        max_chunk_size: Max chunk size. Defaults to 300.
+        chunk_overlap: Chunk overlap. Defaults to 0.
+        use_adaptive_chunking: Use adaptive chunking. Defaults to False.
+        use_multi_level_chunking: Use multi-level chunking. Defaults to False.
+        chunk_language: Language for chunking. Defaults to 'english'.
+        use_cookies: Use cookies for download. Defaults to False.
+        cookies: Cookies (JSON string or dict) for download. Defaults to None.
+        keep_original: Keep temporary files. Defaults to False.
+        temp_dir: Explicit temporary directory. Defaults to None (system default).
 
     Returns:
-        Dict containing keys like: status, input_ref, processing_source, transcript,
-        segments, summary, metadata, error, warnings, analysis_details.
-        (Similar structure to process_audio_files results)
+        A dictionary containing the processing result for the podcast:
+        - 'status' (str): 'Success', 'Error', or 'Warning'.
+        - 'input_ref' (str): The original podcast URL.
+        - 'processing_source' (str): Path to the processed audio file (e.g., WAV).
+        - 'transcript' (Optional[str]): Full transcribed text. (Note: code uses 'content', alias here)
+        - 'segments' (Optional[List[Dict]]): List of transcribed segments.
+        - 'summary' (Optional[str]): Generated summary/analysis. (Note: code uses 'analysis', alias here)
+        - 'chunks' (Optional[List[Dict]]): List of text chunks if chunking performed.
+        - 'metadata' (Dict[str, Any]): Extracted and provided metadata (title, author, keywords, series, etc.).
+        - 'error' (Optional[str]): Error message if processing failed.
+        - 'warnings' (List[str]): List of non-fatal warnings.
+        - 'analysis_details' (Dict[str, Any]): Details about the analysis.
+        - 'processing_time_seconds' (float): Total time taken for processing.
+        (Note: The actual keys in the returned dict from the code are 'content' for transcript
+         and 'analysis' for summary. This docstring tries to use more common terms but also
+         notes the internal keys from `process_audio_files` which this function uses.)
     """
     start_time = time.time()
     progress = []
