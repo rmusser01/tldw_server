@@ -26,8 +26,8 @@ from typing import Dict, List, Any, Optional, Union
 
 # Import 3rd Party Libraries
 import yaml
-from pyannote.audio import Pipeline
-from pyannote.audio.pipelines.speaker_diarization import SpeakerDiarization
+#from pyannote.audio import Pipeline
+#from pyannote.audio.pipelines.speaker_diarization import SpeakerDiarization
 # Filter out UserWarnings from Pyannote/Torch related to lazy loading or specific model features
 warnings.filterwarnings("ignore", category=UserWarning, message="Trying to infer the `batch_size` from an ambiguous collection.*")
 warnings.filterwarnings("ignore", category=UserWarning, message="Model was trained with pyannote.audio 0.0.1, yours is .*") # Ignore minor version mismatches if they cause warnings

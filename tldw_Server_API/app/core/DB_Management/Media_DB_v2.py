@@ -1716,12 +1716,23 @@ class Database:
                         new_version = current_version + 1
                         logger.info(f"Updating existing media ID {media_id} (UUID: {media_uuid}) to version {new_version}.")
                         update_data = {  # Prepare dict for easier payload generation
-                            'url': url, 'title': title, 'type': media_type, 'content': content, 'author': author,
-                            'ingestion_date': ingestion_date_str, 'transcription_model': transcription_model,
-                            'content_hash': content_hash, 'is_trash': 0, 'trash_date': None,  # Ensure trash_date is None here
-                            'chunking_status': "pending", 'vector_processing': 0,
+                            'url': url,
+                            'title': title,
+                            'type': media_type,
+                            'content': content,
+                            'author': author,
+                            'ingestion_date': ingestion_date_str,
+                            'transcription_model': transcription_model,
+                            'content_hash': content_hash,
+                            'is_trash': 0,
+                            'trash_date': None,  # Ensure trash_date is None here
+                            'chunking_status': "pending",
+                            'vector_processing': 0,
                             'last_modified': current_time,  # Set last_modified
-                            'version': new_version, 'client_id': client_id, 'deleted': 0, 'uuid': media_uuid
+                            'version': new_version,
+                            'client_id': client_id,
+                            'deleted': 0,
+                            'uuid': media_uuid
                         }
                         cursor.execute(
                             """UPDATE Media SET url=?, title=?, type=?, content=?, author=?, ingestion_date=?,
@@ -1742,24 +1753,41 @@ class Database:
                         # Use the update_data dict directly for the payload
                         self._log_sync_event(conn, 'Media', media_uuid, 'update', new_version, update_data)
                         self._update_fts_media(conn, media_id, update_data['title'], update_data['content'])
+
+                        # Consolidate keyword and version creation here for "updated"
                         self.update_keywords_for_media(media_id, keywords_list)  # Manages its own logs
                         # Create a new document version representing this update
-                        self.create_document_version(media_id=media_id, content=content, prompt=prompt, analysis_content=analysis_content)  # Manages its own logs
+                        self.create_document_version(
+                            media_id=media_id,
+                            content=content,  # Use the new content for the version
+                            prompt=prompt,
+                            analysis_content=analysis_content
+                        )
                     else:
                         action = "already_exists_skipped"
-                else:
+                else:  # Not existing_media
                     action = "added"
                     media_uuid = self._generate_uuid()
                     new_version = 1
                     logger.info(f"Inserting new media '{title}' with UUID {media_uuid}.")
                     insert_data = {  # Prepare dict for easier payload generation
-                         'url': url, 'title': title, 'type': media_type, 'content': content, 'author': author,
-                         'ingestion_date': ingestion_date_str,  # Use generated/passed ingestion_date
-                         'transcription_model': transcription_model,
-                         'content_hash': content_hash, 'is_trash': 0, 'trash_date': None,  # trash_date is NULL on creation
-                         'chunking_status': initial_chunking_status, 'vector_processing': 0, 'uuid': media_uuid,
-                         'last_modified': current_time,  # Set last_modified
-                         'version': new_version, 'client_id': client_id, 'deleted': 0
+                         'url': url,
+                        'title': title,
+                        'type': media_type,
+                        'content': content,
+                        'author': author,
+                        'ingestion_date': ingestion_date_str,  # Use generated/passed ingestion_date
+                        'transcription_model': transcription_model,
+                        'content_hash': content_hash,
+                        'is_trash': 0,
+                        'trash_date': None,  # trash_date is NULL on creation
+                        'chunking_status': initial_chunking_status,
+                        'vector_processing': 0,
+                        'uuid': media_uuid,
+                        'last_modified': current_time,  # Set last_modified
+                        'version': new_version,
+                        'client_id': client_id,
+                        'deleted': 0
                     }
                     cursor.execute(
                         """INSERT INTO Media (url, title, type, content, author, ingestion_date, transcription_model,
@@ -1781,16 +1809,8 @@ class Database:
                     # Use the insert_data dict directly for the payload
                     self._log_sync_event(conn, 'Media', media_uuid, 'create', new_version, insert_data)
                     self._update_fts_media(conn, media_id, insert_data['title'], insert_data['content'])
-                    self.update_keywords_for_media(media_id, keywords_list)  # Manages its own logs
-                    self.create_document_version(
-                        media_id=media_id,
-                        content=content,
-                        prompt=prompt,
-                        analysis_content=analysis_content
-                    )  # Manages its own logs
 
-                # Common operations if media was added or updated
-                if action in ["added", "updated"] and media_id is not None and media_uuid is not None:
+                    # Consolidate keyword and version creation here for "added"
                     self.update_keywords_for_media(media_id, keywords_list)
                     self.create_document_version(
                         media_id=media_id,

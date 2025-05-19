@@ -39,8 +39,8 @@ from transformers import AutoProcessor, Qwen2AudioForConditionalGeneration
 import sounddevice as sd
 import wave
 
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Diarization_Lib_v2 import audio_diarization, \
-    combine_transcription_and_diarization, DiarizationError
+#from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Diarization_Lib_v2 import audio_diarization, \
+#    combine_transcription_and_diarization, DiarizationError
 #
 # Import Local
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename, logging
@@ -129,39 +129,42 @@ def perform_transcription(
         # --- Perform Diarization and Combination (if requested) ---
         if diarize:
             final_segments = None
-            try:
-                # Define path to your diarization config
-                # Resolve path relative to current file or use absolute path
-                base_dir = Path(__file__).parent.resolve()  # Or wherever your config lives
-                diarization_config_path = base_dir / 'models' / 'pyannote_diarization_config.yaml'  # ADJUST PATH AS NEEDED
+            pass
+            # FIXME
+            # try:
+            #     # Define path to your diarization config
+            #     # Resolve path relative to current file or use absolute path
+            #     base_dir = Path(__file__).parent.resolve()  # Or wherever your config lives
+            #     diarization_config_path = base_dir / 'models' / 'pyannote_diarization_config.yaml'  # ADJUST PATH AS NEEDED
+            #
+            #     logging.info(f"Performing diarization using config: {diarization_config_path}...")
+            #     diarization_segments = audio_diarization(
+            #         audio_file_path=audio_file_path,
+            #         config_path=diarization_config_path
+            #         # Optionally pass num_speakers, min_speakers, max_speakers here if known
+            #     )
+            #
+            #     logging.info("Combining transcription and diarization results...")
+            #     final_segments = combine_transcription_and_diarization(
+            #         # FIXME
+            #         transcription_segments=adapted_transcription_segments,  # Use adapted segments
+            #         diarization_segments=diarization_segments
+            #     )
+            #     logging.info("Diarization and combination successful.")
 
-                logging.info(f"Performing diarization using config: {diarization_config_path}...")
-                diarization_segments = audio_diarization(
-                    audio_file_path=audio_file_path,
-                    config_path=diarization_config_path
-                    # Optionally pass num_speakers, min_speakers, max_speakers here if known
-                )
-
-                logging.info("Combining transcription and diarization results...")
-                final_segments = combine_transcription_and_diarization(
-                    # FIXME
-                    transcription_segments=adapted_transcription_segments,  # Use adapted segments
-                    diarization_segments=diarization_segments
-                )
-                logging.info("Diarization and combination successful.")
-
-            except (DiarizationError, FileNotFoundError) as e:
-                logging.error(f"Diarization or combination failed for {audio_file_path}: {e}")
-                # Decide how to handle diarization failure: return transcription only? or error?
-                # Option 1: Return transcription with warning
-                logging.warning("Proceeding with transcription only due to diarization error.")
-                final_segments = adapted_transcription_segments  # Fallback to transcription segments
-                # Add a warning marker maybe?
-                if final_segments:
-                    final_segments[0]['text'] = f"[Warning: Diarization failed ({e})] " + final_segments[0]['text']
-
-                # Option 2: Treat as overall failure for this step
-                # return audio_file_path, None # Or raise the error
+                # FIXME
+            # except (DiarizationError, FileNotFoundError) as e:
+            #     logging.error(f"Diarization or combination failed for {audio_file_path}: {e}")
+            #     # Decide how to handle diarization failure: return transcription only? or error?
+            #     # Option 1: Return transcription with warning
+            #     logging.warning("Proceeding with transcription only due to diarization error.")
+            #     final_segments = adapted_transcription_segments  # Fallback to transcription segments
+            #     # Add a warning marker maybe?
+            #     if final_segments:
+            #         final_segments[0]['text'] = f"[Warning: Diarization failed ({e})] " + final_segments[0]['text']
+            #
+            #     # Option 2: Treat as overall failure for this step
+            #     # return audio_file_path, None # Or raise the error
 
             # Return the combined (or fallback) segments
             return audio_file_path, final_segments

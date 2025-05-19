@@ -830,6 +830,7 @@ class TestSecurityAndPerformance:
         # Expect validation error due to non-integer page
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
+    # FIXME - test doesn't get skipped?
     @pytest.mark.skipif(sys.platform.startswith("win32"), reason="Skipping on Windows due to PermissionError during teardown (DB file lock issue)")
     def test_content_type_enforcement_json(self, seeded_document_media):
         """Test that endpoints expecting JSON reject incorrect Content-Type."""
