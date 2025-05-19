@@ -557,7 +557,7 @@ def chat_with_cohere(
         temp: Optional[float] = None,
         streaming: Optional[bool] = False,
         # Cohere specific or mapped OpenAI params
-        topp: Optional[float]   = None,  # Maps to 'p' in Cohere
+        topp: Optional[float] = None,  # Maps to 'p' in Cohere
         topk: Optional[int] = None,  # Maps to 'k'
         max_tokens: Optional[int] = None,  # Cohere's 'max_tokens' for response
         stop_sequences: Optional[List[str]] = None,  # Mapped from 'stop'
@@ -581,18 +581,14 @@ def chat_with_cohere(
     api_base_url = cohere_config.get('api_base_url', 'https://api.cohere.com').rstrip('/')
     COHERE_CHAT_URL = f"{api_base_url}/v1/chat"
 
-    timeout_seconds = float(cohere_config.get('api_timeout', 120.0))  # Increased default from previous context
-    # For streaming, a very long timeout might be needed if the stream is long-lived with pauses
-    # For request-response non-streaming, 120s should be ample.
-    # Consider separate timeouts if necessary. The current test timeout is 90s.
-    # Let's make the internal timeout slightly higher for streams to give Cohere a chance.
+    timeout_seconds = float(cohere_config.get('api_timeout', 120.0))
     effective_timeout = timeout_seconds * 2 if streaming else timeout_seconds
 
     headers = {
         "Authorization": f"Bearer {final_api_key}",
         "Content-Type": "application/json",
-        "Accept": "application/json" if not streaming else "text/event-stream",  # Correct Accept for streams
-        "Cohere-Version": cohere_config.get('api_version_date', "2022-12-06")
+        "Accept": "application/json" if not streaming else "text/event-stream",
+        "Cohere-Version": cohere_config.get('api_version_date', "2022-12-06") # Consider using a more recent API version
     }
 
     chat_history_for_cohere = []
@@ -614,25 +610,22 @@ def chat_with_cohere(
         if isinstance(last_msg_content, list):
             current_user_message_str = next((part['text'] for part in last_msg_content if part.get('type') == 'text'),
                                             "")
-            # TODO: Handle images for Cohere if its API supports it (e.g., by passing image URLs if Cohere supports them)
         else:
             current_user_message_str = str(last_msg_content)
         chat_history_for_cohere = temp_messages[:-1]
     else:
-        # This case is problematic for Cohere's /chat which expects a final user message.
-        # If custom_prompt_arg is meaningful as a user query, use it.
-        current_user_message_str = custom_prompt_arg or "Please respond."  # Provide a default user message
-        chat_history_for_cohere = temp_messages  # Keep all as history, append the placeholder
+        current_user_message_str = custom_prompt_arg or "Please respond."
+        chat_history_for_cohere = temp_messages
         logger.warning(
             f"Cohere: Last message in payload was not 'user'. Using fallback: '{current_user_message_str}'. This might not be ideal.")
 
-    if not current_user_message_str.strip():  # Ensure there's actual content
+    if not current_user_message_str.strip():
         raise ChatBadRequestError(provider="cohere",
                                   message="Current user message for Cohere is empty after processing.")
 
     transformed_history = []
     for msg in chat_history_for_cohere:
-        role = msg.get('role', '').lower()  # Use lower for easier comparison
+        role = msg.get('role', '').lower()
         content = msg.get('content', '')
         if isinstance(content, list):
             content = next((part['text'] for part in content if part.get('type') == 'text'), "")
@@ -641,7 +634,6 @@ def chat_with_cohere(
             transformed_history.append({"role": "USER", "message": str(content)})
         elif role == "assistant":
             transformed_history.append({"role": "CHATBOT", "message": str(content)})
-        # Other roles (like system if not used as preamble) are usually ignored by Cohere in chat_history
 
     payload: Dict[str, Any] = {"model": final_model, "message": current_user_message_str}
     if transformed_history: payload["chat_history"] = transformed_history
@@ -653,40 +645,74 @@ def chat_with_cohere(
     if stop_sequences is not None: payload["stop_sequences"] = stop_sequences
     if seed is not None: payload["seed"] = seed
 
-    # num_generations is for non-streaming. Cohere's API might error if sent with stream=True.
+    # === FIX START ===
+    # Add the 'stream' parameter to the JSON payload
+    if streaming:
+        payload["stream"] = True
+    # else:
+        # Optionally, for non-streaming, you could add payload["stream"] = False
+        # if Cohere's API prefers/supports it for consistency.
+        # If you do this, remove it from `params` in the non-streaming requests.post call.
+        # payload["stream"] = False
+    # === FIX END ===
+
     if num_generations is not None and not streaming:
         payload["num_generations"] = num_generations
     elif num_generations is not None and streaming:
         logger.warning(
-            "Cohere: 'num_generations' (n) is typically for non-streaming and will be ignored for streaming.")
+            "Cohere: 'num_generations' (n) is typically for non-streaming and will be ignored when stream=True.")
 
     if frequency_penalty is not None: payload["frequency_penalty"] = frequency_penalty
     if presence_penalty is not None: payload["presence_penalty"] = presence_penalty
     if tools: payload["tools"] = tools
 
-    logger.debug(f"Cohere Request Payload: {payload}")
-    logger.debug(f"Cohere Request URL: {COHERE_CHAT_URL}, Params: {{'stream': {str(streaming).lower()}}}")
+    logger.debug(f"Cohere Request Payload: {json.dumps(payload, indent=2)}") # Log the full payload
+    # The 'stream' parameter will now be part of the payload log
+    # The URL for streaming requests will not have the ?stream=true query parameter anymore
+    logger.debug(f"Cohere Request URL: {COHERE_CHAT_URL}")
+
 
     try:
         if streaming:
-            # Ensure stream parameter is boolean true for Cohere SDK or string "true" for direct REST
+            # The 'stream: true' is now in the 'json_payload'
             response = requests.post(COHERE_CHAT_URL, headers=headers, json=payload, stream=True,
-                                     params={"stream": "true"}, timeout=effective_timeout)
+                                     # params={"stream": "true"}, # REMOVED FROM QUERY PARAMETERS
+                                     timeout=effective_timeout)
             response.raise_for_status()
             logger.debug("Cohere: Streaming response connection established.")
 
-            # This generator yields text chunks for the endpoint's sse_event_generator
             def stream_generator_cohere_text_chunks(response_iterator, model_name_for_event_ignored):
                 stream_properly_closed = False
                 accumulated_text_for_log = []
+                # current_event_name = None # Can be used if data part doesn't specify event_type
+
                 try:
                     for line_bytes in response_iterator:
-                        if line_bytes:
-                            decoded_line = line_bytes.decode('utf-8').strip()
-                            if not decoded_line: continue
-                            # logger.trace(f"Cohere stream raw line: {decoded_line}")
+                        if not line_bytes:  # Skip raw empty bytes (e.g. from keep-alive chunks)
+                            continue
+
+                        decoded_line = line_bytes.decode('utf-8').strip()
+
+                        if not decoded_line: # An empty line in SSE typically ends a message block.
+                            # current_event_name = None # Reset if using this
+                            continue
+
+                        # logger.trace(f"Cohere stream raw line: {decoded_line}") # Uncomment for deep debugging
+
+                        if decoded_line.startswith("event:"):
+                            # current_event_name = decoded_line[len("event:"):].strip()
+                            # logger.trace(f"Cohere stream saw event name: {current_event_name}")
+                            # With Cohere, the event_type is usually in the data payload, so this line is often just informational
+                            continue # The actual data comes in the 'data:' line
+
+                        if decoded_line.startswith("data:"):
+                            json_data_str = decoded_line[len("data:"):].strip()
+                            if not json_data_str:
+                                # logger.trace("Cohere stream: received empty data field.")
+                                continue
+
                             try:
-                                cohere_event = json.loads(decoded_line)
+                                cohere_event = json.loads(json_data_str)
                                 event_type = cohere_event.get("event_type")
 
                                 if event_type == "text-generation":
@@ -697,16 +723,27 @@ def chat_with_cohere(
                                         yield text_chunk  # Yield the text content directly
                                 elif event_type == "stream-end":
                                     stream_properly_closed = True
-                                    finish_reason = cohere_event.get("finish_reason", "UNKNOWN")
+                                    # The 'response' field in stream-end contains final details
+                                    final_response_details = cohere_event.get("response", {})
+                                    finish_reason = final_response_details.get("finish_reason")
+                                    if not finish_reason: # Fallback if not in response object directly
+                                        finish_reason = cohere_event.get("finish_reason", "UNKNOWN")
+
                                     logger.info(
-                                        f"Cohere stream: 'stream-end' event received. Finish reason: {finish_reason}. Total text fragments: {len(accumulated_text_for_log)}")
+                                        f"Cohere stream: 'stream-end' event received. Finish reason: {finish_reason}. Total text fragments: {len(accumulated_text_for_log)}.")
                                     # The endpoint's SSE generator will send the final [DONE] type message.
                                     return  # Properly exit the generator
-                                # elif event_type: # Log other known event types if curious
-                                # logger.trace(f"Cohere stream event type: {event_type}, data: {cohere_event}")
+                                elif event_type == "stream-start":
+                                    logger.debug(f"Cohere stream: 'stream-start' event received. Gen ID: {cohere_event.get('generation_id')}")
+                                    # Other events like 'tool-calls-generation', 'citation-generation' can be handled here if needed
+                                elif event_type:
+                                     logger.debug(f"Cohere stream event type: {event_type}, data: {cohere_event}")
 
                             except json.JSONDecodeError:
-                                logger.warning(f"Cohere Stream: JSON decode error for line: '{decoded_line}'")
+                                logger.warning(f"Cohere Stream: JSON decode error for data content: '{json_data_str}' (original line: '{decoded_line}')")
+                        else:
+                            logger.warning(f"Cohere Stream: Unexpected line format, not 'event:' or 'data:': '{decoded_line}'")
+
                 except requests.exceptions.ChunkedEncodingError as e:
                     logger.warning(f"Cohere stream: ChunkedEncodingError: {e}. Stream may have been interrupted.")
                 except Exception as e_stream:
@@ -715,23 +752,33 @@ def chat_with_cohere(
                     if not stream_properly_closed:
                         logger.warning(
                             "Cohere stream generator loop finished without explicit 'stream-end' event from Cohere.")
-                    logger.debug(f"Cohere stream_generator_cohere_text_chunks for model {final_model} finished.")
+                    logger.debug(f"Cohere stream_generator_cohere_text_chunks for model {final_model} finished. Total text: {''.join(accumulated_text_for_log)[:100]}...")
                     if response:  # Ensure the main response object is closed
                         response.close()
 
             return stream_generator_cohere_text_chunks(response.iter_lines(), final_model)
         else:  # Non-streaming
+            # For non-streaming, if you decide to put `stream: false` in payload:
+            # payload["stream"] = False # (as shown in the FIX START section, commented out)
+            # Then, remove `params` from the requests.post call below:
+            # response = requests.post(COHERE_CHAT_URL, headers=headers, json=payload, stream=False,
+            #                          timeout=effective_timeout)
+            #
+            # Current code uses query parameter for stream=false:
+            current_params = {"stream": "false"}
+            # If you added payload["stream"] = False earlier for non-streaming, then remove the 'params' argument below.
             response = requests.post(COHERE_CHAT_URL, headers=headers, json=payload, stream=False,
-                                     params={"stream": "false"}, timeout=effective_timeout)
+                                     params=current_params,
+                                     timeout=effective_timeout)
             response.raise_for_status()
             response_data = response.json()
             logger.debug(f"Cohere non-streaming response data: {response_data}")
 
             chat_id = response_data.get("generation_id", f"chatcmpl-cohere-{time.time()}")
-            created_timestamp = int(time.time())  # Or parse from response if available
+            created_timestamp = int(time.time())
 
             choices_payload = []
-            finish_reason = response_data.get("finish_reason", "stop")  # Default, Cohere might provide this
+            finish_reason = response_data.get("finish_reason", "stop")
 
             if response_data.get("text"):
                 choices_payload.append({
@@ -740,26 +787,20 @@ def chat_with_cohere(
                     "index": 0
                 })
             elif response_data.get("tool_calls"):
-                # This needs careful mapping to OpenAI's tool_calls structure if strict compatibility is needed.
-                # For now, passing Cohere's tool_calls structure as is.
                 cohere_tool_calls = response_data.get("tool_calls", [])
-                # Example mapping (very basic, needs detail based on Cohere's actual tool_call format vs OpenAI's):
                 openai_like_tool_calls = []
-                for tc in cohere_tool_calls:
-                    # This assumes Cohere's tool_call ('tc') has 'name', 'parameters'
-                    # and we need to generate an 'id' and 'type: function'.
+                for i, tc in enumerate(cohere_tool_calls):
                     openai_like_tool_calls.append({
-                        "id": f"call_{tc.get('name', 'tool')}_{time.time_ns()}",  # Generate a unique ID
+                        "id": f"call_{tc.get('name', 'tool')}_{time.time_ns()}_{i}",
                         "type": "function",
-                        "function": {  # This should be FunctionDefinition schema-like
+                        "function": {
                             "name": tc.get("name"),
-                            "arguments": json.dumps(tc.get("parameters", {}))  # Arguments must be JSON string
+                            "arguments": json.dumps(tc.get("parameters", {}))
                         }
                     })
-
                 choices_payload.append({
                     "message": {"role": "assistant", "content": None, "tool_calls": openai_like_tool_calls},
-                    "finish_reason": "tool_calls",  # OpenAI uses "tool_calls"
+                    "finish_reason": "tool_calls",
                     "index": 0
                 })
             else:
@@ -770,23 +811,22 @@ def chat_with_cohere(
                     "index": 0
                 })
 
-            # Cohere /v1/chat response structure:
-            # { "text": "...", "generation_id": "...", "citations": [...], "documents": [...],
-            #   "is_search_required": bool, "search_queries": [...], "search_results": [...],
-            #   "finish_reason": "...", "tool_calls": [...], "chat_history": [...],
-            #   "meta": { "api_version": {...}, "billed_units": {"input_tokens": X, "output_tokens": Y}}}
-
             usage_data = None
             if "meta" in response_data and "billed_units" in response_data["meta"]:
                 billed_units = response_data["meta"]["billed_units"]
                 prompt_tokens = billed_units.get("input_tokens")
                 completion_tokens = billed_units.get("output_tokens")
+                search_units = billed_units.get("search_units") # Cohere might also bill for search units
+
                 if prompt_tokens is not None and completion_tokens is not None:
                     usage_data = {
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,
                         "total_tokens": prompt_tokens + completion_tokens
                     }
+                    if search_units is not None: # include search units if available
+                        usage_data["search_units"] = search_units
+
 
             openai_compatible_response = {
                 "id": chat_id,
@@ -803,7 +843,7 @@ def chat_with_cohere(
     except requests.exceptions.HTTPError as e:
         status_code = getattr(e.response, 'status_code', 500)
         error_text = getattr(e.response, 'text', str(e))
-        logger.error(f"Cohere API call failed with status {status_code}. Details: {error_text[:500]}", exc_info=False)
+        logger.error(f"Cohere API call failed with status {status_code}. Details: {error_text[:500]}", exc_info=False) # Set exc_info=True for full traceback if needed
         if status_code == 401:
             raise ChatAuthenticationError(provider="cohere",
                                           message=f"Authentication failed. Detail: {error_text[:200]}")
@@ -818,15 +858,14 @@ def chat_with_cohere(
                                     status_code=status_code)
     except requests.exceptions.RequestException as e:
         logger.error(f"Cohere API request failed (network error): {e}", exc_info=True)
-        raise ChatProviderError(provider="cohere", message=f"Network error: {e}", status_code=504)
+        raise ChatProviderError(provider="cohere", message=f"Network error: {e}", status_code=504) # 504 for gateway timeout like errors
     except Exception as e:
         logger.error(f"Cohere API call: Unexpected error: {e}", exc_info=True)
-        # Ensure it's a ChatAPIError or one of its subtypes
         if not isinstance(e, (ChatAuthenticationError, ChatRateLimitError, ChatBadRequestError, ChatProviderError,
                               ChatAPIError, ChatConfigurationError)):
             raise ChatAPIError(provider="cohere", message=f"Unexpected error in Cohere API call: {e}")
         else:
-            raise  # Re-raise if it's already a suitable custom error
+            raise
 
 
 def chat_with_deepseek(
