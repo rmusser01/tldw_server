@@ -3844,7 +3844,7 @@ def get_process_documents_form(
 
     # --- Fields from ChunkingOptions ---
     perform_chunking: bool = Form(True), # Use default from ProcessDocumentsForm
-    chunk_method: Optional[ChunkMethod] = Form('sentence'), # Use default from ProcessDocumentsForm
+    chunk_method: Optional[ChunkMethod] = Form('sentences'), # Use default from ProcessDocumentsForm
     chunk_language: Optional[str] = Form(None),
     chunk_size: int = Form(1000), # Use default from ProcessDocumentsForm
     chunk_overlap: int = Form(200), # Use default from ProcessDocumentsForm

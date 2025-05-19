@@ -94,7 +94,7 @@ class SearchRequest(BaseModel):
 MediaType = Literal['video', 'audio', 'document', 'pdf', 'ebook']
 
 # Define allowed chunking methods (adjust as needed based on your library)
-ChunkMethod = Literal['semantic', 'tokens', 'paragraphs', 'sentences','words', 'chapter', 'json' ]
+ChunkMethod = Literal['semantic', 'tokens', 'paragraphs', 'sentences','words', 'ebook_chapters', 'json' ]
 
 # Define allowed PDF parsing engines
 PdfEngine = Literal['pymupdf4llm', 'pymupdf', 'docling'] # Add others if supported

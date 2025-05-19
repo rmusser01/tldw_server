@@ -19,16 +19,13 @@ import pytest
 from fastapi import status # Added
 from fastapi.testclient import TestClient
 from loguru import logger
-
+#
+# Local Imports
 from tldw_Server_API.app.core.DB_Management.DB_Manager import get_all_document_versions
 from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.tests.MediaDB2.test_sqlite_db import get_entity_version, get_latest_log
 from tldw_Server_API.tests.Media_Ingestion_Modification.test_add_media_endpoint import override_get_request_user
-# Local Imports
-# --- Test Utilities ---
 from tldw_Server_API.tests.test_utils import temp_db
-
-# --- App and Dependencies for Overriding ---
 try:
     # Import app instance and specific dependencies to override
     from tldw_Server_API.app.main import app as fastapi_app_instance, app
@@ -38,7 +35,7 @@ try:
     from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, get_document_version
 except ImportError as e:
     raise ImportError(f"Could not locate the FastAPI app instance or dependencies: {e}")
-
+from tldw_Server_API.app.api.v1.schemas.media_request_models import ChunkMethod, MediaType, PdfEngine
 
 ######################################################################################################################
 # Constants
