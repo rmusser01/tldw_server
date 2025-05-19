@@ -27,8 +27,11 @@ from typing import List, Any, Optional, Tuple, Dict, Union
 #
 # Import 3rd-Party Libraries
 import requests
+from loguru import logger
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 #
 # Import Local libraries
 from tldw_Server_API.app.core.config import load_and_log_configs
@@ -547,249 +550,283 @@ def chat_with_anthropic(
 
 
 def chat_with_cohere(
-        input_data: List[Dict[str, Any]],  # Mapped from 'messages_payload'
+        input_data: List[Dict[str, Any]],
         model: Optional[str] = None,
         api_key: Optional[str] = None,
-        system_prompt: Optional[str] = None,  # Mapped from 'system_message', becomes 'preamble'
+        system_prompt: Optional[str] = None,  # Cohere calls it 'preamble' or uses first system message
         temp: Optional[float] = None,
-        topp: Optional[float] = None,  # Mapped from 'topp', becomes 'p'
-        topk: Optional[int] = None,  # Mapped from 'topk', becomes 'k'
         streaming: Optional[bool] = False,
-        max_tokens: Optional[int] = None,
+        # Cohere specific or mapped OpenAI params
+        topp: Optional[float]   = None,  # Maps to 'p' in Cohere
+        topk: Optional[int] = None,  # Maps to 'k'
+        max_tokens: Optional[int] = None,  # Cohere's 'max_tokens' for response
         stop_sequences: Optional[List[str]] = None,  # Mapped from 'stop'
         seed: Optional[int] = None,
-        num_generations: Optional[int] = None,  # Mapped from 'n'
-        frequency_penalty: Optional[float] = None,
-        presence_penalty: Optional[float] = None,
-        logit_bias: Optional[Dict[str, float]] = None,  # Cohere calls it 'logit_bias' too
+        num_generations: Optional[int] = None,  # Mapped from 'n' - ONLY for non-streaming
+        frequency_penalty: Optional[float] = None,  # Cohere specific name
+        presence_penalty: Optional[float] = None,  # Cohere specific name
         tools: Optional[List[Dict[str, Any]]] = None,
-        # Cohere's tool_choice equivalent is 'force_single_tool' or managed via prompt/tool results.
-        # For simplicity, direct 'tool_choice' as OpenAI is complex here.
-        custom_prompt_arg: Optional[str] = None  # Legacy
+        custom_prompt_arg: Optional[str] = None  # Legacy, less used by Cohere's chat
 ):
+    logger.debug(f"Cohere Chat: Request process starting for model '{model}' (Streaming: {streaming})")
     loaded_config_data = load_and_log_configs()
-    cohere_config = loaded_config_data.get('cohere_api', {})
+    cohere_config = loaded_config_data.get('cohere_api', loaded_config_data.get('API', {}).get('cohere', {}))
+
     final_api_key = api_key or cohere_config.get('api_key')
     if not final_api_key:
-        raise ChatConfigurationError(provider="cohere", message="Cohere API Key is required.")
+        raise ChatAuthenticationError(provider="cohere", message="Cohere API key is missing.")
+    logger.debug(f"Cohere: Using API Key: {final_api_key[:5]}...{final_api_key[-5:]}")
 
-    log_key = f"{final_api_key[:3]}...{final_api_key[-3:]}" if final_api_key and len(
-        final_api_key) > 5 else "Key Provided"
-    logging.debug(f"Cohere: Using API Key: {log_key}")
+    final_model = model or cohere_config.get('model', 'command-r')
+    api_base_url = cohere_config.get('api_base_url', 'https://api.cohere.com').rstrip('/')
+    COHERE_CHAT_URL = f"{api_base_url}/v1/chat"
 
-    current_model = model or cohere_config.get('model', 'command-r')
-    current_temp = temp if temp is not None else float(cohere_config.get('temperature', 0.3))
-    current_p = topp  # Cohere uses 'p'
-    current_k = topk  # Cohere uses 'k'
-    current_streaming_cfg = cohere_config.get('streaming', False)
-    current_streaming = streaming if streaming is not None else \
-        (str(current_streaming_cfg).lower() == 'true' if isinstance(current_streaming_cfg, str) else bool(
-            current_streaming_cfg))
+    timeout_seconds = float(cohere_config.get('api_timeout', 120.0))  # Increased default from previous context
+    # For streaming, a very long timeout might be needed if the stream is long-lived with pauses
+    # For request-response non-streaming, 120s should be ample.
+    # Consider separate timeouts if necessary. The current test timeout is 90s.
+    # Let's make the internal timeout slightly higher for streams to give Cohere a chance.
+    effective_timeout = timeout_seconds * 2 if streaming else timeout_seconds
 
-    current_max_tokens = max_tokens if max_tokens is not None else _safe_cast(cohere_config.get('max_tokens'), int)
+    headers = {
+        "Authorization": f"Bearer {final_api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json" if not streaming else "text/event-stream",  # Correct Accept for streams
+        "Cohere-Version": cohere_config.get('api_version_date', "2022-12-06")
+    }
 
-    chat_history = []
-    user_message_text = ""
-    # Cohere expects the last message to be the current user query, and previous ones in chat_history
-    # System prompt becomes 'preamble'
-    if system_prompt:
-        # Cohere's 'preamble' is a top-level field.
-        pass  # Will be added to 'data' later
+    chat_history_for_cohere = []
+    current_user_message_str = ""
+    preamble_str = system_prompt or ""
 
-    for i, msg in enumerate(input_data):
-        role = msg.get("role")
-        content = msg.get("content")
-        # Cohere only supports text content directly in chat history/message for /v1/chat
-        # Multimodal (images) needs different handling or isn't supported by /v1/chat.
-        # For simplicity, we'll extract text.
-        current_msg_text = ""
-        if isinstance(content, str):
-            current_msg_text = content
-        elif isinstance(content, list):
-            for part in content:
-                if part.get("type") == "text":
-                    current_msg_text += part.get("text", "") + "\n"
-                elif part.get("type") == "image_url":
-                    logging.warning("Cohere /v1/chat: Images in messages are not directly supported, text extracted.")
-            current_msg_text = current_msg_text.strip()
+    temp_messages = list(input_data)
 
-        if not current_msg_text and role != "assistant":  # Allow empty assistant response in history
-            logging.warning(f"Cohere: Skipping empty message for role {role}")
-            continue
+    if not preamble_str and temp_messages and temp_messages[0]['role'] == 'system':
+        preamble_str = temp_messages.pop(0)['content']
+        logger.debug(f"Cohere: Using system message from input_data as preamble: '{preamble_str[:100]}...'")
 
-        if i == len(input_data) - 1 and role == "user":
-            user_message_text = current_msg_text
-        elif role == "user":
-            chat_history.append({"role": "USER", "message": current_msg_text})
+    if not temp_messages:
+        raise ChatBadRequestError(provider="cohere",
+                                  message="No user/assistant messages found for Cohere chat after processing system message.")
+
+    if temp_messages[-1]['role'] == 'user':
+        last_msg_content = temp_messages[-1]['content']
+        if isinstance(last_msg_content, list):
+            current_user_message_str = next((part['text'] for part in last_msg_content if part.get('type') == 'text'),
+                                            "")
+            # TODO: Handle images for Cohere if its API supports it (e.g., by passing image URLs if Cohere supports them)
+        else:
+            current_user_message_str = str(last_msg_content)
+        chat_history_for_cohere = temp_messages[:-1]
+    else:
+        # This case is problematic for Cohere's /chat which expects a final user message.
+        # If custom_prompt_arg is meaningful as a user query, use it.
+        current_user_message_str = custom_prompt_arg or "Please respond."  # Provide a default user message
+        chat_history_for_cohere = temp_messages  # Keep all as history, append the placeholder
+        logger.warning(
+            f"Cohere: Last message in payload was not 'user'. Using fallback: '{current_user_message_str}'. This might not be ideal.")
+
+    if not current_user_message_str.strip():  # Ensure there's actual content
+        raise ChatBadRequestError(provider="cohere",
+                                  message="Current user message for Cohere is empty after processing.")
+
+    transformed_history = []
+    for msg in chat_history_for_cohere:
+        role = msg.get('role', '').lower()  # Use lower for easier comparison
+        content = msg.get('content', '')
+        if isinstance(content, list):
+            content = next((part['text'] for part in content if part.get('type') == 'text'), "")
+
+        if role == "user":
+            transformed_history.append({"role": "USER", "message": str(content)})
         elif role == "assistant":
-            chat_history.append({"role": "CHATBOT", "message": current_msg_text})
-        # System messages are handled by 'preamble'
+            transformed_history.append({"role": "CHATBOT", "message": str(content)})
+        # Other roles (like system if not used as preamble) are usually ignored by Cohere in chat_history
 
-    if not user_message_text:  # If the last message wasn't a user message or was empty
-        if chat_history and chat_history[-1]["role"] == "CHATBOT":  # if last history item was bot
-            raise ChatBadRequestError(provider="cohere",
-                                      message="Last message must be from USER for Cohere API, or provide a new user message.")
-        elif not chat_history:  # No history and no current user message
-            raise ChatBadRequestError(provider="cohere", message="No user message provided for Cohere API.")
-        # If history exists and last message was user, it might be implicitly the current message
-        # but Cohere API prefers explicit 'message' field.
-        # For robustness, it's better if the last message in `input_data` is always user for Cohere.
+    payload: Dict[str, Any] = {"model": final_model, "message": current_user_message_str}
+    if transformed_history: payload["chat_history"] = transformed_history
+    if preamble_str: payload["preamble"] = preamble_str
+    if temp is not None: payload["temperature"] = temp
+    if topp is not None: payload["p"] = topp
+    if topk is not None: payload["k"] = topk
+    if max_tokens is not None: payload["max_tokens"] = max_tokens
+    if stop_sequences is not None: payload["stop_sequences"] = stop_sequences
+    if seed is not None: payload["seed"] = seed
 
-    headers = {'accept': 'application/json', 'content-type': 'application/json',
-               'Authorization': f'Bearer {final_api_key}'}
-    data = {"model": current_model, "message": user_message_text}  # 'message' is the current user query
+    # num_generations is for non-streaming. Cohere's API might error if sent with stream=True.
+    if num_generations is not None and not streaming:
+        payload["num_generations"] = num_generations
+    elif num_generations is not None and streaming:
+        logger.warning(
+            "Cohere: 'num_generations' (n) is typically for non-streaming and will be ignored for streaming.")
 
-    if system_prompt is not None: data["preamble"] = system_prompt
-    if chat_history: data["chat_history"] = chat_history
-    if current_temp is not None: data["temperature"] = current_temp
-    if current_p is not None: data["p"] = current_p
-    if current_k is not None: data["k"] = current_k
-    if current_max_tokens is not None: data["max_tokens"] = current_max_tokens
-    if stop_sequences is not None: data["stop_sequences"] = stop_sequences
-    if seed is not None: data["seed"] = seed
-    if num_generations is not None: data["num_generations"] = num_generations  # 'n' mapped
-    if frequency_penalty is not None: data["frequency_penalty"] = frequency_penalty
-    if presence_penalty is not None: data["presence_penalty"] = presence_penalty
-    if logit_bias is not None: data["logit_bias"] = logit_bias
-    if tools is not None: data["tools"] = tools  # Assuming 'tools' is in Cohere's format
+    if frequency_penalty is not None: payload["frequency_penalty"] = frequency_penalty
+    if presence_penalty is not None: payload["presence_penalty"] = presence_penalty
+    if tools: payload["tools"] = tools
 
-    # Cohere v1/chat uses stream as query param. v2/chat uses it in body.
-    # Assuming you are using v1/chat based on your original code for chat_with_cohere.
-    api_url_base = cohere_config.get('api_base_url', 'https://api.cohere.com/v1').rstrip('/')
-    api_url = f"{api_url_base}/chat"
-    request_params = {}
-    if current_streaming:
-        request_params["stream"] = "true"  # Query parameter for v1
-
-    logging.debug(f"Cohere Request Payload: {data}")
-    logging.debug(f"Cohere Request URL: {api_url}, Params: {request_params}")
+    logger.debug(f"Cohere Request Payload: {payload}")
+    logger.debug(f"Cohere Request URL: {COHERE_CHAT_URL}, Params: {{'stream': {str(streaming).lower()}}}")
 
     try:
-        # ... (retry logic from your file) ...
-        retry_count = int(cohere_config.get('api_retries', 3))
-        retry_delay = float(cohere_config.get('api_retry_delay', 1))
-        retry_strategy = Retry(total=retry_count, backoff_factor=retry_delay,
-                               status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["POST"])
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        with requests.Session() as session:
-            session.mount("https://", adapter)
-            response = session.post(api_url, headers=headers, json=data, params=request_params,
-                                    stream=current_streaming, timeout=180)
-        response.raise_for_status()
+        if streaming:
+            # Ensure stream parameter is boolean true for Cohere SDK or string "true" for direct REST
+            response = requests.post(COHERE_CHAT_URL, headers=headers, json=payload, stream=True,
+                                     params={"stream": "true"}, timeout=effective_timeout)
+            response.raise_for_status()
+            logger.debug("Cohere: Streaming response connection established.")
 
-        if current_streaming:
-            logging.debug("Cohere: Streaming response received. Yielding raw text chunks.")
-
-            def stream_generator_cohere_raw(response_iter, model_name_for_done):  # Renamed to indicate raw output
-                stream_truly_finished_by_cohere_event = False
+            # This generator yields text chunks for the endpoint's sse_event_generator
+            def stream_generator_cohere_text_chunks(response_iterator, model_name_for_event_ignored):
+                stream_properly_closed = False
+                accumulated_text_for_log = []
                 try:
-                    buffer = ""
-                    for chunk_bytes in response.iter_content(chunk_size=None):  # Iterate over raw bytes
-                        if not chunk_bytes: continue
-                        buffer += chunk_bytes.decode('utf-8', errors='replace')
-
-                        while '\n' in buffer:
-                            line, buffer = buffer.split('\n', 1)
-                            if not line.strip(): continue
+                    for line_bytes in response_iterator:
+                        if line_bytes:
+                            decoded_line = line_bytes.decode('utf-8').strip()
+                            if not decoded_line: continue
+                            # logger.trace(f"Cohere stream raw line: {decoded_line}")
                             try:
-                                cohere_event = json.loads(line)
+                                cohere_event = json.loads(decoded_line)
                                 event_type = cohere_event.get("event_type")
 
                                 if event_type == "text-generation":
                                     text_chunk = cohere_event.get("text")
                                     if text_chunk:
-                                        logging.trace(f"Cohere Stream Raw Yield: {text_chunk[:50]}")
-                                        yield text_chunk  # Yield raw text
+                                        # logger.trace(f"Cohere stream yielding text_chunk: '{text_chunk}'")
+                                        accumulated_text_for_log.append(text_chunk)
+                                        yield text_chunk  # Yield the text content directly
                                 elif event_type == "stream-end":
-                                    stream_truly_finished_by_cohere_event = True
-                                    # Logging the finish reason is good, but don't yield it as text
-                                    raw_finish_reason = cohere_event.get("finish_reason", "COMPLETE")
-                                    if "response" in cohere_event and isinstance(cohere_event["response"], dict):
-                                        raw_finish_reason = cohere_event["response"].get("finish_reason",
-                                                                                         raw_finish_reason)
-                                    logging.info(
-                                        f"Cohere stream ended via 'stream-end' event. Finish reason: {raw_finish_reason}")
-                                    # The endpoint's sse_event_generator will handle the [DONE] SSE message
-                                    return  # Explicitly stop the generator
-
-                                # Handle other event types if necessary, but don't yield them as text unless intended
+                                    stream_properly_closed = True
+                                    finish_reason = cohere_event.get("finish_reason", "UNKNOWN")
+                                    logger.info(
+                                        f"Cohere stream: 'stream-end' event received. Finish reason: {finish_reason}. Total text fragments: {len(accumulated_text_for_log)}")
+                                    # The endpoint's SSE generator will send the final [DONE] type message.
+                                    return  # Properly exit the generator
+                                # elif event_type: # Log other known event types if curious
+                                # logger.trace(f"Cohere stream event type: {event_type}, data: {cohere_event}")
 
                             except json.JSONDecodeError:
-                                logging.warning(f"Cohere Stream: Could not decode JSON from line: '{line}'")
-                            except Exception as e_parse:
-                                logging.error(f"Cohere Stream: Error parsing event '{line}': {e_parse}", exc_info=True)
-
-                        if stream_truly_finished_by_cohere_event:  # Check if inner loop broke due to stream-end
-                            break
-
-                    if not stream_truly_finished_by_cohere_event:
-                        logging.warning("Cohere stream loop finished without explicit 'stream-end' event from Cohere.")
-
+                                logger.warning(f"Cohere Stream: JSON decode error for line: '{decoded_line}'")
                 except requests.exceptions.ChunkedEncodingError as e:
-                    logging.error(f"Cohere: ChunkedEncodingError: {e}", exc_info=True)
-                    # Yield a special marker or raise an exception that the endpoint's sse_event_generator can catch
-                    yield f"<STREAM_ERROR:ChunkedEncodingError:{str(e)}>"  # Example error marker
-                except Exception as e_outer:
-                    logging.error(f"Cohere: Stream iteration error: {e_outer}", exc_info=True)
-                    yield f"<STREAM_ERROR:IterationError:{str(e_outer)}>"  # Example error marker
+                    logger.warning(f"Cohere stream: ChunkedEncodingError: {e}. Stream may have been interrupted.")
+                except Exception as e_stream:
+                    logger.error(f"Cohere stream: Error during streaming: {e_stream}", exc_info=True)
                 finally:
-                    logging.debug("Cohere Stream (raw generator): Finished.")
-                    if response: response.close()
+                    if not stream_properly_closed:
+                        logger.warning(
+                            "Cohere stream generator loop finished without explicit 'stream-end' event from Cohere.")
+                    logger.debug(f"Cohere stream_generator_cohere_text_chunks for model {final_model} finished.")
+                    if response:  # Ensure the main response object is closed
+                        response.close()
 
-            return stream_generator_cohere_raw()  # Return the raw generator
-        else:
+            return stream_generator_cohere_text_chunks(response.iter_lines(), final_model)
+        else:  # Non-streaming
+            response = requests.post(COHERE_CHAT_URL, headers=headers, json=payload, stream=False,
+                                     params={"stream": "false"}, timeout=effective_timeout)
+            response.raise_for_status()
             response_data = response.json()
-            logging.debug("Cohere: Non-streaming request successful.")
-            finish_reason_map = {"COMPLETE": "stop", "MAX_TOKENS": "length", "ERROR_LIMIT": "length",
-                                 "ERROR_TOXIC": "content_filter", "ERROR": "error"}
-            cohere_finish_reason = response_data.get("finish_reason", "UNKNOWN")
-            openai_finish_reason = finish_reason_map.get(cohere_finish_reason, cohere_finish_reason.lower())
-            usage_data = response_data.get("meta", {}).get("billed_units", {})  # Default if not present
-            if not usage_data and "token_count" in response_data:  # Older API might have token_count
-                usage_data = {
-                    "input_tokens": response_data["token_count"].get("prompt_tokens"),
-                    "output_tokens": response_data["token_count"].get("response_tokens")  # Or "completion_tokens"
-                }
+            logger.debug(f"Cohere non-streaming response data: {response_data}")
 
-            prompt_tokens = usage_data.get("input_tokens")
-            completion_tokens = usage_data.get("output_tokens")
-            total_tokens = None
-            if prompt_tokens is not None and completion_tokens is not None:
-                total_tokens = prompt_tokens + completion_tokens
+            chat_id = response_data.get("generation_id", f"chatcmpl-cohere-{time.time()}")
+            created_timestamp = int(time.time())  # Or parse from response if available
 
-            normalized_response = {
-                "id": response_data.get("generation_id", f"cohere-{time.time_ns()}"),
-                "object": "chat.completion", "created": int(time.time()),
-                "model": current_model,
-                # Cohere response includes "meta":{"api_version":{"version":"1"},"billed_units":{"input_tokens":X,"output_tokens":Y}}
-                # but not the model name directly in the main body for /v1/chat
-                "choices": [
-                    {"index": 0, "message": {"role": "assistant", "content": response_data.get("text", "").strip()},
-                     "finish_reason": openai_finish_reason}],
-                "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
-                          "total_tokens": total_tokens}
+            choices_payload = []
+            finish_reason = response_data.get("finish_reason", "stop")  # Default, Cohere might provide this
+
+            if response_data.get("text"):
+                choices_payload.append({
+                    "message": {"role": "assistant", "content": response_data["text"]},
+                    "finish_reason": finish_reason,
+                    "index": 0
+                })
+            elif response_data.get("tool_calls"):
+                # This needs careful mapping to OpenAI's tool_calls structure if strict compatibility is needed.
+                # For now, passing Cohere's tool_calls structure as is.
+                cohere_tool_calls = response_data.get("tool_calls", [])
+                # Example mapping (very basic, needs detail based on Cohere's actual tool_call format vs OpenAI's):
+                openai_like_tool_calls = []
+                for tc in cohere_tool_calls:
+                    # This assumes Cohere's tool_call ('tc') has 'name', 'parameters'
+                    # and we need to generate an 'id' and 'type: function'.
+                    openai_like_tool_calls.append({
+                        "id": f"call_{tc.get('name', 'tool')}_{time.time_ns()}",  # Generate a unique ID
+                        "type": "function",
+                        "function": {  # This should be FunctionDefinition schema-like
+                            "name": tc.get("name"),
+                            "arguments": json.dumps(tc.get("parameters", {}))  # Arguments must be JSON string
+                        }
+                    })
+
+                choices_payload.append({
+                    "message": {"role": "assistant", "content": None, "tool_calls": openai_like_tool_calls},
+                    "finish_reason": "tool_calls",  # OpenAI uses "tool_calls"
+                    "index": 0
+                })
+            else:
+                logger.warning(f"Cohere non-streaming response missing 'text' or 'tool_calls': {response_data}")
+                choices_payload.append({
+                    "message": {"role": "assistant", "content": ""},
+                    "finish_reason": finish_reason,
+                    "index": 0
+                })
+
+            # Cohere /v1/chat response structure:
+            # { "text": "...", "generation_id": "...", "citations": [...], "documents": [...],
+            #   "is_search_required": bool, "search_queries": [...], "search_results": [...],
+            #   "finish_reason": "...", "tool_calls": [...], "chat_history": [...],
+            #   "meta": { "api_version": {...}, "billed_units": {"input_tokens": X, "output_tokens": Y}}}
+
+            usage_data = None
+            if "meta" in response_data and "billed_units" in response_data["meta"]:
+                billed_units = response_data["meta"]["billed_units"]
+                prompt_tokens = billed_units.get("input_tokens")
+                completion_tokens = billed_units.get("output_tokens")
+                if prompt_tokens is not None and completion_tokens is not None:
+                    usage_data = {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": prompt_tokens + completion_tokens
+                    }
+
+            openai_compatible_response = {
+                "id": chat_id,
+                "object": "chat.completion",
+                "created": created_timestamp,
+                "model": final_model,
+                "choices": choices_payload,
             }
-            # If tools were used and results are in response_data["tool_calls"], normalize them.
-            if response_data.get("tool_calls"):
-                normalized_response["choices"][0]["message"]["tool_calls"] = response_data.get(
-                    "tool_calls")  # Assuming direct pass-through is OpenAI compatible enough
+            if usage_data:
+                openai_compatible_response["usage"] = usage_data
 
-            return normalized_response
+            return openai_compatible_response
+
     except requests.exceptions.HTTPError as e:
-        # ... (error handling from your file, ensure provider is "cohere") ...
-        status_code = e.response.status_code if e.response is not None else 500
-        error_text = e.response.text if e.response is not None else "No response text"
+        status_code = getattr(e.response, 'status_code', 500)
+        error_text = getattr(e.response, 'text', str(e))
+        logger.error(f"Cohere API call failed with status {status_code}. Details: {error_text[:500]}", exc_info=False)
         if status_code == 401:
-            raise ChatAuthenticationError(provider="cohere", message=f"Auth failed. Detail: {error_text[:200]}") from e
-        # ... (other status codes) ...
+            raise ChatAuthenticationError(provider="cohere",
+                                          message=f"Authentication failed. Detail: {error_text[:200]}")
+        elif status_code == 429:
+            raise ChatRateLimitError(provider="cohere", message=f"Rate limit exceeded. Detail: {error_text[:200]}")
+        elif 400 <= status_code < 500:
+            raise ChatBadRequestError(provider="cohere",
+                                      message=f"Bad request (Status {status_code}). Detail: {error_text[:200]}")
         else:
-            raise ChatProviderError(provider="cohere", message=f"API error ({status_code}). Detail: {error_text[:200]}",
-                                    status_code=status_code) from e
+            raise ChatProviderError(provider="cohere",
+                                    message=f"Server error (Status {status_code}). Detail: {error_text[:200]}",
+                                    status_code=status_code)
     except requests.exceptions.RequestException as e:
-        raise ChatProviderError(provider="cohere", message=f"Network error: {str(e)}", status_code=504) from e
+        logger.error(f"Cohere API request failed (network error): {e}", exc_info=True)
+        raise ChatProviderError(provider="cohere", message=f"Network error: {e}", status_code=504)
     except Exception as e:
-        logging.error(f"Cohere: Unexpected error: {e}", exc_info=True)
-        raise ChatProviderError(provider="cohere", message=f"Unexpected error: {e}")
+        logger.error(f"Cohere API call: Unexpected error: {e}", exc_info=True)
+        # Ensure it's a ChatAPIError or one of its subtypes
+        if not isinstance(e, (ChatAuthenticationError, ChatRateLimitError, ChatBadRequestError, ChatProviderError,
+                              ChatAPIError, ChatConfigurationError)):
+            raise ChatAPIError(provider="cohere", message=f"Unexpected error in Cohere API call: {e}")
+        else:
+            raise  # Re-raise if it's already a suitable custom error
 
 
 def chat_with_deepseek(
@@ -1220,20 +1257,19 @@ def chat_with_groq(
 
 def chat_with_huggingface(
         input_data: List[Dict[str, Any]],
-        model: Optional[str] = None,  # This will be the 'model' in the payload
+        model: Optional[str] = None,  # This is the model_id like "Org/ModelName"
         api_key: Optional[str] = None,
-        system_message: Optional[str] = None,  # Mapped from generic system_message
+        system_message: Optional[str] = None,
         temp: Optional[float] = None,
         streaming: Optional[bool] = False,
-        # OpenAI-compatible parameters
         top_p: Optional[float] = None,
         top_k: Optional[int] = None,
-        max_tokens: Optional[int] = None,  # Generic 'max_tokens'
+        max_tokens: Optional[int] = None,
         seed: Optional[int] = None,
         stop: Optional[Union[str, List[str]]] = None,
         response_format: Optional[Dict[str, str]] = None,
         num_return_sequences: Optional[int] = None,  # Mapped from 'n'
-        user: Optional[str] = None,  # Mapped from user_identifier
+        user: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
         logit_bias: Optional[Dict[str, float]] = None,
@@ -1243,9 +1279,10 @@ def chat_with_huggingface(
         top_logprobs: Optional[int] = None,
         custom_prompt_arg: Optional[str] = None  # Legacy
 ):
-    logging.debug(f"HuggingFace Chat: Request process starting...")
+    logging.debug(f"HuggingFace Chat: Request process starting for model '{model}'...")
     loaded_config_data = load_and_log_configs()
-    hf_config = loaded_config_data.get('huggingface_api', {})
+    # Ensure 'huggingface_api' section exists or provide empty dict default
+    hf_config = loaded_config_data.get('huggingface_api', loaded_config_data.get('API', {}).get('huggingface', {}))
 
     final_api_key = api_key or hf_config.get('api_key')
     if final_api_key:
@@ -1253,157 +1290,207 @@ def chat_with_huggingface(
         logging.debug(f"HuggingFace: Using API Key: {log_key_display}")
     else:
         logging.warning("HuggingFace: API key is missing. Assuming local/unsecured TGI or endpoint allows it.")
-    if not final_api_key:
-        logging.warning("HuggingFace: API key is missing. Calls might fail if the endpoint requires authentication.")
 
-    headers = {
-        "Content-Type": "application/json"
-    }
-    if final_api_key:  # Only add Authorization header if a key is present
+    headers = {"Content-Type": "application/json"}
+    if final_api_key:
         headers["Authorization"] = f"Bearer {final_api_key}"
 
-    logging.debug(f"HuggingFace Payload (excluding messages): {{k:v for k,v in payload.items() if k != 'messages'}}")
-    logging.debug(f"HuggingFace Headers: {headers}")
-
-    # Model for the payload. The 'model' arg to this function is primary.
-    final_model_for_payload = model or hf_config.get('model')  # 'model' from config, not 'model_id'
-    # final_model_for_payload is the model ID string like "Org/ModelName"
+    # model argument to this function is the primary model_id
+    final_model_for_payload = model
     if not final_model_for_payload:
-        raise ChatConfigurationError(provider="huggingface",
-                                     message="HuggingFace model ID is required for URL construction.")
+        # Try to get from config if not passed directly, though direct pass is preferred for clarity
+        final_model_for_payload = hf_config.get('model_id', hf_config.get('model'))
+        if not final_model_for_payload:
+            raise ChatConfigurationError(provider="huggingface",
+                                         message="HuggingFace model ID is required (must be passed as 'model' or configured).")
+        logging.info(f"HuggingFace: Using model_id from config: {final_model_for_payload}")
 
     # --- URL Construction ---
     api_url: str
-    use_router_format = str(hf_config.get('use_router_url_format', "False")).lower() == "true"
-    if use_router_format:
-        # This format assumes the router base URL needs /models/ appended, then model_id, then chat_path
+    # Explicit config flag to use the specific router URL format
+    use_router_url_format_str = str(hf_config.get('use_router_url_format', "False")).lower()
+
+    if use_router_url_format_str == "true":
         router_base = hf_config.get('router_base_url', 'https://router.huggingface.co/hf-inference').rstrip('/')
-        model_path_part = final_model_for_payload.strip('/')  # e.g., "Org/ModelName"
-        chat_path = hf_config.get('api_chat_path', 'v1/chat/completions').strip('/')
+        model_path_part = final_model_for_payload.strip('/')
+        chat_path = hf_config.get('api_chat_path', 'v1/chat/completions').lstrip('/')
         api_url = f"{router_base}/models/{model_path_part}/{chat_path}"
-        logging.info(f"HuggingFace: Using Router URL format. Target URL: {api_url}")
+        logging.info(f"HuggingFace: Using explicit Router URL format. Target URL: {api_url}")
     else:
-        # This block is for custom TGI endpoints or other OpenAI-compatible endpoints
+        # Try to use a configured specific api_base_url
         configured_api_base_url = hf_config.get('api_base_url')
-        if not configured_api_base_url:
-            # If no specific base URL, AND use_router_format is false, this is ambiguous.
-            # For now, let's assume if use_router_format is false, a base_url MUST be provided.
-            # Or, we could default to the more specific serverless inference API structure.
-            # The previous default here was problematic.
-            raise ChatConfigurationError(provider="huggingface",
-                                         message="HuggingFace 'api_base_url' not configured and 'use_router_format' is false.")
-        else:
-            # We have a configured_api_base_url.
-            # Now, determine if the model ID should be part of the path.
-            # For OpenAI-compatible /v1/chat/completions, the model is usually in the payload, not URL.
-            # However, some TGI setups might expose each model at a sub-path.
-            # The key here is that the LOG showed:
-            # "HuggingFace: Using configured TGI/Endpoint URL format. Target URL: https://router.huggingface.co/hf-inference/models/v1/chat/completions"
-            # This implies 'configured_api_base_url' was something like "https://router.huggingface.co/hf-inference/models"
-            # and 'api_chat_path' was "v1/chat/completions".
-            # THE FIX: The model_id part was missing between these two if this base_url is for a collection of models.
-
-            chat_completions_path = hf_config.get('api_chat_path', 'v1/chat/completions').lstrip(
-                '/')  # Ensure path starts with / if not empty
-
-            # Check if the base URL already looks like it includes a model segment for a *specific* model endpoint
-            # This is heuristic. A better way is an explicit config flag like 'base_url_is_model_specific'.
+        if configured_api_base_url:
+            chat_completions_path = hf_config.get('api_chat_path', 'v1/chat/completions').lstrip('/')
+            # If base_url is for a generic TGI server, model might be part of path or just payload
+            # Heuristic: if model_id is not in base_url, and base_url doesn't end with the model_id, append it.
+            # This is tricky; ideally, config is explicit.
+            base_url_is_generic = True  # Assume generic unless specific markers
             if final_model_for_payload.lower() in configured_api_base_url.lower():
-                # Base URL likely already points to a specific model's endpoint
-                api_url = f"{configured_api_base_url.rstrip('/')}/{chat_completions_path}"
-                logging.info(f"HuggingFace: Configured base URL appears model-specific. Target URL: {api_url}")
-            else:
-                # Base URL is likely generic (e.g., https://my-tgi-server.com), append model and chat path
-                # OR the base_url is like the router's /models path, and we need to insert model_id
-                # This is the path that was likely causing the 404 with the generic URL.
+                base_url_is_generic = False
+
+            if base_url_is_generic and not configured_api_base_url.endswith(final_model_for_payload):
+                # Append model_id if base_url is generic and doesn't end with model_id
                 model_path_part = final_model_for_payload.strip('/')
                 api_url = f"{configured_api_base_url.rstrip('/')}/{model_path_part}/{chat_completions_path}"
                 logging.info(
-                    f"HuggingFace: Using configured TGI/Endpoint URL format (base + model + path). Target URL: {api_url}")
+                    f"HuggingFace: Using configured generic TGI/Endpoint URL with model path. Target URL: {api_url}")
+            else:  # Base URL is specific or already contains model_id, just append chat path
+                api_url = f"{configured_api_base_url.rstrip('/')}/{chat_completions_path}"
+                logging.info(f"HuggingFace: Using configured specific TGI/Endpoint URL. Target URL: {api_url}")
+        else:
+            # Fallback if no api_base_url and use_router_url_format is false: default to serverless inference API style
+            # This is different from the router; this one is api-inference.huggingface.co/models/{model_id}
+            # This endpoint is NOT typically for /v1/chat/completions. It's for raw inference.
+            # For /v1/chat/completions compatibility, router is better.
+            # Given the test context, the router structure with model_id is most likely.
+            default_router_base = 'https://router.huggingface.co/hf-inference'
+            model_part = final_model_for_payload.strip('/')
+            default_chat_path = 'v1/chat/completions'.lstrip('/')
+            api_url = f"{default_router_base}/models/{model_part}/{default_chat_path}"
+            logging.warning(
+                f"HuggingFace: 'api_base_url' not configured and 'use_router_url_format' is false. "
+                f"Defaulting to assumed router structure for model. URL: {api_url}"
+            )
 
     # Resolve other parameters
     final_temp = temp if temp is not None else _safe_cast(hf_config.get('temperature'), float, 0.7)
-    final_streaming_cfg = hf_config.get('streaming', False)
+    final_streaming_cfg = hf_config.get('streaming', False)  # Default to False if not in config
     final_streaming = streaming if streaming is not None else \
         (str(final_streaming_cfg).lower() == 'true' if isinstance(final_streaming_cfg, str) else bool(
             final_streaming_cfg))
 
-    # For max_tokens, OpenAI standard is 'max_tokens'. TGI often uses 'max_new_tokens'.
-    # If the endpoint is OpenAI compatible (e.g. /v1/chat/completions), it likely expects 'max_tokens'.
-    # We prioritize the direct 'max_tokens' from chat_api_call.
     final_max_tokens_val = max_tokens if max_tokens is not None \
         else _safe_cast(hf_config.get('max_tokens', hf_config.get('max_new_tokens')), int)
 
     api_messages = []
-    if system_message:  # This is the parameter passed from chat_api_call
+    if system_message:
         api_messages.append({"role": "system", "content": system_message})
-    api_messages.extend(input_data)  # input_data is the messages_payload
+    api_messages.extend(input_data)
 
     payload = {
-        "model": final_model_for_payload,
-        "messages": api_messages,  # System message is now part of this
+        "model": final_model_for_payload,  # Some TGI endpoints want model here, some infer from URL.
+        "messages": api_messages,
         "stream": final_streaming,
     }
 
+    # Add optional parameters if they have values
     if final_temp is not None: payload["temperature"] = final_temp
     if top_p is not None: payload["top_p"] = top_p
-    if top_k is not None: payload["top_k"] = top_k
-    if final_max_tokens_val is not None: payload["max_tokens"] = final_max_tokens_val
+    if top_k is not None: payload["top_k"] = top_k  # TGI uses top_k
+    if final_max_tokens_val is not None: payload[
+        "max_tokens"] = final_max_tokens_val  # TGI uses max_new_tokens, OpenAI compatible layers expect max_tokens
     if seed is not None: payload["seed"] = seed
-    if stop is not None: payload["stop"] = stop
-    if response_format is not None: payload["response_format"] = response_format
-    if num_return_sequences is not None: payload["num_return_sequences"] = num_return_sequences
-    if user is not None: payload["user"] = user
+    if stop is not None: payload["stop"] = stop  # TGI uses 'stop' (list of strings)
+    if response_format is not None and response_format.get(
+            "type") == "json_object":  # TGI specific for JSON mode if supported
+        # TGI doesn't have a direct 'response_format' object like OpenAI.
+        # It might require specific grammar or be implied by model.
+        # For OpenAI-compatible TGI, it might support it.
+        payload["response_format"] = response_format  # Pass as is for compatible endpoints
+    if num_return_sequences is not None: payload["n"] = num_return_sequences  # OpenAI compatible 'n'
+    if user is not None: payload["user"] = user  # OpenAI compatible 'user'
     if tools is not None: payload["tools"] = tools
-    if tool_choice is not None:  # If it's still present after chat.py logic
-        payload["tool_choice"] = tool_choice
-    # Then conditionally add tool_choice:
-    elif tool_choice == "none":  # Allow "none" even if no tools are present
-        payload["tool_choice"] = "none"
+    if tool_choice is not None: payload["tool_choice"] = tool_choice
     if logit_bias is not None: payload["logit_bias"] = logit_bias
     if presence_penalty is not None: payload["presence_penalty"] = presence_penalty
     if frequency_penalty is not None: payload["frequency_penalty"] = frequency_penalty
     if logprobs is not None: payload["logprobs"] = logprobs
     if top_logprobs is not None and payload.get("logprobs"): payload["top_logprobs"] = top_logprobs
 
-    logging.debug(f"HuggingFace Payload (excluding messages): {{k:v for k,v in payload.items() if k != 'messages'}}")
+    # TGI specific commonly used params (if not covered by OpenAI names)
+    # Example: TGI uses "details" for logprobs-like info, "decoder_input_details"
+    # For now, sticking to OpenAI compatible names if the endpoint is /v1/chat/completions
+
+    logging.debug(
+        f"HuggingFace Final Payload (excluding messages): {{k:v for k,v in payload.items() if k != 'messages'}}")
+    logging.debug(f"HuggingFace Headers: {headers}")
+
+    timeout_seconds = float(hf_config.get('api_timeout', 120.0))
 
     try:
         if final_streaming:
             logging.debug(f"HuggingFace: Posting streaming request to {api_url}")
-            with requests.Session() as session:
-                # Use the defined headers
-                response = session.post(api_url, headers=headers, json=payload, stream=True, timeout=180)
-                response.raise_for_status()
+            session = requests.Session()
+            response = session.post(api_url, headers=headers, json=payload, stream=True, timeout=timeout_seconds)
+            response.raise_for_status()  # Will raise HTTPError for bad responses (4xx or 5xx)
 
-                def stream_generator():
-                    try:
-                        for line in response.iter_lines(decode_unicode=True):
-                            if line and line.strip(): yield line + "\n\n"
-                    # ... (error handling for stream) ...
-                    finally:
-                        yield "data: [DONE]\n\n"
-                        if response: response.close()
+            def stream_generator_huggingface():
+                # For OpenAI-compatible /v1/chat/completions on TGI, it should yield SSE
+                # If it's raw TGI, format is different. Assume OpenAI-compatible here.
+                try:
+                    for line in response.iter_lines():  # iter_lines yields bytes
+                        if line:
+                            decoded_line = line.decode('utf-8')
+                            # logging.debug(f"HF Stream raw line: {decoded_line}")
+                            if decoded_line.startswith("data:"):
+                                data_content = decoded_line[len("data:"):].strip()
+                                if data_content == "[DONE]":
+                                    # Yield a final OpenAI-like DONE structure if needed by endpoint's SSE parser
+                                    # but the endpoint's sse_event_generator already does this.
+                                    # So just stop.
+                                    logging.debug("HuggingFace stream received [DONE]")
+                                    break
+                                try:
+                                    # The data_content itself is the JSON string for an OpenAI chunk
+                                    # The endpoint sse_event_generator expects the text piece, not the whole sse line.
+                                    # This function should yield the *content* of the chunk.
+                                    chunk_json = json.loads(data_content)
+                                    delta_content = chunk_json.get("choices", [{}])[0].get("delta", {}).get("content")
+                                    if delta_content:
+                                        yield delta_content
+                                except json.JSONDecodeError:
+                                    logging.warning(f"HuggingFace stream: JSON decode error for data: {data_content}")
+                except requests.exceptions.ChunkedEncodingError as e:
+                    logging.error(f"HuggingFace stream: ChunkedEncodingError during streaming: {e}")
+                except Exception as e:
+                    logging.error(f"HuggingFace stream: Unexpected error during streaming: {e}", exc_info=True)
+                finally:
+                    if response:
+                        response.close()
+                    if session:
+                        session.close()
+                    logging.debug("HuggingFace stream generator finished.")
 
-                return stream_generator()
+            return stream_generator_huggingface()
         else:
             logging.debug(f"HuggingFace: Posting non-streaming request to {api_url}")
-            adapter = HTTPAdapter(max_retries=Retry(total=int(hf_config.get('api_retries', 3)),
-                                                    backoff_factor=float(hf_config.get('api_retry_delay', 1)),
-                                                    status_forcelist=[429, 500, 502, 503, 504],
-                                                    allowed_methods=["POST"]))
-            with requests.Session() as session:
-                session.mount("https://", adapter);
-                session.mount("http://", adapter)
-                # Use the defined headers
-                response = session.post(api_url, headers=headers, json=payload,
-                                        timeout=float(hf_config.get('api_timeout', 120.0)))
+            adapter = HTTPAdapter(max_retries=Retry(
+                total=int(hf_config.get('api_retries', 3)),
+                backoff_factor=float(hf_config.get('api_retry_delay', 1)),
+                status_forcelist=[429, 500, 502, 503, 504],
+                allowed_methods=["POST"]  # Corrected from allowlist_methods
+            ))
+            session = requests.Session()
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+            response = session.post(api_url, headers=headers, json=payload, timeout=timeout_seconds)
             response.raise_for_status()
             return response.json()
-    except requests.exceptions.HTTPError as e:  # ... error handling ...
-        raise
-    except Exception as e:  # ... error handling ...
-        raise ChatProviderError(provider="huggingface", message=f"Unexpected error: {e}")
+
+    except requests.exceptions.HTTPError as e:
+        status_code = getattr(e.response, 'status_code', 500)
+        error_text = getattr(e.response, 'text', str(e))
+        logging.error(f"HuggingFace API call failed with status {status_code}. Details: {error_text[:500]}",
+                      exc_info=False)
+        if status_code == 401:
+            raise ChatAuthenticationError(provider="huggingface",
+                                          message=f"Authentication failed. Check API key. Detail: {error_text[:200]}")
+        elif status_code == 429:
+            raise ChatRateLimitError(provider="huggingface", message=f"Rate limit exceeded. Detail: {error_text[:200]}")
+        elif 400 <= status_code < 500:
+            raise ChatBadRequestError(provider="huggingface",
+                                      message=f"Bad request (Status {status_code}). Detail: {error_text[:200]}")
+        else:
+            raise ChatProviderError(provider="huggingface",
+                                    message=f"Server error (Status {status_code}). Detail: {error_text[:200]}",
+                                    status_code=status_code)
+    except requests.exceptions.RequestException as e:
+        logging.error(f"HuggingFace API request failed (network error): {e}", exc_info=True)
+        raise ChatProviderError(provider="huggingface", message=f"Network error: {e}",
+                                status_code=504)  # Gateway timeout
+    except Exception as e:
+        logging.error(f"HuggingFace API call: Unexpected error: {e}", exc_info=True)
+        raise ChatAPIError(provider="huggingface", message=f"Unexpected error in HuggingFace API call: {e}")
 
 
 def chat_with_mistral(
