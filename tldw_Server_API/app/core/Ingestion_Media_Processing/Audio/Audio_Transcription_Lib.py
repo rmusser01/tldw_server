@@ -94,13 +94,48 @@ def perform_transcription(
     temp_dir: Optional[str] = None,
     ):
     """
-    Converts video/audio to WAV, performs transcription (optionally with diarization),
-    handles existing files, and manages errors.
+    Converts a video or audio file to WAV format, performs transcription,
+    and optionally attempts diarization (currently a placeholder).
+
+    The function handles file existence checks and error management throughout
+    the process. If diarization is requested, it's currently a non-functional
+    placeholder and will likely return with the audio path but no segments.
+
+    Args:
+        video_path: The file path to the video or audio file to be processed.
+        offset: The time offset (in seconds) from the beginning of the
+            media file from which to start processing. This is passed to
+            `convert_to_wav`.
+        transcription_model: The name or path of the transcription model
+            to be used (e.g., 'base.en', 'large-v3').
+        vad_use: A boolean indicating whether to use Voice Activity Detection
+            (VAD) during transcription.
+        diarize: A boolean indicating whether to perform speaker diarization.
+            (Note: Diarization functionality is currently a FIXME placeholder
+            and not fully implemented).
+        overwrite: A boolean indicating whether to overwrite existing
+            transcription files. If False and a relevant transcription file
+            exists, it will be loaded.
+        transcription_language: The language code (e.g., 'en', 'es') for
+            transcription. Defaults to 'en'.
+        temp_dir: An optional path to a temporary directory. (Note: This
+            parameter is not currently used in the function body).
 
     Returns:
-        Tuple[Optional[str], Optional[list]]: (audio_file_path, segments_list) on success,
-                                             (None, None) on critical failure (like conversion).
-                                             (audio_file_path, None) if transcription fails but conversion succeeded.
+        A tuple containing:
+        - `Optional[str]`: The file path to the converted WAV audio file.
+          This can be `None` if the initial conversion fails.
+        - `Optional[list]`: A list of transcription segments. Each segment
+          is typically a dictionary with 'start_seconds', 'end_seconds',
+          and 'Text'. This can be `None` if transcription (or diarization,
+          if attempted) fails or if an existing invalid file is encountered
+          with `overwrite=False`.
+
+        Specific return scenarios:
+        - `(audio_file_path, segments_list)`: On successful conversion and transcription.
+        - `(None, None)`: On critical failure (e.g., media conversion fails).
+        - `(audio_file_path, None)`: If conversion succeeds but transcription fails,
+          or if diarization is attempted and fails (as it's a placeholder).
     """
     local_media_path_to_convert = None
     temp_dir_manager = None
@@ -228,7 +263,28 @@ def perform_transcription(
 
 
 def re_generate_transcription(audio_file_path, whisper_model, vad_filter, selected_source_lang='en'):
-    """Placeholder: Assumed to call speech_to_text and handle errors."""
+    """
+    Calls `speech_to_text` to perform transcription on an audio file and handles potential errors.
+
+    This function serves as a wrapper around `speech_to_text`, primarily for
+    regenerating transcriptions. It ensures that all necessary parameters are
+    passed to `speech_to_text` and catches exceptions that might occur during
+    the transcription process.
+
+    Args:
+        audio_file_path: The path to the audio file to be transcribed.
+        whisper_model: The name or path of the Whisper model to use for transcription.
+        vad_filter: A boolean indicating whether to use Voice Activity Detection (VAD).
+        selected_source_lang: The language code for the source audio (e.g., 'en', 'es').
+            Defaults to 'en'.
+
+    Returns:
+        A tuple containing:
+        - `str`: The `audio_file_path` that was processed.
+        - `Optional[list]`: A list of transcription segments if successful,
+          or `None` if transcription fails or yields no segments. Each segment is
+          a dictionary, typically with 'start_seconds', 'end_seconds', and 'Text'.
+    """
     logging.info(f"Regenerating transcription for {audio_file_path} using model {whisper_model}")
     try:
         # IMPORTANT: Pass all necessary parameters to speech_to_text
@@ -265,6 +321,29 @@ def re_generate_transcription(audio_file_path, whisper_model, vad_filter, select
 #####################################
 
 class PartialTranscriptionThread(threading.Thread):
+    """
+    A thread that performs partial (live) transcriptions on audio chunks.
+
+    This thread consumes audio data from a queue, maintains a rolling buffer
+    of recent audio, and periodically attempts to transcribe this buffer to
+    provide near real-time transcription updates.
+
+    Attributes:
+        audio_queue (queue.Queue): Queue to get audio chunks from.
+        stop_event (threading.Event): Event to signal the thread to stop.
+        partial_text_state (dict): A dictionary (shared state, needs locking)
+            to store the latest partial transcription text under the key "text".
+        lock (threading.Lock): Lock to protect access to `partial_text_state`.
+        live_model (str): The transcription model to use for partial transcriptions.
+        sample_rate (int): The sample rate of the input audio (Hz).
+        channels (int): The number of audio channels.
+        partial_update_interval (float): How often (in seconds) to attempt a
+            partial transcription.
+        partial_chunk_seconds (float): The duration (in seconds) of the audio
+            rolling buffer to keep in memory for partial transcription.
+        exception_encountered (Optional[Exception]): Stores any exception that
+            occurs during the `run` method.
+    """
     def __init__(
         self,
         audio_queue: queue.Queue,
@@ -277,6 +356,22 @@ class PartialTranscriptionThread(threading.Thread):
         partial_update_interval=2.0,   # how often we attempt a partial transcription
         partial_chunk_seconds=5,
     ):
+        """
+        Initializes the PartialTranscriptionThread.
+
+        Args:
+            audio_queue: Queue for incoming audio data chunks (bytes).
+            stop_event: Event to signal termination of the thread.
+            partial_text_state: Dictionary to store the output partial transcription.
+                Must be thread-safe if accessed from outside without the lock.
+            lock: A threading.Lock instance to synchronize access to `partial_text_state`.
+            live_model: Name or path of the transcription model for live updates.
+            sample_rate: Expected sample rate of the audio in Hz.
+            channels: Number of audio channels.
+            partial_update_interval: Interval in seconds between transcription attempts.
+            partial_chunk_seconds: Maximum duration of audio (in seconds) to hold in
+                the rolling buffer for partial transcription.
+        """
         super().__init__(daemon=True)
         self.audio_queue = audio_queue
         self.stop_event = stop_event
@@ -300,6 +395,15 @@ class PartialTranscriptionThread(threading.Thread):
         self.exception_encountered = None
 
     def run(self):
+        """
+        Main loop for the partial transcription thread.
+
+        Continuously reads audio data from the queue, appends it to a
+        rolling buffer, and periodically transcribes the buffer content.
+        Updates `self.partial_text_state` with the latest transcription.
+        If an error occurs during transcription, it's stored in
+        `self.exception_encountered`.
+        """
         while not self.stop_event.is_set():
             now = time.time()
             if now - self.last_ts < self.partial_update_interval:
@@ -353,10 +457,26 @@ class PartialTranscriptionThread(threading.Thread):
 
 def record_audio_to_disk(device_id, output_file_path, stop_event, audio_queue):
     """
-    Thread function that:
-    - Opens PyAudio with (44.1kHz, 2ch).
-    - Reads data in a loop, writes directly to disk, and also puts chunk into `audio_queue`.
-    - We store minimal data in RAM since each chunk is appended to file.
+    Records audio from a specified PyAudio device and writes it to a WAV file
+    while also putting chunks into a queue for live processing.
+
+    This function is intended to be run in a separate thread. It opens an
+    audio stream from the selected device, reads audio data in chunks,
+    writes each chunk to the specified WAV file, and simultaneously adds
+    the chunk to the `audio_queue`.
+
+    Args:
+        device_id: The index of the PyAudio input device to use for recording.
+        output_file_path: The path where the recorded WAV file will be saved.
+        stop_event: A `threading.Event` object. When set, the recording loop will terminate.
+        audio_queue: A `queue.Queue` object where raw audio chunks (bytes) will be put.
+
+    Raises:
+        ValueError: If the `device_id` is invalid, or if the selected device
+            does not support audio input or the required settings.
+        Exception: Propagates PyAudio stream errors or other exceptions encountered
+            during recording, often related to device issues (e.g., device in use,
+            unsupported sample rate).
     """
     p = pyaudio.PyAudio()
     CHUNK = 1024
@@ -441,9 +561,32 @@ def record_audio_to_disk(device_id, output_file_path, stop_event, audio_queue):
 
 def stop_recording_short(record_state):
     """
-    - Signals the threads to stop
-    - Joins them with a timeout
-    - If partial thread had an exception, returns that
+        Stops active recording threads and returns the partial transcription results.
+
+        This function signals the recording and partial transcription threads (managed
+        within `record_state`) to stop, waits for them to join, and then retrieves
+        the final partial transcription text. It also reports any errors encountered
+        by the partial transcription thread.
+
+        Args:
+            record_state: A dictionary containing the state of the active recording,
+                expected to have keys:
+                - "stop_event" (threading.Event): The event to signal threads to stop.
+                - "record_thread" (threading.Thread): The audio recording thread.
+                - "partial_thread" (PartialTranscriptionThread): The partial transcription thread.
+                - "wav_path" (str): Path to the WAV file being recorded.
+                - "partial_text_state" (dict): Shared dict with "text" key for partial transcription. (Implicitly used by partial_thread)
+
+
+        Returns:
+            A tuple `(partial_text, error_message, output_file_path)`:
+            - `partial_text` (Optional[str]): The last available partial transcription text.
+              `None` if recording wasn't active or if an error occurred preventing text retrieval.
+            - `error_message` (str): An error message if the partial transcription thread
+              encountered an exception, or a message indicating no active recording.
+              Empty if successful.
+            - `output_file_path` (Optional[str]): The path to the recorded WAV file.
+              `None` if recording wasn't active.
     """
     if not record_state:
         return None, "[No active recording to stop]", None
@@ -469,6 +612,20 @@ def stop_recording_short(record_state):
 
 
 def parse_device_id(selected_device_text: str):
+    """
+    Parses a device ID integer from a string, typically formatted as "ID: Device Name".
+
+    It expects the string to start with the device ID followed by a colon.
+    If the string is empty, `None`, or cannot be parsed, it returns `None`.
+
+    Args:
+        selected_device_text: The string containing the device information.
+            Example: "0: Microphone (Realtek Audio)".
+
+    Returns:
+        The parsed integer device ID, or `None` if parsing fails or
+        input is invalid.
+    """
     if not selected_device_text:
         return None
     try:
@@ -484,8 +641,34 @@ def parse_device_id(selected_device_text: str):
 # Transcription Sink Function
 def transcribe_audio(audio_data: np.ndarray, transcription_provider, sample_rate: int = 16000, speaker_lang=None, whisper_model="distil-large-v3") -> str:
     """
-    Unified transcribe entry point.
-    Chooses faster-whisper or Qwen2Audio based on config.
+    Unified entry point for audio transcription using different providers.
+
+    This function selects the transcription provider based on the `transcription_provider`
+    argument or a default from configuration. It supports 'qwen2audio', 'parakeet'
+    (placeholder), and 'faster-whisper'. For 'faster-whisper', it saves the
+    `audio_data` to a temporary WAV file before calling `speech_to_text`.
+
+    Args:
+        audio_data: A NumPy array containing the raw audio waveform (float32).
+        transcription_provider: The name of the transcription provider to use
+            (e.g., 'qwen2audio', 'parakeet', 'faster-whisper'). If None,
+            the default is loaded from configuration.
+        sample_rate: The sample rate of the `audio_data` in Hz.
+        speaker_lang: The language code of the audio (e.g., 'en', 'es').
+            Used by faster-whisper. If None, language detection may be attempted
+            by the underlying model.
+        whisper_model: The specific model name or path to use if 'faster-whisper'
+            is the provider (e.g., 'distil-large-v3', 'base.en').
+
+    Returns:
+        The transcribed text as a string. If an error occurs or no text is
+        produced, an error message or an empty string might be returned depending
+        on the provider.
+
+    Note:
+        - 'parakeet' support is currently a FIXME and will return an error message
+          if selected, unless Nemo toolkit is installed and the FIXME is resolved.
+        - For 'faster-whisper', this function creates and deletes a temporary WAV file.
     """
     loaded_config_data = load_and_log_configs()
     if not transcription_provider:
@@ -563,6 +746,31 @@ def transcribe_audio(audio_data: np.ndarray, transcription_provider, sample_rate
 class LiveAudioStreamer:
     def __init__(self, sample_rate=16000, chunk_size=1024, silence_threshold=0.01, silence_duration=1.6):
         """
+        Manages live audio streaming, silence detection, and transcription.
+
+        This class opens a PyAudio stream, continuously listens for audio,
+        buffers incoming audio chunks, and attempts to detect periods of silence.
+        When sufficient silence is detected after speech, the accumulated audio
+        buffer is passed to a transcription function.
+
+        FIXME: Transcription model and language support are currently hardcoded
+               in `listen_loop` and need to be made configurable.
+
+        Attributes:
+            sample_rate (int): Audio sample rate in Hz.
+            chunk_size (int): Number of frames per buffer for PyAudio stream.
+            silence_threshold (float): Amplitude threshold below which audio is
+                considered "silence".
+            silence_duration (float): Duration in seconds of continuous silence
+                required to finalize an audio segment for transcription.
+            audio_queue (queue.Queue): Queue to hold incoming audio chunks (np.ndarray).
+            is_recording (bool): Flag indicating if the audio stream is active.
+            stop_event (threading.Event): Event to signal threads to stop.
+            pa (pyaudio.PyAudio): PyAudio instance.
+            stream (Optional[pyaudio.Stream]): PyAudio stream object.
+            listener_thread (Optional[threading.Thread]): Thread for the `listen_loop`.
+        """
+        """
         :param silence_threshold: amplitude threshold below which we consider "silence"
         :param silence_duration: how many seconds of silence needed to finalize
         """
@@ -581,7 +789,22 @@ class LiveAudioStreamer:
         self.pa = pyaudio.PyAudio()
 
     def audio_callback(self, in_data, frame_count, time_info, status):
-        """PyAudio stream callback"""
+        """
+        PyAudio stream callback function.
+
+        This callback is invoked by PyAudio when new audio data is available.
+        It converts the raw byte data to a NumPy float32 array and puts it
+        into the `audio_queue`.
+
+        Args:
+            in_data: Raw audio data bytes from the stream.
+            frame_count: Number of frames in `in_data`.
+            time_info: Dictionary containing timestamp information.
+            status: PortAudio status flags.
+
+        Returns:
+            A tuple `(in_data, pyaudio.paContinue)` to continue streaming.
+        """
         if status:
             print(f"Stream status: {status}")
         if not self.is_recording:
@@ -593,7 +816,12 @@ class LiveAudioStreamer:
         return (in_data, pyaudio.paContinue)
 
     def start(self):
-        """Open the audio stream and start recording in a separate thread."""
+        """
+        Opens the audio stream and starts the listening thread.
+
+        Sets up the PyAudio stream with the configured parameters and starts
+        the `listener_thread` which processes audio from the `audio_queue`.
+        """
         self.is_recording = True
         self.stream = self.pa.open(
             format=pyaudio.paFloat32,
@@ -618,7 +846,23 @@ class LiveAudioStreamer:
         self.pa.terminate()
 
     def listen_loop(self):
-        """Continuously pull chunks from the queue and detect silence."""
+        """
+        Continuously processes audio chunks from the queue, detects silence,
+        and triggers transcription.
+
+        This method runs in a separate thread (`listener_thread`). It accumulates
+        audio chunks into a buffer. If the amplitude of incoming audio drops below
+        `silence_threshold` for a duration of `silence_duration`, the accumulated
+        buffer is considered a complete speech segment and is sent for transcription
+        via `transcribe_audio`. The transcribed text is then handled by
+        `handle_transcribed_text`.
+
+        FIXME:
+            - Transcription model (`whisper_model`) is hardcoded to "distil-large-v3".
+            - Speaker language (`speaker_lang`) is hardcoded to "en".
+            - Transcription provider is hardcoded to "faster-whisper".
+            These should be configurable.
+        """
         audio_buffer = []
 
         while not self.stop_event.is_set():
@@ -654,7 +898,17 @@ class LiveAudioStreamer:
                 self.silence_start_time = None
 
     def handle_transcribed_text(self, text: str):
-        """Hook/callback: override or connect a signal to do something with the transcribed text."""
+        """
+        Hook/callback for handling transcribed text.
+
+        This method is called by `listen_loop` after a segment of audio
+        has been transcribed. Users of this class should override this
+        method or connect a signal to process the `text` (e.g., send it
+        to a chatbot, display it in a UI).
+
+        Args:
+            text: The transcribed text string.
+        """
         print(f"USER SAID: {text}")
 
 # # Usage example
@@ -680,6 +934,24 @@ qwen_processor = None
 qwen_model = None
 
 def load_qwen2audio():
+    """
+    Loads the Qwen2Audio model and processor.
+
+    This function implements lazy loading: the model and processor are loaded
+    only on the first call and then cached in global variables for subsequent
+    calls. It uses "Qwen/Qwen2-Audio-7B-Instruct" from Hugging Face Hub.
+
+    Returns:
+        A tuple `(processor, model)`:
+        - `processor`: The `AutoProcessor` for Qwen2Audio.
+        - `model`: The `Qwen2AudioForConditionalGeneration` model.
+
+    Raises:
+        ImportError: If `transformers` library is not installed.
+        Exception: Can propagate errors from `from_pretrained` if model
+                   downloading or loading fails (e.g., network issues,
+                   insufficient memory).
+    """
     global qwen_processor, qwen_model
     if qwen_processor is None or qwen_model is None:
         logging.info("Loading Qwen2Audio model...")
@@ -692,7 +964,25 @@ def load_qwen2audio():
     return qwen_processor, qwen_model
 
 def transcribe_with_qwen2audio(audio: np.ndarray, sample_rate: int = 16000) -> str:
-    """Given a raw audio array, transcribe using Qwen2Audio's built-in ASR capabilities."""
+    """
+    Transcribes an audio waveform using the Qwen2Audio model.
+
+    This function takes a raw audio NumPy array, processes it with the
+    Qwen2Audio processor, and generates a transcription using the model's
+    ASR capabilities. It uses a specific prompt structure required by
+    Qwen2Audio for transcription tasks.
+
+    Args:
+        audio: A NumPy array representing the raw audio waveform (float32).
+        sample_rate: The sample rate of the input `audio` in Hz.
+
+    Returns:
+        The transcribed text as a string. Returns an empty string or an
+        error message if transcription fails.
+
+    Raises:
+        Can propagate exceptions from `load_qwen2audio` if model loading fails.
+    """
     processor, model = load_qwen2audio()
 
     # We build a prompt that includes <|audio_bos|><|AUDIO|><|audio_eos|> token(s)
@@ -741,6 +1031,22 @@ processing_choice = config['processing_choice'] or 'cpu'
 total_thread_count = multiprocessing.cpu_count()
 
 class WhisperModel(OriginalWhisperModel):
+    """
+    Custom wrapper for `faster_whisper.WhisperModel` to manage model loading.
+
+    This class extends the original `faster_whisper.WhisperModel` to provide
+    customized model path resolution (Hugging Face Hub ID, local path, or
+    standard model name) and sets a default download root for models.
+
+    Attributes:
+        default_download_root (str): The default directory path where models
+            will be downloaded or looked for if not found elsewhere. This is
+            set relative to the `tldw_Server_API` directory structure.
+        valid_model_sizes (List[str]): A list of recognized standard model size
+            names and some known community model identifiers.
+        model_identifier (str): The resolved identifier (path or name) used to
+            load the model.
+    """
     tldw_dir = os.path.dirname(os.path.dirname(__file__))
     default_download_root = os.path.join(tldw_dir, 'models', 'Whisper')
 
@@ -764,6 +1070,39 @@ class WhisperModel(OriginalWhisperModel):
         files: Optional[Dict[str, Any]] = None,
         **model_kwargs: Any
     ):
+        """
+        Initializes the custom WhisperModel.
+
+        Determines if `model_size_or_path` is a Hugging Face Hub ID, an
+        existing local path, or a standard model name. It then calls the
+        parent `faster_whisper.WhisperModel` initializer with the resolved
+        identifier and specified `download_root`.
+
+        Args:
+            model_size_or_path: Identifier for the model. Can be:
+                - A standard model size name (e.g., "large-v3", "tiny.en").
+                - A path to a local model directory.
+                - A Hugging Face Hub model ID (e.g., "openai/whisper-large-v3").
+            device: Device to load the model on ("cpu", "cuda", "auto").
+            device_index: Index of the device(s) to use.
+            compute_type: Type of computation to use (e.g., "float16", "int8").
+            cpu_threads: Number of CPU threads to use for inference.
+                Set to 0 for faster-whisper to auto-detect.
+            num_workers: Number of workers for parallel transcription.
+            download_root: Path to the directory for downloading/caching models.
+                If None, uses `WhisperModel.default_download_root`.
+            local_files_only: If True, only look for local files and do not
+                attempt to download.
+            files: Optional dictionary of specific files to use for the model,
+                   as per faster-whisper's `OriginalWhisperModel`.
+            **model_kwargs: Additional keyword arguments passed to the
+                `faster_whisper.WhisperModel` constructor.
+
+        Raises:
+            ValueError: If the model identifier is invalid, cannot be resolved,
+                or if `faster_whisper.WhisperModel` initialization fails.
+            RuntimeError: For other unexpected errors during model loading.
+        """
         if download_root is None:
             download_root = self.default_download_root # Use your default path
 
@@ -838,6 +1177,21 @@ class WhisperModel(OriginalWhisperModel):
 
 # Implement FIXME
 def unload_whisper_model():
+    """
+    Unloads the global faster-whisper model instance and triggers garbage collection.
+
+    This function is intended to free up resources, particularly GPU memory,
+    used by the loaded Whisper model. It deletes the reference to the global
+    `whisper_model_instance` (if it exists and was set by `get_whisper_model` or
+    directly) and also clears the `whisper_model_cache`.
+
+    Note:
+        If `whisper_model_instance` was not the sole reference to the model object
+        (e.g., if it's also in `whisper_model_cache` and that cache is used),
+        deleting it alone might not free memory until the cache is also cleared
+        or the Python garbage collector reclaims the object. This function now
+        explicitly clears the cache.
+    """
     global whisper_model_instance
     if whisper_model_instance is not None:
         del whisper_model_instance
@@ -847,6 +1201,27 @@ def unload_whisper_model():
 whisper_model_cache = {}
 
 def get_whisper_model(model_name, device):
+    """
+    Retrieves or initializes a `WhisperModel` instance, using a cache.
+
+    This function checks a cache for an existing model instance matching the
+    `model_name`, `device`, and a determined `compute_type`. If not found,
+    it initializes a new `WhisperModel` instance, stores it in the cache,
+    and returns it. `compute_type` is set to "float16" if CUDA is used,
+    otherwise "int8" for CPU.
+
+    Args:
+        model_name: The name or path of the Whisper model (e.g., "base.en",
+            "/path/to/model", "openai/whisper-large-v3").
+        device: The device to load the model on ("cpu", "cuda").
+
+    Returns:
+        A `WhisperModel` instance.
+
+    Raises:
+        ValueError: If `WhisperModel` initialization fails (e.g., invalid model name).
+        RuntimeError: For other unexpected errors during model loading.
+    """
     compute_type = "float16" if "cuda" in device else "int8" # Example compute type logic
     cache_key = (model_name, device, compute_type)
 
@@ -894,26 +1269,40 @@ def speech_to_text(
     diarize: bool = False
 ):
     """
-    Transcribe audio to text using a Whisper model.
-    Returns a list of segment dictionaries or raises RuntimeError on failure.
+    Transcribes an audio file to text using a specified faster-Whisper model.
+
+    This function loads the specified Whisper model (or retrieves it from a cache),
+    performs transcription on the given audio file, and returns the resulting
+    segments. It supports language specification and Voice Activity Detection (VAD).
 
     Args:
-        audio_file_path: Path to the WAV audio file.
-        whisper_model: Name or path of the faster-whisper model.
-        selected_source_lang: Language code (e.g., 'en', 'es') or None for auto-detect.
-        vad_filter: Apply Voice Activity Detection filter.
-        diarize: Placeholder for diarization flag (not implemented in this function).
+        audio_file_path: Path to the WAV audio file to be transcribed.
+        whisper_model: Name or path of the faster-whisper model to use
+            (e.g., 'distil-large-v3', 'base.en').
+        selected_source_lang: Language code of the source audio (e.g., 'en', 'es').
+            If `None`, the model will attempt to auto-detect the language.
+            Defaults to 'en'.
+        vad_filter: If True, applies Voice Activity Detection filter during
+            transcription to potentially improve accuracy by filtering out non-speech
+            segments.
+        diarize: Placeholder for diarization flag. This parameter is not currently
+            used within this function's transcription logic.
 
     Returns:
-        List[Dict]: A list of segments, where each segment is a dict containing
-                   'start_seconds', 'end_seconds', and 'Text'.
+        A list of segment dictionaries. Each dictionary contains:
+        - "start_seconds" (float): Start time of the segment in seconds.
+        - "end_seconds" (float): End time of the segment in seconds.
+        - "Text" (str): The transcribed text of the segment.
+        The first segment may include metadata about the transcription model
+        and detected language prepended to its "Text" field.
 
     Raises:
-        ValueError: If no audio file path is provided.
-        RuntimeError: If transcription fails or produces no segments.
-        FileNotFoundError: If the audio file does not exist.
+        ValueError: If `audio_file_path` is not provided or is invalid.
+        FileNotFoundError: If the `audio_file_path` does not exist.
+        RuntimeError: If transcription fails for other reasons (e.g., model loading
+            error, issue during transcription process, or if no segments are produced).
+            The original exception may be chained.
     """
-
     log_counter("speech_to_text_attempt", labels={"file_path": audio_file_path, "model": whisper_model})
     time_start = time.time()
 
@@ -1015,7 +1404,20 @@ class ConversionError(Exception):
     pass
 
 def _find_ffmpeg() -> str:
-    """Finds the ffmpeg executable."""
+    """
+    Finds the ffmpeg executable by checking common locations.
+
+    Order of checks:
+    1. Relative path: `../../Bin/ffmpeg.exe` (for Windows, specific to project structure).
+    2. Environment variable: `FFMPEG_PATH`.
+    3. System PATH: Uses `shutil.which("ffmpeg")`.
+
+    Returns:
+        The absolute path to the found ffmpeg executable as a string.
+
+    Raises:
+        FileNotFoundError: If ffmpeg is not found in any of the checked locations.
+    """
     # 1. Check specific relative path (if applicable to your structure)
     if os.name == 'nt':
         # Adjust this path based on your project structure relative to this file
@@ -1048,21 +1450,30 @@ def _find_ffmpeg() -> str:
 @timeit
 def convert_to_wav(video_file_path: str, offset: int = 0, overwrite: bool = False) -> str:
     """
-    Converts a video or audio file to a standardized WAV format (16kHz, mono, PCM s16le)
-    suitable for Whisper transcription.
+    Converts a video or audio file to a standardized WAV format using ffmpeg.
+
+    The output WAV file is 16kHz, mono, 16-bit PCM signed little-endian,
+    which is suitable for many speech recognition systems, including Whisper.
+    The output file is saved in the same directory as the input file with
+    a ".wav" extension.
 
     Args:
-        video_file_path: Path to the input media file.
-        offset: Start offset (currently unused by ffmpeg command).
-        overwrite: If True, overwrite the output WAV file if it exists.
+        video_file_path: The path to the input video or audio file.
+        offset: The start offset in seconds from the beginning of the input
+            file. ffmpeg's `-ss` parameter will be set to this value.
+        overwrite: If True, overwrite the output WAV file if it already
+            exists. If False and the file exists, the conversion is skipped,
+            and the path to the existing file is returned.
 
     Returns:
-        The path to the generated WAV file.
+        The absolute path to the generated (or existing) WAV file as a string.
 
     Raises:
-        FileNotFoundError: If the input file doesn't exist.
-        ConversionError: If the ffmpeg conversion process fails.
-        RuntimeError: If ffmpeg executable cannot be found.
+        FileNotFoundError: If the input `video_file_path` does not exist.
+        RuntimeError: If the ffmpeg executable cannot be found or fails basic version check.
+        ConversionError: If the ffmpeg conversion process fails (e.g., invalid input file,
+            ffmpeg command returns non-zero exit code). This can also wrap other
+            unexpected errors during ffmpeg execution.
     """
     log_counter("convert_to_wav_attempt", labels={"file_path": video_file_path})
     start_time = time.time()
@@ -1174,7 +1585,20 @@ def convert_to_wav(video_file_path: str, offset: int = 0, overwrite: bool = Fals
 # Audio Recording Functions
 
 def test_device_availability(device_id):
-    """Test if a device is actually available for recording."""
+    """
+    Tests if a specific PyAudio input device is available for recording.
+
+    It tries to get device information and briefly open an input stream
+    on the specified device.
+
+    Args:
+        device_id: The index of the PyAudio device to test. If None,
+                   the function will return False.
+
+    Returns:
+        True if the device is available and can be opened for input,
+        False otherwise.
+    """
     if device_id is None:
         return False
 
@@ -1206,6 +1630,30 @@ def test_device_availability(device_id):
 
 @timeit
 def record_audio(duration, sample_rate=16000, chunk_size=1024):
+    """
+    Starts recording audio from the default input device for a specified duration.
+
+    This function initializes PyAudio, opens an audio stream, and starts a
+    separate thread to read audio data from the stream and put it into a queue.
+    The recording will run for approximately the given `duration`.
+
+    Args:
+        duration: The desired duration of the recording in seconds.
+        sample_rate: The sample rate for recording in Hz (samples per second).
+        chunk_size: The number of frames per buffer (audio chunk size).
+
+    Returns:
+        A tuple containing:
+        - `p` (pyaudio.PyAudio): The PyAudio instance.
+        - `stream` (pyaudio.Stream): The opened PyAudio stream.
+        - `audio_queue` (queue.Queue[bytes]): A queue where audio data chunks (bytes) are placed.
+        - `stop_recording_event` (threading.Event): An event to signal the recording thread to stop.
+        - `audio_thread` (threading.Thread): The thread performing the audio reading.
+
+    Raises:
+        pyaudio.PyAudioError: If there's an issue opening the audio stream
+                              (e.g., no input device, unsupported parameters).
+    """
     log_counter("record_audio_attempt", labels={"duration": duration})
     p = pyaudio.PyAudio()
     stream = p.open(format=pyaudio.paInt16,
@@ -1234,6 +1682,24 @@ def record_audio(duration, sample_rate=16000, chunk_size=1024):
 
 @timeit
 def stop_recording_infinite(p, stream, audio_queue, stop_recording_event, audio_thread):
+    """
+    Stops an ongoing "infinite" (externally managed duration) audio recording.
+
+    This function signals the recording thread to stop, waits for it to join,
+    collects all audio data from the queue, and then closes and terminates
+    the PyAudio stream and instance. It's designed for recordings where the
+    duration isn't fixed beforehand by `record_audio` itself.
+
+    Args:
+        p: The PyAudio instance.
+        stream: The PyAudio stream object.
+        audio_queue: The queue containing recorded audio chunks (bytes).
+        stop_recording_event: The `threading.Event` used to signal the recording thread to stop.
+        audio_thread: The `threading.Thread` that is performing the recording.
+
+    Returns:
+        A bytes object containing all concatenated audio frames collected from the queue.
+    """
     log_counter("stop_recording_attempt")
     start_time = time.time()
     stop_recording_event.set()
@@ -1257,7 +1723,22 @@ def stop_recording_infinite(p, stream, audio_queue, stop_recording_event, audio_
 
 @timeit
 def save_audio_temp(audio_data, sample_rate=16000):
-    """Save audio data to temporary WAV file with proper format handling."""
+    """
+    Saves audio data (NumPy array or PyTorch Tensor) to a temporary WAV file.
+
+    The audio data is normalized if its absolute maximum exceeds 1.0 (for float32),
+    then converted to 16-bit integers before saving. The temporary file is
+    created with a ".wav" suffix and is not automatically deleted (delete=False).
+
+    Args:
+        audio_data: The audio data to save. Can be a NumPy ndarray or a
+            PyTorch Tensor. Assumed to be float32 data if normalization is applied.
+        sample_rate: The sample rate of the audio data in Hz.
+
+    Returns:
+        The file path (string) to the created temporary WAV file if successful,
+        otherwise `None`.
+    """
     log_counter("save_audio_temp_attempt")
 
     try:

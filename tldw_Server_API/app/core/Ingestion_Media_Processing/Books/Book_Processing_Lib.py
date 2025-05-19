@@ -1,13 +1,35 @@
 # Book_Ingestion_Lib.py
 #########################################
-# Library to hold functions for ingesting book files.#
+# Library to hold functions for ingesting and processing book files.
+# This library provides capabilities for:
+# - Extracting metadata and content from EPUB, HTML, XML, OPML, and plain text files.
+# - Converting EPUB files to Markdown.
+# - Chunking text content using various strategies.
+# - Performing summarization/analysis on content or chunks (via external LLM calls).
+# - Processing ZIP archives containing EPUB files.
+# - Ingesting text files into a database (specific functions).
 #
+# Note: While many processing functions are designed to be database-agnostic,
+# some older functions (`ingest_text_file`, `ingest_folder`) directly interact
+# with a database.
 ####################
-# Function List
+# Function List (Generated documentation covers all functions below)
 #
-# 1. ingest_text_file(file_path, title=None, author=None, keywords=None):
-# 2.
-#
+# 1. extract_epub_metadata_from_text
+# 2. format_toc_item
+# 3. slugify
+# 4. epub_to_markdown
+# 5. extract_epub_metadata_from_epub_obj
+# 6. read_epub_filtered
+# 7. read_epub
+# 8. xml_to_markdown
+# 9. opml_to_markdown
+# 10. process_epub
+# 11. process_zip_of_epubs
+# 12. _process_markup_or_plain_text
+# 13. extract_epub_metadata
+# 14. ingest_text_file
+# 15. ingest_folder
 #
 ####################
 #
@@ -19,7 +41,7 @@ import zipfile
 from datetime import datetime
 import defusedxml.ElementTree as ET
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Union
 #
 # External Imports
 from bs4 import BeautifulSoup
@@ -42,7 +64,19 @@ from tldw_Server_API.app.core.Utils.Utils import logging
 #
 
 def extract_epub_metadata_from_text(content: str) -> Tuple[Optional[str], Optional[str]]:
-    """Extracts Title/Author if specific headers exist in the text."""
+    """
+    Extracts Title and Author from a string if specific headers are present.
+
+    Searches for lines starting with "Title:" and "Author:" (case-insensitive)
+    and extracts the subsequent text as metadata.
+
+    Args:
+        content (str): The text content to search within.
+
+    Returns:
+        Tuple[Optional[str], Optional[str]]: A tuple containing the extracted
+        title (or None if not found) and author (or None if not found).
+    """
     title_match = re.search(r'^Title:\s*(.*?)$', content, re.IGNORECASE | re.MULTILINE)
     author_match = re.search(r'^Author:\s*(.*?)$', content, re.IGNORECASE | re.MULTILINE)
 
@@ -51,16 +85,22 @@ def extract_epub_metadata_from_text(content: str) -> Tuple[Optional[str], Option
 
     return title, author
 
-def format_toc_item(item, level):
+def format_toc_item(item: Union[epub.Link, epub.Section, Any], level: int) -> str:
     """
     Formats a table of contents item into Markdown list format.
 
-    Parameters:
-        - item (epub.Link or epub.Section): TOC item.
-        - level (int): Heading level for indentation.
+    It attempts to extract the title from `epub.Link` or `epub.Section` objects.
+    For other types, it uses the string representation of the item.
+
+    Args:
+        item (Union[epub.Link, epub.Section, Any]): The TOC item, typically
+            an `epub.Link` or `epub.Section` object from `ebooklib`.
+        level (int): The nesting level for the TOC item, used for indentation
+            in the Markdown output (e.g., level 1 for `- item`, level 2 for `  - item`).
 
     Returns:
-        - str: Markdown-formatted TOC item.
+        str: A Markdown-formatted string representing the TOC item (e.g., "- [Title](#slug)").
+             Returns an empty string if an error occurs during formatting.
     """
     try:
         if isinstance(item, epub.Link):
@@ -76,15 +116,21 @@ def format_toc_item(item, level):
         return ""
 
 
-def slugify(text):
+def slugify(text: str) -> str:
     """
-    Converts a string into a slug suitable for Markdown links.
+    Converts a string into a slug suitable for Markdown anchors or URLs.
 
-    Parameters:
-        - text (str): The text to slugify.
+    The process involves:
+    1. Replacing sequences of non-alphanumeric characters (excluding underscore,
+       which is also replaced) with a single hyphen.
+    2. Converting the string to lowercase.
+    3. Stripping leading and trailing hyphens.
+
+    Args:
+        text (str): The text to slugify.
 
     Returns:
-        - str: Slugified text.
+        str: The slugified text.
     """
     return re.sub(r'[\W_]+', '-', text.lower()).strip('-')
 
@@ -98,15 +144,26 @@ def slugify(text):
 #
 # File Conversion Functions
 
-def epub_to_markdown(epub_path) -> Tuple[str, Optional[epub.EpubBook]]:
+def epub_to_markdown(epub_path: str) -> Tuple[str, Optional[epub.EpubBook]]:
     """
-    Converts an EPUB file to Markdown format, including the table of contents and chapter contents.
+    Converts an EPUB file to Markdown format.
 
-    Parameters:
-        - epub_path (str): Path to the EPUB file.
+    The output includes a generated Table of Contents (TOC) based on the EPUB's
+    TOC structure, followed by the content of each document item (chapter)
+    in the EPUB. HTML elements like headings, paragraphs, and lists are
+    converted to their Markdown equivalents.
+
+    Args:
+        epub_path (str): Path to the EPUB file.
 
     Returns:
-        - str: Markdown-formatted content of the EPUB.
+        Tuple[str, Optional[epub.EpubBook]]: A tuple containing:
+            - str: The Markdown-formatted content of the EPUB. If an error occurs
+                   during conversion, this string will contain an error message
+                   (e.g., "# Error converting EPUB\n\nDetails...").
+            - Optional[epub.EpubBook]: The `ebooklib.epub.EpubBook` object if the
+                   EPUB was successfully read, otherwise None (e.g., if the file
+                   is corrupted or parsing fails).
     """
     book = None # Initialize book
     try:
@@ -165,7 +222,19 @@ def epub_to_markdown(epub_path) -> Tuple[str, Optional[epub.EpubBook]]:
         return f"# Error converting EPUB\n\n{e}", book # Return error message and potentially None book
 
 def extract_epub_metadata_from_epub_obj(book: epub.EpubBook) -> Tuple[Optional[str], Optional[str]]:
-    """Extracts title and author directly from the ebooklib book object metadata."""
+    """
+    Extracts title and author directly from an `ebooklib.epub.EpubBook` object's metadata.
+
+    It queries the Dublin Core (DC) metadata fields for 'title' and 'creator'.
+
+    Args:
+        book (epub.EpubBook): The `ebooklib` book object from which to extract metadata.
+
+    Returns:
+        Tuple[Optional[str], Optional[str]]: A tuple containing the extracted
+        title (or None if not found or an error occurs) and author (or None
+        if not found or an error occurs).
+    """
     title = None
     author = None
     try:
@@ -199,12 +268,25 @@ def extract_epub_metadata_from_epub_obj(book: epub.EpubBook) -> Tuple[Optional[s
 
 def read_epub_filtered(epub_path) -> Tuple[str, Optional[epub.EpubBook]]:
     """
-    Reads an EPUB by following the spine, skipping known front matter
-    but keeping the Table of Contents (TOC). Returns a cleaned-up
-    text string with minimal empty whitespace.
+    Reads an EPUB file by following its spine, attempting to skip known front matter.
 
-    :param epub_path: Path to the .epub file.
-    :return: A cleaned-up text string of the book's content.
+    This function aims to extract the main content of the book by iterating
+    through the EPUB's spine (reading order). It uses a predefined list of
+    common front matter filenames (e.g., "cover", "titlepage", "copyright")
+    to skip these sections. The Table of Contents (TOC) is generally preserved
+    if not explicitly in the skip list.
+    Extracted text from HTML content is cleaned to minimize empty whitespace and
+    format headings and lists into a readable plain text/markdown-like structure.
+
+    Args:
+        epub_path (str): Path to the .epub file.
+
+    Returns:
+        Tuple[str, Optional[epub.EpubBook]]: A tuple containing:
+            - str: The cleaned-up text string of the book's main content.
+                   Returns an empty string if parsing fails or no content is extracted.
+            - Optional[epub.EpubBook]: The `ebooklib.epub.EpubBook` object if the EPUB
+                   was successfully read, otherwise None.
     """
     book = None
     try:
@@ -300,7 +382,26 @@ def read_epub_filtered(epub_path) -> Tuple[str, Optional[epub.EpubBook]]:
 def read_epub(file_path) -> Tuple[str, Optional[epub.EpubBook]]:
     """
     Reads and extracts text from an EPUB file, cleaning up messy spacing.
-    Returns cleaned text and book object.
+
+    This function iterates through all document items in the EPUB, extracts
+    text from headings (h1-h6) and paragraphs (p), and formats them into
+    a single string. Headings are prefixed with Markdown-style '#' characters.
+    The resulting text undergoes whitespace normalization.
+
+    Args:
+        file_path (str): Path to the EPUB file.
+
+    Returns:
+        Tuple[str, Optional[epub.EpubBook]]: A tuple containing:
+            - str: The cleaned text content extracted from the EPUB.
+            - Optional[epub.EpubBook]: The `ebooklib.epub.EpubBook` object if
+                   successfully read.
+
+    Raises:
+        ValueError: If the EPUB file is invalid, corrupted, or cannot be parsed
+                    by `ebooklib` (this wraps `ebooklib.epub.EpubException`).
+        RuntimeError: For other unexpected errors encountered during the EPUB
+                      reading process.
     """
     book = None
     try:
@@ -361,7 +462,22 @@ def read_epub(file_path) -> Tuple[str, Optional[epub.EpubBook]]:
 def xml_to_markdown(element, level=0):
     # ... (keep existing implementation - seems DB free) ...
     """
-    Recursively converts XML elements to markdown format.
+    Recursively converts an XML element and its children to a Markdown string.
+
+    Each element's tag name is converted to a Markdown heading (level increases
+    with XML depth). Text content of elements and their tail text (text following
+    a child element) are included. Attributes are currently commented out but
+    can be enabled.
+
+    Args:
+        element (xml.etree.ElementTree.Element or defusedxml.ElementTree.Element):
+            The XML element to convert.
+        level (int, optional): The current depth in the XML tree, used to
+            determine Markdown heading levels. Starts at 0 for the root.
+            Defaults to 0.
+
+    Returns:
+        str: The Markdown representation of the XML element and its descendants.
     """
     markdown = ""
     tag = element.tag.split('}')[-1] # Clean namespace if present
@@ -394,7 +510,18 @@ def xml_to_markdown(element, level=0):
 def opml_to_markdown(root):
     # ... (keep existing implementation - seems DB free) ...
     """
-    Converts OPML structure to markdown format.
+    Converts an OPML (Outline Processor Markup Language) XML structure to Markdown.
+
+    Extracts the main title from the `<head><title>` element and then processes
+    each `<outline>` element in the `<body>` into a Markdown nested list.
+    It prefers the 'text' attribute of an outline item, falling back to 'title'.
+
+    Args:
+        root (xml.etree.ElementTree.Element or defusedxml.ElementTree.Element):
+            The root element of the OPML XML tree.
+
+    Returns:
+        str: The Markdown representation of the OPML outline.
     """
     markdown = ""
     head = root.find("head")
@@ -443,39 +570,76 @@ def process_epub(
     Processes an EPUB file: extracts content & metadata, chunks, and optionally summarizes.
     Returns a dictionary with processed data, status, and errors. *No DB interaction.*
 
-    Parameters:
-        - file_path (str): Path to the EPUB file.
-        - title_override (str, optional): User-provided title.
-        - author_override (str, optional): User-provided author.
-        - keywords (List[str], optional): Keywords for the book.
-        - custom_prompt (str, optional): Custom user prompt for summarization.
-        - system_prompt (str, optional): System prompt for summarization.
-        - perform_chunking (bool): Whether to chunk the content.
-        - chunk_options (dict, optional): Options for chunking e.g., {'method': 'chapter', 'max_size': ..., 'custom_chapter_pattern': ...}).
-        - custom_chapter_pattern (str, optional): Custom regex pattern for chapter detection.
-        - perform_analysis (bool): Whether to perform summarization.
-        - api_name (str, optional): API name for summarization.
-        - api_key (str, optional): API key for summarization.
-        - summarize_recursively (bool): Whether to perform recursive summarization.
-        - extraction_method (str): 'markdown', 'filtered' or 'basic'.
+    This function is designed to be database-agnostic. It handles file reading,
+    metadata extraction (with overrides), content chunking using specified options,
+    and optional summarization/analysis of the content or chunks via an external
+    `analyze` function.
+
+    Args:
+        file_path (str): Path to the EPUB file.
+        title_override (Optional[str], optional): User-provided title to override
+            metadata extracted from the EPUB. Defaults to None.
+        author_override (Optional[str], optional): User-provided author to override
+            metadata extracted from the EPUB. Defaults to None.
+        keywords (Optional[List[str]], optional): A list of keywords to associate
+            with the book. Defaults to None, resulting in an empty list.
+        custom_prompt (Optional[str], optional): Custom user prompt to be used
+            for summarization if `perform_analysis` is True. Defaults to None.
+        system_prompt (Optional[str], optional): System prompt (e.g., instructions
+            for the LLM) to be used for summarization. Defaults to None.
+        perform_chunking (bool, optional): If True, the extracted content is chunked.
+            Defaults to True. If False, the entire content is treated as a single chunk.
+        chunk_options (Optional[Dict[str, Any]], optional): Dictionary of options for
+            the chunking process. Examples:
+            `{'method': 'ebook_chapters', 'max_size': 1500, 'overlap': 200}`.
+            If 'method' is 'ebook_chapters', it uses chapter-based chunking.
+            Other methods like 'recursive', 'fixed_size' can also be specified.
+            Defaults to `{'method': 'ebook_chapters', 'max_size': 1500, 'overlap': 200}`.
+        perform_analysis (bool, optional): If True, summarization/analysis is performed
+            on the chunks (or the whole content if not chunked). Requires `api_name`
+            and `api_key`. Defaults to False.
+        api_name (Optional[str], optional): Name of the API/model to use for summarization
+            (e.g., "openai_gpt3.5_turbo"). Required if `perform_analysis` is True.
+            Defaults to None.
+        api_key (Optional[str], optional): API key for the summarization service.
+            Required if `perform_analysis` is True. Defaults to None.
+        summarize_recursively (bool, optional): If True, `perform_analysis` is True,
+            and multiple chunks are generated and summarized, their individual summaries
+            are combined and then summarized again to create a final overall summary.
+            Defaults to False.
+        extraction_method (str, optional): Method to use for extracting content from
+            the EPUB. Options are:
+            - 'markdown': Converts EPUB to full Markdown including TOC (uses `epub_to_markdown`).
+            - 'filtered': Reads EPUB spine, skips front matter, cleans text (uses `read_epub_filtered`).
+            - 'basic': Reads all document items, extracts Hx/P tags (uses `read_epub`).
+            Defaults to 'filtered'. If the chosen method fails, it attempts a fallback to 'basic'.
 
     Returns:
-        - Dict[str, Any]: Dictionary containing processing results:
-            {
-                "status": "Success" | "Warning" | "Error", # Added Warning
-                "input_ref": str (file_path),
-                "processing_source": str (file_path),
-                "media_type": "ebook",
-                "content": Optional[str],
-                "metadata": Optional[Dict], # {'title': str, 'author': str, 'raw': dict}
-                "chunks": Optional[List[Dict]], # [{'text': str, 'metadata': {...}}]
-                "summary": Optional[str], # Renamed from 'analysis' for clarity? Or keep 'analysis'? Let's keep analysis for consistency.
-                "analysis": Optional[str],
-                "keywords": Optional[List[str]], # Keywords PASSED IN
-                "error": Optional[str],
-                "warnings": Optional[List[str]], # Changed to list
-                "analysis_details": Optional[Dict], # Added
-            }
+        Dict[str, Any]: A dictionary containing the processing results. Keys include:
+            - "status" (str): "Success", "Warning" (if non-critical issues occurred), or "Error".
+            - "input_ref" (str): The input `file_path`.
+            - "processing_source" (str): The `file_path` that was processed.
+            - "media_type" (str): Always "ebook".
+            - "content" (Optional[str]): The extracted text content from the EPUB.
+            - "metadata" (Dict):
+                - "title" (Optional[str]): Final title (override, extracted, or filename).
+                - "author" (Optional[str]): Final author (override, extracted, or "Unknown").
+                - "raw" (Optional[Dict]): Raw metadata from the `ebooklib` object.
+                - "source_filename" (str): Original filename of the EPUB.
+            - "chunks" (Optional[List[Dict]]): List of chunk dictionaries. Each chunk dict
+              contains 'text' (str) and 'metadata' (dict, which may include chunk_index,
+              analysis if summarized per chunk, etc.). `None` if chunking fails catastrophically
+              or if no content was extracted.
+            - "analysis" (Optional[str]): The final summary/analysis result for the entire book.
+              `None` if `perform_analysis` was False or failed.
+            - "keywords" (List[str]): The list of keywords passed in or an empty list.
+            - "error" (Optional[str]): An error message if `status` is "Error".
+            - "warnings" (Optional[List[str]]): A list of warning messages if `status` is "Warning".
+              `None` if no warnings.
+            - "analysis_details" (Dict): Information about the summarization process, like
+              model used, if prompts were used, and if recursion was applied.
+            - "parser_used" (Optional[str]): Name of the EPUB parser function actually used,
+              especially if a fallback occurred (e.g., "read_epub (fallback)").
     """
     start_time = datetime.now()
     result: Dict[str, Any] = {
@@ -741,6 +905,11 @@ def process_epub(
          result["status"] = "Error"
          result["error"] = str(ve)
          log_counter("epub_processing_error", labels={"file_path": file_path, "error": "ValueError"})
+    except RuntimeError as rterr: # Catch critical runtime errors from extraction
+         logging.error(f"RuntimeError processing EPUB {file_path}: {str(rterr)}", exc_info=True)
+         result["status"] = "Error"
+         result["error"] = str(rterr)
+         log_counter("epub_processing_error", labels={"file_path": file_path, "error": "RuntimeError"})
     except Exception as e:
         logging.exception(f"Unexpected error processing EPUB {file_path}: {str(e)}")
         result["status"] = "Error"
@@ -777,19 +946,32 @@ def process_zip_of_epubs(
     **epub_options # Collects title_override, author_override, perform_chunking, chunk_options etc.
     ) -> List[Dict[str, Any]]:
     """
-    Processes a ZIP file containing multiple EPUB files, extracts each one,
-    and processes it using process_epub. Returns a list of result dictionaries.
-    *No DB interaction.*
+    Processes a ZIP file containing multiple EPUB files.
 
-    Parameters:
-        - zip_file_path (str): Path to the ZIP file.
-        - keywords (List[str], optional): Base keywords to apply to all books.
-        - **epub_options: Keyword arguments to pass down to process_epub
-                         (e.g., custom_prompt, perform_analysis, api_name, etc.)
+    Extracts each EPUB file from the ZIP archive into a temporary directory
+    and then processes it using the `process_epub` function, passing along
+    any provided `keywords` and `**epub_options`.
+
+    This function is designed to be database-agnostic.
+
+    Args:
+        zip_file_path (str): Path to the ZIP file.
+        keywords (Optional[List[str]], optional): Base keywords to apply to all
+            EPUBs found within the ZIP. These will be passed to `process_epub`.
+            Defaults to None.
+        **epub_options (Any): Arbitrary keyword arguments that will be passed
+            directly to the `process_epub` function for each EPUB file.
+            Examples: `title_override`, `author_override`, `perform_chunking`,
+            `chunk_options`, `perform_analysis`, `api_name`, `api_key`, etc.
 
     Returns:
-        - List[Dict[str, Any]]: A list where each item is the result dictionary
-                                from processing a single EPUB file.
+        List[Dict[str, Any]]: A list where each item is the result dictionary
+        from `process_epub` for a single EPUB file.
+        If the ZIP file itself is invalid, cannot be extracted, or an error occurs
+        during the ZIP handling phase, a list containing a single error dictionary
+        pertaining to the ZIP file operation will be returned.
+        If no .epub files are found in the ZIP, a list with a warning result
+        for the ZIP file is returned.
     """
     results = []
     temp_dir_path_obj = None
@@ -895,8 +1077,43 @@ def _process_markup_or_plain_text(
 ) -> Dict[str, Any]:
     """
     Internal helper to process HTML, XML, OPML, or plain text files.
-    Extracts content, converts to Markdown (if applicable), chunks, summarizes.
-    Returns a result dictionary. *No DB interaction.*
+
+    This function reads the specified file, converts its content to Markdown
+    (if applicable, e.g., for HTML, XML, OPML), extracts basic metadata,
+    optionally chunks the content, and optionally performs summarization/analysis.
+    It is designed to be database-agnostic.
+
+    Args:
+        file_path (str): Path to the input file.
+        file_type (str): The type of the file. Must be one of 'html', 'xml',
+                         'opml', or 'text'.
+        title_override (Optional[str], optional): User-provided title. Defaults to None.
+        author_override (Optional[str], optional): User-provided author. Defaults to None.
+        keywords (Optional[List[str]], optional): List of keywords. Defaults to None.
+        perform_chunking (bool, optional): Whether to chunk the content. Defaults to True.
+        chunk_options (Optional[Dict[str, Any]], optional): Options for chunking,
+            e.g., `{'method': 'recursive', 'max_size': 1000, 'overlap': 200}`.
+            Defaults to `{'method': 'recursive', ...}`.
+        perform_analysis (bool, optional): Whether to perform summarization.
+            Requires `api_name` and `api_key`. Defaults to False.
+        api_name (Optional[str], optional): API name for summarization. Defaults to None.
+        api_key (Optional[str], optional): API key for summarization. Defaults to None.
+        custom_prompt (Optional[str], optional): Custom prompt for summarization. Defaults to None.
+        system_prompt (Optional[str], optional): System prompt for summarization. Defaults to None.
+        summarize_recursively (bool, optional): If True and multiple chunks are
+            summarized, their summaries are combined and summarized again. Defaults to False.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing processing results, structured similarly
+        to `process_epub`'s output, with keys like "status", "input_ref", "content",
+        "metadata", "chunks", "analysis", "error", "warnings".
+        "media_type" will reflect the `file_type` (e.g., "html", "xml").
+        "source_format" will also be set to `file_type`.
+
+    Raises:
+        ValueError: If `file_type` is unsupported, or if content extraction/parsing
+                    fails for the given file type (e.g., malformed XML).
+                    These are typically caught and returned in the result dict.
     """
     start_time = datetime.now()
     # Initialize title for logging, ensuring it's always defined
@@ -1133,8 +1350,20 @@ def _process_markup_or_plain_text(
     return result
 
 
-# Ingest a text file into the database with Title/Author/Keywords
-def extract_epub_metadata(content):
+def extract_epub_metadata(content: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Extracts Title and Author from a string based on "Title:" and "Author:" prefixes.
+
+    Searches for lines starting with "Title:" and "Author:" (case-sensitive,
+    expects newline after value) and extracts the subsequent text.
+
+    Args:
+        content (str): The text content to search within.
+
+    Returns:
+        Tuple[Optional[str], Optional[str]]: A tuple containing the extracted
+        title (or None if not found) and author (or None if not found).
+    """
     title_match = re.search(r'Title:\s*(.*?)\n', content)
     author_match = re.search(r'Author:\s*(.*?)\n', content)
 
@@ -1148,11 +1377,25 @@ def ingest_text_file(file_path, title=None, author=None, keywords=None):
     """
     Ingests a plain text file into the database with optional metadata.
 
-    Parameters:
-        - file_path (str): Path to the text file.
-        - title (str, optional): Title of the document.
-        - author (str, optional): Author of the document.
-        - keywords (str, optional): Comma-separated keywords.
+    This function reads a text file, attempts to determine its title and author
+    (using provided values, extracting from content if 'epub_converted' keyword
+    is present, or defaulting to filename/Unknown), and then adds it to a
+    database using `add_media_with_keywords`.
+
+    **Note:** This function directly interacts with a database.
+
+    Args:
+        file_path (str): Path to the text file.
+        title (Optional[str], optional): Title of the document. If None, the function
+            attempts to extract it (if 'epub_converted' in keywords) or uses the
+            filename (without extension). Defaults to None.
+        author (Optional[str], optional): Author of the document. If None, the function
+            attempts to extract it (if 'epub_converted' in keywords) or defaults to
+            'Unknown'. Defaults to None.
+        keywords (Optional[str], optional): A comma-separated string of keywords.
+            If None, defaults to 'text_file,epub_converted'.
+            'text_file' and 'epub_converted' are always added if keywords are provided.
+            Defaults to None.
 
     Returns:
         - str: Status message indicating success or failure.
@@ -1205,14 +1448,24 @@ def ingest_text_file(file_path, title=None, author=None, keywords=None):
 
 def ingest_folder(folder_path, keywords=None):
     """
-    Ingests all text files within a specified folder.
+    Ingests all text files (.txt) within a specified folder into the database.
 
-    Parameters:
-        - folder_path (str): Path to the folder containing text files.
-        - keywords (str, optional): Comma-separated keywords to add to each file.
+    Iterates through all files in the given `folder_path`. For each file ending
+    with '.txt' (case-insensitive), it calls `ingest_text_file` to process and
+    add it to the database.
+
+    **Note:** This function directly interacts with a database via `ingest_text_file`.
+
+    Args:
+        folder_path (str): Path to the folder containing text files.
+        keywords (Optional[str], optional): A comma-separated string of keywords
+            to be added to each text file ingested from this folder. These keywords
+            are passed to `ingest_text_file`. Defaults to None.
 
     Returns:
-        - str: Combined status messages for all ingested text files.
+        str: A string containing combined status messages from each `ingest_text_file`
+             call, separated by newlines. If an error occurs while accessing or
+             listing the folder, an error message for the folder operation is returned.
     """
     results = []
     try:
