@@ -1883,7 +1883,6 @@ async def _process_batch_media(
                         author=author_for_db,
                         overwrite=form_data.overwrite_existing,
                         chunk_options=chunk_options,
-                        segments=process_result.get('segments'),
                     )
 
                     # --- Function to run in executor ---
@@ -2219,7 +2218,6 @@ async def _process_document_like_item(
                     prompt=form_data.custom_prompt, analysis_content=analysis_for_db,
                     transcription_model=model_used, author=author_for_db,
                     overwrite=form_data.overwrite_existing, chunk_options=chunk_options,
-                    segments=None
                 )
 
                 # --- Function to run in executor ---

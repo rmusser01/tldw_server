@@ -119,6 +119,11 @@ def load_settings():
     access_token_expire_minutes = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
     # --- Database Settings ---
+    # FIXME - set this up similar to DB_Deps.py method.
+    # user_dir_name = str(user_id)
+    # # Use the variable assigned from settings dict
+    # user_dir = USER_DB_BASE_DIR / user_dir_name
+    # db_file = user_dir / "user_media_library.sqlite"
     user_db_base_dir = Path(os.getenv("USER_DB_BASE_DIR", "./user_databases/"))
     # Flag to indicate if the central Users DB is configured
     users_db_configured = os.getenv("USERS_DB_ENABLED", "false").lower() == "true"
