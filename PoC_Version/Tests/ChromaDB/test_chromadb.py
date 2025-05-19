@@ -8,8 +8,7 @@ from unittest.mock import patch, MagicMock
 # Third-party library imports
 import pytest
 
-
-
+from PoC_Version.App_Function_Libraries.RAG import ChromaDB_Library
 #
 ####################################################################################################
 #
@@ -73,6 +72,10 @@ def mock_database(mocker):
     mock_db = MagicMock()
     mock_db.execute_query = MagicMock()
     return mock_db
+
+print(f"ChromaDB_Library.chroma_client in test: {type(ChromaDB_Library.chroma_client)}")
+print(f"mock_chroma_client in test: {type(mock_chroma_client)}")
+
 
 ##############################
 # Test: preprocess_all_content
