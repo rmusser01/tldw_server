@@ -13,7 +13,7 @@ import time
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, ConflictError, DatabaseError, search_media_db
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, ConflictError, DatabaseError
 
 
 #
@@ -574,23 +574,23 @@ class TestDatabaseFTS:
         media_id, media_uuid, _ = db_instance.add_media_with_keywords(title=title, content=content, media_type="fts_test")
 
         # Search by title fragment
-        results, total = search_media_db(db_instance, search_query="Alpha", search_fields=["title"])
+        results, total = Database.search_media_db(db_instance, search_query="Alpha", search_fields=["title"])
         assert total == 1
         assert len(results) == 1
         assert results[0]['id'] == media_id
 
         # Search by content fragment
-        results, total = search_media_db(db_instance, search_query="omega", search_fields=["content"])
+        results, total = Database.search_media_db(db_instance, search_query="omega", search_fields=["content"])
         assert total == 1
         assert len(results) == 1
         assert results[0]['id'] == media_id
 
         # Search by content phrase
-        results, total = search_media_db(db_instance, search_query='"omega gamma"', search_fields=["content"])
+        results, total = Database.search_media_db(db_instance, search_query='"omega gamma"', search_fields=["content"])
         assert total == 1
 
         # Search non-existent term
-        results, total = search_media_db(db_instance, search_query="nonexistent", search_fields=["content", "title"])
+        results, total = Database.search_media_db(db_instance, search_query="nonexistent", search_fields=["content", "title"])
         assert total == 0
 
     def test_fts_media_update_search(self, db_instance):
@@ -604,7 +604,7 @@ class TestDatabaseFTS:
                                                                       media_type="fts_update")
 
         # Verify initial search works
-        results, total = search_media_db(db_instance, search_query="epsilon", search_fields=["content"])
+        results, total = Database.search_media_db(db_instance, search_query="epsilon", search_fields=["content"])
         assert total == 1
         initial_url = results[0]['url']  # Get URL for update lookup
 
@@ -617,12 +617,12 @@ class TestDatabaseFTS:
         # assert total == 0
 
         # Search for NEW content should work
-        results, total = search_media_db(db_instance, search_query="delta", search_fields=["content"])
+        results, total = Database.search_media_db(db_instance, search_query="delta", search_fields=["content"])
         assert total == 1
         assert results[0]['id'] == media_id
 
         # Search for NEW title should work
-        results, total = search_media_db(db_instance, search_query="Zeta", search_fields=["title"])
+        results, total = Database.search_media_db(db_instance, search_query="Zeta", search_fields=["title"])
         assert total == 1
         assert results[0]['id'] == media_id
 
@@ -633,7 +633,7 @@ class TestDatabaseFTS:
         media_id, media_uuid, _ = db_instance.add_media_with_keywords(title=title, content=content, media_type="fts_delete")
 
         # Verify initial search works
-        results, total = search_media_db(db_instance, search_query="theta", search_fields=["content"])
+        results, total = Database.search_media_db(db_instance, search_query="theta", search_fields=["content"])
         assert total == 1
 
         # Soft delete the media
@@ -641,7 +641,7 @@ class TestDatabaseFTS:
         assert deleted is True
 
         # Search should now fail
-        results, total = search_media_db(db_instance, search_query="theta", search_fields=["content"])
+        results, total = Database.search_media_db(db_instance, search_query="theta", search_fields=["content"])
         assert total == 0
 
     def test_fts_keyword_search(self, db_instance):

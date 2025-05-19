@@ -32,7 +32,8 @@ from loguru import logger
 # Import Local
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-from tldw_Server_API.app.core.Utils.Chunk_Lib import Chunker, improved_chunking_process
+from tldw_Server_API.app.core.Utils.Chunk_Lib import Chunker, improved_chunking_process, ChunkingError, \
+    InvalidChunkingMethodError
 from tldw_Server_API.app.core.Metrics.metrics_logger import (log_counter, log_histogram)
 from tldw_Server_API.app.core.Utils.Utils import logging
 #
@@ -565,39 +566,74 @@ def process_epub(
         processed_chunks = None
         if perform_chunking:
             effective_chunk_options = chunk_options or {}
-            # Default to chapter unless specified otherwise
-            effective_chunk_options.setdefault('method', 'chapter')
-            # Default size/overlap relevant for non-chapter methods if used
+            # Default to ebook_chapters for EPUBs unless specified otherwise in chunk_options.
+            # This method name must match one of the methods handled by Chunker.chunk_text in Chunk_Lib.py
+            effective_chunk_options.setdefault('method', 'ebook_chapters') # UPDATED
+
+            # Default size/overlap are used by 'ebook_chapters' for sub-chunking very large chapters,
+            # or by other chunking methods if 'method' is overridden in chunk_options.
             effective_chunk_options.setdefault('max_size', 1500)
             effective_chunk_options.setdefault('overlap', 200)
 
             logging.info(f"Chunking ebook content with options: {effective_chunk_options}")
             try:
-                # Use chunk_ebook_by_chapters or adapt improved_chunking_process if needed
-                # Assuming chunk_ebook_by_chapters exists and works similarly
-                processed_chunks = Chunker._chunk_ebook_by_chapters(extracted_text, effective_chunk_options)
+                # Use improved_chunking_process, which handles Chunker instantiation and metadata enrichment.
+                # It will use the 'method' from effective_chunk_options to dispatch correctly.
+                processed_chunks = improved_chunking_process(
+                    text=extracted_text,
+                    chunk_options_dict=effective_chunk_options
+                    # llm_call_function_for_chunker and llm_api_config_for_chunker can be passed here
+                    # if any chunking method requiring LLM calls (like 'rolling_summarize') was to be used.
+                    # For 'ebook_chapters', they are not directly needed unless sub-chunking uses an LLM method.
+                )
 
-                if not processed_chunks:
-                     logging.warning(f"Chunking produced no chunks for {file_path}. Using full text as one chunk.")
-                     processed_chunks = [{'text': extracted_text, 'metadata': {'chunk_num': 0}}]
-                     result["warnings"].append("Chunking yielded no results; using full text.")
+                if not processed_chunks and extracted_text.strip(): # If no chunks but text existed
+                     logging.warning(f"Chunking (via improved_chunking_process) produced no chunks for {file_path}, though text was present. Using full text as one chunk.")
+                     # Fallback to a single chunk with basic metadata if improved_chunking_process returns empty for non-empty text.
+                     # This scenario should be rare if _chunk_ebook_by_chapters is robust.
+                     processed_chunks = [{'text': extracted_text, 'metadata': {
+                         'chunk_index': 1, 'total_chunks': 1,
+                         'chunk_method': 'fallback_single_chunk', 'error': 'Original chunking yielded no results'
+                         }}]
+                     result["warnings"].append("Chunking yielded no results; using full text as a single chunk (fallback).")
+                elif not processed_chunks: # No chunks and text was empty/whitespace
+                     logging.info(f"Chunking produced no chunks for {file_path} (extracted text was empty or whitespace).")
+                     # processed_chunks remains empty or None, which is appropriate.
                 else:
                      logging.info(f"Total chunks created: {len(processed_chunks)}")
                      log_histogram("epub_chunks_created", len(processed_chunks), labels={"file_path": file_path})
 
-                result["chunks"] = processed_chunks
+                result["chunks"] = processed_chunks # Assign the list of chunk dictionaries
 
-            except Exception as chunk_err:
-                logging.error(f"Chunking failed for {file_path}: {chunk_err}", exc_info=True)
-                result["warnings"].append(f"Chunking failed: {chunk_err}")
+            # Catch specific exceptions from Chunker/improved_chunking_process
+            except InvalidChunkingMethodError as icme:
+                logging.error(f"Invalid chunking method specified for {file_path}: {icme}", exc_info=True)
+                result["warnings"].append(f"Chunking failed (invalid method): {str(icme)}")
+                processed_chunks = [{'text': extracted_text, 'metadata': {'chunk_num': 0, 'error': f"Chunking failed (invalid method): {str(icme)}"}}]
+                result["chunks"] = processed_chunks
+            except ChunkingError as ce:
+                logging.error(f"ChunkingError during chunking for {file_path}: {ce}", exc_info=True)
+                result["warnings"].append(f"Chunking failed: {str(ce)}")
+                processed_chunks = [{'text': extracted_text, 'metadata': {'chunk_num': 0, 'error': f"Chunking failed: {str(ce)}"}}]
+                result["chunks"] = processed_chunks
+            except Exception as chunk_err: # Catch any other unexpected errors during chunking
+                logging.error(f"Unexpected error during chunking for {file_path}: {chunk_err}", exc_info=True)
+                result["warnings"].append(f"Chunking failed (unexpected): {str(chunk_err)}")
                 # Fallback: use full text as one chunk
-                processed_chunks = [{'text': extracted_text, 'metadata': {'chunk_num': 0, 'error': f"Chunking failed: {chunk_err}"}}]
+                processed_chunks = [{'text': extracted_text, 'metadata': {'chunk_num': 0, 'error': f"Chunking failed (unexpected): {str(chunk_err)}"}}]
                 result["chunks"] = processed_chunks
 
         else:
              # If not chunking, create a single chunk containing the whole text
-             processed_chunks = [{'text': extracted_text, 'metadata': {'chunk_num': 0}}]
-             result["chunks"] = processed_chunks # Store the single chunk
+             # The metadata structure should be consistent with what improved_chunking_process would provide for a single chunk.
+             processed_chunks = [{'text': extracted_text, 'metadata': {
+                 'chunk_index': 1,
+                 'total_chunks': 1,
+                 'chunk_method': 'none', # Indicate no method was applied
+                 'relative_position': 0.0,
+                 'language': 'unknown' # Or detect language if important even when not chunking
+                 }}]
+             result["chunks"] = processed_chunks
              logging.info("Chunking disabled. Using full text as one chunk.")
 
 
@@ -609,9 +645,10 @@ def process_epub(
             chunk_summaries = []
             summarized_chunks_for_result = [] # Keep track of chunks with summaries added
 
-            for i, chunk in enumerate(processed_chunks):
-                chunk_text = chunk.get('text', '')
-                chunk_metadata = chunk.get('metadata', {}) # Get existing metadata
+            for i, chunk_dict in enumerate(processed_chunks): # Iterate over list of dictionaries
+                chunk_text = chunk_dict.get('text', '')
+                # Preserve existing metadata from chunking, add analysis to it
+                chunk_metadata = chunk_dict.get('metadata', {}).copy() # Work on a copy
                 if chunk_text:
                     try:
                         # Match expected args for summarize function
@@ -635,11 +672,11 @@ def process_epub(
                         chunk_metadata['analysis'] = f"[Summarization Error: {str(summ_err)}]"
                         result["warnings"].append(f"Summarization failed for chunk {i+1}: {str(summ_err)}")
 
-                chunk['metadata'] = chunk_metadata
-                summarized_chunks_for_result.append(chunk)
+                # Update the chunk dictionary with new/updated metadata
+                updated_chunk_dict = {'text': chunk_text, 'metadata': chunk_metadata}
+                summarized_chunks_for_result.append(updated_chunk_dict)
 
-
-            result["chunks"] = summarized_chunks_for_result # Update chunks in result
+            result["chunks"] = summarized_chunks_for_result # Update chunks in result with analysis metadata
 
             # Combine chunk summaries (potentially recursively)
             if chunk_summaries:
@@ -648,8 +685,8 @@ def process_epub(
                     try:
                         final_analysis = analyze(
                             api_name=api_name,
-                            input_data="\n\n---\n\n".join(chunk_summaries), # Join summaries clearly
-                            custom_prompt_arg=custom_prompt or "Provide a concise overall summary of the following chapter summaries.", # Recursive prompt
+                            input_data="\n\n---\n\n".join(chunk_summaries),
+                            custom_prompt_arg=custom_prompt or "Provide a concise overall summary of the following chapter summaries.",
                             api_key=api_key,
                             system_message=system_prompt,
                             temp=None,
@@ -684,12 +721,15 @@ def process_epub(
 
 
         # Final status determination
-        if result["warnings"]:
+        if result["error"]: # If an error was set before this point (e.g. extraction failed hard)
+             result["status"] = "Error"
+        elif result["warnings"]:
             result["status"] = "Warning"
         else:
             result["status"] = "Success"
 
-        log_counter(f"epub_processing_{result['status'].lower()}", labels={"file_path": file_path})
+        if result["status"] != "Error": # Don't log success/warning if it already failed
+             log_counter(f"epub_processing_{result['status'].lower()}", labels={"file_path": file_path})
 
     except FileNotFoundError:
         logging.error(f"EPUB file not found: {file_path}")
@@ -710,6 +750,7 @@ def process_epub(
 
     end_time = datetime.now()
     processing_time = (end_time - start_time).total_seconds()
+    # Ensure status for logging duration is the final one
     log_histogram("epub_processing_duration", processing_time, labels={"file_path": file_path, "status": result["status"]})
 
     # Final logging
@@ -858,13 +899,17 @@ def _process_markup_or_plain_text(
     Returns a result dictionary. *No DB interaction.*
     """
     start_time = datetime.now()
+    # Initialize title for logging, ensuring it's always defined
+    # It will be refined later if processing is successful.
+    final_title_for_logging = Path(file_path).name
+
     media_type = file_type if file_type in ['html', 'xml', 'opml', 'text'] else "document"
     result: Dict[str, Any] = {
         "status": "Pending", "input_ref": file_path, "processing_source": file_path,
         "media_type": media_type, "source_format": file_type, "content": None,
         "metadata": {"title": None, "author": None, "raw": None}, "chunks": None,
         "analysis": None, "keywords": keywords or [], "error": None, "warnings": [],
-        "analysis_details": { # Initialize
+        "analysis_details": {
             "analysis_model": api_name if perform_analysis else None,
             "custom_prompt_used": custom_prompt if perform_analysis else None,
             "system_prompt_used": system_prompt if perform_analysis else None,
@@ -882,6 +927,7 @@ def _process_markup_or_plain_text(
         logging.info(f"Processing {file_type} file from {file_path}")
         file_path_obj = Path(file_path)
         filename_stem = file_path_obj.stem
+        final_title_for_logging = filename_stem # Refine with stem if path is valid
 
         # 1. Read and Convert Content
         if file_type == 'html':
@@ -895,7 +941,6 @@ def _process_markup_or_plain_text(
                 soup = BeautifulSoup(html_content, 'html.parser')
                 title_tag = soup.find('title')
                 extracted_title = title_tag.string.strip() if title_tag and title_tag.string else None
-                # Add more metadata extraction if desired (e.g., meta tags)
                 meta_author_tag = soup.find('meta', attrs={'name': 'author'})
                 if meta_author_tag and meta_author_tag.get('content'):
                      extracted_author = meta_author_tag['content'].strip()
@@ -907,11 +952,9 @@ def _process_markup_or_plain_text(
             try:
                 tree = ET.parse(file_path)
                 root = tree.getroot()
-                markdown_content = xml_to_markdown(root) # Use helper
-                # Try finding a common title element
-                title_elem = root.find('.//title') # Adjust XPath as needed
+                markdown_content = xml_to_markdown(root)
+                title_elem = root.find('.//title')
                 extracted_title = title_elem.text.strip() if title_elem is not None and title_elem.text else None
-                # Add more metadata extraction if desired
                 raw_metadata = {'xml_root_tag': root.tag}
             except ET.ParseError as xml_err:
                  raise ValueError(f"Failed to parse XML file {file_path}: {xml_err}") from xml_err
@@ -920,7 +963,7 @@ def _process_markup_or_plain_text(
              try:
                  tree = ET.parse(file_path)
                  root = tree.getroot()
-                 markdown_content = opml_to_markdown(root) # Use helper
+                 markdown_content = opml_to_markdown(root)
                  title_elem = root.find("./head/title")
                  extracted_title = title_elem.text.strip() if title_elem is not None and title_elem.text else None
                  raw_metadata = {'opml_title': extracted_title}
@@ -930,8 +973,7 @@ def _process_markup_or_plain_text(
         elif file_type == 'text':
             try:
                 with open(file_path, 'r', encoding='utf-8') as file:
-                    markdown_content = file.read() # Plain text is already "markdown-like"
-                # Try extracting metadata if it looks like a converted epub text dump
+                    markdown_content = file.read()
                 epub_title, epub_author = extract_epub_metadata_from_text(markdown_content)
                 extracted_title = epub_title
                 if epub_author: extracted_author = epub_author
@@ -941,9 +983,9 @@ def _process_markup_or_plain_text(
         else:
             raise ValueError(f"Unsupported file type for processing: {file_type}")
 
-        # Clean up common issues like excessive newlines
-        markdown_content = re.sub(r'\n{3,}', '\n\n', markdown_content).strip()
-        if not markdown_content:
+        if markdown_content: # Check if None before regex
+            markdown_content = re.sub(r'\n{3,}', '\n\n', markdown_content).strip()
+        if not markdown_content: # Check after potential stripping
             raise ValueError(f"Content extraction failed or resulted in empty content for {file_path}.")
         result["content"] = markdown_content
 
@@ -954,11 +996,12 @@ def _process_markup_or_plain_text(
             "title": final_title,
             "author": final_author,
             "source_filename": file_path_obj.name,
-            "raw": raw_metadata # Store any extracted raw metadata
+            "raw": raw_metadata
         }
-        logging.debug(f"Final metadata - Title: {final_title}, Author: {final_author}")
+        final_title_for_logging = final_title # Update for accurate logging if processing was successful
+        logging.debug(f"Final metadata - Title: {final_title_for_logging}, Author: {final_author}")
 
-        # 2. Chunking (Similar logic as EPUB, adjust defaults if needed)
+        # 2. Chunking
         processed_chunks = None
         if perform_chunking:
             effective_chunk_options = chunk_options or {}
@@ -976,7 +1019,7 @@ def _process_markup_or_plain_text(
                 if not processed_chunks:
                      logging.warning(f"Chunking produced no chunks for {file_path}. Using full text as one chunk.")
                      processed_chunks = [{'text': markdown_content, 'metadata': {'chunk_num': 0}}]
-                     result["warnings"] = (result["warnings"] or []) + ["Chunking yielded no results; using full text."]
+                     result["warnings"].append("Chunking yielded no results; using full text.")
                 else:
                      logging.info(f"Total chunks created: {len(processed_chunks)}")
                      log_histogram(f"{file_type}_chunks_created", len(processed_chunks), labels={"file_path": file_path})
@@ -985,7 +1028,7 @@ def _process_markup_or_plain_text(
 
             except Exception as chunk_err:
                 logging.error(f"Chunking failed for {file_path}: {chunk_err}", exc_info=True)
-                result["warnings"] = (result["warnings"] or []) + [f"Chunking failed: {chunk_err}"]
+                result["warnings"].append(f"Chunking failed: {chunk_err}")
                 processed_chunks = [{'text': markdown_content, 'metadata': {'chunk_num': 0, 'error': f"Chunking failed: {chunk_err}"}}]
                 result["chunks"] = processed_chunks # Store fallback chunk
         else:
@@ -993,10 +1036,10 @@ def _process_markup_or_plain_text(
              result["chunks"] = processed_chunks
              logging.info("Chunking disabled. Using full text as one chunk.")
 
-        # 3. Summarization / Analysis (Identical logic to process_epub)
+        # 3. Summarization / Analysis
         final_analysis = None
-        if perform_analysis and api_name and api_key and processed_chunks:
-            # --- (Copy the summarization loop from process_epub here) ---
+        # `processed_chunks` is guaranteed to be non-empty list here if markdown_content was valid.
+        if perform_analysis and api_name and api_key:
             logging.info(f"Summarization enabled for {len(processed_chunks)} chunks of {file_type}.")
             log_counter(f"{file_type}_summarization_attempt", value=len(processed_chunks), labels={"file_path": file_path, "api_name": api_name})
             chunk_summaries = []
@@ -1017,7 +1060,7 @@ def _process_markup_or_plain_text(
                     except Exception as summ_err:
                         logging.warning(f"Summarization failed for chunk {i} of {file_path}: {summ_err}")
                         chunk_metadata['summary'] = f"[Summarization Error: {summ_err}]"
-                        result["warnings"] = (result["warnings"] or []) + [f"Summarization failed for chunk {i}: {summ_err}"]
+                        result["warnings"].append(f"Summarization failed for chunk {i}: {summ_err}")
 
                 chunk['metadata'] = chunk_metadata
                 summarized_chunks_for_result.append(chunk)
@@ -1032,13 +1075,13 @@ def _process_markup_or_plain_text(
                         if not final_analysis or not final_analysis.strip():
                             logging.warning(f"Recursive summarization for {file_path} yielded empty result. Falling back.")
                             final_analysis = "\n\n---\n\n".join(chunk_summaries)
-                            result["warnings"] = (result["warnings"] or []) + ["Recursive summarization yielded empty result."]
+                            result["warnings"].append("Recursive summarization yielded empty result.")
                         else:
                              log_counter(f"{file_type}_recursive_summarization_success", labels={"file_path": file_path})
                     except Exception as rec_summ_err:
                          logging.error(f"Recursive summarization failed for {file_path}: {rec_summ_err}")
                          final_analysis = f"[Recursive Summarization Error: {rec_summ_err}]\n\n" + "\n\n---\n\n".join(chunk_summaries)
-                         result["warnings"] = (result["warnings"] or []) + [f"Recursive summarization failed: {rec_summ_err}"]
+                         result["warnings"].append(f"Recursive summarization failed: {rec_summ_err}")
                          log_counter(f"{file_type}_recursive_summarization_error", labels={"file_path": file_path, "error": str(rec_summ_err)})
                 else:
                     final_analysis = "\n\n---\n\n".join(chunk_summaries)
@@ -1046,23 +1089,27 @@ def _process_markup_or_plain_text(
             result["analysis"] = final_analysis
             log_counter(f"{file_type}_chunks_summarized", value=len(chunk_summaries), labels={"file_path": file_path})
             logging.info("Summarization processing completed.")
-        # --- (Log summarization skipped reasons) ---
-        elif not perform_analysis: logging.info("Summarization disabled.")
-        elif not api_name or not api_key: logging.warning("Summarization skipped: API name or key not provided.")
-        elif not processed_chunks: logging.warning("Summarization skipped: No chunks were generated/available.")
-        else: logging.warning("Summarization skipped due to unknown condition.")
+        # Log summarization skipped reasons
+        elif not perform_analysis:
+            logging.info("Summarization disabled.")
+        elif not api_name or not api_key: # This implies perform_analysis was true
+            logging.warning("Summarization skipped: API name or key not provided.")
+        # The case for `not processed_chunks` is unreachable here if content was extracted.
+        # If `processed_chunks` was empty for some reason, summarization loop above handles it gracefully.
 
         # Final status determination
-        if result["warnings"]: result["status"] = "Warning"
-        else: result["status"] = "Success"
-        log_counter(f"{file_type}_processing_{result['status'].lower()}", labels={"file_path": file_path})
+        if result["warnings"]:
+            result["status"] = "Warning"
+        else:
+            result["status"] = "Success"
+        # Removed redundant log_counter here; the one at the end covers all statuses.
 
     except FileNotFoundError:
         logging.error(f"{file_type.capitalize()} file not found: {file_path}")
         result["status"] = "Error"
         result["error"] = "File not found"
         log_counter(f"{file_type}_processing_error", labels={"file_path": file_path, "error": "FileNotFoundError"})
-    except ValueError as ve: # Catch value errors from parsing/conversion/empty content
+    except ValueError as ve:
          logging.error(f"Processing value error for {file_type} file {file_path}: {str(ve)}")
          result["status"] = "Error"
          result["error"] = str(ve)
@@ -1076,10 +1123,13 @@ def _process_markup_or_plain_text(
     end_time = datetime.now()
     processing_time = (end_time - start_time).total_seconds()
     log_histogram(f"{file_type}_processing_duration", processing_time, labels={"file_path": file_path})
-    logging.info(f"{file_type.capitalize()} file '{final_title}' processed with status: {result['status']}.")
+    # Use final_title_for_logging which is guaranteed to be defined
+    logging.info(f"{file_type.capitalize()} file '{final_title_for_logging}' processed with status: {result['status']}.")
+    # This log_counter correctly reflects the final status (Success, Warning, or Error)
     log_counter(f"{file_type}_processing_{result['status'].lower()}", labels={"file_path": file_path})
 
-    if not result["warnings"]: result["warnings"] = None
+    if not result["warnings"]: # Convert empty list to None for cleaner output if desired
+        result["warnings"] = None
     return result
 
 

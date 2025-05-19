@@ -24,6 +24,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 # Import Local
 from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.config import global_default_chunk_language
 #
 #######################################################################################################################
 # Custom Exceptions
@@ -758,8 +759,10 @@ class Chunker:
 
         # In tldw_Server_API/app/core/Utils/Chunk_Lib.py
 
+
+    global global_default_chunk_language
     def _chunk_ebook_by_chapters(self, text: str, max_size: int, overlap: int, custom_pattern: Optional[str],
-                                 language: str) -> List[Dict[str, Any]]:
+                                 language: str = global_default_chunk_language) -> List[Dict[str, Any]]:
         logging.debug(f"Chunking Ebook by Chapters. Custom pattern: {custom_pattern}, Lang: {language}")
 
         chapter_patterns = [

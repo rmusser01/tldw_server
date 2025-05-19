@@ -27,6 +27,9 @@ SERVER_CLIENT_ID = "SERVER_API_V1"
 YARA_RULES_PATH: Optional[str] = None # e.g., "/app/yara_rules/index.yar"
 MAGIC_FILE_PATH: Optional[str] = os.getenv("MAGIC_FILE_PATH", None) # e.g., "/app/magic.mgc"
 
+# --- Chunking Settings ---
+global_default_chunk_language = "en"
+
 
 # FIXME - TTS Config
 APP_CONFIG = {

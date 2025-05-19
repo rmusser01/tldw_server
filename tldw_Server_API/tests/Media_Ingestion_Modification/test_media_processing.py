@@ -35,8 +35,7 @@ try:
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User, _single_user_instance
     from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
     from tldw_Server_API.app.core.config import settings
-    from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, get_document_version, \
-    search_media_db  # If type hints needed
+    from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, get_document_version
 except ImportError as e:
     raise ImportError(f"Could not locate the FastAPI app instance or dependencies: {e}")
 
@@ -1489,12 +1488,12 @@ class TestDocumentVersioningV2:
 
         # 7. Verify FTS Update
         # Search for the rolled-back content (V1 content)
-        results_fts, total_fts = search_media_db(db_instance, search_query='"Original"', search_fields=["content"])
+        results_fts, total_fts = Database.search_media_db(db_instance, search_query='"Original"', search_fields=["content"])
         assert total_fts == 1
         assert results_fts[0]['id'] == media_id
 
         # Search for the previous content (V2 content) - should not be found in main search
-        results_fts_old, total_fts_old = search_media_db(db_instance, search_query='"Changed"', search_fields=["content"])
+        results_fts_old, total_fts_old = Database.search_media_db(db_instance, search_query='"Changed"', search_fields=["content"])
         assert total_fts_old == 0
 
     def test_rollback_to_nonexistent_version(self, db_instance):

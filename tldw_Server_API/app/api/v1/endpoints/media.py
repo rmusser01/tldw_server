@@ -1280,7 +1280,7 @@ async def search_media_items(  # Renamed to avoid conflict if list_all_media is 
         db_search_fields = search_params.fields
 
         # Call the database search function
-        items_data, total_items = search_media_db(
+        items_data, total_items = Database.search_media_db(
             db_instance=db,
             search_query=db_search_query,
             search_fields=db_search_fields,
@@ -1550,16 +1550,16 @@ def _prepare_chunking_options_dict(form_data: AddMediaForm) -> Optional[Dict[str
     # Determine default chunk method based on media type if not specified
     default_chunk_method = 'sentences'
     if form_data.media_type == 'ebook':
-        default_chunk_method = 'chapter'
-        logging.info("Setting chunk method to 'chapter' for ebook type.")
+        default_chunk_method = 'ebook_chapters'
+        logging.info("Setting chunk method to 'ebook_chapters' for ebook type.")
     elif form_data.media_type in ['video', 'audio']:
         default_chunk_method = 'sentences' # Example default
 
     final_chunk_method = form_data.chunk_method or default_chunk_method
 
-    # Override to 'chapter' if media_type is 'ebook', regardless of user input
+    # Override to 'ebook_chapters' if media_type is 'ebook', regardless of user input
     if form_data.media_type == 'ebook':
-        final_chunk_method = 'chapter'
+        final_chunk_method = 'ebook_chapters'
 
     chunk_options = {
         'method': final_chunk_method,
@@ -3422,7 +3422,7 @@ def get_process_ebooks_form(
 
     # --- Fields from ChunkingOptions ---
     perform_chunking: bool = Form(True, description="Enable chunking (default: by chapter)"),
-    chunk_method: Optional[ChunkMethod] = Form('chapter', description="Chunking method (chapter, recursive, sentences etc.)"),
+    chunk_method: Optional[ChunkMethod] = Form('ebook_chapters', description="Chunking method ('semantic', 'tokens', 'paragraphs', 'sentences','words', 'ebook_chapters', 'json')"),
     chunk_language: Optional[str] = Form(None, description="Chunking language override (rarely needed for chapter)"),
     chunk_size: int = Form(1500, description="Target chunk size (used by non-chapter methods)"),
     chunk_overlap: int = Form(200, description="Chunk overlap size (used by non-chapter methods)"),
@@ -3682,7 +3682,7 @@ async def process_ebooks_endpoint(
             if form_data.perform_chunking:
                  # Use form_data directly for chunk options
                  chunk_options_dict = {
-                     'method': form_data.chunk_method, # Already defaults to 'chapter' in model
+                     'method': form_data.chunk_method,
                      'max_size': form_data.chunk_size,
                      'overlap': form_data.chunk_overlap,
                      'language': form_data.chunk_language,
@@ -3817,7 +3817,7 @@ class ProcessDocumentsForm(AddMediaForm):
 
     # Override chunking defaults if desired for documents
     perform_chunking: bool = True
-    chunk_method: Optional[ChunkMethod] = Field('recursive', description="Default chunking method for documents")
+    chunk_method: Optional[ChunkMethod] = Field('sentences', description="Default chunking method for documents")
     chunk_size: int = Field(1000, gt=0, description="Target chunk size for documents")
     chunk_overlap: int = Field(200, ge=0, description="Chunk overlap size for documents")
 
@@ -3844,7 +3844,7 @@ def get_process_documents_form(
 
     # --- Fields from ChunkingOptions ---
     perform_chunking: bool = Form(True), # Use default from ProcessDocumentsForm
-    chunk_method: Optional[ChunkMethod] = Form('recursive'), # Use default from ProcessDocumentsForm
+    chunk_method: Optional[ChunkMethod] = Form('sentence'), # Use default from ProcessDocumentsForm
     chunk_language: Optional[str] = Form(None),
     chunk_size: int = Form(1000), # Use default from ProcessDocumentsForm
     chunk_overlap: int = Form(200), # Use default from ProcessDocumentsForm
