@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.Chat.prompt_template_manager import PromptTemplate
 
 
 # --- Fixtures defined locally in this file ---
+API_BEARER="default-secret-key-for-single-user"
 @pytest.fixture(scope="function")
 def client():
     """Yields a TestClient instance for making requests to the app."""
@@ -233,7 +234,7 @@ def test_commercial_provider_streaming_no_template(
         "openai": "gpt-4o-mini", "anthropic": "claude-3-haiku-20240307", "cohere": "command-r",
         "groq": "llama3-8b-8192", "openrouter": "mistralai/mistral-7b-instruct:free",
         "deepseek": "deepseek-chat", "mistral": "mistral-tiny", "google": "gemini-1.5-flash-latest",
-        "huggingface": os.getenv("HF_TEST_MODEL", "mistralai/Mistral-7B-Instruct-v0.1")
+        "huggingface": os.getenv("HF_TEST_MODEL", "Qwen/Qwen3-235B-A22B")
     }
     default_test_model = "test-model-default-stream"
 
