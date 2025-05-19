@@ -1298,29 +1298,28 @@ def chat_with_huggingface(
         input_data: List[Dict[str, Any]],
         model: Optional[str] = None,  # This is the model_id like "Org/ModelName"
         api_key: Optional[str] = None,
-        system_message: Optional[str] = None,
+        system_message: Optional[str] = None, # Renamed from system_prompt for clarity if it maps to HF system
         temp: Optional[float] = None,
         streaming: Optional[bool] = False,
         top_p: Optional[float] = None,
         top_k: Optional[int] = None,
-        max_tokens: Optional[int] = None,
+        max_tokens: Optional[int] = None, # Maps to max_new_tokens for some TGI, or max_tokens for OpenAI compatible
         seed: Optional[int] = None,
         stop: Optional[Union[str, List[str]]] = None,
         response_format: Optional[Dict[str, str]] = None,
         num_return_sequences: Optional[int] = None,  # Mapped from 'n'
-        user: Optional[str] = None,
+        user: Optional[str] = None, # OpenAI compatible user field
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
-        logit_bias: Optional[Dict[str, float]] = None,
-        presence_penalty: Optional[float] = None,
-        frequency_penalty: Optional[float] = None,
-        logprobs: Optional[bool] = None,
-        top_logprobs: Optional[int] = None,
+        logit_bias: Optional[Dict[str, float]] = None, # OpenAI compatible
+        presence_penalty: Optional[float] = None, # OpenAI compatible name
+        frequency_penalty: Optional[float] = None, # OpenAI compatible name
+        logprobs: Optional[bool] = None, # OpenAI compatible name
+        top_logprobs: Optional[int] = None, # OpenAI compatible name
         custom_prompt_arg: Optional[str] = None  # Legacy
 ):
-    logging.debug(f"HuggingFace Chat: Request process starting for model '{model}'...")
+    logging.debug(f"HuggingFace Chat: Request process starting for model '{model}' (Streaming: {streaming})")
     loaded_config_data = load_and_log_configs()
-    # Ensure 'huggingface_api' section exists or provide empty dict default
     hf_config = loaded_config_data.get('huggingface_api', loaded_config_data.get('API', {}).get('huggingface', {}))
 
     final_api_key = api_key or hf_config.get('api_key')
@@ -1328,106 +1327,96 @@ def chat_with_huggingface(
         log_key_display = f"{final_api_key[:5]}...{final_api_key[-5:]}" if len(final_api_key) > 9 else "Key Provided"
         logging.debug(f"HuggingFace: Using API Key: {log_key_display}")
     else:
-        logging.warning("HuggingFace: API key is missing. Assuming local/unsecured TGI or endpoint allows it.")
+        logging.warning("HuggingFace: API key is missing. Public Inference API or unsecured TGI assumed.")
 
     headers = {"Content-Type": "application/json"}
     if final_api_key:
         headers["Authorization"] = f"Bearer {final_api_key}"
 
-    # model argument to this function is the primary model_id
-    final_model_for_payload = model
+    final_model_for_payload = model or hf_config.get('model_id') or hf_config.get('model')
     if not final_model_for_payload:
-        # Try to get from config if not passed directly, though direct pass is preferred for clarity
-        final_model_for_payload = hf_config.get('model_id', hf_config.get('model'))
-        if not final_model_for_payload:
-            raise ChatConfigurationError(provider="huggingface",
-                                         message="HuggingFace model ID is required (must be passed as 'model' or configured).")
-        logging.info(f"HuggingFace: Using model_id from config: {final_model_for_payload}")
+        raise ChatConfigurationError(provider="huggingface",
+                                     message="HuggingFace model ID is required (must be passed as 'model' or configured).")
+    logging.info(f"HuggingFace: Using model_id for payload: {final_model_for_payload}")
 
     # --- URL Construction ---
     api_url: str
-    # Explicit config flag to use the specific router URL format
     use_router_url_format_str = str(hf_config.get('use_router_url_format', "False")).lower()
 
     if use_router_url_format_str == "true":
+        # This format explicitly puts the model in the URL path.
+        # User must ensure router_base_url and model_id result in a valid endpoint.
         router_base = hf_config.get('router_base_url', 'https://router.huggingface.co/hf-inference').rstrip('/')
         model_path_part = final_model_for_payload.strip('/')
         chat_path = hf_config.get('api_chat_path', 'v1/chat/completions').lstrip('/')
+        # Constructs URL like: {router_base}/models/{model_path_part}/{chat_path}
         api_url = f"{router_base}/models/{model_path_part}/{chat_path}"
-        logging.info(f"HuggingFace: Using explicit Router URL format. Target URL: {api_url}")
-    else:
-        # Try to use a configured specific api_base_url
+        logging.info(f"HuggingFace: Using explicit 'use_router_url_format=true'. Target URL: {api_url}")
+    else: # use_router_url_format is false, standard URL construction
         configured_api_base_url = hf_config.get('api_base_url')
+        # Default chat path can be just "chat/completions" if base_url includes /v1, or "v1/chat/completions" if not.
+        # Let's make the default api_chat_path more flexible.
+        # If using the public HF API, base is /v1 and path is chat/completions.
+        default_chat_path = 'chat/completions' if (configured_api_base_url and 'api-inference.huggingface.co/v1' in configured_api_base_url) else 'v1/chat/completions'
+        chat_completions_path = hf_config.get('api_chat_path', default_chat_path).lstrip('/')
+
         if configured_api_base_url:
-            chat_completions_path = hf_config.get('api_chat_path', 'v1/chat/completions').lstrip('/')
-            # If base_url is for a generic TGI server, model might be part of path or just payload
-            # Heuristic: if model_id is not in base_url, and base_url doesn't end with the model_id, append it.
-            # This is tricky; ideally, config is explicit.
-            base_url_is_generic = True  # Assume generic unless specific markers
-            if final_model_for_payload.lower() in configured_api_base_url.lower():
-                base_url_is_generic = False
-
-            if base_url_is_generic and not configured_api_base_url.endswith(final_model_for_payload):
-                # Append model_id if base_url is generic and doesn't end with model_id
-                model_path_part = final_model_for_payload.strip('/')
-                api_url = f"{configured_api_base_url.rstrip('/')}/{model_path_part}/{chat_completions_path}"
-                logging.info(
-                    f"HuggingFace: Using configured generic TGI/Endpoint URL with model path. Target URL: {api_url}")
-            else:  # Base URL is specific or already contains model_id, just append chat path
-                api_url = f"{configured_api_base_url.rstrip('/')}/{chat_completions_path}"
-                logging.info(f"HuggingFace: Using configured specific TGI/Endpoint URL. Target URL: {api_url}")
+            # If api_base_url is configured, use it directly and append the chat_completions_path.
+            # The model is expected to be in the payload.
+            # If the endpoint needs the model_id in the path, configured_api_base_url should include it fully.
+            api_url = f"{configured_api_base_url.rstrip('/')}/{chat_completions_path}"
+            logging.info(f"HuggingFace: Using configured 'api_base_url' ('{configured_api_base_url}') and 'api_chat_path' ('{chat_completions_path}'). Target URL: {api_url}. Model is in payload.")
         else:
-            # Fallback if no api_base_url and use_router_url_format is false: default to serverless inference API style
-            # This is different from the router; this one is api-inference.huggingface.co/models/{model_id}
-            # This endpoint is NOT typically for /v1/chat/completions. It's for raw inference.
-            # For /v1/chat/completions compatibility, router is better.
-            # Given the test context, the router structure with model_id is most likely.
-            default_router_base = 'https://router.huggingface.co/hf-inference'
-            model_part = final_model_for_payload.strip('/')
-            default_chat_path = 'v1/chat/completions'.lstrip('/')
-            api_url = f"{default_router_base}/models/{model_part}/{default_chat_path}"
+            # Fallback if no api_base_url is configured.
+            # Use the public Hugging Face Inference API endpoint for OpenAI-like chat completions.
+            default_hf_api_base = 'https://api-inference.huggingface.co/v1' # Base includes /v1
+            default_chat_path_for_api_inference = 'chat/completions' # Path relative to /v1 base
+            api_url = f"{default_hf_api_base.rstrip('/')}/{default_chat_path_for_api_inference}"
             logging.warning(
-                f"HuggingFace: 'api_base_url' not configured and 'use_router_url_format' is false. "
-                f"Defaulting to assumed router structure for model. URL: {api_url}"
+                f"HuggingFace: 'api_base_url' not configured. Defaulting to public Inference API endpoint: {api_url}. Model is in payload."
             )
+    # --- End URL Construction ---
 
-    # Resolve other parameters
     final_temp = temp if temp is not None else _safe_cast(hf_config.get('temperature'), float, 0.7)
-    final_streaming_cfg = hf_config.get('streaming', False)  # Default to False if not in config
-    final_streaming = streaming if streaming is not None else \
-        (str(final_streaming_cfg).lower() == 'true' if isinstance(final_streaming_cfg, str) else bool(
-            final_streaming_cfg))
+    # Ensure final_streaming is a boolean for the payload
+    hf_config_streaming = hf_config.get('streaming', False)
+    final_streaming_payload_val = streaming if streaming is not None else \
+        (str(hf_config_streaming).lower() == 'true' if isinstance(hf_config_streaming, str) else bool(hf_config_streaming))
 
-    final_max_tokens_val = max_tokens if max_tokens is not None \
-        else _safe_cast(hf_config.get('max_tokens', hf_config.get('max_new_tokens')), int)
+
+    # TGI uses max_new_tokens. OpenAI compatible layers might expect max_tokens.
+    # If max_tokens is provided, prefer it. Otherwise, check hf_config for max_new_tokens or max_tokens
+    final_max_val = max_tokens
+    if final_max_val is None:
+        final_max_val = _safe_cast(hf_config.get('max_tokens', hf_config.get('max_new_tokens')), int)
+
 
     api_messages = []
+    # Handle system message: TGI usually wants it as the first message if no dedicated 'system' field in payload root
+    # For OpenAI compatible /v1/chat/completions, system message is standard.
     if system_message:
         api_messages.append({"role": "system", "content": system_message})
-    api_messages.extend(input_data)
+    api_messages.extend(input_data) # input_data should be correctly formatted by caller
 
-    payload = {
-        "model": final_model_for_payload,  # Some TGI endpoints want model here, some infer from URL.
+    payload: Dict[str, Any] = {
+        "model": final_model_for_payload, # Model ID is crucial for endpoints that multiplex
         "messages": api_messages,
-        "stream": final_streaming,
+        "stream": final_streaming_payload_val, # Use the boolean value
     }
 
-    # Add optional parameters if they have values
     if final_temp is not None: payload["temperature"] = final_temp
     if top_p is not None: payload["top_p"] = top_p
-    if top_k is not None: payload["top_k"] = top_k  # TGI uses top_k
-    if final_max_tokens_val is not None: payload[
-        "max_tokens"] = final_max_tokens_val  # TGI uses max_new_tokens, OpenAI compatible layers expect max_tokens
+    if top_k is not None: payload["top_k"] = top_k
+    if final_max_val is not None:
+        # Use "max_tokens" for OpenAI compatibility, TGI might map this or use "max_new_tokens"
+        # Sticking to "max_tokens" if the endpoint is /v1/chat/completions
+        payload["max_tokens"] = final_max_val
     if seed is not None: payload["seed"] = seed
-    if stop is not None: payload["stop"] = stop  # TGI uses 'stop' (list of strings)
-    if response_format is not None and response_format.get(
-            "type") == "json_object":  # TGI specific for JSON mode if supported
-        # TGI doesn't have a direct 'response_format' object like OpenAI.
-        # It might require specific grammar or be implied by model.
-        # For OpenAI-compatible TGI, it might support it.
-        payload["response_format"] = response_format  # Pass as is for compatible endpoints
-    if num_return_sequences is not None: payload["n"] = num_return_sequences  # OpenAI compatible 'n'
-    if user is not None: payload["user"] = user  # OpenAI compatible 'user'
+    if stop is not None: payload["stop_sequences"] = stop if isinstance(stop, list) else [stop] # TGI often uses stop_sequences
+    if response_format is not None: payload["response_format"] = response_format # For OpenAI compatible JSON mode
+
+    if num_return_sequences is not None and not final_streaming_payload_val : payload["n"] = num_return_sequences
+    if user is not None: payload["user"] = user
     if tools is not None: payload["tools"] = tools
     if tool_choice is not None: payload["tool_choice"] = tool_choice
     if logit_bias is not None: payload["logit_bias"] = logit_bias
@@ -1436,100 +1425,96 @@ def chat_with_huggingface(
     if logprobs is not None: payload["logprobs"] = logprobs
     if top_logprobs is not None and payload.get("logprobs"): payload["top_logprobs"] = top_logprobs
 
-    # TGI specific commonly used params (if not covered by OpenAI names)
-    # Example: TGI uses "details" for logprobs-like info, "decoder_input_details"
-    # For now, sticking to OpenAI compatible names if the endpoint is /v1/chat/completions
 
-    logging.debug(
-        f"HuggingFace Final Payload (excluding messages): {{k:v for k,v in payload.items() if k != 'messages'}}")
+    # Remove None values from payload before sending, common practice
+    payload = {k: v for k, v in payload.items() if v is not None}
+
+    logging.debug(f"HuggingFace Final Payload (excluding messages, tools): {{ {', '.join(f'{k}: {v}' for k, v in payload.items() if k not in ['messages', 'tools'])} }}")
+    if 'tools' in payload: logging.debug(f"HuggingFace Tools: {payload['tools']}")
     logging.debug(f"HuggingFace Headers: {headers}")
 
     timeout_seconds = float(hf_config.get('api_timeout', 120.0))
+    # For streaming, timeout applies to initial connection and pauses between data.
+    # Consider a tuple timeout (connect_timeout, read_timeout) for more control if needed.
 
     try:
-        if final_streaming:
+        if final_streaming_payload_val: # Check the boolean intended for payload
             logging.debug(f"HuggingFace: Posting streaming request to {api_url}")
-            session = requests.Session()
-            response = session.post(api_url, headers=headers, json=payload, stream=True, timeout=timeout_seconds)
-            response.raise_for_status()  # Will raise HTTPError for bad responses (4xx or 5xx)
+            # Session might not be strictly necessary for a single streaming POST, but good for potential keep-alive
+            response = requests.post(api_url, headers=headers, json=payload, stream=True, timeout=timeout_seconds)
+            response.raise_for_status()
 
             def stream_generator_huggingface():
-                # For OpenAI-compatible /v1/chat/completions on TGI, it should yield SSE
-                # If it's raw TGI, format is different. Assume OpenAI-compatible here.
                 try:
-                    for line in response.iter_lines():  # iter_lines yields bytes
-                        if line:
-                            decoded_line = line.decode('utf-8')
+                    for line_bytes in response.iter_lines():
+                        if line_bytes:
+                            decoded_line = line_bytes.decode('utf-8').strip()
+                            if not decoded_line: continue # Skip empty keep-alive lines
+
                             # logging.debug(f"HF Stream raw line: {decoded_line}")
                             if decoded_line.startswith("data:"):
                                 data_content = decoded_line[len("data:"):].strip()
                                 if data_content == "[DONE]":
-                                    # Yield a final OpenAI-like DONE structure if needed by endpoint's SSE parser
-                                    # but the endpoint's sse_event_generator already does this.
-                                    # So just stop.
-                                    logging.debug("HuggingFace stream received [DONE]")
+                                    logging.debug("HuggingFace stream received [DONE] marker.")
                                     break
                                 try:
-                                    # The data_content itself is the JSON string for an OpenAI chunk
-                                    # The endpoint sse_event_generator expects the text piece, not the whole sse line.
-                                    # This function should yield the *content* of the chunk.
                                     chunk_json = json.loads(data_content)
                                     delta_content = chunk_json.get("choices", [{}])[0].get("delta", {}).get("content")
                                     if delta_content:
                                         yield delta_content
+                                    # Consider if other parts of the chunk are needed, e.g., finish_reason in delta
+                                    # For now, just yielding content as per OpenAI's typical text stream delta.
                                 except json.JSONDecodeError:
-                                    logging.warning(f"HuggingFace stream: JSON decode error for data: {data_content}")
-                except requests.exceptions.ChunkedEncodingError as e:
-                    logging.error(f"HuggingFace stream: ChunkedEncodingError during streaming: {e}")
-                except Exception as e:
-                    logging.error(f"HuggingFace stream: Unexpected error during streaming: {e}", exc_info=True)
+                                    logging.warning(f"HuggingFace stream: JSON decode error for data: '{data_content}'")
+                except requests.exceptions.ChunkedEncodingError as e_chunked:
+                    logging.error(f"HuggingFace stream: ChunkedEncodingError during streaming: {e_chunked}")
+                except Exception as e_stream:
+                    logging.error(f"HuggingFace stream: Unexpected error during streaming: {e_stream}", exc_info=True)
                 finally:
                     if response:
-                        response.close()
-                    if session:
-                        session.close()
+                        response.close() # Ensure response is closed
                     logging.debug("HuggingFace stream generator finished.")
-
             return stream_generator_huggingface()
-        else:
+        else: # Non-streaming
             logging.debug(f"HuggingFace: Posting non-streaming request to {api_url}")
             adapter = HTTPAdapter(max_retries=Retry(
                 total=int(hf_config.get('api_retries', 3)),
                 backoff_factor=float(hf_config.get('api_retry_delay', 1)),
                 status_forcelist=[429, 500, 502, 503, 504],
-                allowed_methods=["POST"]  # Corrected from allowlist_methods
+                allowed_methods=["POST"] # Should be allowed_methods for Retry v0.9.2+ (urllib3)
+                                         # or method_whitelist for older versions.
             ))
             session = requests.Session()
             session.mount("https://", adapter)
             session.mount("http://", adapter)
+
             response = session.post(api_url, headers=headers, json=payload, timeout=timeout_seconds)
             response.raise_for_status()
-            return response.json()
+            return response.json() # This should be an OpenAI compatible JSON response
 
     except requests.exceptions.HTTPError as e:
         status_code = getattr(e.response, 'status_code', 500)
         error_text = getattr(e.response, 'text', str(e))
-        logging.error(f"HuggingFace API call failed with status {status_code}. Details: {error_text[:500]}",
-                      exc_info=False)
+        logging.error(f"HuggingFace API call failed to {api_url} with status {status_code}. Details: {error_text[:500]}", exc_info=False)
         if status_code == 401:
-            raise ChatAuthenticationError(provider="huggingface",
-                                          message=f"Authentication failed. Check API key. Detail: {error_text[:200]}")
+            raise ChatAuthenticationError(provider="huggingface", message=f"Authentication failed. Detail: {error_text[:200]}")
+        elif status_code == 404: # Specifically handle 404 for URL/model issues
+            raise ChatBadRequestError(provider="huggingface", message=f"Endpoint or Model not found (404) at {api_url}. Detail: {error_text[:200]}")
         elif status_code == 429:
             raise ChatRateLimitError(provider="huggingface", message=f"Rate limit exceeded. Detail: {error_text[:200]}")
-        elif 400 <= status_code < 500:
-            raise ChatBadRequestError(provider="huggingface",
-                                      message=f"Bad request (Status {status_code}). Detail: {error_text[:200]}")
-        else:
-            raise ChatProviderError(provider="huggingface",
-                                    message=f"Server error (Status {status_code}). Detail: {error_text[:200]}",
-                                    status_code=status_code)
-    except requests.exceptions.RequestException as e:
-        logging.error(f"HuggingFace API request failed (network error): {e}", exc_info=True)
-        raise ChatProviderError(provider="huggingface", message=f"Network error: {e}",
-                                status_code=504)  # Gateway timeout
+        elif 400 <= status_code < 500: # Other 4xx
+            raise ChatBadRequestError(provider="huggingface", message=f"Bad request (Status {status_code}) to {api_url}. Detail: {error_text[:200]}")
+        else: # 5xx
+            raise ChatProviderError(provider="huggingface", message=f"Server error (Status {status_code}) from {api_url}. Detail: {error_text[:200]}", status_code=status_code)
+    except requests.exceptions.RequestException as e: # Covers DNS, Connection, Timeout errors
+        logging.error(f"HuggingFace API request failed to {api_url} (network error): {e}", exc_info=True)
+        raise ChatProviderError(provider="huggingface", message=f"Network error connecting to {api_url}: {e}", status_code=504) # 504 for timeout/gateway like
     except Exception as e:
-        logging.error(f"HuggingFace API call: Unexpected error: {e}", exc_info=True)
-        raise ChatAPIError(provider="huggingface", message=f"Unexpected error in HuggingFace API call: {e}")
+        logging.error(f"HuggingFace API call to {api_url}: Unexpected error: {e}", exc_info=True)
+        if not isinstance(e, ChatAPIError): # Avoid re-wrapping known chat errors
+            raise ChatAPIError(provider="huggingface", message=f"Unexpected error in HuggingFace API call: {e}")
+        else:
+            raise # Re-raise if it's already a ChatAPIError subtype
 
 
 def chat_with_mistral(

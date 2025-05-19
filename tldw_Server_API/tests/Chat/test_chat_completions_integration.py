@@ -190,7 +190,7 @@ def test_commercial_provider_non_streaming_no_template(
         "deepseek": "deepseek-chat",
         "mistral": "mistral-tiny",  # Or mistral-small for better results
         "google": "gemini-1.5-flash-latest",  # Cost-effective Gemini
-        "huggingface": os.getenv("HF_TEST_MODEL", "mistralai/Mistral-7B-Instruct-v0.1")  # Ensure HF_TOKEN is set
+        "huggingface": os.getenv("HF_TEST_MODEL", "Qwen/Qwen3-235B-A22B")  # Ensure HF_TOKEN is set
     }
     default_test_model = "test-model-default"  # Fallback, though ideally map should cover all in COMMERCIAL_PROVIDERS_FOR_TEST
 
