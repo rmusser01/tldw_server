@@ -15,6 +15,7 @@ soundfile
 # API-Server
 aiofiles
 cachetools
+defusedxml
 fastapi
 loguru
 numpy

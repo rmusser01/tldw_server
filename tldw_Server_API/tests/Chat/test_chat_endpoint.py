@@ -272,15 +272,8 @@ def test_no_system_message_in_payload(
 
     mock_chat_api_call.assert_called_once()
     # This line was missing:
-    called_kwargs = mock_chat_api_call.call_args.kwargs  # Get the keyword arguments passed to the mock
-
-    # Assert that system_message passed to chat_api_call is None because:
-    # 1. default_chat_request_data has no system message.
-    # 2. No template is specified, so DEFAULT_RAW_PASSTHROUGH_TEMPLATE is used.
-    # 3. DEFAULT_RAW_PASSTHROUGH_TEMPLATE.system_message_template is likely empty or just "{original_system_message_from_request}".
-    # 4. original_system_message_from_request will be "" or None.
-    # So, final_system_message_for_provider should be None or empty, leading to system_message=None in chat_args_cleaned.
-    assert mock_chat_api_call.get("system_message") == ""
+    called_kwargs = mock_chat_api_call.call_args.kwargs
+    assert called_kwargs.get("system_message") == ""
 
     # Ensure the messages in the payload are dictionaries and match the input (since it's passthrough)
     expected_payload_messages_as_dicts = [msg.model_dump(exclude_none=True) for msg in DEFAULT_USER_MESSAGES_FOR_SCHEMA]
@@ -645,7 +638,8 @@ def test_error_within_stream_generator(
                         first_data_event_found = True
                     if payload["choices"][0].get("finish_reason") == "stop":
                         done_event_found = True
-                        assert payload.get("tldw_conversation_id") == "mock_conv_id_stream_error"
+                        # Use the previously extracted expected_conv_id:
+                        assert payload.get("tldw_conversation_id") == expected_conv_id
 
                 if "error" in payload and "message" in payload["error"]:
                     if "Something broke mid-stream!" in payload["error"]["message"] or \

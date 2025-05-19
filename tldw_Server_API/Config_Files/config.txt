@@ -207,7 +207,8 @@ groq_api_retry_delay = 1
 # Set to true if targeting router.huggingface.co
 huggingface_use_router_url_format = false
 # Default router base
-huggingface_router_base_url = https://router.huggingface.co/hf-inference
+huggingface_router_base_url = https://router.huggingface.co/hf-inference/models
+huggingface_api_chat_path = v1/chat/completions
 huggingface_api_key = <huggingface_api_key>
 huggingface_model = meta-llama/Llama-3.1-8B-Instruct
 huggingface_streaming = True

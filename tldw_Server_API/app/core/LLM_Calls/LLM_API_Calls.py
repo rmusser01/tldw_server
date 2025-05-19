@@ -678,95 +678,66 @@ def chat_with_cohere(
         response.raise_for_status()
 
         if current_streaming:
-            # ... (streaming normalization logic from your file for Cohere, ensure "Cohere" in logs) ...
-            # (This part looks okay from your provided code, focusing on 'text-generation' and 'stream-end' events)
-            logging.debug("Cohere: Streaming response received. Normalizing to OpenAI SSE.")
+            logging.debug("Cohere: Streaming response received. Yielding raw text chunks.")
 
-            def stream_generator():
-                completion_id = f"chatcmpl-cohere-{time.time_ns()}"
-                created_time = int(time.time())
-                buffer = ""
-                stream_truly_finished_by_cohere = False
+            def stream_generator_cohere_raw(response_iter, model_name_for_done):  # Renamed to indicate raw output
+                stream_truly_finished_by_cohere_event = False
                 try:
-                    for chunk_bytes in response.iter_content(chunk_size=None):
+                    buffer = ""
+                    for chunk_bytes in response.iter_content(chunk_size=None):  # Iterate over raw bytes
                         if not chunk_bytes: continue
                         buffer += chunk_bytes.decode('utf-8', errors='replace')
+
                         while '\n' in buffer:
                             line, buffer = buffer.split('\n', 1)
                             if not line.strip(): continue
                             try:
                                 cohere_event = json.loads(line)
                                 event_type = cohere_event.get("event_type")
-                                delta_text = None
-                                finish_reason_str = None
 
                                 if event_type == "text-generation":
-                                    delta_text = cohere_event.get("text")
+                                    text_chunk = cohere_event.get("text")
+                                    if text_chunk:
+                                        logging.trace(f"Cohere Stream Raw Yield: {text_chunk[:50]}")
+                                        yield text_chunk  # Yield raw text
                                 elif event_type == "stream-end":
-                                    stream_truly_finished_by_cohere = True
-                                    # Cohere's finish_reason from the 'response' object in stream-end event
-                                    # or directly if it's at the top level of the stream-end event.
-                                    # Let's assume it might be at the top level of the event first
+                                    stream_truly_finished_by_cohere_event = True
+                                    # Logging the finish reason is good, but don't yield it as text
                                     raw_finish_reason = cohere_event.get("finish_reason", "COMPLETE")
-                                    # Or from the nested response object if available
                                     if "response" in cohere_event and isinstance(cohere_event["response"], dict):
-                                        raw_finish_reason = cohere_event["response"].get("finish_reason", raw_finish_reason)
+                                        raw_finish_reason = cohere_event["response"].get("finish_reason",
+                                                                                         raw_finish_reason)
+                                    logging.info(
+                                        f"Cohere stream ended via 'stream-end' event. Finish reason: {raw_finish_reason}")
+                                    # The endpoint's sse_event_generator will handle the [DONE] SSE message
+                                    return  # Explicitly stop the generator
 
-                                    finish_reason_str = str(raw_finish_reason).upper() # Ensure uppercase for map
-                                    # Map to OpenAI like finish reasons
-                                    if finish_reason_str == "COMPLETE":
-                                        finish_reason_str = "stop"
-                                    elif finish_reason_str == "MAX_TOKENS":
-                                        finish_reason_str = "length"
-                                    elif finish_reason_str == "ERROR_LIMIT": # Example, adjust if needed
-                                        finish_reason_str = "length"
-                                    elif finish_reason_str == "ERROR_TOXIC": # Example
-                                        finish_reason_str = "content_filter"
-                                    else: # For other Cohere reasons, pass them lowercased or map specifically
-                                        finish_reason_str = finish_reason_str.lower()
+                                # Handle other event types if necessary, but don't yield them as text unless intended
 
-
-                                if delta_text:
-                                    sse_chunk = {"id": completion_id, "object": "chat.completion.chunk",
-                                                 "created": created_time, "model": current_model, "choices": [
-                                            {"index": 0, "delta": {"content": delta_text}, "finish_reason": None}]}
-                                    logging.debug(f"Cohere Stream Yielding Text: {delta_text[:50]}")
-                                    yield f"data: {json.dumps(sse_chunk)}\n\n"
-
-                                if finish_reason_str and stream_truly_finished_by_cohere: # Only yield finish reason at the actual end
-                                    sse_chunk = {"id": completion_id, "object": "chat.completion.chunk",
-                                                 "created": created_time, "model": current_model, "choices": [
-                                            {"index": 0, "delta": {}, "finish_reason": finish_reason_str}]}
-                                    logging.debug(f"Cohere Stream Yielding Finish Reason: {finish_reason_str}")
-                                    yield f"data: {json.dumps(sse_chunk)}\n\n"
-
-                                if stream_truly_finished_by_cohere:
-                                    break
                             except json.JSONDecodeError:
                                 logging.warning(f"Cohere Stream: Could not decode JSON from line: '{line}'")
                             except Exception as e_parse:
                                 logging.error(f"Cohere Stream: Error parsing event '{line}': {e_parse}", exc_info=True)
 
-                        if stream_truly_finished_by_cohere:
+                        if stream_truly_finished_by_cohere_event:  # Check if inner loop broke due to stream-end
                             break
-                    # Ensure [DONE] is sent if the loop finishes without a stream-end event (less ideal)
-                    if not stream_truly_finished_by_cohere:
-                        logging.warning("Cohere stream finished without explicit stream-end event.")
 
-                except requests.exceptions.ChunkedEncodingError as e:  # ... error handling ...
+                    if not stream_truly_finished_by_cohere_event:
+                        logging.warning("Cohere stream loop finished without explicit 'stream-end' event from Cohere.")
+
+                except requests.exceptions.ChunkedEncodingError as e:
                     logging.error(f"Cohere: ChunkedEncodingError: {e}", exc_info=True)
-                    yield f"data: {json.dumps({'error': {'message': f'Stream error: {str(e)}', 'type': 'cohere_stream_error'}})}\n\n"
-                except Exception as e:  # ... error handling ...
-                    logging.error(f"Cohere: Stream iteration error: {e}", exc_info=True)
-                    yield f"data: {json.dumps({'error': {'message': f'Stream iteration error: {str(e)}', 'type': 'cohere_stream_error'}})}\n\n"
+                    # Yield a special marker or raise an exception that the endpoint's sse_event_generator can catch
+                    yield f"<STREAM_ERROR:ChunkedEncodingError:{str(e)}>"  # Example error marker
+                except Exception as e_outer:
+                    logging.error(f"Cohere: Stream iteration error: {e_outer}", exc_info=True)
+                    yield f"<STREAM_ERROR:IterationError:{str(e_outer)}>"  # Example error marker
                 finally:
-                    logging.debug("Cohere Stream: Sending final [DONE] event.")
-                    yield "data: [DONE]\n\n"
+                    logging.debug("Cohere Stream (raw generator): Finished.")
                     if response: response.close()
-            return stream_generator()
+
+            return stream_generator_cohere_raw()  # Return the raw generator
         else:
-            # ... (non-streaming normalization from your file, ensure "Cohere" in logs) ...
-            # (This part looks okay, mapping 'text' and 'finish_reason')
             response_data = response.json()
             logging.debug("Cohere: Non-streaming request successful.")
             finish_reason_map = {"COMPLETE": "stop", "MAX_TOKENS": "length", "ERROR_LIMIT": "length",
@@ -1009,12 +980,9 @@ def chat_with_google(
         response.raise_for_status()
 
         if current_streaming:
-            # ... (Gemini streaming normalization logic from your file) ...
-            # (This part looks generally okay, normalizing to OpenAI SSE deltas)
             logging.debug("Google Gemini: Streaming response received.")
 
             def stream_generator():
-                # ... (your existing Gemini stream normalization) ...
                 try:
                     for line in response.iter_lines(decode_unicode=True):
                         if line and line.strip().startswith('data:'):
@@ -1082,8 +1050,6 @@ def chat_with_google(
 
             return stream_generator()
         else:
-            # ... (non-streaming normalization logic from your file) ...
-            # (This part looks okay, normalizing candidates and usageMetadata)
             response_data = response.json()
             logging.debug("Google Gemini: Non-streaming request successful.")
             assistant_content = ""
@@ -1287,9 +1253,8 @@ def chat_with_huggingface(
         logging.debug(f"HuggingFace: Using API Key: {log_key_display}")
     else:
         logging.warning("HuggingFace: API key is missing. Assuming local/unsecured TGI or endpoint allows it.")
-    if not final_api_key:  # Ensure this check is appropriate for your HF setup
+    if not final_api_key:
         logging.warning("HuggingFace: API key is missing. Calls might fail if the endpoint requires authentication.")
-        # Depending on your setup, you might want to raise ChatAuthenticationError here if a key is always needed.
 
     headers = {
         "Content-Type": "application/json"
@@ -1302,26 +1267,59 @@ def chat_with_huggingface(
 
     # Model for the payload. The 'model' arg to this function is primary.
     final_model_for_payload = model or hf_config.get('model')  # 'model' from config, not 'model_id'
+    # final_model_for_payload is the model ID string like "Org/ModelName"
     if not final_model_for_payload:
-        raise ChatConfigurationError(provider="huggingface", message="HuggingFace model for payload is required.")
+        raise ChatConfigurationError(provider="huggingface",
+                                     message="HuggingFace model ID is required for URL construction.")
 
     # --- URL Construction ---
-    # (URL construction logic from your previous version, ensure it uses final_model_for_payload if needed for path)
     api_url: str
-    use_router_format = hf_config.get('use_router_url_format', False)
+    use_router_format = str(hf_config.get('use_router_url_format', "False")).lower() == "true"
     if use_router_format:
+        # This format assumes the router base URL needs /models/ appended, then model_id, then chat_path
         router_base = hf_config.get('router_base_url', 'https://router.huggingface.co/hf-inference').rstrip('/')
-        model_path_part = final_model_for_payload  # Using the model that will be in the payload for path consistency
+        model_path_part = final_model_for_payload.strip('/')  # e.g., "Org/ModelName"
         chat_path = hf_config.get('api_chat_path', 'v1/chat/completions').strip('/')
         api_url = f"{router_base}/models/{model_path_part}/{chat_path}"
         logging.info(f"HuggingFace: Using Router URL format. Target URL: {api_url}")
     else:
+        # This block is for custom TGI endpoints or other OpenAI-compatible endpoints
         configured_api_base_url = hf_config.get('api_base_url')
         if not configured_api_base_url:
-            raise ChatConfigurationError(provider="huggingface", message="HuggingFace 'api_base_url' not configured.")
-        chat_completions_path = hf_config.get('api_chat_path', 'v1/chat/completions').strip('/')
-        api_url = f"{configured_api_base_url.rstrip('/')}/{chat_completions_path}"
-        logging.info(f"HuggingFace: Using TGI/Endpoint URL format. Target URL: {api_url}")
+            # If no specific base URL, AND use_router_format is false, this is ambiguous.
+            # For now, let's assume if use_router_format is false, a base_url MUST be provided.
+            # Or, we could default to the more specific serverless inference API structure.
+            # The previous default here was problematic.
+            raise ChatConfigurationError(provider="huggingface",
+                                         message="HuggingFace 'api_base_url' not configured and 'use_router_format' is false.")
+        else:
+            # We have a configured_api_base_url.
+            # Now, determine if the model ID should be part of the path.
+            # For OpenAI-compatible /v1/chat/completions, the model is usually in the payload, not URL.
+            # However, some TGI setups might expose each model at a sub-path.
+            # The key here is that the LOG showed:
+            # "HuggingFace: Using configured TGI/Endpoint URL format. Target URL: https://router.huggingface.co/hf-inference/models/v1/chat/completions"
+            # This implies 'configured_api_base_url' was something like "https://router.huggingface.co/hf-inference/models"
+            # and 'api_chat_path' was "v1/chat/completions".
+            # THE FIX: The model_id part was missing between these two if this base_url is for a collection of models.
+
+            chat_completions_path = hf_config.get('api_chat_path', 'v1/chat/completions').lstrip(
+                '/')  # Ensure path starts with / if not empty
+
+            # Check if the base URL already looks like it includes a model segment for a *specific* model endpoint
+            # This is heuristic. A better way is an explicit config flag like 'base_url_is_model_specific'.
+            if final_model_for_payload.lower() in configured_api_base_url.lower():
+                # Base URL likely already points to a specific model's endpoint
+                api_url = f"{configured_api_base_url.rstrip('/')}/{chat_completions_path}"
+                logging.info(f"HuggingFace: Configured base URL appears model-specific. Target URL: {api_url}")
+            else:
+                # Base URL is likely generic (e.g., https://my-tgi-server.com), append model and chat path
+                # OR the base_url is like the router's /models path, and we need to insert model_id
+                # This is the path that was likely causing the 404 with the generic URL.
+                model_path_part = final_model_for_payload.strip('/')
+                api_url = f"{configured_api_base_url.rstrip('/')}/{model_path_part}/{chat_completions_path}"
+                logging.info(
+                    f"HuggingFace: Using configured TGI/Endpoint URL format (base + model + path). Target URL: {api_url}")
 
     # Resolve other parameters
     final_temp = temp if temp is not None else _safe_cast(hf_config.get('temperature'), float, 0.7)
@@ -1415,15 +1413,14 @@ def chat_with_mistral(
         system_message: Optional[str] = None,
         temp: Optional[float] = None,
         streaming: Optional[bool] = False,
-        topp: Optional[float] = None,  # top_p for Mistral
-        # Mistral specific and new params
+        topp: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        random_seed: Optional[int] = None,  # from generic 'seed'
-        top_k: Optional[int] = None,  # from generic 'topk'
-        safe_prompt: Optional[bool] = None,  # Mistral specific, already in your config
+        random_seed: Optional[int] = None,
+        top_k: Optional[int] = None,
+        safe_prompt: Optional[bool] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[str] = None,  # Mistral: "auto", "any", "none"
-        response_format: Optional[Dict[str, str]] = None,  # Mistral: {"type": "json_object"}
+        tool_choice: Optional[str] = None,
+        response_format: Optional[Dict[str, str]] = None,
         custom_prompt_arg: Optional[str] = None
 ):
     loaded_config_data = load_and_log_configs()
