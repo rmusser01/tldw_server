@@ -987,182 +987,277 @@ class Database:
         # Add 'media_ids_filter' to the method signature
         # from typing import List, Tuple, Dict, Any, Optional, Union # Ensure Union is imported
 
-    def search_media_db(self,
-                        search_query: Optional[str],
-                        search_fields: Optional[List[str]] = None,
-                        keywords: Optional[List[str]] = None,
-                        media_ids_filter: Optional[List[Union[int, str]]] = None,  # New parameter
-                        page: int = 1,
-                        results_per_page: int = 20,
-                        include_trash: bool = False,
-                        include_deleted: bool = False) -> Tuple[List[Dict[str, Any]], int]:
+    def search_media_db(
+        self,
+        search_query: Optional[str], # Main text for FTS/LIKE (can be pre-formatted for exact phrase)
+        search_fields: Optional[List[str]] = None,
+        media_types: Optional[List[str]] = None,
+        date_range: Optional[Dict[str, datetime]] = None, # Expects datetime objects
+        must_have_keywords: Optional[List[str]] = None,
+        must_not_have_keywords: Optional[List[str]] = None,
+        sort_by: Optional[str] = "last_modified_desc", # Default sort order
+        # boost_fields: Optional[Dict[str, float]] = None, # Future: for FTS boosting
+        media_ids_filter: Optional[List[Union[int, str]]] = None,
+        page: int = 1,
+        results_per_page: int = 20,
+        include_trash: bool = False,
+        include_deleted: bool = False
+    ) -> Tuple[List[Dict[str, Any]], int]:
         """
-        Searches media items based on query text, keywords, explicit media ID filter, and other filters.
+        Searches media items based on a variety of criteria, supporting text search,
+        filtering, and sorting.
 
-        Supports FTS search on 'title' and 'content' via `media_fts` table.
-        Supports basic LIKE search on 'author' and 'type'.
-        Filters by a list of required keywords (all must match).
-        Filters by a list of provided media IDs if `media_ids_filter` is given.
-        Applies `is_trash` and `deleted` filters.
-        Implements pagination.
+        The method combines Full-Text Search (FTS) for 'title' and 'content' fields
+        with LIKE queries for 'author' and 'type' fields. It also allows filtering
+        by media types, date ranges, required keywords, excluded keywords, and
+        specific media IDs. Results are paginated and can optionally include
+        items marked as trash or soft-deleted.
 
         Args:
-            self (Database): An initialized Database instance.
-            search_query (Optional[str]): The text query string. Matched against
-                selected `search_fields`. Can be None for keyword-only/ID-only search.
-            search_fields (Optional[List[str]]): Fields to match `search_query` against.
-                Valid options: 'title', 'content' (use FTS), 'author', 'type' (use LIKE).
-                Defaults to ['title', 'content'] if `search_query` is provided.
-                If `search_query` is None, this is ignored.
-            keywords (Optional[List[str]]): A list of keywords. Media items must be
-                associated with *all* provided keywords to match. Case-insensitive.
+            search_query (Optional[str]): The primary text string for searching.
+                If `search_fields` include 'title' or 'content', this query is
+                matched against the FTS index. It can be pre-formatted for exact
+                phrases (e.g., "\"exact phrase\""). For 'author' or 'type' in
+                `search_fields`, it's used in a LIKE '%query%' match.
+            search_fields (Optional[List[str]]): A list of fields to apply the
+                `search_query` against. Valid fields: 'title', 'content' (FTS),
+                'author', 'type' (LIKE). Defaults to ['title', 'content'] if
+                `search_query` is provided.
+            media_types (Optional[List[str]]): A list of media type strings
+                (e.g., ['video', 'pdf']) to filter results. Only items matching
+                one of these types will be returned.
+            date_range (Optional[Dict[str, datetime]]): A dictionary to filter
+                media items by their ingestion date. Expected keys:
+                - 'start_date' (datetime): Items ingested on or after this date.
+                - 'end_date' (datetime): Items ingested on or before this date.
+                Both keys are optional. Expects datetime objects.
+            must_have_keywords (Optional[List[str]]): A list of keyword strings.
+                Media items must be associated with *all* these keywords to be
+                included. Case-insensitive.
+            must_not_have_keywords (Optional[List[str]]): A list of keyword strings.
+                Media items associated with *any* of these keywords will be
+                excluded. Case-insensitive.
+            sort_by (Optional[str]): The criteria for sorting results.
+                Available options:
+                - 'relevance': (Default if FTS is active) Sorts by FTS match score.
+                - 'last_modified_desc': (Default otherwise) Newest items first based on last modification.
+                - 'last_modified_asc': Oldest items first based on last modification.
+                - 'date_desc': Newest items first based on ingestion date.
+                - 'date_asc': Oldest items first based on ingestion date.
+                - 'title_asc': Sort by title alphabetically (A-Z).
+                - 'title_desc': Sort by title reverse alphabetically (Z-A).
+                Defaults to 'last_modified_desc'.
             media_ids_filter (Optional[List[Union[int, str]]]): A list of media IDs
-                to restrict the search to. If provided, only media items with these
-                IDs will be considered. Defaults to None.
+                (integer) or UUIDs (string) to restrict the search to. If provided,
+                only media items with these IDs/UUIDs will be considered.
             page (int): The page number for pagination (1-based). Defaults to 1.
             results_per_page (int): Number of results per page. Defaults to 20.
-            include_trash (bool): If True, include items marked as trash. Defaults to False.
-            include_deleted (bool): If True, include soft-deleted items. Defaults to False.
+            include_trash (bool): If True, include items marked as trash
+                (Media.is_trash = 1). Defaults to False.
+            include_deleted (bool): If True, include items marked as soft-deleted
+                (Media.deleted = 1). Defaults to False.
 
         Returns:
             Tuple[List[Dict[str, Any]], int]: A tuple containing:
-                - results_list (List[Dict[str, Any]]): A list of dictionaries, each
-                  representing a matching media item for the current page.
-                - total_matches (int): The total number of items matching the criteria
-                  across all pages.
+                - results_list (List[Dict[str, Any]]): A list of dictionaries,
+                  each representing a matching media item for the current page.
+                  Includes standard media fields. If FTS was active and sort_by
+                  was 'relevance', a 'relevance_score' key may also be present.
+                - total_matches (int): The total number of items matching all
+                  criteria across all pages.
 
         Raises:
-            TypeError: If `db_instance` is not a Database object. (Not applicable here as it's a method)
-            ValueError: If `page` or `results_per_page` are less than 1, or if
-                        `media_ids_filter` contains invalid types.
-            DatabaseError: If FTS table is missing or other database errors occur.
+            ValueError: If `page` or `results_per_page` are less than 1,
+                        if `media_ids_filter` contains invalid types,
+                        if `media_types` contains non-string elements,
+                        or if `date_range` values are not datetime objects.
+            DatabaseError: If the FTS table is missing, or for other general
+                           database query errors.
         """
-        # Parameter validation (page, results_per_page remains the same)
         if page < 1:
             raise ValueError("Page number must be 1 or greater")
         if results_per_page < 1:
             raise ValueError("Results per page must be 1 or greater")
 
         if search_query and not search_fields:
-            search_fields = ["title", "content"]
-        elif not search_fields:
-            search_fields = []  # Ensure search_fields is a list
+            search_fields = ["title", "content"] # Default fields for search_query
+        elif not search_fields: # Ensure search_fields is a list even if empty
+            search_fields = []
 
-        valid_fields = {"title", "content", "author", "type"}
-        # Ensure sanitized_fields is based on the potentially defaulted search_fields
-        sanitized_fields = [f for f in search_fields if f in valid_fields]
-
-        keyword_list = [k.strip().lower() for k in keywords if k and k.strip()] if keywords else []
-        search_query_stripped = search_query.strip() if search_query else None  # Use a new var
-
-        # Log if no actual search criteria is provided (query, keywords, or ids)
-        if not search_query_stripped and not keyword_list and not media_ids_filter:
-            logging.debug(f"Executing browse query (no specific search criteria) on DB {self.db_path_str}.")
+        valid_text_search_fields = {"title", "content", "author", "type"}
+        sanitized_text_search_fields = [f for f in search_fields if f in valid_text_search_fields]
 
         offset = (page - 1) * results_per_page
-        base_select = "m.id, m.uuid, m.url, m.title, m.type, m.author, m.ingestion_date, m.transcription_model, m.is_trash, m.trash_date, m.chunking_status, m.vector_processing, m.content_hash, m.last_modified, m.version, m.client_id, m.deleted"
-        # Optionally add relevance score if FTS is used and available
-        # if fts_search_requested: base_select += ", fts.rank AS relevance_score"
-
-        count_select = "COUNT(DISTINCT m.id)"  # Use DISTINCT m.id for count if joins can create duplicates
+        # Define base SELECT, FROM clauses
+        base_select_parts = ["m.id", "m.uuid", "m.url", "m.title", "m.type", "m.author", "m.ingestion_date",
+                             "m.transcription_model", "m.is_trash", "m.trash_date", "m.chunking_status",
+                             "m.vector_processing", "m.content_hash", "m.last_modified", "m.version",
+                             "m.client_id", "m.deleted"]
+        count_select = "COUNT(DISTINCT m.id)"
         base_from = "FROM Media m"
         joins = []
         conditions = []
         params = []
 
+        # Basic filters
         if not include_deleted:
             conditions.append("m.deleted = 0")
         if not include_trash:
             conditions.append("m.is_trash = 0")
 
-        # New: Filter by specific media IDs
+        # Media IDs Filter
         if media_ids_filter:
-            # Basic validation for media_ids_filter elements
             if not all(isinstance(mid, (int, str)) for mid in media_ids_filter):
                 raise ValueError("media_ids_filter must be a list of ints or strings.")
-            # Ensure the list is not empty before adding the clause
-            if media_ids_filter:  # Pythonic check for non-empty list
+            if media_ids_filter:
                 id_placeholders = ','.join('?' * len(media_ids_filter))
                 conditions.append(f"m.id IN ({id_placeholders})")
                 params.extend(media_ids_filter)
 
-        if keyword_list:
-            kw_placeholders = ','.join('?' * len(keyword_list))
-            # Subquery to check if media_id is linked to ALL provided keywords
+        # Media Types Filter
+        if media_types:
+            if not all(isinstance(mt, str) for mt in media_types):
+                raise ValueError("media_types must be a list of strings.")
+            if media_types:
+                type_placeholders = ','.join('?' * len(media_types))
+                conditions.append(f"m.type IN ({type_placeholders})")
+                params.extend(media_types)
+
+        # Date Range Filter (m.ingestion_date is DATETIME)
+        # SQLite can compare ISO8601 date strings correctly.
+        if date_range:
+            start_date = date_range.get('start_date')
+            end_date = date_range.get('end_date')
+            if start_date:
+                if not isinstance(start_date, datetime):
+                    # Should ideally be caught by Pydantic, but defensive check
+                    raise ValueError("date_range['start_date'] must be a datetime object.")
+                conditions.append("m.ingestion_date >= ?")
+                params.append(start_date.isoformat())
+            if end_date:
+                if not isinstance(end_date, datetime):
+                    raise ValueError("date_range['end_date'] must be a datetime object.")
+                # For 'less than or equal to the end of the day' if end_date is just a date:
+                # end_date_inclusive = datetime.combine(end_date, datetime.max.time())
+                # params.append(end_date_inclusive.isoformat())
+                # Or simply use the provided datetime as is
+                conditions.append("m.ingestion_date <= ?")
+                params.append(end_date.isoformat())
+
+
+        # Must Have Keywords
+        cleaned_must_have = [k.strip().lower() for k in must_have_keywords if k and k.strip()] if must_have_keywords else []
+        if cleaned_must_have:
+            kw_mh_placeholders = ','.join('?' * len(cleaned_must_have))
+            # Subquery to ensure media_id is linked to ALL provided keywords
             conditions.append(f"""
-                (SELECT COUNT(DISTINCT k.id)
-                 FROM MediaKeywords mk
-                 JOIN Keywords k ON mk.keyword_id = k.id
-                 WHERE mk.media_id = m.id AND k.deleted = 0 AND k.keyword IN ({kw_placeholders})
+                (SELECT COUNT(DISTINCT k_mh.id)
+                 FROM MediaKeywords mk_mh
+                 JOIN Keywords k_mh ON mk_mh.keyword_id = k_mh.id
+                 WHERE mk_mh.media_id = m.id AND k_mh.deleted = 0 AND LOWER(k_mh.keyword) IN ({kw_mh_placeholders})
                 ) = ?
             """)
-            params.extend(keyword_list)
-            params.append(len(keyword_list))
+            params.extend(cleaned_must_have)
+            params.append(len(cleaned_must_have))
 
-        fts_search_requested = search_query_stripped and (
-                    "title" in sanitized_fields or "content" in sanitized_fields)
-        like_fields = {"author", "type"}
-        # Determine fields for LIKE search based on sanitized_fields
-        like_search_fields = [f for f in sanitized_fields if f in like_fields]
+        # Must Not Have Keywords
+        cleaned_must_not_have = [k.strip().lower() for k in must_not_have_keywords if k and k.strip()] if must_not_have_keywords else []
+        if cleaned_must_not_have:
+            kw_mnh_placeholders = ','.join('?' * len(cleaned_must_not_have))
+            conditions.append(f"""
+                NOT EXISTS (
+                    SELECT 1
+                    FROM MediaKeywords mk_mnh
+                    JOIN Keywords k_mnh ON mk_mnh.keyword_id = k_mnh.id
+                    WHERE mk_mnh.media_id = m.id AND k_mnh.deleted = 0 AND LOWER(k_mnh.keyword) IN ({kw_mnh_placeholders})
+                )
+            """)
+            params.extend(cleaned_must_not_have)
 
-        if fts_search_requested:
-            # Ensure FTS join is added only once
-            if not any("media_fts fts" in j for j in joins):  # More robust check
-                joins.append("JOIN media_fts fts ON fts.rowid = m.id")
-            # Construct FTS match query for specified fields
-            fts_match_parts = []
-            if "title" in sanitized_fields:
-                fts_match_parts.append("title:")
-            if "content" in sanitized_fields:
-                fts_match_parts.append("content:")
-            # If both, SQLite FTS5 searches across all columns by default if no column is specified.
-            # Or, build a more specific FTS query if needed, e.g. 'title:query OR content:query'
-            # For simplicity here, if any FTS field is chosen, match against the whole fts table.
-            # A more refined approach might be:
-            # fts_query_string = ""
-            # if "title" in sanitized_fields: fts_query_string += f"title:({search_query_stripped}) "
-            # if "content" in sanitized_fields: fts_query_string += f"content:({search_query_stripped}) "
-            # conditions.append(f"fts.media_fts MATCH ?"); params.append(fts_query_string.strip())
-            # Simpler: FTS5 will search all its columns if not specified.
-            conditions.append("fts.media_fts MATCH ?")
-            params.append(search_query_stripped)
+        # Text Search Logic (FTS or LIKE)
+        fts_search_active = False
+        if search_query: # search_query is the actual text to match (e.g., "my query" or "\"exact phrase\"")
+            # FTS on 'title', 'content'
+            if any(f in sanitized_text_search_fields for f in ["title", "content"]):
+                fts_search_active = True
+                if not any("media_fts fts" in j_item for j_item in joins): # Ensure FTS join is added only once
+                    joins.append("JOIN media_fts fts ON fts.rowid = m.id")
+                # FTS5 MATCH syntax: if search_fields is ["title", "content"], query for both is 'title:value OR content:value'
+                # or just 'value' to search all FTS columns.
+                # The provided search_query can already be an FTS formatted string (e.g. "field:value")
+                # or a simple term/phrase. Using MATCH ? is safer for simple terms/phrases.
+                # If `search_query` is already like `"exact phrase"`, it works well with `MATCH ?`.
+                conditions.append("fts.media_fts MATCH ?")
+                params.append(search_query) # search_query already contains quotes for exact phrase if needed
 
-        if like_search_fields:  # If there are fields designated for LIKE search
-            like_conditions_parts = []
-            for field in like_search_fields:
-                like_conditions_parts.append(f"m.{field} LIKE ? COLLATE NOCASE")
-                params.append(f"%{search_query_stripped}%")
-            if like_conditions_parts:
-                conditions.append(f"({' OR '.join(like_conditions_parts)})")
+            # LIKE search for 'author', 'type'
+            like_fields_to_search = [f for f in sanitized_text_search_fields if f in ["author", "type"]]
+            if like_fields_to_search:
+                like_parts = []
+                for field in like_fields_to_search:
+                    # Avoid LIKE on 'type' if 'media_types' filter is already active for 'type'
+                    if field == "type" and media_types:
+                        logging.debug(f"LIKE search on 'type' skipped due to active 'media_types' filter.")
+                        continue
+                    like_parts.append(f"m.{field} LIKE ? COLLATE NOCASE")
+                    params.append(f"%{search_query}%") # search_query here should be the raw query, not the FTS one
+                                                      # This means we might need two versions of the query text if one is FTS formatted.
+                                                      # For simplicity now, assume search_query passed is suitable for both,
+                                                      # or that if FTS is used, LIKE on the same query text is acceptable.
+                                                      # If search_query is "\"exact phrase\"", LIKE will try to match that literally.
+                if like_parts:
+                    conditions.append(f"({' OR '.join(like_parts)})")
 
-        # Warning if query text is provided but no applicable search fields are selected
-        if search_query_stripped and not fts_search_requested and not like_search_fields and sanitized_fields:
-            logging.warning(f"Search query '{search_query_stripped}' provided but no FTS/LIKE searchable fields "
-                            f"(title, content, author, type) were selected from: {search_fields}. Query text may not be effective.")
+        # Order By Clause
+        order_by_clause_str = ""
+        default_order_by = "ORDER BY m.last_modified DESC, m.id DESC"
 
-        join_clause = " ".join(list(dict.fromkeys(joins)))  # Ensure unique joins
+        if fts_search_active and (sort_by == "relevance" or not sort_by):
+            # FTS results are naturally sorted by relevance by SQLite.
+            # We can add secondary sort criteria.
+            # To explicitly use rank, it must be selected.
+            if "fts.rank AS relevance_score" not in " ".join(base_select_parts):
+                 base_select_parts.append("fts.rank AS relevance_score")
+            order_by_clause_str = "ORDER BY relevance_score DESC, m.last_modified DESC, m.id DESC"
+        else:
+            if sort_by == "date_desc":
+                order_by_clause_str = "ORDER BY m.ingestion_date DESC, m.last_modified DESC, m.id DESC"
+            elif sort_by == "date_asc":
+                order_by_clause_str = "ORDER BY m.ingestion_date ASC, m.last_modified ASC, m.id ASC"
+            elif sort_by == "title_asc":
+                # Using LOWER(m.title) for case-insensitive sort if COLLATE NOCASE is not behaving as expected with an index
+                order_by_clause_str = "ORDER BY m.title ASC COLLATE NOCASE, m.id ASC"
+            elif sort_by == "title_desc":
+                order_by_clause_str = "ORDER BY m.title DESC COLLATE NOCASE, m.id DESC"
+            elif sort_by == "last_modified_asc":
+                order_by_clause_str = "ORDER BY m.last_modified ASC, m.id ASC"
+            elif sort_by == "last_modified_desc": # Also default
+                order_by_clause_str = default_order_by
+            else: # Unrecognized sort_by or default
+                order_by_clause_str = default_order_by
+
+        # Finalize SELECT statement
+        final_select_stmt = f"SELECT DISTINCT {', '.join(base_select_parts)}"
+
+        # --- Construct and Execute Queries ---
+        join_clause = " ".join(list(dict.fromkeys(joins))) # Unique joins
         where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
 
         try:
-            # Count query
-            count_sql_query = f"SELECT {count_select} {base_from} {join_clause} {where_clause}"
-            logging.debug(f"Search Count SQL ({self.db_path_str}): {count_sql_query} | Params: {params}")
-            # Use execute_query which uses the instance's connection handling
-            count_cursor = self.execute_query(count_sql_query, tuple(params))
-            total_matches = count_cursor.fetchone()[0] or 0
+            # Count Query
+            count_sql = f"SELECT {count_select} {base_from} {join_clause} {where_clause}"
+            logging.debug(f"Search Count SQL ({self.db_path_str}): {count_sql} | Params: {params}")
+            count_cursor = self.execute_query(count_sql, tuple(params))
+            total_matches_row = count_cursor.fetchone()
+            total_matches = total_matches_row[0] if total_matches_row else 0
 
             results_list = []
             if total_matches > 0 and offset < total_matches:
-                # Results query - order by last_modified then ID for stable pagination
-                # If FTS used, could also order by fts.rank
-                order_by_clause = "ORDER BY m.last_modified DESC, m.id DESC"
-                # if fts_search_requested: order_by_clause = "ORDER BY fts.rank, m.last_modified DESC, m.id DESC"
-
-                results_sql_query = f"SELECT DISTINCT {base_select} {base_from} {join_clause} {where_clause} {order_by_clause} LIMIT ? OFFSET ?"
+                # Results Query
+                results_sql = f"{final_select_stmt} {base_from} {join_clause} {where_clause} {order_by_clause_str} LIMIT ? OFFSET ?"
                 paginated_params = tuple(params + [results_per_page, offset])
-                logging.debug(
-                    f"Search Results SQL ({self.db_path_str}): {results_sql_query} | Params: {paginated_params}")
-                results_cursor = self.execute_query(results_sql_query, paginated_params)
+                logging.debug(f"Search Results SQL ({self.db_path_str}): {results_sql} | Params: {paginated_params}")
+                results_cursor = self.execute_query(results_sql, paginated_params)
                 results_list = [dict(row) for row in results_cursor.fetchall()]
 
             return results_list, total_matches
@@ -1173,10 +1268,9 @@ class Database:
                 raise DatabaseError(f"FTS table 'media_fts' not found in {self.db_path_str}.") from e
             logging.error(f"Database error during media search in '{self.db_path_str}': {e}", exc_info=True)
             raise DatabaseError(f"Failed to search media in {self.db_path_str}: {e}") from e
-        except Exception as e:  # Catch any other unexpected error
+        except Exception as e:
             logging.error(f"Unexpected error during media search in '{self.db_path_str}': {e}", exc_info=True)
-            raise DatabaseError(
-                f"An unexpected error occurred during media search in {self.db_path_str}: {e}") from e
+            raise DatabaseError(f"An unexpected error occurred during media search: {e}") from e
 
     # --- Public Mutating Methods (Modified for Python Sync/FTS Logging) ---
     def add_keyword(self, keyword: str) -> Tuple[Optional[int], Optional[str]]:

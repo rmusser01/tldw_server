@@ -1269,39 +1269,49 @@ def parse_advanced_query(search_request: SearchRequest) -> Dict:
 )
 @limiter.limit("30/minute")  # Adjust rate limit as needed
 async def search_media_items(
-        request: Request,  # Keep request for limiter
+        request: Request,
         search_params: SearchRequest,
         page: int = Query(1, ge=1, description="Page number"),
         results_per_page: int = Query(10, ge=1, le=100, description="Results per page"),
-        db: Database = Depends(get_media_db_for_user)
+        db: Database = Depends(get_media_db_for_user),
+        if_none_match: Optional[str] = Header(None) # For ETag
 ):
     """
     Search across media items based on various criteria.
-
-    Args:
-
     The search is case-insensitive for LIKE queries and uses SQLite FTS capabilities.
+    Supports ETag-based caching.
     """
     try:
-        db_search_query: Optional[str] = None
+        # Prepare the text query for FTS or LIKE
+        query_text_for_match: Optional[str] = None
         if search_params.exact_phrase:
-            # SQLite FTS exact phrase is typically enclosed in double quotes
-            db_search_query = f'"{search_params.exact_phrase.strip()}"'
+            # Ensure it's correctly quoted for FTS if it contains spaces or special chars
+            # Simple double quoting is a common approach for FTS exact phrase
+            query_text_for_match = f'"{search_params.exact_phrase.strip()}"'
         elif search_params.query:
-            db_search_query = search_params.query.strip()
+            query_text_for_match = search_params.query.strip()
 
-        # Fields to search in; defaults are handled by Pydantic model
-        db_search_fields = search_params.fields
+        # Convert date_range from SearchRequest (which might have string dates from JSON)
+        # to datetime objects if they are not already. FastAPI usually handles this
+        # if the model field is `datetime`.
+        # Your `SearchRequest.date_range` is `Optional[Dict[str, datetime]]`
+        # so FastAPI should provide datetime objects directly.
 
-        # Call the database search function
-        items_data, total_items = Database.search_media_db(
-            search_query=db_search_query,
-            search_fields=db_search_fields,
-            keywords=search_params.must_have,  # Maps to 'must_have'
+        # Call the enhanced database search function
+        items_data, total_items = db.search_media_db( # Ensure search_media_db is an instance method
+            search_query=query_text_for_match, # This will be the main text query for FTS/LIKE
+            # exact_phrase is handled by formatting query_text_for_match
+            search_fields=search_params.fields,
+            media_types=search_params.media_types,
+            date_range=search_params.date_range,
+            must_have_keywords=search_params.must_have,
+            must_not_have_keywords=search_params.must_not_have,
+            sort_by=search_params.sort_by,
+            # boost_fields=search_params.boost_fields, # Pass if DB layer supports it
             page=page,
             results_per_page=results_per_page,
-            include_trash=False,
-            include_deleted=False
+            include_trash=False, # Assuming search doesn't include trash by default
+            include_deleted=False # Assuming search doesn't include deleted by default
         )
 
         formatted_items = [
@@ -1309,24 +1319,19 @@ async def search_media_items(
                 id=item["id"],
                 title=item["title"],
                 type=item["type"],
-                # Construct URL as in the list_all_media example
-                # Ensure your router prefix is handled correctly if media details are under /api/v1/media/{id}
                 url=f"/api/v1/media/{item['id']}"
             )
             for item in items_data
         ]
 
         total_pages = ceil(total_items / results_per_page) if results_per_page > 0 and total_items > 0 else 0
-
-        # The requested page number is `page`. If it's out of bounds for the results,
-        # `items` will be empty, and `total_pages` will reflect the actual number of pages.
         current_page_for_response = page
 
         pagination_info = PaginationInfo(
             page=current_page_for_response,
-            results_per_page=results_per_page,
-            total_pages=total_pages,  # Calculated total pages
-            total_items=total_items  # Total items matching search
+            results_per_page=results_per_page, # Ensure this matches PaginationInfo field name
+            total_pages=total_pages,
+            total_items=total_items
         )
 
         try:
@@ -1334,29 +1339,44 @@ async def search_media_items(
                 items=formatted_items,
                 pagination=pagination_info
             )
-            return response_obj
-        except ValidationError as ve:
-            logger.error(f"Pydantic validation error creating MediaListResponse for search: {ve.errors()}",
-                         exc_info=True)
-            logger.debug(
-                f"Data causing validation error in search: items_count={len(formatted_items)}, pagination={pagination_info.model_dump_json(indent=2) if pagination_info else 'None'}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                detail="Internal server error: Response creation failed.")
 
-    except ValueError as ve:
-        logger.warning(f"Invalid parameters for media search: {ve}",
-                       exc_info=True)  # Log stack trace for ValueErrors too
+            # ETag Generation
+            response_json = response_obj.model_dump_json()
+            current_etag = hashlib.md5(response_json.encode('utf-8')).hexdigest()
+
+            if if_none_match == current_etag:
+                return Response(status_code=status.HTTP_304_NOT_MODIFIED)
+
+            # Return full response with ETag header
+            # FastAPI's default JSONResponse will be used if you return a Pydantic model
+            # To add custom headers, you might need to construct the response explicitly
+            custom_response = response_obj # Return the Pydantic model directly
+            # If you need to return a custom Response object to set headers with Pydantic model:
+            # from fastapi.responses import JSONResponse
+            # custom_response = JSONResponse(content=response_obj.model_dump(), headers={"ETag": current_etag})
+            # However, FastAPI has a way to add headers to responses from path operations.
+            # For simplicity here, we'll rely on returning the Pydantic model and let you
+            # explore middleware or response parameters for headers if needed, or:
+            final_response = Response(content=response_json, media_type="application/json", headers={"ETag": current_etag})
+            return final_response
+
+
+        except ValidationError as ve:
+            logger.error(f"Pydantic validation error creating MediaListResponse for search: {ve.errors()}", exc_info=True)
+            logger.debug(f"Data causing validation error in search: items_count={len(formatted_items)}, pagination={pagination_info.model_dump_json(indent=2) if pagination_info else 'None'}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error: Response creation failed.")
+
+    except ValueError as ve: # Catch custom ValueErrors from db.search_media_db or param validation
+        logger.warning(f"Invalid parameters for media search: {ve}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(ve))
     except DatabaseError as e:
         logger.error(f"Database error during media search: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="A database error occurred during the search.")
-    except HTTPException:  # Re-raise HTTPExceptions directly
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="A database error occurred during the search.")
+    except HTTPException: # Re-raise HTTPExceptions directly
         raise
     except Exception as e:
         logger.error(f"Unexpected error in search_media_items endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="An unexpected internal server error occurred.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected internal server error occurred.")
 
 #
 # End of Bare Media Endpoint Functions/Routes
