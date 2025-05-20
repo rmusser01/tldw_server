@@ -205,43 +205,80 @@ class PromptsDatabase:
     """
 
     def __init__(self, db_path: Union[str, Path], client_id: str):
+        """
+        Initializes the PromptsDatabase instance, sets up the connection pool (via threading.local),
+        and ensures the database schema is correctly initialized or migrated.
+
+        Args:
+            db_path (Union[str, Path]): The path to the SQLite database file or ':memory:'.
+            client_id (str): A unique identifier for the client using this database instance.
+
+        Raises:
+            ValueError: If client_id is empty or None.
+            DatabaseError: If database initialization or schema setup fails.
+        """
+        # Determine if it's an in-memory DB and resolve the path
         if isinstance(db_path, Path):
             self.is_memory_db = False
             self.db_path = db_path.resolve()
-        else:
+        else:  # Treat as string
             self.is_memory_db = (db_path == ':memory:')
-            self.db_path = Path(db_path).resolve() if not self.is_memory_db else Path(":memory:")
+            if not self.is_memory_db:
+                self.db_path = Path(db_path).resolve()
+            else:
+                # Even for memory, Path object can be useful internally, though str is ':memory:'
+                self.db_path = Path(":memory:")  # Represent in-memory path consistently
+
+        # Store the path as a string for convenience/logging
         self.db_path_str = str(self.db_path) if not self.is_memory_db else ':memory:'
 
+        # Validate client_id
         if not client_id:
             raise ValueError("Client ID cannot be empty or None.")
         self.client_id = client_id
 
+        # Ensure parent directory exists if it's a file-based DB
         if not self.is_memory_db:
             try:
                 self.db_path.parent.mkdir(parents=True, exist_ok=True)
             except OSError as e:
+                # Catch potential errors creating the directory (e.g., permissions)
                 raise DatabaseError(f"Failed to create database directory {self.db_path.parent}: {e}") from e
 
         logging.info(f"Initializing PromptsDatabase object for path: {self.db_path_str} [Client ID: {self.client_id}]")
+
+        # Initialize thread-local storage for connections
         self._local = threading.local()
+
+        # Flag to track successful initialization before logging completion
         initialization_successful = False
         try:
+            # --- Core Initialization Logic ---
+            # This establishes the first connection for the current thread
+            # and applies/verifies the schema.
             self._initialize_schema()
-            initialization_successful = True
+            initialization_successful = True  # Mark as successful if no exception occurred
         except (DatabaseError, SchemaError, sqlite3.Error) as e:
-            logging.critical(f"FATAL: DB Initialization failed for {self.db_path_str}: {e}", exc_info=True)
-            self.close_connection()
-            raise DatabaseError(f"Database initialization failed: {e}") from e
+            # Catch specific DB/Schema errors and general SQLite errors during init
+            logging.critical(f"FATAL: Prompts DB Initialization failed for {self.db_path_str}: {e}", exc_info=True)
+            # Attempt to clean up the connection before raising
+            self.close_connection() # Important to call this if available
+            # Re-raise as a DatabaseError to signal catastrophic failure
+            raise DatabaseError(f"Prompts Database initialization failed: {e}") from e
         except Exception as e:
-            logging.critical(f"FATAL: Unexpected error during DB Initialization for {self.db_path_str}: {e}",
-                             exc_info=True)
-            self.close_connection()
-            raise DatabaseError(f"Unexpected database initialization error: {e}") from e
+            # Catch any other unexpected errors during initialization
+            logging.critical(f"FATAL: Unexpected error during Prompts DB Initialization for {self.db_path_str}: {e}", exc_info=True)
+            # Attempt cleanup
+            self.close_connection() # Important to call this
+            # Re-raise as a DatabaseError
+            raise DatabaseError(f"Unexpected prompts database initialization error: {e}") from e
         finally:
+            # Log completion status based on the flag
             if initialization_successful:
                 logging.debug(f"PromptsDatabase initialization completed successfully for {self.db_path_str}")
             else:
+                # This path indicates an exception was caught and raised above.
+                # Logging here provides context that the __init__ block finished, albeit with failure.
                 logging.error(f"PromptsDatabase initialization block finished for {self.db_path_str}, but failed.")
 
     # --- Connection Management ---

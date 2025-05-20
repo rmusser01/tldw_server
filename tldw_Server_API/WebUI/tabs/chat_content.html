@@ -1,175 +1,2340 @@
-      
-<!-- Chat Completions Tab -->
-<div id="tabChatCompletions" class="tab-content"> <!-- Ensure this ID matches the sub-tab button's data-content-id -->
-    <div class="endpoint-section" id="createChatCompletion"> <!-- ID for cURL and response targeting -->
-        <h2>POST /api/v1/chat/completions - Create Chat Completion</h2>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tabbed API Frontend - Two Tier</title>
+    <style>
+        body { font-family: sans-serif; margin: 0; background-color: #f4f4f4; color: #333; }
+        .app-container { display: flex; flex-direction: column; min-height: 100vh; }
+        header { background-color: #007bff; color: white; padding: 15px 20px; text-align: center; }
 
-        <div class="form-group checkbox-group">
-            <input type="checkbox" id="chatCompletions_useRawJson" onchange="toggleRawJson('chatCompletions')">
-            <label for="chatCompletions_useRawJson" style="font-weight: normal; margin-bottom:0;">Use Raw JSON Payload Instead of Form Fields</label>
+        /* Top Level Tabs */
+        .top-tab-container { width: 100%; background-color: #222; }
+        .top-tab-buttons { display: flex; justify-content: center; list-style-type: none; margin: 0; padding: 0; }
+        .top-tab-buttons button {
+            background-color: #444; color: white; border: none; padding: 14px 25px;
+            cursor: pointer; transition: background-color 0.3s ease; font-size: 1.1em;
+            border-right: 1px solid #333;
+        }
+        .top-tab-buttons button:last-child { border-right: none; }
+        .top-tab-buttons button:hover { background-color: #666; }
+        .top-tab-buttons button.active { background-color: #0056b3; /* Darker blue for active top tab */ }
+
+        /* Sub Level Tabs */
+        .sub-tab-row { width: 100%; background-color: #333; display: none; /* Hidden by default */ }
+        .sub-tab-row.active { display: block; }
+        .sub-tab-buttons { display: flex; justify-content: center; list-style-type: none; margin: 0; padding: 0; overflow-x: auto; }
+        .sub-tab-buttons button {
+            background-color: #555; color: white; border: none; padding: 12px 20px;
+            cursor: pointer; transition: background-color 0.3s ease; font-size: 1em;
+            border-right: 1px solid #444; white-space: nowrap;
+        }
+        .sub-tab-buttons button:last-child { border-right: none; }
+        .sub-tab-buttons button:hover { background-color: #777; }
+        .sub-tab-buttons button.active { background-color: #007bff; }
+
+        .content-container { flex-grow: 1; padding: 20px; max-width: 1100px; margin: 20px auto; width: calc(100% - 40px); }
+        .tab-content { display: none; /* Hidden by default */ }
+        .tab-content.active { display: block; }
+
+        /* Styles for endpoint sections (generic) */
+        .endpoint-section { border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; border-radius: 5px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .endpoint-section h2 { margin-top: 0; color: #007bff; border-bottom: 1px solid #eee; padding-bottom: 10px; font-size: 1.4em; }
+        .endpoint-section h3 { margin-top: 15px; color: #555; font-size: 1.1em; }
+        label { display: block; margin-top: 10px; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="number"], input[type="password"], textarea, select {
+            width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px;
+            box-sizing: border-box; font-size: 0.95em;
+        }
+        input[type="file"] { /* Style file inputs slightly differently */
+            width: calc(100% - 22px); padding: 8px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px;
+            box-sizing: border-box; font-size: 0.9em;
+        }
+        textarea { min-height: 80px; resize: vertical; }
+        button.api-button { /* Differentiate API call buttons from tab buttons */
+            background-color: #28a745; color: white; padding: 10px 15px; border: none; border-radius: 4px;
+            cursor: pointer; font-size: 1em; transition: background-color 0.3s ease; margin-top: 10px;
+        }
+        button.api-button:hover { background-color: #218838; }
+        pre { background-color: #e9e9e9; padding: 10px; border: 1px solid #ccc; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; font-size: 0.9em; max-height: 400px; overflow-y: auto;}
+        .form-group { margin-bottom: 15px; }
+        .checkbox-group label { display: inline-block; margin-right: 10px; font-weight: normal;}
+        .checkbox-group input[type="checkbox"] { margin-right: 5px; vertical-align: middle; width: auto; margin-bottom: 0;}
+        .columns { display: flex; flex-wrap: wrap; gap: 20px; }
+        .column { flex: 1; min-width: 300px; }
+        small { color: #666; display: block; margin-top: -5px; margin-bottom: 10px;}
+
+        /* Chat Completions Specific Styles */
+        textarea.raw-payload-textarea { min-height: 250px; font-family: monospace; }
+        .message-entry {
+            border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        .message-entry label { font-size: 0.9em; }
+        .message-entry select, .message-entry textarea, .message-entry input[type="text"], .message-entry input[type="file"] {
+            margin-bottom: 5px; width: 100% !important; box-sizing: border-box;
+        }
+        .message-image-upload {
+            margin-top: 8px;
+            padding: 8px;
+            border: 1px dashed #ccc;
+            border-radius: 3px;
+        }
+        .message-image-upload label { font-size: 0.85em; margin-top: 0;}
+
+        .remove-message-btn, .remove-image-btn {
+            background-color: #dc3545; color: white; border: none; padding: 5px 10px;
+            border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px;
+        }
+        .remove-message-btn:hover, .remove-image-btn:hover { background-color: #c82333; }
+        .add-message-btn {
+            background-color: #17a2b8; /* Info blue */ color: white; border: none; padding: 8px 12px;
+            border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-bottom: 15px;
+        }
+        .add-message-btn:hover { background-color: #138496; }
+        .optional-params { border-left: 3px solid #007bff; padding-left: 15px; margin-top: 10px; }
+
+        /* Ensure full width for inputs inside columns and optional params for Chat tab */
+        #chatCompletions_formFields .columns .column input[type="text"],
+        #chatCompletions_formFields .columns .column input[type="number"],
+        #chatCompletions_formFields .columns .column select,
+        #chatCompletions_formFields .optional-params input[type="text"],
+        #chatCompletions_formFields .optional-params input[type="number"],
+        #chatCompletions_formFields .optional-params select,
+        #chatCompletions_formFields .optional-params textarea {
+             width: 100% !important; /* Override generic width for chat form elements */
+             box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>API Interaction Page</h1>
+        </header>
+
+        <!-- Top Level Tabs -->
+        <div class="top-tab-container">
+            <div class="top-tab-buttons">
+                <button class="top-tab-button" data-toptab="general">General</button>
+                <button class="top-tab-button" data-toptab="media">Media</button>
+                <button class="top-tab-button" data-toptab="chat" id="top-tab-chat">Chat</button>
+            </div>
         </div>
 
-        <div id="chatCompletions_formFields">
-            <div class="columns">
-                <div class="column">
+        <!-- Sub Level Tab Rows -->
+        <div id="general-subtabs" class="sub-tab-row">
+            <div class="sub-tab-buttons">
+                <button class="sub-tab-button" data-content-id="tabGlobalSettings">Global Settings</button>
+                <button class="sub-tab-button" data-content-id="tabDebug" data-load-group="general">Debug</button>
+            </div>
+        </div>
+
+        <div id="media-subtabs" class="sub-tab-row">
+            <div class="sub-tab-buttons">
+                <button class="sub-tab-button" data-content-id="tabMediaManagement" data-load-group="media">Media Management</button>
+                <button class="sub-tab-button" data-content-id="tabMediaVersioning" data-load-group="media">Versioning</button>
+                <button class="sub-tab-button" data-content-id="tabMediaIngestionPersistence" data-load-group="media">Ingestion (DB)</button>
+                <button class="sub-tab-button" data-content-id="tabMediaProcessingNoDB" data-load-group="media">Processing (No DB)</button>
+                <button class="sub-tab-button" data-content-id="tabMediaWiki" data-load-group="media">MediaWiki</button>
+                <button class="sub-tab-button" data-content-id="tabWebScraping" data-load-group="media">Web Scraping</button>
+            </div>
+        </div>
+
+        <div id="chat-subtabs" class="sub-tab-row"> <!-- Sub-tabs for Chat -->
+            <div class="sub-tab-buttons">
+                <button class="sub-tab-button" data-content-id="tabChatCompletions" data-load-group="chat">Chat Completions</button>
+                <button class="sub-tab-button" data-content-id="tabCharacterManagement" data-load-group="chat">Character Management</button>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="content-container" id="main-content-area">
+            <!-- Global Settings Tab Content (always present) -->
+            <div id="tabGlobalSettings" class="tab-content">
+                <div class="endpoint-section">
+                    <h2>Global API Configuration</h2>
                     <div class="form-group">
-                        <label for="chatCompletions_api_provider">API Provider:</label>
-                        <select id="chatCompletions_api_provider">
-                            <option value="" selected>Server Default</option>
-                            <option value="openai">OpenAI</option>
-                            <option value="anthropic">Anthropic</option>
-                            <option value="google">Google (Gemini)</option>
-                            <option value="cohere">Cohere</option>
-                            <option value="groq">Groq</option>
-                            <option value="openrouter">OpenRouter</option>
-                            <option value="mistral">Mistral</option>
-                            <option value="deepseek">DeepSeek</option>
-                            <option value="huggingface">HuggingFace</option>
-                            <option value="local-llm">local-llm (Generic)</option>
-                            <option value="ollama">Ollama</option>
-                            <option value="llama.cpp">llama.cpp</option>
-                            <option value="ooba">Oobabooga</option>
-                            <option value="tabbyapi">TabbyAPI</option>
-                            <option value="kobold">Kobold</option>
-                            <option value="vllm">vLLM</option>
-                            <option value="custom-openai-api">Custom OpenAI API 1</option>
-                            <option value="custom-openai-api-2">Custom OpenAI API 2</option>
-                        </select>
+                        <label for="baseUrl">API Base URL:</label>
+                        <input type="text" id="baseUrl" value="http://localhost:8000">
                     </div>
                     <div class="form-group">
-                        <label for="chatCompletions_model">Model:</label>
-                        <input type="text" id="chatCompletions_model" value="gpt-4o-mini" placeholder="e.g., gpt-4o-mini, claude-3-opus-20240229, llava, ...">
-                    </div>
-                </div>
-                <div class="column">
-                    <div class="form-group">
-                        <label for="chatCompletions_temperature">Temperature (0.0 - 2.0):</label>
-                        <input type="number" id="chatCompletions_temperature" placeholder="e.g., 0.7" step="0.1" min="0" max="2">
-                    </div>
-                    <div class="form-group">
-                        <label for="chatCompletions_max_tokens">Max Tokens:</label>
-                        <input type="number" id="chatCompletions_max_tokens" placeholder="e.g., 1024" step="1" min="1">
+                        <label for="apiKeyInput">API Token (used in 'Token' header):</label>
+                        <input type="text" id="apiKeyInput" value="default-secret-key-for-single-user"><br>
+                        <small>This will be sent in the 'Token' header for authenticated requests.</small>
                     </div>
                 </div>
             </div>
 
-            <div class="form-group checkbox-group">
-                <input type="checkbox" id="chatCompletions_stream">
-                <label for="chatCompletions_stream" style="font-weight: normal; margin-bottom:0;">Stream Response</label>
-            </div>
-
-            <div class="form-group">
-                <h3>Messages:</h3>
-                <div id="chatCompletions_messagesContainer">
-                    <!-- Initial messages will be added by JS with image input capabilities -->
+            <!-- Debug Tab Content (Loaded if general_content.html is fetched or directly included) -->
+            <div id="tabDebug" class="tab-content">
+                <div class="endpoint-section" id="debugSchema">
+                    <h2>GET /api/v1/media/debug/schema - Debug Database Schema</h2>
+                    <p>Diagnostic endpoint to check database schema.</p>
+                    <button class="api-button" onclick="makeRequest('debugSchema', 'GET', '/api/v1/media/debug/schema', 'none')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="debugSchema_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="debugSchema_response">---</pre>
                 </div>
-                <button class="add-message-btn" onclick="addChatMessage('chatCompletions')">Add Message</button>
             </div>
 
-            <details>
-                <summary style="cursor: pointer; color: #0056b3; font-weight: bold;">Optional Parameters</summary>
-                <div class="optional-params">
+            <!-- Media Management Tab -->
+            <div id="tabMediaManagement" class="tab-content">
+                <!-- GET /api/v1/media/ - List All Media Items -->
+                <div class="endpoint-section" id="listAllMedia">
+                    <h2>GET /api/v1/media/ - List All Media Items</h2>
+                    <div class="form-group">
+                        <label for="listAllMedia_page">Page:</label>
+                        <input type="number" id="listAllMedia_page" value="1" name="page">
+                    </div>
+                    <div class="form-group">
+                        <label for="listAllMedia_results_per_page">Results per page:</label>
+                        <input type="number" id="listAllMedia_results_per_page" value="10" name="results_per_page">
+                    </div>
+                    <button class="api-button" onclick="makeRequest('listAllMedia', 'GET', '/api/v1/media/', 'query')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="listAllMedia_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="listAllMedia_response">---</pre>
+                </div>
+
+                <!-- POST /api/v1/media/search - Search Media Items -->
+                <div class="endpoint-section" id="searchMediaItems">
+                    <h2>POST /api/v1/media/search - Search Media Items</h2>
+                    <p>Search media items based on criteria. Pagination is handled via query parameters.</p>
                     <div class="columns">
                         <div class="column">
                             <div class="form-group">
-                                <label for="chatCompletions_top_p">Top P (0.0 - 1.0):</label>
-                                <input type="number" id="chatCompletions_top_p" placeholder="e.g., 1.0" step="0.01" min="0" max="1">
-                            </div>
-                             <div class="form-group">
-                                <label for="chatCompletions_frequency_penalty">Frequency Penalty (-2.0 - 2.0):</label>
-                                <input type="number" id="chatCompletions_frequency_penalty" placeholder="e.g., 0.0" step="0.1" min="-2" max="2">
-                            </div>
-                            <div class="form-group">
-                                <label for="chatCompletions_presence_penalty">Presence Penalty (-2.0 - 2.0):</label>
-                                <input type="number" id="chatCompletions_presence_penalty" placeholder="e.g., 0.0" step="0.1" min="-2" max="2">
-                            </div>
-                             <div class="form-group">
-                                <label for="chatCompletions_minp">Min P (Provider Specific):</label>
-                                <input type="number" id="chatCompletions_minp" step="0.01" placeholder="e.g., 0.1">
-                            </div>
-                            <div class="form-group">
-                                <label for="chatCompletions_topk">Top K (Provider Specific):</label>
-                                <input type="number" id="chatCompletions_topk" step="1" placeholder="e.g., 40">
-                            </div>
-                            <div class="form-group">
-                                <label for="chatCompletions_character_id">Character ID (for Templating):</label>
-                                <input type="text" id="chatCompletions_character_id" placeholder="e.g., character_db_id_123">
-                            </div>
-                            <div class="form-group">
-                                <label for="chatCompletions_conversation_id">Conversation ID (for Context):</label>
-                                <input type="text" id="chatCompletions_conversation_id" placeholder="e.g., conv_uuid_abc_123">
+                                <label for="searchMediaItems_payload">Payload (SearchRequest JSON):</label>
+                                <textarea id="searchMediaItems_payload" style="min-height: 200px;">{
+    "query": "example search term",
+    "fields": ["title", "content"],
+    "exact_phrase": null,
+    "media_types": ["video", "article"],
+    "must_have": ["keyword1"],
+    "must_not_have": ["keyword_exclude"],
+    "sort_by": "relevance",
+    "date_range": null,
+    "boost_fields": {"title": 2.0, "content": 1.0}
+}</textarea>
                             </div>
                         </div>
                         <div class="column">
                             <div class="form-group">
-                                <label for="chatCompletions_seed">Seed (Integer, Optional):</label>
-                                <input type="number" id="chatCompletions_seed" placeholder="e.g., 42" step="1">
+                                <label for="searchMediaItems_page">Page (Query Param):</label>
+                                <input type="number" id="searchMediaItems_page" value="1" name="page">
                             </div>
                             <div class="form-group">
-                                <label for="chatCompletions_stop">Stop Sequences (JSON string array or single string):</label>
-                                <input type="text" id="chatCompletions_stop" placeholder='e.g., ["\n", "Human:"] or "\n"'>
-                            </div>
-                             <div class="form-group checkbox-group">
-                                <input type="checkbox" id="chatCompletions_logprobs">
-                                <label for="chatCompletions_logprobs" style="font-weight: normal; margin-bottom:0;">Logprobs</label>
-                            </div>
-                            <div class="form-group">
-                                <label for="chatCompletions_top_logprobs">Top Logprobs (if logprobs true, 0-20):</label>
-                                <input type="number" id="chatCompletions_top_logprobs" step="1" min="0" max="20" placeholder="e.g., 5">
-                            </div>
-                            <div class="form-group">
-                                <label for="chatCompletions_response_format_type">Response Format Type:</label>
-                                <select id="chatCompletions_response_format_type">
-                                    <option value="">(Default)</option>
-                                    <option value="text">text</option>
-                                    <option value="json_object">json_object</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="chatCompletions_prompt_template_name">Prompt Template Name:</label>
-                                <input type="text" id="chatCompletions_prompt_template_name" placeholder="e.g., my_custom_template">
-                            </div>
-                            <div class="form-group">
-                                <label for="chatCompletions_n">N (Completions, 1-128):</label>
-                                <input type="number" id="chatCompletions_n" placeholder="e.g., 1" step="1" min="1" max="128">
-                            </div>
-                            <div class="form-group">
-                                <label for="chatCompletions_user">User Identifier (Optional):</label>
-                                <input type="text" id="chatCompletions_user" placeholder="e.g., user_12345">
+                                <label for="searchMediaItems_results_per_page">Results per page (Query Param):</label>
+                                <input type="number" id="searchMediaItems_results_per_page" value="10" name="results_per_page">
                             </div>
                         </div>
                     </div>
-                     <div class="form-group">
-                        <label for="chatCompletions_tools">Tools (JSON Array string, Optional):</label>
-                        <textarea id="chatCompletions_tools" placeholder='[{"type": "function", "function": {"name": "get_weather", "description": "Get current weather", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}, "required": ["location"]}}}]'></textarea>
+                    <button class="api-button" onclick="makeRequest('searchMediaItems', 'POST', '/api/v1/media/search', 'json_with_query')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="searchMediaItems_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="searchMediaItems_response">---</pre>
+                </div>
+
+                <!-- GET /api/v1/media/{media_id} -->
+                <div class="endpoint-section" id="getMediaItem">
+                    <h2>GET /api/v1/media/{media_id} - Get Media Item Details</h2>
+                    <div class="form-group">
+                        <label for="getMediaItem_media_id">Media ID:</label>
+                        <input type="number" id="getMediaItem_media_id" value="1">
+                    </div>
+                    <button class="api-button" onclick="makeRequest('getMediaItem', 'GET', '/api/v1/media/{media_id}', 'none')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="getMediaItem_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="getMediaItem_response">---</pre>
+                </div>
+
+                <!-- PUT /api/v1/media/{media_id} -->
+                <div class="endpoint-section" id="updateMediaItem">
+                    <h2>PUT /api/v1/media/{media_id} - Update Media Item</h2>
+                    <div class="form-group">
+                        <label for="updateMediaItem_media_id">Media ID:</label>
+                        <input type="number" id="updateMediaItem_media_id" value="1">
                     </div>
                     <div class="form-group">
-                        <label for="chatCompletions_tool_choice">Tool Choice (string or JSON object string, Optional):</label>
-                        <input type="text" id="chatCompletions_tool_choice" placeholder='e.g., "auto", "none", "required", or {"type": "function", "function": {"name": "my_func"}}'>
+                        <label for="updateMediaItem_payload">Payload (MediaUpdateRequest JSON):</label>
+                        <textarea id="updateMediaItem_payload">{
+    "title": "New Title (Optional)",
+    "author": "New Author (Optional)",
+    "content": "New content for the media item (Optional). If provided, a new version will be created.",
+    "prompt": "Prompt for new version (Optional, if content is updated)",
+    "analysis": "Analysis for new version (Optional, if content is updated)",
+    "keywords": ["new_keyword1", "new_keyword2"]
+}</textarea>
                     </div>
-                     <div class="form-group">
-                        <label for="chatCompletions_logit_bias">Logit Bias (JSON object string, Optional):</label>
-                        <input type="text" id="chatCompletions_logit_bias" placeholder='e.g., {"123": -1.0, "456": 2.0}'>
-                    </div>
+                    <button class="api-button" onclick="makeRequest('updateMediaItem', 'PUT', '/api/v1/media/{media_id}', 'json')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="updateMediaItem_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="updateMediaItem_response">---</pre>
                 </div>
-            </details>
-        </div>
+            </div>
 
-        <div class="form-group" id="chatCompletions_rawJsonContainer" style="display:none;">
-            <label for="chatCompletions_payload_raw">Raw Payload (ChatCompletionRequest JSON):</label>
-            <textarea id="chatCompletions_payload_raw" class="raw-payload-textarea"></textarea>
-        </div>
-         <small>
-            API key for the selected provider is configured server-side (if required by provider).
-            Ensure model names are compatible with the selected provider (e.g., multimodal models like gpt-4-vision-preview, llava).
-            The "character_id" and "conversation_id" fields are primarily for use with custom server logic involving templating and conversation history management.
-        </small>
-        <br><br>
-        <button class="api-button" onclick="handleChatCompletionsRequest()">Send Request</button>
+            <!-- Media Versioning Tab -->
+            <div id="tabMediaVersioning" class="tab-content">
+                <!-- POST /api/v1/media/{media_id}/versions -->
+                <div class="endpoint-section" id="createVersion">
+                    <h2>POST /api/v1/media/{media_id}/versions - Create Media Version</h2>
+                    <div class="form-group">
+                        <label for="createVersion_media_id">Media ID:</label>
+                        <input type="number" id="createVersion_media_id" value="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="createVersion_payload">Payload (VersionCreateRequest JSON):</label>
+                        <textarea id="createVersion_payload">{
+    "content": "Content for the new version.",
+    "prompt": "Prompt used for this version.",
+    "analysis_content": "Analysis content for this version."
+}</textarea>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('createVersion', 'POST', '/api/v1/media/{media_id}/versions', 'json')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="createVersion_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="createVersion_response">---</pre>
+                </div>
 
-        <h3>cURL Command:</h3>
-        <pre id="createChatCompletion_curl">---</pre>
-        <h3>Response (or Stream):</h3>
-        <pre id="createChatCompletion_response">---</pre>
-    </div>
-</div>
+                <!-- GET /api/v1/media/{media_id}/versions -->
+                <div class="endpoint-section" id="listVersions">
+                    <h2>GET /api/v1/media/{media_id}/versions - List Media Versions</h2>
+                    <div class="form-group">
+                        <label for="listVersions_media_id">Media ID:</label>
+                        <input type="number" id="listVersions_media_id" value="1">
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="listVersions_include_content" name="include_content"> <label for="listVersions_include_content">Include Content</label>
+                    </div>
+                    <div class="form-group">
+                        <label for="listVersions_limit">Limit:</label>
+                        <input type="number" id="listVersions_limit" value="10" name="limit">
+                    </div>
+                    <div class="form-group">
+                        <label for="listVersions_page">Page:</label>
+                        <input type="number" id="listVersions_page" value="1" name="page">
+                    </div>
+                    <button class="api-button" onclick="makeRequest('listVersions', 'GET', '/api/v1/media/{media_id}/versions', 'query')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="listVersions_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="listVersions_response">---</pre>
+                </div>
+
+                <!-- GET /api/v1/media/{media_id}/versions/{version_number} -->
+                <div class="endpoint-section" id="getVersion">
+                    <h2>GET /api/v1/media/{media_id}/versions/{version_number} - Get Specific Media Version</h2>
+                    <div class="form-group">
+                        <label for="getVersion_media_id">Media ID:</label>
+                        <input type="number" id="getVersion_media_id" value="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="getVersion_version_number">Version Number:</label>
+                        <input type="number" id="getVersion_version_number" value="1">
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="getVersion_include_content" name="include_content" checked> <label for="getVersion_include_content">Include Content</label>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('getVersion', 'GET', '/api/v1/media/{media_id}/versions/{version_number}', 'query')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="getVersion_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="getVersion_response">---</pre>
+                </div>
+
+                <!-- DELETE /api/v1/media/{media_id}/versions/{version_number} -->
+                <div class="endpoint-section" id="deleteVersion">
+                    <h2>DELETE /api/v1/media/{media_id}/versions/{version_number} - Soft Delete Media Version</h2>
+                    <div class="form-group">
+                        <label for="deleteVersion_media_id">Media ID:</label>
+                        <input type="number" id="deleteVersion_media_id" value="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="deleteVersion_version_number">Version Number:</label>
+                        <input type="number" id="deleteVersion_version_number" value="1">
+                    </div>
+                    <button class="api-button" onclick="makeRequest('deleteVersion', 'DELETE', '/api/v1/media/{media_id}/versions/{version_number}', 'none')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="deleteVersion_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="deleteVersion_response">---</pre>
+                </div>
+
+                <!-- POST /api/v1/media/{media_id}/versions/rollback -->
+                <div class="endpoint-section" id="rollbackVersion">
+                    <h2>POST /api/v1/media/{media_id}/versions/rollback - Rollback to Media Version</h2>
+                    <div class="form-group">
+                        <label for="rollbackVersion_media_id">Media ID:</label>
+                        <input type="number" id="rollbackVersion_media_id" value="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="rollbackVersion_payload">Payload (VersionRollbackRequest JSON):</label>
+                        <textarea id="rollbackVersion_payload">{
+    "version_number": 1
+}</textarea>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('rollbackVersion', 'POST', '/api/v1/media/{media_id}/versions/rollback', 'json')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="rollbackVersion_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="rollbackVersion_response">---</pre>
+                </div>
+            </div>
+
+            <!-- Media Ingestion (DB Persistence) Tab -->
+            <div id="tabMediaIngestionPersistence" class="tab-content">
+                <div class="endpoint-section" id="addMedia">
+                    <h2>POST /api/v1/media/add - Add Media (URLs/Files) with DB Persistence</h2>
+                    <p>This endpoint ingests media, processes it, and saves it to the database.</p>
+                    <div class="columns">
+                        <div class="column">
+                            <h3>Basic Info & Sources</h3>
+                            <div class="form-group">
+                                <label for="addMedia_media_type">Media Type:</label>
+                                <select id="addMedia_media_type" name="media_type">
+                                    <option value="audio">audio</option>
+                                    <option value="video">video</option>
+                                    <option value="document">document</option>
+                                    <option value="pdf">pdf</option>
+                                    <option value="ebook">ebook</option>
+                                    <option value="xml">xml</option>
+                                    <option value="archive">archive</option>
+                                    <option value="web_page">web_page</option>
+                                    <option value="image">image</option>
+                                    <option value="text">text</option>
+                                    <option value="markdown">markdown</option>
+                                    <option value="csv">csv</option>
+                                    <option value="json">json</option>
+                                    <option value="youtube">youtube</option>
+                                    <option value="url">url</option>
+                                    <option value="sitemap">sitemap</option>
+                                    <option value="mediawiki">mediawiki</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="addMedia_urls">URLs (one per line):</label>
+                                <textarea id="addMedia_urls" name="urls" placeholder="https://example.com/video.mp4"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="addMedia_files">Files:</label>
+                                <input type="file" id="addMedia_files" name="files" multiple>
+                            </div>
+                             <div class="form-group">
+                                <label for="addMedia_title">Title (optional, for single item):</label>
+                                <input type="text" id="addMedia_title" name="title">
+                            </div>
+                            <div class="form-group">
+                                <label for="addMedia_author">Author (optional, for single item):</label>
+                                <input type="text" id="addMedia_author" name="author">
+                            </div>
+                            <div class="form-group">
+                                <label for="addMedia_keywords">Keywords (comma-separated):</label>
+                                <input type="text" id="addMedia_keywords" name="keywords">
+                            </div>
+                        </div>
+                        <div class="column">
+                            <h3>Processing Options</h3>
+                             <div class="form-group checkbox-group">
+                                <input type="checkbox" id="addMedia_overwrite_existing" name="overwrite_existing"> <label for="addMedia_overwrite_existing">Overwrite Existing</label><br>
+                                <input type="checkbox" id="addMedia_keep_original_file" name="keep_original_file"> <label for="addMedia_keep_original_file">Keep Original File</label><br>
+                                <input type="checkbox" id="addMedia_perform_analysis" name="perform_analysis" checked> <label for="addMedia_perform_analysis">Perform Analysis</label><br>
+                                <input type="checkbox" id="addMedia_use_cookies" name="use_cookies"> <label for="addMedia_use_cookies">Use Cookies (for URL download)</label><br>
+                                <input type="checkbox" id="addMedia_diarize" name="diarize"> <label for="addMedia_diarize">Diarize (Audio/Video)</label><br>
+                                <input type="checkbox" id="addMedia_timestamp_option" name="timestamp_option" checked> <label for="addMedia_timestamp_option">Timestamp Option (Audio/Video)</label><br>
+                                <input type="checkbox" id="addMedia_vad_use" name="vad_use"> <label for="addMedia_vad_use">VAD Use (Audio/Video)</label><br>
+                                <input type="checkbox" id="addMedia_perform_confabulation_check_of_analysis" name="perform_confabulation_check_of_analysis"> <label for="addMedia_perform_confabulation_check_of_analysis">Confabulation Check</label><br>
+                                <input type="checkbox" id="addMedia_perform_chunking" name="perform_chunking" checked> <label for="addMedia_perform_chunking">Perform Chunking</label><br>
+                                <input type="checkbox" id="addMedia_use_adaptive_chunking" name="use_adaptive_chunking"> <label for="addMedia_use_adaptive_chunking">Use Adaptive Chunking</label><br>
+                                <input type="checkbox" id="addMedia_use_multi_level_chunking" name="use_multi_level_chunking"> <label for="addMedia_use_multi_level_chunking">Use Multi-Level Chunking</label><br>
+                                <input type="checkbox" id="addMedia_perform_rolling_summarization" name="perform_rolling_summarization"> <label for="addMedia_perform_rolling_summarization">Perform Rolling Summarization</label><br>
+                                <input type="checkbox" id="addMedia_summarize_recursively" name="summarize_recursively"> <label for="addMedia_summarize_recursively">Summarize Recursively</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="columns">
+                         <div class="column">
+                            <h3>Prompts & API</h3>
+                            <div class="form-group">
+                                <label for="addMedia_custom_prompt">Custom Prompt:</label>
+                                <textarea id="addMedia_custom_prompt" name="custom_prompt"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="addMedia_system_prompt">System Prompt:</label>
+                                <textarea id="addMedia_system_prompt" name="system_prompt"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="addMedia_api_name">API Name (for analysis):</label>
+                                <input type="text" id="addMedia_api_name" name="api_name">
+                            </div>
+                            <div class="form-group">
+                                <label for="addMedia_api_key">API Key (for analysis):</label>
+                                <input type="password" id="addMedia_api_key" name="api_key">
+                            </div>
+                            <div class="form-group">
+                                <label for="addMedia_cookies">Cookies (string, if use_cookies):</label>
+                                <input type="text" id="addMedia_cookies" name="cookies">
+                            </div>
+                        </div>
+                        <div class="column">
+                            <h3>Specific Media Settings</h3>
+                             <div class="form-group">
+                                <label for="addMedia_transcription_model">Transcription Model (Audio/Video):</label>
+                                <input type="text" id="addMedia_transcription_model" name="transcription_model" value="deepdml/faster-distil-whisper-large-v3.5">
+                            </div>
+                            <div class="form-group">
+                                <label for="addMedia_transcription_language">Transcription Language (Audio/Video):</label>
+                                <input type="text" id="addMedia_transcription_language" name="transcription_language" value="en">
+                            </div>
+                             <div class="form-group">
+                                <label for="addMedia_start_time">Start Time (HH:MM:SS or secs, A/V):</label>
+                                <input type="text" id="addMedia_start_time" name="start_time">
+                            </div>
+                            <div class="form-group">
+                                <label for="addMedia_end_time">End Time (HH:MM:SS or secs, A/V):</label>
+                                <input type="text" id="addMedia_end_time" name="end_time">
+                            </div>
+                            <div class="form-group">
+                                <label for="addMedia_pdf_parsing_engine">PDF Parsing Engine:</label>
+                                <select id="addMedia_pdf_parsing_engine" name="pdf_parsing_engine">
+                                    <option value="pymupdf4llm">pymupdf4llm</option>
+                                    <option value="pymupdf">pymupdf</option>
+                                    <option value="docling">docling</option>
+                                    <option value="ocr_only">ocr_only</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                     <div class="columns">
+                        <div class="column">
+                            <h3>Chunking Details</h3>
+                             <div class="form-group">
+                                <label for="addMedia_chunk_method">Chunk Method:</label>
+                                <select id="addMedia_chunk_method" name="chunk_method">
+                                    <option value="" selected>(default based on media type)</option>
+                                    <option value="semantic">semantic</option>
+                                    <option value="token">token</option>
+                                    <option value="paragraph">paragraph</option>
+                                    <option value="sentence">sentence</option>
+                                    <option value="word">word</option>
+                                    <option value="recursive">recursive (text)</option>
+                                    <option value="markdown">markdown</option>
+                                    <option value="text_splitter">text_splitter</option>
+                                    <option value="code_splitter">code_splitter</option>
+                                    <option value="json_splitter">json_splitter</option>
+                                    <option value="html_splitter">html_splitter</option>
+                                    <option value="page">page (PDF)</option>
+                                    <option value="layout">layout (PDF)</option>
+                                    <option value="reference">reference</option>
+                                    <option value="ebook_chapters">ebook_chapters</option>
+                                </select>
+                            </div>
+                             <div class="form-group">
+                                <label for="addMedia_chunk_language">Chunk Language Override:</label>
+                                <input type="text" id="addMedia_chunk_language" name="chunk_language">
+                            </div>
+                            <div class="form-group">
+                                <label for="addMedia_chunk_size">Chunk Size:</label>
+                                <input type="number" id="addMedia_chunk_size" name="chunk_size" value="500">
+                            </div>
+                            <div class="form-group">
+                                <label for="addMedia_chunk_overlap">Chunk Overlap:</label>
+                                <input type="number" id="addMedia_chunk_overlap" name="chunk_overlap" value="200">
+                            </div>
+                             <div class="form-group">
+                                <label for="addMedia_custom_chapter_pattern">Custom Chapter Pattern (Regex):</label>
+                                <input type="text" id="addMedia_custom_chapter_pattern" name="custom_chapter_pattern">
+                            </div>
+                        </div>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('addMedia', 'POST', '/api/v1/media/add', 'form')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="addMedia_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="addMedia_response">---</pre>
+                </div>
+            </div>
+
+            <!-- Media Processing (No DB) Tab -->
+            <div id="tabMediaProcessingNoDB" class="tab-content">
+                <!-- POST /api/v1/media/process-videos -->
+                <div class="endpoint-section" id="processVideos">
+                    <h2>POST /api/v1/media/process-videos - Process Videos (No DB)</h2>
+                    <p>Media type is fixed to "video", keep_original_file is false. Inherits many options from AddMediaForm.</p>
+                    <div class="columns">
+                        <div class="column">
+                            <h3>Sources & Info</h3>
+                            <div class="form-group">
+                                <label for="processVideos_urls">URLs (one per line):</label>
+                                <textarea id="processVideos_urls" name="urls" placeholder="https://example.com/video.mp4"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processVideos_files">Files:</label>
+                                <input type="file" id="processVideos_files" name="files" multiple>
+                            </div>
+                             <div class="form-group">
+                                <label for="processVideos_title">Title (optional):</label>
+                                <input type="text" id="processVideos_title" name="title">
+                            </div>
+                            <div class="form-group">
+                                <label for="processVideos_author">Author (optional):</label>
+                                <input type="text" id="processVideos_author" name="author">
+                            </div>
+                            <div class="form-group">
+                                <label for="processVideos_keywords">Keywords (comma-separated):</label>
+                                <input type="text" id="processVideos_keywords" name="keywords">
+                            </div>
+                        </div>
+                        <div class="column">
+                            <h3>Processing Options</h3>
+                             <div class="form-group checkbox-group">
+                                <input type="checkbox" id="processVideos_perform_analysis" name="perform_analysis" checked> <label for="processVideos_perform_analysis">Perform Analysis</label><br>
+                                <input type="checkbox" id="processVideos_use_cookies" name="use_cookies"> <label for="processVideos_use_cookies">Use Cookies</label><br>
+                                <input type="checkbox" id="processVideos_diarize" name="diarize"> <label for="processVideos_diarize">Diarize</label><br>
+                                <input type="checkbox" id="processVideos_timestamp_option" name="timestamp_option" checked> <label for="processVideos_timestamp_option">Timestamp Option</label><br>
+                                <input type="checkbox" id="processVideos_vad_use" name="vad_use"> <label for="processVideos_vad_use">VAD Use</label><br>
+                                <input type="checkbox" id="processVideos_perform_confabulation_check_of_analysis" name="perform_confabulation_check_of_analysis"> <label for="processVideos_perform_confabulation_check_of_analysis">Confabulation Check</label><br>
+                                <input type="checkbox" id="processVideos_perform_chunking" name="perform_chunking" checked> <label for="processVideos_perform_chunking">Perform Chunking</label><br>
+                                <input type="checkbox" id="processVideos_use_adaptive_chunking" name="use_adaptive_chunking"> <label for="processVideos_use_adaptive_chunking">Adaptive Chunking</label><br>
+                                <input type="checkbox" id="processVideos_use_multi_level_chunking" name="use_multi_level_chunking"> <label for="processVideos_use_multi_level_chunking">Multi-Level Chunking</label><br>
+                                <input type="checkbox" id="processVideos_summarize_recursively" name="summarize_recursively"> <label for="processVideos_summarize_recursively">Summarize Recursively</label>
+                                <!-- Overwrite existing is not used by this endpoint per Python, but Pydantic model needs it -->
+                                <input type="hidden" id="processVideos_overwrite_existing" name="overwrite_existing" value="false">
+                            </div>
+                        </div>
+                    </div>
+                     <div class="columns">
+                         <div class="column">
+                            <h3>Prompts & API</h3>
+                            <div class="form-group">
+                                <label for="processVideos_custom_prompt">Custom Prompt:</label>
+                                <textarea id="processVideos_custom_prompt" name="custom_prompt"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processVideos_system_prompt">System Prompt:</label>
+                                <textarea id="processVideos_system_prompt" name="system_prompt"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processVideos_api_name">API Name (for analysis):</label>
+                                <input type="text" id="processVideos_api_name" name="api_name">
+                            </div>
+                            <div class="form-group">
+                                <label for="processVideos_api_key">API Key (for analysis):</label>
+                                <input type="password" id="processVideos_api_key" name="api_key">
+                            </div>
+                            <div class="form-group">
+                                <label for="processVideos_cookies">Cookies (string, if use_cookies):</label>
+                                <input type="text" id="processVideos_cookies" name="cookies">
+                            </div>
+                        </div>
+                         <div class="column">
+                            <h3>Video Specific Settings</h3>
+                             <div class="form-group">
+                                <label for="processVideos_transcription_model">Transcription Model:</label>
+                                <input type="text" id="processVideos_transcription_model" name="transcription_model" value="deepdml/faster-whisper-large-v3-turbo-ct2">
+                            </div>
+                            <div class="form-group">
+                                <label for="processVideos_transcription_language">Transcription Language:</label>
+                                <input type="text" id="processVideos_transcription_language" name="transcription_language" value="en">
+                            </div>
+                             <div class="form-group">
+                                <label for="processVideos_start_time">Start Time (HH:MM:SS or secs):</label>
+                                <input type="text" id="processVideos_start_time" name="start_time">
+                            </div>
+                            <div class="form-group">
+                                <label for="processVideos_end_time">End Time (HH:MM:SS or secs):</label>
+                                <input type="text" id="processVideos_end_time" name="end_time">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="columns">
+                        <div class="column">
+                            <h3>Chunking Details</h3>
+                             <div class="form-group">
+                                <label for="processVideos_chunk_method">Chunk Method:</label>
+                                <select id="processVideos_chunk_method" name="chunk_method">
+                                    <option value="sentences" selected>sentences</option>
+                                    <option value="recursive">recursive</option>
+                                    <option value="token">token</option>
+                                    <option value="character">character</option>
+                                     <!-- Add other ChunkMethod enums -->
+                                </select>
+                            </div>
+                             <div class="form-group">
+                                <label for="processVideos_chunk_language">Chunk Language Override:</label>
+                                <input type="text" id="processVideos_chunk_language" name="chunk_language">
+                            </div>
+                            <div class="form-group">
+                                <label for="processVideos_chunk_size">Chunk Size:</label>
+                                <input type="number" id="processVideos_chunk_size" name="chunk_size" value="500">
+                            </div>
+                            <div class="form-group">
+                                <label for="processVideos_chunk_overlap">Chunk Overlap:</label>
+                                <input type="number" id="processVideos_chunk_overlap" name="chunk_overlap" value="200">
+                            </div>
+                             <div class="form-group">
+                                <label for="processVideos_custom_chapter_pattern">Custom Chapter Pattern (Regex):</label>
+                                <input type="text" id="processVideos_custom_chapter_pattern" name="custom_chapter_pattern">
+                            </div>
+                        </div>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('processVideos', 'POST', '/api/v1/media/process-videos', 'form')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="processVideos_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="processVideos_response">---</pre>
+                </div>
+
+                <!-- POST /api/v1/media/process-audios -->
+                <div class="endpoint-section" id="processAudios">
+                    <h2>POST /api/v1/media/process-audios - Process Audios (No DB)</h2>
+                    <p>Media type is fixed to "audio", keep_original_file is false.</p>
+                     <div class="columns">
+                        <div class="column">
+                            <h3>Sources & Info</h3>
+                            <div class="form-group">
+                                <label for="processAudios_urls">URLs (one per line):</label>
+                                <textarea id="processAudios_urls" name="urls" placeholder="https://example.com/audio.mp3"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processAudios_files">Files:</label>
+                                <input type="file" id="processAudios_files" name="files" multiple>
+                            </div>
+                             <div class="form-group">
+                                <label for="processAudios_title">Title (optional):</label>
+                                <input type="text" id="processAudios_title" name="title">
+                            </div>
+                            <div class="form-group">
+                                <label for="processAudios_author">Author (optional):</label>
+                                <input type="text" id="processAudios_author" name="author">
+                            </div>
+                            <div class="form-group">
+                                <label for="processAudios_keywords">Keywords (comma-separated):</label>
+                                <input type="text" id="processAudios_keywords" name="keywords">
+                            </div>
+                        </div>
+                        <div class="column">
+                            <h3>Processing Options</h3>
+                             <div class="form-group checkbox-group">
+                                <input type="checkbox" id="processAudios_perform_analysis" name="perform_analysis" checked> <label for="processAudios_perform_analysis">Perform Analysis</label><br>
+                                <input type="checkbox" id="processAudios_use_cookies" name="use_cookies"> <label for="processAudios_use_cookies">Use Cookies</label><br>
+                                <input type="checkbox" id="processAudios_diarize" name="diarize"> <label for="processAudios_diarize">Diarize</label><br>
+                                <input type="checkbox" id="processAudios_timestamp_option" name="timestamp_option" checked> <label for="processAudios_timestamp_option">Timestamp Option</label><br>
+                                <input type="checkbox" id="processAudios_vad_use" name="vad_use"> <label for="processAudios_vad_use">VAD Use</label><br>
+                                <input type="checkbox" id="processAudios_perform_confabulation_check_of_analysis" name="perform_confabulation_check_of_analysis"> <label for="processAudios_perform_confabulation_check_of_analysis">Confabulation Check</label><br>
+                                <input type="checkbox" id="processAudios_perform_chunking" name="perform_chunking" checked> <label for="processAudios_perform_chunking">Perform Chunking</label><br>
+                                <input type="checkbox" id="processAudios_use_adaptive_chunking" name="use_adaptive_chunking"> <label for="processAudios_use_adaptive_chunking">Adaptive Chunking</label><br>
+                                <input type="checkbox" id="processAudios_use_multi_level_chunking" name="use_multi_level_chunking"> <label for="processAudios_use_multi_level_chunking">Multi-Level Chunking</label><br>
+                                <input type="checkbox" id="processAudios_summarize_recursively" name="summarize_recursively"> <label for="processAudios_summarize_recursively">Summarize Recursively</label>
+                                <input type="hidden" id="processAudios_overwrite_existing" name="overwrite_existing" value="false">
+                            </div>
+                        </div>
+                    </div>
+                     <div class="columns">
+                         <div class="column">
+                            <h3>Prompts & API</h3>
+                            <div class="form-group">
+                                <label for="processAudios_custom_prompt">Custom Prompt:</label>
+                                <textarea id="processAudios_custom_prompt" name="custom_prompt"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processAudios_system_prompt">System Prompt:</label>
+                                <textarea id="processAudios_system_prompt" name="system_prompt"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processAudios_api_name">API Name (for analysis):</label>
+                                <input type="text" id="processAudios_api_name" name="api_name">
+                            </div>
+                            <div class="form-group">
+                                <label for="processAudios_api_key">API Key (for analysis):</label>
+                                <input type="password" id="processAudios_api_key" name="api_key">
+                            </div>
+                            <div class="form-group">
+                                <label for="processAudios_cookies">Cookies (string, if use_cookies):</label>
+                                <input type="text" id="processAudios_cookies" name="cookies">
+                            </div>
+                        </div>
+                         <div class="column">
+                            <h3>Audio Specific Settings</h3>
+                             <div class="form-group">
+                                <label for="processAudios_transcription_model">Transcription Model:</label>
+                                <input type="text" id="processAudios_transcription_model" name="transcription_model" value="deepdml/faster-distil-whisper-large-v3.5">
+                            </div>
+                            <div class="form-group">
+                                <label for="processAudios_transcription_language">Transcription Language:</label>
+                                <input type="text" id="processAudios_transcription_language" name="transcription_language" value="en">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="columns">
+                        <div class="column">
+                            <h3>Chunking Details</h3>
+                             <div class="form-group">
+                                <label for="processAudios_chunk_method">Chunk Method:</label>
+                                <select id="processAudios_chunk_method" name="chunk_method">
+                                     <option value="sentences" selected>sentences</option>
+                                    <option value="recursive">recursive</option>
+                                    <option value="token">token</option>
+                                    <option value="character">character</option>
+                                    <!-- Add other ChunkMethod enums -->
+                                </select>
+                            </div>
+                             <div class="form-group">
+                                <label for="processAudios_chunk_language">Chunk Language Override:</label>
+                                <input type="text" id="processAudios_chunk_language" name="chunk_language">
+                            </div>
+                            <div class="form-group">
+                                <label for="processAudios_chunk_size">Chunk Size:</label>
+                                <input type="number" id="processAudios_chunk_size" name="chunk_size" value="500">
+                            </div>
+                            <div class="form-group">
+                                <label for="processAudios_chunk_overlap">Chunk Overlap:</label>
+                                <input type="number" id="processAudios_chunk_overlap" name="chunk_overlap" value="200">
+                            </div>
+                             <div class="form-group">
+                                <label for="processAudios_custom_chapter_pattern">Custom Chapter Pattern (Regex):</label>
+                                <input type="text" id="processAudios_custom_chapter_pattern" name="custom_chapter_pattern">
+                            </div>
+                        </div>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('processAudios', 'POST', '/api/v1/media/process-audios', 'form')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="processAudios_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="processAudios_response">---</pre>
+                </div>
+
+                <!-- POST /api/v1/media/process-ebooks -->
+                <div class="endpoint-section" id="processEbooks">
+                    <h2>POST /api/v1/media/process-ebooks - Process Ebooks (No DB)</h2>
+                    <p>Media type is fixed to "ebook", keep_original_file is false.</p>
+                    <div class="columns">
+                        <div class="column">
+                            <h3>Sources & Info</h3>
+                            <div class="form-group">
+                                <label for="processEbooks_urls">URLs (one per line, .epub):</label>
+                                <textarea id="processEbooks_urls" name="urls"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processEbooks_files">Files (.epub):</label>
+                                <input type="file" id="processEbooks_files" name="files" multiple accept=".epub">
+                            </div>
+                             <div class="form-group">
+                                <label for="processEbooks_title">Title Override:</label>
+                                <input type="text" id="processEbooks_title" name="title">
+                            </div>
+                            <div class="form-group">
+                                <label for="processEbooks_author">Author Override:</label>
+                                <input type="text" id="processEbooks_author" name="author">
+                            </div>
+                            <div class="form-group">
+                                <label for="processEbooks_keywords_str">Keywords (comma-separated):</label>
+                                <input type="text" id="processEbooks_keywords_str" name="keywords_str">
+                            </div>
+                             <div class="form-group">
+                                <label for="processEbooks_extraction_method">Extraction Method:</label>
+                                <select id="processEbooks_extraction_method" name="extraction_method">
+                                    <option value="filtered">filtered</option>
+                                    <option value="markdown">markdown</option>
+                                    <option value="basic">basic</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="column">
+                            <h3>Processing & Chunking Options</h3>
+                             <div class="form-group checkbox-group">
+                                <input type="checkbox" id="processEbooks_perform_analysis" name="perform_analysis" checked> <label for="processEbooks_perform_analysis">Perform Analysis</label><br>
+                                <input type="checkbox" id="processEbooks_summarize_recursively" name="summarize_recursively"> <label for="processEbooks_summarize_recursively">Summarize Recursively</label><br>
+                                <input type="checkbox" id="processEbooks_perform_chunking" name="perform_chunking" checked> <label for="processEbooks_perform_chunking">Perform Chunking</label>
+                                <input type="hidden" id="processEbooks_overwrite_existing" name="overwrite_existing" value="false">
+                            </div>
+                            <div class="form-group">
+                                <label for="processEbooks_chunk_method">Chunk Method:</label>
+                                <select id="processEbooks_chunk_method" name="chunk_method">
+                                    <option value="ebook_chapters" selected>ebook_chapters</option>
+                                    <option value="recursive">recursive</option>
+                                    <option value="sentences">sentences</option>
+                                    <option value="token">token</option>
+                                    <option value="character">character</option>
+                                    <!-- Add other ChunkMethod enums -->
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="processEbooks_chunk_size">Chunk Size (for non-chapter):</label>
+                                <input type="number" id="processEbooks_chunk_size" name="chunk_size" value="1500">
+                            </div>
+                            <div class="form-group">
+                                <label for="processEbooks_chunk_overlap">Chunk Overlap (for non-chapter):</label>
+                                <input type="number" id="processEbooks_chunk_overlap" name="chunk_overlap" value="200">
+                            </div>
+                             <div class="form-group">
+                                <label for="processEbooks_custom_chapter_pattern">Custom Chapter Pattern (Regex):</label>
+                                <input type="text" id="processEbooks_custom_chapter_pattern" name="custom_chapter_pattern">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="columns">
+                         <div class="column">
+                            <h3>Prompts & API (for Analysis)</h3>
+                            <div class="form-group">
+                                <label for="processEbooks_custom_prompt">Custom Prompt:</label>
+                                <textarea id="processEbooks_custom_prompt" name="custom_prompt"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processEbooks_system_prompt">System Prompt:</label>
+                                <textarea id="processEbooks_system_prompt" name="system_prompt"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processEbooks_api_name">API Name:</label>
+                                <input type="text" id="processEbooks_api_name" name="api_name">
+                            </div>
+                            <div class="form-group">
+                                <label for="processEbooks_api_key">API Key:</label>
+                                <input type="password" id="processEbooks_api_key" name="api_key">
+                            </div>
+                        </div>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('processEbooks', 'POST', '/api/v1/media/process-ebooks', 'form')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="processEbooks_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="processEbooks_response">---</pre>
+                </div>
+
+                <!-- POST /api/v1/media/process-documents -->
+                <div class="endpoint-section" id="processDocuments">
+                    <h2>POST /api/v1/media/process-documents - Process Documents (No DB)</h2>
+                    <p>Media type is fixed to "document", keep_original_file is false.</p>
+                     <div class="columns">
+                        <div class="column">
+                            <h3>Sources & Info</h3>
+                            <div class="form-group">
+                                <label for="processDocuments_urls">URLs (one per line, .txt, .docx, etc.):</label>
+                                <textarea id="processDocuments_urls" name="urls"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processDocuments_files">Files (.txt, .md, .docx, .rtf, .html, .htm, .xml):</label>
+                                <input type="file" id="processDocuments_files" name="files" multiple accept=".txt,.md,.docx,.rtf,.html,.htm,.xml">
+                            </div>
+                             <div class="form-group">
+                                <label for="processDocuments_title">Title Override:</label>
+                                <input type="text" id="processDocuments_title" name="title">
+                            </div>
+                            <div class="form-group">
+                                <label for="processDocuments_author">Author Override:</label>
+                                <input type="text" id="processDocuments_author" name="author">
+                            </div>
+                            <div class="form-group">
+                                <label for="processDocuments_keywords_str">Keywords (comma-separated):</label>
+                                <input type="text" id="processDocuments_keywords_str" name="keywords_str">
+                            </div>
+                        </div>
+                        <div class="column">
+                            <h3>Processing & Chunking Options</h3>
+                             <div class="form-group checkbox-group">
+                                <input type="checkbox" id="processDocuments_perform_analysis" name="perform_analysis" checked> <label for="processDocuments_perform_analysis">Perform Analysis</label><br>
+                                <input type="checkbox" id="processDocuments_summarize_recursively" name="summarize_recursively"> <label for="processDocuments_summarize_recursively">Summarize Recursively</label><br>
+                                <input type="checkbox" id="processDocuments_perform_chunking" name="perform_chunking" checked> <label for="processDocuments_perform_chunking">Perform Chunking</label>
+                                <input type="hidden" id="processDocuments_overwrite_existing" name="overwrite_existing" value="false">
+                            </div>
+                            <div class="form-group">
+                                <label for="processDocuments_chunk_method">Chunk Method:</label>
+                                <select id="processDocuments_chunk_method" name="chunk_method">
+                                    <option value="sentences" selected>sentences</option>
+                                    <option value="recursive">recursive</option>
+                                    <option value="markdown">markdown</option>
+                                    <option value="token">token</option>
+                                    <option value="character">character</option>
+                                    <!-- Add other ChunkMethod enums -->
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="processDocuments_chunk_size">Chunk Size:</label>
+                                <input type="number" id="processDocuments_chunk_size" name="chunk_size" value="1000">
+                            </div>
+                            <div class="form-group">
+                                <label for="processDocuments_chunk_overlap">Chunk Overlap:</label>
+                                <input type="number" id="processDocuments_chunk_overlap" name="chunk_overlap" value="200">
+                            </div>
+                            <div class="form-group">
+                                <label for="processDocuments_custom_chapter_pattern">Custom Chapter Pattern (Regex):</label>
+                                <input type="text" id="processDocuments_custom_chapter_pattern" name="custom_chapter_pattern">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="columns">
+                         <div class="column">
+                            <h3>Prompts & API (for Analysis)</h3>
+                            <div class="form-group">
+                                <label for="processDocuments_custom_prompt">Custom Prompt:</label>
+                                <textarea id="processDocuments_custom_prompt" name="custom_prompt"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processDocuments_system_prompt">System Prompt:</label>
+                                <textarea id="processDocuments_system_prompt" name="system_prompt"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processDocuments_api_name">API Name:</label>
+                                <input type="text" id="processDocuments_api_name" name="api_name">
+                            </div>
+                            <div class="form-group">
+                                <label for="processDocuments_api_key">API Key:</label>
+                                <input type="password" id="processDocuments_api_key" name="api_key">
+                            </div>
+                        </div>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('processDocuments', 'POST', '/api/v1/media/process-documents', 'form')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="processDocuments_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="processDocuments_response">---</pre>
+                </div>
+
+                 <!-- POST /api/v1/media/process-pdfs -->
+                <div class="endpoint-section" id="processPdfs">
+                    <h2>POST /api/v1/media/process-pdfs - Process PDFs (No DB)</h2>
+                    <p>Media type is fixed to "pdf", keep_original_file is false.</p>
+                     <div class="columns">
+                        <div class="column">
+                            <h3>Sources & Info</h3>
+                            <div class="form-group">
+                                <label for="processPdfs_urls">URLs (one per line, .pdf):</label>
+                                <textarea id="processPdfs_urls" name="urls"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processPdfs_files">Files (.pdf):</label>
+                                <input type="file" id="processPdfs_files" name="files" multiple accept=".pdf">
+                            </div>
+                             <div class="form-group">
+                                <label for="processPdfs_title">Title Override:</label>
+                                <input type="text" id="processPdfs_title" name="title">
+                            </div>
+                            <div class="form-group">
+                                <label for="processPdfs_author">Author Override:</label>
+                                <input type="text" id="processPdfs_author" name="author">
+                            </div>
+                            <div class="form-group">
+                                <label for="processPdfs_keywords">Keywords (comma-separated):</label>
+                                <input type="text" id="processPdfs_keywords" name="keywords">
+                            </div>
+                             <div class="form-group">
+                                <label for="processPdfs_pdf_parsing_engine">PDF Parsing Engine:</label>
+                                <select id="processPdfs_pdf_parsing_engine" name="pdf_parsing_engine">
+                                    <option value="pymupdf4llm">pymupdf4llm</option>
+                                    <option value="pymupdf">pymupdf</option>
+                                    <option value="docling">docling</option>
+                                    <option value="ocr_only">ocr_only</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="column">
+                            <h3>Processing & Chunking Options</h3>
+                             <div class="form-group checkbox-group">
+                                <input type="checkbox" id="processPdfs_perform_analysis" name="perform_analysis" checked> <label for="processPdfs_perform_analysis">Perform Analysis</label><br>
+                                <input type="checkbox" id="processPdfs_summarize_recursively" name="summarize_recursively"> <label for="processPdfs_summarize_recursively">Summarize Recursively</label><br>
+                                <input type="checkbox" id="processPdfs_perform_chunking" name="perform_chunking" checked> <label for="processPdfs_perform_chunking">Perform Chunking</label>
+                                <input type="hidden" id="processPdfs_overwrite_existing" name="overwrite_existing" value="false">
+                            </div>
+                            <div class="form-group">
+                                <label for="processPdfs_chunk_method">Chunk Method:</label>
+                                <select id="processPdfs_chunk_method" name="chunk_method">
+                                    <option value="sentences" selected>sentences</option>
+                                    <option value="recursive">recursive</option>
+                                    <option value="page">page</option>
+                                    <option value="layout">layout</option>
+                                    <option value="token">token</option>
+                                    <option value="character">character</option>
+                                    <!-- Add other ChunkMethod enums -->
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="processPdfs_chunk_size">Chunk Size:</label>
+                                <input type="number" id="processPdfs_chunk_size" name="chunk_size" value="500">
+                            </div>
+                            <div class="form-group">
+                                <label for="processPdfs_chunk_overlap">Chunk Overlap:</label>
+                                <input type="number" id="processPdfs_chunk_overlap" name="chunk_overlap" value="200">
+                            </div>
+                             <div class="form-group">
+                                <label for="processPdfs_custom_chapter_pattern">Custom Chapter Pattern (Regex, for chunking):</label>
+                                <input type="text" id="processPdfs_custom_chapter_pattern" name="custom_chapter_pattern">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="columns">
+                         <div class="column">
+                            <h3>Prompts & API (for Analysis)</h3>
+                            <div class="form-group">
+                                <label for="processPdfs_custom_prompt">Custom Prompt:</label>
+                                <textarea id="processPdfs_custom_prompt" name="custom_prompt"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processPdfs_system_prompt">System Prompt:</label>
+                                <textarea id="processPdfs_system_prompt" name="system_prompt"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="processPdfs_api_name">API Name:</label>
+                                <input type="text" id="processPdfs_api_name" name="api_name">
+                            </div>
+                            <div class="form-group">
+                                <label for="processPdfs_api_key">API Key:</label>
+                                <input type="password" id="processPdfs_api_key" name="api_key">
+                            </div>
+                        </div>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('processPdfs', 'POST', '/api/v1/media/process-pdfs', 'form')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="processPdfs_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="processPdfs_response">---</pre>
+                </div>
+            </div>
+
+             <!-- MediaWiki Processing Tab -->
+            <div id="tabMediaWiki" class="tab-content">
+                <!-- POST /api/v1/media/mediawiki/ingest-dump -->
+                <div class="endpoint-section" id="ingestMediaWikiDump">
+                    <h2>POST /api/v1/media/mediawiki/ingest-dump</h2>
+                    <p>Ingest and process a MediaWiki XML dump, storing results to database and vector store. Response is streamed.</p>
+                    <div class="form-group">
+                        <label for="ingestMediaWikiDump_dump_file">MediaWiki XML Dump File (.xml, .xml.bz2, .xml.gz):</label>
+                        <input type="file" id="ingestMediaWikiDump_dump_file" name="dump_file" accept=".xml,.xml.bz2,.xml.gz">
+                    </div>
+                    <div class="form-group">
+                        <label for="ingestMediaWikiDump_wiki_name">Wiki Name (Unique Identifier):</label>
+                        <input type="text" id="ingestMediaWikiDump_wiki_name" name="wiki_name" value="my_wiki">
+                    </div>
+                    <div class="form-group">
+                        <label for="ingestMediaWikiDump_namespaces_str">Namespaces (comma-separated IDs, e.g., '0,1', All if empty):</label>
+                        <input type="text" id="ingestMediaWikiDump_namespaces_str" name="namespaces_str" placeholder="0,14">
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="ingestMediaWikiDump_skip_redirects" name="skip_redirects" checked> <label for="ingestMediaWikiDump_skip_redirects">Skip Redirect Pages</label>
+                    </div>
+                    <div class="form-group">
+                        <label for="ingestMediaWikiDump_chunk_max_size">Chunk Max Size:</label>
+                        <input type="number" id="ingestMediaWikiDump_chunk_max_size" name="chunk_max_size" value="1000">
+                    </div>
+                    <div class="form-group">
+                        <label for="ingestMediaWikiDump_api_name_vector_db">API Name (Vector DB Embedding):</label>
+                        <input type="text" id="ingestMediaWikiDump_api_name_vector_db" name="api_name_vector_db">
+                    </div>
+                    <div class="form-group">
+                        <label for="ingestMediaWikiDump_api_key_vector_db">API Key (Vector DB Embedding):</label>
+                        <input type="password" id="ingestMediaWikiDump_api_key_vector_db" name="api_key_vector_db">
+                    </div>
+                    <button class="api-button" onclick="makeRequest('ingestMediaWikiDump', 'POST', '/api/v1/media/mediawiki/ingest-dump', 'form', {}, 'stream')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="ingestMediaWikiDump_curl">---</pre>
+                    <h3>Response (Streaming NDJSON):</h3>
+                    <pre id="ingestMediaWikiDump_response">---</pre>
+                </div>
+
+                <!-- POST /api/v1/media/mediawiki/process-dump -->
+                <div class="endpoint-section" id="processMediaWikiDump">
+                    <h2>POST /api/v1/media/mediawiki/process-dump</h2>
+                    <p>Process a MediaWiki XML dump and return structured content without database storage. Response is streamed.</p>
+                     <div class="form-group">
+                        <label for="processMediaWikiDump_dump_file">MediaWiki XML Dump File (.xml, .xml.bz2, .xml.gz):</label>
+                        <input type="file" id="processMediaWikiDump_dump_file" name="dump_file" accept=".xml,.xml.bz2,.xml.gz">
+                    </div>
+                    <div class="form-group">
+                        <label for="processMediaWikiDump_wiki_name">Wiki Name:</label>
+                        <input type="text" id="processMediaWikiDump_wiki_name" name="wiki_name" value="processed_wiki">
+                    </div>
+                    <div class="form-group">
+                        <label for="processMediaWikiDump_namespaces_str">Namespaces (comma-separated IDs, e.g., '0,1', All if empty):</label>
+                        <input type="text" id="processMediaWikiDump_namespaces_str" name="namespaces_str" placeholder="0">
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="processMediaWikiDump_skip_redirects" name="skip_redirects" checked> <label for="processMediaWikiDump_skip_redirects">Skip Redirect Pages</label>
+                    </div>
+                    <div class="form-group">
+                        <label for="processMediaWikiDump_chunk_max_size">Chunk Max Size:</label>
+                        <input type="number" id="processMediaWikiDump_chunk_max_size" name="chunk_max_size" value="1000">
+                    </div>
+                    <!-- api_name_vector_db and api_key_vector_db are ignored if store_to_vector_db is False, but form dep expects them -->
+                    <input type="hidden" id="processMediaWikiDump_api_name_vector_db" name="api_name_vector_db" value="">
+                    <input type="hidden" id="processMediaWikiDump_api_key_vector_db" name="api_key_vector_db" value="">
+
+                    <button class="api-button" onclick="makeRequest('processMediaWikiDump', 'POST', '/api/v1/media/mediawiki/process-dump', 'form', {}, 'stream')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="processMediaWikiDump_curl">---</pre>
+                    <h3>Response (Streaming NDJSON):</h3>
+                    <pre id="processMediaWikiDump_response">---</pre>
+                </div>
+            </div>
+
+
+            <!-- Web Scraping Tab -->
+            <div id="tabWebScraping" class="tab-content">
+                 <!-- POST /api/v1/media/ingest-web-content -->
+                <div class="endpoint-section" id="ingestWebContent">
+                    <h2>POST /api/v1/media/ingest-web-content</h2>
+                    <div class="form-group">
+                        <label for="ingestWebContent_payload">Payload (IngestWebContentRequest JSON):</label>
+                        <textarea id="ingestWebContent_payload" style="min-height: 300px;">{
+    "urls": ["https://example.com/article1"],
+    "scrape_method": "individual",
+    "titles": ["Optional Title 1"],
+    "authors": ["Author 1"],
+    "keywords": ["keywordA,keywordB"],
+    "perform_analysis": true,
+    "custom_prompt": "Summarize this briefly.",
+    "system_prompt": "You are a concise summarizer.",
+    "api_name": null,
+    "api_key": null,
+    "perform_translation": false,
+    "translation_language": "en",
+    "perform_chunking": true,
+    "chunk_method": "sentences",
+    "chunk_size": 500,
+    "chunk_overlap": 50,
+    "timestamp_option": true,
+    "overwrite_existing": false,
+    "max_pages": 10,
+    "max_depth": 2,
+    "url_level": 1,
+    "use_cookies": false,
+    "cookies": null,
+    "perform_rolling_summarization": false,
+    "perform_confabulation_check_of_analysis": false,
+    "custom_chapter_pattern": null
+}</textarea>
+                        <small>Scrape Methods for <code>scrape_method</code>: "individual", "sitemap", "url_level", "recursive".</small>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('ingestWebContent', 'POST', '/api/v1/media/ingest-web-content', 'json')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="ingestWebContent_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="ingestWebContent_response">---</pre>
+                </div>
+
+                <!-- POST /api/v1/media/process-web-scraping -->
+                <div class="endpoint-section" id="processWebScraping">
+                    <h2>POST /api/v1/media/process-web-scraping</h2>
+                    <div class="form-group">
+                        <label for="processWebScraping_payload">Payload (WebScrapingRequest JSON):</label>
+                        <textarea id="processWebScraping_payload" style="min-height: 300px;">{
+    "scrape_method": "Individual URLs",
+    "url_input": "https://example.com/article1\\nhttps://example.com/article2",
+    "url_level": null,
+    "max_pages": 10,
+    "max_depth": 3,
+    "summarize_checkbox": true,
+    "custom_prompt": "Please summarize with bullet points only.",
+    "api_name": null,
+    "api_key": null,
+    "keywords": "web, scraping, example",
+    "custom_titles": "Article 1 Title\\nArticle 2 Title",
+    "system_prompt": "You are a bulleted-notes specialist...",
+    "temperature": 0.7,
+    "custom_cookies": null,
+    "mode": "persist"
+}</textarea>
+                        <small>Scrape Methods for <code>scrape_method</code>: "Individual URLs", "Sitemap", "URL Level", "Recursive Scraping". Mode: "persist" or "ephemeral".</small>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('processWebScraping', 'POST', '/api/v1/media/process-web-scraping', 'json')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="processWebScraping_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="processWebScraping_response">---</pre>
+                </div>
+            </div>
+
+            <!-- Chat Completions Tab Content placeholder -->
+            <div id="tabChatCompletions" class="tab-content">
+                 <p>Loading Chat Completions UI...</p>
+            </div>
+
+            <!-- Character Management Tab -->
+            <div id="tabCharacterManagement" class="tab-content">
+                <div class="endpoint-section" id="importCharacter">
+                    <h2>POST /api/v1/characters/import - Import Character from File</h2>
+                    <p>Supports PNG/WEBP (with 'chara' metadata), JSON, or Markdown files.</p>
+                    <div class="form-group">
+                        <label for="importCharacter_character_file">Character File:</label>
+                        <input type="file" id="importCharacter_character_file" name="character_file" accept=".png,.webp,.json,.md">
+                    </div>
+                    <button class="api-button" onclick="makeRequest('importCharacter', 'POST', '/api/v1/characters/import', 'form')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="importCharacter_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="importCharacter_response">---</pre>
+                </div>
+
+                <div class="endpoint-section" id="listCharacters">
+                    <h2>GET /api/v1/characters/ - List All Characters</h2>
+                    <div class="form-group">
+                        <label for="listCharacters_limit">Limit:</label>
+                        <input type="number" id="listCharacters_limit" name="limit" value="100">
+                    </div>
+                    <div class="form-group">
+                        <label for="listCharacters_offset">Offset:</label>
+                        <input type="number" id="listCharacters_offset" name="offset" value="0">
+                    </div>
+                    <button class="api-button" onclick="makeRequest('listCharacters', 'GET', '/api/v1/characters/', 'query')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="listCharacters_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="listCharacters_response">---</pre>
+                </div>
+
+                <div class="endpoint-section" id="createCharacter">
+                    <h2>POST /api/v1/characters/ - Create Character</h2>
+                    <div class="form-group">
+                        <label for="createCharacter_payload">Payload (CharacterCreate JSON):</label>
+                        <textarea id="createCharacter_payload" style="min-height: 300px;">{
+    "name": "Sir Gideon",
+    "description": "A valiant knight from the forgotten ages.",
+    "personality": "Brave, honorable, somewhat stoic but kind-hearted.",
+    "scenario": "Guarding the Whispering Pass against encroaching shadows.",
+    "system_prompt": "You are Sir Gideon, a knight of old. Speak with honor and courage. Offer guidance to those who seek it. You are currently at the Whispering Pass.",
+    "post_history_instructions": "Maintain your persona as Sir Gideon. Be wary of trickery.",
+    "first_message": "Hail, traveler! What brings you to this perilous Whispering Pass?",
+    "message_example": "<START>\\nUSER: Greetings, Sir Knight. What dangers lie ahead?\\nASSISTANT: The path is fraught with peril, good sir. Shadow beasts roam these lands, and the very air grows cold with their passing. State your purpose, and perhaps I can offer counsel.\\n<END>",
+    "creator_notes": "This is a character for a fantasy RPG setting. Focus on medieval speech patterns.",
+    "alternate_greetings": ["Well met, adventurer!", "Who goes there? Declare yourself!"],
+    "tags": ["fantasy", "knight", "guardian", "lore"],
+    "creator": "AI Storyteller",
+    "character_version": "1.0.0",
+    "extensions": {
+        "world_setting": "Kingdom of Eldoria",
+        "faction": "Knights of the Silver Flame",
+        "inventory_system_notes": "Standard D&D 5e equipment. Has a +1 longsword."
+    },
+    "image_base64": null
+}</textarea>
+                        <small><code>image_base64</code> should be a base64 encoded string of the image, without the 'data:image/...;base64,' prefix. List/Dict fields can be JSON strings or actual lists/dicts if using a client that sends structured JSON.</small>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('createCharacter', 'POST', '/api/v1/characters/', 'json')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="createCharacter_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="createCharacter_response">---</pre>
+                </div>
+
+                <div class="endpoint-section" id="getCharacter">
+                    <h2>GET /api/v1/characters/{character_id} - Get Character</h2>
+                    <div class="form-group">
+                        <label for="getCharacter_character_id">Character ID:</label>
+                        <input type="number" id="getCharacter_character_id" value="1">
+                    </div>
+                    <button class="api-button" onclick="makeRequest('getCharacter', 'GET', '/api/v1/characters/{character_id}')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="getCharacter_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="getCharacter_response">---</pre>
+                </div>
+
+                <div class="endpoint-section" id="updateCharacter">
+                    <h2>PUT /api/v1/characters/{character_id} - Update Character</h2>
+                    <div class="form-group">
+                        <label for="updateCharacter_character_id">Character ID:</label>
+                        <input type="number" id="updateCharacter_character_id" value="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="updateCharacter_payload">Payload (CharacterUpdate JSON - include only fields to change):</label>
+                        <textarea id="updateCharacter_payload" style="min-height: 250px;">{
+    "description": "An even braver knight, now with a slightly shinier helmet.",
+    "tags": ["fantasy", "knight", "updated"],
+    "image_base64": null
+}</textarea>
+                         <small>To remove an image, pass <code>image_base64: null</code> or an empty string.</small>
+                    </div>
+                    <button class="api-button" onclick="makeRequest('updateCharacter', 'PUT', '/api/v1/characters/{character_id}', 'json')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="updateCharacter_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="updateCharacter_response">---</pre>
+                </div>
+
+                <div class="endpoint-section" id="deleteCharacter">
+                    <h2>DELETE /api/v1/characters/{character_id} - Delete Character</h2>
+                    <div class="form-group">
+                        <label for="deleteCharacter_character_id">Character ID:</label>
+                        <input type="number" id="deleteCharacter_character_id" value="1">
+                    </div>
+                    <button class="api-button" onclick="makeRequest('deleteCharacter', 'DELETE', '/api/v1/characters/{character_id}')">Send Request</button>
+                    <h3>cURL Command:</h3>
+                    <pre id="deleteCharacter_curl">---</pre>
+                    <h3>Response:</h3>
+                    <pre id="deleteCharacter_response">---</pre>
+                </div>
+            </div>
+
+
+            <!-- Chat Completions Tab Content placeholder -->
+            <div id="tabChatCompletions" class="tab-content">
+                 <p>Loading Chat Completions UI...</p>
+            </div>
+
+        </div> <!-- end content-container -->
+    </div> <!-- end app-container -->
+
+    <script>
+        const loadedContentGroups = new Set();
+        const mainContentArea = document.getElementById('main-content-area');
+        let activeTopTabButton = null;
+        let activeSubTabButton = null;
+        let messageIdCounter = { chatCompletions: 0 }; // For dynamic message IDs
+
+        function initTabs() {
+            const topTabButtons = document.querySelectorAll('.top-tab-buttons button');
+            topTabButtons.forEach(btn => {
+                btn.addEventListener('click', () => activateTopTab(btn));
+            });
+
+            const subTabButtons = document.querySelectorAll('.sub-tab-buttons button');
+            subTabButtons.forEach(btn => {
+                btn.addEventListener('click', () => activateSubTab(btn));
+            });
+
+            // Default to Chat -> Character Management
+            const defaultTopTab = document.getElementById('top-tab-chat');
+             if (defaultTopTab) {
+                activateTopTab(defaultTopTab).then(() => {
+                    const defaultSubTab = document.querySelector('#chat-subtabs .sub-tab-buttons button[data-content-id="tabCharacterManagement"]');
+                    if (defaultSubTab) {
+                        activateSubTab(defaultSubTab);
+                    } else { // Fallback to first chat sub-tab if CharacterManagement isn't first
+                        const firstChatSubTab = document.querySelector('#chat-subtabs .sub-tab-buttons button');
+                        if (firstChatSubTab) activateSubTab(firstChatSubTab);
+                    }
+                });
+            } else if (topTabButtons.length > 0) { // Fallback if "chat" top tab isn't found
+                 activateTopTab(topTabButtons[0]);
+            }
+        }
+
+
+        async function activateTopTab(topTabButtonToActivate) {
+            if (activeTopTabButton) {
+                activeTopTabButton.classList.remove('active');
+            }
+            activeTopTabButton = topTabButtonToActivate;
+            activeTopTabButton.classList.add('active');
+
+            const topTabName = activeTopTabButton.dataset.toptab;
+            document.querySelectorAll('.sub-tab-row').forEach(row => row.classList.remove('active'));
+
+            const subTabRowToShow = document.getElementById(topTabName + '-subtabs');
+            if (subTabRowToShow) {
+                subTabRowToShow.classList.add('active');
+                const firstSubTabButton = subTabRowToShow.querySelector('.sub-tab-buttons button');
+                if (firstSubTabButton) {
+                    await activateSubTab(firstSubTabButton);
+                }
+            } else {
+                if (activeSubTabButton) {
+                    activeSubTabButton.classList.remove('active');
+                    activeSubTabButton = null;
+                }
+                mainContentArea.querySelectorAll('.tab-content').forEach(tc => {
+                    tc.classList.remove('active');
+                    tc.style.display = 'none';
+                });
+                const directContentId = `tab${topTabName.charAt(0).toUpperCase() + topTabName.slice(1)}`;
+                let contentToShow = document.getElementById(directContentId);
+
+                if (topTabName === 'general' && !contentToShow) {
+                    contentToShow = document.getElementById('tabGlobalSettings');
+                }
+
+
+                if (contentToShow) {
+                    contentToShow.classList.add('active');
+                    contentToShow.style.display = 'block';
+                } else {
+                    console.warn(`No sub-tabs and no direct content found for top tab: ${topTabName}`);
+                }
+            }
+        }
+
+        async function activateSubTab(subTabButtonToActivate) {
+            const parentSubTabRow = subTabButtonToActivate.closest('.sub-tab-row');
+            if (!parentSubTabRow) return;
+
+            parentSubTabRow.querySelectorAll('.sub-tab-buttons button').forEach(btn => btn.classList.remove('active'));
+            activeSubTabButton = subTabButtonToActivate;
+            activeSubTabButton.classList.add('active');
+
+            const contentId = activeSubTabButton.dataset.contentId;
+            const loadGroup = activeSubTabButton.dataset.loadGroup;
+
+            let contentAreaExists = !!document.getElementById(contentId);
+
+            if (loadGroup && !loadedContentGroups.has(loadGroup) && !contentAreaExists) {
+                try {
+                    console.log(`Loading content for group: ${loadGroup}, target content ID: ${contentId}`);
+                    // Assuming loadContentGroup is for fetching external HTML files.
+                    // Since all HTML is in one file now, this step might be less about fetching
+                    // and more about ensuring any group-specific JS initialization happens.
+                    await loadContentGroup(loadGroup, contentId);
+                    loadedContentGroups.add(loadGroup);
+                    contentAreaExists = !!document.getElementById(contentId);
+                } catch (error) {
+                    console.error(`Failed to load content for group ${loadGroup}:`, error);
+                    let errorDisplay = document.getElementById(contentId);
+                    if (!errorDisplay) {
+                        errorDisplay = document.createElement('div');
+                        errorDisplay.id = contentId;
+                        errorDisplay.classList.add('tab-content');
+                        mainContentArea.appendChild(errorDisplay);
+                    }
+                    errorDisplay.innerHTML = `<p>Error loading content for ${contentId}. Please check console.</p>`;
+                }
+            }
+
+            mainContentArea.querySelectorAll('.tab-content').forEach(tc => {
+                tc.classList.remove('active');
+                tc.style.display = 'none';
+            });
+
+            const contentToShow = document.getElementById(contentId);
+            if (contentToShow) {
+                contentToShow.classList.add('active');
+                contentToShow.style.display = 'block';
+                if (contentId === 'tabChatCompletions' && typeof initializeChatCompletionsTab === "function") {
+                    initializeChatCompletionsTab();
+                }
+            } else {
+                console.warn(`Content ID "${contentId}" not found even after attempting to load group "${loadGroup}". It might be missing from the HTML or there was an error.`);
+                if (!document.getElementById(contentId)) {
+                    const placeholder = document.createElement('div');
+                    placeholder.id = contentId;
+                    placeholder.classList.add('tab-content', 'active');
+                    placeholder.style.display = 'block';
+                    placeholder.innerHTML = `<p>Content for ${contentId} is missing or failed to load.</p>`;
+                    mainContentArea.appendChild(placeholder);
+                }
+            }
+        }
+
+        async function loadContentGroup(groupName, targetContentId) {
+            console.log(`Simulating load for group: ${groupName}. Content should already be in DOM.`);
+            if (groupName === 'chat') { // For any sub-tab under 'Chat' top-tab
+                 if (targetContentId === 'tabChatCompletions' && typeof initializeChatCompletionsTab === "function") {
+                     initializeChatCompletionsTab();
+                 }
+                 // Add more else if for other chat sub-tabs if they need specific JS init
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', initTabs);
+
+        // --- Chat Completions UI Specific Functions ---
+        function escapeCurlData(data) {
+            return data.replace(/'/g, "'\\''");
+        }
+
+        function addChatMessage(prefix, role = 'user', content = '') {
+            const container = document.getElementById(prefix + '_messagesContainer');
+            if (!container) {
+                console.error("Messages container not found for prefix:", prefix);
+                return;
+            }
+            const id = messageIdCounter[prefix]++;
+            const entryDiv = document.createElement('div');
+            entryDiv.className = 'message-entry';
+            entryDiv.id = `${prefix}_message_entry_${id}`;
+            entryDiv.innerHTML = `
+                <label for="${prefix}_message_role_${id}">Role:</label>
+                <select id="${prefix}_message_role_${id}" onchange="toggleToolFields('${prefix}', ${id}); toggleImageUploadUI('${prefix}', ${id})">
+                    <option value="system" ${role === 'system' ? 'selected' : ''}>System</option>
+                    <option value="user" ${role === 'user' ? 'selected' : ''}>User</option>
+                    <option value="assistant" ${role === 'assistant' ? 'selected' : ''}>Assistant</option>
+                    <option value="tool" ${role === 'tool' ? 'selected' : ''}>Tool</option>
+                </select>
+                <label for="${prefix}_message_content_${id}">Content (Text):</label>
+                <textarea id="${prefix}_message_content_${id}" rows="3" placeholder="Enter message text...">${content}</textarea>
+
+                <div class="form-group message-image-upload" id="${prefix}_message_image_upload_container_${id}">
+                    <label for="${prefix}_message_image_${id}">Image (Optional, for 'user' role):</label>
+                    <input type="file" id="${prefix}_message_image_${id}" accept="image/*" onchange="previewMessageImage('${prefix}', ${id})">
+                    <img id="${prefix}_message_image_preview_${id}" src="#" alt="Image Preview" style="max-width: 100px; max-height: 100px; display: none; margin-top: 5px;">
+                    <button type="button" class="remove-image-btn" id="${prefix}_message_image_clear_${id}" onclick="clearMessageImage('${prefix}', ${id})" style="display: none; font-size:0.8em; padding: 3px 6px;">Clear Image</button>
+                </div>
+
+                <label for="${prefix}_message_name_${id}">Name (Optional):</label>
+                <input type="text" id="${prefix}_message_name_${id}" placeholder="Participant name (e.g., function name for assistant tool_calls)">
+                <div id="${prefix}_message_tool_fields_${id}" style="display: ${role === 'tool' ? 'block' : 'none'};">
+                    <label for="${prefix}_message_tool_call_id_${id}">Tool Call ID (Required for 'tool' role):</label>
+                    <input type="text" id="${prefix}_message_tool_call_id_${id}" placeholder="ID of the tool call this message is responding to">
+                </div>
+                <button class="remove-message-btn" onclick="removeChatMessage('${prefix}', ${id})">Remove</button>
+            `;
+            container.appendChild(entryDiv);
+            toggleToolFields(prefix, id);
+            toggleImageUploadUI(prefix, id);
+        }
+
+        function toggleToolFields(prefix, id) {
+            const roleSelect = document.getElementById(`${prefix}_message_role_${id}`);
+            const toolFieldsDiv = document.getElementById(`${prefix}_message_tool_fields_${id}`);
+            if (roleSelect && toolFieldsDiv) {
+                toolFieldsDiv.style.display = roleSelect.value === 'tool' ? 'block' : 'none';
+            }
+        }
+
+        function toggleImageUploadUI(prefix, id) {
+            const roleSelect = document.getElementById(`${prefix}_message_role_${id}`);
+            const imageUploadContainer = document.getElementById(`${prefix}_message_image_upload_container_${id}`);
+            if (roleSelect && imageUploadContainer) {
+                imageUploadContainer.style.display = roleSelect.value === 'user' ? 'block' : 'none';
+                if (roleSelect.value !== 'user') {
+                    clearMessageImage(prefix, id);
+                }
+            }
+        }
+
+        function previewMessageImage(prefix, id) {
+            const fileInput = document.getElementById(`${prefix}_message_image_${id}`);
+            const previewImg = document.getElementById(`${prefix}_message_image_preview_${id}`);
+            const clearButton = document.getElementById(`${prefix}_message_image_clear_${id}`);
+
+            if (fileInput && previewImg && clearButton && fileInput.files && fileInput.files[0]) {
+                const file = fileInput.files[0];
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewImg.src = e.target.result;
+                    previewImg.style.display = 'block';
+                    clearButton.style.display = 'inline-block';
+                    fileInput.dataset.imageDataUrl = e.target.result;
+                }
+                reader.readAsDataURL(file);
+            } else if (previewImg) {
+                clearMessageImage(prefix, id);
+            }
+        }
+
+        function clearMessageImage(prefix, id) {
+            const fileInput = document.getElementById(`${prefix}_message_image_${id}`);
+            const previewImg = document.getElementById(`${prefix}_message_image_preview_${id}`);
+            const clearButton = document.getElementById(`${prefix}_message_image_clear_${id}`);
+
+            if (fileInput) {
+                fileInput.value = null;
+                delete fileInput.dataset.imageDataUrl;
+            }
+            if (previewImg) {
+                previewImg.style.display = 'none';
+                previewImg.src = '#';
+            }
+            if (clearButton) {
+                clearButton.style.display = 'none';
+            }
+        }
+
+
+        function buildPayloadFromForm(prefix) { // For Chat Completions
+            const payload = {};
+
+            const apiProviderEl = document.getElementById(prefix + '_api_provider');
+            if (apiProviderEl && apiProviderEl.value) {
+                payload.api_provider = apiProviderEl.value;
+            }
+
+            const modelEl = document.getElementById(prefix + '_model');
+            if (modelEl && modelEl.value) {
+                payload.model = modelEl.value;
+            }
+
+            const messages = [];
+            const messagesContainer = document.getElementById(prefix + '_messagesContainer');
+            if (messagesContainer) {
+                Array.from(messagesContainer.children).forEach(entryDiv => {
+                    if (!entryDiv.id || !entryDiv.id.startsWith(prefix + '_message_entry_')) return;
+                    const entryId = entryDiv.id.split('_').pop();
+                    const role = document.getElementById(`${prefix}_message_role_${entryId}`).value;
+                    const textContent = document.getElementById(`${prefix}_message_content_${entryId}`).value;
+                    const nameEl = document.getElementById(`${prefix}_message_name_${entryId}`);
+                    const name = nameEl ? (nameEl.value.trim() || undefined) : undefined;
+
+                    const imageInput = document.getElementById(`${prefix}_message_image_${entryId}`);
+                    const imageDataUrl = imageInput ? imageInput.dataset.imageDataUrl : null;
+
+                    let messageContentParts = [];
+                    if (textContent.trim() !== "") {
+                        messageContentParts.push({ type: "text", text: textContent });
+                    }
+
+                    if (role === 'user' && imageDataUrl) {
+                        messageContentParts.push({
+                            type: "image_url",
+                            image_url: { url: imageDataUrl }
+                        });
+                    }
+
+                    const message = { role };
+                    if (name) message.name = name;
+
+                    if (messageContentParts.length === 0 && role !== 'assistant') {
+                        if (role === 'user' || role === 'system' || role === 'tool') {
+                             message.content = "";
+                        }
+                    } else if (messageContentParts.length === 1 && messageContentParts[0].type === "text") {
+                        message.content = messageContentParts[0].text;
+                    } else if (messageContentParts.length > 0) {
+                        message.content = messageContentParts;
+                    } else if (role === 'assistant') {
+                        message.content = null;
+                    }
+
+
+                    if (role === 'tool') {
+                        const toolCallIdEl = document.getElementById(`${prefix}_message_tool_call_id_${entryId}`);
+                        const toolCallId = toolCallIdEl ? toolCallIdEl.value.trim() : "";
+                        if (!toolCallId) {
+                            alert(`Tool Call ID is required for message with role 'tool'. Please check message entry ${entryId}.`);
+                            throw new Error("Missing Tool Call ID for a tool message.");
+                        }
+                        message.tool_call_id = toolCallId;
+                    }
+                    messages.push(message);
+                });
+            }
+            payload.messages = messages;
+            if (messages.length === 0 && document.getElementById(prefix + '_useRawJson') && !document.getElementById(prefix + '_useRawJson').checked) {
+                 alert("At least one message is required for chat completions when not using Raw JSON.");
+                 throw new Error("No messages provided.");
+            }
+
+            const temperatureEl = document.getElementById(prefix + '_temperature');
+            if (temperatureEl && temperatureEl.value !== "") payload.temperature = parseFloat(temperatureEl.value);
+
+            const maxTokensEl = document.getElementById(prefix + '_max_tokens');
+            if (maxTokensEl && maxTokensEl.value !== "") payload.max_tokens = parseInt(maxTokensEl.value);
+
+            const streamEl = document.getElementById(prefix + '_stream');
+            if (streamEl) payload.stream = streamEl.checked;
+
+
+            const optionalFields = {
+                top_p: { type: 'float', elIdSuffix: '_top_p' },
+                frequency_penalty: { type: 'float', elIdSuffix: '_frequency_penalty' },
+                presence_penalty: { type: 'float', elIdSuffix: '_presence_penalty' },
+                minp: { type: 'float', elIdSuffix: '_minp', allowUndefined: true },
+                topk: { type: 'int', elIdSuffix: '_topk', allowUndefined: true },
+                seed: { type: 'int', elIdSuffix: '_seed', allowNull: true },
+                stop: { type: 'json_or_csv_list', elIdSuffix: '_stop', allowNull: true },
+                logprobs: { type: 'checkbox', elIdSuffix: '_logprobs' },
+                top_logprobs: { type: 'int', elIdSuffix: '_top_logprobs', dependsOn: 'logprobs', allowUndefined: true },
+                response_format: { type: 'select_object', elIdSuffix: '_response_format_type', key: 'type', allowNull: true },
+                tools: { type: 'json', elIdSuffix: '_tools', allowNull: true },
+                tool_choice: { type: 'json_or_string', elIdSuffix: '_tool_choice', allowUndefined: true, validStrings: ["auto", "none", "required"], defaultIfEmpty: "auto" },
+                logit_bias: { type: 'json', elIdSuffix: '_logit_bias', allowNull: true },
+                character_id: { type: 'string', elIdSuffix: '_character_id', allowNull: true },
+                conversation_id: { type: 'string', elIdSuffix: '_conversation_id', allowNull: true },
+                prompt_template_name: { type: 'string', elIdSuffix: '_prompt_template_name', allowNull: true },
+                n: { type: 'int', elIdSuffix: '_n', allowNull: true, min: 1, max: 128 },
+                user: { type: 'string', elIdSuffix: '_user', allowNull: true }
+            };
+
+            for (const key in optionalFields) {
+                const config = optionalFields[key];
+                const el = document.getElementById(prefix + config.elIdSuffix);
+                if (!el) continue;
+
+                if (config.dependsOn && !document.getElementById(prefix + '_' + config.dependsOn)?.checked) {
+                    if (config.allowNull) payload[key] = null;
+                    else if (config.allowUndefined) delete payload[key];
+                    continue;
+                }
+
+                let value;
+                switch (config.type) {
+                    case 'float':
+                        value = el.value !== "" ? parseFloat(el.value) : (config.allowUndefined ? undefined : (config.allowNull ? null : NaN));
+                        if (isNaN(value) && el.value !== "" && !config.allowNull && !config.allowUndefined) {
+                             alert(`Invalid float value for ${key}`); throw new Error(`Invalid float for ${key}`);
+                        }
+                        break;
+                    case 'int':
+                        value = el.value !== "" ? parseInt(el.value) : (config.allowUndefined ? undefined : (config.allowNull ? null : NaN));
+                        if (isNaN(value) && el.value !== "" && !config.allowNull && !config.allowUndefined) {
+                             alert(`Invalid integer value for ${key}`); throw new Error(`Invalid int for ${key}`);
+                        }
+                        if (config.min !== undefined && !isNaN(value) && value < config.min) value = config.min;
+                        if (config.max !== undefined && !isNaN(value) && value > config.max) value = config.max;
+                        break;
+                    case 'string':
+                        value = el.value.trim() !== "" ? el.value.trim() : (config.allowUndefined ? undefined : (config.allowNull ? null : ""));
+                        break;
+                    case 'checkbox':
+                        value = el.checked ? true : (config.allowNullIfFalse ? null : false);
+                         if (key === 'logprobs' && !el.checked) {
+                            value = undefined;
+                        }
+                        break;
+                    case 'json_or_csv_list':
+                        if (el.value.trim() !== "") {
+                            let parsed = false;
+                            if (el.value.trim().startsWith('[') && el.value.trim().endsWith(']')) {
+                                try { value = JSON.parse(el.value); parsed = true; }
+                                catch (e) { /* will try csv next if this fails */ }
+                            }
+                            if (!parsed) {
+                                value = el.value.split(',').map(s => s.trim()).filter(s => s);
+                                if (value.length === 0 && el.value.trim().includes(',')) {
+                                     value = config.allowNull ? null : (config.allowUndefined ? undefined : []);
+                                } else if (value.length === 0 && !el.value.trim().includes(',')) {
+                                    value = el.value.trim() || (config.allowNull ? null : (config.allowUndefined ? undefined : []));
+                                    if(value === "" && !config.allowNull && !config.allowUndefined && !Array.isArray(value)) value = [];
+                                } else if (value.length === 1 && !el.value.trim().includes(',')) {
+                                    value = el.value.trim();
+                                }
+                            }
+                        } else { value = config.allowNull ? null : (config.allowUndefined ? undefined : []); }
+                        break;
+                    case 'json':
+                        const trimmedJsonValue = el.value.trim();
+                        if (trimmedJsonValue !== "") {
+                            try {
+                                value = JSON.parse(trimmedJsonValue);
+                            } catch (e) {
+                                alert(`Invalid JSON for field '${key}' (element ID: ${el.id}). Attempted to parse: "${trimmedJsonValue}". Error: ${e.message}`);
+                                throw new Error(`Invalid JSON for ${key}`);
+                            }
+                        } else {
+                            value = config.allowNull ? null : (config.allowUndefined ? undefined : (key === 'tools' ? null : {}));
+                        }
+                        break;
+                    case 'select_object':
+                        value = el.value ? { [config.key]: el.value } : (config.allowNull ? null : (config.allowUndefined ? undefined : {}));
+                         if (el.value === "") value = config.allowNull ? null : undefined;
+                        break;
+                    case 'json_or_string':
+                        if (el.value.trim() !== "") {
+                            if (config.validStrings && config.validStrings.includes(el.value.trim().toLowerCase())) {
+                                value = el.value.trim().toLowerCase();
+                            } else {
+                                try { value = JSON.parse(el.value); }
+                                catch (e) { alert(`Invalid value for ${key}. Must be one of ${config.validStrings.join(', ')} or a valid JSON object string.`); throw new Error(`Invalid value for ${key}`); }
+                            }
+                        } else { value = config.defaultIfEmpty !== undefined ? config.defaultIfEmpty : (config.allowUndefined ? undefined : (config.allowNull ? null : "auto")); }
+                        break;
+                }
+
+                if (value !== undefined && !(typeof value === 'number' && isNaN(value))) {
+                    payload[key] = value;
+                } else if (config.allowNull && value === null) {
+                    payload[key] = null;
+                } else if (config.allowUndefined && value === undefined) {
+                    delete payload[key];
+                }
+            }
+
+            for (const key in payload) { if (payload[key] === undefined) { delete payload[key]; } }
+            if (payload.response_format && Object.keys(payload.response_format).length === 0) delete payload.response_format;
+
+            payload.messages = payload.messages.map(msg => {
+                if (msg.role === 'assistant' && msg.content === null) {
+                    // This is fine as per schema.
+                }
+                return msg;
+            });
+            return payload;
+        }
+
+        function toggleRawJson(prefix) {
+            const useRawJsonCheckbox = document.getElementById(prefix + '_useRawJson');
+            if (!useRawJsonCheckbox) return;
+            const useRawJson = useRawJsonCheckbox.checked;
+
+            const formFieldsDiv = document.getElementById(prefix + '_formFields');
+            const rawJsonContainerDiv = document.getElementById(prefix + '_rawJsonContainer');
+            const rawPayloadTextarea = document.getElementById(prefix + '_payload_raw');
+
+            if (formFieldsDiv) formFieldsDiv.style.display = useRawJson ? 'none' : 'block';
+            if (rawJsonContainerDiv) rawJsonContainerDiv.style.display = useRawJson ? 'block' : 'none';
+
+            if (useRawJson && rawPayloadTextarea) {
+                try {
+                    const currentPayload = buildPayloadFromForm(prefix);
+                    rawPayloadTextarea.value = JSON.stringify(currentPayload, null, 2);
+                } catch (e) {
+                    console.warn("Could not build payload for raw view:", e.message);
+                    rawPayloadTextarea.value = JSON.stringify({"error_building_payload": e.message, "tip": "Fix form errors (like missing tool_call_id) or manually edit JSON."}, null, 2);
+                }
+            }
+        }
+
+        function generateChatCompletionsCurl() {
+            const endpointId = 'createChatCompletion';
+            const prefix = 'chatCompletions';
+            const curlEl = document.getElementById(endpointId + '_curl');
+            if (!curlEl) return;
+
+            const token = document.getElementById('apiKeyInput').value || "YOUR_API_TOKEN_PLACEHOLDER";
+            const baseUrl = document.getElementById('baseUrl').value;
+            let payloadString;
+
+            const useRawJsonCheckbox = document.getElementById(prefix + '_useRawJson');
+            if (!useRawJsonCheckbox) { curlEl.textContent = "Error: Raw JSON toggle checkbox not found."; return; }
+
+            if (useRawJsonCheckbox.checked) {
+                const rawPayloadEl = document.getElementById(prefix + '_payload_raw');
+                if (rawPayloadEl && rawPayloadEl.value.trim() !== "") {
+                     try {
+                        JSON.parse(rawPayloadEl.value);
+                        payloadString = rawPayloadEl.value;
+                     }
+                     catch(e) { curlEl.textContent = "Error: Invalid Raw JSON for cURL generation. " + e.message; return; }
+                } else {
+                     curlEl.textContent = "Error: Raw JSON payload for cURL is empty."; return;
+                }
+            } else {
+                try {
+                    const payloadObject = buildPayloadFromForm(prefix);
+                    payloadString = JSON.stringify(payloadObject, null, 2);
+                } catch (e) {
+                     curlEl.textContent = "Error building payload from form for cURL: " + e.message;
+                     return;
+                }
+            }
+            const escapedPayloadString = payloadString.replace(/'/g, "'\\''");
+
+            const curlCommand = `curl -X POST "${baseUrl}/api/v1/chat/completions" \\
+-H "accept: application/json" \\
+-H "Content-Type: application/json" \\
+-H "Token: ${token.replace(/"/g, '\\"')}" \\
+-d '${escapedPayloadString}'`;
+            curlEl.textContent = curlCommand;
+        }
+
+        async function handleChatCompletionsRequest() {
+            const endpointId = 'createChatCompletion';
+            const prefix = 'chatCompletions';
+            const responseArea = document.getElementById(endpointId + '_response');
+            if (!responseArea) { console.error("Response area not found!"); return; }
+
+            responseArea.textContent = 'Sending...';
+            generateChatCompletionsCurl();
+
+            let payload;
+            const useRawJsonCheckbox = document.getElementById(prefix + '_useRawJson');
+             if (!useRawJsonCheckbox) { responseArea.textContent = "Error: Raw JSON toggle checkbox not found."; return; }
+
+            const baseUrl = document.getElementById('baseUrl').value;
+            const token = document.getElementById('apiKeyInput').value;
+
+            if (useRawJsonCheckbox.checked) {
+                const rawPayloadEl = document.getElementById(prefix + '_payload_raw');
+                if (!rawPayloadEl) { responseArea.textContent = "Error: Raw JSON textarea not found."; return; }
+                try {
+                    payload = JSON.parse(rawPayloadEl.value);
+                } catch (e) {
+                    responseArea.textContent = "Error: Invalid Raw JSON Payload.\n" + e.message;
+                    return;
+                }
+            } else {
+                 try {
+                    payload = buildPayloadFromForm(prefix);
+                } catch (e) {
+                    responseArea.textContent = "Error building payload from form: " + e.message;
+                    return;
+                }
+            }
+
+            const isStreaming = payload.stream;
+            if (isStreaming) {
+                responseArea.textContent = '';
+            }
+
+            try {
+                const fetchResponse = await fetch(`${baseUrl}/api/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json, text/event-stream',
+                        'Token': token
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!fetchResponse.ok) {
+                    let errorDetail = fetchResponse.statusText;
+                    try {
+                        const errorData = await fetchResponse.json();
+                        errorDetail = errorData.detail || JSON.stringify(errorData);
+                    } catch (e) { /* ignore, use statusText */ }
+                    throw new Error(`HTTP error ${fetchResponse.status}: ${errorDetail}`);
+                }
+
+                const contentType = fetchResponse.headers.get("content-type");
+                if (isStreaming && contentType && contentType.includes("text/event-stream") && fetchResponse.body) {
+                    const reader = fetchResponse.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = "";
+                    let streamHadContent = false;
+
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+
+                        let eventEndIndex;
+                        while ((eventEndIndex = buffer.indexOf('\n\n')) >= 0) {
+                            const eventString = buffer.substring(0, eventEndIndex);
+                            buffer = buffer.substring(eventEndIndex + 2);
+
+                            if (eventString.startsWith('data: ')) {
+                                streamHadContent = true;
+                                const dataStr = eventString.substring(6).trim();
+                                if (dataStr === '[DONE]') {
+                                    responseArea.textContent += "\nStream finished by [DONE] signal.\n";
+                                    return;
+                                }
+                                try {
+                                    const dataJson = JSON.parse(dataStr);
+                                    const contentChunk = dataJson.choices?.[0]?.delta?.content;
+                                    if (contentChunk) {
+                                        responseArea.textContent += contentChunk;
+                                    } else if (dataJson.choices?.[0]?.finish_reason) {
+                                         responseArea.textContent += `\n[Finish Reason: ${dataJson.choices[0].finish_reason}]\n`;
+                                    } else if (dataJson.error) {
+                                        responseArea.textContent += `\n[Stream Error: ${JSON.stringify(dataJson.error)}]\n`;
+                                    } else if (Object.keys(dataJson).length > 0) {
+                                         responseArea.textContent += `\n(Stream JSON: ${dataStr})\n`;
+                                    }
+                                } catch (e) {
+                                    if (dataStr) {
+                                        console.warn('Non-JSON stream data or parse error:', dataStr, e);
+                                        responseArea.textContent += `\n(Stream data: ${dataStr})\n`;
+                                    }
+                                }
+                            } else if (eventString.trim().startsWith('event: tldw_metadata')) {
+                                const dataLine = buffer.substring(eventString.length).split('\n').find(line => line.startsWith('data: '));
+                                if (dataLine) {
+                                    const metaDataStr = dataLine.substring(6).trim();
+                                    try {
+                                        const metaDataJson = JSON.parse(metaDataStr);
+                                        responseArea.textContent += `\n[TLDW Metadata: ${JSON.stringify(metaDataJson)}]\n`;
+                                        if (metaDataJson.conversation_id) {
+                                            const convIdEl = document.getElementById(prefix + '_conversation_id');
+                                            if (convIdEl && !convIdEl.value) {
+                                                convIdEl.value = metaDataJson.conversation_id;
+                                                if (metaDataJson.conversation_created) {
+                                                    convIdEl.style.backgroundColor = "#e6ffe6";
+                                                }
+                                            }
+                                        }
+                                    } catch (e) {
+                                        console.warn('Error parsing tldw_metadata JSON:', metaDataStr, e);
+                                        responseArea.textContent += `\n(Raw tldw_metadata: ${metaDataStr})\n`;
+                                    }
+                                }
+                            } else if (eventString.trim()) {
+                                console.log("Received non-data line in stream:", eventString);
+                            }
+                            responseArea.scrollTop = responseArea.scrollHeight;
+                        }
+                    }
+                    if (buffer.trim()) {
+                        if (buffer.startsWith('data: ')) {
+                            const finalDataStr = buffer.substring(6).trim();
+                            if (finalDataStr === '[DONE]') {
+                                responseArea.textContent += "\nStream finished by [DONE] signal (final buffer).\n";
+                            } else {
+                                responseArea.textContent += `\n(Final unprocessed stream data: ${finalDataStr})\n`;
+                            }
+                        } else {
+                             responseArea.textContent += `\n(Final unprocessed stream buffer: ${buffer.trim()})\n`;
+                        }
+                    }
+
+                    if (!responseArea.textContent.includes("[DONE]") && !responseArea.textContent.includes("Stream finished")) {
+                         responseArea.textContent += streamHadContent ? "\nStream ended.\n" : "Stream connected, but no data or [DONE] signal received.\n";
+                    }
+
+                } else {
+                    const responseData = await fetchResponse.json();
+                    responseArea.textContent = JSON.stringify(responseData, null, 2);
+                    if (responseData.tldw_conversation_id) {
+                        const convIdEl = document.getElementById(prefix + '_conversation_id');
+                        if (convIdEl && !convIdEl.value) {
+                            convIdEl.value = responseData.tldw_conversation_id;
+                            if (responseData.tldw_conversation_created) {
+                                convIdEl.style.backgroundColor = "#e6ffe6";
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error during chat completion:', error);
+                responseArea.textContent = 'Error: ' + error.message;
+            }
+        }
+
+        function initializeChatCompletionsTab() {
+            const prefix = 'chatCompletions';
+            console.log("Initializing Chat Completions Tab");
+            const container = document.getElementById(prefix + '_messagesContainer');
+            if (container && !container.dataset.initialized) {
+                container.innerHTML = '';
+                messageIdCounter[prefix] = 0;
+
+                addChatMessage(prefix, 'system', 'You are a helpful assistant that provides concise answers.');
+                addChatMessage(prefix, 'user', 'What is the capital of France?');
+                container.dataset.initialized = "true";
+            } else if (!container) {
+                console.warn("Messages container not found during chat completions tab initialization.");
+            }
+
+
+            const tempEl = document.getElementById(prefix + '_temperature');
+            if (tempEl && tempEl.value === "") tempEl.placeholder = "0.7";
+
+            const maxTokensEl = document.getElementById(prefix + '_max_tokens');
+            if (maxTokensEl && maxTokensEl.value === "") maxTokensEl.placeholder = "1024";
+
+            const topPEl = document.getElementById(prefix + '_top_p');
+            if (topPEl && topPEl.value === "") topPEl.placeholder = "1.0";
+
+            const nEl = document.getElementById(prefix + '_n');
+            if (nEl && nEl.value === "") nEl.placeholder = "1";
+
+
+            const useRawJsonCheckbox = document.getElementById(prefix + '_useRawJson');
+            if (useRawJsonCheckbox) {
+                 if (useRawJsonCheckbox.checked) {
+                    toggleRawJson(prefix);
+                } else {
+                    try {
+                        const initialPayload = buildPayloadFromForm(prefix);
+                        const rawPayloadTextarea = document.getElementById(prefix + '_payload_raw');
+                        if(rawPayloadTextarea) rawPayloadTextarea.value = JSON.stringify(initialPayload, null, 2);
+                    } catch(e) { console.warn("Initial raw payload build failed for chat completions during init:", e.message); }
+                }
+            } else {
+                console.warn("Raw JSON toggle not found during chat completions tab init.");
+            }
+            generateChatCompletionsCurl();
+        }
+
+        async function makeRequest(endpointId, method, path, bodyType = 'none', queryParams = {}, responseHint = 'json') {
+            const curlEl = document.getElementById(endpointId + '_curl');
+            const responseArea = document.getElementById(endpointId + '_response');
+            if (!curlEl || !responseArea) {
+                console.error(`Missing cURL or response element for ${endpointId}`);
+                return;
+            }
+
+            responseArea.textContent = 'Sending...';
+            const baseUrl = document.getElementById('baseUrl').value;
+            const token = document.getElementById('apiKeyInput').value;
+            let fullPath = path;
+
+            const pathParams = path.match(/{(\w+)}/g);
+            if (pathParams) {
+                pathParams.forEach(param => {
+                    const paramName = param.substring(1, param.length - 1);
+                    const inputEl = document.getElementById(endpointId + '_' + paramName);
+                    if (inputEl && inputEl.value) {
+                        fullPath = fullPath.replace(param, encodeURIComponent(inputEl.value));
+                    } else if (inputEl) { // Input element exists but is empty
+                         console.warn(`Path parameter ${paramName} for ${endpointId} is empty. Using placeholder or will likely error.`);
+                         // Allowing it to proceed, server will validate if required
+                         fullPath = fullPath.replace(param, ''); // Replace with empty or a placeholder if server expects something
+                    } else {
+                        console.warn(`Path parameter input element ${endpointId + '_' + paramName} for ${endpointId} not found.`);
+                        // This case should ideally not happen if HTML is correct.
+                    }
+                });
+            }
+
+            let url = `${baseUrl}${fullPath}`;
+            const fetchOptions = {
+                method: method,
+                headers: {
+                    'Accept': responseHint === 'stream' ? 'application/x-ndjson, text/event-stream, application/json' : 'application/json',
+                    'Token': token
+                }
+            };
+
+            let payloadString = '';
+            let queryParamsString = '';
+            let computedQueryParams = {};
+
+            if (bodyType === 'query' || bodyType === 'json_with_query' || method === 'GET' || method === 'DELETE') {
+                const queryParts = [];
+                const formGroup = document.getElementById(endpointId);
+                 if (formGroup) {
+                    const inputs = formGroup.querySelectorAll('input[type="text"], input[type="number"], input[type="checkbox"], select');
+                    inputs.forEach(input => {
+                        if (input.id && input.id.startsWith(endpointId + '_')) {
+                            const paramName = input.name || input.id.substring((endpointId + '_').length);
+                            if (path.includes(`{${paramName}}`)) return; // Skip path params
+                            if (input.id.includes("_payload")) return; // Skip payload textareas
+                            if (paramName === "files" || paramName === "character_file" || paramName === "dump_file") return; // Skip file inputs handled by FormData
+
+                            if (input.type === 'checkbox') {
+                                if (input.checked) { // Only send if checked, or send specific value like 'true'/'false'
+                                    queryParts.push(`${encodeURIComponent(paramName)}=true`);
+                                    computedQueryParams[paramName] = 'true';
+                                } else if (method === 'GET' || method === 'DELETE') { // Optionally send 'false' for GET/DELETE
+                                    queryParts.push(`${encodeURIComponent(paramName)}=false`);
+                                    computedQueryParams[paramName] = 'false';
+                                }
+                            } else if (input.value !== null && input.value.trim() !== '') {
+                                queryParts.push(`${encodeURIComponent(paramName)}=${encodeURIComponent(input.value)}`);
+                                computedQueryParams[paramName] = input.value;
+                            }
+                        }
+                    });
+                }
+                if (queryParts.length > 0) {
+                    queryParamsString = (url.includes('?') ? '&' : '?') + queryParts.join('&');
+                    url += queryParamsString;
+                }
+            }
+
+
+            if (method === 'POST' || method === 'PUT') {
+                if (bodyType === 'json' || bodyType === 'json_with_query') {
+                    const payloadEl = document.getElementById(endpointId + '_payload');
+                    if (payloadEl && payloadEl.value.trim() !== "") {
+                        try {
+                            JSON.parse(payloadEl.value);
+                            fetchOptions.body = payloadEl.value;
+                            payloadString = payloadEl.value;
+                        } catch (e) {
+                            responseArea.textContent = 'Error: Invalid JSON payload. ' + e.message;
+                            curlEl.textContent = 'Invalid JSON in payload field.';
+                            return;
+                        }
+                        fetchOptions.headers['Content-Type'] = 'application/json';
+                    } else if (bodyType === 'json') {
+                        fetchOptions.body = '{}';
+                        payloadString = '{}';
+                        fetchOptions.headers['Content-Type'] = 'application/json';
+                    }
+                } else if (bodyType === 'form') {
+                    const formData = new FormData();
+                    const formGroup = document.getElementById(endpointId);
+                    if (formGroup) {
+                        const inputs = formGroup.querySelectorAll('input, textarea, select');
+                        inputs.forEach(input => {
+                            const key = input.name || (input.id && input.id.startsWith(endpointId + '_') ? input.id.substring((endpointId + '_').length) : null);
+                            if (!key) return;
+                            if (path.includes(`{${key}}`)) return;
+                            if (input.id === 'baseUrl' || input.id === 'apiKeyInput') return;
+
+                            if (input.type === 'file') {
+                                if (input.files.length > 0) {
+                                     Array.from(input.files).forEach(file => formData.append(key, file));
+                                }
+                            } else if (input.type === 'checkbox') {
+                                formData.append(key, input.checked ? 'true' : 'false');
+                            } else if (input.tagName === 'TEXTAREA' && input.id.endsWith('_urls')) {
+                                const urls = input.value.split('\n').map(u => u.trim()).filter(u => u);
+                                urls.forEach(u => formData.append(key, u));
+                            } else {
+                                if (input.value !== null && input.value !== undefined) {
+                                     formData.append(key, input.value);
+                                } else if (input.type !== 'file' && input.type !== 'checkbox') {
+                                     formData.append(key, '');
+                                }
+                            }
+                        });
+                    }
+                    fetchOptions.body = formData;
+                }
+            }
+
+            let finalCurlUrl = `${baseUrl}${fullPath}`;
+             // For GET/DELETE, computedQueryParams already built the query string for 'url'
+             // For POST/PUT with 'json_with_query', queryParamsString is appended to finalCurlUrl here
+            if (queryParamsString && (bodyType === 'json_with_query' || (method !== 'GET' && method !== 'DELETE' && bodyType === 'query'))) {
+                 finalCurlUrl += queryParamsString;
+            } else if (Object.keys(computedQueryParams).length > 0 && (method === 'GET' || method === 'DELETE')) {
+                // This ensures GET/DELETE uses the computedQueryParams for cURL if queryParamsString wasn't already appended to finalCurlUrl
+                // (It should have been, via `url += queryParamsString;` earlier)
+                // This part is more for ensuring the cURL display is right for GET/DELETE if queryParamsString was not formed for the main url.
+                let tempQueryString = '';
+                const getQueryParts = [];
+                for (const k in computedQueryParams) {
+                     getQueryParts.push(`${encodeURIComponent(k)}=${encodeURIComponent(computedQueryParams[k])}`);
+                }
+                if (getQueryParts.length > 0) {
+                    tempQueryString = (finalCurlUrl.includes('?') ? '&' : '?') + getQueryParts.join('&');
+                     if(!finalCurlUrl.includes(tempQueryString.substring(1))) { // Avoid double appending query
+                        finalCurlUrl += tempQueryString;
+                     }
+                }
+            }
+
+
+            let curlCommand = `curl -X ${method} "${finalCurlUrl}" \\\n-H "Accept: ${fetchOptions.headers['Accept']}" \\\n-H "Token: ${token}"`;
+            if (fetchOptions.headers['Content-Type']) {
+                curlCommand += ` \\\n-H "Content-Type: ${fetchOptions.headers['Content-Type']}"`;
+            }
+
+            if ((bodyType === 'json' || bodyType === 'json_with_query') && payloadString) {
+                curlCommand += ` \\\n-d '${escapeCurlData(payloadString)}'`;
+            } else if (bodyType === 'form' && fetchOptions.body instanceof FormData) {
+                for (let [key, value] of fetchOptions.body.entries()) {
+                    if (value instanceof File) {
+                        curlCommand += ` \\\n-F "${key}=@${value.name}"`;
+                    } else {
+                        curlCommand += ` \\\n-F "${key}=${value}"`;
+                    }
+                }
+            }
+            curlEl.textContent = curlCommand;
+
+            try {
+                const res = await fetch(url, fetchOptions);
+                const contentType = res.headers.get("content-type");
+
+                if (responseHint === 'stream' && contentType && (contentType.includes("application/x-ndjson") || contentType.includes("text/event-stream"))) {
+                    responseArea.textContent = '';
+                    const reader = res.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = "";
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, {stream: true});
+                        let lineEndIndex;
+                        while((lineEndIndex = buffer.indexOf('\n')) >= 0) {
+                            const line = buffer.substring(0, lineEndIndex).trim();
+                            buffer = buffer.substring(lineEndIndex + 1);
+                            if (line) {
+                                try {
+                                    const jsonObj = JSON.parse(line);
+                                    responseArea.textContent += JSON.stringify(jsonObj, null, 2) + '\n\n';
+                                } catch (e) {
+                                    responseArea.textContent += line + '\n(Error parsing line as JSON)\n\n';
+                                }
+                            }
+                        }
+                        responseArea.scrollTop = responseArea.scrollHeight;
+                    }
+                    if (buffer.trim()) responseArea.textContent += buffer.trim() + '\n(Stream Ended)\n';
+                } else if (res.status === 204) {
+                    responseArea.textContent = 'Success: No Content (204)';
+                } else {
+                    const data = await res.json();
+                    responseArea.textContent = JSON.stringify(data, null, 2);
+                }
+
+                if (!res.ok) {
+                    console.warn(`API request to ${url} failed with status ${res.status}`, responseArea.textContent);
+                }
+            } catch (error) {
+                responseArea.textContent = 'Error: ' + error.message;
+                console.error('API request error:', error);
+            }
+        }
+
+    </script>
+</body>
+</html>
