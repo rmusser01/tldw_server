@@ -187,7 +187,7 @@ app.include_router(embeddings_router, prefix="/api/v1/embedding", tags=["embeddi
 
 
 # Router for Note Management endpoints
-app.include_router(notes_router, prefix="/api/v1/notes", tags=["notes]"])
+app.include_router(notes_router, prefix="/api/v1/notes", tags=["notes"])
 
 
 # Router for Prompt Management endpoints
