@@ -57,17 +57,16 @@ RAG_SEARCH_CONFIG = {
     "chat_context_limit": 10,
 }
 
-def load_openai_mappings() -> Dict:
-    # Determine path relative to this file or use an absolute/configurable path
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    # Assume mappings.json is in a 'configs' folder at the project root
-    # or adjust as needed. For example, if it's next to this router file:
-    # mapping_path = os.path.join(current_dir, "openai_tts_mappings.json")
 
-    # Example: if your project root is one level up from 'routers'
-    # and configs is at root:
-    project_root = os.path.dirname(os.path.dirname(current_dir))
-    mapping_path = os.path.join(project_root, "Config_Files", "openai_tts_mappings.json")
+def load_openai_mappings() -> Dict:
+    # Determine path relative to this file.
+    # config.py is in project_root/tldw_server_api/app/core/config.py
+    # Config_Files is assumed to be in project_root/tldw_server_api/Config_Files/
+    current_file_path = Path(__file__).resolve()
+    api_component_root = current_file_path.parent.parent.parent  # This should be /project_root/tldw_server_api/
+
+    mapping_path = api_component_root / "Config_Files" / "openai_tts_mappings.json"
+    logger.info(f"Attempting to load OpenAI TTS mappings from: {str(mapping_path)}")
     try:
         with open(mapping_path, "r") as f:
             return json.load(f)
@@ -103,6 +102,12 @@ openai_tts_mappings = {
 def load_settings():
     """Loads all settings from environment variables or defaults into a dictionary."""
 
+    # Determine Actual Project Root based on the location of this file
+    # config.py is in project_root/tldw_server_api/app/core/config.py
+    # ACTUAL_PROJECT_ROOT will be /project_root/
+    ACTUAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+    logger.info(f"Determined ACTUAL_PROJECT_ROOT for database paths: {ACTUAL_PROJECT_ROOT}")
+
     # --- Application Mode ---
     single_user_mode_str = os.getenv("APP_MODE", "single").lower()
     single_user_mode = single_user_mode_str != "multi"
@@ -119,25 +124,29 @@ def load_settings():
     access_token_expire_minutes = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
     # --- Database Settings ---
-    # FIXME - set this up similar to DB_Deps.py method.
-    # user_dir_name = str(user_id)
-    # # Use the variable assigned from settings dict
-    # user_dir = USER_DB_BASE_DIR / user_dir_name
-    # db_file = user_dir / "user_media_library.sqlite"
-    user_db_base_dir = Path(os.getenv("USER_DB_BASE_DIR", "./user_databases/"))
-    # Flag to indicate if the central Users DB is configured
+    # User-specific databases: ACTUAL_PROJECT_ROOT/user_databases/
+    default_user_db_base_dir = ACTUAL_PROJECT_ROOT / "user_databases"
+    user_db_base_dir_str = os.getenv("USER_DB_BASE_DIR", str(default_user_db_base_dir.resolve()))
+    user_db_base_dir = Path(user_db_base_dir_str)
+
+    # Main/central database: ACTUAL_PROJECT_ROOT/tldw_data/databases/tldw.db
+    default_main_db_path = (ACTUAL_PROJECT_ROOT / "tldw_data" / "databases" / "tldw.db").resolve()
+    default_database_url = f"sqlite:///{default_main_db_path}"
+    database_url = os.getenv("DATABASE_URL", default_database_url)
+
     users_db_configured = os.getenv("USERS_DB_ENABLED", "false").lower() == "true"
     database_url = os.getenv("DATABASE_URL", f"sqlite:///{Path('./tldw_data/databases/tldw.db').resolve()}") # Example path
 
     # --- Logging ---
-    log_level = os.getenv("LOG_LEVEL", "I NFO").upper()
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
     # --- Build the Settings Dictionary ---
     config_dict = {
         # General App
-        "APP_MODE_STR": single_user_mode_str, # Optional: Keep the raw string if needed elsewhere
+        "APP_MODE_STR": single_user_mode_str,
         "SINGLE_USER_MODE": single_user_mode,
         "LOG_LEVEL": log_level,
+        "PROJECT_ROOT": ACTUAL_PROJECT_ROOT, # Centralized project root definition
 
         # Single User
         "SINGLE_USER_FIXED_ID": single_user_fixed_id,
@@ -149,29 +158,39 @@ def load_settings():
         "ACCESS_TOKEN_EXPIRE_MINUTES": access_token_expire_minutes,
 
         # Database
-        "DATABASE_URL": database_url, # Main DB URL if used
-        "USER_DB_BASE_DIR": user_db_base_dir,
+        "DATABASE_URL": database_url, # Main DB URL
+        "USER_DB_BASE_DIR": user_db_base_dir, # Base for user-specific DBs
         "USERS_DB_CONFIGURED": users_db_configured,
 
-        # Server Specific (Constants might also live here or stay module-level)
+        # Server Specific
         "SERVER_CLIENT_ID": SERVER_CLIENT_ID,
     }
 
-    # --- Warnings (can be placed after dictionary creation) ---
+    # --- Warnings ---
     if config_dict["SINGLE_USER_MODE"] and config_dict["SINGLE_USER_API_KEY"] == "default-secret-key-for-single-user":
         print("!!! WARNING: Using default API_KEY for single-user mode. Set the API_KEY environment variable for security. !!!")
-        print("DEBUGPRING: Using default API_KEY for single-user mode: '{}'".format(config_dict["SINGLE_USER_API_KEY"]))
-        #logging.debug("DEBUGPRING: Using default API_KEY for single-user mode: {}".format(config_dict["SINGLE_USER_API_KEY"]))
+        print(f"DEBUGPRINT: Using default API_KEY for single-user mode: '{config_dict['SINGLE_USER_API_KEY']}'")
     if not config_dict["SINGLE_USER_MODE"] and config_dict["JWT_SECRET_KEY"] == "a_very_insecure_default_secret_key_for_dev_only":
         print("!!! SECURITY WARNING: Using default JWT_SECRET_KEY in multi-user mode. Set a strong JWT_SECRET_KEY environment variable! !!!")
     if not config_dict["SINGLE_USER_MODE"] and not config_dict["USERS_DB_CONFIGURED"]:
          print("!!! WARNING: Multi-user mode enabled (APP_MODE=multi), but USERS_DB_ENABLED is not 'true'. User authentication will likely fail. !!!")
 
     # Create necessary directories if they don't exist
-    # Example: Ensure database directory exists
-    db_path = Path(config_dict["DATABASE_URL"].replace("sqlite:///", ""))
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Ensure main database directory exists
+    if config_dict["DATABASE_URL"].startswith("sqlite:///"):
+        main_db_file_path_str = config_dict["DATABASE_URL"].replace("sqlite:///", "")
+        # Path() can take a full file path string.
+        main_db_file_path = Path(main_db_file_path_str)
+        # Ensure the path is absolute if it was constructed from env var and relative
+        if not main_db_file_path.is_absolute():
+             main_db_file_path = ACTUAL_PROJECT_ROOT / main_db_file_path
+        main_db_file_path.parent.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Ensured main database directory exists: {main_db_file_path.parent}")
+
+    # Ensure user database base directory exists
+    # USER_DB_BASE_DIR is already a Path object from default or env var conversion
     config_dict["USER_DB_BASE_DIR"].mkdir(parents=True, exist_ok=True)
+    logger.info(f"Ensured user database base directory exists: {config_dict['USER_DB_BASE_DIR']}")
 
     return config_dict
 
