@@ -48,7 +48,7 @@ from pydantic.v1 import Field
 # API Rate Limiter/Caching via Redis
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 
 #
 # Local Imports
@@ -94,9 +94,15 @@ from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_a
 from tldw_Server_API.app.api.v1.schemas.media_request_models import MediaUpdateRequest, VersionCreateRequest, \
     VersionRollbackRequest, \
     IngestWebContentRequest, ScrapeMethod, MediaType, AddMediaForm, ChunkMethod, PdfEngine, ProcessVideosForm, \
-    ProcessAudiosForm, SearchRequest
+    ProcessAudiosForm, SearchRequest, ProcessedMediaWikiPage, media_wiki_global_config
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.services.web_scraping_service import process_web_scraping_task
+#
+# MediaWiki
+from tldw_Server_API.app.core.Ingestion_Media_Processing.MediaWiki.Media_Wiki import (
+        import_mediawiki_dump as core_import_mediawiki_dump,
+        load_mediawiki_import_config,
+    )
 #
 #
 #######################################################################################################################
@@ -1241,7 +1247,7 @@ def parse_advanced_query(search_request: SearchRequest) -> Dict:
     response_model=MediaListResponse
 )
 @limiter.limit("30/minute")  # Adjust rate limit as needed
-async def search_media_items(  # Renamed to avoid conflict if list_all_media is in same file
+async def search_media_items(
         request: Request,  # Keep request for limiter
         search_params: SearchRequest,
         page: int = Query(1, ge=1, description="Page number"),
@@ -1281,7 +1287,6 @@ async def search_media_items(  # Renamed to avoid conflict if list_all_media is 
 
         # Call the database search function
         items_data, total_items = Database.search_media_db(
-            db_instance=db,
             search_query=db_search_query,
             search_fields=db_search_fields,
             keywords=search_params.must_have,  # Maps to 'must_have'
@@ -4785,6 +4790,177 @@ class XMLIngestRequest(BaseModel):
 #
 # End of XML Ingestion
 ############################################################################################################
+
+
+#######################################################################################################################
+# MediaWiki Processing Endpoints
+#######################################################################################################################
+
+# Dependency function for MediaWiki form data
+def get_mediawiki_form_data(
+        wiki_name: str = Form(..., description="A unique name for this MediaWiki instance."),
+        namespaces_str: Optional[str] = Form(None,
+                                             description="Comma-separated namespace IDs (e.g., '0,1'). All if None."),
+        skip_redirects: bool = Form(True, description="Skip redirect pages."),
+        chunk_max_size: int = Form(
+            default_factory=lambda: media_wiki_global_config.get('chunking', {}).get('default_size', 1000),
+            description="Max chunk size."),
+        api_name_vector_db: Optional[str] = Form(None, description="API name for vector DB/embedding service."),
+        api_key_vector_db: Optional[str] = Form(None, description="API key for vector DB/embedding service.")
+) -> Dict[str, Any]:
+    namespaces = None
+    if namespaces_str:
+        try:
+            namespaces = [int(ns.strip()) for ns in namespaces_str.split(',')]
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail="Invalid namespace format. Must be comma-separated integers.")
+
+    chunk_options_override = {'max_size': chunk_max_size}
+    # Potentially add other chunk options from config or form here if needed by optimized_chunking
+
+    return {
+        "wiki_name": wiki_name,
+        "namespaces": namespaces,
+        "skip_redirects": skip_redirects,
+        "chunk_options_override": chunk_options_override,
+        "api_name_vector_db": api_name_vector_db,
+        "api_key_vector_db": api_key_vector_db
+    }
+
+
+@router.post(
+    "/mediawiki/ingest-dump",
+    summary="Ingest and process a MediaWiki XML dump, storing results to database and vector store.",
+    tags=["MediaWiki Processing"],
+    # No specific response_model for StreamingResponse, individual yielded items can be documented.
+)
+async def ingest_mediawiki_dump_endpoint(
+        form_data: Dict[str, Any] = Depends(get_mediawiki_form_data),
+        dump_file: UploadFile = File(..., description="MediaWiki XML dump file (.xml, .xml.bz2, .xml.gz)."),
+        # db: Database = Depends(get_media_db_for_user), # Required by add_media_with_keywords indirectly
+        # token: str = Header(..., description="Authentication token"), # Assuming auth via get_media_db_for_user
+):
+    if core_import_mediawiki_dump is None:
+        raise HTTPException(status_code=501, detail="MediaWiki processing module not loaded.")
+
+    if not dump_file.filename:
+        raise HTTPException(status_code=400, detail="Dump file has no filename.")
+
+    # Using the existing TempDirManager
+    with TempDirManager(prefix="mediawiki_ingest_") as temp_dir:
+        temp_file_path = Path(temp_dir) / sanitize_filename(dump_file.filename)  # Sanitize filename
+        try:
+            async with aiofiles.open(temp_file_path, 'wb') as f:
+                content = await dump_file.read()  # Read file content
+                await f.write(content)
+        except Exception as e:
+            logger.error(f"Failed to save uploaded MediaWiki dump: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {e}")
+        finally:
+            await dump_file.close()
+
+        logger.info(f"MediaWiki dump for ingestion saved to temporary path: {temp_file_path}")
+
+        async def stream_ingestion_results():
+            # store_to_db and store_to_vector_db are True for ingest
+            for result_event in core_import_mediawiki_dump(
+                    file_path=str(temp_file_path),
+                    wiki_name=form_data["wiki_name"],
+                    namespaces=form_data["namespaces"],
+                    skip_redirects=form_data["skip_redirects"],
+                    chunk_options_override=form_data["chunk_options_override"],
+                    store_to_db=True,
+                    store_to_vector_db=True,
+                    api_name_vector_db=form_data.get("api_name_vector_db"),
+                    api_key_vector_db=form_data.get("api_key_vector_db"),
+            ):
+                yield json.dumps(result_event) + "\n"
+                await asyncio.sleep(0.01)  # Allow other tasks to run, prevent tight loop blocking
+
+        return StreamingResponse(stream_ingestion_results(), media_type="application/x-ndjson")
+
+
+@router.post(
+    "/mediawiki/process-dump",
+    summary="Process a MediaWiki XML dump and return structured content without database storage.",
+    tags=["MediaWiki Processing"],
+    # No specific response_model for StreamingResponse. Each line is a JSON object.
+    # Can describe the structure of yielded objects (e.g. ProcessedMediaWikiPage or error dicts)
+)
+async def process_mediawiki_dump_ephemeral_endpoint(
+        form_data: Dict[str, Any] = Depends(get_mediawiki_form_data),
+        # Can reuse the same form dep, api_name/key will be ignored
+        dump_file: UploadFile = File(..., description="MediaWiki XML dump file (.xml, .xml.bz2, .xml.gz)."),
+        # No db dependency, as we are not storing to the primary DB.
+        # token: str = Header(..., description="Authentication token"), # Optional auth
+):
+    if core_import_mediawiki_dump is None:
+        raise HTTPException(status_code=501, detail="MediaWiki processing module not loaded.")
+
+    if not dump_file.filename:
+        raise HTTPException(status_code=400, detail="Dump file has no filename.")
+
+    with TempDirManager(prefix="mediawiki_process_") as temp_dir:
+        temp_file_path = Path(temp_dir) / sanitize_filename(dump_file.filename)  # Sanitize filename
+        try:
+            async with aiofiles.open(temp_file_path, 'wb') as f:
+                content = await dump_file.read()
+                await f.write(content)
+        except Exception as e:
+            logger.error(f"Failed to save uploaded MediaWiki dump for processing: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {e}")
+        finally:
+            await dump_file.close()
+
+        logger.info(f"MediaWiki dump for ephemeral processing saved to: {temp_file_path}")
+
+        async def stream_processed_data():
+            # store_to_db and store_to_vector_db are False for ephemeral processing
+            for result_event in core_import_mediawiki_dump(
+                    file_path=str(temp_file_path),
+                    wiki_name=form_data["wiki_name"],  # Still useful for collection naming if vector DB was used
+                    namespaces=form_data["namespaces"],
+                    skip_redirects=form_data["skip_redirects"],
+                    chunk_options_override=form_data["chunk_options_override"],
+                    store_to_db=False,
+                    store_to_vector_db=False,  # No storage to ChromaDB either for this endpoint
+                    # api_name_vector_db and api_key_vector_db are not strictly needed if store_to_vector_db is False,
+                    # but pass them in case some underlying part of process_single_item still uses them for non-storage tasks.
+                    # However, the modified process_single_item only uses them if store_to_vector_db is True.
+                    api_name_vector_db=form_data.get("api_name_vector_db"),
+                    # Will be ignored by process_single_item if store_to_vector_db is False
+                    api_key_vector_db=form_data.get("api_key_vector_db")  # Same as above
+            ):
+                # We are interested in the "item_result" type which contains the processed page data
+                if result_event.get("type") == "item_result":
+                    page_data = result_event.get("data", {})
+                    # Validate with Pydantic model before yielding for this endpoint
+                    try:
+                        # The page_data from process_single_item should now match ProcessedMediaWikiPage
+                        processed_page_model = ProcessedMediaWikiPage(**page_data)
+                        yield json.dumps(processed_page_model.model_dump()) + "\n"  # Use .model_dump() for Pydantic v2+
+                    except ValidationError as ve:
+                        # Log validation error and yield a structured error for this item
+                        logger.error(
+                            f"Validation error for processed MediaWiki page '{page_data.get('title', 'Unknown')}': {ve.errors()}")
+                        error_output = {
+                            "type": "validation_error",
+                            "title": page_data.get("title", "Unknown"),
+                            "page_id": page_data.get("page_id"),
+                            "detail": ve.errors()
+                        }
+                        yield json.dumps(error_output) + "\n"
+                elif result_event.get("type") in ["error", "progress_total", "summary"]:
+                    # Stream other event types as well (errors, total count, final summary)
+                    yield json.dumps(result_event) + "\n"
+
+                await asyncio.sleep(0.01)  # Prevent tight loop blocking
+
+        return StreamingResponse(stream_processed_data(), media_type="application/x-ndjson")
+#
+# End of MediaWiki Processing Endpoints
+#################################################################################################################
 
 
 ######################## Web Scraping & URL Ingestion Endpoint ###################################

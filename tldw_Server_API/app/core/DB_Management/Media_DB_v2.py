@@ -1617,13 +1617,22 @@ class Database:
             logger.error(f"Unexpected error soft deleting media ID {media_id}: {e}", exc_info=True)
             raise DatabaseError(f"Unexpected error during soft delete: {e}") from e
 
-    def add_media_with_keywords(self, *, url: Optional[str] = None, title: Optional[str], media_type: Optional[str],
-                                content: Optional[str], keywords: Optional[List[str]] = None,
-                                prompt: Optional[str] = None, analysis_content: Optional[str] = None,
-                                transcription_model: Optional[str] = None, author: Optional[str] = None,
-                                ingestion_date: Optional[str] = None, overwrite: bool = False,
+    def add_media_with_keywords(self,
+                                *,
+                                url: Optional[str] = None,
+                                title: Optional[str],
+                                media_type: Optional[str],
+                                content: Optional[str],
+                                keywords: Optional[List[str]] = None,
+                                prompt: Optional[str] = None,
+                                analysis_content: Optional[str] = None,
+                                transcription_model: Optional[str] = None,
+                                author: Optional[str] = None,
+                                ingestion_date: Optional[str] = None,
+                                overwrite: bool = False,
                                 chunk_options: Optional[Dict] = None,
-                                chunks: Optional[List[Dict[str, Any]]] = None) -> Tuple[Optional[int], Optional[str], str]:
+                                chunks: Optional[List[Dict[str, Any]]] = None
+        ) -> Tuple[Optional[int], Optional[str], str]:
         """
         Adds a new media item or updates an existing one based on URL or content hash.
 

@@ -12,6 +12,8 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, validator, computed_field, field_validator
 from pydantic_core.core_schema import ValidationInfo
 
+from tldw_Server_API.app.core.Ingestion_Media_Processing.MediaWiki.Media_Wiki import load_mediawiki_import_config
+
 
 #
 # Local Imports
@@ -389,6 +391,38 @@ class IngestWebContentRequest(BaseModel):
 #
 # End of Web-Scraping ingestion and analysis model schema
 ####################################################################################
+
+######################### MediaWiki ingestion and analysis model schema ###################################
+#
+# This is a schema for MediaWiki ingestion and analysis.
+
+media_wiki_global_config = load_mediawiki_import_config()
+
+class MediaWikiDumpOptionsForm(BaseModel):
+    wiki_name: str = Field(..., description="A unique name for this MediaWiki instance (e.g., 'my_custom_wiki').")
+    namespaces_str: Optional[str] = Field(None, description="Comma-separated list of namespace IDs (e.g., '0,1'). Imports all if None.")
+    skip_redirects: bool = Field(True, description="Skip redirect pages.")
+    chunk_max_size: int = Field(default_factory=lambda: media_wiki_global_config.get('chunking', {}).get('default_size', 1000), description="Maximum chunk size for MediaWiki content processing.")
+    api_name_vector_db: Optional[str] = Field(None, description="API name for vector DB/embedding/summary service (e.g., 'openai') used during ingestion.")
+    api_key_vector_db: Optional[str] = Field(None, description="API key for the vector DB/embedding/summary service.")
+
+class ProcessedMediaWikiPage(BaseModel):
+    title: str
+    content: str # The plain text content
+    namespace: Optional[int] = None
+    page_id: Optional[int] = None
+    revision_id: Optional[int] = None
+    timestamp: Optional[str] = None # ISO format
+    chunks: List[Dict[str, Any]] = []
+    media_id: Optional[int] = None # Populated if stored to DB
+    message: Optional[str] = None
+    status: str = "Pending"
+    error_message: Optional[str] = None
+
+#
+# End of MediaWiki ingestion and analysis model schema
+######################################################################################
+
 
 
 #
