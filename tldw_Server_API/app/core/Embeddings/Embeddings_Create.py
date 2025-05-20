@@ -290,7 +290,14 @@ def create_embeddings_batch(texts: List[str],
     but allows overriding them with specific parameters.
     """
     global embedding_models_cache
-    global default_embedding_provider, default_embedding_model, default_embedding_api_url, model_dir
+    config = load_and_log_configs()
+    embedding_models_cache = config['embedding_models_cache']
+    # Load global config values
+    default_embedding_provider = config['embedding_config']['embedding_provider']
+    default_embedding_model = config['embedding_config']['embedding_model']
+    default_embedding_api_url = config['embedding_config']['embedding_api_url']
+    embedding_api_key = config['embedding_config']['embedding_api_key']
+    model_dir = config['embedding_config']['model_dir']
 
     # Determine actual provider, model, and API URL to use
     provider_to_use = provider_override if provider_override else default_embedding_provider
