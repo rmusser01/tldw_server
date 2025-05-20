@@ -441,7 +441,9 @@ def test_chat_integration_invalid_key_for_commercial_provider_standalone(
         "messages": [msg.model_dump(exclude_none=True) for msg in INTEGRATION_MESSAGES_NO_SYS_SCHEMA]
     }
     response = client.post("/api/v1/chat/completions", json=request_body, headers={"Token": valid_auth_token})
-
+    print(f"CI DEBUG: Status Code: {response.status_code}")
+    print(f"CI DEBUG: Response Headers: {response.headers}")
+    print(f"CI DEBUG: Response Text: {response.text}")
     assert response.status_code in [status.HTTP_401_UNAUTHORIZED, status.HTTP_400_BAD_REQUEST], \
         f"Expected 401/400 for invalid key with {provider_to_test_invalid_key}, got {response.status_code}. Response: {response.text}"
 

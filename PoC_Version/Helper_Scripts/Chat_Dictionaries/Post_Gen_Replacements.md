@@ -1,3 +1,0 @@
-# Post Generation Chat Dictionaries
-
-

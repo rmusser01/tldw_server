@@ -16,7 +16,7 @@ https://github.com/homanmirgolbabaee/arxiv-wizard-search?tab=readme-ov-file#-arx
 https://www.youtube.com/watch?v=D7_ipDqhtwk
 https://chatboxai.app/en
 https://github.com/camel-ai/camel
-
+https://github.com/Roy3838/Observer
 
 
 
