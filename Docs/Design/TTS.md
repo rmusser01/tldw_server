@@ -19,6 +19,7 @@ https://github.com/Extraltodeus/Quick-slap-tkinter-dia/blob/main/README.md
 https://github.com/RobViren/kokovoicelab
 https://decodingml.substack.com/p/deploying-agents-as-real-time-apis
 https://github.com/Nighthawk42/mOrpheus
+https://github.com/QuantiusBenignus/blahst/
 https://jordandarefsky.com/blog/2024/parakeet/
 https://www.tamingllms.com/notebooks/input.html#generating-long-form-content
 https://github.com/collabora/WhisperLive
