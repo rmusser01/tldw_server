@@ -16,6 +16,15 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONPATH: ./tldw_Server_API
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }} >> .env
+      COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }} >> .env
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }} >> .env
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }} >> .env
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }} >> .env
+      HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }} >> .env
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }} >> .env
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }} >> .env
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,6 +40,17 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install -r tldw_Server_API/requirements.txt
           pip check
+      - name: Create .env file
+        run: |
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
+          echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> .env
+          echo "COHERE_API_KEY=${{ secrets.COHERE_API_KEY }}" >> .env
+          echo "DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}" >> .env
+          echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" >> .env
+          echo "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" >> .env
+          echo "HUGGINGFACE_API_KEY=${{ secrets.HUGGINGFACE_API_KEY }}" >> .env
+          echo "MISTRAL_API_KEY=${{ secrets.MISTRAL_API_KEY }}" >> .env
+          echo "OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}" >> .env
       - name: Test ChaChaNotesDB with pytest
         run: |
           pwd
