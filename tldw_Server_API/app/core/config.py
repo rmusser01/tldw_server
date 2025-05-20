@@ -124,18 +124,22 @@ def load_settings():
     access_token_expire_minutes = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
     # --- Database Settings ---
-    # User-specific databases: ACTUAL_PROJECT_ROOT/user_databases/
+    # User-specific SQLite databases: ACTUAL_PROJECT_ROOT/user_databases/
     default_user_db_base_dir = ACTUAL_PROJECT_ROOT / "user_databases"
     user_db_base_dir_str = os.getenv("USER_DB_BASE_DIR", str(default_user_db_base_dir.resolve()))
     user_db_base_dir = Path(user_db_base_dir_str)
 
-    # Main/central database: ACTUAL_PROJECT_ROOT/tldw_data/databases/tldw.db
+    # Main/central SQLite database: ACTUAL_PROJECT_ROOT/tldw_data/databases/tldw.db
     default_main_db_path = (ACTUAL_PROJECT_ROOT / "tldw_data" / "databases" / "tldw.db").resolve()
     default_database_url = f"sqlite:///{default_main_db_path}"
     database_url = os.getenv("DATABASE_URL", default_database_url)
 
     users_db_configured = os.getenv("USERS_DB_ENABLED", "false").lower() == "true"
-    database_url = os.getenv("DATABASE_URL", f"sqlite:///{Path('./tldw_data/databases/tldw.db').resolve()}") # Example path
+
+    # ChromaDB Path: ACTUAL_PROJECT_ROOT/chroma_db/
+    default_chroma_db_path = (ACTUAL_PROJECT_ROOT / "chroma_db").resolve()
+    chroma_db_path_str = os.getenv("CHROMA_DB_PATH", str(default_chroma_db_path))
+    chroma_db_path = Path(chroma_db_path_str)
 
     # --- Logging ---
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -158,9 +162,10 @@ def load_settings():
         "ACCESS_TOKEN_EXPIRE_MINUTES": access_token_expire_minutes,
 
         # Database
-        "DATABASE_URL": database_url, # Main DB URL
-        "USER_DB_BASE_DIR": user_db_base_dir, # Base for user-specific DBs
+        "DATABASE_URL": database_url,
+        "USER_DB_BASE_DIR": user_db_base_dir,
         "USERS_DB_CONFIGURED": users_db_configured,
+        "CHROMA_DB_PATH": chroma_db_path,
 
         # Server Specific
         "SERVER_CLIENT_ID": SERVER_CLIENT_ID,
@@ -176,7 +181,7 @@ def load_settings():
          print("!!! WARNING: Multi-user mode enabled (APP_MODE=multi), but USERS_DB_ENABLED is not 'true'. User authentication will likely fail. !!!")
 
     # Create necessary directories if they don't exist
-    # Ensure main database directory exists
+    # Ensure main SQLite database directory exists
     if config_dict["DATABASE_URL"].startswith("sqlite:///"):
         main_db_file_path_str = config_dict["DATABASE_URL"].replace("sqlite:///", "")
         # Path() can take a full file path string.
@@ -185,12 +190,15 @@ def load_settings():
         if not main_db_file_path.is_absolute():
              main_db_file_path = ACTUAL_PROJECT_ROOT / main_db_file_path
         main_db_file_path.parent.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Ensured main database directory exists: {main_db_file_path.parent}")
+        logger.info(f"Ensured main SQLite database directory exists: {main_db_file_path.parent}")
 
-    # Ensure user database base directory exists
-    # USER_DB_BASE_DIR is already a Path object from default or env var conversion
+    # Ensure user SQLite database base directory exists
     config_dict["USER_DB_BASE_DIR"].mkdir(parents=True, exist_ok=True)
-    logger.info(f"Ensured user database base directory exists: {config_dict['USER_DB_BASE_DIR']}")
+    logger.info(f"Ensured user SQLite database base directory exists: {config_dict['USER_DB_BASE_DIR']}")
+
+    # Ensure ChromaDB directory exists
+    config_dict["CHROMA_DB_PATH"].mkdir(parents=True, exist_ok=True)
+    logger.info(f"Ensured ChromaDB directory exists: {config_dict['CHROMA_DB_PATH']}")
 
     return config_dict
 
