@@ -43,6 +43,9 @@ from tldw_Server_API.app.api.v1.endpoints.prompts import router as prompt_router
 # RAG Endpoint
 from tldw_Server_API.app.api.v1.endpoints.rag import router as retrieval_agent_router
 #
+# Research Endpoint
+from tldw_Server_API.app.api.v1.endpoints.research import router as research_router
+#
 # Sync Endpoint
 from tldw_Server_API.app.api.v1.endpoints.sync import router as sync_router
 #
@@ -184,7 +187,7 @@ app.include_router(embeddings_router, prefix="/api/v1/embedding", tags=["embeddi
 
 
 # Router for Note Management endpoints
-app.include_router(prompt_router, prefix="/api/v1/notes", tags=["notes]"])
+app.include_router(notes_router, prefix="/api/v1/notes", tags=["notes]"])
 
 
 # Router for Prompt Management endpoints
@@ -195,8 +198,16 @@ app.include_router(prompt_router, prefix="/api/v1/prompts", tags=["prompts]"])
 app.include_router(retrieval_agent_router, prefix="/api/v1/retrieval_agent", tags=["retrieval_agent"])
 
 
+# Router for Research endpoint
+app.include_router(research_router, prefix="/api/v1/research", tags=["research"])
+
+
 # Router for Sync endpoint
 app.include_router(sync_router, prefix="/api/v1/sync", tags=["sync"])
+
+
+# Router for Tools endpoint
+app.include_router(tools_router, prefix="/api/v1/tools", tags=["tools"])
 
 
 # Router for trash endpoints - deletion of media items / trash file handling (FIXME: Secure delete vs lag on delete?)

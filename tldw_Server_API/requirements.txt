@@ -18,6 +18,7 @@ cachetools
 defusedxml
 fastapi
 loguru
+lxml
 numpy
 pandas
 passlib

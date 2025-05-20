@@ -64,8 +64,10 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     get_paginated_files,
 )
 from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import (
-    Database, DatabaseError, InputError, ConflictError, SchemaError, # Core class & exceptions
-    # Standalone Functions AVAILABLE in Media_DB_v2.py (Import ONLY what's provided):
+    Database, DatabaseError,
+    InputError,
+    ConflictError,
+    SchemaError,
     get_document_version,
     check_media_exists,
     fetch_keywords_for_media,
@@ -84,17 +86,36 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestio
 #
 # Document Processing
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-from tldw_Server_API.app.core.Utils.Utils import logging, \
-    sanitize_filename, smart_download
+from tldw_Server_API.app.core.Utils.Utils import (
+    logging,
+    sanitize_filename,
+    smart_download
+)
 from tldw_Server_API.app.core.Utils.Utils import logging as logger
 #
 # Web Scraping
-from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article, scrape_from_sitemap, \
-    scrape_by_url_level, recursive_scrape
-from tldw_Server_API.app.api.v1.schemas.media_request_models import MediaUpdateRequest, VersionCreateRequest, \
-    VersionRollbackRequest, \
-    IngestWebContentRequest, ScrapeMethod, MediaType, AddMediaForm, ChunkMethod, PdfEngine, ProcessVideosForm, \
-    ProcessAudiosForm, SearchRequest, ProcessedMediaWikiPage, media_wiki_global_config
+from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
+    scrape_article,
+    scrape_from_sitemap,
+    scrape_by_url_level,
+    recursive_scrape
+)
+from tldw_Server_API.app.api.v1.schemas.media_request_models import (
+    MediaUpdateRequest,
+    VersionCreateRequest,
+    VersionRollbackRequest,
+    IngestWebContentRequest,
+    ScrapeMethod,
+    MediaType,
+    AddMediaForm,
+    ChunkMethod,
+    PdfEngine,
+    ProcessVideosForm,
+    ProcessAudiosForm,
+    SearchRequest,
+    ProcessedMediaWikiPage,
+    media_wiki_global_config
+)
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.services.web_scraping_service import process_web_scraping_task
 #
@@ -1258,19 +1279,6 @@ async def search_media_items(
     Search across media items based on various criteria.
 
     Args:
-        db_instance (Database): An initialized Database instance.
-        search_query (Optional[str]): The text query string. Matched against
-            selected `search_fields`. Can be None for keyword-only search.
-        search_fields (Optional[List[str]]): Fields to match `search_query` against.
-            Valid options: 'title', 'content' (use FTS), 'author', 'type' (use LIKE).
-            Defaults to ['title', 'content'] if `search_query` is provided.
-            If `search_query` is None, this is ignored.
-        keywords (Optional[List[str]]): A list of keywords. Media items must be
-            associated with *all* provided keywords to match. Case-insensitive.
-        page (int): The page number for pagination (1-based). Defaults to 1.
-        results_per_page (int): Number of results per page. Defaults to 20.
-        include_trash (bool): If True, include items marked as trash. Defaults to False.
-        include_deleted (bool): If True, include soft-deleted items. Defaults to False.
 
     The search is case-insensitive for LIKE queries and uses SQLite FTS capabilities.
     """
