@@ -58,6 +58,7 @@ docx2txt
 EbookLib
 lxml
 mwparserfromhell
+mwxml
 pymupdf
 pymupdf4llm
 pypandoc

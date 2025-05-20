@@ -61,6 +61,11 @@ https://data.perkins.org/
 https://designdetails.fm/episodes
 https://blikket.co/ux-vs-cro-how-harmonizing-design-and-strategy-can-skyrocket-your-ecommerce-revenue/
 https://copycoder.ai/
+https://x.com/dot_louis/status/1884990033775493505
+https://telcontar.net/Misc/GUI/RISCOS/
+https://guidebookgallery.org/guis
+
+https://aiverse.design/browse/subform-s-non-linear-conversation
 https://websiteheadlines.com/
 https://joseparreogarcia.substack.com/p/airbnb-ai-search-ranking-lessons
 https://piccalil.li/blog/how-to-write-error-messages-that-actually-help-users-rather-than-frustrate-them/
