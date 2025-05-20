@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.DB_Management.Prompts_DB import list_prompts as sq
     load_prompt_details as sqlite_load_prompt_details, insert_prompt_to_db as sqlite_insert_prompt_to_db, \
     delete_prompt as sqlite_delete_prompt
 from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import (
-    Database,
+    MediaDatabase,
     import_obsidian_note_to_db as sqlite_import_obsidian_note_to_db,
     empty_trash as sqlite_empty_trash,
     create_automated_backup as sqlite_create_automated_backup,
@@ -106,7 +106,7 @@ elif BIGSEARCH == True and single_user_config.get('Database', 'type') == 'postgr
 
 def get_all_content_from_database(*args, **kwargs):
     if db_type == 'sqlite':
-        return Database.get_all_content_from_database(*args, **kwargs)
+        return MediaDatabase.get_all_content_from_database(*args, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
@@ -126,7 +126,7 @@ def check_media_exists(*args, **kwargs):
 
 def get_full_media_details2(*args, **kwargs):
     if db_type == 'sqlite':
-        return Database.get_full_media_details(*args, **kwargs)
+        return MediaDatabase.get_full_media_details(*args, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
@@ -136,7 +136,7 @@ def get_full_media_details2(*args, **kwargs):
 
 def get_paginated_files(*args, **kwargs):
     if db_type == 'sqlite':
-        return Database.get_paginated_files(*args, **kwargs)
+        return MediaDatabase.get_paginated_files(*args, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
@@ -167,7 +167,7 @@ def import_obsidian_note_to_db(*args, **kwargs):
 
 def add_media_with_keywords(*args, **kwargs):
     if db_type == 'sqlite':
-        return Database.add_media_with_keywords(*args, **kwargs)
+        return MediaDatabase.add_media_with_keywords(*args, **kwargs)
     elif db_type == 'elasticsearch':
         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
     return None
@@ -193,7 +193,7 @@ def ingest_article_to_db(*args, **kwargs):
 
 def add_media_chunk(*args, **kwargs):
     if db_type == 'sqlite':
-        Database.add_media_chunk(*args, **kwargs)
+        MediaDatabase.add_media_chunk(*args, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version not yet implemented")
@@ -202,7 +202,7 @@ def add_media_chunk(*args, **kwargs):
 
 def batch_insert_chunks(*args, **kwargs):
     if db_type == 'sqlite':
-        Database.batch_insert_chunks(*args, **kwargs)
+        MediaDatabase.batch_insert_chunks(*args, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version not yet implemented")
@@ -231,7 +231,7 @@ def mark_media_as_processed(*args, **kwargs):
 
 def update_keywords_for_media(*args, **kwargs):
     if db_type == 'sqlite':
-        return Database.update_keywords_for_media(*args, **kwargs)
+        return MediaDatabase.update_keywords_for_media(*args, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of update_keywords_for_media not yet implemented")
@@ -244,7 +244,7 @@ def update_keywords_for_media(*args, **kwargs):
 
 def rollback_to_version(*arg, **kwargs):
     if db_type == 'sqlite':
-        return Database.rollback_to_version(*arg, **kwargs)
+        return MediaDatabase.rollback_to_version(*arg, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of rollback_to_version not yet implemented")
@@ -257,7 +257,7 @@ def rollback_to_version(*arg, **kwargs):
 
 def delete_document_version(*args, **kwargs):
     if db_type == 'sqlite':
-        return Database.soft_delete_document_version(*args, **kwargs)
+        return MediaDatabase.soft_delete_document_version(*args, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of delete_document_version not yet implemented")
@@ -365,7 +365,7 @@ def delete_prompt(*args, **kwargs):
 
 def mark_as_trash(*args, **kwargs: int) -> bool:
     if db_type == 'sqlite':
-        return Database.mark_as_trash(*args, **kwargs)
+        return MediaDatabase.mark_as_trash(*args, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version when available
         raise NotImplementedError("Elasticsearch version of mark_as_trash not yet implemented")
@@ -381,7 +381,7 @@ def get_latest_transcription(*args, **kwargs):
 
 def fetch_paginated_data(*args, **kwargs):
     if db_type == 'sqlite':
-        return Database.fetch_paginated_data(*args, **kwargs)
+        return MediaDatabase.fetch_paginated_data(*args, **kwargs)
     elif db_type == 'elasticsearch':
         # Implement Elasticsearch version
         raise NotImplementedError("Elasticsearch version of fetch_paginated_data not yet implemented")
@@ -405,13 +405,13 @@ def get_specific_transcript(*args, **kwargs: int) -> Dict:
         raise ValueError(f"Unsupported database type: {db_type}")
 
 
-def get_all_document_versions(db_instance: Database, media_id: int, **kwargs):
+def get_all_document_versions(db_instance: MediaDatabase, media_id: int, **kwargs):
     """
     Wrapper to get all document versions for a given media_id from a Database instance.
     """
     # db_type check might be relevant if you support multiple DB backends via DB_Manager
     # For now, assume db_instance is always a Media_DB_v2.Database instance.
-    if isinstance(db_instance, Database):
+    if isinstance(db_instance, MediaDatabase):
         # Call the INSTANCE method, passing only the relevant kwargs
         # The instance method itself is get_all_document_versions(self, media_id, include_content=True, include_deleted=False, limit=None, offset=None)
         # So we need to ensure only those valid arguments are passed from kwargs.

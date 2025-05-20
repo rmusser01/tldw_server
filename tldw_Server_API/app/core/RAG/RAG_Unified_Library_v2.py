@@ -19,7 +19,7 @@ from flashrank import Ranker, RerankRequest
 
 # Local Imports
 # DB Management - New Libraries
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database as MediaDatabase, DatabaseError as MediaDBError, \
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase as MediaDatabase, DatabaseError as MediaDBError, \
     DatabaseError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 

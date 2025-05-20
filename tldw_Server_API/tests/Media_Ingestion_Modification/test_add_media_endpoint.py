@@ -27,7 +27,7 @@ from tldw_Server_API.app.api.v1.endpoints.media import _process_document_like_it
 from tldw_Server_API.tests.test_utils import temp_db
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
 from tldw_Server_API.app.core.config import settings
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database # Import Database class
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase # Import Database class
 # Import the form model
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm, MediaType # Import AddMediaForm, MediaType
 #
@@ -104,7 +104,7 @@ URL_404 = "https://httpbin.org/status/404" # Reliable 404
 @pytest.fixture(scope="function") # <<< CHANGED HERE
 def db_session_scope():
     """RENAMED: FUNCTION-scoped temporary database with explicit connection closing."""
-    db: Optional[Database] = None
+    db: Optional[MediaDatabase] = None
     db_path_str_for_log = "UNKNOWN_DB_PATH_FUNC_SCOPE" # Initialize for logging
     try:
         # temp_db() creates a new DB file each time this fixture runs (per function)

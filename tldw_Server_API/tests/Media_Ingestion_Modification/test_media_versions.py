@@ -17,7 +17,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.main import app as fastapi_app_instance, app
     # Import specific DB functions used directly in tests/fixtures
 from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import (
-        Database
+    MediaDatabase
     )
     # Import the utility for temporary DB if it's defined elsewhere
 from tldw_Server_API.tests.test_utils import temp_db
@@ -149,7 +149,7 @@ def seeded_document_media(db_session):
                 raise RuntimeError("Failed to retrieve media_id after insertion.")
 
             # Create an initial version using the imported function
-            version_res = Database.create_document_version(
+            version_res = MediaDatabase.create_document_version(
                 self=db_session,  # Pass the db_instance
                 media_id=media_id,
                 content="Initial content v1",
@@ -193,7 +193,7 @@ def seeded_multi_media(db_session):
                 id_row = id_cursor.fetchone()
                 media_ids["document"] = id_row[0] if id_row else None
             if media_ids["document"]:  # Check if ID was obtained
-                Database.create_document_version(
+                MediaDatabase.create_document_version(
                     self=db_session,  # Pass the db_instance
                     media_id=media_ids["document"],  # Pass media_id first
                     content="Doc content v1",

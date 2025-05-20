@@ -11,7 +11,7 @@ from typing import List, Dict, Optional, Tuple
 #
 # Local Imports
 try:
-    from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, ConflictError, DatabaseError, InputError
+    from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase, ConflictError, DatabaseError, InputError
 except ImportError:
     print("ERROR: Could not import the 'Media_DB' library. Make sure Media_DB.py is accessible.")
 #
@@ -42,8 +42,8 @@ class ClientSyncEngine:
     with a central server.
     """
 
-    def __init__(self, db_instance: Database, server_api_url: str, client_id: str, state_file: str):
-        if not isinstance(db_instance, Database):
+    def __init__(self, db_instance: MediaDatabase, server_api_url: str, client_id: str, state_file: str):
+        if not isinstance(db_instance, MediaDatabase):
              raise TypeError("db_instance must be a valid Database object.")
 
         self.db = db_instance
@@ -706,12 +706,12 @@ if __name__ == "__main__":
     os.makedirs(os.path.dirname(DATABASE_PATH) or '.', exist_ok=True)
 
     # Initialize db to None outside the try block
-    db: Optional[Database] = None
+    db: Optional[MediaDatabase] = None
     engine: Optional[ClientSyncEngine] = None
 
     try:
         # Initialize the database (creates schema if needed)
-        db = Database(db_path=DATABASE_PATH, client_id=CLIENT_ID)
+        db = MediaDatabase(db_path=DATABASE_PATH, client_id=CLIENT_ID)
         logger.info("Database object created.")
 
         # Initialize the sync engine

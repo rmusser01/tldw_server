@@ -2,18 +2,21 @@
 # Description: Functions for managing embeddings in ChromaDB
 #
 # Imports:
-from typing import List, Dict, Any
+from pathlib import Path
+from typing import List, Dict, Any, Optional, Collection
 import threading
 # 3rd-Party Imports:
 import chromadb
 from chromadb import Settings
 from itertools import islice
 import numpy as np
+from chromadb.api.models.Collection import Collection
+from chromadb.api.types import QueryResult
 #
 # Local Imports:
 from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_for_embedding
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
 from tldw_Server_API.app.core.Embeddings.Embeddings_Create import create_embedding, create_embeddings_batch
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Utils.Utils import get_database_path, ensure_directory_exists, logger,  logging
@@ -47,369 +50,378 @@ embedding_api_url = config['embedding_config']['embedding_api_url'] or ''
 #_chroma_lock = threading.Lock()
 _chroma_lock = threading.RLock()
 
-def batched(iterable, n):
-    "Batch data into lists of length n. The last batch may be shorter."
-    it = iter(iterable)
-    while True:
-        batch = list(islice(it, n))
-        if not batch:
-            return
-        yield batch
 
-
-def situate_context(api_name, doc_content: str, chunk_content: str) -> str:
-    doc_content_prompt = f"""
-    <document>
-    {doc_content}
-    </document>
+class ChromaDBManager:
     """
-
-    chunk_context_prompt = f"""
-    \n\n\n\n\n
-    Here is the chunk we want to situate within the whole document
-    <chunk>
-    {chunk_content}
-    </chunk>
-
-    Please give a short succinct context to situate this chunk within the overall document for the purposes of improving search retrieval of the chunk.
-    Answer only with the succinct context and nothing else.
+    Manages ChromaDB instances and operations for specific users.
+    Each instance of this class corresponds to a user's isolated ChromaDB storage.
     """
+    DEFAULT_COLLECTION_NAME_PREFIX = "user_embeddings_for_"
 
-    response = analyze(chunk_context_prompt, doc_content_prompt, api_name, api_key=None, temp=0, system_message=None)
-    return response
+    def __init__(self, user_id: str, settings: Dict[str, Any]):
+        """
+        Initializes the ChromaDBManager for a specific user.
 
-# FIXME
-# FIXME - update all uses to reflect 'api_name' parameter
-def process_and_store_content(database, content: str, collection_name: str, media_id: int, file_name: str,
-                              create_embeddings: bool = True, create_contextualized: bool = True, api_name: str = "gpt-3.5-turbo",
-                              chunk_options = None, embedding_provider: str = None,
-                              embedding_model: str = None, embedding_api_url: str = None):
-    try:
-        logger.info(f"Processing content for media_id {media_id} in collection {collection_name}")
+        Args:
+            user_id (str): The ID of the user for whom this ChromaDB instance is.
+            settings (Dict[str, Any]): The global application settings dictionary.
+        """
+        if not user_id:
+            raise ValueError("user_id cannot be empty for ChromaDBManager.")
+        if not settings:
+            raise ValueError("settings cannot be empty for ChromaDBManager.")
 
-        chunks = chunk_for_embedding(content, file_name, chunk_options)
+        self.user_id = str(user_id)
+        self.settings = settings
+        self._lock = threading.RLock()
 
-        # FIXME - Change to use proper function
-        # Process chunks synchronously
-        Database.process_chunks(database, chunks, media_id)
+        user_base_path: Optional[Path] = self.settings.get("USER_DB_BASE_DIR")
+        if not user_base_path:
+            # This case should ideally be prevented by robust settings load,
+            # but good to have a fallback or clearer error.
+            logger.critical("USER_DB_BASE_DIR not found in settings. ChromaDBManager cannot be initialized.")
+            raise ValueError("USER_DB_BASE_DIR not configured in application settings.")
 
-        if create_embeddings:
-            texts = []
-            contextualized_chunks = []
-            for chunk in chunks:
-                chunk_text = chunk['text']
-                if create_contextualized:
-                    context = situate_context(api_name, content, chunk_text)
-                    contextualized_text = f"{chunk_text}\n\nContextual Summary: {context}"
-                    contextualized_chunks.append(contextualized_text)
-                else:
-                    contextualized_chunks.append(chunk_text)
-                texts.append(chunk_text)  # Store original text for database
+        self.user_chroma_path: Path = (user_base_path / self.user_id / "chroma_storage").resolve()
+        self.user_chroma_path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"ChromaDBManager for user '{self.user_id}' initialized. Path: {self.user_chroma_path}")
 
-            embeddings = create_embeddings_batch(contextualized_chunks, embedding_provider, embedding_model, embedding_api_url)
-            ids = [f"{media_id}_chunk_{i}" for i in range(1, len(chunks) + 1)]
-            metadatas = [{
-                "media_id": str(media_id),
-                "chunk_index": i,
-                "total_chunks": len(chunks),
-                "start_index": int(chunk['metadata']['start_index']),
-                "end_index": int(chunk['metadata']['end_index']),
-                "file_name": str(chunk['metadata']['file_name']),
-                "relative_position": float(chunk['metadata']['relative_position']),
-                "contextualized": create_contextualized,
-                "original_text": chunk['text'],
-                "contextual_summary": contextualized_chunks[i-1].split("\n\nContextual Summary: ")[-1] if create_contextualized else ""
-            } for i, chunk in enumerate(chunks, 1)]
-
-            store_in_chroma(collection_name, contextualized_chunks, embeddings, ids, metadatas)
-
-            # Mark the media as processed
-            mark_media_as_processed(database, media_id)
-
-        # Update full-text search index
-        database.execute_query(
-            "INSERT OR REPLACE INTO media_fts (rowid, title, content) SELECT id, title, content FROM Media WHERE id = ?",
-            (media_id,)
+        self.client = chromadb.PersistentClient(
+            path=str(self.user_chroma_path),
+            settings=Settings(anonymized_telemetry=False, allow_reset=True)  # allow_reset=True can be useful
         )
 
-        logger.info(f"Finished processing and storing content for media_id {media_id}")
+        embedding_config = self.settings.get("EMBEDDING_CONFIG", {})
+        self.embedding_provider = embedding_config.get('embedding_provider', 'openai')
+        self.embedding_model = embedding_config.get('embedding_model', 'text-embedding-3-small')
+        self.embedding_api_key = embedding_config.get('embedding_api_key', '')
+        self.embedding_api_url = embedding_config.get('embedding_api_url', '')
 
-    except Exception as e:
-        logger.error(f"Error in process_and_store_content for media_id {media_id}: {str(e)}")
-        raise
+        logger.info(
+            f"User '{self.user_id}' ChromaDBManager using Embedding Provider: {self.embedding_provider}, Model: {self.embedding_model}")
 
-# Usage example:
-# process_and_store_content(db, content, "my_collection", 1, "example.txt", create_embeddings=True, create_summary=True, api_name="gpt-3.5-turbo")
+    def _batched(self, iterable, n):
+        it = iter(iterable)
+        while True:
+            batch = list(islice(it, n))
+            if not batch:
+                return
+            yield batch
 
-
-def check_embedding_status(selected_item, item_mapping):
-    if not selected_item:
-        return "Please select an item", ""
-    logging.info("DEBUG: item_mapping type:", type(item_mapping), item_mapping)
-    try:
-        item_id = item_mapping.get(selected_item)
-        if item_id is None:
-            return f"Invalid item selected: {selected_item}", ""
-
-        item_title = selected_item.rsplit(' (', 1)[0]
-        with _chroma_lock:
-            collection = chroma_client.get_or_create_collection(name="all_content_embeddings")
-
-            result = collection.get(ids=[f"doc_{item_id}"], include=["embeddings", "metadatas"])
-            logging.info(f"ChromaDB result for item '{item_title}' (ID: {item_id}): {result}")
-
-            if not result['ids']:
-                return f"No embedding found for item '{item_title}' (ID: {item_id})", ""
-
-            if not result['embeddings'] or not result['embeddings'][0]:
-                return f"Embedding data missing for item '{item_title}' (ID: {item_id})", ""
-
-            embedding = result['embeddings'][0]
-            metadata = result['metadatas'][0] if result['metadatas'] else {}
-            embedding_preview = str(embedding[:50])
-            status = f"Embedding exists for item '{item_title}' (ID: {item_id})"
-            return status, f"First 50 elements of embedding:\n{embedding_preview}\n\nMetadata: {metadata}"
-
-    except Exception as e:
-        logging.error(f"Error in check_embedding_status: {str(e)}")
-        return f"Error processing item: {selected_item}. Details: {str(e)}", ""
-
-def reset_chroma_collection(collection_name: str):
-    with _chroma_lock:
-        try:
-            chroma_client.delete_collection(collection_name)
-            chroma_client.create_collection(collection_name)
-            logging.info(f"Reset ChromaDB collection: {collection_name}")
-        except Exception as e:
-            logging.error(f"Error resetting ChromaDB collection: {str(e)}")
-
-
-#v2
-def store_in_chroma(collection_name: str, texts: List[str], embeddings: Any, ids: List[str],
-                    metadatas: List[Dict[str, Any]]):
-    """
-    Stores text, embeddings, and metadata in ChromaDB using upsert.
-    """
-    # Input validation
-    if not all([texts, embeddings, ids, metadatas]):
-        raise ValueError("All input lists (texts, embeddings, ids, metadatas) must be non-empty.")
-
-    if not (len(texts) == len(embeddings) == len(ids) == len(metadatas)):
-        raise ValueError("All input lists must have the same length.")
-
-    # Convert embeddings to list if it's a numpy array
-    if isinstance(embeddings, np.ndarray):
-        embeddings = embeddings.tolist()
-    elif not isinstance(embeddings, list):
-        raise TypeError("Embeddings must be either a list or a numpy array")
-
-    if not embeddings:  # Check for empty embeddings list after conversion
-      raise ValueError("No embeddings provided")
-    embedding_dim = len(embeddings[0])
-
-    with _chroma_lock:
-        logging.info(f"Storing embeddings in ChromaDB - Collection: {collection_name}")
-        logging.info(f"Number of embeddings: {len(embeddings)}, Dimension: {embedding_dim}")
-
-        try:
-            # Clean metadata
-            cleaned_metadatas = [clean_metadata(metadata) for metadata in metadatas]
-
-            # Try to get or create the collection
-            try:
-                collection = chroma_client.get_collection(name=collection_name)
-                logging.info(f"Existing collection '{collection_name}' found")
-
-                # Check dimension of existing embeddings
-                existing_embeddings = collection.get(limit=1, include=['embeddings'])['embeddings']
-                if existing_embeddings:
-                    existing_dim = len(existing_embeddings[0])
-                    if existing_dim != embedding_dim:
-                        logging.warning(f"Embedding dimension mismatch. Existing: {existing_dim}, New: {embedding_dim}")
-                        logging.warning("Deleting existing collection and creating a new one")
-                        chroma_client.delete_collection(name=collection_name)
-                        collection = chroma_client.create_collection(name=collection_name)
+    def _clean_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        cleaned = {}
+        for key, value in metadata.items():
+            if value is not None:
+                if isinstance(value, (str, int, float, bool)):
+                    cleaned[key] = value
+                elif isinstance(value, (np.int32, np.int64)):
+                    cleaned[key] = int(value)
+                elif isinstance(value, (np.float32, np.float64)):
+                    cleaned[key] = float(value)
                 else:
-                    logging.info("No existing embeddings in the collection")
-            except Exception as e:
-                logging.info(f"Collection '{collection_name}' not found. Creating new collection")
-                collection = chroma_client.create_collection(name=collection_name)
+                    cleaned[key] = str(value)
+        return cleaned
 
-            # Perform the upsert operation
-            collection.upsert(
-                documents=texts,
-                embeddings=embeddings,
-                ids=ids,
-                metadatas=cleaned_metadatas
+    def get_user_default_collection_name(self) -> str:
+        return f"{self.DEFAULT_COLLECTION_NAME_PREFIX}{self.user_id}"
+
+    def get_or_create_collection(self, collection_name: Optional[str] = None) -> Collection:
+        name_to_use = collection_name or self.get_user_default_collection_name()
+        with self._lock:
+            # Note: Default embedding function can be set at collection creation
+            # if all embeddings in it will use the same model.
+            # However, since we pass embeddings directly to upsert, this is less critical here.
+            return self.client.get_or_create_collection(name=name_to_use)
+
+    def situate_context(self, api_name: str, doc_content: str, chunk_content: str) -> str:
+        doc_content_prompt = f"<document>\n{doc_content}\n</document>"
+        chunk_context_prompt = (
+            f"\n\n\n\n\nHere is the chunk we want to situate within the whole document\n<chunk>\n{chunk_content}\n</chunk>\n\n"
+            "Please give a short succinct context to situate this chunk within the overall document "
+            "for the purposes of improving search retrieval of the chunk.\n"
+            "Answer only with the succinct context and nothing else."
+        )
+        response = analyze(chunk_context_prompt, doc_content_prompt, api_name, api_key=None, temp=0,
+                           system_message=None)
+        return response
+
+    def process_and_store_content(self, media_db_instance: MediaDatabase, content: str,
+                                  media_id: int, file_name: str,
+                                  collection_name: Optional[str] = None,
+                                  create_embeddings: bool = True, create_contextualized: bool = True,
+                                  api_name: str = "gpt-3.5-turbo",
+                                  chunk_options: Optional[Dict] = None):
+        collection_to_use = self.get_or_create_collection(collection_name)
+        target_collection_name = collection_to_use.name
+
+        try:
+            logger.info(
+                f"User '{self.user_id}': Processing content for media_id {media_id} in collection {target_collection_name}")
+            chunks = chunk_for_embedding(content, file_name, chunk_options)
+
+            sql_db_chunks_to_add = []
+            for i, chunk_info in enumerate(chunks):
+                sql_db_chunks_to_add.append({
+                    "text": chunk_info['text'],
+                    "start_index": chunk_info['metadata'].get('start_index'),
+                    "end_index": chunk_info['metadata'].get('end_index'),
+                })
+
+            if sql_db_chunks_to_add:
+                media_db_instance.add_media_chunks_in_batches(media_id=media_id, chunks_to_add=sql_db_chunks_to_add)
+                logger.info(
+                    f"User '{self.user_id}': Stored {len(sql_db_chunks_to_add)} chunk references in SQL DB for media_id {media_id}.")
+
+            if create_embeddings:
+                texts_for_embedding = []
+                contextualized_docs_for_chroma = []
+
+                for chunk in chunks:
+                    chunk_text = chunk['text']
+                    texts_for_embedding.append(chunk_text)
+
+                    if create_contextualized:
+                        context = self.situate_context(api_name, content, chunk_text)
+                        contextualized_text_for_embedding = f"{chunk_text}\n\nContextual Summary: {context}"
+                        contextualized_docs_for_chroma.append(contextualized_text_for_embedding)
+                    else:
+                        contextualized_docs_for_chroma.append(chunk_text)
+
+                # Corrected: Removed self.embedding_api_key from the call
+                embeddings = create_embeddings_batch(
+                    texts=contextualized_docs_for_chroma,
+                    provider_override=self.embedding_provider,  # Use self for provider/model/url overrides
+                    model_override=self.embedding_model,
+                    api_url_override=self.embedding_api_url
+                )
+
+                ids = [f"{media_id}_chunk_{i}" for i in range(1, len(chunks) + 1)]
+
+                metadatas = []
+                for i, chunk in enumerate(chunks, 1):
+                    meta = {
+                        "media_id": str(media_id),
+                        "chunk_index": i,
+                        "total_chunks": len(chunks),
+                        "start_index": int(chunk['metadata']['start_index']),
+                        "end_index": int(chunk['metadata']['end_index']),
+                        "file_name": str(chunk['metadata']['file_name']),
+                        "relative_position": float(chunk['metadata']['relative_position']),
+                        "contextualized": create_contextualized,
+                        "original_text": chunk['text']
+                    }
+                    if create_contextualized and len(contextualized_docs_for_chroma) >= i:
+                        summary_part = contextualized_docs_for_chroma[i - 1].split("\n\nContextual Summary: ", 1)
+                        if len(summary_part) > 1:
+                            meta["contextual_summary"] = summary_part[1]
+                        else:
+                            meta["contextual_summary"] = ""
+                    else:
+                        meta["contextual_summary"] = ""
+                    metadatas.append(meta)
+
+                self.store_in_chroma(target_collection_name, contextualized_docs_for_chroma, embeddings, ids, metadatas)
+
+                # Correctly call the standalone function imported from DB_Manager
+                mark_media_as_processed(media_db_instance, media_id)
+
+            media_db_instance.execute_query(
+                "INSERT OR REPLACE INTO media_fts (rowid, title, content) SELECT id, title, content FROM Media WHERE id = ?",
+                (media_id,),
+                commit=True
             )
-            logging.info(f"Successfully upserted {len(embeddings)} embeddings")
-
-            # Verify all stored embeddings
-            results = collection.get(ids=ids, include=["documents", "embeddings", "metadatas"])
-
-            for i, doc_id in enumerate(ids):
-                if results['embeddings'][i] is None:
-                    raise ValueError(f"Failed to store embedding for {doc_id}")
-                else:
-                    logging.debug(f"Embedding stored successfully for {doc_id}")
-                    logging.debug(f"Stored document preview: {results['documents'][i][:100]}...")
-                    logging.debug(f"Stored metadata: {results['metadatas'][i]}")
-
-            logging.info("Successfully stored and verified all embeddings in ChromaDB")
+            logger.info(f"User '{self.user_id}': Finished processing and storing content for media_id {media_id}")
 
         except Exception as e:
-            logging.error(f"Error in store_in_chroma: {str(e)}")
+            logger.error(f"User '{self.user_id}': Error in process_and_store_content for media_id {media_id}: {str(e)}",
+                         exc_info=True)
             raise
 
-        return collection
+    def store_in_chroma(self, collection_name: Optional[str], texts: List[str], embeddings: Any,
+                        ids: List[str], metadatas: List[Dict[str, Any]]):
+        if not all([texts, ids, metadatas]) or embeddings is None:  # Check embeddings is not None
+            raise ValueError("Texts, ids, metadatas lists must be non-empty, and embeddings must be provided.")
+        if not (len(texts) == len(embeddings) == len(ids) == len(metadatas)):
+            raise ValueError("All input lists (texts, embeddings, ids, metadatas) must have the same length.")
 
+        if isinstance(embeddings, np.ndarray):
+            embeddings_list = embeddings.tolist()
+        elif isinstance(embeddings, list):
+            embeddings_list = embeddings
+        else:
+            raise TypeError("Embeddings must be either a list or a numpy array")
 
-# Function to perform vector search using ChromaDB + Keywords from the media_db
-#v2
-def vector_search(collection_name: str, query: str, k: int = 10) -> List[Dict[str, Any]]:
-    with _chroma_lock:
-        try:
-            collection = chroma_client.get_collection(name=collection_name)
+        if not embeddings_list:
+            raise ValueError("No embeddings provided after potential conversion.")
 
-            # Fetch a sample of embeddings to check metadata
-            sample_results = collection.get(limit=10, include=["metadatas"])
-            if not sample_results.get('metadatas') or not any(sample_results['metadatas']):
-                logging.warning(f"No metadata found in the collection '{collection_name}'. Skipping this collection.")
+        target_collection = self.get_or_create_collection(collection_name)
+        embedding_dim = len(embeddings_list[0])
+
+        with self._lock:
+            logger.info(f"User '{self.user_id}': Storing embeddings in ChromaDB - Collection: {target_collection.name}")
+            logger.info(f"Number of embeddings: {len(embeddings_list)}, Dimension: {embedding_dim}")
+
+            try:
+                cleaned_metadatas = [self._clean_metadata(metadata) for metadata in metadatas]
+
+                existing_embeddings_sample_result = target_collection.get(limit=1, include=['embeddings'])
+                existing_embeddings_sample = existing_embeddings_sample_result['embeddings']
+
+                if existing_embeddings_sample and existing_embeddings_sample[0] is not None:
+                    existing_dim = len(existing_embeddings_sample[0])
+                    if existing_dim != embedding_dim:
+                        logger.warning(
+                            f"User '{self.user_id}': Embedding dimension mismatch for collection '{target_collection.name}'. Existing: {existing_dim}, New: {embedding_dim}. Deleting and recreating collection.")
+                        self.client.delete_collection(name=target_collection.name)
+                        target_collection = self.client.create_collection(name=target_collection.name)
+
+                target_collection.upsert(
+                    documents=texts,
+                    embeddings=embeddings_list,
+                    ids=ids,
+                    metadatas=cleaned_metadatas
+                )
+                logger.info(
+                    f"User '{self.user_id}': Successfully upserted {len(embeddings_list)} embeddings to '{target_collection.name}'")
+            except Exception as e:
+                logger.error(f"User '{self.user_id}': Error in store_in_chroma: {str(e)}", exc_info=True)
+                raise
+        return target_collection
+
+    def vector_search(self, query: str, collection_name: Optional[str] = None, k: int = 10) -> List[Dict[str, Any]]:
+        target_collection = self.get_or_create_collection(collection_name)
+        with self._lock:
+            try:
+                logger.info(
+                    f"User '{self.user_id}': Performing vector search in collection '{target_collection.name}' for query: '{query[:50]}...'")
+
+                # Corrected: Removed self.embedding_api_key from the call
+                query_embedding_single = create_embedding(
+                    text=query,
+                    provider_override=self.embedding_provider,
+                    model_override=self.embedding_model,
+                    api_url_override=self.embedding_api_url
+                )
+
+                query_embedding_list_for_chroma: List[List[float]]
+                if isinstance(query_embedding_single, np.ndarray):
+                    query_embedding_list_for_chroma = [query_embedding_single.tolist()]
+                elif isinstance(query_embedding_single, list) and query_embedding_single and isinstance(
+                        query_embedding_single[0], (float, int)):
+                    query_embedding_list_for_chroma = [query_embedding_single]
+                elif isinstance(query_embedding_single, list) and query_embedding_single and isinstance(
+                        query_embedding_single[0], list):  # Already a list of lists
+                    query_embedding_list_for_chroma = query_embedding_single
+                else:
+                    logger.error(
+                        f"User '{self.user_id}': create_embedding returned an unexpected type or structure: {type(query_embedding_single)}")
+                    return []
+
+                results: QueryResult = target_collection.query(
+                    query_embeddings=query_embedding_list_for_chroma,
+                    n_results=k,
+                    include=["documents", "metadatas", "distances"]
+                )
+
+                documents = results.get('documents')
+                metadatas = results.get('metadatas')
+                distances = results.get('distances')
+
+                if not documents or not documents[0]:
+                    logger.warning(
+                        f"User '{self.user_id}': No results found for the query in collection '{target_collection.name}'.")
+                    return []
+
+                output = []
+                # documents[0], metadatas[0], distances[0] correspond to the results for the first query embedding
+                res_docs = documents[0]
+                res_metas = metadatas[0] if metadatas and metadatas[0] is not None else [None] * len(res_docs)
+                res_dists = distances[0] if distances and distances[0] is not None else [None] * len(res_docs)
+
+                for doc, meta, dist in zip(res_docs, res_metas, res_dists):
+                    output.append({"content": doc, "metadata": meta, "distance": dist})
+
+                logger.info(
+                    f"User '{self.user_id}': Found {len(output)} results for query in '{target_collection.name}'.")
+                return output
+            except Exception as e:
+                logger.error(
+                    f"User '{self.user_id}': Error in vector_search for collection '{target_collection.name}': {str(e)}",
+                    exc_info=True)
                 return []
 
-            # Check if all embeddings use the same model and provider
-            embedding_models = [
-                metadata.get('embedding_model') for metadata in sample_results['metadatas']
-                if metadata and metadata.get('embedding_model')
-            ]
-            embedding_providers = [
-                metadata.get('embedding_provider') for metadata in sample_results['metadatas']
-                if metadata and metadata.get('embedding_provider')
-            ]
+    def reset_chroma_collection(self, collection_name: Optional[str] = None):
+        name_to_reset = collection_name or self.get_user_default_collection_name()
+        with self._lock:
+            try:
+                self.client.delete_collection(name=name_to_reset)
+                self.client.create_collection(name=name_to_reset)
+                logger.info(f"User '{self.user_id}': Reset ChromaDB collection: {name_to_reset}")
+            except Exception as e:
+                logger.warning(
+                    f"User '{self.user_id}': Error resetting ChromaDB collection '{name_to_reset}': {str(e)}. It might not have existed.")
+                try:
+                    self.client.create_collection(name=name_to_reset)
+                    logger.info(
+                        f"User '{self.user_id}': Created ChromaDB collection after failed reset: {name_to_reset}")
+                except Exception as ce:
+                    logger.error(
+                        f"User '{self.user_id}': Failed to create collection '{name_to_reset}' after reset attempt: {str(ce)}")
 
-            if not embedding_models or not embedding_providers:
-                raise ValueError("Embedding model or provider information not found in metadata")
+    def delete_from_collection(self, ids: List[str], collection_name: Optional[str] = None):
+        target_collection = self.get_or_create_collection(collection_name)
+        with self._lock:
+            try:
+                target_collection.delete(ids=ids)
+                logger.info(f"User '{self.user_id}': Deleted IDs {ids} from collection '{target_collection.name}'.")
+            except Exception as e:
+                logger.error(
+                    f"User '{self.user_id}': Error deleting from collection '{target_collection.name}': {str(e)}",
+                    exc_info=True)
+                raise
 
-            embedding_model = max(set(embedding_models), key=embedding_models.count)
-            embedding_provider = max(set(embedding_providers), key=embedding_providers.count)
-
-            logging.info(f"Using embedding model: {embedding_model} from provider: {embedding_provider}")
-
-            # Generate query embedding using the existing create_embedding function
-            query_embedding = create_embedding(query, embedding_provider, embedding_model, embedding_api_url)
-
-            # Ensure query_embedding is a list
-            if isinstance(query_embedding, np.ndarray):
-                query_embedding = query_embedding.tolist()
-
-            results = collection.query(
-                query_embeddings=[query_embedding],
-                n_results=k,
-                include=["documents", "metadatas"]
-            )
-
-            if not results['documents'][0]:
-                logging.warning(f"No results found for the query in collection '{collection_name}'.")
-                return []
-
-            return [{"content": doc, "metadata": meta} for doc, meta in zip(results['documents'][0], results['metadatas'][0])]
-        except Exception as e:
-            logging.error(f"Error in vector_search for collection '{collection_name}': {str(e)}", exc_info=True)
-            return []
-
-
-def schedule_embedding(media_id: int, content: str, media_name: str):
-    try:
-        # FIXME - Change to use proper function
-        chunks = chunk_for_embedding(content, media_name, )
-        texts = [chunk['text'] for chunk in chunks]
-        embeddings = create_embeddings_batch(texts, embedding_provider, embedding_model, embedding_api_url)
-        ids = [f"{media_id}_chunk_{i}" for i in range(len(chunks))]
-        metadatas = [{
-            "media_id": str(media_id),
-            "chunk_index": i,
-            "total_chunks": len(chunks),
-            "start_index": chunk['metadata']['start_index'],
-            "end_index": chunk['metadata']['end_index'],
-            "file_name": media_name,
-            "relative_position": chunk['metadata']['relative_position']
-        } for i, chunk in enumerate(chunks)]
-        with _chroma_lock:
-            store_in_chroma("all_content_embeddings", texts, embeddings, ids, metadatas)
-
-    except Exception as e:
-        logging.error(f"Error scheduling embedding for media_id {media_id}: {str(e)}")
+    def query_collection(self, query_embedding: List[float], n_results: int = 5,
+                         where_clause: Optional[Dict[str, Any]] = None,
+                         collection_name: Optional[str] = None) -> QueryResult: # Corrected return type
+        target_collection = self.get_or_create_collection(collection_name)
+        with self._lock:
+            try:
+                # Ensure query_embedding is wrapped in a list if it's a single embedding vector
+                # ChromaDB's query_embeddings expects a list of embeddings (List[List[float]])
+                query_embeddings_list: List[List[float]]
+                if query_embedding and isinstance(query_embedding[0], (int, float)): # It's a single embedding vector
+                    query_embeddings_list = [query_embedding]
+                elif query_embedding and isinstance(query_embedding[0], list): # It's already a list of embeddings
+                    query_embeddings_list = query_embedding
+                else: # Fallback or error for unexpected structure
+                    logger.warning(f"User '{self.user_id}': query_embedding has an unexpected structure in query_collection. Assuming it's a single embedding.")
+                    query_embeddings_list = [query_embedding]
 
 
-def clean_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
-    """Clean metadata by removing None values and converting to appropriate types"""
-    cleaned = {}
-    for key, value in metadata.items():
-        if value is not None:  # Skip None values
-            if isinstance(value, (str, int, float, bool)):
-                cleaned[key] = value
-            elif isinstance(value, (np.int32, np.int64)):
-                cleaned[key] = int(value)
-            elif isinstance(value, (np.float32, np.float64)):
-                cleaned[key] = float(value)
-            else:
-                cleaned[key] = str(value)  # Convert other types to string
-    return cleaned
+                return target_collection.query(
+                    query_embeddings=query_embeddings_list,
+                    n_results=n_results,
+                    where=where_clause,
+                    include=["documents", "metadatas", "distances"]
+                )
+            except Exception as e:
+                logger.error(f"User '{self.user_id}': Error querying collection '{target_collection.name}': {str(e)}",
+                             exc_info=True)
+                raise
 
+    def count_items_in_collection(self, collection_name: Optional[str] = None) -> int:
+        target_collection = self.get_or_create_collection(collection_name)
+        with self._lock:
+            return target_collection.count()
 
-def count_items_in_collection(collection_name):
-    """
-    Counts the number of items in a specified ChromaDB collection.
-    Args:
-        collection_name (str): The name of the collection.
-    Returns:
-        int: The number of items in the collection.
-    """
-    with _chroma_lock:
-        collection = chroma_client.get_collection(name=collection_name)
-        return collection.count()
+# Example of how you might instantiate and use it (outside this file):
+# from tldw_Server_API.app.core.config import settings
+# from tldw_Server_API.app.core.Vector_DB_Management.ChromaDB_Library import ChromaDBManager
 
-
-def get_chroma_collection(collection_name):
-    """Retrieves a specified ChromaDB collection.
-    Args:
-        collection_name (str): The name of the collection to retrieve.
-    Returns:
-        chromadb.Collection: The requested ChromaDB collection.
-    """
-    # Directly return the result of get_collection
-    with _chroma_lock:
-        return chroma_client.get_collection(collection_name)
-
-
-def delete_from_chroma(collection_name, ids):
-    """
-    Deletes entries from a ChromaDB collection by their IDs.
-    :param collection_name: Name of the collection.
-    :param ids: List of IDs to delete.
-    """
-    with _chroma_lock:
-        collection = chroma_client.get_collection(name=collection_name)
-        collection.delete(ids=ids)
-
-
-def query_chroma(collection_name, query_embedding, n_results=5, where_clause=None):
-    """
-    Queries ChromaDB for the most similar embeddings.
-    :param collection_name: Name of the collection.
-    :param query_embedding: The embedding to query for.
-    :param n_results: Number of results to return.
-    :param where_clause: Optional where clause for filtering results.
-    :return: Query results.
-    """
-    with _chroma_lock:
-        collection = chroma_client.get_collection(name=collection_name)
-        return collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=where_clause
-        )
-
+# current_user_id = "user123" # Get this from auth context
+# chroma_manager = ChromaDBManager(user_id=current_user_id, settings=settings)
+# results = chroma_manager.vector_search(query="some query text", k=5)
+# chroma_manager.store_in_chroma(texts=["..."], embeddings=[[...]], ids=["..."], metadatas=[{...}])
 #
 # End of Functions for ChromaDB
 #######################################################################################################################

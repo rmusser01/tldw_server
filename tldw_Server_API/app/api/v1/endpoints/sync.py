@@ -37,7 +37,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_server_models import ClientChangesP
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
 #
 # DB Mgmt
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import DatabaseError, ConflictError, Database, InputError
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import DatabaseError, ConflictError, MediaDatabase, InputError
 from tldw_Server_API.app.core.Sync.Sync_Client import SYNC_BATCH_SIZE
 #
 #
@@ -85,7 +85,7 @@ router = APIRouter()
 async def receive_changes_from_client(
     payload: ClientChangesPayload,
     user_id: User = Depends(get_request_user),
-    db: Database = Depends(get_media_db_for_user)
+    db: MediaDatabase = Depends(get_media_db_for_user)
 ):
     """
     Receives a batch of sync log entries from a client, applies them
@@ -136,7 +136,7 @@ async def send_changes_to_client(
     client_id: str,
     since_change_id: int = 0,
     user_id: User = Depends(get_request_user),
-    db: Database = Depends(get_media_db_for_user)
+    db: MediaDatabase = Depends(get_media_db_for_user)
 ):
     """
     Sends sync log entries from the user's server-side database back to
@@ -213,7 +213,7 @@ async def send_changes_to_client(
 class ServerSyncProcessor:
     """Handles applying changes received from a client to the server's user DB."""
 
-    def __init__(self, db: Database, user_id: str, requesting_client_id: str):
+    def __init__(self, db: MediaDatabase, user_id: str, requesting_client_id: str):
         self.db = db
         self.user_id = user_id
         self.requesting_client_id = requesting_client_id # Client making the current API call

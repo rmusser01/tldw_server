@@ -277,29 +277,30 @@ def exponential_backoff(max_retries=5, base_delay=1):
     return decorator
 
 @exponential_backoff()
-@RateLimiter(max_calls=50, period=60) # Adjust rate limit as needed
+@RateLimiter(max_calls=50, period=60)
 def create_embeddings_batch(texts: List[str],
                             provider_override: Optional[str] = None,
                             model_override: Optional[str] = None,
                             api_url_override: Optional[str] = None,
-                            timeout_seconds: int = 300
+                            timeout_seconds: int = 300 # Ensure this default is appropriate
                             ) -> List[List[float]]:
     """
     Creates embeddings for a batch of texts.
     Uses globally configured defaults for provider, model, and API URL,
     but allows overriding them with specific parameters.
     """
-    global embedding_models_cache
+    global embedding_models # Use the global cache declared at the module level
+
+    # Load global config values each time, or consider passing them if they can change at runtime
+    # For now, this matches your existing pattern of loading config inside.
     config = load_and_log_configs()
-    embedding_models_cache = config['embedding_models_cache']
-    # Load global config values
     default_embedding_provider = config['embedding_config']['embedding_provider']
     default_embedding_model = config['embedding_config']['embedding_model']
     default_embedding_api_url = config['embedding_config']['embedding_api_url']
+    # API key is retrieved here for 'local' provider, or OpenAI client handles its own key.
     embedding_api_key = config['embedding_config']['embedding_api_key']
     model_dir = config['embedding_config']['model_dir']
 
-    # Determine actual provider, model, and API URL to use
     provider_to_use = provider_override if provider_override else default_embedding_provider
     model_to_use = model_override if model_override else default_embedding_model
     api_url_to_use = api_url_override if api_url_override else default_embedding_api_url
@@ -309,33 +310,33 @@ def create_embeddings_batch(texts: List[str],
 
     try:
         if provider_to_use.lower() == 'huggingface':
-            # Ensure model_dir is valid
             if not model_dir or not os.path.isdir(model_dir):
                 logging.error(f"HuggingFace model_dir '{model_dir}' is not configured or not a directory.")
                 raise ValueError(f"Invalid model_dir for HuggingFace: {model_dir}")
 
-            if model_to_use not in embedding_models_cache:
+            if model_to_use not in embedding_models: # Use the global dict
                 logging.info(f"Model {model_to_use} not in cache. Initializing new embedder.")
-                # Example logic: You might have a more sophisticated way to determine if a model is ONNX-compatible
-                if model_to_use == "dunzhang/stella_en_400M_v5": # Corrected model name
-                    embedding_models_cache[model_to_use] = ONNXEmbedder(model_to_use, model_dir, timeout_seconds)
+                # Corrected model name for 'stella' and check for other ONNX models if logic expands
+                if model_to_use == "dunzhang/setll_en_400M_v5": # Check against the correct key from commit_hashes
+                    embedding_models[model_to_use] = ONNXEmbedder(model_to_use, model_dir, timeout_seconds)
                 else:
-                    embedding_models_cache[model_to_use] = HuggingFaceEmbedder(model_to_use, model_dir, timeout_seconds)
-            embedder = embedding_models_cache[model_to_use]
+                    embedding_models[model_to_use] = HuggingFaceEmbedder(model_to_use, model_dir, timeout_seconds)
+            embedder = embedding_models[model_to_use] # Use the global dict
             embeddings_list = embedder.create_embeddings(texts)
 
         elif provider_to_use.lower() == 'openai':
             logging.debug(f"Creating embeddings for {len(texts)} texts using OpenAI API with model {model_to_use}")
-            embeddings_list = [create_openai_embedding(text, model=model_to_use) for text in texts]
+            # get_openai_embeddings (from LLM_API_Calls) will handle its own API key from its config/env
+            embeddings_list = [get_openai_embeddings(text, model=model_to_use) for text in texts]
 
         elif provider_to_use.lower() == 'local':
             logging.debug(f"Creating embeddings for {len(texts)} texts using local API ({api_url_to_use}) with model {model_to_use}")
             response = requests.post(
-                api_url_to_use, # Use the determined API URL
+                api_url_to_use,
                 json={"texts": texts, "model": model_to_use},
-                headers={"Authorization": f"Bearer {embedding_api_key}"} # Global API key for 'local'
+                headers={"Authorization": f"Bearer {embedding_api_key}"} # Uses key from this file's loaded_config
             )
-            response.raise_for_status() # Raise an exception for bad status codes
+            response.raise_for_status()
             embeddings_list = response.json()['embeddings']
         else:
             raise ValueError(f"Unsupported embedding provider: {provider_to_use}")

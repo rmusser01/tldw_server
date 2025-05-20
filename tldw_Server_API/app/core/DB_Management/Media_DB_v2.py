@@ -90,7 +90,7 @@ class ConflictError(DatabaseError):
         return f"{base} ({', '.join(details)})" if details else base
 
 # --- Database Class ---
-class Database:
+class MediaDatabase:
     """
     Manages SQLite connection and operations for a specific database file,
     handling sync metadata and FTS updates internally via Python code.
@@ -3661,7 +3661,7 @@ class Database:
 # =========================================================================
 # These generally call instance methods now, which handle logging/FTS internally.
 
-def get_document_version(db_instance: Database, media_id: int, version_number: Optional[int] = None, include_content: bool = True) -> Optional[Dict[str, Any]]:
+def get_document_version(db_instance: MediaDatabase, media_id: int, version_number: Optional[int] = None, include_content: bool = True) -> Optional[Dict[str, Any]]:
     """
     Gets a specific document version or the latest active one for an active media item.
 
@@ -3669,7 +3669,7 @@ def get_document_version(db_instance: Database, media_id: int, version_number: O
     and the parent Media item are not soft-deleted (`deleted = 0`).
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         media_id (int): The ID of the parent Media item.
         version_number (Optional[int]): The specific `version_number` to retrieve.
             If None, retrieves the latest (highest `version_number`) active version.
@@ -3686,7 +3686,7 @@ def get_document_version(db_instance: Database, media_id: int, version_number: O
         ValueError: If `version_number` is provided but is not a positive integer.
         DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance must be a Database object.")
     if not isinstance(media_id, int):
         raise TypeError("media_id must be an integer.")
@@ -3795,7 +3795,7 @@ def is_valid_date(date_string: str) -> bool:
         return False
 
 
-def check_media_exists(db_instance: Database, media_id: Optional[int] = None, url: Optional[str] = None, content_hash: Optional[str] = None) -> Optional[int]:
+def check_media_exists(db_instance: MediaDatabase, media_id: Optional[int] = None, url: Optional[str] = None, content_hash: Optional[str] = None) -> Optional[int]:
     """
     Checks if an *active* (non-deleted) media item exists using ID, URL, or hash.
 
@@ -3803,7 +3803,7 @@ def check_media_exists(db_instance: Database, media_id: Optional[int] = None, ur
     Returns the ID of the first matching active media item found.
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         media_id (Optional[int]): The media ID to check.
         url (Optional[str]): The media URL to check.
         content_hash (Optional[str]): The media content hash to check.
@@ -3817,7 +3817,7 @@ def check_media_exists(db_instance: Database, media_id: Optional[int] = None, ur
         ValueError: If none of `media_id`, `url`, or `content_hash` are provided.
         DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     query_parts = []
     params = []
@@ -3842,7 +3842,7 @@ def check_media_exists(db_instance: Database, media_id: Optional[int] = None, ur
         raise DatabaseError(f"Failed check media existence: {e}") from e
 
 
-def empty_trash(db_instance: Database, days_threshold: int) -> Tuple[int, int]:
+def empty_trash(db_instance: MediaDatabase, days_threshold: int) -> Tuple[int, int]:
     """
     Permanently removes items from the trash that are older than a threshold.
 
@@ -3852,7 +3852,7 @@ def empty_trash(db_instance: Database, days_threshold: int) -> Tuple[int, int]:
     soft delete, log sync events, update FTS, and handle cascades.
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         days_threshold (int): The minimum number of days an item must have been
                               in the trash (based on `trash_date`) to be emptied.
                               Must be a non-negative integer.
@@ -3873,7 +3873,7 @@ def empty_trash(db_instance: Database, days_threshold: int) -> Tuple[int, int]:
                        they encounter issues beyond ConflictError. Errors during the
                        initial query or final count also raise DatabaseError.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     if not isinstance(days_threshold, int) or days_threshold < 0:
         raise ValueError("Days must be non-negative int.")
@@ -3919,7 +3919,7 @@ def check_media_and_whisper_model(*args, **kwargs):
     return True, "Deprecated"
 
 # Media processing state functions (unchanged logic, rely on DB fields)
-def get_unprocessed_media(db_instance: Database) -> List[Dict]:
+def get_unprocessed_media(db_instance: MediaDatabase) -> List[Dict]:
     """
     Retrieves media items marked as needing vector processing.
 
@@ -3927,7 +3927,7 @@ def get_unprocessed_media(db_instance: Database) -> List[Dict]:
     Returns a list of dictionaries containing basic info (id, uuid, content, type, title).
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
 
     Returns:
         List[Dict[str, Any]]: A list of media items needing processing. Empty if none.
@@ -3936,7 +3936,7 @@ def get_unprocessed_media(db_instance: Database) -> List[Dict]:
         TypeError: If `db_instance` is not a Database object.
         DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     try:
         query = "SELECT id, uuid, content, type, title FROM Media WHERE vector_processing = 0 AND deleted = 0 AND is_trash = 0 ORDER BY id"
@@ -3947,7 +3947,7 @@ def get_unprocessed_media(db_instance: Database) -> List[Dict]:
         raise DatabaseError("Failed get unprocessed media") from e
 
 
-def mark_media_as_processed(db_instance: Database, media_id: int):
+def mark_media_as_processed(db_instance: MediaDatabase, media_id: int):
     """
     Marks a media item's vector processing status as complete (`vector_processing = 1`).
 
@@ -3958,14 +3958,14 @@ def mark_media_as_processed(db_instance: Database, media_id: int):
     updates and sync logging if content/vectors were added.
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         media_id (int): The ID of the media item to mark as processed.
 
     Raises:
         TypeError: If `db_instance` is not a Database object.
         DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     logger.debug(f"Marking media {media_id} vector_processing=1 on DB '{db_instance.db_path_str}'.")
     try:
@@ -3977,7 +3977,7 @@ def mark_media_as_processed(db_instance: Database, media_id: int):
         raise DatabaseError(f"Failed mark media {media_id} processed") from e
 
 # Ingestion wrappers call instance methods
-def ingest_article_to_db_new(db_instance: Database, *,
+def ingest_article_to_db_new(db_instance: MediaDatabase, *,
                              url: str, title: str,
                              content: str,
                              author: Optional[str] = None,
@@ -3994,7 +3994,7 @@ def ingest_article_to_db_new(db_instance: Database, *,
     `custom_prompt` as `prompt` for the initial document version.
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         url (str): The URL of the article. Required.
         title (str): The title of the article. Required.
         content (str): The main content of the article. Required.
@@ -4015,7 +4015,7 @@ def ingest_article_to_db_new(db_instance: Database, *,
         ConflictError: If overwrite=True and update fails due to version conflict.
         DatabaseError: For underlying database or sync/FTS errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     if not url or not title or content is None:
         raise InputError("URL, Title, and Content are required.")
@@ -4033,7 +4033,7 @@ def ingest_article_to_db_new(db_instance: Database, *,
     )
 
 
-def import_obsidian_note_to_db(db_instance: Database, note_data: Dict[str, Any]) -> Tuple[Optional[int], Optional[str], str]:
+def import_obsidian_note_to_db(db_instance: MediaDatabase, note_data: Dict[str, Any]) -> Tuple[Optional[int], Optional[str], str]:
     """
     Wrapper function to add or update an Obsidian note using `add_media_with_keywords`.
 
@@ -4044,7 +4044,7 @@ def import_obsidian_note_to_db(db_instance: Database, note_data: Dict[str, Any])
     Requires `pyyaml` to be installed to parse frontmatter.
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         note_data (Dict[str, Any]): A dictionary containing note information.
             Expected keys: 'title' (str, required), 'content' (str, required).
             Optional keys: 'tags' (List[str|int]), 'frontmatter' (Dict),
@@ -4061,7 +4061,7 @@ def import_obsidian_note_to_db(db_instance: Database, note_data: Dict[str, Any])
         DatabaseError: For underlying database or sync/FTS errors.
         ImportError: If `yaml` library is needed but not installed.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     required = ['title', 'content']
     missing = [k for k in required if k not in note_data or note_data[k] is None]
@@ -4083,7 +4083,7 @@ def import_obsidian_note_to_db(db_instance: Database, note_data: Dict[str, Any])
 
 
 # Read functions call instance methods or query directly with filters
-def get_media_transcripts(db_instance: Database, media_id: int) -> List[Dict]:
+def get_media_transcripts(db_instance: MediaDatabase, media_id: int) -> List[Dict]:
     """
     Retrieves all active transcripts associated with an active media item.
 
@@ -4092,7 +4092,7 @@ def get_media_transcripts(db_instance: Database, media_id: int) -> List[Dict]:
     Results are ordered by creation date descending (newest first).
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         media_id (int): The ID of the parent Media item.
 
     Returns:
@@ -4103,7 +4103,7 @@ def get_media_transcripts(db_instance: Database, media_id: int) -> List[Dict]:
         TypeError: If `db_instance` is not a Database object or `media_id` is not int.
         DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     logger.debug(f"Fetching transcripts for media_id={media_id} DB: {db_instance.db_path_str}")
     try:
@@ -4115,7 +4115,7 @@ def get_media_transcripts(db_instance: Database, media_id: int) -> List[Dict]:
         raise DatabaseError(f"Failed get transcripts {media_id}") from e
 
 
-def get_latest_transcription(db_instance: Database, media_id: int) -> Optional[str]:
+def get_latest_transcription(db_instance: MediaDatabase, media_id: int) -> Optional[str]:
     """
     Retrieves the text content of the latest active transcript for an active media item.
 
@@ -4123,7 +4123,7 @@ def get_latest_transcription(db_instance: Database, media_id: int) -> Optional[s
     and returns only the `transcription` field of the newest one.
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         media_id (int): The ID of the parent Media item.
 
     Returns:
@@ -4133,7 +4133,7 @@ def get_latest_transcription(db_instance: Database, media_id: int) -> Optional[s
         TypeError: If `db_instance` is not a Database object or `media_id` is not int.
         DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     try:
         query = "SELECT t.transcription FROM Transcripts t JOIN Media m ON t.media_id = m.id WHERE t.media_id = ? AND t.deleted = 0 AND m.deleted = 0 ORDER BY t.created_at DESC LIMIT 1"
@@ -4145,7 +4145,7 @@ def get_latest_transcription(db_instance: Database, media_id: int) -> Optional[s
         raise DatabaseError(f"Failed get latest transcript {media_id}") from e
 
 
-def get_specific_transcript(db_instance: Database, transcript_uuid: str) -> Optional[Dict]:
+def get_specific_transcript(db_instance: MediaDatabase, transcript_uuid: str) -> Optional[Dict]:
     """
     Retrieves a specific active transcript by its UUID, ensuring parent media is active.
 
@@ -4153,7 +4153,7 @@ def get_specific_transcript(db_instance: Database, transcript_uuid: str) -> Opti
     Media item are not soft-deleted (`deleted = 0`).
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         transcript_uuid (str): The UUID of the transcript to retrieve.
 
     Returns:
@@ -4165,7 +4165,7 @@ def get_specific_transcript(db_instance: Database, transcript_uuid: str) -> Opti
         InputError: If `transcript_uuid` is empty.
         DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     try:
         query = "SELECT t.* FROM Transcripts t JOIN Media m ON t.media_id = m.id WHERE t.uuid = ? AND t.deleted = 0 AND m.deleted = 0"
@@ -4177,14 +4177,14 @@ def get_specific_transcript(db_instance: Database, transcript_uuid: str) -> Opti
         raise DatabaseError(f"Failed get transcript {transcript_uuid}") from e
 
 
-def get_specific_analysis(db_instance: Database, version_uuid: str) -> Optional[str]:
+def get_specific_analysis(db_instance: MediaDatabase, version_uuid: str) -> Optional[str]:
     """
     Retrieves the `analysis_content` from a specific active DocumentVersion.
 
     Ensures both the DocumentVersion and its parent Media item are active (`deleted=0`).
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         version_uuid (str): The UUID of the DocumentVersion.
 
     Returns:
@@ -4195,7 +4195,7 @@ def get_specific_analysis(db_instance: Database, version_uuid: str) -> Optional[
         InputError: If `version_uuid` is empty.
         DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     try:
         query = "SELECT dv.analysis_content FROM DocumentVersions dv JOIN Media m ON dv.media_id = m.id WHERE dv.uuid = ? AND dv.deleted = 0 AND m.deleted = 0"
@@ -4207,7 +4207,7 @@ def get_specific_analysis(db_instance: Database, version_uuid: str) -> Optional[
         raise DatabaseError(f"Failed get analysis {version_uuid}") from e
 
 
-def get_media_prompts(db_instance: Database, media_id: int) -> List[Dict]:
+def get_media_prompts(db_instance: MediaDatabase, media_id: int) -> List[Dict]:
     """
     Retrieves all non-empty prompts from active DocumentVersions for an active media item.
 
@@ -4215,7 +4215,7 @@ def get_media_prompts(db_instance: Database, media_id: int) -> List[Dict]:
     and orders by version number descending (newest first).
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         media_id (int): The ID of the parent Media item.
 
     Returns:
@@ -4227,7 +4227,7 @@ def get_media_prompts(db_instance: Database, media_id: int) -> List[Dict]:
         TypeError: If `db_instance` is not Database object or `media_id` not int.
         DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     try:
         query = "SELECT dv.id, dv.uuid, dv.prompt, dv.created_at, dv.version_number FROM DocumentVersions dv JOIN Media m ON dv.media_id = m.id WHERE dv.media_id = ? AND dv.deleted = 0 AND m.deleted = 0 AND dv.prompt IS NOT NULL AND dv.prompt != '' ORDER BY dv.version_number DESC"
@@ -4238,14 +4238,14 @@ def get_media_prompts(db_instance: Database, media_id: int) -> List[Dict]:
         raise DatabaseError(f"Failed get prompts {media_id}") from e
 
 
-def get_specific_prompt(db_instance: Database, version_uuid: str) -> Optional[str]:
+def get_specific_prompt(db_instance: MediaDatabase, version_uuid: str) -> Optional[str]:
     """
     Retrieves the `prompt` text from a specific active DocumentVersion.
 
     Ensures both the DocumentVersion and its parent Media item are active (`deleted=0`).
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         version_uuid (str): The UUID of the DocumentVersion.
 
     Returns:
@@ -4256,7 +4256,7 @@ def get_specific_prompt(db_instance: Database, version_uuid: str) -> Optional[st
         InputError: If `version_uuid` is empty.
         DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     try:
         query = "SELECT dv.prompt FROM DocumentVersions dv JOIN Media m ON dv.media_id = m.id WHERE dv.uuid = ? AND dv.deleted = 0 AND m.deleted = 0"
@@ -4269,7 +4269,7 @@ def get_specific_prompt(db_instance: Database, version_uuid: str) -> Optional[st
 
 
 # Specific deletes call instance methods
-def soft_delete_transcript(db_instance: Database, transcript_uuid: str) -> bool:
+def soft_delete_transcript(db_instance: MediaDatabase, transcript_uuid: str) -> bool:
     """
     Soft deletes a specific transcript by its UUID.
 
@@ -4278,7 +4278,7 @@ def soft_delete_transcript(db_instance: Database, transcript_uuid: str) -> bool:
     parent Media item is active before proceeding.
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         transcript_uuid (str): The UUID of the transcript to soft delete.
 
     Returns:
@@ -4290,7 +4290,7 @@ def soft_delete_transcript(db_instance: Database, transcript_uuid: str) -> bool:
         ConflictError: If the transcript's version changed concurrently.
         DatabaseError: For other database errors or sync logging failures.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     if not transcript_uuid:
         raise InputError("Transcript UUID required.")
@@ -4333,7 +4333,7 @@ def soft_delete_transcript(db_instance: Database, transcript_uuid: str) -> bool:
 
 
 # clear_specific_analysis/prompt call instance methods implicitly via update logic
-def clear_specific_analysis(db_instance: Database, version_uuid: str) -> bool:
+def clear_specific_analysis(db_instance: MediaDatabase, version_uuid: str) -> bool:
     """
     Clears the `analysis_content` field (sets to NULL) for a specific active DocumentVersion.
 
@@ -4341,7 +4341,7 @@ def clear_specific_analysis(db_instance: Database, version_uuid: str) -> bool:
     sync event for the `DocumentVersions` entity. Ensures the version is active.
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         version_uuid (str): The UUID of the DocumentVersion whose analysis to clear.
 
     Returns:
@@ -4353,7 +4353,7 @@ def clear_specific_analysis(db_instance: Database, version_uuid: str) -> bool:
         ConflictError: If the version's sync version changed concurrently.
         DatabaseError: For other database errors or sync logging failures.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     if not version_uuid:
         raise InputError("Version UUID required.")
@@ -4395,7 +4395,7 @@ def clear_specific_analysis(db_instance: Database, version_uuid: str) -> bool:
         raise DatabaseError(f"Unexpected clear analysis error: {e}") from e
 
 
-def clear_specific_prompt(db_instance: Database, version_uuid: str) -> bool:
+def clear_specific_prompt(db_instance: MediaDatabase, version_uuid: str) -> bool:
     """
     Clears the `prompt` field (sets to NULL) for a specific active DocumentVersion.
 
@@ -4403,7 +4403,7 @@ def clear_specific_prompt(db_instance: Database, version_uuid: str) -> bool:
     sync event for the `DocumentVersions` entity. Ensures the version is active.
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
         version_uuid (str): The UUID of the DocumentVersion whose prompt to clear.
 
     Returns:
@@ -4415,7 +4415,7 @@ def clear_specific_prompt(db_instance: Database, version_uuid: str) -> bool:
         ConflictError: If the version's sync version changed concurrently.
         DatabaseError: For other database errors or sync logging failures.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     if not version_uuid:
         raise InputError("Version UUID required.")
@@ -4458,7 +4458,7 @@ def clear_specific_prompt(db_instance: Database, version_uuid: str) -> bool:
 
 
 # Other remaining functions
-def get_chunk_text(db_instance: Database, chunk_uuid: str) -> Optional[str]:
+def get_chunk_text(db_instance: MediaDatabase, chunk_uuid: str) -> Optional[str]:
     """
     Retrieves the text content (`chunk_text`) of a specific active chunk.
 
@@ -4466,7 +4466,7 @@ def get_chunk_text(db_instance: Database, chunk_uuid: str) -> Optional[str]:
     parent Media item are active (`deleted=0`).
 
     Args:
-     db_instance (Database): An initialized Database instance.
+     db_instance (MediaDatabase): An initialized Database instance.
      chunk_uuid (str): The UUID of the chunk (from UnvectorizedMediaChunks).
 
     Returns:
@@ -4477,7 +4477,7 @@ def get_chunk_text(db_instance: Database, chunk_uuid: str) -> Optional[str]:
      InputError: If `chunk_uuid` is empty.
      DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     target_table = "UnvectorizedMediaChunks"  # Assuming this table for text
     try:
@@ -4490,7 +4490,7 @@ def get_chunk_text(db_instance: Database, chunk_uuid: str) -> Optional[str]:
         raise DatabaseError(f"Failed get chunk text {chunk_uuid}") from e
 
 
-def get_all_content_from_database(db_instance: Database) -> List[Dict[str, Any]]:
+def get_all_content_from_database(db_instance: MediaDatabase) -> List[Dict[str, Any]]:
     """
     Retrieves basic identifying information for all active, non-trashed media items.
 
@@ -4499,7 +4499,7 @@ def get_all_content_from_database(db_instance: Database) -> List[Dict[str, Any]]
     Ordered by `last_modified` descending.
 
     Args:
-        db_instance (Database): An initialized Database instance.
+        db_instance (MediaDatabase): An initialized Database instance.
 
     Returns:
         List[Dict[str, Any]]: A list of dictionaries, each representing an active
@@ -4509,7 +4509,7 @@ def get_all_content_from_database(db_instance: Database) -> List[Dict[str, Any]]
         TypeError: If `db_instance` is not a Database object.
         DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     try:
         cursor = db_instance.execute_query("SELECT id, uuid, content, title, author, type, url, ingestion_date, last_modified FROM Media WHERE deleted = 0 AND is_trash = 0 ORDER BY last_modified DESC")
@@ -4519,7 +4519,7 @@ def get_all_content_from_database(db_instance: Database) -> List[Dict[str, Any]]
         raise DatabaseError("Error retrieving all content") from e
 
 
-def permanently_delete_item(db_instance: Database, media_id: int) -> bool:
+def permanently_delete_item(db_instance: MediaDatabase, media_id: int) -> bool:
     """
         Performs a HARD delete of a media item and its related data via cascades.
 
@@ -4532,7 +4532,7 @@ def permanently_delete_item(db_instance: Database, media_id: int) -> bool:
         through the sync log. Primarily intended for cleanup or specific admin tasks.
 
         Args:
-            db_instance (Database): An initialized Database instance.
+            db_instance (MediaDatabase): An initialized Database instance.
             media_id (int): The ID of the Media item to permanently delete.
 
         Returns:
@@ -4542,7 +4542,7 @@ def permanently_delete_item(db_instance: Database, media_id: int) -> bool:
             TypeError: If `db_instance` is not a Database object.
             DatabaseError: For database errors during deletion.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     logger.warning(f"!!! PERMANENT DELETE initiated Media ID: {media_id} DB {db_instance.db_path_str}. NOT SYNCED !!!")
     try:
@@ -4572,7 +4572,7 @@ def permanently_delete_item(db_instance: Database, media_id: int) -> bool:
 
 
 # Keyword read functions use instance methods or query directly
-def fetch_keywords_for_media(media_id: int, db_instance: Database) -> List[str]:
+def fetch_keywords_for_media(media_id: int, db_instance: MediaDatabase) -> List[str]:
     """
        Fetches all active keywords associated with a specific active media item.
 
@@ -4582,7 +4582,7 @@ def fetch_keywords_for_media(media_id: int, db_instance: Database) -> List[str]:
 
        Args:
            media_id (int): The ID of the Media item.
-           db_instance (Database): An initialized Database instance.
+           db_instance (MediaDatabase): An initialized Database instance.
 
        Returns:
            List[str]: A sorted list of active keyword strings linked to the media item.
@@ -4593,7 +4593,7 @@ def fetch_keywords_for_media(media_id: int, db_instance: Database) -> List[str]:
            TypeError: If `db_instance` is not Database object or `media_id` not int.
            DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     logger.debug(f"Fetching keywords media_id={media_id} DB: {db_instance.db_path_str}")
     try:
@@ -4605,7 +4605,7 @@ def fetch_keywords_for_media(media_id: int, db_instance: Database) -> List[str]:
         raise DatabaseError(f"Failed fetch keywords {media_id}") from e
 
 
-def fetch_keywords_for_media_batch(media_ids: List[int], db_instance: Database) -> Dict[int, List[str]]:
+def fetch_keywords_for_media_batch(media_ids: List[int], db_instance: MediaDatabase) -> Dict[int, List[str]]:
     """
        Fetches active keywords for multiple active media items in a single query.
 
@@ -4615,7 +4615,7 @@ def fetch_keywords_for_media_batch(media_ids: List[int], db_instance: Database) 
 
        Args:
            media_ids (List[int]): A list of Media item IDs.
-           db_instance (Database): An initialized Database instance.
+           db_instance (MediaDatabase): An initialized Database instance.
 
        Returns:
            Dict[int, List[str]]: A dictionary where keys are the input `media_id`s
@@ -4628,7 +4628,7 @@ def fetch_keywords_for_media_batch(media_ids: List[int], db_instance: Database) 
            InputError: If `media_ids` contains non-integer values.
            DatabaseError: For database query errors.
     """
-    if not isinstance(db_instance, Database):
+    if not isinstance(db_instance, MediaDatabase):
         raise TypeError("db_instance required.")
     if not media_ids:
         return {}

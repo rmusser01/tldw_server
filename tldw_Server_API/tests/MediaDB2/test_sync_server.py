@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 #
 # Local Imports
 from tldw_Server_API.app.api.v1.endpoints.sync import ServerSyncProcessor
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
 #
 #######################################################################################################################
 #
@@ -30,7 +30,7 @@ def create_mock_log_entry(change_id, entity, uuid, op, client, version, payload_
          "version": version, "payload": payload_str # Ensure payload is string for server input
      }
 
-def get_entity_state(db: Database, entity: str, uuid: str) -> dict | None:
+def get_entity_state(db: MediaDatabase, entity: str, uuid: str) -> dict | None:
      cursor = db.execute_query(f"SELECT * FROM `{entity}` WHERE uuid = ?", (uuid,))
      row = cursor.fetchone()
      return dict(row) if row else None

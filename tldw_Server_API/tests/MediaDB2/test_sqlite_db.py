@@ -13,7 +13,7 @@ import time
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, ConflictError, DatabaseError
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase, ConflictError, DatabaseError
 
 
 #
@@ -27,11 +27,11 @@ from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, Conflic
 # Functions:
 
 # Helper to get sync log entries for assertions
-def get_log_count(db: Database, entity_uuid: str) -> int:
+def get_log_count(db: MediaDatabase, entity_uuid: str) -> int:
     cursor = db.execute_query("SELECT COUNT(*) FROM sync_log WHERE entity_uuid = ?", (entity_uuid,))
     return cursor.fetchone()[0]
 
-def get_latest_log(db: Database, entity_uuid: str) -> dict | None:
+def get_latest_log(db: MediaDatabase, entity_uuid: str) -> dict | None:
     cursor = db.execute_query(
         "SELECT * FROM sync_log WHERE entity_uuid = ? ORDER BY change_id DESC LIMIT 1",
         (entity_uuid,)
@@ -39,7 +39,7 @@ def get_latest_log(db: Database, entity_uuid: str) -> dict | None:
     row = cursor.fetchone()
     return dict(row) if row else None
 
-def get_entity_version(db: Database, entity_table: str, uuid: str) -> int | None:
+def get_entity_version(db: MediaDatabase, entity_table: str, uuid: str) -> int | None:
      cursor = db.execute_query(f"SELECT version FROM {entity_table} WHERE uuid = ?", (uuid,))
      row = cursor.fetchone()
      return row['version'] if row else None
@@ -67,16 +67,16 @@ class TestDatabaseInitialization:
     def test_missing_client_id(self):
         """Test that ValueError is raised if client_id is missing."""
         with pytest.raises(ValueError, match="Client ID cannot be empty"):
-            Database(db_path=":memory:", client_id="")
+            MediaDatabase(db_path=":memory:", client_id="")
         with pytest.raises(ValueError, match="Client ID cannot be empty"):
-            Database(db_path=":memory:", client_id=None)
+            MediaDatabase(db_path=":memory:", client_id=None)
 
 def test_schema_versioning_new_file_db(file_db): # Use the file_db fixture
     """Test that a new file DB gets the correct schema version."""
     # Initialization happened in the fixture
     cursor = file_db.execute_query("SELECT version FROM schema_version")
     version = cursor.fetchone()['version']
-    assert version == Database._CURRENT_SCHEMA_VERSION
+    assert version == MediaDatabase._CURRENT_SCHEMA_VERSION
 
 class TestDatabaseTransactions:
     def test_transaction_commit(self, memory_db_factory):
@@ -562,7 +562,7 @@ class TestDatabaseFTS:
         # return memory_db_factory("fts_client")
         temp_dir = tempfile.mkdtemp()
         db_file = Path(temp_dir) / "fts_test_db.sqlite"
-        db = Database(db_path=str(db_file), client_id="fts_client")
+        db = MediaDatabase(db_path=str(db_file), client_id="fts_client")
         yield db
         db.close_connection()
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -574,23 +574,23 @@ class TestDatabaseFTS:
         media_id, media_uuid, _ = db_instance.add_media_with_keywords(title=title, content=content, media_type="fts_test")
 
         # Search by title fragment
-        results, total = Database.search_media_db(db_instance, search_query="Alpha", search_fields=["title"])
+        results, total = MediaDatabase.search_media_db(db_instance, search_query="Alpha", search_fields=["title"])
         assert total == 1
         assert len(results) == 1
         assert results[0]['id'] == media_id
 
         # Search by content fragment
-        results, total = Database.search_media_db(db_instance, search_query="omega", search_fields=["content"])
+        results, total = MediaDatabase.search_media_db(db_instance, search_query="omega", search_fields=["content"])
         assert total == 1
         assert len(results) == 1
         assert results[0]['id'] == media_id
 
         # Search by content phrase
-        results, total = Database.search_media_db(db_instance, search_query='"omega gamma"', search_fields=["content"])
+        results, total = MediaDatabase.search_media_db(db_instance, search_query='"omega gamma"', search_fields=["content"])
         assert total == 1
 
         # Search non-existent term
-        results, total = Database.search_media_db(db_instance, search_query="nonexistent", search_fields=["content", "title"])
+        results, total = MediaDatabase.search_media_db(db_instance, search_query="nonexistent", search_fields=["content", "title"])
         assert total == 0
 
     def test_fts_media_update_search(self, db_instance):
@@ -604,7 +604,7 @@ class TestDatabaseFTS:
                                                                       media_type="fts_update")
 
         # Verify initial search works
-        results, total = Database.search_media_db(db_instance, search_query="epsilon", search_fields=["content"])
+        results, total = MediaDatabase.search_media_db(db_instance, search_query="epsilon", search_fields=["content"])
         assert total == 1
         initial_url = results[0]['url']  # Get URL for update lookup
 
@@ -617,12 +617,12 @@ class TestDatabaseFTS:
         # assert total == 0
 
         # Search for NEW content should work
-        results, total = Database.search_media_db(db_instance, search_query="delta", search_fields=["content"])
+        results, total = MediaDatabase.search_media_db(db_instance, search_query="delta", search_fields=["content"])
         assert total == 1
         assert results[0]['id'] == media_id
 
         # Search for NEW title should work
-        results, total = Database.search_media_db(db_instance, search_query="Zeta", search_fields=["title"])
+        results, total = MediaDatabase.search_media_db(db_instance, search_query="Zeta", search_fields=["title"])
         assert total == 1
         assert results[0]['id'] == media_id
 
@@ -633,7 +633,7 @@ class TestDatabaseFTS:
         media_id, media_uuid, _ = db_instance.add_media_with_keywords(title=title, content=content, media_type="fts_delete")
 
         # Verify initial search works
-        results, total = Database.search_media_db(db_instance, search_query="theta", search_fields=["content"])
+        results, total = MediaDatabase.search_media_db(db_instance, search_query="theta", search_fields=["content"])
         assert total == 1
 
         # Soft delete the media
@@ -641,7 +641,7 @@ class TestDatabaseFTS:
         assert deleted is True
 
         # Search should now fail
-        results, total = Database.search_media_db(db_instance, search_query="theta", search_fields=["content"])
+        results, total = MediaDatabase.search_media_db(db_instance, search_query="theta", search_fields=["content"])
         assert total == 0
 
     def test_fts_keyword_search(self, db_instance):

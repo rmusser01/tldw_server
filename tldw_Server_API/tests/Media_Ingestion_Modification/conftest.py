@@ -2,7 +2,7 @@
 #
 import pytest
 import sqlite3
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
 from tldw_Server_API.app.core.Utils.Utils import logging  # Ensure logging is available
 
 
@@ -21,8 +21,8 @@ def memory_db_factory():
         """
         # Generate a unique client_id for each DB instance to prevent potential collisions
         # if client_id is used for any singleton patterns or global state (though unlikely for :memory: DBs).
-        unique_client_id = f"{client_id_prefix}_{Database._generate_uuid()}"
-        db_instance = Database(db_path=":memory:", client_id=unique_client_id)
+        unique_client_id = f"{client_id_prefix}_{MediaDatabase._generate_uuid()}"
+        db_instance = MediaDatabase(db_path=":memory:", client_id=unique_client_id)
 
         # Ensure schema, including FTS tables, is created.
         # This mirrors the logic in TestDocumentVersioningV2.db_instance.
@@ -37,9 +37,9 @@ def memory_db_factory():
                     if "no such table" in str(e).lower():  # Make check case-insensitive
                         logging.warning(
                             f"FTS tables not found for {db_instance.db_path_str} (client: {unique_client_id}), attempting to create.")
-                        if hasattr(Database, '_FTS_TABLES_SQL') and Database._FTS_TABLES_SQL:
+                        if hasattr(MediaDatabase, '_FTS_TABLES_SQL') and MediaDatabase._FTS_TABLES_SQL:
                             # Execute script to create tables
-                            conn.executescript(Database._FTS_TABLES_SQL)
+                            conn.executescript(MediaDatabase._FTS_TABLES_SQL)
                             # No explicit commit needed for executescript with DDL in sqlite3 usually,
                             # but ensure your Database.execute_query or connection handling does it if required.
                             # If db.execute_query(Database._FTS_TABLES_SQL, commit=True) was used,

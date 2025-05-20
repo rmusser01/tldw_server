@@ -27,7 +27,7 @@ from tldw_Server_API.app.core.Third_Party.Arxiv import (
     convert_xml_to_markdown
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User  # For User dependency
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
 from tldw_Server_API.app.core.Third_Party.Semantic_Scholar import search_papers_semantic_scholar
 
 #
@@ -50,7 +50,7 @@ async def arxiv_search_endpoint(
         # user: User = Depends(get_request_user), # Optional: if endpoint requires auth
         search_params: ArxivSearchRequestForm = Depends(),
         Token: Optional[str] = Query(None, alias="X-Token"),
-        db: Database = Depends(get_media_db_for_user),
+        db: MediaDatabase = Depends(get_media_db_for_user),
 ):
     """
     Searches the arXiv repository based on query, author, and year.
@@ -120,7 +120,7 @@ def process_and_ingest_arxiv_paper(paper_id, additional_keywords):
         if additional_keywords:
             keywords += f",{additional_keywords}"
 
-        Database.add_media_with_keywords(
+        MediaDatabase.add_media_with_keywords(
             url=f"https://arxiv.org/abs/{paper_id}",
             title=title,
             media_type='document',

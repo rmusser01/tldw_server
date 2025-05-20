@@ -12,7 +12,7 @@ from pathlib import Path
 
 #
 # Local Imports
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, DatabaseError
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase, DatabaseError
 
 
 #
@@ -32,7 +32,7 @@ def temp_db(client_id: str = None):
         try:
             logging.debug(f"Creating temp DB instance for test: {db_path} (Client: {client_id})")
             # --- Ensure this uses the CORRECT imported Database class ---
-            db = Database(db_path=db_path, client_id=client_id)
+            db = MediaDatabase(db_path=db_path, client_id=client_id)
             # -------------------------------------------------------------
             yield db
         except (DatabaseError, sqlite3.Error) as e:
@@ -75,7 +75,7 @@ def verify_media_db_schema(db):
     # No finally block needed to close conn, as get_connection manages thread-local connection
 
 
-def create_test_media(db: Database, title: str, content: str, content_hash: str = "test_hash"):
+def create_test_media(db: MediaDatabase, title: str, content: str, content_hash: str = "test_hash"):
     """Inserts a test document media item."""
     # Now just insert:
     # Ensure all NOT NULL columns are provided (like content_hash)

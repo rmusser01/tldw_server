@@ -23,7 +23,7 @@ from tldw_Server_API.app.core.config import settings
 # Import the primary user identification dependency and User model
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
 # Import the specific Database class
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, DatabaseError, SchemaError # Adjust import path
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase, DatabaseError, SchemaError # Adjust import path
 
 #######################################################################################################################
 
@@ -43,7 +43,7 @@ if _HAS_CACHETOOLS:
     logging.info(f"Using LRUCache for user DB instances (maxsize={MAX_CACHED_DB_INSTANCES}).")
 else:
     # Keyed by user ID (int)
-    _user_db_instances: Dict[int, Database] = {} # Fallback to standard dict
+    _user_db_instances: Dict[int, MediaDatabase] = {} # Fallback to standard dict
 
 _user_db_lock = threading.Lock() # Protects access to _user_db_instances
 
@@ -77,7 +77,7 @@ def _get_db_path_for_user(user_id: int) -> Path:
 async def get_media_db_for_user(
     # Depends on the primary authentication/identification dependency
     current_user: User = Depends(get_request_user)
-) -> Database:
+) -> MediaDatabase:
     """
     FastAPI dependency to get the Database instance for the identified user.
 
@@ -100,7 +100,7 @@ async def get_media_db_for_user(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="User identification failed.")
 
     user_id = current_user.id # Will be SINGLE_USER_FIXED_ID in single-user mode
-    db_instance: Optional[Database] = None
+    db_instance: Optional[MediaDatabase] = None
 
     # --- Check Cache ---
     # Read lock implicitly handled by context manager
@@ -130,7 +130,7 @@ async def get_media_db_for_user(
 
             # Instantiate the Database class for the specific user ID's path
             # Use SERVER_CLIENT_ID assigned from settings dict
-            db_instance = Database(db_path=str(db_path), client_id=SERVER_CLIENT_ID)
+            db_instance = MediaDatabase(db_path=str(db_path), client_id=SERVER_CLIENT_ID)
 
             # --- Store in Cache ---
             _user_db_instances[user_id] = db_instance

@@ -64,7 +64,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     get_paginated_files,
 )
 from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import (
-    Database, DatabaseError,
+    MediaDatabase, DatabaseError,
     InputError,
     ConflictError,
     SchemaError,
@@ -358,7 +358,7 @@ def get_add_media_form(
 )
 async def get_media_item(
     media_id: int,
-    db: Database = Depends(get_media_db_for_user)
+    db: MediaDatabase = Depends(get_media_db_for_user)
 ):
     """
     **Retrieve Media Item by ID**
@@ -652,7 +652,7 @@ async def create_version(
     media_id: int,
     request_body: VersionCreateRequest, # Renamed for clarity (vs request object)
     # --- Use the new DB dependency ---
-    db: Database = Depends(get_media_db_for_user)
+    db: MediaDatabase = Depends(get_media_db_for_user)
 ):
     """
     **Create a New Document Version**
@@ -711,7 +711,7 @@ async def list_versions(
     limit: int = Query(10, ge=1, le=100, description="Results per page"),
     page: int = Query(1, ge=1, description="Page number"), # Use page instead of offset
     # --- Use the new DB dependency ---
-    db: Database = Depends(get_media_db_for_user)
+    db: MediaDatabase = Depends(get_media_db_for_user)
 ):
     """
     **List Active Versions for an Active Media Item**
@@ -781,7 +781,7 @@ async def get_version(
     version_number: int,
     include_content: bool = Query(True, description="Include full content in response"),
     # --- Use the new DB dependency ---
-    db: Database = Depends(get_media_db_for_user)
+    db: MediaDatabase = Depends(get_media_db_for_user)
 ):
     """
     **Get Specific Active Version Details**
@@ -830,7 +830,7 @@ async def delete_version(
     media_id: int,
     version_number: int,
     # --- Use the new DB dependency ---
-    db: Database = Depends(get_media_db_for_user)
+    db: MediaDatabase = Depends(get_media_db_for_user)
 ):
     """
     **Soft Delete a Specific Version**
@@ -903,7 +903,7 @@ async def rollback_version(
     media_id: int,
     request_body: VersionRollbackRequest, # Renamed for clarity
     # --- Use the new DB dependency ---
-    db: Database = Depends(get_media_db_for_user)
+    db: MediaDatabase = Depends(get_media_db_for_user)
 ):
     """
     **Rollback to a Previous Version**
@@ -974,7 +974,7 @@ async def update_media_item(
     media_id: int,
     payload: MediaUpdateRequest,
     # --- Use the new DB dependency ---
-    db: Database = Depends(get_media_db_for_user)
+    db: MediaDatabase = Depends(get_media_db_for_user)
 ):
     """
     **Update Media Item Details**
@@ -1182,7 +1182,7 @@ async def list_all_media(
     request: Request, # Keep request for limiter
     page: int = Query(1, ge=1, description="Page number"),
     results_per_page: int = Query(10, ge=1, le=100, description="Results per page"),
-    db: Database = Depends(get_media_db_for_user)
+    db: MediaDatabase = Depends(get_media_db_for_user)
 ):
     """
     Retrieve a paginated listing of all active (non-deleted, non-trash) media items.
@@ -1273,7 +1273,7 @@ async def search_media_items(
         search_params: SearchRequest,
         page: int = Query(1, ge=1, description="Page number"),
         results_per_page: int = Query(10, ge=1, le=100, description="Results per page"),
-        db: Database = Depends(get_media_db_for_user),
+        db: MediaDatabase = Depends(get_media_db_for_user),
         if_none_match: Optional[str] = Header(None) # For ETag
 ):
     """
@@ -1667,7 +1667,7 @@ async def _process_batch_media(
                 # FIXME
                 # Alternatively, move the check inside the executor task later.
                 # For now, let's instantiate temporarily for the check:
-                temp_db_for_check = Database(db_path=db_path, client_id=client_id)
+                temp_db_for_check = MediaDatabase(db_path=db_path, client_id=client_id)
                 model_for_check = form_data.transcription_model
                 pre_check_query = """
                                   SELECT id \
@@ -1923,7 +1923,7 @@ async def _process_batch_media(
                         worker_db = None  # Initialize
                         try:
                             # --- Instantiate DB inside the worker ---
-                            worker_db = Database(db_path=db_path, client_id=client_id)
+                            worker_db = MediaDatabase(db_path=db_path, client_id=client_id)
                             # --- Call the INSTANCE method ---
                             return worker_db.add_media_with_keywords(**db_add_kwargs)
                         finally:
@@ -2258,7 +2258,7 @@ async def _process_document_like_item(
                     worker_db = None
                     try:
                         # --- Instantiate DB inside the worker ---
-                        worker_db = Database(db_path=db_path, client_id=client_id)
+                        worker_db = MediaDatabase(db_path=db_path, client_id=client_id)
                         # --- Call the INSTANCE method ---
                         return worker_db.add_media_with_keywords(**db_add_kwargs)
                     finally:
@@ -2397,7 +2397,7 @@ async def add_media(
     token: str = Header(..., description="Authentication token"), # Placeholder for auth
     files: Optional[List[UploadFile]] = File(None, description="List of files to upload"),
     # --- DB Dependency ---
-    db: Database = Depends(get_media_db_for_user) # Use the correct dependency
+    db: MediaDatabase = Depends(get_media_db_for_user) # Use the correct dependency
 ):
     """
     **Add Media Endpoint**
@@ -2688,7 +2688,7 @@ async def process_videos_endpoint(
     # 1. Auth + UserID Determined through `get_db_by_user`
     # Add check here for granular permissions if needed
     # 2. DB Dependency
-    db: Database = Depends(get_media_db_for_user),
+    db: MediaDatabase = Depends(get_media_db_for_user),
     # 3. Form Data Dependency: Parses form fields into the Pydantic model.
     form_data: ProcessVideosForm = Depends(get_process_videos_form),
     # 4. File Uploads
@@ -3082,7 +3082,7 @@ async def process_audios_endpoint(
     # 1. Auth + UserID Determined through `get_db_by_user`
     # token: str = Header(None), # Use Header(None) for optional
     # 2. DB Dependency
-    db: Database = Depends(get_media_db_for_user),
+    db: MediaDatabase = Depends(get_media_db_for_user),
     # 3. Use Dependency Injection for Form Data
     form_data: ProcessAudiosForm = Depends(get_process_audios_form),
     # 4. File uploads remain separate
@@ -3572,7 +3572,7 @@ async def process_ebooks_endpoint(
     # 1. Auth + UserID Determined through `get_db_by_user`
     # token: str = Header(None), # Use Header(None) for optional
     # 2. DB Dependency
-    db: Database = Depends(get_media_db_for_user),
+    db: MediaDatabase = Depends(get_media_db_for_user),
     # 3. Use Dependency Injection for Form Data
     form_data: ProcessEbooksForm = Depends(get_process_ebooks_form), # Use the dependency
     # 4. File uploads remain separate
@@ -3976,7 +3976,7 @@ async def process_documents_endpoint(
     # 1. Auth + UserID Determined through `get_db_by_user`
     # token: str = Header(None), # Use Header(None) for optional
     # 2. DB Dependency
-    db: Database = Depends(get_media_db_for_user),
+    db: MediaDatabase = Depends(get_media_db_for_user),
     # 3. Form Data Dependency
     form_data: ProcessDocumentsForm = Depends(get_process_documents_form), # Use the dependency
     # 4. File Upload
@@ -4482,7 +4482,7 @@ async def process_pdfs_endpoint(
     # 1. Auth + UserID Determined through `get_db_by_user`
     # token: str = Header(None), # Use Header(None) for optional
     # 2. DB Dependency
-    db: Database = Depends(get_media_db_for_user),
+    db: MediaDatabase = Depends(get_media_db_for_user),
     form_data: ProcessPDFsForm = Depends(get_process_pdfs_form),
     files: Optional[List[UploadFile]] = File(None,  description="PDF uploads"),
 ):
@@ -5333,7 +5333,7 @@ async def process_web_scraping_endpoint(
         # 1. Auth + UserID Determined through `get_db_by_user`
         # token: str = Header(None), # Use Header(None) for optional
         # 2. DB Dependency
-        db: Database = Depends(get_media_db_for_user),
+        db: MediaDatabase = Depends(get_media_db_for_user),
     ):
     """
     Ingest / scrape data from websites or sitemaps, optionally summarize,
@@ -5377,7 +5377,7 @@ async def debug_schema(
         # 1. Auth + UserID Determined through `get_db_by_user`
         # token: str = Header(None), # Use Header(None) for optional
         # 2. DB Dependency
-        db: Database = Depends(get_media_db_for_user),
+        db: MediaDatabase = Depends(get_media_db_for_user),
     ):
     """Diagnostic endpoint to check database schema."""
     try:

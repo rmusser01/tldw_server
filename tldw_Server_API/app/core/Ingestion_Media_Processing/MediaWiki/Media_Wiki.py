@@ -18,7 +18,7 @@ import mwxml
 import yaml
 #
 # Local Imports
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import process_and_store_content
 from tldw_Server_API.app.core.Utils.Utils import logging
 #
@@ -201,7 +201,7 @@ def process_single_item(
             # Ensure ingestion_date is a string in 'YYYY-MM-DD' format
             ingestion_date_str = timestamp_dt.strftime('%Y-%m-%d')
 
-            result = Database.add_media_with_keywords(  # This function is from App_Function_Libraries.DB.DB_Manager
+            result = MediaDatabase.add_media_with_keywords(  # This function is from App_Function_Libraries.DB.DB_Manager
                 url=url,
                 title=title,
                 media_type="mediawiki_page",  # Adjusted type

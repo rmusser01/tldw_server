@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Any  # Added for type hinting
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database
+from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
 
 #
 # Local Imports (ensure path is correct if this file is moved/used elsewhere)

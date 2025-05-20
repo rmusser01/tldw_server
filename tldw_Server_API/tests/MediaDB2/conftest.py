@@ -12,7 +12,7 @@ sys.path.insert(0, str(src_path))
 
 # Now import after modifying path
 try:
-    from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database
+    from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
 except ImportError as e:
     print(f"ERROR in conftest: Could not import Database from sqlite_db. Error: {e}")
     # Define dummy class if import fails to avoid crashing pytest collection
@@ -50,7 +50,7 @@ def memory_db_factory():
     """Factory fixture to create in-memory Database instances."""
     created_dbs = []
     def _create_db(client_id="test_client"):
-        db = Database(db_path=":memory:", client_id=client_id)
+        db = MediaDatabase(db_path=":memory:", client_id=client_id)
         created_dbs.append(db)
         return db
     yield _create_db
@@ -64,7 +64,7 @@ def memory_db_factory():
 @pytest.fixture(scope="function")
 def file_db(temp_db_path):
     """Creates a file-based Database instance using a temporary path."""
-    db = Database(db_path=temp_db_path, client_id="file_client")
+    db = MediaDatabase(db_path=temp_db_path, client_id="file_client")
     yield db
     db.close_connection() # Ensure connection is closed
 

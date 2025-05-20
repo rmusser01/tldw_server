@@ -98,6 +98,7 @@ openai_tts_mappings = {
     }
 }
 
+
 # --- Helper Function (Optional but can keep dictionary creation clean) ---
 def load_settings():
     """Loads all settings from environment variables or defaults into a dictionary."""
@@ -123,11 +124,10 @@ def load_settings():
     jwt_algorithm = "HS256"
     access_token_expire_minutes = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
-    # --- Database Settings ---
-    # User-specific SQLite databases: ACTUAL_PROJECT_ROOT/user_databases/
-    default_user_db_base_dir = ACTUAL_PROJECT_ROOT / "user_databases"
-    user_db_base_dir_str = os.getenv("USER_DB_BASE_DIR", str(default_user_db_base_dir.resolve()))
-    user_db_base_dir = Path(user_db_base_dir_str)
+    # Base directory for all user-specific data: ACTUAL_PROJECT_ROOT/user_databases/
+    default_user_data_base_dir = ACTUAL_PROJECT_ROOT / "user_databases"
+    user_data_base_dir_str = os.getenv("USER_DB_BASE_DIR", str(default_user_data_base_dir.resolve()))
+    user_data_base_dir = Path(user_data_base_dir_str)
 
     # Main/central SQLite database: ACTUAL_PROJECT_ROOT/tldw_data/databases/tldw.db
     default_main_db_path = (ACTUAL_PROJECT_ROOT / "tldw_data" / "databases" / "tldw.db").resolve()
@@ -135,16 +135,20 @@ def load_settings():
     database_url = os.getenv("DATABASE_URL", default_database_url)
 
     users_db_configured = os.getenv("USERS_DB_ENABLED", "false").lower() == "true"
-
-    # ChromaDB Path: ACTUAL_PROJECT_ROOT/chroma_db/
-    default_chroma_db_path = (ACTUAL_PROJECT_ROOT / "chroma_db").resolve()
-    chroma_db_path_str = os.getenv("CHROMA_DB_PATH", str(default_chroma_db_path))
-    chroma_db_path = Path(chroma_db_path_str)
-
-    # --- Logging ---
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
-    # --- Build the Settings Dictionary ---
+    # Load comprehensive configurations (API keys, embedding settings, etc.)
+    comprehensive_config = {}
+    try:
+        comprehensive_config = load_and_log_configs() # This function is already defined in your provided code
+        if comprehensive_config is None:
+            logger.error("Failed to load comprehensive_config, will use fallbacks for some settings.")
+            comprehensive_config = {} # Ensure it's a dict to avoid errors on .get()
+    except Exception as e:
+        logger.error(f"Error loading comprehensive_config: {e}", exc_info=True)
+        comprehensive_config = {}
+
+
     config_dict = {
         # General App
         "APP_MODE_STR": single_user_mode_str,
@@ -160,15 +164,27 @@ def load_settings():
         "JWT_SECRET_KEY": jwt_secret_key,
         "JWT_ALGORITHM": jwt_algorithm,
         "ACCESS_TOKEN_EXPIRE_MINUTES": access_token_expire_minutes,
-
-        # Database
         "DATABASE_URL": database_url,
-        "USER_DB_BASE_DIR": user_db_base_dir,
+        "USER_DB_BASE_DIR": user_data_base_dir, # Renamed for clarity (was user_db_base_dir)
         "USERS_DB_CONFIGURED": users_db_configured,
-        "CHROMA_DB_PATH": chroma_db_path,
-
-        # Server Specific
         "SERVER_CLIENT_ID": SERVER_CLIENT_ID,
+
+        # Merge relevant parts from comprehensive_config
+        # Embedding Config
+        "EMBEDDING_CONFIG": comprehensive_config.get("embedding_config", {
+            'embedding_provider': 'openai', # Fallback defaults
+            'embedding_model': 'text-embedding-3-small',
+            'onnx_model_path': "./App_Function_Libraries/onnx_models/text-embedding-3-small.onnx",
+            'model_dir': "./App_Function_Libraries/onnx_models",
+            'embedding_api_url': "http://localhost:8080/v1/embeddings",
+            'embedding_api_key': '',
+            'chunk_size': 400,
+            'chunk_overlap': 200
+        }),
+        # Add other configs from comprehensive_config as needed
+        "OPENAI_API_KEY": comprehensive_config.get("openai_api", {}).get("api_key", os.getenv("OPENAI_API_KEY")),
+        # You can continue to merge other specific keys or whole sections
+        "COMPREHENSIVE_CONFIG_RAW": comprehensive_config # Store the raw one if needed elsewhere
     }
 
     # --- Warnings ---

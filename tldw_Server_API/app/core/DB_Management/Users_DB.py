@@ -13,7 +13,7 @@ from fastapi import Depends, HTTPException
 # Local Imports
 
 from tldw_Server_API.app.core.Security.Security import decode_access_token
-from tldw_Server_API.app.core.DB_Management.DB_Manager import Database # or your custom class
+from tldw_Server_API.app.core.DB_Management.DB_Manager import MediaDatabase # or your custom class
 #
 #######################################################################################################################
 #
@@ -63,7 +63,7 @@ def get_user_db_path(user_id: int, db_name: str) -> str:
 def get_user_db(
         token: str,
         db_name: str,
-) -> Database:
+) -> MediaDatabase:
     """
     1) Decode the token to find user_id
     2) Construct a path for the user's DB
@@ -78,5 +78,5 @@ def get_user_db(
     user_id = payload.get("user_id")  # or fetch it from your user table by username
 
     path = get_user_db_path(user_id=user_id, db_name=db_name)
-    db_instance = Database(os.path.basename(path))  # or pass the entire path
+    db_instance = MediaDatabase(os.path.basename(path))  # or pass the entire path
     return db_instance

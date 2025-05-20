@@ -32,7 +32,7 @@ try:
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User, _single_user_instance
     from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
     from tldw_Server_API.app.core.config import settings
-    from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import Database, get_document_version
+    from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase, get_document_version
 except ImportError as e:
     raise ImportError(f"Could not locate the FastAPI app instance or dependencies: {e}")
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ChunkMethod, MediaType, PdfEngine
@@ -189,7 +189,7 @@ def memory_db_factory_local():  # Using a different name to avoid conflicts if o
         generated_uuid_str = str(uuid.uuid4())  # Direct UUID generation
         unique_client_id = f"{client_id_prefix}_{generated_uuid_str}"
 
-        db_instance = Database(db_path=":memory:", client_id=unique_client_id)
+        db_instance = MediaDatabase(db_path=":memory:", client_id=unique_client_id)
 
         try:
             with db_instance.get_connection() as conn:
@@ -200,8 +200,8 @@ def memory_db_factory_local():  # Using a different name to avoid conflicts if o
                     if "no such table" in str(e).lower():
                         logging.warning(
                             f"FTS tables not found for {db_instance.db_path_str} (client: {unique_client_id}), attempting to create.")
-                        if hasattr(Database, '_FTS_TABLES_SQL') and Database._FTS_TABLES_SQL:
-                            conn.executescript(Database._FTS_TABLES_SQL)
+                        if hasattr(MediaDatabase, '_FTS_TABLES_SQL') and MediaDatabase._FTS_TABLES_SQL:
+                            conn.executescript(MediaDatabase._FTS_TABLES_SQL)
                             logging.info(
                                 f"FTS tables created for {db_instance.db_path_str} (client: {unique_client_id}).")
                         else:
@@ -1485,12 +1485,12 @@ class TestDocumentVersioningV2:
 
         # 7. Verify FTS Update
         # Search for the rolled-back content (V1 content)
-        results_fts, total_fts = Database.search_media_db(db_instance, search_query='"Original"', search_fields=["content"])
+        results_fts, total_fts = MediaDatabase.search_media_db(db_instance, search_query='"Original"', search_fields=["content"])
         assert total_fts == 1
         assert results_fts[0]['id'] == media_id
 
         # Search for the previous content (V2 content) - should not be found in main search
-        results_fts_old, total_fts_old = Database.search_media_db(db_instance, search_query='"Changed"', search_fields=["content"])
+        results_fts_old, total_fts_old = MediaDatabase.search_media_db(db_instance, search_query='"Changed"', search_fields=["content"])
         assert total_fts_old == 0
 
     def test_rollback_to_nonexistent_version(self, db_instance):
