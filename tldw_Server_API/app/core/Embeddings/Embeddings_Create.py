@@ -27,8 +27,11 @@ from tldw_Server_API.app.core.config import load_and_log_configs
 
 # Load configuration
 loaded_config = load_and_log_configs()
+default_embedding_provider = loaded_config['embedding_config']['embedding_provider']
 embedding_provider = loaded_config['embedding_config']['embedding_provider']
+default_embedding_model = loaded_config['embedding_config']['embedding_model']
 embedding_model = loaded_config['embedding_config']['embedding_model']
+default_embedding_api_url = loaded_config['embedding_config']['embedding_api_url']
 embedding_api_url = loaded_config['embedding_config']['embedding_api_url']
 embedding_api_key = loaded_config['embedding_config']['embedding_api_key']
 model_dir = loaded_config['embedding_config']['model_dir'] or './App_Function_Libraries/models/embedding_models/'
@@ -361,8 +364,6 @@ def create_embedding(text: str,
     Creates an embedding for a single text.
     Uses globally configured defaults but allows overrides.
     """
-    global default_embedding_provider, default_embedding_model, default_embedding_api_url
-
     model_to_use = model_override if model_override else default_embedding_model
     provider_to_use = provider_override if provider_override else default_embedding_provider
     api_url_to_use = api_url_override if api_url_override else default_embedding_api_url

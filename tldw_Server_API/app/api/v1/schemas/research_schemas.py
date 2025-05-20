@@ -10,6 +10,9 @@ from pydantic import BaseModel
 #
 # Local Imports
 from tldw_Server_API.app.core.Third_Party.Arxiv import ARXIV_DEFAULT_PAGE_SIZE
+from tldw_Server_API.app.core.Third_Party.Semantic_Scholar import FIELDS_OF_STUDY_CHOICES, PUBLICATION_TYPE_CHOICES
+
+
 #
 #########################################################################################################################
 #

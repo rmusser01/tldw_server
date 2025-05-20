@@ -19,7 +19,6 @@ import yaml
 #
 # Local Imports
 from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
-from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import process_and_store_content
 from tldw_Server_API.app.core.Utils.Utils import logging
 #
 #######################################################################################################################
@@ -27,7 +26,7 @@ from tldw_Server_API.app.core.Utils.Utils import logging
 # Functions:
 # Load configuration
 def load_mediawiki_import_config():
-    config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'Config_Files', 'mediawiki_import_config.yaml')
+    config_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'Config_Files', 'mediawiki_import_config.yaml')
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
@@ -237,16 +236,18 @@ def process_single_item(
                         # process_and_store_content(content: str, collection_name: str, media_id: int, file_name: str,
                         #                           create_embeddings: bool = False, create_summary: bool = False,
                         #                           api_name: str = None, api_key: str = None):
-                        process_and_store_content(
-                            chunk_dict['text'],
-                            f"mediawiki_{wiki_name}",
-                            media_id,
-                            title,  # Use page title as file_name context for vector DB
-                            create_embeddings=True,
-                            create_summary=True,  # Set to True if you want summaries per chunk via LLM
-                            api_name=api_name_vector_db,
-                            api_key=api_key_vector_db  # Pass the API key
-                        )
+                        pass
+                        # FIXME
+                        # process_and_store_content(
+                        #     chunk_dict['text'],
+                        #     f"mediawiki_{wiki_name}",
+                        #     media_id,
+                        #     title,  # Use page title as file_name context for vector DB
+                        #     create_embeddings=True,
+                        #     create_summary=True,  # Set to True if you want summaries per chunk via LLM
+                        #     api_name=api_name_vector_db,
+                        #     api_key=api_key_vector_db  # Pass the API key
+                        # )
                     except Exception as e_vec:
                         logging.error(f"Failed to store chunk {i + 1} for '{title}' to vector DB: {e_vec}")
                         processed_data["message"] += f" Error storing chunk {i + 1} to vector DB."

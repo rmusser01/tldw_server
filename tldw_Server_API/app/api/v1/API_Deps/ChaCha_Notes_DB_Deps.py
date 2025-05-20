@@ -22,45 +22,38 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 
 # --- Configuration ---
 _HAS_CACHETOOLS = True
-# Define a specific base directory for ChaChaNotes DBs, or fallback
-# Ensure USER_CHACHA_DB_BASE_DIR is defined in your settings, or adjust the default.
-DEFAULT_CHACHA_DB_SUBDIR = "chachanotes_user_dbs"
-USER_CHACHA_DB_BASE_DIR_STR = settings.get("user_db_base_dir")
-if USER_CHACHA_DB_BASE_DIR_STR:
-    USER_CHACHA_DB_BASE_DIR = Path(USER_CHACHA_DB_BASE_DIR_STR)
-else:
-    # Fallback to a subdir under the general USER_DB_BASE_DIR if USER_CHACHA_DB_BASE_DIR is not set
-    USER_DB_BASE_DIR_STR = settings.get("user_db_base_dir")
-    if not USER_DB_BASE_DIR_STR:
-        logging.error("CRITICAL: user_db_base_dir is not configured in settings. Cannot determine ChaChaNotes DB path.")
-        # This should ideally prevent the app from starting or be handled gracefully.
-        # For now, using a placeholder that will likely cause issues if not configured:
-        USER_DB_BASE_DIR_STR = "./data/user_dbs"  # Placeholder, ensure this is configured
-        logging.warning(f"USER_DB_BASE_DIR not set, using placeholder: {USER_DB_BASE_DIR_STR}")
-    USER_CHACHA_DB_BASE_DIR = Path(USER_DB_BASE_DIR_STR) / DEFAULT_CHACHA_DB_SUBDIR
-    logging.info(f"USER_CHACHA_DB_BASE_DIR not explicitly set, defaulting to: {USER_CHACHA_DB_BASE_DIR}")
+DEFAULT_CHACHA_DB_SUBDIR = "chachanotes_user_dbs" # This will be a sub-directory within the user's main DB directory
+
+# Get the main user database base directory from settings
+# THIS IS THE MAIN DIRECTORY FOR A USER, e.g., /project_root/user_databases/
+MAIN_USER_DATA_BASE_DIR = settings.get("USER_DB_BASE_DIR")
+
+if not MAIN_USER_DATA_BASE_DIR:
+    logging.critical("CRITICAL: USER_DB_BASE_DIR is not configured in settings. Cannot determine ChaChaNotes DB path structure.")
+    # This is a fatal configuration error. The application might not function correctly.
+    # Using a hardcoded fallback here to prevent immediate crash during startup for debugging,
+    # but this signals a setup problem.
+    MAIN_USER_DATA_BASE_DIR = Path("./app_data/user_databases_fallback").resolve()
+    logging.error(f"USER_DB_BASE_DIR missing from settings, using emergency fallback: {MAIN_USER_DATA_BASE_DIR}")
+
+# USER_CHACHA_DB_BASE_DIR will now be defined *per user* inside _get_chacha_db_path_for_user
+# We only need the main base directory here at the module level.
 
 SERVER_CLIENT_ID = settings.get("SERVER_CLIENT_ID")
 if not SERVER_CLIENT_ID:
     logging.error("CRITICAL: SERVER_CLIENT_ID is not configured in settings.")
-    SERVER_CLIENT_ID = "default_server_client_id"  # Placeholder
+    SERVER_CLIENT_ID = "default_server_client_id"
     logging.warning(f"SERVER_CLIENT_ID not set, using placeholder: {SERVER_CLIENT_ID}")
 
-# Ensure base directory for ChaChaNotes exists
-try:
-    USER_CHACHA_DB_BASE_DIR.mkdir(parents=True, exist_ok=True)
-    logging.info(f"ChaChaNotes base directory ensured: {USER_CHACHA_DB_BASE_DIR}")
-except OSError as e:
-    logging.error(f"Could not create ChaChaNotes base DB directory {USER_CHACHA_DB_BASE_DIR}: {e}", exc_info=True)
-    # Depending on application startup, this might be a fatal error.
+# Global directory creation for a *common* ChaChaNotes base is removed
+# as each user gets their DB under their own USER_DB_BASE_DIR/user_id/
 
 # +++ Default Character Configuration +++
 DEFAULT_CHARACTER_NAME = "Default Character"
 DEFAULT_CHARACTER_DESCRIPTION = "This is a default character created by the system."
 
 # --- Global Cache for ChaChaNotes DB Instances ---
-MAX_CACHED_CHACHA_DB_INSTANCES = settings.get("MAX_CACHED_CHACHA_DB_INSTANCES",
-                                              20)  # Reduced default for potentially larger DBs
+MAX_CACHED_CHACHA_DB_INSTANCES = settings.get("MAX_CACHED_CHACHA_DB_INSTANCES", 20)
 
 if _HAS_CACHETOOLS:
     _chacha_db_instances: LRUCache = LRUCache(maxsize=MAX_CACHED_CHACHA_DB_INSTANCES)
@@ -79,16 +72,23 @@ def _get_chacha_db_path_for_user(user_id: int) -> Path:
     """
     Determines the database file path for a given user ID for ChaChaNotes.
     Ensures the user's specific directory exists.
+    The path will be USER_DB_BASE_DIR / <user_id> / chachanotes_user_dbs / user_chacha_notes_rag.sqlite
     """
     user_dir_name = str(user_id)
-    user_dir = USER_CHACHA_DB_BASE_DIR / user_dir_name
-    db_file = user_dir / "user_chacha_notes_rag.sqlite"  # Consistent naming
+    # MAIN_USER_DATA_BASE_DIR is from settings (e.g. /project_root/user_databases)
+    # DEFAULT_CHACHA_DB_SUBDIR is "chachanotes_user_dbs"
+
+    # Path: /project_root/user_databases/<user_id>/chachanotes_user_dbs/
+    user_specific_chacha_base_dir = MAIN_USER_DATA_BASE_DIR / user_dir_name / DEFAULT_CHACHA_DB_SUBDIR
+    db_file = user_specific_chacha_base_dir / "user_chacha_notes_rag.sqlite"
 
     try:
-        user_dir.mkdir(parents=True, exist_ok=True)
+        user_specific_chacha_base_dir.mkdir(parents=True, exist_ok=True)
+        logging.info(f"Ensured ChaChaNotes DB directory for user {user_id}: {user_specific_chacha_base_dir}")
     except OSError as e:
-        logging.error(f"Could not create ChaChaNotes DB directory for user_id {user_id} at {user_dir}: {e}",
-                      exc_info=True)
+        logging.error(
+            f"Could not create ChaChaNotes DB directory for user_id {user_id} at {user_specific_chacha_base_dir}: {e}",
+            exc_info=True)
         raise IOError(f"Could not initialize ChaChaNotes storage directory for user {user_id}.") from e
     return db_file
 

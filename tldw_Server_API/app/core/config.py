@@ -129,8 +129,8 @@ def load_settings():
     user_data_base_dir_str = os.getenv("USER_DB_BASE_DIR", str(default_user_data_base_dir.resolve()))
     user_data_base_dir = Path(user_data_base_dir_str)
 
-    # Main/central SQLite database: ACTUAL_PROJECT_ROOT/tldw_data/databases/tldw.db
-    default_main_db_path = (ACTUAL_PROJECT_ROOT / "tldw_data" / "databases" / "tldw.db").resolve()
+    # Main/central SQLite database: ACTUAL_PROJECT_ROOT/user_databases/databases/tldw.db
+    default_main_db_path = (ACTUAL_PROJECT_ROOT / "user_databases" / f"{single_user_fixed_id}" / "tldw.db").resolve()
     default_database_url = f"sqlite:///{default_main_db_path}"
     database_url = os.getenv("DATABASE_URL", default_database_url)
 
@@ -208,13 +208,9 @@ def load_settings():
         main_db_file_path.parent.mkdir(parents=True, exist_ok=True)
         logger.info(f"Ensured main SQLite database directory exists: {main_db_file_path.parent}")
 
-    # Ensure user SQLite database base directory exists
+    # Ensure USER_DB_BASE_DIR exists (base for user-specific SQLite and ChromaDB)
     config_dict["USER_DB_BASE_DIR"].mkdir(parents=True, exist_ok=True)
-    logger.info(f"Ensured user SQLite database base directory exists: {config_dict['USER_DB_BASE_DIR']}")
-
-    # Ensure ChromaDB directory exists
-    config_dict["CHROMA_DB_PATH"].mkdir(parents=True, exist_ok=True)
-    logger.info(f"Ensured ChromaDB directory exists: {config_dict['CHROMA_DB_PATH']}")
+    logger.info(f"Ensured user data base directory exists: {config_dict['USER_DB_BASE_DIR']}")
 
     return config_dict
 

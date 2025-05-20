@@ -25,31 +25,10 @@ from tldw_Server_API.app.core.config import load_and_log_configs
 #
 #######################################################################################################################
 #
-# Config Settings for ChromaDB Functions
-#
-# FIXME - Refactor so that all globals are set in summarize.py
-# Load config
-config = load_and_log_configs()
-#
-# ChromaDB settings
-chroma_db_path = config['db_config']['chroma_db_path'] or get_database_path('chroma_db')
-ensure_directory_exists(chroma_db_path)
-chroma_client = chromadb.PersistentClient(path=chroma_db_path, settings=Settings(anonymized_telemetry=False))
-#
-# Embedding settings
-embedding_provider = config['embedding_config']['embedding_provider'] or 'openai'
-embedding_model = config['embedding_config']['embedding_model'] or 'text-embedding-3-small'
-embedding_api_key = config['embedding_config']['embedding_api_key'] or ''
-embedding_api_url = config['embedding_config']['embedding_api_url'] or ''
-#
-# End of Config Settings
-#######################################################################################################################
-#
 # Functions:
 
 #_chroma_lock = threading.Lock()
 _chroma_lock = threading.RLock()
-
 
 class ChromaDBManager:
     """
