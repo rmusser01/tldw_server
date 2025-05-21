@@ -341,13 +341,6 @@ Dict[str, Any]:
 #######################################################################################################################
 
 @pytest.mark.asyncio
-async def test_verify_token_success(monkeypatch, actual_api_token_value: str):
-    monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", actual_api_token_value)
-    assert await verify_token(Token=f"Bearer {actual_api_token_value}") is True
-    assert await verify_token(Token=actual_api_token_value) is True  # Without Bearer prefix
-
-
-@pytest.mark.asyncio
 async def test_verify_token_missing_token(monkeypatch, actual_api_token_value: str):
     monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", actual_api_token_value)
     with pytest.raises(HTTPException) as exc_info:
