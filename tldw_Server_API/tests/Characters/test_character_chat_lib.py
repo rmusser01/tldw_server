@@ -12,11 +12,11 @@ import io
 import json
 import os
 import time
-
 import yaml
-from PIL import Image as PILImageReal
 #
 # Third Party Imports
+from PIL import Image as PILImageReal
+from loguru import logger as loguru_logger
 #
 # Local Imports
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib import (
@@ -74,17 +74,16 @@ MODULE_PATH_PREFIX = "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib
 
 # --- Mock PIL Image object for finer control during unit tests where PIL is mocked ---
 class MockPILImageObject:
-    def __init__(self, format="PNG", info=None, width=100, height=100):
+    def __init__(self, format="PNG", info=None, width=100, height=100, mode="RGBA"): # mode was added here
         self.format = format
         self.info = info if info is not None else {}
         self.width = width
         self.height = height
-        self.fp = None  # To mimic file pointer handling for close
-        self.mode = "RGBA"  # Default mode after convert
+        self.fp = None
+        self.mode = mode # And used here
 
     def convert(self, mode):
-        new_mock = MockPILImageObject(format=self.format, info=self.info.copy(), width=self.width, height=self.height)
-        new_mock.mode = mode
+        new_mock = MockPILImageObject(format=self.format, info=self.info.copy(), width=self.width, height=self.height, mode=mode)
         return new_mock
 
     def close(self):
@@ -139,24 +138,30 @@ def db():
 # --- Pytest Fixture for Capturing Logs (using standard logging) ---
 @pytest.fixture
 def caplog_handler(caplog):
-    """Fixture to correctly set up loguru to work with pytest's caplog."""
-    # This assumes loguru is the logger used by Character_Chat_Lib.py
-    # If Character_Chat_Lib.py directly uses standard logging, this might not be needed
-    # or might need adjustment based on how loguru is configured in the library.
-    # For now, we'll assume the library's logger is the root logger or a child.
-    # Pytest's caplog fixture captures standard logging.
-    # If loguru is configured to propagate to root, caplog should get it.
-    # If Character_Chat_Lib specifically uses its own loguru instance, direct loguru capture needed.
-    # For simplicity, let's assume standard logging capture works or library uses standard logging.
-    # No special loguru setup needed here if it propagates.
-    # If Character_Chat_Lib.logger is a specific loguru instance:
-    # from loguru import logger as loguru_logger
-    # handler_id = loguru_logger.add(your_capture_sink_function, level="DEBUG")
-    # yield caplog
-    # loguru_logger.remove(handler_id)
-    # For now, relying on pytest's default caplog with standard logging.
-    caplog.set_level(logging.DEBUG)  # Capture from DEBUG level upwards
-    return caplog
+    """
+    Fixture to correctly set up loguru to work with pytest's caplog.
+    It adds a handler that propagates loguru messages to the standard logging system.
+    """
+
+    # Ensure Loguru's default handler is removed if it exists, to avoid duplicate console output
+    # or configure it not to print to stderr during tests if that's preferred.
+    # For simplicity here, we just add a new handler for caplog.
+
+    class PropagateHandler(logging.Handler):
+        def emit(self, record):
+            logging.getLogger(record.name).handle(record)
+
+    # Add a handler to loguru that propagates to standard logging
+    # Use a unique name for the handler to avoid issues if tests are run multiple times in a session
+    handler_id = loguru_logger.add(PropagateHandler(), format="{message}", level="DEBUG")
+
+    caplog.set_level(logging.DEBUG, logger="tldw_Server_API")  # Capture DEBUG from your app's logger namespace
+    caplog.set_level(logging.DEBUG)  # And generally
+
+    yield caplog  # Test runs here
+
+    # Remove the handler after the test
+    loguru_logger.remove(handler_id)
 
 
 # --- Unit Tests (Pure Logic) ---
@@ -359,38 +364,43 @@ def test_import_character_card_from_json_string_unit(mock_parse_v1, mock_parse_v
 
 @mock.patch(f"{MODULE_PATH_PREFIX}.import_character_card_from_json_string")
 @mock.patch(f"{MODULE_PATH_PREFIX}.yaml")
-def test_load_character_card_from_string_content_unit(mock_yaml_module, mock_import_json_str, caplog_handler):
+def test_load_character_card_from_string_content_unit(mock_yaml_module, mock_import_json_str,
+                                                      caplog_handler):  # caplog_handler now works
     mock_import_json_str.return_value = {"name": "Loaded"}
     json_content = json.dumps(MINIMAL_V1_CARD_UNIT)
     assert load_character_card_from_string_content(json_content)["name"] == "Loaded"
 
-    yaml_text = "name: YChar\nd: D\nfm: F\nme: ME\np: P\ns: S"  # simplified for this test
+    yaml_text = "name: YChar\ndescription: D\nfirst_mes: FM\nmes_example: ME\npersonality: P\nscenario: S"
     yaml_front = f"---\n{yaml_text}\n---"
-    mock_yaml_module.safe_load.return_value = {"name": "YChar", "d": "D", "fm": "F", "me": "ME", "p": "P", "s": "S"}
-    expected_json = json.dumps(mock_yaml_module.safe_load.return_value)
-    load_character_card_from_string_content(yaml_front)
-    mock_import_json_str.assert_called_with(expected_json)
 
-    # Test missing PyYAML
-    mock_yaml_module.YAMLError = Exception  # To simulate yaml.YAMLError if yaml itself is mocked
+    expected_dict_from_yaml = {
+        "name": "YChar", "description": "D", "first_mes": "FM",
+        "mes_example": "ME", "personality": "P", "scenario": "S"
+    }
+    mock_yaml_module.safe_load.return_value = expected_dict_from_yaml
+    expected_json_to_import_func = json.dumps(expected_dict_from_yaml)
+
+    load_character_card_from_string_content(yaml_front)
+    mock_import_json_str.assert_called_with(expected_json_to_import_func)
+
+    mock_yaml_module.YAMLError = yaml.YAMLError
     mock_yaml_module.safe_load.side_effect = ImportError("No module named 'yaml'")
     with pytest.raises(ImportError, match="No module named 'yaml'"):
         load_character_card_from_string_content(yaml_front)
-    mock_yaml_module.safe_load.side_effect = None  # Reset
+    mock_yaml_module.safe_load.side_effect = None
 
-    # Test malformed YAML frontmatter (should fall through and potentially log error)
     malformed_yaml = "---\nkey: [missing_bracket\n---"
     mock_yaml_module.safe_load.side_effect = yaml.YAMLError("YAML parsing error")
-    # It should then try to find JSON block, or fail. Assuming no JSON block:
     mock_import_json_str.reset_mock()
     result = load_character_card_from_string_content(malformed_yaml)
-    assert result is None  # Fails to find any valid structure
-    assert "Error parsing YAML frontmatter" in caplog_handler.text
+    assert result is None
+    assert "Error parsing YAML frontmatter" in caplog_handler.text  # Should pass now
+    mock_import_json_str.assert_not_called()
     mock_yaml_module.safe_load.side_effect = None
 
 
 @mock.patch(f"{MODULE_PATH_PREFIX}.Image", new_callable=mock.MagicMock)
-@mock.patch(f"{MODULE_PATH_PREFIX}.base64")
+@mock.patch(f"{MODULE_PATH_PREFIX}.base64")  # This is the base64 module *used by Character_Chat_Lib*
 @mock.patch(f"{MODULE_PATH_PREFIX}.json")
 def test_extract_json_from_image_file_unit(mock_json_loads_mod, mock_base64_mod, MockPILImageModule, tmp_path,
                                            caplog_handler):
@@ -398,36 +408,69 @@ def test_extract_json_from_image_file_unit(mock_json_loads_mod, mock_base64_mod,
     MockPILImageModule.open.return_value = mock_img_instance
 
     chara_json_str = '{"name": "CharaFromImage"}'
-    b64_encoded = base64.b64encode(chara_json_str.encode('utf-8')).decode('utf-8')
-    mock_img_instance.info = {'chara': b64_encoded};
+    b64_encoded_bytes = base64.b64encode(chara_json_str.encode('utf-8'))
+    b64_encoded_str = b64_encoded_bytes.decode('utf-8')
+
+    mock_img_instance.info = {'chara': b64_encoded_str};
     mock_img_instance.format = 'PNG'
-    mock_base64_mod.b64decode.return_value = chara_json_str.encode('utf-8')
+
+    # Default good path return values
+    default_b64_return = chara_json_str.encode('utf-8')
+    mock_base64_mod.b64decode.return_value = default_b64_return
     mock_json_loads_mod.loads.return_value = json.loads(chara_json_str)
 
-    # File path
     dummy_png_path = tmp_path / "test_unit.png";
-    dummy_png_path.write_text("dummy_content")
-    assert extract_json_from_image_file(str(dummy_png_path)) == chara_json_str
+    dummy_png_path.write_text("dummy_content_for_file_existence")
 
-    # Non-PNG with chara key (should log warning but still process)
+    result = extract_json_from_image_file(str(dummy_png_path))
+    assert result == chara_json_str
+    MockPILImageModule.open.assert_called_once()
+    assert isinstance(MockPILImageModule.open.call_args[0][0], io.BytesIO)
+    mock_base64_mod.b64decode.assert_called_once_with(b64_encoded_str)
+    mock_json_loads_mod.loads.assert_called_once_with(chara_json_str)
+
+    MockPILImageModule.open.reset_mock()
+    mock_base64_mod.b64decode.reset_mock()
+    mock_json_loads_mod.loads.reset_mock()
+    caplog_handler.clear()
+
+    # Test Non-PNG with chara key
     mock_img_instance.format = 'JPEG'
+    # Ensure mocks are set for this path too if they were reset
+    mock_base64_mod.b64decode.return_value = default_b64_return
+    mock_json_loads_mod.loads.return_value = json.loads(chara_json_str)
     assert extract_json_from_image_file(str(dummy_png_path)) == chara_json_str
     assert "not in PNG format" in caplog_handler.text
     caplog_handler.clear()
+    mock_img_instance.format = 'PNG'  # Reset format
 
-    # Error in b64decode
-    mock_base64_mod.b64decode.side_effect = binascii.Error("bad b64")
+    # --- Test error in b64decode / subsequent decode ---
+    # To test the (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) block
+
+    # Option 1: Trigger UnicodeDecodeError (often easier to reliably mock)
+    mock_base64_mod.b64decode.reset_mock()  # Reset call count
+    mock_base64_mod.b64decode.return_value = b'\xff\xfe\xfd'  # Invalid UTF-8 sequence
+    mock_json_loads_mod.loads.reset_mock()  # Not reached if decode fails
+
     assert extract_json_from_image_file(str(dummy_png_path)) is None
     assert "Error decoding 'chara' metadata" in caplog_handler.text
-    mock_base64_mod.b64decode.side_effect = None;
+    # Verify b64decode was called
+    mock_base64_mod.b64decode.assert_called_once_with(b64_encoded_str)  # It's still called with the original b64 string
+    # json.loads should not have been called if .decode() failed
+    mock_json_loads_mod.loads.assert_not_called()
+
+    # Reset for next test section
+    mock_base64_mod.b64decode.return_value = default_b64_return  # Restore good default
+    mock_base64_mod.b64decode.side_effect = None  # Clear any side effect
     caplog_handler.clear()
 
-    # PIL UnidentifiedImageError
+    # Test PIL UnidentifiedImageError
+    MockPILImageModule.open.reset_mock()  # Reset open mock before setting side_effect
     MockPILImageModule.open.side_effect = PILImageReal.UnidentifiedImageError("bad image file")
     assert extract_json_from_image_file(str(dummy_png_path)) is None
     assert "Cannot open or read image file" in caplog_handler.text
     MockPILImageModule.open.side_effect = None;
-    MockPILImageModule.open.return_value = mock_img_instance;
+    MockPILImageModule.open.return_value = mock_img_instance;  # Restore
     caplog_handler.clear()
 
 
@@ -459,25 +502,40 @@ def test_get_character_list_for_ui_integration(db):
 
 
 @pytest.mark.integration
-@mock.patch(f"{MODULE_PATH_PREFIX}.Image", new_callable=mock.MagicMock)
+@mock.patch(f"{MODULE_PATH_PREFIX}.Image", new_callable=mock.MagicMock)  # Patches PIL.Image used in Character_Chat_Lib
 def test_load_character_and_image_integration(MockPILImageModule, db, caplog_handler):
-    mock_img_instance = MockPILImageObject()  # Using our own mock for better control
-    MockPILImageModule.open.return_value = mock_img_instance
+    mock_opened_image = MockPILImageObject(format="PNG")  # This is what Image.open() will return
+    mock_converted_image = MockPILImageObject(format="PNG", mode="RGBA")  # This is what .convert() will return
+
+    # Configure the mock chain: Image.open().convert()
+    MockPILImageModule.open.return_value = mock_opened_image
+    mock_opened_image.convert = mock.Mock(
+        return_value=mock_converted_image)  # Mock the convert method on the opened instance
 
     image_bytes = create_dummy_png_bytes()
     char_id = db.add_character_card(
         {"name": "Gandalf", "description": "W {{user}}", "first_message": "FM {{char}} {{user}}", "image": image_bytes})
+
     loaded_char, hist, img = load_character_and_image(db, char_id, "Frodo")
-    assert loaded_char["name"] == "Gandalf" and hist == [(None, "FM Gandalf Frodo")] and img == mock_img_instance
+
+    assert loaded_char["name"] == "Gandalf"
+    assert hist == [(None, "FM Gandalf Frodo")]
+    # Check that the image returned is the one from .convert()
+    assert img == mock_converted_image
+    mock_opened_image.convert.assert_called_once_with("RGBA")  # Verify convert was called correctly
 
     # Test image processing error
+    # Make Image.open() itself raise the error for this part of the test
     MockPILImageModule.open.side_effect = PILImageReal.UnidentifiedImageError("bad image")
+    mock_opened_image.convert.reset_mock()  # Reset convert mock call count
+
     loaded_char_bad_img, _, img_bad = load_character_and_image(db, char_id, "Frodo")
     assert loaded_char_bad_img is not None  # Char data should still load
     assert img_bad is None
-    assert f"Error processing image for character 'Gandalf' (ID: {char_id})" in caplog_handler.text
-    MockPILImageModule.open.side_effect = None;
-    MockPILImageModule.open.return_value = mock_img_instance  # Reset
+    assert f"Error processing image for character 'Gandalf' (ID: {char_id})" in caplog_handler.text  # This will use the new caplog_handler
+
+    MockPILImageModule.open.side_effect = None  # Reset side effect
+    MockPILImageModule.open.return_value = mock_opened_image  # Reset return value for other tests
 
 
 @pytest.mark.integration
@@ -511,30 +569,46 @@ def test_import_and_save_character_from_file_integration(MockPILImageModule, moc
 
 @pytest.mark.integration
 @mock.patch(f"{MODULE_PATH_PREFIX}.time.strftime", return_value=MOCK_TIME_STRFTIME)
-def test_load_chat_history_from_file_and_save_to_db_integration(mock_strftime, db, tmp_path, caplog_handler):
-    char_name = "HistChar";
-    char_id_db = db.add_character_card({"name": char_name, "description": "D"})
+def test_load_chat_history_from_file_and_save_to_db_integration(mock_strftime, db, tmp_path,
+                                                                caplog_handler):  # caplog_handler now works
+    char_name_in_db = "HistCharDB"  # Renamed to avoid clash with `char_name` variable if any
+    char_id_db = db.add_character_card({"name": char_name_in_db, "description": "D"})
     log_user = "LogU"
-    # Valid and malformed pairs
-    chat_data = {"char_name": char_name, "user_name": log_user, "history": {"internal": [
-        ["U: {{user}}", "C: {{char}}"],  # Valid
-        "not a list",  # Malformed string pair
-        ["User only"],  # Valid (becomes User msg, None Bot msg)
-        ["Msg1", "Msg2", "Msg3"],  # Malformed (too long)
-        [None, None]  # Skipped (empty)
-    ]}}
-    hist_file = tmp_path / "hist.json";
-    hist_file.write_text(json.dumps(chat_data))
 
-    conv_id, char_id_hist = load_chat_history_from_file_and_save_to_db(db, str(hist_file),
-                                                                       user_name_for_placeholders=log_user)
-    assert conv_id and char_id_hist == char_id_db
+    chat_data = {
+        "char_name": char_name_in_db,
+        "user_name": log_user,
+        "history": {
+            "internal": [
+                ["U: {{user}}", "C: {{char}}"],
+                "not a list",
+                ["User only"],
+                ["Msg1", "Msg2", "Msg3"],
+                [None, None]
+            ]
+        }
+    }
+    hist_file_path = tmp_path / "hist.json"
+    hist_file_path.write_text(json.dumps(chat_data))
+
+    conv_id, char_id_hist = load_chat_history_from_file_and_save_to_db(
+        db,
+        str(hist_file_path),
+        user_name_for_placeholders=log_user
+    )
+    assert conv_id is not None
+    assert char_id_hist == char_id_db
+
     msgs = db.get_messages_for_conversation(conv_id)
-    assert len(msgs) == 3  # (U,C) pair -> 2 msgs. ("User only", None) -> 1 msg.
-    assert "Skipping malformed message pair" in caplog_handler.text  # For "not a list" and too long pair
+    assert len(msgs) == 3
+    assert "Skipping malformed message pair" in caplog_handler.text  # Should pass now
+
     assert msgs[0]["content"] == f"U: {log_user}"
-    assert msgs[1]["content"] == f"C: {char_name}"
+    assert msgs[0]["sender"] == "User"
+    assert msgs[1]["content"] == f"C: {char_name_in_db}"
+    assert msgs[1]["sender"] == char_name_in_db
     assert msgs[2]["content"] == "User only"
+    assert msgs[2]["sender"] == "User"
 
 
 @pytest.mark.integration

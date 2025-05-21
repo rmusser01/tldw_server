@@ -53,16 +53,34 @@ def test_api_token():
 
 
 @pytest.fixture(scope="function")
-def client(test_user: User, tmp_path: Path):
+def client(test_user: User, tmp_path: Path, monkeypatch):  # Add monkeypatch fixture
     """
     Provides a TestClient instance with a fresh, temporary database for each test function.
     Overrides authentication and database path settings for isolated testing.
     """
-    # Save the original USER_DB_BASE_DIR that was loaded by config.py
-    original_user_db_base_dir = settings["USER_DB_BASE_DIR"]  # Use dictionary access
 
-    # Override USER_DB_BASE_DIR in the global 'settings' object to use tmp_path for this test
-    settings["USER_DB_BASE_DIR"] = tmp_path  # Use dictionary access for assignment
+    # This function will be used to override the original _get_prompts_db_path_for_user
+    def mock_get_prompts_db_path_for_user(user: User, db_version: str = "v2") -> Path:
+        # Construct the path using tmp_path and the user ID
+        user_db_dir = tmp_path / str(user.id) / "prompts_user_dbs"
+        user_db_dir.mkdir(parents=True, exist_ok=True)
+        if db_version == "v2":
+            return user_db_dir / "user_prompts_v2.sqlite"
+        # Add other versions if needed
+        return user_db_dir / f"user_prompts_{db_version}.sqlite"
+
+    # Patch the function within the Prompts_DB_Deps module
+    # The target string is 'module.path.to.function'
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps._get_prompts_db_path_for_user",
+        mock_get_prompts_db_path_for_user
+    )
+
+    # The original settings.USER_DB_BASE_DIR modification might now be redundant
+    # if _get_prompts_db_path_for_user is the sole determinant and is now fully mocked.
+    # You can test keeping it or removing it.
+    original_user_db_base_dir = settings.get("USER_DB_BASE_DIR")  # Use .get for safety
+    settings["USER_DB_BASE_DIR"] = tmp_path
 
     user_specific_prompts_dir = tmp_path / str(test_user.id) / "prompts_user_dbs"
     user_specific_prompts_dir.mkdir(parents=True, exist_ok=True)
