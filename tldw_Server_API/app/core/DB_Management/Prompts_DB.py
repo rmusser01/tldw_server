@@ -795,6 +795,124 @@ class PromptsDatabase:
             if isinstance(e, (InputError, DatabaseError)): raise e
             else: raise DatabaseError(f"Keyword update failed for prompt {prompt_id}: {e}") from e
 
+    def update_prompt_by_id(self, prompt_id: int, update_data: Dict[str, Any]) -> Tuple[Optional[str], str]:
+        """
+        Updates an existing prompt identified by its ID.
+        Handles name changes and ensures the new name doesn't conflict with other existing prompts.
+
+        Args:
+            prompt_id: The ID of the prompt to update.
+            update_data: A dictionary containing fields to update (name, author, details, system_prompt, user_prompt).
+                         Keywords are handled separately by `update_keywords_for_prompt`.
+
+        Returns:
+            A tuple (updated_prompt_uuid, message_string).
+
+        Raises:
+            InputError: If required fields like 'name' are missing or invalid in update_data.
+            ConflictError: If a name change conflicts with another existing prompt, or version mismatch.
+            DatabaseError: For other database issues.
+        """
+        if 'name' in update_data and (not update_data['name'] or not update_data['name'].strip()):
+            raise InputError("Prompt name cannot be empty if provided for update.")
+
+        current_time = self._get_current_utc_timestamp_str()
+        client_id = self.client_id
+
+        try:
+            with self.transaction() as conn:
+                cursor = conn.cursor()
+                # Get current state of the prompt being updated
+                cursor.execute("SELECT uuid, name, version, deleted FROM Prompts WHERE id = ?", (prompt_id,))
+                existing_prompt_state = cursor.fetchone()
+
+                if not existing_prompt_state:
+                    return None, f"Prompt with ID {prompt_id} not found."  # Or raise InputError("Prompt not found")
+
+                original_uuid = existing_prompt_state['uuid']
+                original_name = existing_prompt_state['name']
+                current_version = existing_prompt_state['version']
+                is_deleted = existing_prompt_state['deleted']
+
+                if is_deleted:  # Optional: decide if updating a soft-deleted prompt should undelete it.
+                    # For now, let's assume we are updating an active prompt or an explicitly fetched soft-deleted one.
+                    # If this method should also undelete, set 'deleted = 0' in the update.
+                    pass
+
+                new_name = update_data.get('name', original_name).strip()
+
+                # If name is changing, check for conflict with *other* prompts
+                if new_name != original_name:
+                    cursor.execute("SELECT id FROM Prompts WHERE name = ? AND id != ? AND deleted = 0",
+                                   (new_name, prompt_id))
+                    conflicting_prompt = cursor.fetchone()
+                    if conflicting_prompt:
+                        raise ConflictError(
+                            f"Another active prompt with name '{new_name}' already exists (ID: {conflicting_prompt['id']}).")
+
+                new_version = current_version + 1
+
+                set_clauses = []
+                params = []
+
+                # Build SET clause dynamically
+                if 'name' in update_data and update_data['name'].strip() != original_name:  # Only if actually changing
+                    set_clauses.append("name = ?")
+                    params.append(new_name)
+                if 'author' in update_data:
+                    set_clauses.append("author = ?")
+                    params.append(update_data.get('author'))
+                if 'details' in update_data:
+                    set_clauses.append("details = ?")
+                    params.append(update_data.get('details'))
+                if 'system_prompt' in update_data:
+                    set_clauses.append("system_prompt = ?")
+                    params.append(update_data.get('system_prompt'))
+                if 'user_prompt' in update_data:
+                    set_clauses.append("user_prompt = ?")
+                    params.append(update_data.get('user_prompt'))
+
+                # Always update these
+                set_clauses.extend(
+                    ["last_modified = ?", "version = ?", "client_id = ?", "deleted = 0"])  # Ensure it's marked active
+                params.extend([current_time, new_version, client_id])
+
+                if not set_clauses:  # Nothing to update besides version/timestamp
+                    return original_uuid, "No changes detected to update."
+
+                sql_set_clause = ", ".join(set_clauses)
+                update_sql = f"UPDATE Prompts SET {sql_set_clause} WHERE id = ? AND version = ?"
+                params.extend([prompt_id, current_version])
+
+                cursor.execute(update_sql, tuple(params))
+
+                if cursor.rowcount == 0:
+                    raise ConflictError(f"Failed to update prompt ID {prompt_id} (version mismatch or record gone).",
+                                        "Prompts", prompt_id)
+
+                # Log sync event
+                # Fetch the full updated row for payload
+                cursor.execute("SELECT * FROM Prompts WHERE id = ?", (prompt_id,))
+                updated_payload = dict(cursor.fetchone())
+                self._log_sync_event(conn, 'Prompts', original_uuid, 'update', new_version, updated_payload)
+
+                # Update FTS
+                self._update_fts_prompt(conn, prompt_id,
+                                        updated_payload['name'], updated_payload.get('author'),
+                                        updated_payload.get('details'), updated_payload.get('system_prompt'),
+                                        updated_payload.get('user_prompt'))
+
+                # Handle keywords if provided in update_data (assuming 'keywords' is a list of strings)
+                if 'keywords' in update_data and isinstance(update_data['keywords'], list):
+                    self.update_keywords_for_prompt(prompt_id, update_data['keywords'])  # Call existing method
+
+                return original_uuid, f"Prompt ID {prompt_id} updated successfully to version {new_version}."
+
+        except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e:
+            logger.error(f"Error updating prompt ID {prompt_id}: {e}", exc_info=True)
+            if isinstance(e, (InputError, ConflictError, DatabaseError)):
+                raise e
+            raise DatabaseError(f"Failed to update prompt ID {prompt_id}: {e}") from e
 
     def soft_delete_prompt(self, prompt_id_or_name_or_uuid: Union[int, str]) -> bool:
         current_time = self._get_current_utc_timestamp_str()

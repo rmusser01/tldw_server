@@ -78,222 +78,9 @@ async def get_sync_log(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error.")
 
 
-# === Prompt Endpoints ===
-
-@router.post(
-    "/",
-    response_model=schemas.PromptResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create a new prompt",
-    dependencies=[Depends(verify_token)] # Apply token verification
-)
-async def create_prompt(
-    prompt_data: schemas.PromptCreate,
-    Token: str = Header(None, description="Bearer token for authentication."),
-    db: PromptsDatabase = Depends(get_prompts_db_for_user)
-):
-    try:
-        existing_check = db.get_prompt_by_name(prompt_data.name, include_deleted=True)
-        if existing_check:
-            # If it exists and is active, it's a conflict for a POST request
-            if not existing_check['deleted']:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Prompt with name '{prompt_data.name}' already exists."
-                )
-        if "already exists. Skipped." in msg or "exists but is soft-deleted" in msg:  # Check for the specific message
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=msg
-            )
-
-        if not p_id or not p_uuid:
-            logger.error(f"Failed to create prompt '{prompt_data.name}', add_prompt returned: {p_id}, {p_uuid}, {msg}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                detail=f"Failed to create prompt: {msg}")
-
-        created_prompt = db.fetch_prompt_details(p_uuid)
-        if not created_prompt:
-            logger.error(f"Could not fetch newly created prompt by UUID {p_uuid}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                detail="Prompt created but could not be retrieved.")
-
-        # Ensure 'deleted' field is present if schema expects it
-        if 'deleted' not in created_prompt and hasattr(schemas.PromptResponse, 'deleted'):
-            created_prompt['deleted'] = False  # Default for new prompts
-
-        return schemas.PromptResponse(**created_prompt)
-    except InputError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except ConflictError as e:  # This will be hit if DB layer raises it
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-    except DatabaseError as e:
-        logger.error(f"Database error creating prompt: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error during prompt creation.")
-    except Exception as e:
-        logger.error(f"Unexpected error creating prompt: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.")
-
-@router.get(
-    "/",
-    response_model=schemas.PaginatedPromptsResponse,
-    summary="List all prompts (paginated)",
-    dependencies=[Depends(verify_token)]
-)
-async def list_all_prompts(
-    page: int = Query(1, ge=1, description="Page number"),
-    per_page: int = Query(10, ge=1, le=100, description="Items per page"),
-    include_deleted: bool = Query(False, description="Include soft-deleted prompts"),
-    Token: str = Header(None, description="Bearer token for authentication."),
-    db: PromptsDatabase = Depends(get_prompts_db_for_user)
-):
-    try:
-        items_dict_list, total_pages, current_page, total_items = db.list_prompts(
-            page=page, per_page=per_page, include_deleted=include_deleted
-        )
-        # Convert list of dicts to list of PromptBriefResponse
-        brief_items = [schemas.PromptBriefResponse(**item) for item in items_dict_list]
-        return schemas.PaginatedPromptsResponse(
-            items=brief_items,
-            total_pages=total_pages,
-            current_page=current_page,
-            total_items=total_items
-        )
-    except ValueError as e: # For bad page/per_page from DB layer
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except DatabaseError as e:
-        logger.error(f"Database error listing prompts: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error listing prompts.")
 
 
-@router.get(
-    "/{prompt_identifier}",
-    response_model=schemas.PromptResponse,
-    summary="Get a specific prompt by ID, UUID, or Name",
-    dependencies=[Depends(verify_token)]
-)
-async def get_prompt(
-    prompt_identifier: Union[int, str], # Path param will be string, FastAPI can convert to int if possible
-    include_deleted: bool = Query(False, description="Include if soft-deleted"),
-    Token: str = Header(None, description="Bearer token for authentication."),
-    db: PromptsDatabase = Depends(get_prompts_db_for_user)
-):
-    try:
-        # Attempt to convert to int if it looks like an ID
-        processed_identifier: Union[int, str] = prompt_identifier
-        try:
-            processed_identifier = int(prompt_identifier)
-        except ValueError:
-            pass # Keep as string if not an int (name or UUID)
-
-        prompt_details = db.fetch_prompt_details(processed_identifier, include_deleted=include_deleted)
-        if not prompt_details:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt not found.")
-        return schemas.PromptResponse(**prompt_details)
-    except DatabaseError as e:
-        logger.error(f"Database error getting prompt '{prompt_identifier}': {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error.")
-
-
-@router.put(
-    "/{prompt_identifier}",
-    response_model=schemas.PromptResponse,
-    summary="Update an existing prompt (or create if name matches and overwrite=true logic used)",
-    dependencies=[Depends(verify_token)]
-)
-async def update_prompt(
-    prompt_identifier: Union[int, str],
-    prompt_data: schemas.PromptCreate, # Using PromptCreate for full replacement, or PromptUpdate for partial
-    Token: str = Header(None, description="Bearer token for authentication."),
-    db: PromptsDatabase = Depends(get_prompts_db_for_user)
-):
-    # This uses add_prompt with overwrite=True logic.
-    # For a true PATCH, you'd need a different DB method.
-    # The prompt_identifier is used to ensure we are updating the one intended if name changes.
-    try:
-        # First, verify the prompt_identifier exists
-        existing_prompt = db.fetch_prompt_details(prompt_identifier, include_deleted=True) # Allow updating soft-deleted
-        if not existing_prompt:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Prompt with identifier '{prompt_identifier}' not found for update.")
-
-        # If the name in payload is different from existing_prompt's name,
-        # and that new name already exists (and is not the current prompt), it's a conflict.
-        # add_prompt handles unique name constraint. If prompt_data.name is different than existing_prompt['name'],
-        # and prompt_data.name already exists as another prompt, add_prompt will raise IntegrityError.
-        # If prompt_data.name is the same, it's a direct update.
-
-        # We use existing_prompt['name'] for the add_prompt call if the identifier was ID/UUID
-        # and we want to ensure we update based on that original record, even if name in payload changes.
-        # However, add_prompt identifies by *name*. So, if name changes, it's like creating a new one
-        # and potentially deleting the old one.
-        #
-        # A simpler PUT: identify by name from payload, overwrite.
-        # If prompt_identifier is ID/UUID, we might want to ensure *that specific record* is updated,
-        # even if its name changes. PromptsDatabase.add_prompt's `overwrite` is based on NAME.
-        #
-        # For a more robust PUT matching identifier:
-        # 1. Fetch by prompt_identifier (ID/UUID/Name).
-        # 2. If found, use its ID for a specific update method (not currently in PromptsDatabase).
-        #
-        # Using add_prompt(overwrite=True) means it's an UPSERT based on name from payload.
-        p_id, p_uuid, msg = db.add_prompt(
-            name=prompt_data.name, # Keyed by the name in the payload
-            author=prompt_data.author,
-            details=prompt_data.details,
-            system_prompt=prompt_data.system_prompt,
-            user_prompt=prompt_data.user_prompt,
-            keywords=prompt_data.keywords,
-            overwrite=True
-        )
-        if not p_id or not p_uuid:
-             logger.error(f"Failed to update prompt '{prompt_data.name}', add_prompt returned: {p_id}, {p_uuid}, {msg}")
-             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update prompt.")
-
-        updated_prompt = db.fetch_prompt_details(p_uuid) # Fetch by new/updated UUID
-        if not updated_prompt:
-            logger.error(f"Could not fetch updated prompt by UUID {p_uuid}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Prompt updated but could not be retrieved.")
-        return schemas.PromptResponse(**updated_prompt)
-
-    except InputError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except ConflictError as e: # Version mismatch if we were using specific update method
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-    except DatabaseError as e: # Covers IntegrityError if name constraint is violated by rename
-        logger.error(f"Database error updating prompt: {e}", exc_info=True)
-        if "UNIQUE constraint failed: Prompts.name" in str(e):
-             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Prompt name '{prompt_data.name}' already exists.")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error during prompt update.")
-
-
-@router.delete(
-    "/{prompt_identifier}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Soft delete a prompt",
-    dependencies=[Depends(verify_token)]
-)
-async def delete_prompt(
-    prompt_identifier: Union[int, str],
-    Token: str = Header(None, description="Bearer token for authentication."),
-    db: PromptsDatabase = Depends(get_prompts_db_for_user)
-):
-    try:
-        processed_identifier: Union[int, str] = prompt_identifier
-        try: processed_identifier = int(prompt_identifier)
-        except ValueError: pass
-
-        success = db.soft_delete_prompt(processed_identifier)
-        if not success:
-            # Could be not found or already deleted, DB layer logs warning
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt not found or already deleted.")
-        return None # HTTP 204 returns no body
-    except ConflictError as e: # If version mismatch during delete
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-    except DatabaseError as e:
-        logger.error(f"Database error deleting prompt '{prompt_identifier}': {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error.")
-
-
+# --- Search Endpoints ---
 @router.post(
     "/search",
     response_model=schemas.PromptSearchResponse,
@@ -331,8 +118,8 @@ async def search_all_prompts(
         logger.error(f"Database error searching prompts: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error during search.")
 
-# === Keyword Endpoints ===
 
+# === Keyword Endpoints ===
 @router.post(
     "/keywords/",
     response_model=schemas.KeywordResponse, # Or a simpler success message
@@ -498,6 +285,229 @@ async def export_keywords_api(
         logger.error(f"Unexpected error during keyword export: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected error during keyword export: {str(e)}")
 
+
+# === Prompt Endpoints ===
+
+@router.post(
+    "/",
+    response_model=schemas.PromptResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new prompt",
+    dependencies=[Depends(verify_token)] # Apply token verification
+)
+async def create_prompt(
+    prompt_data: schemas.PromptCreate,
+    Token: str = Header(None, description="Bearer token for authentication."),
+    db: PromptsDatabase = Depends(get_prompts_db_for_user)
+):
+    try:
+        # The db.add_prompt method with overwrite=False should raise ConflictError
+        # if the name already exists and is active (as per our DB layer modification).
+        p_id, p_uuid, db_message = db.add_prompt(  # db_message is returned by add_prompt on success
+            name=prompt_data.name,
+            author=prompt_data.author,
+            details=prompt_data.details,
+            system_prompt=prompt_data.system_prompt,
+            user_prompt=prompt_data.user_prompt,
+            keywords=prompt_data.keywords,
+            overwrite=False  # For a POST/create, we don't want to overwrite.
+        )
+        # If add_prompt successfully created or undeleted (if that's its logic for overwrite=False and deleted=True)
+        # then p_id and p_uuid will be set.
+
+        # The 'msg' variable was causing the NameError.
+        # db.add_prompt returns (id, uuid, message_string)
+        # We can use db_message for logging if needed.
+
+        if not p_id or not p_uuid:  # Should ideally not be hit if add_prompt raises on failure
+            logger.error(
+                f"Failed to create prompt '{prompt_data.name}', add_prompt returned: {p_id}, {p_uuid}, {db_message}")
+            # If db_message has specific error info from add_prompt, use it.
+            detail_msg = f"Failed to create prompt: {db_message}" if db_message else "Failed to create prompt (unknown DB issue)."
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail_msg)
+
+        created_prompt_dict = db.fetch_prompt_details(p_uuid)  # Fetch by UUID to be sure
+        if not created_prompt_dict:
+            logger.error(f"Could not fetch newly created prompt by UUID {p_uuid}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail="Prompt created but could not be retrieved.")
+
+        # Ensure 'deleted' field is populated if the schema expects it
+        if 'deleted' not in created_prompt_dict and schemas.PromptResponse.model_fields.get('deleted'):
+            created_prompt_dict['deleted'] = False  # Default for new prompts
+
+        return schemas.PromptResponse(**created_prompt_dict)
+
+    except InputError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except ConflictError as e:  # This is expected if name exists and overwrite=False
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except DatabaseError as e:
+        logger.error(f"Database error creating prompt: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Database error during prompt creation.")
+    except Exception as e:  # Catch-all for other unexpected errors
+        logger.error(f"Unexpected error creating prompt: {e}", exc_info=True)
+        # Avoid leaking the raw 'msg' variable if it was a NameError
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.")
+
+@router.get(
+    "/",
+    response_model=schemas.PaginatedPromptsResponse,
+    summary="List all prompts (paginated)",
+    dependencies=[Depends(verify_token)]
+)
+async def list_all_prompts(
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(10, ge=1, le=100, description="Items per page"),
+    include_deleted: bool = Query(False, description="Include soft-deleted prompts"),
+    Token: str = Header(None, description="Bearer token for authentication."),
+    db: PromptsDatabase = Depends(get_prompts_db_for_user)
+):
+    try:
+        items_dict_list, total_pages, current_page, total_items = db.list_prompts(
+            page=page, per_page=per_page, include_deleted=include_deleted
+        )
+        # Convert list of dicts to list of PromptBriefResponse
+        brief_items = [schemas.PromptBriefResponse(**item) for item in items_dict_list]
+        return schemas.PaginatedPromptsResponse(
+            items=brief_items,
+            total_pages=total_pages,
+            current_page=current_page,
+            total_items=total_items
+        )
+    except ValueError as e: # For bad page/per_page from DB layer
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except DatabaseError as e:
+        logger.error(f"Database error listing prompts: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error listing prompts.")
+
+
+@router.get(
+    "/{prompt_identifier}",
+    response_model=schemas.PromptResponse,
+    summary="Get a specific prompt by ID, UUID, or Name",
+    dependencies=[Depends(verify_token)]
+)
+async def get_prompt(
+    prompt_identifier: Union[int, str], # Path param will be string, FastAPI can convert to int if possible
+    include_deleted: bool = Query(False, description="Include if soft-deleted"),
+    Token: str = Header(None, description="Bearer token for authentication."),
+    db: PromptsDatabase = Depends(get_prompts_db_for_user)
+):
+    try:
+        # Attempt to convert to int if it looks like an ID
+        processed_identifier: Union[int, str] = prompt_identifier
+        try:
+            processed_identifier = int(prompt_identifier)
+        except ValueError:
+            pass # Keep as string if not an int (name or UUID)
+
+        prompt_details = db.fetch_prompt_details(processed_identifier, include_deleted=include_deleted)
+        if not prompt_details:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt not found.")
+        return schemas.PromptResponse(**prompt_details)
+    except DatabaseError as e:
+        logger.error(f"Database error getting prompt '{prompt_identifier}': {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error.")
+
+
+@router.put(
+    "/{prompt_identifier}",
+    response_model=schemas.PromptResponse,
+    summary="Update an existing prompt (or create if name matches and overwrite=true logic used)",
+    dependencies=[Depends(verify_token)]
+)
+async def update_prompt(
+    prompt_identifier: Union[int, str],
+    prompt_data: schemas.PromptCreate, # Using PromptCreate for full replacement, or PromptUpdate for partial
+    Token: str = Header(None, description="Bearer token for authentication."),
+    db: PromptsDatabase = Depends(get_prompts_db_for_user)
+):
+    # This uses add_prompt with overwrite=True logic.
+    # For a true PATCH, you'd need a different DB method.
+    # The prompt_identifier is used to ensure we are updating the one intended if name changes.
+    try:
+        # 1. Resolve identifier to actual prompt ID
+        target_prompt_dict = db.fetch_prompt_details(prompt_identifier,
+                                                     include_deleted=True)  # Allow updating soft-deleted
+        if not target_prompt_dict:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                detail=f"Prompt with identifier '{prompt_identifier}' not found.")
+
+        prompt_id_to_update = target_prompt_dict['id']
+
+        # 2. Call the new update method
+        # Convert Pydantic model to dict, excluding unset to allow partial-like updates if some fields are optional
+        update_payload_dict = prompt_data.model_dump(
+            exclude_unset=False)  # exclude_unset=False means all fields are included
+
+        updated_prompt_uuid, msg = db.update_prompt_by_id(prompt_id_to_update, update_payload_dict)
+
+        if not updated_prompt_uuid:
+            # This case should be rare if fetch_prompt_details found it, unless db.update_prompt_by_id returns None for "no changes"
+            logger.error(
+                f"Update for prompt identifier '{prompt_identifier}' (ID: {prompt_id_to_update}) resulted in no UUID: {msg}")
+            # Determine appropriate HTTP status based on msg
+            if "not found" in msg.lower():  # Should have been caught by fetch_prompt_details
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail=f"Prompt update failed: {msg}")
+
+        # Fetch the fully updated prompt to return
+        final_updated_prompt = db.fetch_prompt_details(updated_prompt_uuid)  # Fetch by UUID
+        if not final_updated_prompt:
+            logger.error(f"Could not retrieve prompt by UUID {updated_prompt_uuid} after update.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail="Prompt updated but could not be retrieved.")
+
+        if 'deleted' not in final_updated_prompt and hasattr(schemas.PromptResponse, 'deleted'):
+            final_updated_prompt['deleted'] = False
+
+        return schemas.PromptResponse(**final_updated_prompt)
+
+    except InputError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except DatabaseError as e:
+        logger.error(f"Database error updating prompt '{prompt_identifier}': {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Database error during prompt update.")
+    except HTTPException:  # Re-raise
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error updating prompt '{prompt_identifier}': {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="An unexpected error occurred during prompt update.")
+
+
+@router.delete(
+    "/{prompt_identifier}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Soft delete a prompt",
+    dependencies=[Depends(verify_token)]
+)
+async def delete_prompt(
+    prompt_identifier: Union[int, str],
+    Token: str = Header(None, description="Bearer token for authentication."),
+    db: PromptsDatabase = Depends(get_prompts_db_for_user)
+):
+    try:
+        processed_identifier: Union[int, str] = prompt_identifier
+        try: processed_identifier = int(prompt_identifier)
+        except ValueError: pass
+
+        success = db.soft_delete_prompt(processed_identifier)
+        if not success:
+            # Could be not found or already deleted, DB layer logs warning
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt not found or already deleted.")
+        return None # HTTP 204 returns no body
+    except ConflictError as e: # If version mismatch during delete
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except DatabaseError as e:
+        logger.error(f"Database error deleting prompt '{prompt_identifier}': {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error.")
 
 
 #
