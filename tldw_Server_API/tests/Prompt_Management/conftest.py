@@ -34,7 +34,7 @@ def test_user():
 @pytest.fixture(scope="session")
 def test_api_token():
     # This should match what your verify_token expects if not mocked away completely
-    return settings.API_BEARER  # Or a fixed "test_token"
+    return "fixed_test_api_token_for_pytest"
 
 
 @pytest.fixture(scope="module")
@@ -46,9 +46,10 @@ def client(test_user, test_api_token):
     async def override_verify_token():  # Make it async if original is
         return True  # Bypass token check for tests
 
+    fml = ("Fuck_temp_test_user_dbs_prompts_api")
     # Store original settings to restore later if necessary
-    original_user_db_base_dir = settings.USER_DB_BASE_DIR
-    temp_test_user_db_base_dir = Path("temp_test_user_dbs_prompts_api")
+    original_user_db_base_dir = fml
+    temp_test_user_db_base_dir = Path("fuck_temp_test_user_dbs_prompts_api")
 
     def setup_test_db_environment():
         settings.USER_DB_BASE_DIR = temp_test_user_db_base_dir
@@ -72,7 +73,6 @@ def client(test_user, test_api_token):
         close_all_cached_prompts_db_instances()  # Important
         if temp_test_user_db_base_dir.exists():
             shutil.rmtree(temp_test_user_db_base_dir)
-        settings.USER_DB_BASE_DIR = original_user_db_base_dir
 
     setup_test_db_environment()
     fastapi_app.dependency_overrides[get_request_user] = override_get_request_user

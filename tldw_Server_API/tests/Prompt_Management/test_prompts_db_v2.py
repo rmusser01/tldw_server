@@ -2,6 +2,8 @@
 # Description:
 #
 # Imports
+import re
+
 import pytest
 import sqlite3
 import uuid
@@ -186,7 +188,7 @@ def test_search_prompts_fts(memory_db: PromptsDatabase):
     memory_db.add_prompt(name="Alpha Search", author="AuthorA", details="Unique detail alpha", keywords=["common", "alpha_k"])
     memory_db.add_prompt(name="Beta Search", author="AuthorB", details="Common detail beta", keywords=["common", "beta_k"])
     memory_db.add_prompt(name="Gamma NonMatch", author="AuthorC", details="Different info", keywords=["other"])
-    time.sleep(0.1) # Allow FTS to potentially catch up if there were async aspects (though SQLite FTS is sync)
+    # time.sleep(0.1) # For in-memory SQLite, FTS updates are typically synchronous.
 
     results, total = memory_db.search_prompts(search_query="alpha")
     assert total == 1
@@ -201,8 +203,16 @@ def test_search_prompts_fts(memory_db: PromptsDatabase):
     assert total_detail == 2 # "Unique detail alpha", "Common detail beta"
 
     # Test FTS on system/user prompts
-    memory_db.add_prompt(name="SysUserPrompt", system_prompt="System test phrase", user_prompt="User specific content")
-    results_sys, _ = memory_db.search_prompts(search_query="phrase", search_fields=["system_prompt"])
+    # FIX: Add missing 'author' and 'details' arguments
+    memory_db.add_prompt(
+        name="SysUserPrompt",
+        author="TestAuthorFTS",      # Added
+        details="TestDetailsFTS",    # Added
+        system_prompt="System test phrase",
+        user_prompt="User specific content"
+    )
+    results_sys, total_sys_val = memory_db.search_prompts(search_query="phrase", search_fields=["system_prompt"])
+    assert total_sys_val == 1 # Check the total count from search_prompts
     assert len(results_sys) == 1
     assert results_sys[0]['name'] == "SysUserPrompt"
 
@@ -247,22 +257,18 @@ def test_versioning_and_conflict(memory_db: PromptsDatabase):
 
     # Simulate a direct DB update with incorrect version (should be blocked by trigger)
     conn = memory_db.get_connection()
-    with pytest.raises(sqlite3.IntegrityError, match="Sync Error (Prompts): Version must increment by exactly 1."):
-        with memory_db.transaction(): # Use transaction context
+
+    # FIX: Escape the regex string for the match argument
+    expected_error_message = "Sync Error (Prompts): Version must increment by exactly 1."
+    with pytest.raises(sqlite3.IntegrityError, match=re.escape(expected_error_message)):
+        with memory_db.transaction():  # Use transaction context
             conn.execute(
                 "UPDATE Prompts SET details = ?, version = ?, client_id = ?, last_modified = ? WHERE id = ?",
-                ("Conflict attempt", prompt_v2['version'] + 2, TEST_CLIENT_ID, memory_db._get_current_utc_timestamp_str(), p_id)
+                ("Conflict attempt", prompt_v2['version'] + 2, TEST_CLIENT_ID,
+                 memory_db._get_current_utc_timestamp_str(), p_id)
             )
-            # The transaction context will attempt to commit, which is when the trigger's RAISE(ABORT) takes effect.
-
-    # Test ConflictError on soft_delete_prompt if version mismatch (harder to simulate without direct version manipulation)
-    # PromptsDatabase.soft_delete_prompt internally fetches current version, so direct conflict is less likely unless concurrent access
-    # To test ConflictError from soft_delete_prompt, one would need to:
-    # 1. Fetch prompt (gets current_version_A)
-    # 2. Concurrently, another process updates the prompt (version becomes current_version_A + 1)
-    # 3. The first process tries to soft_delete using current_version_A, which now mismatches.
-    # This is hard to test in a single-threaded unit test without complex mocking.
-    # The trigger test above covers the core version integrity.
+            # The transaction context will attempt to commit, which is when the trigger's RAISE(ABORT)
+            # (or RAISE(FAIL)) takes effect.
 
 # --- Test Standalone Functions ---
 
