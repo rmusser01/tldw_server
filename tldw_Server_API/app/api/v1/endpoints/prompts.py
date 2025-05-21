@@ -93,30 +93,39 @@ async def create_prompt(
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
-        # The add_prompt method with overwrite=False will fail if name exists
-        # If you want "create or update if name matches", set overwrite=True
-        p_id, p_uuid, msg = db.add_prompt(
-            name=prompt_data.name,
-            author=prompt_data.author,
-            details=prompt_data.details,
-            system_prompt=prompt_data.system_prompt,
-            user_prompt=prompt_data.user_prompt,
-            keywords=prompt_data.keywords,
-            overwrite=False # Explicitly for create: don't overwrite
-        )
-        if not p_id or not p_uuid: # Should not happen if add_prompt is robust
-            logger.error(f"Failed to create prompt '{prompt_data.name}', add_prompt returned: {p_id}, {p_uuid}, {msg}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create prompt.")
+        existing_check = db.get_prompt_by_name(prompt_data.name, include_deleted=True)
+        if existing_check:
+            # If it exists and is active, it's a conflict for a POST request
+            if not existing_check['deleted']:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Prompt with name '{prompt_data.name}' already exists."
+                )
+        if "already exists. Skipped." in msg or "exists but is soft-deleted" in msg:  # Check for the specific message
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=msg
+            )
 
-        # Fetch the full prompt details to return
-        created_prompt = db.fetch_prompt_details(p_uuid) # Fetch by UUID to be sure
+        if not p_id or not p_uuid:
+            logger.error(f"Failed to create prompt '{prompt_data.name}', add_prompt returned: {p_id}, {p_uuid}, {msg}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail=f"Failed to create prompt: {msg}")
+
+        created_prompt = db.fetch_prompt_details(p_uuid)
         if not created_prompt:
-             logger.error(f"Could not fetch newly created prompt by UUID {p_uuid}")
-             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Prompt created but could not be retrieved.")
+            logger.error(f"Could not fetch newly created prompt by UUID {p_uuid}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail="Prompt created but could not be retrieved.")
+
+        # Ensure 'deleted' field is present if schema expects it
+        if 'deleted' not in created_prompt and hasattr(schemas.PromptResponse, 'deleted'):
+            created_prompt['deleted'] = False  # Default for new prompts
+
         return schemas.PromptResponse(**created_prompt)
     except InputError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except ConflictError as e: # This might occur if name constraint violated
+    except ConflictError as e:  # This will be hit if DB layer raises it
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except DatabaseError as e:
         logger.error(f"Database error creating prompt: {e}", exc_info=True)

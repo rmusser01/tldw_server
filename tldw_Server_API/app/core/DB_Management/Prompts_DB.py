@@ -653,7 +653,8 @@ class PromptsDatabase:
                     if is_deleted and not overwrite:  # Soft-deleted, treat as "exists" if not overwriting
                         return prompt_id, prompt_uuid, f"Prompt '{name}' exists but is soft-deleted. Use overwrite to restore/update."
                     if not overwrite and not is_deleted:
-                        return prompt_id, prompt_uuid, f"Prompt '{name}' already exists. Skipped."
+                        raise ConflictError(f"Prompt '{name}' already exists.")  # RAISE ERROR
+                        #return prompt_id, prompt_uuid, f"Prompt '{name}' already exists. Skipped."
 
                     # Overwrite or undelete-and-update
                     action_taken = "updated"

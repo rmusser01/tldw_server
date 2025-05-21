@@ -59,8 +59,7 @@ class PromptResponse(PromptBase):
     last_modified: datetime
     version: int
     keywords: List[str] = Field(default_factory=list, description="Keywords associated with the prompt.")
-
-    # deleted: bool # If you want to expose this
+    deleted: bool = Field(..., description="Indicates if the prompt is soft-deleted.")
 
     class Config:
         orm_mode = True
