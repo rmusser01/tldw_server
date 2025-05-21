@@ -18,7 +18,7 @@ from starlette import status
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib import import_and_save_character_from_file
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import ConflictError, InputError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError, CharactersRAGDBError
 #
 #######################################################################################################################
 #
@@ -104,44 +104,50 @@ router = APIRouter()
 
 def _convert_db_char_to_response_model(char_dict_from_db: Dict[str, Any]) -> CharacterResponse:
     """Converts a character dictionary from the DB to a CharacterResponse model."""
-    response_data = char_dict_from_db.copy()
+    try:
+        response_data = char_dict_from_db.copy()
 
-    if response_data.get('image') and isinstance(response_data['image'], bytes):
-        try:
-            response_data['image_base64'] = base64.b64encode(response_data['image']).decode('utf-8')
-            response_data['image_present'] = True
-        except Exception as e:
-            logger.error(f"Error encoding image for character {response_data.get('id')}: {e}")
-            response_data['image_base64'] = None
-            response_data['image_present'] = False
-    else:
-        response_data['image_base64'] = None
-        # image_present should be False if image is None or not bytes
-        response_data['image_present'] = bool(
-            response_data.get('image') and isinstance(response_data.get('image'), bytes))
-
-    # Ensure JSON fields (alternate_greetings, tags, extensions) are Python objects
-    # The DB layer should ideally load these as Python objects if column type is JSON.
-    # If they are stored as text and are JSON strings, this parsing is needed.
-    for field_name in ["alternate_greetings", "tags", "extensions"]:
-        value = response_data.get(field_name)
-        if isinstance(value, str):
+        if response_data.get('image') and isinstance(response_data['image'], bytes):
             try:
-                response_data[field_name] = json.loads(value)
-            except json.JSONDecodeError:
-                logger.warning(
-                    f"DB data for {field_name} in char {response_data.get('id')} is not valid JSON: {value[:100]}...")
-                # Set defaults based on expected type if parsing fails
-                if field_name in ["alternate_greetings", "tags"]:
-                    response_data[field_name] = []
-                elif field_name == "extensions":
-                    response_data[field_name] = {}
+                response_data['image_base64'] = base64.b64encode(response_data['image']).decode('utf-8')
+                response_data['image_present'] = True
+            except Exception as e:
+                logger.error(f"Error encoding image for character {response_data.get('id')}: {e}")
+                response_data['image_base64'] = None
+                response_data['image_present'] = False
+        else:
+            response_data['image_base64'] = None
+            # image_present should be False if image is None or not bytes
+            response_data['image_present'] = bool(
+                response_data.get('image') and isinstance(response_data.get('image'), bytes))
 
-    # Remove the raw 'image' bytes field before passing to Pydantic model if it exists
-    response_data.pop('image', None)
+        # Ensure JSON fields (alternate_greetings, tags, extensions) are Python objects
+        # The DB layer should ideally load these as Python objects if column type is JSON.
+        # If they are stored as text and are JSON strings, this parsing is needed.
+        for field_name in ["alternate_greetings", "tags", "extensions"]:
+            value = response_data.get(field_name)
+            if isinstance(value, str):
+                try:
+                    response_data[field_name] = json.loads(value)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        f"DB data for {field_name} in char {response_data.get('id')} is not valid JSON: {value[:100]}...")
+                    # Set defaults based on expected type if parsing fails
+                    if field_name in ["alternate_greetings", "tags"]:
+                        response_data[field_name] = []
+                    elif field_name == "extensions":
+                        response_data[field_name] = {}
 
-    return CharacterResponse.model_validate(response_data)
+        # Remove the raw 'image' bytes field before passing to Pydantic model if it exists
+        response_data.pop('image', None)
 
+        return CharacterResponse.model_validate(response_data)
+    except StopIteration as si: # ADD THIS EXCEPT
+        logger.error(f"****** StopIteration CAUGHT INSIDE _convert_db_char_to_response_model ******: {si}", exc_info=True)
+        raise # Re-raise to see if it's the one caught by the endpoint
+    except Exception as ex_inner: # ADD THIS EXCEPT
+        logger.error(f"****** Other Exception in _convert_db_char_to_response_model ******: Type: {type(ex_inner)}, Msg: {str(ex_inner)}", exc_info=True)
+        raise
 
 def _prepare_char_data_for_db(char_input_data: Union[CharacterCreate, CharacterUpdate], is_update: bool = False) -> \
 Dict[str, Any]:
@@ -159,7 +165,7 @@ Dict[str, Any]:
                 # Robustly remove data URL prefix if present, common in web inputs
                 if ',' in base64_str and base64_str.startswith("data:image"):
                     base64_str = base64_str.split(',', 1)[1]
-                db_data['image'] = base64.b64decode(base64_str)
+                db_data['image'] = base64.b64decode(base64_str, validate=True)
                 logger.debug("Image successfully decoded.")
             except Exception as e:
                 logger.error(f"IMAGE DECODE FAILED for character '{getattr(char_input_data, 'name', 'N/A')}': {e}. RAISING HTTP 400.")
@@ -438,8 +444,11 @@ async def update_character(
         logger.error(f"Database error updating character {character_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {e}")
     except Exception as e:  # Catch-all for other unexpected errors
-        logger.error(f"Unexpected error updating character {character_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.")
+        logger.error(
+            f"Unexpected error updating character {character_id}. Type: {type(e)}, Message: '{str(e)}', Args: {e.args}",
+            exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"An unexpected error occurred: {type(e).__name__}")
 
 
 @router.delete("/{character_id}", response_model=DeletionResponse, summary="Delete a character", tags=["Characters"])
@@ -474,7 +483,7 @@ async def delete_character(
             raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED,
                                 detail="Character deletion functionality is not available on the server.")
 
-        success = db.delete_character_card(character_id, version=char_to_delete['version'])
+        success = db.soft_delete_character_card(character_id, expected_version=char_to_delete['version'])
 
         if not success:
             # Similar to update, this assumes `delete_character_card` returns False for logical non-conflict failures.
@@ -502,8 +511,11 @@ async def delete_character(
         logger.error(f"Database error deleting character {character_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {e}")
     except Exception as e:  # Catch-all for other unexpected errors
-        logger.error(f"Unexpected error deleting character {character_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.")
+        logger.error(
+            f"Unexpected error deleting character {character_id}. Type: {type(e)}, Message: '{str(e)}', Args: {e.args}",
+            exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"An unexpected error occurred: {type(e).__name__}")
 
 #
 # End of characters.py

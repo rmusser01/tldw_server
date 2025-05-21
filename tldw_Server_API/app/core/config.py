@@ -174,8 +174,8 @@ def load_settings():
         "EMBEDDING_CONFIG": comprehensive_config.get("embedding_config", {
             'embedding_provider': 'openai', # Fallback defaults
             'embedding_model': 'text-embedding-3-small',
-            'onnx_model_path': "./App_Function_Libraries/onnx_models/text-embedding-3-small.onnx",
-            'model_dir': "./App_Function_Libraries/onnx_models",
+            'onnx_model_path': "./Models/onnx_models/text-embedding-3-small.onnx",
+            'model_dir': "./Models",
             'embedding_api_url': "http://localhost:8080/v1/embeddings",
             'embedding_api_key': '',
             'chunk_size': 400,

@@ -21,6 +21,8 @@ from fastapi import (
 )
 from starlette.responses import FileResponse # For serving exported files
 from loguru import logger
+
+from tldw_Server_API.app.api.v1.API_Deps.v1_endpoint_deps import verify_token
 #
 # Local Imports
 from tldw_Server_API.app.core.Prompt_Management.Prompts_Interop import (
@@ -52,17 +54,29 @@ from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
 
 router = APIRouter()
 
-# Helper to check API token if needed (can be a shared dependency)
-async def verify_token(Token: str = Header(None)):
-    if not Token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authentication token.")
-    expected_token = os.getenv("API_BEARER")
-    if not expected_token:
-        logger.critical("API_BEARER environment variable is not set. Authentication cannot be verified.")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="Server authentication is misconfigured.")
-    if Token.replace("Bearer ", "", 1).strip() != expected_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token.")
+# --- Sync Log Endpoints ---
+@router.get(
+    "/sync-log",
+    response_model=List[schemas.SyncLogEntryResponse],
+    summary="Get sync log entries (admin/debug)",
+    dependencies=[Depends(verify_token)] # Should be admin-only
+)
+async def get_sync_log(
+    since_change_id: int = Query(0, ge=0),
+    limit: Optional[int] = Query(100, ge=1, le=1000),
+    Token: str = Header(None, description="Bearer token for authentication."),
+    db: PromptsDatabase = Depends(get_prompts_db_for_user) # User specific sync log
+):
+    # Add admin role check here if you have role-based auth
+    # if not current_user.is_admin:
+    #     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    try:
+        entries = db.get_sync_log_entries(since_change_id=since_change_id, limit=limit)
+        return [schemas.SyncLogEntryResponse(**entry) for entry in entries]
+    except DatabaseError as e:
+        logger.error(f"Database error fetching sync log: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error.")
+
 
 # === Prompt Endpoints ===
 
@@ -475,28 +489,7 @@ async def export_keywords_api(
         logger.error(f"Unexpected error during keyword export: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected error during keyword export: {str(e)}")
 
-# --- Sync Log Endpoints (Example - usually for admin/debug) ---
-@router.get(
-    "/sync-log",
-    response_model=List[schemas.SyncLogEntryResponse],
-    summary="Get sync log entries (admin/debug)",
-    dependencies=[Depends(verify_token)] # Should be admin-only
-)
-async def get_sync_log(
-    since_change_id: int = Query(0, ge=0),
-    limit: Optional[int] = Query(100, ge=1, le=1000),
-    Token: str = Header(None, description="Bearer token for authentication."),
-    db: PromptsDatabase = Depends(get_prompts_db_for_user) # User specific sync log
-):
-    # Add admin role check here if you have role-based auth
-    # if not current_user.is_admin:
-    #     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-    try:
-        entries = db.get_sync_log_entries(since_change_id=since_change_id, limit=limit)
-        return [schemas.SyncLogEntryResponse(**entry) for entry in entries]
-    except DatabaseError as e:
-        logger.error(f"Database error fetching sync log: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error.")
+
 
 #
 # End of prompts.py

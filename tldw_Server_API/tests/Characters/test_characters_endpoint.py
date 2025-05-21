@@ -4,6 +4,8 @@
 import base64
 import binascii
 import json
+import sys
+
 import pytest  # Using pytest for its features, though not strictly required by "no conftest"
 import builtins  # For patching builtins.hasattr
 from typing import Dict, Any, List, Optional
@@ -416,8 +418,10 @@ class TestUpdateCharacter:
     def test_update_character_no_updatable_fields(self):  # Empty payload
         char_id = 1;
         current_char_db = get_sample_character_db_dict(id=char_id, name="NoChangeChar")
-        mock_db_instance.get_character_card_by_id.return_value = current_char_db
 
+        mock_db_instance.reset_mock()
+        mock_db_instance.get_character_card_by_id.return_value = current_char_db
+        mock_db_instance.update_character_card = MagicMock()
         response = client.put(f"{BASE_API_URL}/{char_id}", json={})  # Empty update payload
 
         assert response.status_code == status.HTTP_200_OK  # Returns current data
@@ -425,9 +429,10 @@ class TestUpdateCharacter:
         mock_db_instance.update_character_card.assert_not_called()  # DB update should not be called
 
     def test_update_character_version_conflict(self):
-        char_id = 1;
+        char_id = 1
         current_version = 1
         current_char_db = get_sample_character_db_dict(id=char_id, name="MyChar", version=current_version)
+        mock_db_instance.reset_mock()
         mock_db_instance.get_character_card_by_id.return_value = current_char_db
         # DB update method raises ConflictError for version mismatch
         mock_db_instance.update_character_card.side_effect = ConflictError("Version mismatch during update")
@@ -445,7 +450,7 @@ class TestDeleteCharacter:
         char_version = 2;
         char_name = "Char About To Be Deleted"
         char_to_delete_db_data = get_sample_character_db_dict(id=char_id, name=char_name, version=char_version)
-
+        mock_db_instance.reset_mock()
         mock_db_instance.get_character_card_by_id.return_value = char_to_delete_db_data
         # Ensure delete_character_card method exists on the mock for this test path and returns True
         mock_db_instance.delete_character_card = MagicMock(return_value=True)
@@ -462,6 +467,7 @@ class TestDeleteCharacter:
 
     def test_delete_character_not_found(self):
         char_id = 999
+        mock_db_instance.reset_mock()
         mock_db_instance.get_character_card_by_id.return_value = None
         response = client.delete(f"{BASE_API_URL}/{char_id}")
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -472,8 +478,9 @@ class TestDeleteCharacter:
             mock_db_instance.delete_character_card.assert_not_called()
 
     def test_delete_character_version_conflict(self):  # e.g., optimistic locking failure
-        char_id = 1;
+        char_id = 1
         char_db_data = get_sample_character_db_dict(id=char_id, name="ConflictDelete", version=1)
+        mock_db_instance.reset_mock()
         mock_db_instance.get_character_card_by_id.return_value = char_db_data
         mock_db_instance.delete_character_card = MagicMock(
             side_effect=ConflictError("Version mismatch on delete attempt"))
@@ -485,6 +492,7 @@ class TestDeleteCharacter:
     def test_delete_character_db_method_not_implemented(self):
         char_id = 1
         char_to_delete_db_data = get_sample_character_db_dict(id=char_id, name="NoDeleteMethodChar", version=1)
+        mock_db_instance.reset_mock()
         mock_db_instance.get_character_card_by_id.return_value = char_to_delete_db_data
 
         # Store original hasattr to restore it later

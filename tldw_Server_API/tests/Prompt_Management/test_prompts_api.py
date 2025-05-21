@@ -8,9 +8,12 @@ import pytest
 import json
 import base64
 import urllib.parse
+from unittest.mock import MagicMock
 #
 # Third-Party Imports
 from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.api.v1.API_Deps import Prompts_DB_Deps
 #
 # Local Imports
 from tldw_Server_API.app.main import app as fastapi_app
@@ -89,6 +92,92 @@ def get_sample_prompt_payload(name_suffix: str = "") -> Dict[str, Any]:
 def get_sample_keyword_payload(text_suffix: str = "") -> Dict[str, str]:
     return {"keyword_text": f"api_keyword_{text_suffix}".strip()}
 
+# Fixture for a specific API token value for direct testing of verify_token
+@pytest.fixture(scope="session")
+def actual_test_api_key() -> str:
+    return "this_is_the_actual_single_user_key_for_testing"
+
+# Standalone tests for verify_token (if they are in test_prompts_api.py)
+@pytest.mark.asyncio
+async def test_verify_token_success_single_user_mode(monkeypatch, actual_test_api_key: str):
+    # Simulate single-user mode and set the expected API key
+    original_single_user_mode = settings.get("SINGLE_USER_MODE")
+    original_api_key = settings.get("SINGLE_USER_API_KEY")
+
+    monkeypatch.setitem(settings, "SINGLE_USER_MODE", True)
+    monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", actual_test_api_key)
+    try:
+        assert await verify_token(Token=actual_test_api_key) is True
+    finally:
+        # Restore original settings
+        monkeypatch.setitem(settings, "SINGLE_USER_MODE", original_single_user_mode)
+        if original_api_key is not None:
+            monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", original_api_key)
+        else:
+            monkeypatch.delitem(settings, "SINGLE_USER_API_KEY", raising=False)
+
+
+@pytest.mark.asyncio
+async def test_verify_token_missing_token_header_direct(): # Renamed for clarity
+    with pytest.raises(HTTPException) as excinfo:
+        await verify_token(Token=None) # FastAPI would pass None if Header is missing
+    assert excinfo.value.status_code == status.HTTP_401_UNAUTHORIZED
+    assert "Missing authentication token" in excinfo.value.detail
+
+
+@pytest.mark.asyncio
+async def test_verify_token_invalid_token_single_user_mode(monkeypatch, actual_test_api_key: str):
+    original_single_user_mode = settings.get("SINGLE_USER_MODE")
+    original_api_key = settings.get("SINGLE_USER_API_KEY")
+
+    monkeypatch.setitem(settings, "SINGLE_USER_MODE", True)
+    monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", actual_test_api_key)
+    try:
+        with pytest.raises(HTTPException) as excinfo:
+            await verify_token(Token="completely-wrong-token")
+        assert excinfo.value.status_code == status.HTTP_401_UNAUTHORIZED
+        assert "Invalid authentication token" in excinfo.value.detail
+    finally:
+        monkeypatch.setitem(settings, "SINGLE_USER_MODE", original_single_user_mode)
+        if original_api_key is not None:
+            monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", original_api_key)
+        else:
+            monkeypatch.delitem(settings, "SINGLE_USER_API_KEY", raising=False)
+
+@pytest.mark.asyncio
+async def test_verify_token_server_misconfigured_key_missing_single_user(monkeypatch):
+    original_single_user_mode = settings.get("SINGLE_USER_MODE")
+    original_api_key = settings.get("SINGLE_USER_API_KEY")
+
+    monkeypatch.setitem(settings, "SINGLE_USER_MODE", True)
+    monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", None) # Simulate API key not set
+    try:
+        with pytest.raises(HTTPException) as excinfo:
+            await verify_token(Token="any-token-will-do-for-this-check")
+        assert excinfo.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert "Server authentication misconfigured (API key missing)" in excinfo.value.detail
+    finally:
+        monkeypatch.setitem(settings, "SINGLE_USER_MODE", original_single_user_mode)
+        if original_api_key is not None:
+            monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", original_api_key)
+        else:
+            # If original was None or not present, restore that state
+             monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", None) # Or delitem if that's more appropriate for your settings load
+
+@pytest.fixture(scope="session")
+def test_api_token(actual_test_api_key: str): # Depends on the actual_test_api_key fixture
+    if settings.get("SINGLE_USER_MODE"):
+        # For single-user mode, tests should use a known, valid API key.
+        # We can set this key in settings for the test session if it's not already there.
+        # This assumes your settings["SINGLE_USER_API_KEY"] is the source of truth.
+        # If settings() are reloaded per test function (via `client` fixture),
+        # then settings["SINGLE_USER_API_KEY"] might default to "default-secret-key-for-single-user"
+        # unless explicitly patched for the test.
+        # Using actual_test_api_key makes it consistent.
+        return actual_test_api_key
+    # For multi-user mode, this is a placeholder, as real JWTs are complex.
+    # The verify_token override in the `client` fixture handles this for endpoint tests.
+    return "fixed_test_api_token_for_pytest_jwt_placeholder"
 
 #######################################################################################################################
 # Fixtures
@@ -142,22 +231,54 @@ def client_env_setup(tmp_path: Path, monkeypatch, test_user_instance: User):
 
 
 @pytest.fixture(scope="function")
-def client(client_env_setup):
+def client(test_user: User, tmp_path: Path, monkeypatch):
     """
-    Provides a TestClient with auth bypassed (verify_token always returns True).
-    Uses a fresh, temporary database for each test function.
+    Provides a TestClient instance with a fresh, temporary database for each test function.
+    Overrides authentication and database path settings for isolated testing.
     """
 
-    async def override_verify_token_dependency_always_true():
+    # This function will be used to override the original _get_prompts_db_path_for_user
+    def mock_get_prompts_db_path_for_user(user_id: int, db_version: str = "v2") -> Path: # MODIFIED: user: User -> user_id: int
+        user_db_dir = tmp_path / str(user_id) / "prompts_user_dbs"
+        user_db_dir.mkdir(parents=True, exist_ok=True)
+        if db_version == "v2":
+            return user_db_dir / "user_prompts_v2.sqlite"
+        return user_db_dir / f"user_prompts_{db_version}.sqlite"
+
+    monkeypatch.setattr(Prompts_DB_Deps, "_get_prompts_db_path_for_user", mock_get_prompts_db_path_for_user)
+
+    original_user_db_base_dir = settings.get("USER_DB_BASE_DIR")
+    monkeypatch.setitem(settings, "USER_DB_BASE_DIR", tmp_path) # Use monkeypatch.setitem for dict
+
+    # This explicit creation might be redundant if the mock above handles it, but harmless.
+    user_specific_prompts_dir = tmp_path / str(test_user.id) / "prompts_user_dbs"
+    user_specific_prompts_dir.mkdir(parents=True, exist_ok=True)
+
+
+    def override_get_request_user():
+        return test_user
+
+    async def override_verify_token_dependency():
         return True
 
-    fastapi_app.dependency_overrides[verify_token] = override_verify_token_dependency_always_true
+    original_overrides = fastapi_app.dependency_overrides.copy()
+    fastapi_app.dependency_overrides[get_request_user] = override_get_request_user
+    fastapi_app.dependency_overrides[verify_token] = override_verify_token_dependency
 
-    with TestClient(fastapi_app) as c:
-        yield c
+    try:
+        with TestClient(fastapi_app) as c:
+            yield c
+    finally:
+        fastapi_app.dependency_overrides = original_overrides
 
-    # Teardown: remove verify_token override
-    del fastapi_app.dependency_overrides[verify_token]
+        if callable(close_all_cached_prompts_db_instances):
+            close_all_cached_prompts_db_instances()
+
+        # Restore original USER_DB_BASE_DIR on the settings object
+        if original_user_db_base_dir is not None:
+            monkeypatch.setitem(settings, "USER_DB_BASE_DIR", original_user_db_base_dir)
+        else:
+            monkeypatch.delitem(settings, "USER_DB_BASE_DIR", raising=False)
 
 
 @pytest.fixture(scope="function")
@@ -288,6 +409,35 @@ def test_authorized_access_valid_token_provided(client_with_auth: TestClient, au
 #######################################################################################################################
 
 class TestPromptEndpoints:
+    def get_sample_prompt_payload(self, name_suffix: str = "") -> dict:
+        return {
+            "name": f"Test Prompt {name_suffix}",
+            "author": "API Test Author",
+            "details": "Some test details.",
+            "system_prompt": "System prompt content.",
+            "user_prompt": "User prompt content.",
+            "keywords": [f"kw{name_suffix.lower()}", "common"]
+        }
+
+    def create_prompt_utility(self, client: TestClient, name_suffix: str) -> dict:
+        payload = self.get_sample_prompt_payload(name_suffix)
+        response = client.post(f"{API_V1_PROMPTS_PREFIX}/", json=payload)
+        response.raise_for_status()  # Will raise for non-2xx
+        return response.json()
+
+    @pytest.mark.parametrize("identifier_type", ["id", "uuid", "name"])
+    def test_get_prompt_by_identifier(self, client: TestClient, identifier_type: str):
+        created_prompt = self.create_prompt_utility(client, f"GetBy{identifier_type.capitalize()}")  # Use self
+        identifier_to_fetch = created_prompt[identifier_type]
+
+        if identifier_type == "name":
+            identifier_to_fetch = urllib.parse.quote(str(identifier_to_fetch))
+
+        response = client.get(f"{API_V1_PROMPTS_PREFIX}/{identifier_to_fetch}")
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data[identifier_type] == created_prompt[identifier_type]
+        assert data["name"] == created_prompt["name"]
 
     def test_create_prompt_success(self, client: TestClient):
         payload = get_sample_prompt_payload("CreateSuccess")
