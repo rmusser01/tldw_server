@@ -42,32 +42,42 @@ router = APIRouter()
 
 # --- Helper for Exception Handling (largely the same) ---
 def handle_db_errors(e: Exception, entity_type: str = "resource"):
+    if isinstance(e, HTTPException):  # If it's already an HTTPException, re-raise
+        raise e
+
+    logger_func = logger.warning  # Default to warning for known DB operational errors
+    http_status_code = status.HTTP_500_INTERNAL_SERVER_ERROR  # Default
+    detail_message = f"An unexpected error occurred while processing your request for {entity_type}."
+
     if isinstance(e, InputError):
-        logger.warning(f"Input error for {entity_type}: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        http_status_code = status.HTTP_400_BAD_REQUEST
+        detail_message = str(e)
     elif isinstance(e, ConflictError):
-        logger.warning(
-            f"Conflict error for {entity_type} (ID: {e.entity_id if hasattr(e, 'entity_id') else 'N/A'}): {e}")
-        user_message = str(e)
-        if e.entity and e.entity_id:
-            user_message = f"A conflict occurred with {e.entity} (ID: {e.entity_id}). It might have been modified or deleted, or a unique constraint was violated."
-        elif "version mismatch" in str(e).lower():
-            user_message = "The resource has been modified since you last fetched it. Please refresh and try again."
-        elif "already exists" in str(e).lower():
-            user_message = f"A {entity_type} with the provided identifier already exists."
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=user_message)
-    elif isinstance(e, CharactersRAGDBError):
-        logger.error(f"Database error for {entity_type}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"A database error occurred while processing your request for {entity_type}.")
-    # ValueError might be raised by ChaChaNotes_DB for invalid inputs not caught by InputError
-    elif isinstance(e, ValueError):
-        logger.warning(f"Value error for {entity_type}: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    else:
-        logger.error(f"Unexpected DB service error for {entity_type}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"An unexpected error occurred while processing your request for {entity_type}.")
+        http_status_code = status.HTTP_409_CONFLICT
+        # Prioritize version mismatch message
+        exception_message_str = str(e.args[0]) if e.args else str(e)  # Get the primary message
+        if "version mismatch" in exception_message_str.lower():
+            detail_message = "The resource has been modified since you last fetched it. Please refresh and try again."
+        elif hasattr(e, 'entity') and e.entity and hasattr(e, 'entity_id') and e.entity_id:
+            detail_message = f"A conflict occurred with {e.entity} (ID: {e.entity_id}). It might have been modified or deleted, or a unique constraint was violated."
+        elif "already exists" in exception_message_str.lower():
+            detail_message = f"A {entity_type} with the provided identifier already exists."
+        else:  # Generic conflict based on the exception's original message
+            detail_message = exception_message_str
+    elif isinstance(e, CharactersRAGDBError):  # General DB Error from our library
+        logger_func = logger.error  # Log as error
+        detail_message = f"A database error occurred while processing your request for {entity_type}."
+    elif isinstance(e, ValueError):  # Catch generic ValueErrors that might not be InputError
+        http_status_code = status.HTTP_400_BAD_REQUEST
+        detail_message = str(e)
+    else:  # Truly unexpected errors
+        logger_func = logger.error
+
+    logger_func(f"Error for {entity_type}: {type(e).__name__} - {str(e)}",
+                exc_info=isinstance(e, (CharactersRAGDBError, Exception)) and not isinstance(e,
+                                                                                             (InputError, ConflictError,
+                                                                                              ValueError)))
+    raise HTTPException(status_code=http_status_code, detail=detail_message)
 
 
 # --- Notes Endpoints ---
@@ -117,15 +127,20 @@ async def get_note(
         note_id: str,
         db: CharactersRAGDB = Depends(get_chacha_db_for_user)
 ):
-    try:
-        logger.debug(f"User (DB client_id: {db.client_id}) fetching note: ID='{note_id}'")
+    logger.debug(f"User (DB client_id: {db.client_id}) fetching note: ID='{note_id}'")
+    try:  # Added try block here to catch DB errors during fetch
         note_data = db.get_note_by_id(note_id=note_id)
-        if not note_data:
-            logger.warning(f"Note ID '{note_id}' not found for user (DB client_id: {db.client_id}).")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
-        return note_data
-    except Exception as e:
-        handle_db_errors(e, "note")
+    except Exception as e:  # Catch DB errors from get_note_by_id
+        handle_db_errors(e, "note")  # This will reraise appropriately
+        return  # Should not be reached if handle_db_errors raises
+
+    if not note_data:
+        logger.warning(f"Note ID '{note_id}' not found for user (DB client_id: {db.client_id}).")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+
+    # If note_data is found, it's a dict from the DB. Pydantic will validate it on return.
+    # No need for an explicit try-except for Pydantic here, FastAPI handles it.
+    return note_data
 
 
 @router.get(
@@ -279,14 +294,17 @@ async def get_keyword(
         keyword_id: int,
         db: CharactersRAGDB = Depends(get_chacha_db_for_user)
 ):
-    try:
-        logger.debug(f"User (DB client_id: {db.client_id}) fetching keyword by ID: {keyword_id}")
+    logger.debug(f"User (DB client_id: {db.client_id}) fetching keyword by ID: {keyword_id}")
+    try: # Added try block
         keyword_data = db.get_keyword_by_id(keyword_id=keyword_id)
-        if not keyword_data:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Keyword not found")
-        return keyword_data
     except Exception as e:
         handle_db_errors(e, "keyword")
+        return
+
+    if not keyword_data:
+        logger.warning(f"Keyword ID '{keyword_id}' not found for user (DB client_id: {db.client_id}).")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Keyword not found")
+    return keyword_data
 
 
 @router.get(

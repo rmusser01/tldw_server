@@ -7,7 +7,7 @@ from typing import Optional, Any, Dict, List
 from pydantic import Field, BaseModel, field_validator, model_validator
 #
 # Local Imports
-from tldw_Server_API.app.core.Utils.Chunk_Lib import (
+from tldw_Server_API.app.core.Chunking.Chunk_Lib import (
     DEFAULT_CHUNK_OPTIONS as default_chunk_options_from_lib
 )
 #

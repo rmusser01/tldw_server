@@ -9,15 +9,12 @@ import zipfile
 
 import pypandoc
 import requests
-from fastapi import HTTPException
 from typing import Optional, List, Dict, Any
 from docx2txt import docx2txt
 from pypandoc import convert_file
 
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
-from tldw_Server_API.app.core.Utils.Utils import logger
-from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
+from tldw_Server_API.app.core.Chunking.Chunk_Lib import improved_chunking_process
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
 from tldw_Server_API.app.core.Utils.Utils import logging
 

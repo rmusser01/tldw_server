@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 #
 # Local Imports
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_xml
+from tldw_Server_API.app.core.Chunking.Chunk_Lib import chunk_xml
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_to_database
 from tldw_Server_API.app.core.Utils.Utils import logging
 #

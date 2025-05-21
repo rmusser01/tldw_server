@@ -3,19 +3,17 @@
 import pytest
 import json
 import re
-from unittest.mock import patch, MagicMock, call # For mocking external dependencies
+from unittest.mock import patch, MagicMock  # For mocking external dependencies
 
 from langdetect import LangDetectException
 # Assuming Chunk_Lib.py is in a path like app.core.Chunk_Lib
 # Adjust the import path based on your project structure.
 # For this example, let's assume Chunk_Lib.py is directly accessible or in PYTHONPATH.
 # If it's in app/core/Chunk_Lib.py and your tests are at the project root:
-from tldw_Server_API.app.core.Utils.Chunk_Lib import (
+from tldw_Server_API.app.core.Chunking.Chunk_Lib import (
     Chunker,
     DEFAULT_CHUNK_OPTIONS,
     improved_chunking_process,
-    ChunkingError,
-    InvalidInputError,
     InvalidChunkingMethodError,
     # load_document, # If you want to test this utility separately
     # chunk_for_embedding # Can be tested more like an integration test
@@ -75,7 +73,7 @@ def default_chunker_options():
 @pytest.fixture
 def default_chunker(default_chunker_options):
     # Mock tokenizer loading for most tests unless specific tokenizer behavior is tested
-    with patch('tldw_Server_API.app.core.Utils.Chunk_Lib.AutoTokenizer.from_pretrained') as mock_tokenizer_load:
+    with patch('tldw_Server_API.app.core.Chunking.Chunk_Lib.AutoTokenizer.from_pretrained') as mock_tokenizer_load:
         mock_tokenizer_instance = MagicMock()
         # Mock common tokenizer methods if they are used directly and not just for encode/decode
         mock_tokenizer_instance.encode = lambda text: [len(c) for c in text.split()] # Dummy encode
@@ -88,14 +86,14 @@ def default_chunker(default_chunker_options):
 class TestChunker:
 
     def test_chunker_initialization_default(self, default_chunker_options):
-        with patch('tldw_Server_API.app.core.Utils.Chunk_Lib.AutoTokenizer.from_pretrained', MagicMock()):
+        with patch('tldw_Server_API.app.core.Chunking.Chunk_Lib.AutoTokenizer.from_pretrained', MagicMock()):
             chunker = Chunker() # Test with no options
         assert chunker.options['method'] == default_chunker_options['method']
         assert chunker.tokenizer is not None
 
     def test_chunker_initialization_custom_options(self):
         custom_opts = {"method": "sentences", "max_size": 5, "overlap": 1, "language": "fr"}
-        with patch('tldw_Server_API.app.core.Utils.Chunk_Lib.AutoTokenizer.from_pretrained', MagicMock()):
+        with patch('tldw_Server_API.app.core.Chunking.Chunk_Lib.AutoTokenizer.from_pretrained', MagicMock()):
             chunker = Chunker(options=custom_opts)
         assert chunker.options['method'] == "sentences"
         assert chunker.options['max_size'] == 5
@@ -103,11 +101,11 @@ class TestChunker:
         assert chunker.options['language'] == "fr"
 
     def test_chunker_initialization_tokenizer_failure(self, mocker):
-        mocker.patch('tldw_Server_API.app.core.Utils.Chunk_Lib.AutoTokenizer.from_pretrained', side_effect=Exception("Load failed"))
+        mocker.patch('tldw_Server_API.app.core.Chunking.Chunk_Lib.AutoTokenizer.from_pretrained', side_effect=Exception("Load failed"))
         chunker = Chunker()
         assert chunker.tokenizer is None # Should handle gracefully for non-token methods
 
-    @patch('tldw_Server_API.app.core.Utils.Chunk_Lib.detect') # Mock langdetect.detect
+    @patch('tldw_Server_API.app.core.Chunking.Chunk_Lib.detect') # Mock langdetect.detect
     def test_detect_language(self, mock_lang_detect, default_chunker, sample_text_en):
         mock_lang_detect.return_value = "en"
         assert default_chunker.detect_language(sample_text_en) == "en"
@@ -141,7 +139,7 @@ class TestChunker:
             overlap_words = chunks[0].split()[-2:] # Last 2 words of first chunk
             assert overlap_words[0] in chunks[1].split() or overlap_words[1] in chunks[1].split() # Basic overlap check
 
-    @patch('tldw_Server_API.app.core.Utils.Chunk_Lib.sent_tokenize')
+    @patch('tldw_Server_API.app.core.Chunking.Chunk_Lib.sent_tokenize')
     def test_chunk_text_by_sentences(self, mock_sent_tokenize, default_chunker, sample_text_en):
         # Mock NLTK's sentence tokenizer to return predictable sentences
         sentences = re.split(r'(?<=[.!?])\s+', sample_text_en.replace("\n\n", " "))
@@ -233,9 +231,9 @@ class TestChunker:
         assert chunk_dicts[0]['json']['metadata']['source'] == "test_doc" # Preserved key
 
 
-    @patch('tldw_Server_API.app.core.Utils.Chunk_Lib.TfidfVectorizer')
-    @patch('tldw_Server_API.app.core.Utils.Chunk_Lib.cosine_similarity')
-    @patch('tldw_Server_API.app.core.Utils.Chunk_Lib.sent_tokenize')
+    @patch('tldw_Server_API.app.core.Chunking.Chunk_Lib.TfidfVectorizer')
+    @patch('tldw_Server_API.app.core.Chunking.Chunk_Lib.cosine_similarity')
+    @patch('tldw_Server_API.app.core.Chunking.Chunk_Lib.sent_tokenize')
     def test_semantic_chunking(self, mock_sent_tokenize, mock_cosine_similarity, mock_tfidf, default_chunker, sample_text_en):
         mock_sent_tokenize.return_value = ["Sentence one.", "Sentence two.", "Sentence three.", "Sentence four.", "Sentence five is different."]
         # Mock TF-IDF and cosine similarity to control splits
@@ -350,7 +348,7 @@ class TestChunker:
 
 # --- Tests for improved_chunking_process (more like integration for this function) ---
 
-@patch('tldw_Server_API.app.core.Utils.Chunk_Lib.Chunker') # Mock the Chunker class itself
+@patch('tldw_Server_API.app.core.Chunking.Chunk_Lib.Chunker') # Mock the Chunker class itself
 def test_improved_chunking_process_basic_flow(mock_chunker_class, sample_text_short, default_chunker_options):
     # Setup mock Chunker instance and its methods
     mock_chunker_instance = MagicMock()
@@ -400,7 +398,7 @@ def test_improved_chunking_process_with_json_header(default_chunker_options):
 
     # Patch the Chunker's specific chunking method to control its output
     with patch.object(Chunker, '_chunk_text_by_words', return_value=["This is the", "main content to", "be chunked. It", "has several words."]) as mock_word_chunker:
-        with patch('tldw_Server_API.app.core.Utils.Chunk_Lib.AutoTokenizer.from_pretrained', MagicMock()): # Mock tokenizer loading
+        with patch('tldw_Server_API.app.core.Chunking.Chunk_Lib.AutoTokenizer.from_pretrained', MagicMock()): # Mock tokenizer loading
             results = improved_chunking_process(full_text_input, chunk_options_dict=test_options)
 
     # Check that _chunk_text_by_words was called with the *actual_content*
@@ -417,9 +415,9 @@ def test_improved_chunking_process_with_json_header(default_chunker_options):
 # TODO: Add tests for chunk_for_embedding and process_document_with_metadata
 # These are higher-level and might involve more mocking or specific input files.
 # Example for chunk_for_embedding:
-@patch('tldw_Server_API.app.core.Utils.Chunk_Lib.improved_chunking_process')
+@patch('tldw_Server_API.app.core.Chunking.Chunk_Lib.improved_chunking_process')
 def test_chunk_for_embedding(mock_improved_process):
-    from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_for_embedding # Import here if not at top
+    from tldw_Server_API.app.core.Chunking.Chunk_Lib import chunk_for_embedding # Import here if not at top
 
     # Mock the output of improved_chunking_process
     mock_improved_process.return_value = [

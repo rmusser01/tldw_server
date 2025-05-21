@@ -14,7 +14,7 @@ from typing import Optional, List
 from fastapi import HTTPException
 from tldw_Server_API.app.core.Utils.Utils import logger
 
-from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_xml
+from tldw_Server_API.app.core.Chunking.Chunk_Lib import chunk_xml
 
 async def process_xml_task(
     file_bytes: bytes,

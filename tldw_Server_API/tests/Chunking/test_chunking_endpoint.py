@@ -4,9 +4,8 @@
 #
 # Imports
 import pytest
-import json
-from typing import List, Optional, Dict, Any, Callable, Generator, Union
-from unittest.mock import patch, MagicMock
+from typing import List, Optional, Dict, Any, Generator, Union
+from unittest.mock import patch
 #
 # Third-party Libraries
 from fastapi import \
@@ -18,7 +17,7 @@ from fastapi.testclient import TestClient
 # The actual router from your application
 from tldw_Server_API.app.api.v1.endpoints.chunking import chunking_router as actual_chunking_endpoint_router
 # The real default options to compare against if needed
-from tldw_Server_API.app.core.Utils.Chunk_Lib import (
+from tldw_Server_API.app.core.Chunking.Chunk_Lib import (
     DEFAULT_CHUNK_OPTIONS as default_chunk_options_from_lib_real,
     # We are mocking improved_chunking_process, so don't need the real one here
     # We also don't need the exception types here unless we're testing for them directly in this file

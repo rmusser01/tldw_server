@@ -140,9 +140,9 @@ class LlamafileHandler(BaseLLMHandler):
                     # Using tqdm for progress if available, can be made optional
                     try:
                         from tqdm.asyncio import tqdm  # For async progress bar
-                        
+
                         pbar = tqdm(total=total_size, unit='B', unit_scale=True, desc=output_path.name,
-                                    disable=not self.logger.isEnabledFor(logging.DEBUG))  # Only show if debug
+                                    disable=self.logger.level > 10)  # Only show if debug
                     except ImportError:
                         pbar = None
                         self.logger.info(f"tqdm not found, downloading {output_path.name} without progress bar.")

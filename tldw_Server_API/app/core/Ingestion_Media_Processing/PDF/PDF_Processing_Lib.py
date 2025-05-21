@@ -13,15 +13,8 @@
 ####################
 # Import necessary libraries
 import gc
-import shutil
-import time
-import uuid
 from datetime import datetime
-import os
 import re
-import tempfile
-import time
-from pathlib import Path
 from typing import Dict, Any, Optional, List, Union
 #
 # Import External Libs
@@ -189,7 +182,6 @@ def extract_metadata_from_pdf(pdf_path):
 import tempfile
 import shutil
 import uuid
-import platform
 import time
 import os
 from pathlib import Path
@@ -452,7 +444,7 @@ def process_pdf(
 
             logging.info(f"Attempting chunking for {filename} with options: {chunk_options}")
             try:
-                from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
+                from tldw_Server_API.app.core.Chunking.Chunk_Lib import improved_chunking_process
                 processed_chunks = improved_chunking_process(content, chunk_options)
 
                 if not processed_chunks:

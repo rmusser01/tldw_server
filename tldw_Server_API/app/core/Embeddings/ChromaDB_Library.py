@@ -3,7 +3,7 @@
 #
 # Imports:
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Collection
+from typing import List, Dict, Any, Optional
 import threading
 # 3rd-Party Imports:
 import chromadb
@@ -14,13 +14,12 @@ from chromadb.api.models.Collection import Collection
 from chromadb.api.types import QueryResult
 #
 # Local Imports:
-from tldw_Server_API.app.core.Utils.Chunk_Lib import chunk_for_embedding
+from tldw_Server_API.app.core.Chunking.Chunk_Lib import chunk_for_embedding
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
 from tldw_Server_API.app.core.Embeddings.Embeddings_Create import create_embedding, create_embeddings_batch
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-from tldw_Server_API.app.core.Utils.Utils import get_database_path, ensure_directory_exists, logger,  logging
-from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.Utils.Utils import logger
 
 #
 #######################################################################################################################

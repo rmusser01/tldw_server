@@ -124,6 +124,7 @@ https://github.com/masterFoad/NanoSage
 https://github.com/pkargupta/tree-of-debate
 https://github.com/binary-husky/gpt_academic/blob/master/docs/README.English.md
 https://arxiv.org/abs/2409.13741
+https://github.com/codelion/openevolve
 https://github.com/sentient-agi/OpenDeepSearch
 https://github.com/qx-labs/agents-deep-research
 https://researcher.iqidis.ai

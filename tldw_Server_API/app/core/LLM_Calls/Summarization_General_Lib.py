@@ -28,7 +28,7 @@ from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 #
 # Import Local
-from tldw_Server_API.app.core.Utils.Chunk_Lib import (
+from tldw_Server_API.app.core.Chunking.Chunk_Lib import (
     improved_chunking_process
 )
 from tldw_Server_API.app.core.LLM_Calls.Local_Summarization_Lib import (

@@ -12,11 +12,16 @@ from typing import List, Tuple, Union, Dict
 # Local Imports
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.Utils.Utils import get_database_path, get_project_relative_path
-from tldw_Server_API.app.core.DB_Management.Prompts_DB import list_prompts as sqlite_list_prompts, \
-    fetch_prompt_details as sqlite_fetch_prompt_details, add_prompt as sqlite_add_prompt, \
-    search_prompts as sqlite_search_prompts, add_or_update_prompt as sqlite_add_or_update_prompt, \
-    load_prompt_details as sqlite_load_prompt_details, insert_prompt_to_db as sqlite_insert_prompt_to_db, \
-    delete_prompt as sqlite_delete_prompt
+#from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
+    #list_prompts as sqlite_list_prompts,
+    #fetch_prompt_details as sqlite_fetch_prompt_details,
+    #add_prompt as sqlite_add_prompt,
+    #search_prompts as sqlite_search_prompts,
+    #add_or_update_prompt as sqlite_add_or_update_prompt,
+    #load_prompt_details as sqlite_load_prompt_details,
+    # insert_prompt_to_db as sqlite_insert_prompt_to_db,
+    #delete_prompt as sqlite_delete_prompt
+#)
 from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import (
     MediaDatabase,
     import_obsidian_note_to_db as sqlite_import_obsidian_note_to_db,
@@ -276,92 +281,92 @@ def delete_document_version(*args, **kwargs):
 #
 # Prompt-related functions #FIXME rename /resort
 
-def list_prompts(*args, **kwargs):
-    if db_type == 'sqlite':
-        return sqlite_list_prompts(*args, **kwargs)
-    elif db_type == 'elasticsearch':
-        # Implement Elasticsearch version
-        raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
-    elif db_type == 'postgres':
-        # Implement Postgres version
-        raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
-
-def search_prompts(*args, **kwargs):
-    if db_type == 'sqlite':
-        return sqlite_search_prompts(*args, **kwargs)
-    elif db_type == 'elasticsearch':
-        # Implement Elasticsearch version
-        raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
-    elif db_type == 'postgres':
-        # Implement Postgres version
-        raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
-
-def fetch_prompt_details(*args, **kwargs):
-    if db_type == 'sqlite':
-        return sqlite_fetch_prompt_details(*args, **kwargs)
-    elif db_type == 'elasticsearch':
-        # Implement Elasticsearch version
-        raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
-    elif db_type == 'postgres':
-        # Implement Postgres version
-        raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
-
-def add_prompt(*args, **kwargs):
-    if db_type == 'sqlite':
-        return sqlite_add_prompt(*args, **kwargs)
-    elif db_type == 'elasticsearch':
-        # Implement Elasticsearch version
-        raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
-    elif db_type == 'postgres':
-        # Implement Postgres version
-        raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
-
-
-def add_or_update_prompt(*args, **kwargs):
-    if db_type == 'sqlite':
-        return sqlite_add_or_update_prompt(*args, **kwargs)
-    elif db_type == 'elasticsearch':
-        # Implement Elasticsearch version
-        raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
-    elif db_type == 'postgres':
-        # Implement Postgres version
-        raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
-    return None
-
-
-def load_prompt_details(*args, **kwargs):
-    if db_type == 'sqlite':
-        return sqlite_load_prompt_details(*args, **kwargs)
-    elif db_type == 'elasticsearch':
-        # Implement Elasticsearch version
-        raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
-    elif db_type == 'postgres':
-        # Implement Postgres version
-        raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
-    return None
-
-
-def insert_prompt_to_db(*args, **kwargs):
-    if db_type == 'sqlite':
-        return sqlite_insert_prompt_to_db(*args, **kwargs)
-    elif db_type == 'elasticsearch':
-        # Implement Elasticsearch version
-        raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
-    elif db_type == 'postgres':
-        # Implement Postgres version
-        raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
-    return None
-
-
-def delete_prompt(*args, **kwargs):
-    if db_type == 'sqlite':
-        return sqlite_delete_prompt(*args, **kwargs)
-    elif db_type == 'elasticsearch':
-        # Implement Elasticsearch version
-        raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
-    elif db_type == 'postgres':
-        # Implement Postgres version
-        raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
+# def list_prompts(*args, **kwargs):
+#     if db_type == 'sqlite':
+#         return sqlite_list_prompts(*args, **kwargs)
+#     elif db_type == 'elasticsearch':
+#         # Implement Elasticsearch version
+#         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
+#     elif db_type == 'postgres':
+#         # Implement Postgres version
+#         raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
+#
+# def search_prompts(*args, **kwargs):
+#     if db_type == 'sqlite':
+#         return sqlite_search_prompts(*args, **kwargs)
+#     elif db_type == 'elasticsearch':
+#         # Implement Elasticsearch version
+#         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
+#     elif db_type == 'postgres':
+#         # Implement Postgres version
+#         raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
+#
+# def fetch_prompt_details(*args, **kwargs):
+#     if db_type == 'sqlite':
+#         return sqlite_fetch_prompt_details(*args, **kwargs)
+#     elif db_type == 'elasticsearch':
+#         # Implement Elasticsearch version
+#         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
+#     elif db_type == 'postgres':
+#         # Implement Postgres version
+#         raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
+#
+# def add_prompt(*args, **kwargs):
+#     if db_type == 'sqlite':
+#         return sqlite_add_prompt(*args, **kwargs)
+#     elif db_type == 'elasticsearch':
+#         # Implement Elasticsearch version
+#         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
+#     elif db_type == 'postgres':
+#         # Implement Postgres version
+#         raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
+#
+#
+# def add_or_update_prompt(*args, **kwargs):
+#     if db_type == 'sqlite':
+#         return sqlite_add_or_update_prompt(*args, **kwargs)
+#     elif db_type == 'elasticsearch':
+#         # Implement Elasticsearch version
+#         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
+#     elif db_type == 'postgres':
+#         # Implement Postgres version
+#         raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
+#     return None
+#
+#
+# def load_prompt_details(*args, **kwargs):
+#     if db_type == 'sqlite':
+#         return sqlite_load_prompt_details(*args, **kwargs)
+#     elif db_type == 'elasticsearch':
+#         # Implement Elasticsearch version
+#         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
+#     elif db_type == 'postgres':
+#         # Implement Postgres version
+#         raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
+#     return None
+#
+#
+# def insert_prompt_to_db(*args, **kwargs):
+#     if db_type == 'sqlite':
+#         return sqlite_insert_prompt_to_db(*args, **kwargs)
+#     elif db_type == 'elasticsearch':
+#         # Implement Elasticsearch version
+#         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
+#     elif db_type == 'postgres':
+#         # Implement Postgres version
+#         raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
+#     return None
+#
+#
+# def delete_prompt(*args, **kwargs):
+#     if db_type == 'sqlite':
+#         return sqlite_delete_prompt(*args, **kwargs)
+#     elif db_type == 'elasticsearch':
+#         # Implement Elasticsearch version
+#         raise NotImplementedError("Elasticsearch version of add_media_with_keywords not yet implemented")
+#     elif db_type == 'postgres':
+#         # Implement Postgres version
+#         raise NotImplementedError("Postgres version of add_media_with_keywords not yet implemented")
 
 def mark_as_trash(*args, **kwargs: int) -> bool:
     if db_type == 'sqlite':

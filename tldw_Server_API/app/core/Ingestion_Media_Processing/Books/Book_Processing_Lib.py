@@ -48,13 +48,12 @@ from bs4 import BeautifulSoup
 import ebooklib
 from ebooklib import epub
 import html2text
-from loguru import logger
 
 #
 # Import Local
 from tldw_Server_API.app.core.DB_Management.DB_Manager import add_media_with_keywords
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-from tldw_Server_API.app.core.Utils.Chunk_Lib import Chunker, improved_chunking_process, ChunkingError, \
+from tldw_Server_API.app.core.Chunking.Chunk_Lib import improved_chunking_process, ChunkingError, \
     InvalidChunkingMethodError
 from tldw_Server_API.app.core.Metrics.metrics_logger import (log_counter, log_histogram)
 from tldw_Server_API.app.core.Utils.Utils import logging

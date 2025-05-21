@@ -73,12 +73,9 @@ class NotesInteropService:
             ValueError: If user_id is empty.
             CharactersRAGDBError: If the database initialization fails.
         """
-        if not user_id:
-            # Ensure user_id is a non-empty string, basic validation
-            if not isinstance(user_id, str) or not user_id.strip():
-                raise ValueError("user_id must be a non-empty string.")
-            user_id = user_id.strip()
-
+        if not isinstance(user_id, str) or not user_id.strip():
+            raise ValueError("user_id must be a non-empty string.")
+        user_id = user_id.strip()
         # Fast path: check if instance already exists without lock
         if user_id in self._db_instances:
             return self._db_instances[user_id]

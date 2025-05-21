@@ -27,7 +27,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -47,7 +46,7 @@ from tldw_Server_API.app.core.Utils.Utils import (
     extract_text_from_segments,
     logging
 )
-from tldw_Server_API.app.core.Utils.Chunk_Lib import improved_chunking_process
+from tldw_Server_API.app.core.Chunking.Chunk_Lib import improved_chunking_process
 from tldw_Server_API.app.core.Metrics.metrics_logger import (
     log_counter, log_histogram
 )
