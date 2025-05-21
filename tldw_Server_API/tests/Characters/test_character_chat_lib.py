@@ -401,33 +401,45 @@ def test_load_character_card_from_string_content_unit(mock_yaml_module, mock_imp
 
 @mock.patch(f"{MODULE_PATH_PREFIX}.Image", new_callable=mock.MagicMock)
 @mock.patch(f"{MODULE_PATH_PREFIX}.base64")  # This is the base64 module *used by Character_Chat_Lib*
-@mock.patch(f"{MODULE_PATH_PREFIX}.json")
+@mock.patch(f"{MODULE_PATH_PREFIX}.json")    # This mock is 'mock_json_loads_mod'
 def test_extract_json_from_image_file_unit(mock_json_loads_mod, mock_base64_mod, MockPILImageModule, tmp_path,
                                            caplog_handler):
+    # --- FIX: Configure the mocked json module ---
+    # The SUT (Character_Chat_Lib) uses 'json.JSONDecodeError'.
+    # Since MODULE_PATH_PREFIX.json is mocked (as mock_json_loads_mod),
+    # we need to ensure that mock_json_loads_mod.JSONDecodeError refers to the actual exception class.
+    # 'json' here refers to the 'import json' at the top of this test file (the real json module).
+    mock_json_loads_mod.JSONDecodeError = json.JSONDecodeError
+    # --- END FIX ---
+
     mock_img_instance = MockPILImageObject()
     MockPILImageModule.open.return_value = mock_img_instance
 
     chara_json_str = '{"name": "CharaFromImage"}'
+    # base64 from 'import base64' (real module) is used for test data setup
     b64_encoded_bytes = base64.b64encode(chara_json_str.encode('utf-8'))
     b64_encoded_str = b64_encoded_bytes.decode('utf-8')
 
-    mock_img_instance.info = {'chara': b64_encoded_str};
+    mock_img_instance.info = {'chara': b64_encoded_str}
     mock_img_instance.format = 'PNG'
 
     # Default good path return values
     default_b64_return = chara_json_str.encode('utf-8')
     mock_base64_mod.b64decode.return_value = default_b64_return
+    # mock_json_loads_mod.loads is the mocked function SUT will call.
+    # json.loads(chara_json_str) uses the real 'json' module to prepare the expected return value.
     mock_json_loads_mod.loads.return_value = json.loads(chara_json_str)
 
-    dummy_png_path = tmp_path / "test_unit.png";
+    dummy_png_path = tmp_path / "test_unit.png"
     dummy_png_path.write_text("dummy_content_for_file_existence")
 
     result = extract_json_from_image_file(str(dummy_png_path))
-    assert result == chara_json_str
+    assert result == chara_json_str # This should be json.loads(result) == json.loads(chara_json_str) if result is JSON string or just comparing strings is fine.
+                                      # The function returns a string, so string comparison is correct.
     MockPILImageModule.open.assert_called_once()
     assert isinstance(MockPILImageModule.open.call_args[0][0], io.BytesIO)
     mock_base64_mod.b64decode.assert_called_once_with(b64_encoded_str)
-    mock_json_loads_mod.loads.assert_called_once_with(chara_json_str)
+    mock_json_loads_mod.loads.assert_called_once_with(chara_json_str) # SUT calls json.loads with the decoded string
 
     MockPILImageModule.open.reset_mock()
     mock_base64_mod.b64decode.reset_mock()
@@ -436,7 +448,6 @@ def test_extract_json_from_image_file_unit(mock_json_loads_mod, mock_base64_mod,
 
     # Test Non-PNG with chara key
     mock_img_instance.format = 'JPEG'
-    # Ensure mocks are set for this path too if they were reset
     mock_base64_mod.b64decode.return_value = default_b64_return
     mock_json_loads_mod.loads.return_value = json.loads(chara_json_str)
     assert extract_json_from_image_file(str(dummy_png_path)) == chara_json_str
@@ -447,30 +458,28 @@ def test_extract_json_from_image_file_unit(mock_json_loads_mod, mock_base64_mod,
     # --- Test error in b64decode / subsequent decode ---
     # To test the (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) block
 
-    # Option 1: Trigger UnicodeDecodeError (often easier to reliably mock)
-    mock_base64_mod.b64decode.reset_mock()  # Reset call count
-    mock_base64_mod.b64decode.return_value = b'\xff\xfe\xfd'  # Invalid UTF-8 sequence
-    mock_json_loads_mod.loads.reset_mock()  # Not reached if decode fails
+    mock_base64_mod.b64decode.reset_mock()
+    mock_base64_mod.b64decode.return_value = b'\xff\xfe\xfd'  # Invalid UTF-8 sequence, will cause .decode('utf-8') to fail
+    mock_json_loads_mod.loads.reset_mock()  # Not reached if .decode() fails
 
     assert extract_json_from_image_file(str(dummy_png_path)) is None
+    # This assertion should now pass because the correct logger.error will be called in the SUT
     assert "Error decoding 'chara' metadata" in caplog_handler.text
-    # Verify b64decode was called
-    mock_base64_mod.b64decode.assert_called_once_with(b64_encoded_str)  # It's still called with the original b64 string
-    # json.loads should not have been called if .decode() failed
+    mock_base64_mod.b64decode.assert_called_once_with(b64_encoded_str)
     mock_json_loads_mod.loads.assert_not_called()
 
     # Reset for next test section
-    mock_base64_mod.b64decode.return_value = default_b64_return  # Restore good default
-    mock_base64_mod.b64decode.side_effect = None  # Clear any side effect
+    mock_base64_mod.b64decode.return_value = default_b64_return
+    mock_base64_mod.b64decode.side_effect = None
     caplog_handler.clear()
 
     # Test PIL UnidentifiedImageError
-    MockPILImageModule.open.reset_mock()  # Reset open mock before setting side_effect
+    MockPILImageModule.open.reset_mock()
     MockPILImageModule.open.side_effect = PILImageReal.UnidentifiedImageError("bad image file")
     assert extract_json_from_image_file(str(dummy_png_path)) is None
     assert "Cannot open or read image file" in caplog_handler.text
-    MockPILImageModule.open.side_effect = None;
-    MockPILImageModule.open.return_value = mock_img_instance;  # Restore
+    MockPILImageModule.open.side_effect = None
+    MockPILImageModule.open.return_value = mock_img_instance # Restore
     caplog_handler.clear()
 
 

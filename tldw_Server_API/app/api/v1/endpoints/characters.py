@@ -2,31 +2,27 @@
 # Description:
 #
 # Imports
-#
-# Third-party Libraries
-#
-# Local Imports
-#
-#######################################################################################################################
-#
-# Functions:
 import base64
 import json
-from pathlib import Path
+import pathlib
 from typing import List, Union, Any, Dict, Optional
-
-from fastapi import HTTPException, Depends, Query, UploadFile, File, APIRouter
+#
+# Third-party Libraries
+from fastapi import HTTPException, Depends, Query, UploadFile, File, APIRouter, Path
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 from pydantic_core.core_schema import FieldValidationInfo
 from starlette import status
-
+#
+# Local Imports
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib import import_and_save_character_from_file
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import ConflictError, InputError
-
-
+#
+#######################################################################################################################
+#
+# Functions:
 # --- Pydantic Schemas ---
 
 class CharacterBase(BaseModel):
@@ -164,12 +160,15 @@ Dict[str, Any]:
                 if ',' in base64_str and base64_str.startswith("data:image"):
                     base64_str = base64_str.split(',', 1)[1]
                 db_data['image'] = base64.b64decode(base64_str)
+                logger.debug("Image successfully decoded.")
             except Exception as e:
-                logger.error(f"Failed to decode image_base64 for character '{char_input_data.name}': {e}")
+                logger.error(f"IMAGE DECODE FAILED for character '{getattr(char_input_data, 'name', 'N/A')}': {e}. RAISING HTTP 400.")
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid image_base64 data: {e}")
         else:  # image_base64 was None or empty string
+            logger.debug("image_base64 was None, empty, or not a string. Setting image to None.")
             db_data['image'] = None
     elif not is_update and 'image_base64' not in db_data:  # For create, if not provided at all
+        logger.debug("image_base64 not in input for create. Setting image to None.")
         db_data['image'] = None
 
     # Pydantic model's field_validator should have already converted incoming JSON strings
@@ -314,7 +313,7 @@ async def create_character(
                 detail=f"Character with name '{character_data.name}' already exists (ID: {existing_char['id']})."
             )
 
-        db_ready_data = _prepare_char_data_for_db(character_data, is_update=False)
+        db_ready_data = _prepare_char_data_for_db(character_data, is_update=False)  # This can raise HTTPException(400)
         char_id = db.add_character_card(db_ready_data)
         if not char_id:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -325,11 +324,13 @@ async def create_character(
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail="Failed to retrieve character after creation.")
         return _convert_db_char_to_response_model(created_char_db)
+    except HTTPException:  # ADD THIS
+        raise  # RE-RAISE HTTPExceptions directly
     except InputError as e:
         logger.warning(f"Input error creating character: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except ConflictError as e:
-        logger.warning(f"Conflict error creating character: {e}")  # Should be caught by explicit name check
+        logger.warning(f"Conflict error creating character: {e}")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except CharactersRAGDBError as e:
         logger.error(f"Database error creating character: {e}", exc_info=True)
@@ -343,7 +344,7 @@ async def create_character(
 @router.get("/{character_id}", response_model=CharacterResponse, summary="Get a specific character by ID",
             tags=["Characters"])
 async def get_character(
-        character_id: int = Path(..., description="The ID of the character to retrieve.", gt=0), # Use fastapi.Path
+        character_id: int = Path(..., description="The ID of the character to retrieve.", gt=0),  # Use fastapi.Path
         db: CharactersRAGDB = Depends(get_chacha_db_for_user)
 ):
     """
@@ -425,7 +426,8 @@ async def update_character(
                                 detail="Failed to retrieve character after update.")
 
         return _convert_db_char_to_response_model(updated_char_db)
-
+    except HTTPException:
+        raise
     except InputError as e:  # From DB layer
         logger.warning(f"Input error updating character {character_id}: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -435,8 +437,6 @@ async def update_character(
     except CharactersRAGDBError as e:  # General DB errors
         logger.error(f"Database error updating character {character_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {e}")
-    except HTTPException:  # Re-raise HTTPExceptions if they were raised intentionally (e.g. 404)
-        raise
     except Exception as e:  # Catch-all for other unexpected errors
         logger.error(f"Unexpected error updating character {character_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.")
@@ -488,6 +488,8 @@ async def delete_character(
             message=f"Character with ID {character_id} ('{char_to_delete.get('name', 'N/A')}') marked as deleted successfully.",
             character_id=character_id)
 
+    except HTTPException:
+        raise
     except ConflictError as e:  # From DB layer (e.g. version mismatch or FK constraint)
         logger.warning(
             f"Conflict error deleting character {character_id}: {e}. "
@@ -499,8 +501,6 @@ async def delete_character(
     except CharactersRAGDBError as e:  # General DB errors
         logger.error(f"Database error deleting character {character_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {e}")
-    except HTTPException:  # Re-raise HTTPExceptions (e.g. 404 or 501 from above)
-        raise
     except Exception as e:  # Catch-all for other unexpected errors
         logger.error(f"Unexpected error deleting character {character_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.")

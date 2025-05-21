@@ -56,13 +56,13 @@ router = APIRouter()
 async def verify_token(Token: str = Header(None)):
     if not Token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authentication token.")
-    expected_token = settings.API_BEARER # Assuming settings.API_BEARER exists
+    expected_token = os.getenv("API_BEARER")
     if not expected_token:
-        logger.critical("API_BEARER environment variable/setting is not set.")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server authentication misconfigured.")
+        logger.critical("API_BEARER environment variable is not set. Authentication cannot be verified.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Server authentication is misconfigured.")
     if Token.replace("Bearer ", "", 1).strip() != expected_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token.")
-    return True
 
 # === Prompt Endpoints ===
 
@@ -75,6 +75,7 @@ async def verify_token(Token: str = Header(None)):
 )
 async def create_prompt(
     prompt_data: schemas.PromptCreate,
+    Token: str = Header(None, description="Bearer token for authentication."),
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
@@ -120,6 +121,7 @@ async def list_all_prompts(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(10, ge=1, le=100, description="Items per page"),
     include_deleted: bool = Query(False, description="Include soft-deleted prompts"),
+    Token: str = Header(None, description="Bearer token for authentication."),
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
@@ -150,6 +152,7 @@ async def list_all_prompts(
 async def get_prompt(
     prompt_identifier: Union[int, str], # Path param will be string, FastAPI can convert to int if possible
     include_deleted: bool = Query(False, description="Include if soft-deleted"),
+    Token: str = Header(None, description="Bearer token for authentication."),
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
@@ -178,6 +181,7 @@ async def get_prompt(
 async def update_prompt(
     prompt_identifier: Union[int, str],
     prompt_data: schemas.PromptCreate, # Using PromptCreate for full replacement, or PromptUpdate for partial
+    Token: str = Header(None, description="Bearer token for authentication."),
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     # This uses add_prompt with overwrite=True logic.
@@ -247,6 +251,7 @@ async def update_prompt(
 )
 async def delete_prompt(
     prompt_identifier: Union[int, str],
+    Token: str = Header(None, description="Bearer token for authentication."),
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
@@ -278,6 +283,7 @@ async def search_all_prompts(
     page: int = Query(1, ge=1),
     results_per_page: int = Query(20, ge=1, le=100),
     include_deleted: bool = Query(False),
+    Token: str = Header(None, description="Bearer token for authentication."),
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
@@ -313,6 +319,7 @@ async def search_all_prompts(
 )
 async def create_keyword(
     keyword_data: schemas.KeywordCreate,
+    Token: str = Header(None, description="Bearer token for authentication."),
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
@@ -362,6 +369,7 @@ async def list_all_keywords(
 )
 async def delete_keyword(
     keyword_text: str,
+    Token: str = Header(None, description="Bearer token for authentication."),
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
@@ -395,6 +403,7 @@ async def export_prompts_api(
     include_author: bool = Query(True),
     include_associated_keywords: bool = Query(True),
     markdown_template_name: Optional[str] = Query("Basic Template"),
+    Token: str = Header(None, description="Bearer token for authentication."),
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
@@ -446,6 +455,7 @@ async def export_prompts_api(
     dependencies=[Depends(verify_token)]
 )
 async def export_keywords_api(
+    Token: str = Header(None, description="Bearer token for authentication."),
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
@@ -475,6 +485,7 @@ async def export_keywords_api(
 async def get_sync_log(
     since_change_id: int = Query(0, ge=0),
     limit: Optional[int] = Query(100, ge=1, le=1000),
+    Token: str = Header(None, description="Bearer token for authentication."),
     db: PromptsDatabase = Depends(get_prompts_db_for_user) # User specific sync log
 ):
     # Add admin role check here if you have role-based auth
@@ -488,5 +499,5 @@ async def get_sync_log(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error.")
 
 #
-# End of media.py
+# End of prompts.py
 #######################################################################################################################
