@@ -130,7 +130,9 @@ https://github.com/qx-labs/agents-deep-research
 https://researcher.iqidis.ai
 https://github.com/tegridydev/abstract-agent
 https://github.com/zjunlp/OmniThink
+https://searchthearxiv.com/
 https://github.com/neuml/annotateai
+https://eprint.iacr.org/
 https://docs.gptr.dev/docs/gpt-researcher/multi_agents/langgraph
 https://pub.towardsai.net/learn-anything-with-ai-and-the-feynman-technique-00a33f6a02bc
 https://github.com/dzhng/deep-research

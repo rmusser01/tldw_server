@@ -9,7 +9,7 @@ import toml
 from dotenv import load_dotenv
 #
 # 3rd-party imports
-from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 #
 # Local Imports
 #
@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 # Based on https://platform.openai.com/docs/api-reference/chat/create
 
 DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER", "openai") # Default if not set
+model_config = ConfigDict(extra="allow", from_attributes=True)
 
 # Config Loading
 load_dotenv()

@@ -632,6 +632,15 @@ def chat_api_call(
     except requests.exceptions.RequestException as e:
         logging.error(f"Network error connecting to {endpoint_lower}: {e}", exc_info=False)
         raise ChatProviderError(provider=endpoint_lower, message=f"Network error: {e}", status_code=504)
+    except (ChatAuthenticationError, ChatRateLimitError, ChatBadRequestError, ChatConfigurationError, ChatProviderError,
+            ChatAPIError) as e_chat_direct:
+        # This catches cases where the handler itself has already processed an error
+        # (e.g. non-HTTP error, or it decided to raise a specific Chat*Error type)
+        # and raises one of our custom exceptions.
+        logging.error(
+            f"Handler for {endpoint_lower} directly raised: {type(e_chat_direct).__name__} - {e_chat_direct.message}",
+            exc_info=True if e_chat_direct.status_code >= 500 else False)
+        raise e_chat_direct  # Re-raise the specific error
     except (ValueError, TypeError, KeyError) as e:
         logging.error(f"Value/Type/Key error during chat API call setup for {endpoint_lower}: {e}", exc_info=True)
         error_type = "Configuration/Parameter Error"
@@ -923,16 +932,21 @@ def chat(
                 post_gen_replacement_dict_path = loaded_config_data.get('chat_dictionaries', {}).get('post_gen_replacement_dict')
                 if post_gen_replacement_dict_path and os.path.exists(post_gen_replacement_dict_path):
                     try:
-                        raw_entries = parse_user_dict_markdown_file(post_gen_replacement_dict_path)
-                        # Assuming parse_user_dict_markdown_file returns dict of key:content_string
-                        # Need to define ChatDictionary class or ensure it's imported/available
-                        # For now, assuming it's an available type.
-                        raw_entries = parse_user_dict_markdown_file(post_gen_replacement_dict_path)
-                        # This part might need the ChatDictionary class definition
-                        # post_gen_chat_dict_entries = [ChatDictionary(key=k, content=str(v)) for k, v in raw_entries.items()]
-                        # response = process_user_input(response, post_gen_chat_dict_entries)
-                        # Placeholder if ChatDictionary or process_user_input isn't fully defined yet for this context
-                        logging.warning("Post-gen replacement logic invoked but ChatDictionary/process_user_input usage needs review here.")
+                        parsed_dict_entries = parse_user_dict_markdown_file(post_gen_replacement_dict_path)
+                        if parsed_dict_entries:
+                            post_gen_chat_dict_objects = [
+                                ChatDictionary(key=k, content=str(v)) for k, v in parsed_dict_entries.items()
+                            ]
+                            if post_gen_chat_dict_objects:
+                                response = process_user_input(response, post_gen_chat_dict_objects)
+                                # The original warning log can be removed or changed to a debug log if successfully applied.
+                                logging.debug(
+                                    f"Response after post-gen replacement (first 500 chars): {str(response)[:500]}")
+                            else:
+                                logging.debug("Post-gen dictionary parsed but resulted in no ChatDictionary objects.")
+                        else:
+                            logging.debug(
+                                f"Post-gen replacement dictionary at {post_gen_replacement_dict_path} was empty or failed to parse.")
 
                         logging.debug(f"Response after post-gen replacement (first 500 chars): {str(response)[:500]}")
                     except Exception as e_post_gen:
@@ -2007,6 +2021,7 @@ def process_user_input(
     """
     current_time = datetime.now()
     original_input_for_fallback = user_input # Save for critical error case
+    temp_user_input = user_input
 
     try:
         # 1. Match entries (uses refined match_whole_words for strings)
@@ -2096,8 +2111,8 @@ def process_user_input(
 
         # Generate output with single replacement per match
         for entry in matched_entries:
-            logging.debug("Chat Dictionary: Applying replacements")
             try:
+                logging.debug("Chat Dictionary: Applying replacements")
                 # Use a copy of max_replacements for this run if needed, or modify original for state
                 replacements_done_for_this_entry = 0
                 # Original code had `entry.max_replacements > 0` check outside loop.
@@ -2119,14 +2134,13 @@ def process_user_input(
                 log_counter("chat_dict_replacement_error", labels={"key": entry.key_raw})
                 logging.error(f"Error applying replacement for entry {entry.key_raw}: {str(e_replace)}", exc_info=True)
                 continue
-        user_input = temp_user_input # Assign back the processed string
 
     except Exception as e_crit: # Catch-all for ChatProcessingError or other unexpected issues
         log_counter("chat_dict_processing_error")
         logging.error(f"Critical error in process_user_input: {str(e_crit)}", exc_info=True)
         return original_input_for_fallback # Return original input on critical failure
 
-    return user_input
+    return temp_user_input
 
 # Example Usage:
 # 1. Load entries from a Markdown file

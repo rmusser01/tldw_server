@@ -20,6 +20,7 @@ https://github.com/RobViren/kokovoicelab
 https://github.com/taresh18/TTSizer
 https://decodingml.substack.com/p/deploying-agents-as-real-time-apis
 https://github.com/Nighthawk42/mOrpheus
+https://github.com/RobViren/kvoicewalk
 https://github.com/QuantiusBenignus/blahst/
 https://jordandarefsky.com/blog/2024/parakeet/
 https://www.tamingllms.com/notebooks/input.html#generating-long-form-content
