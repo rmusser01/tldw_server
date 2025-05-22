@@ -598,14 +598,15 @@ class PromptsDatabase:
                         cursor.execute(
                             "UPDATE PromptKeywordsTable SET deleted=0, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
                             (current_time, new_version, client_id, kw_id, current_version))
-                        if cursor.rowcount == 0: raise ConflictError("PromptKeywordsTable", kw_id)
+                        if cursor.rowcount == 0: raise ConflictError("Failed to undelete keyword due to version mismatch or it was not found.", "PromptKeywordsTable", kw_id) # Refined error
                         cursor.execute("SELECT * FROM PromptKeywordsTable WHERE id=?", (kw_id,))
                         payload = dict(cursor.fetchone())
                         self._log_sync_event(conn, 'PromptKeywordsTable', kw_uuid, 'update', new_version, payload)
                         self._update_fts_prompt_keyword(conn, kw_id, normalized_keyword)
                         return kw_id, kw_uuid
-                    else:  # Already active, raise conflict
-                        raise ConflictError(f"Keyword '{normalized_keyword}' already exists and is active.", "PromptKeywordsTable", kw_id)
+                    else:  # Already active, just return its ID and UUID
+                        logger.debug(f"Keyword '{normalized_keyword}' already exists and is active. Reusing ID: {kw_id}, UUID: {kw_uuid}")
+                        return kw_id, kw_uuid # MODIFIED LINE
                 else:  # New keyword
                     new_uuid = self._generate_uuid()
                     new_version = 1
@@ -1167,7 +1168,7 @@ class PromptsDatabase:
         offset = (page - 1) * results_per_page
 
         base_select_parts = ["p.id", "p.uuid", "p.name", "p.author", "p.details",
-                             "p.system_prompt", "p.user_prompt", "p.last_modified", "p.version", "p.deleted"]
+                             "p.system_prompt", "p.user_prompt", "p.last_modified", "p.version"]
         count_select = "COUNT(DISTINCT p.id)"
         base_from = "FROM Prompts p"
         joins = []
