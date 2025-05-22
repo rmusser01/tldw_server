@@ -306,8 +306,8 @@ def client_with_auth(client_env_setup, monkeypatch, actual_api_token_value: str)
 def auth_headers(actual_api_token_value: str) -> Dict[str, str]:
     """Provides authentication headers for tests where auth is NOT bypassed."""
     # The `verify_token` dependency is `Token: str = Header(None)`
-    # It internally handles "Bearer " prefix if present.
-    return {"Token": f"Bearer {actual_api_token_value}"}
+    # In single-user mode, it directly compares the token.
+    return {"Token": actual_api_token_value}
 
 
 @pytest.fixture
@@ -360,19 +360,28 @@ async def test_verify_token_invalid_token(monkeypatch, actual_api_token_value: s
 
 @pytest.mark.asyncio
 async def test_verify_token_server_misconfigured(monkeypatch):
-    # Simulate API_BEARER not being set
-    original_bearer = getattr(settings, "API_BEARER", "exists")
-    monkeypatch.setattr(settings, "API_BEARER", None)  # or delattr if appropriate and safe
+    # Simulate SINGLE_USER_API_KEY not being set correctly
+    original_single_user_mode = settings.get("SINGLE_USER_MODE")
+    original_api_key = settings.get("SINGLE_USER_API_KEY")
 
-    with pytest.raises(HTTPException) as exc_info:
-        await verify_token(Token="anytoken")
-    assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-    assert "Server authentication misconfigured" in exc_info.value.detail
+    monkeypatch.setitem(settings, "SINGLE_USER_MODE", True) # Ensure single user mode for this test
+    monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", None)  # Simulate API key not set
 
-    if original_bearer != "exists":  # Restore if it was there
-        monkeypatch.setattr(settings, "API_BEARER", original_bearer)
-    # If it was 'None' to begin with, this won't change it back if setattr can't set None back to "not set"
-    # This part of teardown can be tricky with Pydantic. Best if settings always have a default.
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await verify_token(Token="anytoken")
+        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert "Server authentication misconfigured (API key missing)." in exc_info.value.detail
+    finally:
+        # Restore original settings
+        monkeypatch.setitem(settings, "SINGLE_USER_MODE", original_single_user_mode)
+        if original_api_key is not None:
+            monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", original_api_key)
+        else:
+            # If the original key was None or absent, ensure it's set back to None
+            # or deleted if that's more appropriate for how settings are typically handled.
+            # Given `settings` is a dict, setting to None is generally safe.
+            monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", None)
 
 
 #######################################################################################################################
@@ -563,38 +572,42 @@ class TestPromptEndpoints:
 
     def test_update_prompt_success(self, client: TestClient):
         created_prompt = create_prompt_utility(client, "ToUpdate")
-        prompt_id_to_update = created_prompt["id"]
+        prompt_uuid_to_update = created_prompt["uuid"]
 
         update_payload = get_sample_prompt_payload("Updated") # Gets a new name
         update_payload["name"] = "Updated Prompt Name Completely" # Ensure a different name for update
         update_payload["keywords"].append("new_kw_after_update")
 
-        response = client.put(f"{API_V1_PROMPTS_PREFIX}/{prompt_id_to_update}", json=update_payload)
+        response = client.put(f"{API_V1_PROMPTS_PREFIX}/{prompt_uuid_to_update}", json=update_payload)
         assert response.status_code == status.HTTP_200_OK, response.text
         data = response.json()
         assert data["name"] == update_payload["name"] # Should reflect the new name
         assert data["author"] == update_payload["author"]
         assert "new_kw_after_update" in data["keywords"]
-        assert data["id"] == prompt_id_to_update # ID should remain the same
+        assert data["uuid"] == prompt_uuid_to_update # UUID should remain the same
 
-        # Verify with a GET
-        get_response = client.get(f"{API_V1_PROMPTS_PREFIX}/{prompt_id_to_update}")
+        # Verify with a GET using UUID
+        get_response = client.get(f"{API_V1_PROMPTS_PREFIX}/{prompt_uuid_to_update}")
         assert get_response.status_code == status.HTTP_200_OK
         assert get_response.json()["name"] == update_payload["name"]
+        assert get_response.json()["uuid"] == prompt_uuid_to_update
 
     def test_update_prompt_not_found(self, client: TestClient):
         update_payload = get_sample_prompt_payload("UpdateNotFound")
-        response = client.put(f"{API_V1_PROMPTS_PREFIX}/999999", json=update_payload)
-        assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+        response_id = client.put(f"{API_V1_PROMPTS_PREFIX}/999999", json=update_payload)
+        assert response_id.status_code == status.HTTP_404_NOT_FOUND, response_id.text
+        
+        response_uuid = client.put(f"{API_V1_PROMPTS_PREFIX}/00000000-0000-0000-0000-000000000000", json=update_payload)
+        assert response_uuid.status_code == status.HTTP_404_NOT_FOUND, response_uuid.text
 
     def test_update_prompt_name_conflict(self, client: TestClient):
         prompt1 = create_prompt_utility(client, "Prompt1ForConflict")
-        prompt2 = create_prompt_utility(client, "Prompt2ForConflict") # This will have ID 2 if DB is fresh per test
+        prompt2 = create_prompt_utility(client, "Prompt2ForConflict") 
 
         update_payload = get_sample_prompt_payload("UpdatedToConflict")
         update_payload["name"] = prompt1["name"]  # Try to rename prompt2 to prompt1's name
 
-        response = client.put(f"{API_V1_PROMPTS_PREFIX}/{prompt2['id']}", json=update_payload)
+        response = client.put(f"{API_V1_PROMPTS_PREFIX}/{prompt2['uuid']}", json=update_payload)
         assert response.status_code == status.HTTP_409_CONFLICT, response.text
         assert "already exists" in response.json()["detail"].lower()
 
@@ -844,52 +857,63 @@ class TestExportEndpoints:
 
 class TestSyncLogEndpoint:
 
-    def test_get_sync_log_success_empty(self, client: TestClient, monkeypatch):
+    def test_get_sync_log_success_empty(self, client: TestClient):
+        original_overrides = fastapi_app.dependency_overrides.copy()
         mock_db = MagicMock(spec=PromptsDatabase)
         mock_db.get_sync_log_entries.return_value = []
-        monkeypatch.setattr(Prompts_DB_Deps, "get_prompts_db_for_user", lambda: mock_db)  # Patch the dep source
+        
+        fastapi_app.dependency_overrides[get_prompts_db_for_user] = lambda: mock_db
+        
+        try:
+            response = client.get(f"{API_V1_PROMPTS_PREFIX}/sync-log")
+            assert response.status_code == status.HTTP_200_OK, response.text
+            assert response.json() == []
+            mock_db.get_sync_log_entries.assert_called_once_with(since_change_id=0, limit=100)
+        finally:
+            fastapi_app.dependency_overrides = original_overrides
 
-        response = client.get(f"{API_V1_PROMPTS_PREFIX}/sync-log")
-        assert response.status_code == status.HTTP_200_OK, response.text
-        assert response.json() == []
-        mock_db.get_sync_log_entries.assert_called_once_with(since_change_id=0, limit=100)
-
-    def test_get_sync_log_with_entries(self, client: TestClient, monkeypatch):
+    def test_get_sync_log_with_entries(self, client: TestClient):
+        original_overrides = fastapi_app.dependency_overrides.copy()
         mock_db = MagicMock(spec=PromptsDatabase)
-        mock_log_entry_from_db = {  # This is what db.get_sync_log_entries would return
+        mock_log_entry_from_db = {
             "change_id": 1,
             "entity": "Prompts",
             "entity_uuid": "some-uuid-123",
             "operation": "create",
-            "timestamp": datetime.now(timezone.utc),  # Actual datetime object
+            "timestamp": datetime.now(timezone.utc),
             "client_id": "test_client_xyz",
             "version": 1,
-            "payload": {"name": "Test Prompt Sync"}  # Payload as dict
+            "payload": {"name": "Test Prompt Sync"}
         }
         mock_db.get_sync_log_entries.return_value = [mock_log_entry_from_db]
 
-        monkeypatch.setattr(Prompts_DB_Deps, "get_prompts_db_for_user", lambda: mock_db)
+        fastapi_app.dependency_overrides[get_prompts_db_for_user] = lambda: mock_db
 
-        response = client.get(f"{API_V1_PROMPTS_PREFIX}/sync-log?since_change_id=0&limit=10")
-        assert response.status_code == status.HTTP_200_OK, response.text
-        data = response.json()
-        assert len(data) == 1
-        # Compare relevant fields, convert timestamp back if needed for exact match
-        assert data[0]["change_id"] == mock_log_entry_from_db["change_id"]
-        assert data[0]["entity_uuid"] == mock_log_entry_from_db["entity_uuid"]
-        assert data[0]["payload"] == mock_log_entry_from_db["payload"]
-        # Timestamp will be string in JSON, convert mock's for comparison or parse response's
-        assert datetime.fromisoformat(data[0]["timestamp"].replace("Z", "+00:00")) == mock_log_entry_from_db[
-            "timestamp"]
+        try:
+            response = client.get(f"{API_V1_PROMPTS_PREFIX}/sync-log?since_change_id=0&limit=10")
+            assert response.status_code == status.HTTP_200_OK, response.text
+            data = response.json()
+            assert len(data) == 1
+            assert data[0]["change_id"] == mock_log_entry_from_db["change_id"]
+            assert data[0]["entity_uuid"] == mock_log_entry_from_db["entity_uuid"]
+            assert data[0]["payload"] == mock_log_entry_from_db["payload"]
+            assert datetime.fromisoformat(data[0]["timestamp"].replace("Z", "+00:00")) == mock_log_entry_from_db["timestamp"]
+        finally:
+            fastapi_app.dependency_overrides = original_overrides
 
-    def test_get_sync_log_db_error(self, client: TestClient, monkeypatch):
+    def test_get_sync_log_db_error(self, client: TestClient):
+        original_overrides = fastapi_app.dependency_overrides.copy()
         mock_db = MagicMock(spec=PromptsDatabase)
         mock_db.get_sync_log_entries.side_effect = DatabaseError("Sync log query failed")
-        monkeypatch.setattr(Prompts_DB_Deps, "get_prompts_db_for_user", lambda: mock_db)
 
-        response = client.get(f"{API_V1_PROMPTS_PREFIX}/sync-log")
-        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert "Database error." in response.json()["detail"]  # Check specific message from endpoint
+        fastapi_app.dependency_overrides[get_prompts_db_for_user] = lambda: mock_db
+        
+        try:
+            response = client.get(f"{API_V1_PROMPTS_PREFIX}/sync-log")
+            assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert "Database error." in response.json()["detail"]
+        finally:
+            fastapi_app.dependency_overrides = original_overrides
 
 # TODO: Add tests for Sync Log endpoint if it's not admin-only or mock admin user.
 # TODO: Test edge cases for pagination, search with no results, various include_deleted flags.
