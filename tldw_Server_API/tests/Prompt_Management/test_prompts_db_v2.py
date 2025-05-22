@@ -116,10 +116,10 @@ def test_add_prompt(memory_db: PromptsDatabase):
     assert "test" in prompt_data['keywords']
     assert "example" in prompt_data['keywords']
 
-    # Try adding same prompt name without overwrite
-    p_id2, p_uuid2, msg2 = memory_db.add_prompt(name="My Test Prompt", author="New Author", details=None)
-    assert p_id2 == p_id
-    assert "skipped" in msg2.lower() # or "already exists"
+    # Try adding same prompt name without overwrite - should raise ConflictError
+    with pytest.raises(ConflictError) as excinfo:
+        memory_db.add_prompt(name="My Test Prompt", author="New Author", details=None) # overwrite defaults to False
+    assert "already exists" in str(excinfo.value).lower()
 
     # Add with overwrite
     p_id3, p_uuid3, msg3 = memory_db.add_prompt(

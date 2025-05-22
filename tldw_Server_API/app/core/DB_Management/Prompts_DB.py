@@ -604,8 +604,8 @@ class PromptsDatabase:
                         self._log_sync_event(conn, 'PromptKeywordsTable', kw_uuid, 'update', new_version, payload)
                         self._update_fts_prompt_keyword(conn, kw_id, normalized_keyword)
                         return kw_id, kw_uuid
-                    else:  # Already active
-                        return kw_id, kw_uuid
+                    else:  # Already active, raise conflict
+                        raise ConflictError(f"Keyword '{normalized_keyword}' already exists and is active.", "PromptKeywordsTable", kw_id)
                 else:  # New keyword
                     new_uuid = self._generate_uuid()
                     new_version = 1
@@ -1167,7 +1167,7 @@ class PromptsDatabase:
         offset = (page - 1) * results_per_page
 
         base_select_parts = ["p.id", "p.uuid", "p.name", "p.author", "p.details",
-                             "p.system_prompt", "p.user_prompt", "p.last_modified", "p.version"]
+                             "p.system_prompt", "p.user_prompt", "p.last_modified", "p.version", "p.deleted"]
         count_select = "COUNT(DISTINCT p.id)"
         base_from = "FROM Prompts p"
         joins = []
