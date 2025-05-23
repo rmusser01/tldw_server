@@ -20,6 +20,7 @@ https://github.com/hzy312/knowledge-r1
 Unsorted
 https://ai.gopubby.com/8-common-mistakes-in-vector-search-and-how-to-avoid-them-e48d849c23f8
 https://arxiv.org/pdf/2501.11551v4
+https://huggingface.co/lightonai/Reason-ModernColBERT
 https://medium.com/@robertdennyson/pathrag-the-enterprise-knowledge-graph-roadmap-from-data-burden-to-corporate-wisdom-and-3d832ff24148
 https://levelup.gitconnected.com/testing-18-rag-techniques-to-find-the-best-094d166af27f
 https://aiexpjourney.substack.com/p/the-mystery-of-rag-optimization-insights

@@ -64,7 +64,7 @@ https://copycoder.ai/
 https://x.com/dot_louis/status/1884990033775493505
 https://telcontar.net/Misc/GUI/RISCOS/
 https://guidebookgallery.org/guis
-
+https://medium.com/@adam.fard/how-i-actually-use-ai-in-ux-design-374187387f69
 https://aiverse.design/browse/subform-s-non-linear-conversation
 https://websiteheadlines.com/
 https://joseparreogarcia.substack.com/p/airbnb-ai-search-ranking-lessons
