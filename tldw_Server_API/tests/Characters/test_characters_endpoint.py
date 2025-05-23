@@ -21,7 +21,7 @@ try:
     from tldw_Server_API.app.api.v1.endpoints import characters as characters_module
     from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
-    from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import ConflictError, InputError
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError
     # Pydantic models from the SUT (optional for tests focusing on API I/O, but good for clarity)
     # from tldw_Server_API.app.api.v1.endpoints.characters import CharacterCreate, CharacterUpdate, CharacterResponse
 except ImportError as e:
@@ -452,8 +452,8 @@ class TestDeleteCharacter:
         char_to_delete_db_data = get_sample_character_db_dict(id=char_id, name=char_name, version=char_version)
         mock_db_instance.reset_mock()
         mock_db_instance.get_character_card_by_id.return_value = char_to_delete_db_data
-        # Ensure delete_character_card method exists on the mock for this test path and returns True
-        mock_db_instance.delete_character_card = MagicMock(return_value=True)
+        # Ensure soft_delete_character_card method exists on the mock for this test path and returns True
+        mock_db_instance.soft_delete_character_card = MagicMock(return_value=True)
 
         response = client.delete(f"{BASE_API_URL}/{char_id}")
 
@@ -463,7 +463,7 @@ class TestDeleteCharacter:
         assert data["character_id"] == char_id
 
         mock_db_instance.get_character_card_by_id.assert_called_once_with(char_id)
-        mock_db_instance.delete_character_card.assert_called_once_with(char_id, version=char_version)
+        mock_db_instance.soft_delete_character_card.assert_called_once_with(char_id, version=char_version)
 
     def test_delete_character_not_found(self):
         char_id = 999
@@ -472,17 +472,17 @@ class TestDeleteCharacter:
         response = client.delete(f"{BASE_API_URL}/{char_id}")
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert f"Character with ID {char_id} not found" in response.json()["detail"]
-        # Ensure delete_character_card is not called if character not found
-        if hasattr(mock_db_instance, 'delete_character_card') and isinstance(mock_db_instance.delete_character_card,
+        # Ensure soft_delete_character_card is not called if character not found
+        if hasattr(mock_db_instance, 'soft_delete_character_card') and isinstance(mock_db_instance.soft_delete_character_card,
                                                                              MagicMock):
-            mock_db_instance.delete_character_card.assert_not_called()
+            mock_db_instance.soft_delete_character_card.assert_not_called()
 
     def test_delete_character_version_conflict(self):  # e.g., optimistic locking failure
         char_id = 1
         char_db_data = get_sample_character_db_dict(id=char_id, name="ConflictDelete", version=1)
         mock_db_instance.reset_mock()
         mock_db_instance.get_character_card_by_id.return_value = char_db_data
-        mock_db_instance.delete_character_card = MagicMock(
+        mock_db_instance.soft_delete_character_card = MagicMock(
             side_effect=ConflictError("Version mismatch on delete attempt"))
 
         response = client.delete(f"{BASE_API_URL}/{char_id}")
@@ -498,9 +498,9 @@ class TestDeleteCharacter:
         # Store original hasattr to restore it later
         original_hasattr = builtins.hasattr
 
-        # Define a mock hasattr that specifically returns False for 'delete_character_card' on our mock_db_instance
+        # Define a mock hasattr that specifically returns False for 'soft_delete_character_card' on our mock_db_instance
         def mock_hasattr_for_delete_test(obj, name):
-            if obj is mock_db_instance and name == 'delete_character_card':
+            if obj is mock_db_instance and name == 'soft_delete_character_card':
                 return False  # Simulate db object not having this method
             return original_hasattr(obj, name)  # Fallback to real hasattr for everything else
 
@@ -511,9 +511,9 @@ class TestDeleteCharacter:
         assert response.status_code == status.HTTP_501_NOT_IMPLEMENTED
         assert "Character deletion functionality is not available on the server." in response.json()["detail"]
         # Ensure the actual delete method on the mock (if it existed from other tests) wasn't called
-        if hasattr(mock_db_instance, 'delete_character_card') and isinstance(mock_db_instance.delete_character_card,
+        if hasattr(mock_db_instance, 'soft_delete_character_card') and isinstance(mock_db_instance.soft_delete_character_card,
                                                                              MagicMock):
-            mock_db_instance.delete_character_card.assert_not_called()
+            mock_db_instance.soft_delete_character_card.assert_not_called()
 
 #
 # End of test_characters_endpoint.py

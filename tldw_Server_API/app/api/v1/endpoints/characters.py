@@ -476,10 +476,10 @@ async def delete_character(
             f"Ensure database foreign key constraints for 'conversations.character_id' are set appropriately (e.g., ON DELETE SET NULL or CASCADE) if characters with active conversations need to be deleted."
         )
 
-        # Corrected: Check if the delete_character_card method exists before calling
-        if not hasattr(db, 'delete_character_card'):
+        # Corrected: Check if the soft_delete_character_card method exists before calling
+        if not hasattr(db, 'soft_delete_character_card'):
             logger.error(
-                "`CharactersRAGDB` class does not have a `delete_character_card` method. Deletion cannot proceed.")
+                "`CharactersRAGDB` class does not have a `soft_delete_character_card` method. Deletion cannot proceed.")
             raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED,
                                 detail="Character deletion functionality is not available on the server.")
 
