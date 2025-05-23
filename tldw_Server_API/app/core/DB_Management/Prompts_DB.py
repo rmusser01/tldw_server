@@ -1168,7 +1168,7 @@ class PromptsDatabase:
         offset = (page - 1) * results_per_page
 
         base_select_parts = ["p.id", "p.uuid", "p.name", "p.author", "p.details",
-                             "p.system_prompt", "p.user_prompt", "p.last_modified", "p.version"]
+                             "p.system_prompt", "p.user_prompt", "p.last_modified", "p.version", "p.deleted"]
         count_select = "COUNT(DISTINCT p.id)"
         base_from = "FROM Prompts p"
         joins = []

@@ -81,10 +81,14 @@ async def get_prompts_db_for_user(
     FastAPI dependency to get the PromptsDatabase instance for the identified user,
     managed via the prompts_interop layer.
     """
-    if not current_user or not isinstance(current_user.id, int):
-        logger.error("get_prompts_db_for_user called without a valid User object or user.id is not int.")
+    # More robust check for User object and its id
+    if not isinstance(current_user, User) or not hasattr(current_user, 'id') or not isinstance(current_user.id, int):
+        logger.error(
+            f"get_prompts_db_for_user called with an invalid User object. "
+            f"Expected User model with int id. Got type: {type(current_user)}, value: {current_user}"
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="User identification failed for Prompts DB.")
+                            detail="User identification failed for Prompts DB (Invalid User object).")
 
     user_id = current_user.id
 
