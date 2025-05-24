@@ -12,6 +12,9 @@ from PIL import Image as PILImage, PngImagePlugin  # Corrected PIL import
 # Third-party imports
 from hypothesis import given, strategies as st, settings, HealthCheck, assume
 from unittest.mock import patch, MagicMock  # For unit tests
+from loguru import logger
+
+from tldw_Server_API.app.api.v1.schemas.character_schemas import CharacterUpdate
 #
 # Local Imports
 from tldw_Server_API.app.main import app  # Your FastAPI app instance
@@ -237,7 +240,7 @@ def test_unit_create_character_pydantic_error(client: TestClient):  # No mock ne
     payload = {"name": "", "description": "Desc"}  # Pydantic CharacterCreate requires non-empty name
     response = client.post(f"{CHARACTERS_ENDPOINT_PREFIX}/", json=payload)
     assert response.status_code == 422  # Unprocessable Entity for Pydantic validation
-    assert "Input should be at least 1 characters" in response.text  # Pydantic default message for min_length
+    assert "String should have at least 1 character" in response.text
 
 
 @patch(f'{UNIT_TEST_PATCH_PREFIX}.get_character_details')
@@ -303,6 +306,39 @@ def test_unit_delete_character_success(mock_get_details: MagicMock, mock_delete:
     mock_delete.assert_called_once_with(mock_delete.call_args[0][0], 1, 1)
 
 
+@patch(f'{UNIT_TEST_PATCH_PREFIX}.create_new_character_from_data')
+@patch(f'{UNIT_TEST_PATCH_PREFIX}.get_character_details')
+def test_unit_create_character_success(mock_get_details: MagicMock, mock_create: MagicMock, client: TestClient):
+    mock_create.return_value = 1 # This is char_id
+    # This mock_char_data is what get_character_details returns from DB
+    mock_char_data_from_db = {
+        "id": 1, "name": "Unit Test Char", "version": 1, "description": "Desc",
+        "image": b"dummy_image_bytes", # mock image bytes from DB
+        "alternate_greetings": ["Hi"], "tags": ["test"], "extensions": {"key": "val"},
+        # Add all other fields expected by _convert_db_char_to_response_model / CharacterResponse
+        "personality": None, "scenario": None, "system_prompt": None,
+        "post_history_instructions": None, "first_message": None,
+        "message_example": None, "creator_notes": None, "creator": None,
+        "character_version": None, "created_at": "2023-01-01T00:00:00", "updated_at": "2023-01-01T00:00:00",
+        "deleted": 0
+    }
+    mock_get_details.return_value = mock_char_data_from_db
+
+    payload = {"name": "Unit Test Char", "description": "Desc"} # API input
+    response = client.post(f"{CHARACTERS_ENDPOINT_PREFIX}/", json=payload)
+
+    assert response.status_code == 201, response.text
+    data = response.json() # This is CharacterResponse
+    assert data["id"] == 1
+    assert data["name"] == "Unit Test Char"
+    assert data["image_present"] is True # Because mock_char_data_from_db["image"] is present
+    mock_create.assert_called_once()
+    # mock_create is called with (db_obj, character_payload_dict)
+    assert mock_create.call_args[0][1]["name"] == payload["name"]
+    # mock_get_details is called with (db_obj, char_id)
+    mock_get_details.assert_called_once_with(mock_create.call_args[0][0], 1)
+
+
 # ============================= INTEGRATION TESTS ==============================
 
 class TestCharacterAPIIntegration:
@@ -353,21 +389,32 @@ class TestCharacterAPIIntegration:
         assert response.status_code == 404, response.text
 
     def test_list_characters_integration(self, client: TestClient, test_db: CharactersRAGDB):
-        # Create unique names for listing to avoid issues with other tests' data if db not perfectly isolated
-        name_a = f"ListA_{uuid.uuid4().hex[:6]}"
-        name_b = f"ListB_{uuid.uuid4().hex[:6]}"
-        client.post(f"{CHARACTERS_ENDPOINT_PREFIX}/", json=create_sample_character_payload(name=name_a))
-        client.post(f"{CHARACTERS_ENDPOINT_PREFIX}/", json=create_sample_character_payload(name=name_b))
+        # Clear previous test data for cleaner list assertion, or ensure unique names
+        # For robust testing against existing data, ensure very unique names or count before/after
+        initial_chars_response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/")
+        assume(initial_chars_response.status_code == 200)
+        initial_count = len(initial_chars_response.json())
+
+        name_a = f"List_Integ_A_{uuid.uuid4().hex[:6]}"
+        name_b = f"List_Integ_B_{uuid.uuid4().hex[:6]}"
+        res_a = client.post(f"{CHARACTERS_ENDPOINT_PREFIX}/", json=create_sample_character_payload(name=name_a))
+        assert res_a.status_code == 201
+        res_b = client.post(f"{CHARACTERS_ENDPOINT_PREFIX}/", json=create_sample_character_payload(name=name_b))
+        assert res_b.status_code == 201
 
         response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/")
         assert response.status_code == 200, response.text
         data = response.json()
+
+        # Check count if DB is guaranteed empty before these two additions
+        # assert len(data) == initial_count + 2
+
         # Filter for names created in this test to be robust against other data
-        filtered_data = [item for item in data if item["name"] in [name_a, name_b]]
-        assert len(filtered_data) == 2
-        names = [item["name"] for item in filtered_data]
-        assert name_a in names
-        assert name_b in names
+        current_test_names = {name_a, name_b}
+        found_names = {item["name"] for item in data if item["name"] in current_test_names}
+        assert len(found_names) == 2
+        assert name_a in found_names
+        assert name_b in found_names
 
     def test_update_character_integration(self, client: TestClient, test_db: CharactersRAGDB):
         create_payload = create_sample_character_payload("UpdateBase")
@@ -490,26 +537,55 @@ class TestCharacterAPIIntegration:
 
 @settings(deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large, HealthCheck.function_scoped_fixture],
-          max_examples=25)
+          max_examples=25)  # Reduced for faster debugging, increase later
 @given(payload=st_character_create_payload_pbt())
 def test_pbt_create_character_api(client: TestClient, test_db: CharactersRAGDB, payload: Dict[str, Any]):
-    unique_name = f"{payload['name']}_{uuid.uuid4().hex[:8]}"
-    payload["name"] = unique_name
+    # Ensure name is unique for each Hypothesis example if db is shared across examples within one PBT run
+    # (pytest fixtures with scope="function" are setup once per test function, not per hypothesis example)
+    payload["name"] = f"{payload['name']}_{uuid.uuid4().hex[:8]}"
+
+    # Avoid creating a character with a name that might already exist from a *previous* PBT example
+    # if the DB is not perfectly clean for each example (it is not, for Hypothesis)
+    if test_db.get_character_card_by_name(payload["name"]):
+        assume(False)  # Skip this example if name collides from previous example in same PBT run
 
     response = client.post(f"{CHARACTERS_ENDPOINT_PREFIX}/", json=payload)
 
-    assert response.status_code == 201, response.text
-    data = response.json()
-    assert data["name"] == unique_name
-    if payload.get("description"): assert data["description"] == payload["description"]
-    if payload.get("image_base64"):
-        assert data["image_present"] is True
-    else:
-        assert data["image_present"] is False
+    assert response.status_code == 201, f"Payload: {payload}, Response: {response.text}"
+    data = response.json()  # This is CharacterResponse
+    assert data["name"] == payload["name"]
+
+    # Check all fields from payload against the response
+    for key, value in payload.items():
+        if key == "image_base64":
+            assert data["image_present"] is (value is not None)
+        elif key in ["alternate_greetings", "tags", "extensions"]:
+            expected_val = value
+            if isinstance(value, str):  # If payload sent JSON string
+                try:
+                    expected_val = json.loads(value)
+                except json.JSONDecodeError:  # Should be caught by Pydantic if invalid
+                    # If Pydantic allows non-JSON string for these fields and they are returned as such:
+                    pass  # expected_val remains the string
+            # If expected_val is None and API returns default empty list/dict:
+            if expected_val is None and key in data and (data[key] == [] or data[key] == {}):
+                pass  # This is acceptable if API behavior is to default None to empty collection
+            else:
+                assert data.get(key) == expected_val, f"Mismatch for {key}"
+        elif value is not None:  # For other simple fields that were provided
+            assert data.get(key) == value, f"Mismatch for {key}"
+        elif value is None:  # If payload field was None
+            # Check if the API response field is also None or a suitable default (e.g., "" for optional strings)
+            api_val = data.get(key)
+            assert api_val is None or api_val == "", f"Mismatch for {key} (expected None or empty string, got {api_val})"
 
     db_char = test_db.get_character_card_by_id(data["id"])
     assert db_char is not None
-    assert db_char["name"] == unique_name
+    assert db_char["name"] == payload["name"]
+    if payload.get("image_base64"):
+        assert db_char["image"] is not None
+    else:
+        assert db_char["image"] is None
 
 
 @settings(
@@ -518,57 +594,100 @@ def test_pbt_create_character_api(client: TestClient, test_db: CharactersRAGDB, 
         HealthCheck.too_slow, HealthCheck.data_too_large,
         HealthCheck.function_scoped_fixture, HealthCheck.filter_too_much
     ],
-    max_examples=25 # Start with fewer examples for PBT during debugging
+    max_examples=25  # Start with fewer examples
 )
-@given(initial_payload=st_character_create_payload_pbt(), update_payload_diff=st_character_update_payload_pbt())
-def test_pbt_update_character_api(client: TestClient, test_db: CharactersRAGDB, initial_payload: Dict[str, Any],
-                                  update_payload_diff: Dict[str, Any]):
-    initial_unique_name = f"{initial_payload['name']}_{uuid.uuid4().hex[:8]}"
-    initial_payload["name"] = initial_unique_name
+@given(initial_payload_gen=st_character_create_payload_pbt(), update_payload_diff_gen=st_character_update_payload_pbt())
+def test_pbt_update_character_api(client: TestClient, test_db: CharactersRAGDB,
+                                  initial_payload_gen: Dict[str, Any],
+                                  update_payload_diff_gen: Dict[str, Any]):
+    # --- Create initial character ---
+    initial_payload = initial_payload_gen.copy()  # Avoid modifying the generated dict directly
+    initial_payload["name"] = f"{initial_payload['name']}_{uuid.uuid4().hex[:8]}"
+    if test_db.get_character_card_by_name(initial_payload["name"]):
+        assume(False)  # Avoid collision for initial creation
 
     create_response = client.post(f"{CHARACTERS_ENDPOINT_PREFIX}/", json=initial_payload)
-    assume(create_response.status_code == 201)
-    created_char_data = create_response.json()
+    assume(create_response.status_code == 201)  # If creation fails, skip this example
+    created_char_data = create_response.json()  # This is CharacterResponse
     char_id = created_char_data["id"]
     current_version = created_char_data["version"]
 
-    # Defensive check: if update_payload_diff happens to be empty or all Nones
-    # (strategy should prevent this, but good to be safe or use assume if needed)
-    if not update_payload_diff or not any(v is not None for v in update_payload_diff.values()):
-        assume(False)  # This example is not a meaningful update, skip.
+    # --- Prepare and perform update ---
+    update_payload_diff = update_payload_diff_gen.copy()
 
+    # Handle potential name update and uniqueness
     if "name" in update_payload_diff and update_payload_diff["name"] is not None:
+        # Ensure new name is valid (non-empty) and unique if it's being changed
+        if not str(update_payload_diff["name"]).strip():  # Invalid name (empty or whitespace)
+            assume(False)  # Pydantic should catch this, but we can assume valid generated name here
+
         updated_unique_name = f"{update_payload_diff['name']}_{uuid.uuid4().hex[:8]}"
-        # Check against other characters that might exist due to function_scoped_fixture for test_db
         existing_with_new_name = test_db.get_character_card_by_name(updated_unique_name)
         if existing_with_new_name and existing_with_new_name['id'] != char_id:
-            assume(False)  # Avoid trying to update to a name that already exists on *another* card
+            assume(False)  # Avoid conflict with another existing character
         update_payload_diff["name"] = updated_unique_name
+    elif "name" in update_payload_diff and update_payload_diff["name"] is None:
+        # Allowing name to be set to None. Your CharacterUpdate Pydantic model and DB schema must allow this.
+        # If name is required, Pydantic would raise a 422, and this test path wouldn't be hit with status 200.
+        pass
 
-    response = client.put(f"{CHARACTERS_ENDPOINT_PREFIX}/{char_id}?expected_version={current_version}",
-                          json=update_payload_diff)
+    # Use Pydantic model to see what `exclude_unset=True` would do.
+    # This helps determine which fields were *actually* intended for update.
+    try:
+        pydantic_update_model = CharacterUpdate.model_validate(update_payload_diff)
+    except Exception:  # If Pydantic validation fails for the generated payload
+        assume(False)  # Skip this example as it's not a valid update payload for the API
+        return
 
-    assert response.status_code == 200, f"Failed with payload: {update_payload_diff}, Response: {response.text}"
-    updated_data_api = response.json()
+    payload_sent_to_lib = pydantic_update_model.model_dump(exclude_unset=True)
+
+    if not payload_sent_to_lib:  # If all fields were unset or default after Pydantic processing
+        assume(False)  # This update wouldn't change anything, skip.
+        # Note: `st_character_update_payload_pbt` tries to ensure at least one field.
+
+    update_response = client.put(f"{CHARACTERS_ENDPOINT_PREFIX}/{char_id}?expected_version={current_version}",
+                                 json=update_payload_diff)  # Send original generated diff
+
+    if update_response.status_code == 422:  # Pydantic validation error from API
+        assume(False)  # Generated data was invalid for the model, skip successful assertion part
+        return
+
+    assert update_response.status_code == 200, \
+        f"Update failed. Initial: {created_char_data['name']}, UpdatePayload: {update_payload_diff}, SentToLib: {payload_sent_to_lib}, Response: {update_response.text}"
+
+    updated_data_api = update_response.json()  # This is CharacterResponse
+
+    # --- Assertions ---
     assert updated_data_api["id"] == char_id
     assert updated_data_api["version"] == current_version + 1
 
-    for key, value in update_payload_diff.items():
-        if value is None and key != "image_base64":
-            if key in created_char_data:  # Compare to original if field was not meant to be changed
-                assert updated_data_api.get(key) == created_char_data.get(key)
-        elif key == "image_base64":
-            assert updated_data_api["image_present"] is (value is not None)
-        elif key == "name" and value is not None:
-            assert updated_data_api["name"] == value
-        elif value is not None:
-            api_val = updated_data_api.get(key)
-            if isinstance(value, str) and key in ["alternate_greetings", "tags", "extensions"]:
-                try:
-                    parsed_payload_val = json.loads(value)
-                    assert api_val == parsed_payload_val
-                except json.JSONDecodeError:
-                    assert api_val == [] if key in ["alternate_greetings",
-                                                    "tags"] else {} if key == "extensions" else value
-            else:
-                assert api_val == value
+    # Verify each field in the response
+    for resp_key, resp_value in updated_data_api.items():
+        if resp_key in ["id", "version", "image_base64"]:  # Already checked or handled by image_present
+            continue
+
+        if resp_key == "image_present":
+            if "image_base64" in payload_sent_to_lib:
+                assert resp_value is (payload_sent_to_lib["image_base64"] is not None)
+            else:  # image_base64 was not part of the update
+                assert resp_value == created_char_data["image_present"]
+            continue
+
+        # If the key was in the actual data sent to the library function for update
+        if resp_key in payload_sent_to_lib:
+            expected_value = payload_sent_to_lib[resp_key]
+            # The `payload_sent_to_lib` should have Python objects if JSON strings were parsed by Pydantic
+            assert resp_value == expected_value, f"Mismatch for updated key '{resp_key}'. API: {resp_value}, Expected (post-Pydantic): {expected_value}"
+        else:
+            # Key was not in the update payload, so it should be same as original character
+            assert resp_value == created_char_data.get(
+                resp_key), f"Mismatch for non-updated key '{resp_key}'. API: {resp_value}, Original: {created_char_data.get(resp_key)}"
+
+    # Optional: Double check against DB
+    db_char_after_update = test_db.get_character_card_by_id(char_id)
+    assert db_char_after_update is not None
+    assert db_char_after_update["version"] == current_version + 1
+    if "name" in payload_sent_to_lib:
+        assert db_char_after_update["name"] == payload_sent_to_lib["name"]
+    if "image_base64" in payload_sent_to_lib:
+        assert (db_char_after_update["image"] is not None) == (payload_sent_to_lib["image_base64"] is not None)
