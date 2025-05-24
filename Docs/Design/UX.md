@@ -58,9 +58,12 @@ https://github.com/sshh12/spark-stack
 https://rentry.org/bloatmaxx
 https://github.com/abi/screenshot-to-
 https://data.perkins.org/
+https://customsvg.github.io/
 https://designdetails.fm/episodes
 https://blikket.co/ux-vs-cro-how-harmonizing-design-and-strategy-can-skyrocket-your-ecommerce-revenue/
 https://copycoder.ai/
+https://ieeexplore.ieee.org/document/5387632
+https://www.growthmates.news/p/how-an-ai-powered-user-onboarding
 https://x.com/dot_louis/status/1884990033775493505
 https://telcontar.net/Misc/GUI/RISCOS/
 https://guidebookgallery.org/guis

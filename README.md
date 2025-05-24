@@ -625,17 +625,28 @@ None of these companies exist to provide AI services in 2024. They’re only doi
 </details>
 
 
+## License
 
-----------
-### <a name="localllm"></a>Setting up a Local LLM Inference Engine
-- **See 'Setting up a Local LLM' in the `Docs` folder for more information.**
+This project is dual-licensed under the **GNU Lesser General Public License v3.0 (LGPL-3.0)** and a **commercial license**.
 
-----------
+### GNU Affero General Public License (AGPL)
+If you use this project under the AGPL-3.0, you must:
+- Provide the source code of any modifications to the LGPL-licensed parts.
+- Allow users to replace the AGPL-licensed components with their own versions.
+
+For full details, see the [LICENSE-LGPL-3.0.txt](LICENSE-LGPL-3.0.txt) file.
+
+### Commercial License
+If you prefer to use this project under a commercial license, please contact us at legal@kframe.ai to discuss terms. The commercial license allows:
+- Static linking of the library in proprietary software.
+- No obligation to provide source code.
+- Priority support and additional benefits.
+
+For more details, see the [LICENSE-COMMERCIAL.txt](LICENSE-COMMERCIAL.txt) file or contact legal@kframe.ai.
 
 
-### <a name="pieces"></a>Pieces & What's in the original repo?
-- **See 'Pieces' in the `Docs` folder for more information.**
-
+## Purpose
+I created this application to leverage C/C++ for a highly modular and parallelized system capable of loading, inferencing, and training machine learning models, all within a unified UI. Existing UI solutions often rely on external tools for refining or editing, or suffer from runtime performance issues due to techstack limitations resulting in inconsistent rendering, slow loading, and cache misses. AniStudio is designed to maintain consistent performance under heavy loads, allowing users to multitask traditional media creation with AI-assistance, all in one seamless application with the freedom of C/C++.
 ------------
 ### Similar/Other projects:
 - https://github.com/Dicklesworthstone/bulk_transcribe_youtube_videos_from_playlist/tree/main

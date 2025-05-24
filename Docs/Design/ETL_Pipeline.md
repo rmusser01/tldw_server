@@ -19,8 +19,8 @@ https://github.com/cocoindex-io/cocoindex
 https://github.com/AIDC-AI/Ovis
 https://github.com/matthsena/AlcheMark
   https://github.com/run-llama/llama_cloud_services
-
-
+https://github.com/kellyjonbrazil/jc
+https://github.com/john-friedman/doc2dict/tree/main
 https://github.com/QwenLM/Qwen-Agent
   https://qwenlm.github.io/blog/qwen-agent-2405/
   https://github.com/QwenLM/Qwen-Agent/blob/main/examples/assistant_rag.py

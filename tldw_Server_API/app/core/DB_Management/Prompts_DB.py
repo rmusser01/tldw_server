@@ -604,9 +604,12 @@ class PromptsDatabase:
                         self._log_sync_event(conn, 'PromptKeywordsTable', kw_uuid, 'update', new_version, payload)
                         self._update_fts_prompt_keyword(conn, kw_id, normalized_keyword)
                         return kw_id, kw_uuid
-                    else:  # Already active, just return its ID and UUID
-                        logger.debug(f"Keyword '{normalized_keyword}' already exists and is active. Reusing ID: {kw_id}, UUID: {kw_uuid}")
-                        return kw_id, kw_uuid # MODIFIED LINE
+                    # else:  # Already active, just return its ID and UUID
+                    #     logger.debug(f"Keyword '{normalized_keyword}' already exists and is active. Reusing ID: {kw_id}, UUID: {kw_uuid}")
+                    #     return kw_id, kw_uuid
+                    else:  # Already active, raise conflict
+                        raise ConflictError(f"Keyword '{normalized_keyword}' already exists and is active.",
+                                            "PromptKeywordsTable", kw_id)
                 else:  # New keyword
                     new_uuid = self._generate_uuid()
                     new_version = 1

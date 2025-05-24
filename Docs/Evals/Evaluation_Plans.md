@@ -13,6 +13,12 @@
 - [VLM Evaluations](#vlm-evals)
 ----------------------------------------------------------------------------------------------------------------
 
+
+
+
+https://www.leahtharin.com/p/107-andres-glusman-why-your-ab-tests
+https://github.com/collect-intel/llm-judge-bias-suite
+https://www.cip.org/blog/llm-judges-are-unreliable
 https://github.com/JackHopkins/factorio-learning-environment
 https://github.com/lechmazur
 https://arxiv.org/abs/2503.05244
