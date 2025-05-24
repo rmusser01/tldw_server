@@ -3,7 +3,9 @@
 #
 # --- Imports ---
 import logging
+import re
 
+import hypothesis
 import pytest
 from unittest import mock
 import base64
@@ -17,6 +19,7 @@ import yaml
 # Third Party Imports
 from PIL import Image as PILImageReal
 from loguru import logger as loguru_logger
+from hypothesis import given, strategies as st, settings, HealthCheck
 #
 # Local Imports
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib import (
@@ -439,7 +442,8 @@ def test_extract_json_from_image_file_unit(mock_json_loads_mod, mock_base64_mod,
     MockPILImageModule.open.assert_called_once()
     assert isinstance(MockPILImageModule.open.call_args[0][0], io.BytesIO)
     mock_base64_mod.b64decode.assert_called_once_with(b64_encoded_str)
-    mock_json_loads_mod.loads.assert_called_once_with(chara_json_str) # SUT calls json.loads with the decoded string
+    mock_json_loads_mod.loads.assert_called_once_with(chara_json_str)
+    MockPILImageModule.open.reset_mock(); mock_base64_mod.b64decode.reset_mock(); mock_json_loads_mod.loads.reset_mock(); caplog_handler.clear()
 
     MockPILImageModule.open.reset_mock()
     mock_base64_mod.b64decode.reset_mock()
@@ -467,6 +471,7 @@ def test_extract_json_from_image_file_unit(mock_json_loads_mod, mock_base64_mod,
     assert "Error decoding 'chara' metadata" in caplog_handler.text
     mock_base64_mod.b64decode.assert_called_once_with(b64_encoded_str)
     mock_json_loads_mod.loads.assert_not_called()
+    mock_base64_mod.b64decode.return_value = default_b64_return; mock_base64_mod.b64decode.side_effect = None; caplog_handler.clear()
 
     # Reset for next test section
     mock_base64_mod.b64decode.return_value = default_b64_return
@@ -478,9 +483,233 @@ def test_extract_json_from_image_file_unit(mock_json_loads_mod, mock_base64_mod,
     MockPILImageModule.open.side_effect = PILImageReal.UnidentifiedImageError("bad image file")
     assert extract_json_from_image_file(str(dummy_png_path)) is None
     assert "Cannot open or read image file" in caplog_handler.text
-    MockPILImageModule.open.side_effect = None
-    MockPILImageModule.open.return_value = mock_img_instance # Restore
-    caplog_handler.clear()
+    MockPILImageModule.open.side_effect = None; MockPILImageModule.open.return_value = mock_img_instance; caplog_handler.clear()
+
+
+# --- Property Tests (using Hypothesis) ---
+
+# Strategy for names that don't contain placeholders themselves
+safe_name_st = st.text(
+    alphabet=st.characters(min_codepoint=32, max_codepoint=126),
+    min_size=0, max_size=20
+).filter(
+    lambda x: not any(p in x for p in ['{{char}}', '{{user}}', '<CHAR>', '<USER>', '{{random_user}}'])
+)
+optional_safe_name_st = st.one_of(st.none(), safe_name_st)
+optional_general_text_st = st.one_of(st.none(), st.text(max_size=100))
+
+@given(text=optional_general_text_st, char_name=optional_safe_name_st, user_name=optional_safe_name_st)
+@settings(suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.data_too_large], deadline=None)
+def test_property_replace_placeholders(text, char_name, user_name):
+    if text is None:
+        assert replace_placeholders(text, char_name, user_name) == ""
+        return
+
+    char_name_actual = char_name if char_name is not None else "Character"
+    user_name_actual = user_name if user_name is not None else "User"
+
+    result = replace_placeholders(text, char_name, user_name)
+
+    expected = text
+    expected = expected.replace('{{char}}', char_name_actual)
+    expected = expected.replace('<CHAR>', char_name_actual)
+    expected = expected.replace('{{user}}', user_name_actual)
+    expected = expected.replace('<USER>', user_name_actual)
+    expected = expected.replace('{{random_user}}', user_name_actual)
+
+    assert result == expected
+
+id_st = st.integers(min_value=0, max_value=10**9)
+simple_char_name_for_id_test_st = st.text(
+    alphabet=st.characters(min_codepoint=97, max_codepoint=122),
+    min_size=1, max_size=20
+).filter(lambda x: '(' not in x and ')' not in x) # Avoid parens in name to simplify test
+
+@given(id_val=id_st, name=simple_char_name_for_id_test_st,
+       id_internal_leading_spaces_count=st.integers(min_value=0, max_value=2),
+       id_internal_trailing_spaces_count=st.integers(min_value=0, max_value=2),
+       overall_leading_spaces_count=st.integers(min_value=0, max_value=2),
+       overall_trailing_spaces_count=st.integers(min_value=0, max_value=2)
+       )
+@settings(suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.data_too_large], deadline=None)
+def test_property_extract_character_id_from_ui_choice_valid_formats(
+    id_val, name,
+    id_internal_leading_spaces_count, id_internal_trailing_spaces_count,
+    overall_leading_spaces_count, overall_trailing_spaces_count
+):
+    id_int_ls = ' ' * id_internal_leading_spaces_count
+    id_int_ts = ' ' * id_internal_trailing_spaces_count
+    overall_ls = ' ' * overall_leading_spaces_count
+    overall_ts = ' ' * overall_trailing_spaces_count
+
+    # Test "Name (ID: <id_val>)" format
+    # The SUT's regex r'\(ID:\s*(\d+)\s*\)$' means the ')' must be the last non-whitespace char
+    # if this pattern is to be matched by the regex.
+    # So, if we add overall_trailing_spaces, the regex match will fail, and it will fall
+    # to the choice.strip().isdigit() path, which would also fail for "Name (ID: id)".
+    # Thus, for this specific format to be matched by the regex, overall_trailing_spaces must be empty.
+
+    # Case 1: Regex match path " [Name] (ID: [spaces] id [spaces]) "
+    # No overall trailing spaces for the regex to match with `$`
+    choice1_core = f"{name} (ID:{id_int_ls}{id_val}{id_int_ts})"
+    choice1_for_regex = f"{overall_ls}{choice1_core}" # No overall_ts
+    assert extract_character_id_from_ui_choice(choice1_for_regex) == id_val
+
+    # Case 2: Just ID path " [spaces] id [spaces] "
+    choice2_core = str(id_val)
+    choice2_with_overall_spaces = f"{overall_ls}{choice2_core}{overall_ts}"
+    assert extract_character_id_from_ui_choice(choice2_with_overall_spaces) == id_val
+
+
+# @given(invalid_choice=st.text(max_size=50).filter(lambda x:
+#     x.strip() != "" and # Must not be empty or all whitespace after strip
+#     not re.fullmatch(r'\s*\d+\s*', x) and # Not just a number with spaces
+#     not re.search(r'\(ID:\s*\d+\s*\)$', x) # And does not end with the ID pattern
+# ))
+# @settings(max_examples=50, suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.data_too_large], deadline=None)
+# def test_property_extract_character_id_from_ui_choice_invalid_formats(invalid_choice):
+#     with pytest.raises(ValueError, match="Invalid choice format"):
+#         extract_character_id_from_ui_choice(invalid_choice)
+
+@given(empty_or_whitespace_choice=st.text(alphabet=' \t\n\r', min_size=0, max_size=10))
+@settings(suppress_health_check=[HealthCheck.data_too_large, HealthCheck.filter_too_much], deadline=None) # Added deadline
+def test_property_extract_character_id_from_ui_choice_empty_or_whitespace(empty_or_whitespace_choice):
+    if not empty_or_whitespace_choice:
+        with pytest.raises(ValueError, match="No choice provided"):
+            extract_character_id_from_ui_choice(empty_or_whitespace_choice)
+    elif not empty_or_whitespace_choice.strip(): # Becomes empty after strip
+        with pytest.raises(ValueError, match="Invalid choice format"):
+            extract_character_id_from_ui_choice(empty_or_whitespace_choice)
+    # If it's whitespace but not empty after strip (e.g. " 123 "), it's handled by valid_formats
+    # If it's whitespace with non-numeric (e.g. " abc "), it's handled by invalid_formats
+
+
+# For parse_v1_card
+v1_required_fields_st = st.fixed_dictionaries({
+    "name": st.text(min_size=1, max_size=50),
+    "description": st.text(max_size=100),
+    "personality": st.text(max_size=100),
+    "scenario": st.text(max_size=100),
+    "first_mes": st.text(min_size=1, max_size=100),
+    "mes_example": st.text(max_size=100),
+})
+v1_optional_fields_st = st.fixed_dictionaries({
+    "creator_notes": st.text(max_size=100), "system_prompt": st.text(max_size=100),
+    "post_history_instructions": st.text(max_size=100),
+    "alternate_greetings": st.lists(st.text(max_size=50), max_size=3),
+    "tags": st.lists(st.text(max_size=20), max_size=5),
+    "creator": st.text(max_size=30), "character_version": st.text(max_size=10),
+    "char_image": st.one_of(st.none(), st.text(max_size=50)), # Can be None, empty string, or text
+    "image": st.one_of(st.none(), st.text(max_size=50))      # Can be None, empty string, or text
+})
+known_v1_keys = {
+    "name", "description", "personality", "scenario", "first_mes", "mes_example",
+    "creator_notes", "system_prompt", "post_history_instructions",
+    "alternate_greetings", "tags", "creator", "character_version", "char_image", "image"
+}
+extension_key_st = st.text(min_size=1, max_size=20, alphabet=st.characters(min_codepoint=97, max_codepoint=122)).filter(lambda k: k not in known_v1_keys)
+extension_value_st = st.one_of(st.text(max_size=50), st.integers(), st.booleans(), st.none())
+extensions_st = st.dictionaries(extension_key_st, extension_value_st, max_size=3)
+
+@given(required_data=v1_required_fields_st, optional_data=v1_optional_fields_st, extensions=extensions_st)
+@settings(suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.data_too_large], deadline=None)
+def test_property_parse_v1_card_structure_and_extensions(required_data, optional_data, extensions):
+    v1_card_data = {**required_data, **optional_data, **extensions}
+    parsed = parse_v1_card(v1_card_data)
+
+    assert parsed is not None
+    assert parsed['name'] == required_data['name']
+    assert parsed['first_message'] == required_data['first_mes']
+    assert parsed['creator_notes'] == optional_data.get('creator_notes', '')
+    assert parsed['alternate_greetings'] == optional_data.get('alternate_greetings', [])
+
+    # Correctly test image_base64 based on SUT's `val1 or val2` logic
+    expected_image_base64 = v1_card_data.get('char_image') or v1_card_data.get('image')
+    assert parsed['image_base64'] == expected_image_base64
+
+    parsed_extensions = parsed.get('extensions', {})
+    for key, value in extensions.items():
+        assert key in parsed_extensions and parsed_extensions[key] == value
+    # Ensure standard keys (that were part of required_data or optional_data) are not in extensions
+    for key in (set(required_data.keys()) | set(optional_data.keys())):
+        if key not in extensions: # Unless it was *also* an extension key (unlikely with filter)
+             assert key not in parsed_extensions
+
+
+@given(base_card=v1_required_fields_st)
+@settings(suppress_health_check=[HealthCheck.data_too_large], deadline=None)
+def test_property_parse_v1_card_missing_required_fields(base_card):
+    import random # Keep import local if only used here
+    card_with_missing_field = base_card.copy()
+    required_keys_list = ["name", "description", "personality", "scenario", "first_mes", "mes_example"]
+    field_to_remove = random.choice(required_keys_list)
+    del card_with_missing_field[field_to_remove]
+    with pytest.raises(ValueError, match=f"Missing required field in V1 card: {field_to_remove}"):
+        parse_v1_card(card_with_missing_field)
+
+# For process_db_messages_to_ui_history
+db_message_content_st = st.text(max_size=30)
+
+@given(
+    user_messages_content=st.lists(db_message_content_st, min_size=0, max_size=3),
+    char_name=safe_name_st.filter(lambda x: x != "User" and x != "" and x is not None),
+    user_name=optional_safe_name_st
+)
+@settings(suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.data_too_large], deadline=None)
+def test_property_process_db_messages_to_ui_history_only_user(user_messages_content, char_name, user_name):
+    db_messages = [{"sender": "User", "content": content} for content in user_messages_content]
+    user_name_actual = user_name if user_name is not None else "User"
+    char_name_actual = char_name # Already filtered to be non-None, non-empty
+    processed_history = process_db_messages_to_ui_history(db_messages, char_name_actual, user_name_actual)
+
+    assert len(processed_history) == len(user_messages_content)
+    for i, original_content in enumerate(user_messages_content):
+        expected_processed_content = replace_placeholders(original_content, char_name_actual, user_name_actual)
+        assert processed_history[i] == (expected_processed_content, None)
+
+@given(
+    char_messages_content=st.lists(db_message_content_st, min_size=0, max_size=3),
+    char_name=safe_name_st.filter(lambda x: x != "User" and x != "" and x is not None),
+    user_name=optional_safe_name_st
+)
+@settings(suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.data_too_large], deadline=None)
+def test_property_process_db_messages_to_ui_history_only_char(char_messages_content, char_name, user_name):
+    char_name_actual = char_name # Already filtered
+    db_messages = [{"sender": char_name_actual, "content": content} for content in char_messages_content]
+    user_name_actual = user_name if user_name is not None else "User"
+
+    processed_history = process_db_messages_to_ui_history(
+        db_messages, char_name_actual, user_name_actual, actual_char_sender_id_in_db=char_name_actual
+    )
+    assert len(processed_history) == len(char_messages_content)
+    for i, original_content in enumerate(char_messages_content):
+        expected_processed_content = replace_placeholders(original_content, char_name_actual, user_name_actual)
+        assert processed_history[i] == (None, expected_processed_content)
+
+@given(
+    message_pairs_content=st.lists(st.tuples(db_message_content_st, db_message_content_st), min_size=0, max_size=2),
+    char_name=safe_name_st.filter(lambda x: x != "User" and x != "" and x is not None),
+    user_name=optional_safe_name_st
+)
+@settings(suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.data_too_large], deadline=None)
+def test_property_process_db_messages_to_ui_history_alternating(message_pairs_content, char_name, user_name):
+    char_name_actual = char_name # Already filtered
+    db_messages = []
+    for user_content, char_content_for_pair in message_pairs_content: # Renamed to avoid clash
+        db_messages.append({"sender": "User", "content": user_content})
+        db_messages.append({"sender": char_name_actual, "content": char_content_for_pair})
+    user_name_actual = user_name if user_name is not None else "User"
+
+    processed_history = process_db_messages_to_ui_history(
+        db_messages, char_name_actual, user_name_actual, actual_char_sender_id_in_db=char_name_actual
+    )
+    assert len(processed_history) == len(message_pairs_content)
+    for i, (orig_user_c, orig_char_c) in enumerate(message_pairs_content):
+        exp_user_c = replace_placeholders(orig_user_c, char_name_actual, user_name_actual)
+        exp_char_c = replace_placeholders(orig_char_c, char_name_actual, user_name_actual)
+        assert processed_history[i] == (exp_user_c, exp_char_c)
+
+# --- End of Property Tests ---
 
 
 # --- Integration Tests (using the 'db' fixture) ---
@@ -597,17 +826,9 @@ def test_load_chat_history_from_file_and_save_to_db_integration(mock_strftime, d
             ]
         }
     }
-    hist_file_path = tmp_path / "hist.json"
-    hist_file_path.write_text(json.dumps(chat_data))
-
-    conv_id, char_id_hist = load_chat_history_from_file_and_save_to_db(
-        db,
-        str(hist_file_path),
-        user_name_for_placeholders=log_user
-    )
-    assert conv_id is not None
-    assert char_id_hist == char_id_db
-
+    hist_file_path = tmp_path / "hist.json"; hist_file_path.write_text(json.dumps(chat_data))
+    conv_id, char_id_hist = load_chat_history_from_file_and_save_to_db(db, str(hist_file_path), user_name_for_placeholders=log_user)
+    assert conv_id is not None and char_id_hist == char_id_db
     msgs = db.get_messages_for_conversation(conv_id)
     assert len(msgs) == 3
     assert "Skipping malformed message pair" in caplog_handler.text  # Should pass now
@@ -644,8 +865,7 @@ def test_full_chat_session_flow_integration(MockPILImageModule, mock_strftime, d
 
     msg_to_rank = db.get_message_by_id(char_resp_id)
     assert set_message_ranking(db, char_resp_id, 3, msg_to_rank['version'])
-
-    msg_to_remove = db.get_message_by_id(user_msg_id)
+    msg_to_remove = db.get_message_by_id(user_msg_id) # Re-fetch after edit for new version
     assert remove_message_from_conversation(db, user_msg_id, msg_to_remove['version'])
 
     conv_meta = db.get_conversation_by_id(conv_id)
@@ -655,8 +875,7 @@ def test_full_chat_session_flow_integration(MockPILImageModule, mock_strftime, d
 
     found_msgs = find_messages_in_conversation(db, conv_id, "Char says", "FlowChar", user_name)
     assert len(found_msgs) == 1 and found_msgs[0]["content"] == "Char says FlowChar"
-
-    conv_to_del = db.get_conversation_by_id(conv_id)
+    conv_to_del = db.get_conversation_by_id(conv_id) # Re-fetch after update for new version
     assert delete_conversation_by_id(db, conv_id, conv_to_del['version'])
     assert db.get_conversation_by_id(conv_id) is None
 

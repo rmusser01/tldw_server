@@ -142,6 +142,8 @@ https://github.com/atineiatte/deep-research-at-home
 https://help.openalex.org/hc/en-us/articles/24396686889751-About-us
 https://www.ginkgonotes.com/
 https://github.com/camel-ai/owl
+https://huggingface.co/papers/2505.16938
+https://github.com/AsyncFuncAI/deepwiki-open
 https://github.com/alienet1109/BookWorld
 https://github.com/jina-ai/node-DeepResearch[v1-f.py](../../../Sky/v1-f.py)
 https://github.com/LearningCircuit/local-deep-research
