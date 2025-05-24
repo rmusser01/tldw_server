@@ -44,21 +44,17 @@ def replace_placeholders(text: Optional[str], char_name: Optional[str], user_nam
         str: The text with placeholders replaced. If the input `text` is None or
         an empty string, an empty string is returned.
     """
-    if not text:  # Guard against None or empty string
-        return ""  # Return empty string if input is None or empty
-
-    # Ensure char_name and user_name are strings, even if None initially
+    if not text:
+        return ""
     char_name_actual = char_name if char_name is not None else "Character"
     user_name_actual = user_name if user_name is not None else "User"
-
     replacements = {
         '{{char}}': char_name_actual,
         '{{user}}': user_name_actual,
-        '{{random_user}}': user_name_actual,  # As per original logic
-        '<USER>': user_name_actual,  # Common alternative
-        '<CHAR>': char_name_actual,  # Common alternative
+        '{{random_user}}': user_name_actual,
+        '<USER>': user_name_actual,
+        '<CHAR>': char_name_actual,
     }
-
     processed_text = text
     for placeholder, value in replacements.items():
         processed_text = processed_text.replace(placeholder, value)
@@ -67,32 +63,11 @@ def replace_placeholders(text: Optional[str], char_name: Optional[str], user_nam
 
 def replace_user_placeholder(history: List[Tuple[Optional[str], Optional[str]]], user_name: Optional[str]) -> List[
     Tuple[Optional[str], Optional[str]]]:
-    """Replaces '{{user}}' placeholders in chat history with the actual user name.
-
-    This function processes chat history provided in a list of tuples,
-    where each tuple is (user_message, bot_message).
-
-    Args:
-        history (List[Tuple[Optional[str], Optional[str]]]): The chat history,
-            a list of (user_message, bot_message) tuples. Messages can be None.
-        user_name (Optional[str]): The actual user name to replace '{{user}}'.
-            Defaults to "User" if None.
-
-    Returns:
-        List[Tuple[Optional[str], Optional[str]]]: The updated chat history with
-        '{{user}}' placeholders replaced in both user and bot messages.
-    """
-    user_name_actual = user_name if user_name else "User"  # Default name if none provided
-
+    user_name_actual = user_name if user_name else "User"
     updated_history = []
     for user_msg, bot_msg in history:
-        updated_user_msg = None
-        if user_msg:
-            updated_user_msg = user_msg.replace("{{user}}", user_name_actual)
-
-        updated_bot_msg = None
-        if bot_msg:
-            updated_bot_msg = bot_msg.replace("{{user}}", user_name_actual)
+        updated_user_msg = user_msg.replace("{{user}}", user_name_actual) if user_msg else None
+        updated_bot_msg = bot_msg.replace("{{user}}", user_name_actual) if bot_msg else None
         updated_history.append((updated_user_msg, updated_bot_msg))
     return updated_history
 
@@ -104,6 +79,72 @@ def replace_user_placeholder(history: List[Tuple[Optional[str], Optional[str]]],
 #################################################################################
 #
 # Functions for character interaction (DB focused):
+
+# Helper for preparing data for DB (especially image)
+def _prepare_character_data_for_db_storage(
+    input_data: Dict[str, Any],
+    is_update: bool = False
+) -> Dict[str, Any]:
+    """
+    Prepares character data (from a dictionary, often derived from Pydantic model)
+    for DB insertion/update.
+    Handles 'image_base64' to 'image' (bytes) conversion.
+    Ensures JSON-like fields are Python objects.
+    """
+    db_data = input_data.copy() # Work on a copy
+
+    # Handle image_base64: convert to bytes for 'image' field, or set 'image' to None
+    if 'image_base64' in db_data:
+        base64_str = db_data.pop('image_base64')
+        if base64_str and isinstance(base64_str, str):
+            try:
+                if ',' in base64_str and base64_str.startswith("data:image"):
+                    base64_str = base64_str.split(',', 1)[1]
+                db_data['image'] = base64.b64decode(base64_str, validate=True)
+            except (binascii.Error, ValueError) as e: # ValueError for invalid padding etc.
+                logger.error(f"Invalid image_base64 data for character: {e}")
+                # Raise an InputError that API can catch and convert to 400
+                raise InputError(f"Invalid image_base64 data: {e}")
+        else: # image_base64 was None or empty string
+            db_data['image'] = None # Explicitly set image to None to remove it if updating
+    elif not is_update and 'image' not in db_data : # For create, if image_base64 and image not provided
+        db_data['image'] = None
+
+    # Ensure JSON fields are Python objects (lists/dicts).
+    # The DB layer (add_character_card, update_character_card) expects Python objects
+    # and will serialize them using _ensure_json_string_from_mixed.
+    # If input_data comes from a Pydantic model with proper validators, this might be redundant,
+    # but it's a good safeguard if raw dicts are passed.
+    for field_name in ["alternate_greetings", "tags"]:
+        if field_name in db_data and isinstance(db_data[field_name], str):
+            try:
+                db_data[field_name] = json.loads(db_data[field_name])
+                if not isinstance(db_data[field_name], list): # Should be a list
+                    logger.warning(f"Field '{field_name}' was a JSON string but not a list. Resetting to empty list.")
+                    db_data[field_name] = []
+            except json.JSONDecodeError:
+                logger.warning(f"Field '{field_name}' is not valid JSON string. Treating as simple tag list if appropriate or ignoring.")
+                # This logic depends on how you want to handle malformed JSON strings for tags/greetings
+                # For now, if it's not a list after trying to parse, make it an empty list.
+                if not isinstance(db_data[field_name], list):
+                     db_data[field_name] = [] # Default to empty list for safety
+        elif field_name in db_data and db_data[field_name] is None:
+             db_data[field_name] = [] # Store None as empty list
+
+    if "extensions" in db_data and isinstance(db_data["extensions"], str):
+        try:
+            db_data["extensions"] = json.loads(db_data["extensions"])
+            if not isinstance(db_data["extensions"], dict): # Should be a dict
+                logger.warning("Field 'extensions' was a JSON string but not a dict. Resetting to empty dict.")
+                db_data["extensions"] = {}
+        except json.JSONDecodeError:
+            logger.warning("Field 'extensions' is not valid JSON string. Resetting to empty dict.")
+            db_data["extensions"] = {}
+    elif "extensions" in db_data and db_data["extensions"] is None:
+        db_data["extensions"] = {} # Store None as empty dict
+
+    return db_data
+
 
 def get_character_list_for_ui(db: CharactersRAGDB, limit: int = 1000) -> List[Dict[str, Any]]:
     """Fetches a simplified list of characters suitable for UI display.
@@ -122,12 +163,10 @@ def get_character_list_for_ui(db: CharactersRAGDB, limit: int = 1000) -> List[Di
         Returns an empty list if an error occurs or no characters are found.
     """
     try:
-        # Assuming CharactersRAGDB.list_character_cards returns more fields,
-        # we select only what's needed.
-        all_chars = db.list_character_cards(limit=limit)  # Use parameter
+        all_chars = db.list_character_cards(limit=limit)
         ui_list = [{"id": char.get("id"), "name": char.get("name")} for char in all_chars if
                    char.get("id") and char.get("name")]
-        return sorted(ui_list, key=lambda x: x["name"].lower() if x["name"] else "")
+        return sorted(ui_list, key=lambda x: (x["name"] or "").lower())  # Ensure name is not None for lower()
     except CharactersRAGDBError as e:
         logger.error(f"Database error fetching character list for UI: {e}")
         return []
@@ -137,37 +176,16 @@ def get_character_list_for_ui(db: CharactersRAGDB, limit: int = 1000) -> List[Di
 
 
 def extract_character_id_from_ui_choice(choice: str) -> int:
-    """Extracts a character ID from a UI selection string.
-
-    Parses strings typically used in UI dropdowns, such as
-    "My Character (ID: 123)", to extract the numerical ID.
-    It also handles cases where the `choice` string is just the numeric ID.
-
-    Args:
-        choice (str): The UI selection string. Expected formats are
-            "Character Name (ID: <number>)" or "<number>".
-
-    Returns:
-        int: The extracted character ID.
-
-    Raises:
-        ValueError: If `choice` is empty, in an invalid format, or the ID
-            cannot be parsed as an integer.
-    """
     logger.debug(f"Choice received for ID extraction: {choice}")
     if not choice:
         raise ValueError("No choice provided for character ID extraction.")
-
-    # Regex to find (ID: <numbers>) at the end of the string
     match = re.search(r'\(ID:\s*(\d+)\s*\)$', choice)
     if match:
         character_id_str = match.group(1)
     else:
-        # If no match, assume the whole string might be an ID
         character_id_str = choice.strip()
         if not character_id_str.isdigit():
             raise ValueError(f"Invalid choice format: '{choice}'. Expected 'Name (ID: 123)' or just a numeric ID.")
-
     try:
         character_id = int(character_id_str)
         logger.debug(f"Extracted character ID: {character_id}")
@@ -470,6 +488,130 @@ def load_character_wrapper(
                      exc_info=True)
         raise
 
+
+# --- NEW Character CRUD Interop Functions ---
+def create_new_character_from_data(db: CharactersRAGDB, character_payload: Dict[str, Any]) -> Optional[int]:
+    """
+    Creates a new character in the database from a dictionary payload.
+    Handles image data (if 'image_base64' is present).
+    Propagates DB errors (InputError, ConflictError, CharactersRAGDBError).
+    """
+    try:
+        if 'name' not in character_payload or not character_payload['name']:
+            raise InputError("Character 'name' is required and cannot be empty.")
+
+        # Check for existing character by name before preparing and adding
+        # This is good practice for the interop layer, even if API layer also checks.
+        existing_char = db.get_character_card_by_name(character_payload['name'])
+        if existing_char:
+            raise ConflictError(
+                f"Character with name '{character_payload['name']}' already exists (ID: {existing_char['id']}).")
+
+        db_ready_data = _prepare_character_data_for_db_storage(character_payload, is_update=False)
+        char_id = db.add_character_card(db_ready_data)
+        if char_id:
+            logger.info(f"Character '{db_ready_data['name']}' created with ID: {char_id}")
+        return char_id
+    except (InputError, ConflictError, CharactersRAGDBError) as e:
+        logger.error(f"Error creating new character: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error creating character: {e}", exc_info=True)
+        raise CharactersRAGDBError(f"Unexpected error creating character: {e}")
+
+
+def get_character_details(db: CharactersRAGDB, character_id: int) -> Optional[Dict[str, Any]]:
+    """Retrieves full character details by ID."""
+    try:
+        return db.get_character_card_by_id(character_id)
+    except CharactersRAGDBError as e:
+        logger.error(f"Database error getting character {character_id}: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error getting character {character_id}: {e}", exc_info=True)
+        raise CharactersRAGDBError(f"Unexpected error getting character: {e}")
+
+
+def update_existing_character_details(
+        db: CharactersRAGDB,
+        character_id: int,
+        update_payload: Dict[str, Any],
+        expected_version: int
+) -> bool:
+    """
+    Updates an existing character's details.
+    Handles image data and ensures JSON fields are correctly formatted for the DB.
+    Propagates DB errors.
+    """
+    try:
+        if not update_payload:  # No actual data to update, DB layer handles this as a "touch"
+            logger.info(
+                f"No specific fields to update for character ID {character_id}, DB layer will touch if version matches.")
+            # Still call update_character_card as it handles version bump and last_modified
+            return db.update_character_card(character_id, {}, expected_version)
+
+        # If name is being updated, check for conflict with other characters.
+        new_name = update_payload.get('name')
+        if new_name is not None:
+            current_char = db.get_character_card_by_id(character_id)  # Fetch current to compare name
+            if not current_char:
+                # This case should ideally be caught by API layer before calling this
+                raise InputError(f"Character with ID {character_id} not found for update.")
+            if new_name != current_char.get('name'):
+                existing_char_with_new_name = db.get_character_card_by_name(new_name)
+                if existing_char_with_new_name and existing_char_with_new_name.get('id') != character_id:
+                    raise ConflictError(
+                        f"Another character with name '{new_name}' already exists (ID: {existing_char_with_new_name['id']}).")
+
+        db_ready_data = _prepare_character_data_for_db_storage(update_payload, is_update=True)
+
+        # The db.update_character_card should only receive fields that are actually changing
+        # or all fields if that's how the Pydantic model worked.
+        # _prepare_character_data_for_db_storage returns a full dict, but db.update_character_card
+        # filters based on updatable fields.
+        success = db.update_character_card(character_id, db_ready_data, expected_version)
+        if success:
+            logger.info(f"Character ID {character_id} updated successfully.")
+        return success
+    except (InputError, ConflictError, CharactersRAGDBError) as e:
+        logger.error(f"Error updating character {character_id}: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error updating character {character_id}: {e}", exc_info=True)
+        raise CharactersRAGDBError(f"Unexpected error updating character: {e}")
+
+
+def delete_character_from_db(db: CharactersRAGDB, character_id: int, expected_version: int) -> bool:
+    """Soft-deletes a character from the database."""
+    try:
+        success = db.soft_delete_character_card(character_id, expected_version)
+        if success:
+            logger.info(f"Character ID {character_id} soft-deleted successfully.")
+        return success
+    except (ConflictError, CharactersRAGDBError) as e:
+        logger.error(f"Error soft-deleting character {character_id}: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error soft-deleting character {character_id}: {e}", exc_info=True)
+        raise CharactersRAGDBError(f"Unexpected error deleting character: {e}")
+
+
+def search_characters_by_query_text(
+        db: CharactersRAGDB,
+        search_term: str,
+        limit: int = 10
+) -> List[Dict[str, Any]]:
+    """Searches character cards using FTS based on the search term."""
+    try:
+        return db.search_character_cards(search_term, limit=limit)
+    except CharactersRAGDBError as e:
+        logger.error(f"Error searching characters for '{search_term}': {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error searching characters: {e}", exc_info=True)
+        raise CharactersRAGDBError(f"Unexpected error searching characters: {e}")
+
+# --- End of Character CRUD Interop Functions ---
 
 #
 # Character Book parsing (copied from original, assumed correct for V2 spec)
@@ -1249,7 +1391,7 @@ def load_character_card_from_string_content(content_str: str) -> Optional[Dict[s
 
 def import_and_save_character_from_file(
         db: CharactersRAGDB,
-        file_input: Union[str, io.BytesIO, bytes]  # File path, BytesIO stream, or raw bytes
+        file_input: Union[str, io.BytesIO, bytes]
 ) -> Optional[int]:
     """Imports a character card from a file, saves it to DB, and returns ID.
 
@@ -1279,171 +1421,103 @@ def import_and_save_character_from_file(
             YAML frontmatter in a text file input) but is not installed.
     """
     parsed_card_dict: Optional[Dict[str, Any]] = None
-    image_bytes_for_db: Optional[bytes] = None  # This will hold the avatar image for the DB
     filename_for_log = "input_stream"
+    image_bytes_for_db: Optional[bytes] = None  # Specific for this function's image handling
 
     try:
-        # 1. Determine input type and get card JSON string and potentially image bytes
+        card_json_str: Optional[str] = None  # String content of the card data
+        # Logic to extract card_json_str and image_bytes_for_db (if input is image)
+        # This part is complex and depends on whether file_input is path, bytes, or stream
+        # and whether it's text or image. The original logic is kept for this part.
         if isinstance(file_input, str):  # File path
             filename_for_log = file_input
-            if not os.path.exists(filename_for_log):
-                logger.error(f"File not found: {filename_for_log}")
-                return None
-
+            if not os.path.exists(filename_for_log): raise FileNotFoundError(f"File not found: {filename_for_log}")
             _, ext = os.path.splitext(filename_for_log.lower())
-            if ext in ['.png', '.webp']:  # Image file
+            if ext in ['.png', '.webp']:
                 with open(filename_for_log, 'rb') as f_img:
-                    image_bytes_for_db = f_img.read()  # The file itself is the image
+                    image_bytes_for_db = f_img.read()
                 card_json_str = extract_json_from_image_file(io.BytesIO(image_bytes_for_db))
                 if not card_json_str:
-                    logger.warning(
-                        f"No character JSON data extracted from image file: {filename_for_log}. Image itself will be used if JSON is found elsewhere or card has default image handling.")
-                    # If no JSON in image, card_json_str will be None. Parsing might happen from a text file later if this function is adapted
-                    # For current design, if image has no JSON, it must be a text file for card data.
-                    # If the intent is to load image AND then separately load a JSON file, this function would need changes.
-                    # Assuming for now: if image, JSON must be in it or it's an error for *this specific path*.
-                    # Re-evaluating based on typical use: if image file, json expected inside.
-                    # If no JSON inside, we don't then try to read the image file as text.
-                    # So, if card_json_str is None here, and it's an image, then we lack card data.
-                    if ext in ['.png', '.webp'] and not card_json_str:  # Explicitly state no card data from image
-                        logger.error(
-                            f"Image file {filename_for_log} provided, but no character JSON metadata found within it.")
-                        return None
-            else:  # Assume text file (JSON/MD)
+                    logger.error(f"Image file {filename_for_log} but no char JSON metadata.")
+                    return None
+            else:  # Assume text file
                 with open(filename_for_log, 'r', encoding='utf-8') as f_text:
                     card_json_str = f_text.read()
-
-        elif isinstance(file_input, bytes):  # Raw bytes input
-            try:
+        elif isinstance(file_input, bytes):
+            try:  # Try as image first
                 temp_image_stream = io.BytesIO(file_input)
-                potential_json_from_bytes_img = extract_json_from_image_file(temp_image_stream)
-                if potential_json_from_bytes_img:
-                    card_json_str = potential_json_from_bytes_img
-                    image_bytes_for_db = file_input
+                card_json_str = extract_json_from_image_file(temp_image_stream)
+                if card_json_str:
+                    image_bytes_for_db = file_input  # It was an image with chara data
                 else:
-                    logger.debug("Input bytes not an image with chara data, or not an image; trying as text.")
-                    card_json_str = file_input.decode('utf-8')
-                    # If it was an image but without chara, image_bytes_for_db would still be None.
-                    # We could try to set image_bytes_for_db = file_input here if we confirm it IS an image
-                    # even if chara extraction failed. For now, only if chara data is from image.
-            except UnicodeDecodeError:
-                logger.error("Input bytes are not valid UTF-8 text and didn't yield chara data as an image.")
+                    card_json_str = file_input.decode('utf-8')  # Try as text
+            except (UnicodeDecodeError, Exception):
+                card_json_str = None  # Could not decode as text
+            if card_json_str is None:  # Failed both image and text attempt from bytes
+                logger.error("Input bytes are not valid image with chara or UTF-8 text.")
                 return None
-            except Exception as e_bytes_img:
-                logger.debug(f"Input bytes not processed as image ({e_bytes_img}), trying as text.")
-                try:
-                    card_json_str = file_input.decode('utf-8')
-                except UnicodeDecodeError:
-                    logger.error("Input bytes are not valid UTF-8 text.")
-                    return None
-
-        elif hasattr(file_input, 'read'):  # File-like object (e.g., BytesIO from upload)
+        elif hasattr(file_input, 'read'):  # File-like object
             if hasattr(file_input, 'name') and file_input.name: filename_for_log = file_input.name
+            file_input.seek(0);
+            stream_bytes = file_input.read();
             file_input.seek(0)
-            stream_bytes = file_input.read()
-            file_input.seek(0)
-
-            try:
-                temp_image_stream_from_obj = io.BytesIO(stream_bytes)
-                potential_json_from_stream_img = extract_json_from_image_file(temp_image_stream_from_obj)
-                if potential_json_from_stream_img:
-                    card_json_str = potential_json_from_stream_img
+            try:  # Try as image
+                temp_image_stream = io.BytesIO(stream_bytes)
+                card_json_str = extract_json_from_image_file(temp_image_stream)
+                if card_json_str:
                     image_bytes_for_db = stream_bytes
                 else:
-                    logger.debug(
-                        f"Stream {filename_for_log} not an image with chara data, or not an image; trying as text.")
                     card_json_str = stream_bytes.decode('utf-8')
-            except UnicodeDecodeError:
-                logger.error(
-                    f"Stream content for {filename_for_log} is not valid UTF-8 and didn't yield chara from image.")
+            except (UnicodeDecodeError, Exception):
+                card_json_str = None
+            if card_json_str is None:
+                logger.error(f"Stream {filename_for_log} not valid image with chara or UTF-8 text.")
                 return None
-            except Exception as e_stream_img:
-                logger.debug(f"Stream {filename_for_log} not processed as image ({e_stream_img}), trying as text.")
-                try:
-                    card_json_str = stream_bytes.decode('utf-8')
-                except UnicodeDecodeError:
-                    logger.error(f"Stream content for {filename_for_log} is not valid UTF-8 text.")
-                    return None
         else:
-            logger.error("Invalid file_input type. Must be file path, BytesIO, or bytes.")
-            return None
+            raise ValueError("Invalid file_input type.")
 
         if not card_json_str:
-            logger.error(f"Could not obtain character card JSON string from input: {filename_for_log}")
+            logger.error(f"Could not obtain character card JSON string from: {filename_for_log}")
             return None
 
-        # 2. Parse and Validate the extracted JSON string.
-        # load_character_card_from_string_content now incorporates validation.
         parsed_card_dict = load_character_card_from_string_content(card_json_str)
-        if not parsed_card_dict:  # This means parsing or validation failed.
-            logger.error(f"Failed to parse or validate character data from content of: {filename_for_log}")
+        if not parsed_card_dict:
             return None
-
-        # 3. Post-parsing check (essential fields on the *parsed and mapped* dictionary)
         if not parsed_card_dict.get('name'):
-            logger.error(
-                "Character import failed: 'name' is missing in the successfully parsed and DB-schema-mapped card data.")
-            return None
-        # Add more critical field checks here on `parsed_card_dict` if needed.
+            raise InputError("Parsed card data is missing 'name'.")
 
-        # 4. Handle image if it's base64 in the JSON and not already set from image file
-        if not image_bytes_for_db and parsed_card_dict.get('image_base64'):
-            try:
-                image_bytes_for_db = base64.b64decode(str(parsed_card_dict['image_base64']))
-                logger.debug("Decoded base64 image from card JSON.")
-            except Exception as e_b64:
-                logger.warning(f"Failed to decode base64 image string from card data: {e_b64}")
-                # Keep image_bytes_for_db as None
+        # Prepare payload for DB, including image handling
+        # If image_bytes_for_db was already set (from image file input), use that.
+        # Otherwise, _prepare_character_data_for_db_storage will check 'image_base64' from parsed_card_dict.
+        payload_for_db_helper = parsed_card_dict.copy()
+        if image_bytes_for_db:  # If image came directly from file, don't use base64 from JSON
+            payload_for_db_helper.pop('image_base64', None)  # Remove if present
+            payload_for_db_helper['image'] = image_bytes_for_db  # Use direct bytes
 
-        # 5. Prepare the payload for the database, using DB schema field names
-        db_payload = {
-            'name': parsed_card_dict['name'],
-            'description': parsed_card_dict.get('description'),
-            'personality': parsed_card_dict.get('personality'),
-            'scenario': parsed_card_dict.get('scenario'),
-            'system_prompt': parsed_card_dict.get('system_prompt'),
-            'image': image_bytes_for_db,
-            'post_history_instructions': parsed_card_dict.get('post_history_instructions'),
-            'first_message': parsed_card_dict.get('first_message'),
-            'message_example': parsed_card_dict.get('message_example'),
-            'creator_notes': parsed_card_dict.get('creator_notes'),
-            'alternate_greetings': parsed_card_dict.get('alternate_greetings', []),
-            'tags': parsed_card_dict.get('tags', []),
-            'creator': parsed_card_dict.get('creator'),
-            'character_version': parsed_card_dict.get('character_version'),
-            'extensions': parsed_card_dict.get('extensions', {})
-        }
+        # Use the helper for final db_payload creation
+        db_payload = _prepare_character_data_for_db_storage(payload_for_db_helper, is_update=False)
 
-        if not isinstance(db_payload['alternate_greetings'], list): db_payload['alternate_greetings'] = []
-        if not isinstance(db_payload['tags'], list): db_payload['tags'] = []
-        if not isinstance(db_payload['extensions'], dict): db_payload['extensions'] = {}
-
-        # 6. Add to database
+        # Call db.add_character_card directly
         char_id = db.add_character_card(db_payload)
-        if char_id:
-            logger.info(f"Successfully imported character '{db_payload['name']}' with DB ID: {char_id}")
-        else:
-            logger.error(
-                f"Failed to save character '{db_payload['name']}' to DB (add_character_card returned None without error).")  # Should ideally not happen
+        if char_id: logger.info(f"Imported character '{db_payload['name']}' with DB ID: {char_id}")
         return char_id
-
     except ConflictError as ce:
-        logger.warning(f"Conflict importing character: {ce}. Name likely already exists.")
-        if parsed_card_dict and parsed_card_dict.get(
-                'name'):  # parsed_card_dict might be None if error happened before it was set
+        logger.warning(f"Conflict importing character: {ce}.")
+        if parsed_card_dict and parsed_card_dict.get('name'):
             existing_char = db.get_character_card_by_name(parsed_card_dict['name'])
-            if existing_char and existing_char.get('id'):
-                logger.info(f"Character '{parsed_card_dict['name']}' already exists with ID {existing_char['id']}.")
-                return existing_char['id']
-        return None
-    except (CharactersRAGDBError, InputError) as db_e:
-        logger.error(f"Database or input error importing character from {filename_for_log}: {db_e}")
-    except ImportError as imp_err:
-        logger.error(f"Import error during character import: {imp_err}. A required library might be missing.")
+            if existing_char and existing_char.get('id'): return existing_char['id']
+        raise  # Re-raise ConflictError so API layer can give 409
+    except (InputError, CharactersRAGDBError) as e:
+        logger.error(f"Error importing character from {filename_for_log}: {e}")
+        raise
+    except FileNotFoundError:
+        logger.error(f"File not found during import: {filename_for_log}")
+        raise InputError(f"File not found: {filename_for_log}")
+    except ImportError:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error importing character from {filename_for_log}: {e}", exc_info=True)
-    return None
+        logger.error(f"Unexpected error importing char from {filename_for_log}: {e}", exc_info=True)
+        raise CharactersRAGDBError(f"Unexpected error importing character: {e}")
 
 
 def load_chat_history_from_file_and_save_to_db(
