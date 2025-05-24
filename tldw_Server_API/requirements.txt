@@ -74,6 +74,9 @@ transformers
 # Re-Ranking
 FlashRank
 #
+# Research
+arxiv
+#
 # VectorDB
 chromadb
 #
