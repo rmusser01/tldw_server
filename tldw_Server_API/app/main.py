@@ -191,7 +191,7 @@ app.include_router(notes_router, prefix="/api/v1/notes", tags=["notes"])
 
 
 # Router for Prompt Management endpoints
-app.include_router(prompt_router, prefix="/api/v1/prompts", tags=["prompts]"])
+app.include_router(prompt_router, prefix="/api/v1/prompts", tags=["prompts"])
 
 
 # Router for RAG endpoint
