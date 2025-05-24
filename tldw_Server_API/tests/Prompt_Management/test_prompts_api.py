@@ -1,72 +1,40 @@
 # tests/integration/api/v1/test_prompts_api.py
-# Description:
-#
-# Imports
-import os
-from datetime import datetime, timezone
-from pathlib import Path
-import pytest
-import json
-import base64
-import urllib.parse
-from unittest.mock import MagicMock
-#
-# Third-Party Imports
-from fastapi.testclient import TestClient
-
-from tldw_Server_API.app.api.v1.API_Deps import Prompts_DB_Deps
-#
-# Local Imports
-from tldw_Server_API.app.main import app as fastapi_app
-from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import close_all_cached_prompts_db_instances
-from tldw_Server_API.app.api.v1.endpoints.prompts import verify_token
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.config import settings
-#
-# Local Imports
-#
-#######################################################################################################################
-#
-
-
-# Functions:
-# tests/integration/api/v1/test_prompts_api.py
 # Description: Extensive integration tests for the Prompts API.
 #
 # Imports
+from datetime import datetime, timezone
+import urllib.parse
 import pytest
-import json
 import base64
 import urllib.parse
 from pathlib import Path
-from typing import Dict, Any, Optional, List
-from unittest.mock import patch, MagicMock
-
+from typing import Dict, Any, Optional
+from unittest.mock import MagicMock
+#
 # Third-Party Imports
 from fastapi import HTTPException, status
 from fastapi.testclient import TestClient
-
+#
 # Local Imports
+from tldw_Server_API.app.api.v1.API_Deps import Prompts_DB_Deps
 from tldw_Server_API.app.main import app as fastapi_app
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import (
     close_all_cached_prompts_db_instances,
-    _get_prompts_db_path_for_user,  # For monkeypatching target
-    get_prompts_db_for_user  # For potential mock DB injection
+    get_prompts_db_for_user
 )
-from tldw_Server_API.app.api.v1.endpoints.prompts import verify_token  # For dependency override
+from tldw_Server_API.app.api.v1.endpoints.prompts import verify_token
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.config import settings  # Canonical settings object
+from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
     PromptsDatabase,
     DatabaseError,
     InputError,
     ConflictError
 )
-from tldw_Server_API.app.api.v1.schemas import prompt_schemas as schemas
-
-# For mocking file operations in export
-from tldw_Server_API.app.core.Prompt_Management import Prompts_Interop
-
+#
+#######################################################################################################################
+#
+#
 #######################################################################################################################
 # Constants
 #######################################################################################################################
@@ -207,8 +175,8 @@ def client_env_setup(tmp_path: Path, monkeypatch, test_user_instance: User):
     """Sets up common environment mocks for client fixtures (DB path, user)."""
 
     # Mock _get_prompts_db_path_for_user to use tmp_path
-    def mock_get_db_path(user: User, db_version: str = "v2") -> Path:
-        user_db_dir = tmp_path / str(user.id) / "prompts_user_dbs"
+    def mock_get_db_path(user_id: int, db_version: str = "v2") -> Path:
+        user_db_dir = tmp_path / str(user_id) / "prompts_user_dbs"
         user_db_dir.mkdir(parents=True, exist_ok=True)
         return user_db_dir / f"user_prompts_{db_version}.sqlite"
 
@@ -282,24 +250,48 @@ def client(test_user: User, test_api_token: str, tmp_path: Path, monkeypatch):
 
 
 @pytest.fixture(scope="function")
-def client_with_auth(client_env_setup, monkeypatch, actual_api_token_value: str):
-    """
-    Provides a TestClient where actual auth logic (verify_token) is tested.
-    `settings.API_BEARER` is monkeypatched to `actual_api_token_value`.
-    """
-    original_api_bearer = getattr(settings, "API_BEARER", None)
+def client_with_auth(tmp_path: Path, monkeypatch, test_user_instance: User, actual_api_token_value: str):
+    # Mock _get_prompts_db_path_for_user to use tmp_path
+    def mock_get_db_path(user_id: int, db_version: str = "v2") -> Path: # Changed user: User to user_id: int
+        user_db_dir = tmp_path / str(user_id) / "prompts_user_dbs"
+        user_db_dir.mkdir(parents=True, exist_ok=True)
+        return user_db_dir / f"user_prompts_{db_version}.sqlite"
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps._get_prompts_db_path_for_user",
+        mock_get_db_path
+    )
+
+    # Override get_request_user dependency
+    async def override_get_request_user_dependency_async(): # Make it async if original is
+        return test_user_instance
+
+    original_overrides = fastapi_app.dependency_overrides.copy()
+    fastapi_app.dependency_overrides[get_request_user] = override_get_request_user_dependency_async
+
+    original_api_key = settings.get("SINGLE_USER_API_KEY")
     monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", actual_api_token_value)
+    # Ensure single user mode is True for these tests if verify_token relies on it
+    original_single_user_mode = settings.get("SINGLE_USER_MODE")
+    monkeypatch.setitem(settings, "SINGLE_USER_MODE", True)
+
 
     # No override for verify_token, so the actual dependency will be called
     with TestClient(fastapi_app) as c:
         yield c
 
-    # Teardown: restore original API_BEARER
-    if original_api_bearer is not None:
-        monkeypatch.setattr(settings, "API_BEARER", original_api_bearer)
-    # else: if it was not set, it might be tricky to "unset" it without knowing Pydantic's behavior
-    # For tests, it's usually fine if it remains set to the test value for subsequent non-auth tests
-    # if they don't rely on its absence. Better to always have a default in settings.
+    # Teardown
+    fastapi_app.dependency_overrides = original_overrides
+    if original_api_key is not None:
+        monkeypatch.setitem(settings, "SINGLE_USER_API_KEY", original_api_key)
+    else:
+        monkeypatch.delitem(settings, "SINGLE_USER_API_KEY", raising=False) # Or set to None
+    if original_single_user_mode is not None:
+        monkeypatch.setitem(settings, "SINGLE_USER_MODE", original_single_user_mode)
+
+
+    if callable(close_all_cached_prompts_db_instances):
+        close_all_cached_prompts_db_instances()
 
 
 @pytest.fixture
@@ -762,26 +754,37 @@ class TestKeywordEndpoints:
 
 class TestExportEndpoints:
     @pytest.fixture(autouse=True)
-    def setup_mocks(self, monkeypatch, tmp_path): # Added tmp_path for temp file
-        self.mock_db_export_prompts_formatted = MagicMock()
-        self.mock_db_export_prompt_keywords_to_csv = MagicMock()
+    def setup_mocks(self, monkeypatch, tmp_path):
+        self.mock_db_export_prompts_formatted = MagicMock()             # Corrected attribute name
+        self.mock_db_export_prompt_keywords_to_csv = MagicMock()        # Corrected attribute name
 
-        monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.prompts.db_export_prompts_formatted", self.mock_db_export_prompts_formatted)
-        monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.prompts.db_export_prompt_keywords_to_csv", self.mock_db_export_prompt_keywords_to_csv)
+        # Patch where these functions are imported and used in the endpoint module.
+        # As per prompts.py:
+        # from tldw_Server_API.app.core.Prompt_Management.Prompts_Interop import (
+        #     db_export_prompts_formatted,
+        #     db_export_prompt_keywords_to_csv
+        # )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.prompts.db_export_prompts_formatted", # Target correct imported name
+            self.mock_db_export_prompts_formatted
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.prompts.db_export_prompt_keywords_to_csv", # Target correct imported name
+            self.mock_db_export_prompt_keywords_to_csv
+        )
 
         self.mock_os_path_exists = MagicMock(return_value=True)
         self.mock_os_remove = MagicMock()
         monkeypatch.setattr("os.path.exists", self.mock_os_path_exists)
         monkeypatch.setattr("os.remove", self.mock_os_remove)
 
-        # Use tmp_path provided by pytest for a unique temp file per test run
         self.temp_file_path = str(tmp_path / "test_export.tmp")
 
     def test_export_prompts_csv_success(self, client: TestClient):
         # Ensure the mocked temp file exists for the test
         with open(self.temp_file_path, "w") as f: f.write("id,name\n1,TestPromptCSV")
-        self.mock_db_export_prompts_formatted.return_value = ("Successfully exported CSV", self.temp_file_path)
-        self.mock_os_path_exists.return_value = True # Make sure it "exists"
+        self.mock_db_export_prompts_formatted.return_value = ("Successfully exported CSV", self.temp_file_path) # Use corrected name
+        self.mock_os_path_exists.return_value = True
 
         response = client.get(f"{API_V1_PROMPTS_PREFIX}/export?export_format=csv")
         assert response.status_code == status.HTTP_200_OK, response.text
@@ -793,7 +796,7 @@ class TestExportEndpoints:
 
     def test_export_prompts_markdown_success(self, client: TestClient):
         with open(self.temp_file_path, "w") as f: f.write("# TestPromptMD")
-        self.mock_db_export_prompts_formatted.return_value = ("Successfully exported Markdown", self.temp_file_path)
+        self.mock_db_export_prompts_formatted.return_value = ("Successfully exported Markdown", self.temp_file_path) # Use corrected name
         self.mock_os_path_exists.return_value = True
 
         response = client.get(f"{API_V1_PROMPTS_PREFIX}/export?export_format=markdown")
@@ -805,7 +808,7 @@ class TestExportEndpoints:
         self.mock_os_remove.assert_called_with(self.temp_file_path)
 
     def test_export_prompts_no_prompts_found(self, client: TestClient):
-        self.mock_db_export_prompts_formatted.return_value = ("No prompts found matching criteria.", "None")
+        self.mock_db_export_prompts_formatted.return_value = ("No prompts found matching criteria.", "None") # Use corrected name
         self.mock_os_path_exists.return_value = False
 
         response = client.get(f"{API_V1_PROMPTS_PREFIX}/export?export_format=csv")
@@ -814,40 +817,41 @@ class TestExportEndpoints:
         assert data["message"] == "No prompts found matching criteria."
         assert data["file_content_b64"] is None
 
-    def test_export_prompts_interop_failure(self, client: TestClient):
-        self.mock_db_export_prompts_formatted.return_value = ("Export failed internally", "None")
+    def test_export_prompts_interop_failure(self, client: TestClient): # Might rename to db_failure
+        self.mock_db_export_prompts_formatted.return_value = ("Export failed internally", "None") # Use corrected name
         self.mock_os_path_exists.return_value = False
 
         response = client.get(f"{API_V1_PROMPTS_PREFIX}/export?export_format=csv")
         assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert "Export failed" in response.json()["detail"] # Check the specific detail message
+        assert "Export failed" in response.json()["detail"]
 
     def test_export_prompts_invalid_format(self, client: TestClient):
-        self.mock_db_export_prompts_formatted.side_effect = ValueError("Unsupported export_format: xml")
+        self.mock_db_export_prompts_formatted.side_effect = ValueError("Unsupported export_format: xml") # Use corrected name
         response = client.get(f"{API_V1_PROMPTS_PREFIX}/export?export_format=xml")
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "Unsupported export_format: xml" in response.json()["detail"]
 
     def test_export_keywords_csv_success(self, client: TestClient):
         with open(self.temp_file_path, "w") as f: f.write("keyword,prompt_ids\ntest_kw,1;2")
-        self.mock_db_export_prompt_keywords_to_csv.return_value = ("Successfully exported keywords", self.temp_file_path)
+        self.mock_db_export_prompt_keywords_to_csv.return_value = ("Successfully exported keywords", self.temp_file_path) # Use corrected name
+        self.mock_os_path_exists.return_value = True
         self.mock_os_path_exists.return_value = True
 
         response = client.get(f"{API_V1_PROMPTS_PREFIX}/keywords/export-csv")
         assert response.status_code == status.HTTP_200_OK, response.text
         data = response.json()
-        assert "Successfully exported keywords" in data["message"] # Match exact expected message
+        assert "Successfully exported keywords" in data["message"]
         assert "file_content_b64" in data and data["file_content_b64"] is not None
         self.mock_os_remove.assert_called_with(self.temp_file_path)
 
     def test_export_keywords_no_keywords_found(self, client: TestClient):
-        self.mock_db_export_prompt_keywords_to_csv.return_value = ("No active keywords found.", "None")
+        self.mock_db_export_prompt_keywords_to_csv.return_value = ("No active keywords found.", "None") # Use corrected name
         self.mock_os_path_exists.return_value = False
 
         response = client.get(f"{API_V1_PROMPTS_PREFIX}/keywords/export-csv")
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert data["message"] == "No active keywords found." # Match exact expected message
+        assert data["message"] == "No active keywords found."
         assert data["file_content_b64"] is None
 
 

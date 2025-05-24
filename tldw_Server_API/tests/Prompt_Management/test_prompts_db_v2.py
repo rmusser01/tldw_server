@@ -86,8 +86,8 @@ def test_add_keyword(memory_db: PromptsDatabase):
     assert res['keyword'] == "test_keyword" # Normalized
     assert res['deleted'] == 0
 
-    # Add same keyword again (should return existing)
-    kw_id_2, kw_uuid_2 = memory_db.add_keyword(" TeSt_KeYwOrD ")
+    # Add same keyword again (should raise ConflictError now)
+    kw_id_2, kw_uuid_2 = memory_db.add_keyword(" TeSt_KeYwOrD ") # Normalized to "test_keyword"
     assert kw_id_2 == kw_id
     assert kw_uuid_2 == kw_uuid
 

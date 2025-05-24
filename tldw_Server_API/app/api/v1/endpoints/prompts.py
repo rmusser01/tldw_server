@@ -5,6 +5,7 @@
 import logging
 import os
 import base64
+import sqlite3
 from typing import List, Optional, Union, Tuple
 #
 # 3rd-party imports
@@ -133,22 +134,46 @@ async def create_keyword(
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
-        kw_id, kw_uuid = db.add_keyword(keyword_data.keyword_text)
-        if not kw_id or not kw_uuid:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create keyword.")
+        normalized_kw_text = db._normalize_keyword(keyword_data.keyword_text)
 
-        # To return full KeywordResponse, fetch it (add_keyword only returns id, uuid)
-        # For simplicity, let's assume this is enough or return a simpler response
-        # If full KeywordResponse is needed, add a get_keyword_by_uuid/id to DB layer.
-        # For now, construct a partial response:
+        # Explicitly check for an existing *active* keyword before attempting to add.
+        # This requires a way to query for a keyword by text without triggering add logic.
+        # A new method in PromptsDatabase like `get_keyword_by_text` would be ideal.
+        # For now, using a direct query within a transaction for atomicity if possible,
+        # though add_keyword manages its own transaction.
+        # This check aims to ensure this *specific API endpoint* behaves as "create only, conflict if active".
+
+        # Simpler check: fetch keyword, if it exists and is NOT deleted, then it's a conflict for this endpoint.
+        existing_kw_details = None
+        try:
+            # Using a direct query to check existence and status
+            # This should be ideally encapsulated in a db method like get_keyword_details_by_text()
+            with db.transaction() as conn: # Ensures check is atomic if DB supported nested/savepoints
+                cursor = conn.execute("SELECT id, uuid, deleted FROM PromptKeywordsTable WHERE keyword = ?", (normalized_kw_text,))
+                existing_kw_row = cursor.fetchone()
+                if existing_kw_row:
+                    existing_kw_details = dict(existing_kw_row)
+        except sqlite3.Error as e:
+            logger.warning(f"Could not pre-check keyword existence for '{normalized_kw_text}': {e}")
+
+
+        if existing_kw_details and not existing_kw_details['deleted']:
+            raise ConflictError(f"Keyword '{normalized_kw_text}' already exists and is active.")
+
+        # If it doesn't exist actively, db.add_keyword will either create it or undelete it.
+        kw_id, kw_uuid = db.add_keyword(keyword_data.keyword_text)
+
+        if not kw_id or not kw_uuid: # Should be rare if db.add_keyword is robust
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create or retrieve keyword.")
+
         return schemas.KeywordResponse(
             id=kw_id,
             uuid=kw_uuid,
-            keyword_text=db._normalize_keyword(keyword_data.keyword_text) # Use normalized form
+            keyword_text=normalized_kw_text # Use the normalized form for response consistency
         )
     except InputError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except ConflictError as e: # If undelete logic has conflict
+    except ConflictError as e: # Catches the ConflictError from our check or from add_keyword's undelete logic (if version mismatch)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except DatabaseError as e:
         logger.error(f"Database error creating keyword: {e}", exc_info=True)

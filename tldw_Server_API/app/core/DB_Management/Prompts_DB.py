@@ -592,24 +592,24 @@ class PromptsDatabase:
 
                 if existing:
                     kw_id, kw_uuid, is_deleted, current_version = existing['id'], existing['uuid'], existing['deleted'], \
-                    existing['version']
+                        existing['version']
                     if is_deleted:  # Undelete
                         new_version = current_version + 1
                         cursor.execute(
                             "UPDATE PromptKeywordsTable SET deleted=0, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
                             (current_time, new_version, client_id, kw_id, current_version))
-                        if cursor.rowcount == 0: raise ConflictError("Failed to undelete keyword due to version mismatch or it was not found.", "PromptKeywordsTable", kw_id) # Refined error
+                        if cursor.rowcount == 0: raise ConflictError(
+                            "Failed to undelete keyword due to version mismatch or it was not found.",
+                            "PromptKeywordsTable", kw_id)
                         cursor.execute("SELECT * FROM PromptKeywordsTable WHERE id=?", (kw_id,))
                         payload = dict(cursor.fetchone())
                         self._log_sync_event(conn, 'PromptKeywordsTable', kw_uuid, 'update', new_version, payload)
                         self._update_fts_prompt_keyword(conn, kw_id, normalized_keyword)
                         return kw_id, kw_uuid
-                    # else:  # Already active, just return its ID and UUID
-                    #     logger.debug(f"Keyword '{normalized_keyword}' already exists and is active. Reusing ID: {kw_id}, UUID: {kw_uuid}")
-                    #     return kw_id, kw_uuid
-                    else:  # Already active, raise conflict
-                        raise ConflictError(f"Keyword '{normalized_keyword}' already exists and is active.",
-                                            "PromptKeywordsTable", kw_id)
+                    else:  # Already active, just return its ID and UUID
+                        logger.debug(
+                            f"Keyword '{normalized_keyword}' already exists and is active. Reusing ID: {kw_id}, UUID: {kw_uuid}")
+                        return kw_id, kw_uuid  # THIS LINE IS REVERTED
                 else:  # New keyword
                     new_uuid = self._generate_uuid()
                     new_version = 1
