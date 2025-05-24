@@ -714,8 +714,6 @@ def test_property_process_db_messages_to_ui_history_alternating(message_pairs_co
 
 # --- Integration Tests (using the 'db' fixture) ---
 
-
-@pytest.mark.integration
 def test_get_character_list_for_ui_integration(db):
     char1_id = db.add_character_card({"name": "Charlie", "description": "C"})
     char2_id = db.add_character_card({"name": "Alice", "description": "A"})
@@ -739,7 +737,7 @@ def test_get_character_list_for_ui_integration(db):
     assert ui_list[1]["name"] == "Charlie"
 
 
-@pytest.mark.integration
+
 @mock.patch(f"{MODULE_PATH_PREFIX}.Image", new_callable=mock.MagicMock)  # Patches PIL.Image used in Character_Chat_Lib
 def test_load_character_and_image_integration(MockPILImageModule, db, caplog_handler):
     mock_opened_image = MockPILImageObject(format="PNG")  # This is what Image.open() will return
@@ -776,7 +774,7 @@ def test_load_character_and_image_integration(MockPILImageModule, db, caplog_han
     MockPILImageModule.open.return_value = mock_opened_image  # Reset return value for other tests
 
 
-@pytest.mark.integration
+
 @mock.patch(f"{MODULE_PATH_PREFIX}.yaml")
 @mock.patch(f"{MODULE_PATH_PREFIX}.Image", new_callable=mock.MagicMock)
 def test_import_and_save_character_from_file_integration(MockPILImageModule, mock_yaml_module, db, tmp_path):
@@ -805,7 +803,7 @@ def test_import_and_save_character_from_file_integration(MockPILImageModule, moc
     assert retrieved_png["name"] == "PNG Chara" and retrieved_png["image"] == dummy_png_bytes
 
 
-@pytest.mark.integration
+
 @mock.patch(f"{MODULE_PATH_PREFIX}.time.strftime", return_value=MOCK_TIME_STRFTIME)
 def test_load_chat_history_from_file_and_save_to_db_integration(mock_strftime, db, tmp_path,
                                                                 caplog_handler):  # caplog_handler now works
@@ -841,7 +839,7 @@ def test_load_chat_history_from_file_and_save_to_db_integration(mock_strftime, d
     assert msgs[2]["sender"] == "User"
 
 
-@pytest.mark.integration
+
 @mock.patch(f"{MODULE_PATH_PREFIX}.time.strftime", return_value=MOCK_TIME_STRFTIME)
 @mock.patch(f"{MODULE_PATH_PREFIX}.Image", new_callable=mock.MagicMock)
 def test_full_chat_session_flow_integration(MockPILImageModule, mock_strftime, db):
@@ -880,7 +878,7 @@ def test_full_chat_session_flow_integration(MockPILImageModule, mock_strftime, d
     assert db.get_conversation_by_id(conv_id) is None
 
 
-@pytest.mark.integration
+
 def test_load_chat_and_character_integration(db):
     user_name = "Loader"
     char_id = db.add_character_card({"name": "LoadChar", "first_message": "FM"})
@@ -894,7 +892,7 @@ def test_load_chat_and_character_integration(db):
         assert char_data["name"] == "LoadChar" and history == [("Hi LoadChar", "Yo Loader")]
 
 
-@pytest.mark.integration
+
 def test_load_character_wrapper_integration(db):
     char_id = db.add_character_card({"name": "Wrap", "first_message": "FM {{user}}"})
     user_name = "Wrapper"
@@ -905,7 +903,7 @@ def test_load_character_wrapper_integration(db):
         assert hist_str == [(None, "FM Wrapper")]
 
 
-@pytest.mark.integration
+
 def test_get_conversation_metadata_integration(db):
     char_id = db.add_character_card({"name": "MetaChar", "description": "D"})
     conv_id = db.add_conversation({"character_id": char_id, "title": "MetaTitle", "rating": 4})
@@ -914,7 +912,7 @@ def test_get_conversation_metadata_integration(db):
     assert get_conversation_metadata(db, "non_existent_conv") is None
 
 
-@pytest.mark.integration
+
 def test_retrieve_message_details_integration(db):
     char_id = db.add_character_card({"name": "MsgDetChar", "description": "D"})
     conv_id = db.add_conversation({"character_id": char_id, "title": "MsgDetConv"})

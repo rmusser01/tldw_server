@@ -51,7 +51,7 @@ class CharacterBase(BaseModel):
 
 
 class CharacterCreate(CharacterBase):
-    name: str = Field(..., examples=["Sir Gideon"])
+    name: str = Field(..., examples=["Sir Gideon"], min_length=1)
 
 
 class CharacterUpdate(CharacterBase):

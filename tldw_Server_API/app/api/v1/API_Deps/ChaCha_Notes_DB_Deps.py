@@ -158,6 +158,7 @@ async def get_chacha_db_for_user(
     FastAPI dependency to get the CharactersRAGDB instance for the identified user.
     Handles caching, initialization, and schema checks.
     """
+    logger.info("<<<<< ACTUAL get_chacha_db_for_user CALLED >>>>>")
     if not current_user or not isinstance(current_user.id, int):  # Ensure user_id is an int
         logging.error("get_chacha_db_for_user called without a valid User object or user.id is not int.")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

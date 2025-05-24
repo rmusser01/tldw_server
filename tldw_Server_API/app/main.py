@@ -175,7 +175,7 @@ app.include_router(chat_router, prefix="/api/v1/chat", tags=["chat"])
 
 
 # Router for chat endpoints/chat temp-file handling
-app.include_router(character_router, prefix="/api/v1/persona", tags=["character, persona"])
+app.include_router(character_router, prefix="/api/v1/characters", tags=["character, persona"])
 
 
 # Router for Chunking Endpoint
