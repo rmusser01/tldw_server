@@ -71,6 +71,9 @@ openai
 torch
 transformers
 #
+# ONNX Conversion
+optimum
+#
 # Re-Ranking
 FlashRank
 #

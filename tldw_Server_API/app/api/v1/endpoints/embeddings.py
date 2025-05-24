@@ -24,7 +24,13 @@ except ImportError:
     import logging
     logging.warning("Could not import from tldw_Server_API. Using placeholder for embedding functions and config.")
     # Placeholder functions and configs for standalone testing:
-    def create_embeddings_batch(texts: List[str], model_override: Optional[str] = None, provider_override: Optional[str] = None, api_url_override: Optional[str] = None, timeout_seconds: int = 300) -> List[List[float]]:
+    def create_embeddings_batch(
+        texts: List[str],
+        model_override: Optional[str] = None,
+        provider_override: Optional[str] = None,
+        api_url_override: Optional[str] = None,
+        timeout_seconds: int = 300
+    ) -> List[List[float]]:
         model_to_use = model_override or "placeholder_model"
         provider_to_use = provider_override or "placeholder_provider"
         logging.info(f"Placeholder: Creating embeddings for {len(texts)} texts with model {model_to_use} via {provider_to_use}")
