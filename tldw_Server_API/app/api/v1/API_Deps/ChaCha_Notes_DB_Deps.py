@@ -195,7 +195,7 @@ async def get_chacha_db_for_user(
             db_path = _get_chacha_db_path_for_user(user_id)
             logging.info(f"Initializing CharactersRAGDB instance for user {user_id} at path: {db_path}")
 
-            db_instance = CharactersRAGDB(db_path=str(db_path), client_id=SERVER_CLIENT_ID)
+            db_instance = CharactersRAGDB(db_path=str(db_path), client_id=str(current_user.id))
 
             # +++ Ensure default character exists after DB instance is created +++
             default_char_id = _ensure_default_character(db_instance)

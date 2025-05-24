@@ -130,7 +130,7 @@ async def get_media_db_for_user(
 
             # Instantiate the Database class for the specific user ID's path
             # Use SERVER_CLIENT_ID assigned from settings dict
-            db_instance = MediaDatabase(db_path=str(db_path), client_id=SERVER_CLIENT_ID)
+            db_instance = MediaDatabase(db_path=str(db_path), client_id=str(current_user.id))
 
             # --- Store in Cache ---
             _user_db_instances[user_id] = db_instance

@@ -145,7 +145,7 @@ async def get_prompts_db_for_user(
             # If you need to track the specific end-user initiating the change,
             # that would be a different field, or SERVER_CLIENT_ID could be user-specific.
             # For now, using a global server client ID.
-            db_instance = PromptsDatabase(db_path=str(db_path), client_id=SERVER_CLIENT_ID)
+            db_instance = PromptsDatabase(db_path=str(db_path), client_id=str(current_user.id))
 
             _user_db_instances[user_id] = db_instance # Cache it
             logger.info(f"PromptsDatabase instance created and cached for user {user_id}")

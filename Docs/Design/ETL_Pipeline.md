@@ -25,7 +25,7 @@ https://github.com/QwenLM/Qwen-Agent
   https://qwenlm.github.io/blog/qwen-agent-2405/
   https://github.com/QwenLM/Qwen-Agent/blob/main/examples/assistant_rag.py
   https://github.com/QwenLM/Qwen-Agent/blob/main/examples/parallel_doc_qa.py
-
+https://github.com/bytedance/Dolphin
 
 
 
