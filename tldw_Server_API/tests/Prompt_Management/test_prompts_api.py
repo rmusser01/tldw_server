@@ -693,7 +693,7 @@ class TestKeywordEndpoints:
     def test_create_keyword_duplicate_normalized(self, client: TestClient):
         # Use a keyword text that, after normalization, will be identical for both calls.
         keyword_to_test_raw = "  TEST DUPLICATE KW  "
-        normalized_keyword_expected = "test duplicate kw" # What Prompts_DB._normalize_keyword would produce
+        normalized_keyword_expected = "test duplicate kw"
 
         payload1 = {"keyword_text": keyword_to_test_raw}
         response1 = client.post(f"{API_V1_PROMPTS_PREFIX}/keywords/", json=payload1)
@@ -706,8 +706,6 @@ class TestKeywordEndpoints:
         payload2 = {"keyword_text": "TeSt dUpLiCaTe kW"} # Normalizes to the same
         response2 = client.post(f"{API_V1_PROMPTS_PREFIX}/keywords/", json=payload2)
 
-        # Now, with the API's pre-check using get_active_keyword_by_text,
-        # it should detect the active duplicate and return 409.
         assert response2.status_code == status.HTTP_409_CONFLICT, response2.text
         assert "already exists and is active" in response2.json()["detail"].lower()
 
