@@ -3,7 +3,7 @@ import json
 import threading
 from pathlib import Path
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 from fastapi import Depends, HTTPException, status
 from cachetools import LRUCache
@@ -92,6 +92,8 @@ def _get_chacha_db_path_for_user(user_id: int) -> Path:
         raise IOError(f"Could not initialize ChaChaNotes storage directory for user {user_id}.") from e
     return db_file
 
+# This function should be made async, and ran inside an executor.
+# FIXME - require _ensure_default_character to become async def and be awaited within get_chacha_db_for_user
 def _ensure_default_character(db_instance: CharactersRAGDB) -> Optional[int]:
     """
     Checks if the default character exists in the DB, creates it if not.
@@ -237,7 +239,7 @@ def close_all_chacha_db_instances():
     """Closes all cached ChaChaNotesDB connections. Useful for application shutdown."""
     with _chacha_db_lock:
         logging.info(f"Closing all cached ChaChaNotesDB instances ({len(_chacha_db_instances)})...")
-        for user_id, db_instance in list(_chacha_db_instances.items()):
+        for user_id, db_instance in List(_chacha_db_instances.items()):
             try:
                 db_instance.close_connection()
                 logging.info(f"Closed ChaChaNotesDB instance for user {user_id}.")

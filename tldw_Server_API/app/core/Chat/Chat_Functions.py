@@ -656,6 +656,20 @@ def chat_api_call(
                            status_code=500)
 
 
+# FIXME - thing is fucking big.
+# Break it down into smaller, logical async helper functions. For example:
+#
+#     _authenticate_request(Token)
+#
+#     _validate_request_payload(request_data)
+#
+#     _get_or_create_conversation_context(chat_db, request_data, character_card)
+#
+#     _load_chat_history(chat_db, conversation_id, character_card)
+#
+#     _prepare_llm_messages(request_data, historical_messages, character_card, template_name)
+#
+#     _handle_llm_call_and_response(loop, llm_call_func, request_data, chat_db, final_conversation_id, character_card)
 def chat(
     message: str,
     history: List[Dict[str, Any]],

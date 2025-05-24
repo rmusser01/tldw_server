@@ -308,6 +308,7 @@ async def create_chat_completion(
         provider_api_key = API_KEYS.get(target_api_provider) # API_KEYS should be up-to-date
 
         # Simplified list, actual check might be in Chat_Functions or per-provider
+        # FIXME - This should be a more dynamic check based on the provider's requirements.
         providers_requiring_keys = ["openai", "anthropic", "cohere", "groq", "openrouter", "deepseek", "mistral", "google", "huggingface"]
         if target_api_provider in providers_requiring_keys and not provider_api_key:
             logger.error(f"API key for provider '{target_api_provider}' is missing or not configured.")
@@ -346,7 +347,7 @@ async def create_chat_completion(
             if not conv_details:
                 logger.warning(f"Provided conv_id '{final_conversation_id}' not found. New one will be created.")
                 final_conversation_id = None
-            elif conv_details.get('character_id') != final_character_db_id or conv_details.get('client_id') != client_id_from_db:
+            elif conv_details.get('character_id') != final_character_db_id or conv_details.get('client_id') != chat_db.client_id:
                 logger.warning(f"Conv_id '{final_conversation_id}' (char {conv_details.get('character_id')}, client {conv_details.get('client_id')}) "
                                f"mismatches context (char {final_character_db_id}, client {client_id_from_db}). New conv will be created.")
                 final_conversation_id = None

@@ -40,6 +40,26 @@ def _get_setting(env_var, section, key, default=""):
         if config_value is not None:
             return config_value
     return default
+ALL_SUPPORTED_PROVIDER_NAMES_LIST: List[str] = [
+    "anthropic",
+    "cohere",
+    "deepseek",
+    "google",
+    "groq",
+    "huggingface",
+    "mistral",
+    "openai",
+    "openrouter",
+    "llama.cpp",
+    "kobold",
+    "ollama",
+    "ooba",
+    "tabbyapi",
+    "vllm",
+    "local-llm",
+    "custom-openai-api",
+    "custom-openai-api-2"
+]
 
 API_KEYS = {
     name: _get_setting(
@@ -47,27 +67,10 @@ API_KEYS = {
         "api_keys",
         name
     )
-    for name in [
-        "openai",
-        "anthropic",
-        "cohere",
-        "groq",
-        "openrouter",
-        "deepseek",
-        "mistral",
-        "google",
-        "huggingface",
-        "llama.cpp",
-        "kobold",
-        "ooba",
-        "tabbyapi",
-        "vllm",
-        "local-llm",
-        "custom-openai-api",
-        "custom-openai-api-2"
-    ]
+    for name in ALL_SUPPORTED_PROVIDER_NAMES_LIST # Use the list here
 }
 
+# For type hinting - define explicitly
 SUPPORTED_API_ENDPOINTS = Literal[
     "anthropic",
     "cohere",
@@ -88,6 +91,7 @@ SUPPORTED_API_ENDPOINTS = Literal[
     "custom-openai-api",
     "custom-openai-api-2"
 ]
+
 
 
 # --- Tool Definitions ---

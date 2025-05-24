@@ -1,7 +1,17 @@
+###########################
+# pyproject.toml for tldw_Server_API
+###########################
 [build-system]
 requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
-
+###########################
+# Project Info
+###########################
+[project.urls]
+Homepage = "https://tldwproject.com"
+Documentation = "https://docs.tldwproject.com"
+Repository = "https://github.com/rmusser01/tldw"
+#
 [project]
 name = "tldw"
 version = "0.0.11.1"
@@ -9,11 +19,13 @@ description = "A naive attempt at 'A Young Lady's Illustrated Primer'."
 requires-python = ">=3.9"
 readme = "README.md"
 license = { file = "LICENSE.txt" }
-
+#
 authors = [
   { name = "Robert Musser", email = "contact@tldwproject.com" }
 ]
-
+###########################
+# Dependencies
+###########################
 dependencies = [
   'arxiv',
   'playwright',
@@ -142,18 +154,26 @@ all = [
   "scikit-learn>=0.24.0",
   "scipy>=1.6.0"
 ]
-
-[project.urls]
-Homepage = "https://tldwproject.com"
-Documentation = "https://docs.tldwproject.com"
-Repository = "https://github.com/rmusser01/tldw"
-
+###########################
+# Tools
+###########################
 [tool.setuptools.packages.find]
 where = ["App_Function_Libraries"]
-
+###########################
+# Tools - Tests
+###########################
 [tool.pytest.ini_options]
 filterwarnings = [
     "ignore::DeprecationWarning:pkg_resources:",
     "ignore::DeprecationWarning:pyannote.core.notebook:",
     "ignore::DeprecationWarning:speechbrain.pretrained:"
 ]
+markers = [
+    "unit: marks tests as unit tests",
+    # add other custom marks here
+]
+###########################
+# Async.io
+###########################
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
