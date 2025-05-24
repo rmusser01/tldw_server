@@ -123,7 +123,7 @@ async def search_all_prompts(
 # === Keyword Endpoints ===
 @router.post(
     "/keywords/",
-    response_model=schemas.KeywordResponse, # Or a simpler success message
+    response_model=schemas.KeywordResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Add a new keyword",
     dependencies=[Depends(verify_token)]
@@ -134,50 +134,43 @@ async def create_keyword(
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
-        normalized_kw_text = db._normalize_keyword(keyword_data.keyword_text)
+        # Step 1: Check if an active keyword with this normalized text already exists.
+        # The new DB method handles normalization internally.
+        existing_active_keyword = db.get_active_keyword_by_text(keyword_data.keyword_text)
 
-        # Explicitly check for an existing *active* keyword before attempting to add.
-        # This requires a way to query for a keyword by text without triggering add logic.
-        # A new method in PromptsDatabase like `get_keyword_by_text` would be ideal.
-        # For now, using a direct query within a transaction for atomicity if possible,
-        # though add_keyword manages its own transaction.
-        # This check aims to ensure this *specific API endpoint* behaves as "create only, conflict if active".
+        if existing_active_keyword:
+            # If it exists and is active, this endpoint should return a conflict.
+            normalized_text = db._normalize_keyword(keyword_data.keyword_text) # For error message
+            raise ConflictError(f"Keyword '{normalized_text}' already exists and is active.")
 
-        # Simpler check: fetch keyword, if it exists and is NOT deleted, then it's a conflict for this endpoint.
-        existing_kw_details = None
-        try:
-            # Using a direct query to check existence and status
-            # This should be ideally encapsulated in a db method like get_keyword_details_by_text()
-            with db.transaction() as conn: # Ensures check is atomic if DB supported nested/savepoints
-                cursor = conn.execute("SELECT id, uuid, deleted FROM PromptKeywordsTable WHERE keyword = ?", (normalized_kw_text,))
-                existing_kw_row = cursor.fetchone()
-                if existing_kw_row:
-                    existing_kw_details = dict(existing_kw_row)
-        except sqlite3.Error as e:
-            logger.warning(f"Could not pre-check keyword existence for '{normalized_kw_text}': {e}")
-
-
-        if existing_kw_details and not existing_kw_details['deleted']:
-            raise ConflictError(f"Keyword '{normalized_kw_text}' already exists and is active.")
-
-        # If it doesn't exist actively, db.add_keyword will either create it or undelete it.
+        # Step 2: If not actively existing, proceed to add (which might create or undelete).
+        # db.add_keyword is "get or create or undelete".
         kw_id, kw_uuid = db.add_keyword(keyword_data.keyword_text)
 
         if not kw_id or not kw_uuid: # Should be rare if db.add_keyword is robust
+            logger.error(f"db.add_keyword failed to return ID/UUID for '{keyword_data.keyword_text}' after pre-check.")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create or retrieve keyword.")
+
+        # Fetch the full details of the (potentially newly created or undeleted) keyword for the response.
+        # To do this properly, we might need a get_keyword_by_id or get_keyword_by_uuid
+        # For now, constructing from what we have. Prompts_DB.add_keyword normalizes.
+        final_keyword_text = db._normalize_keyword(keyword_data.keyword_text)
 
         return schemas.KeywordResponse(
             id=kw_id,
             uuid=kw_uuid,
-            keyword_text=normalized_kw_text # Use the normalized form for response consistency
+            keyword_text=final_keyword_text
         )
     except InputError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except ConflictError as e: # Catches the ConflictError from our check or from add_keyword's undelete logic (if version mismatch)
+    except ConflictError as e: # Catches the ConflictError from our explicit check
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except DatabaseError as e:
         logger.error(f"Database error creating keyword: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error.")
+    except Exception as e:
+        logger.error(f"Unexpected error creating keyword: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred: {str(e)}")
 
 
 @router.get(

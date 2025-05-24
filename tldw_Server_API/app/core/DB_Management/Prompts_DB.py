@@ -630,6 +630,30 @@ class PromptsDatabase:
             else:
                 raise DatabaseError(f"Failed to add/update prompt keyword: {e}") from e
 
+    def get_active_keyword_by_text(self, keyword_text: str) -> Optional[Dict]:
+        """
+        Fetches an active (not deleted) keyword by its exact normalized text.
+
+        Args:
+            keyword_text: The keyword text to search for.
+
+        Returns:
+            A dictionary of the keyword's data if found and active, else None.
+        """
+        if not keyword_text or not keyword_text.strip():
+            return None  # Or raise InputError if strictness is preferred here
+        normalized_keyword = self._normalize_keyword(keyword_text)
+        query = "SELECT id, uuid, keyword, last_modified, version, client_id FROM PromptKeywordsTable WHERE keyword = ? AND deleted = 0"
+        try:
+            cursor = self.execute_query(query, (normalized_keyword,))
+            result = cursor.fetchone()
+            return dict(result) if result else None
+        except (DatabaseError, sqlite3.Error) as e:
+            logger.error(f"Error fetching active keyword by text '{normalized_keyword}': {e}")
+            # Depending on desired strictness, could raise or return None
+            # For a simple check, returning None on error is acceptable if the next step handles it.
+            return None
+
     def add_prompt(self, name: str, author: Optional[str], details: Optional[str],
                    system_prompt: Optional[str] = None, user_prompt: Optional[str] = None,
                    keywords: Optional[List[str]] = None, overwrite: bool = False) -> Tuple[

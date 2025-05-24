@@ -691,14 +691,25 @@ class TestKeywordEndpoints:
         assert "uuid" in data
 
     def test_create_keyword_duplicate_normalized(self, client: TestClient):
-        payload = get_sample_keyword_payload("DuplicateKW")
-        client.post(f"{API_V1_PROMPTS_PREFIX}/keywords/", json=payload).raise_for_status()
+        # Use a keyword text that, after normalization, will be identical for both calls.
+        keyword_to_test_raw = "  TEST DUPLICATE KW  "
+        normalized_keyword_expected = "test duplicate kw" # What Prompts_DB._normalize_keyword would produce
 
-        duplicate_payload = {"keyword_text": "  DUPLICATEKW  "}  # Normalizes to the same
-        response = client.post(f"{API_V1_PROMPTS_PREFIX}/keywords/", json=duplicate_payload)
-        # If add_keyword now raises ConflictError for active duplicates
-        assert response.status_code == status.HTTP_409_CONFLICT, response.text
-        assert "already exists" in response.json()["detail"].lower()
+        payload1 = {"keyword_text": keyword_to_test_raw}
+        response1 = client.post(f"{API_V1_PROMPTS_PREFIX}/keywords/", json=payload1)
+        response1.raise_for_status()
+        assert response1.status_code == status.HTTP_201_CREATED
+        created_kw_data = response1.json()
+        assert created_kw_data["keyword_text"] == normalized_keyword_expected # Verify normalization in response
+
+        # Attempt to create the same keyword again, perhaps with different spacing/casing
+        payload2 = {"keyword_text": "TeSt dUpLiCaTe kW"} # Normalizes to the same
+        response2 = client.post(f"{API_V1_PROMPTS_PREFIX}/keywords/", json=payload2)
+
+        # Now, with the API's pre-check using get_active_keyword_by_text,
+        # it should detect the active duplicate and return 409.
+        assert response2.status_code == status.HTTP_409_CONFLICT, response2.text
+        assert "already exists and is active" in response2.json()["detail"].lower()
 
     def test_create_keyword_invalid_input(self, client: TestClient):
         response = client.post(f"{API_V1_PROMPTS_PREFIX}/keywords/", json={"keyword_text": ""})
