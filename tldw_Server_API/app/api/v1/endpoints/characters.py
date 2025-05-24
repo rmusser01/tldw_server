@@ -11,6 +11,7 @@ from typing import List, Union, Any, Dict, Optional
 from fastapi import HTTPException, Depends, Query, UploadFile, File, APIRouter, Path
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
+from pydantic import ValidationInfo
 from pydantic_core.core_schema import FieldValidationInfo
 from starlette import status
 #
@@ -50,7 +51,7 @@ class CharacterBase(BaseModel):
 
     @field_validator("alternate_greetings", "tags", "extensions", mode="before")
     @classmethod
-    def parse_json_string(cls, value: Any, info: FieldValidationInfo) -> Any:
+    def parse_json_string(cls, value: Any, info: ValidationInfo) -> Any:
         if isinstance(value, str):
             try:
                 return json.loads(value)
