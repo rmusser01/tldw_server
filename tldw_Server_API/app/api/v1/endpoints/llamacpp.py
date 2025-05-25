@@ -16,6 +16,33 @@ from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNot
 
 router = APIRouter()
 
+#     LlamaCppConfig: Defines paths and default arguments for llama.cpp/server.
+#
+#     LlamaCpp_Handler:
+#
+#         Manages a single llama.cpp/server process (_active_server_process).
+#
+#         start_server(): This is your model swap function. If an existing server is running (managed by this handler), it calls stop_server() first, then starts a new server with the new model_filename and server_args.
+#
+#         stop_server(): Terminates the managed server process, handling process groups for robust cleanup.
+#
+#         inference(): Sends requests to the Llama.cpp server's OpenAI-compatible API (e.g., /v1/chat/completions).
+#
+#         list_models(): Scans the models_dir for .gguf files.
+#
+#         get_server_status(): Reports the current state of the managed server.
+#
+#         _cleanup_managed_server_sync(): Ensures server is stopped on application exit.
+#
+#         Optional logging of llama.cpp/server output to a file.
+#
+#     LLM_Inference_Manager Updates:
+#
+#         Initializes and provides access to LlamaCppHandler.
+#
+#         Delegates relevant calls (start_server, stop_server, run_inference, list_local_models) to the LlamaCppHandler.
+#
+#     API Endpoints: Provide HTTP interfaces to list models, start/swap the server with a specific model, stop it, get status, and run inference.
 
 # Assuming 'llm_manager' is available, e.g., initialized in main.py and passed around or via Depends
 # For simplicity, let's assume it's directly accessible here.
