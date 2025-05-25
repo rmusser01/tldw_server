@@ -20,6 +20,7 @@ https://github.com/hzy312/knowledge-r1
 Unsorted
 https://ai.gopubby.com/8-common-mistakes-in-vector-search-and-how-to-avoid-them-e48d849c23f8
 https://arxiv.org/pdf/2501.11551v4
+https://x.com/antoine_chaffin/status/1925555110521798925
 https://huggingface.co/lightonai/Reason-ModernColBERT
 https://docs.anthropic.com/en/api/files-create
 https://github.com/HKUDS/LightRAG

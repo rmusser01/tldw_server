@@ -27,6 +27,7 @@ https://jordandarefsky.com/blog/2024/parakeet/
 https://www.tamingllms.com/notebooks/input.html#generating-long-form-content
 https://github.com/collabora/WhisperLive
 https://github.com/Lex-au/Vocalis?tab=readme-ov-file
+https://github.com/Anjok07/ultimatevocalremovergui
 https://huggingface.co/moonshotai/Kimi-Audio-7B-Instruct
 https://github.com/devnen/Dia-TTS-Server
 https://github.com/Lex-au/Orpheus-FastAPI

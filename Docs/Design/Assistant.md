@@ -17,7 +17,7 @@ https://www.youtube.com/watch?v=D7_ipDqhtwk
 https://chatboxai.app/en
 https://github.com/camel-ai/camel
 https://github.com/Roy3838/Observer
-
+https://www.geoffreylitt.com/2025/04/12/how-i-made-a-useful-ai-assistant-with-one-sqlite-table-and-a-handful-of-cron-jobs
 
 
 

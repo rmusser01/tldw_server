@@ -19,8 +19,10 @@ https://www.partywave.site/show/research/Graph-Based%20Source%20Code%20Analysis
 https://github.com/abinthomasonline/repo2txt
 https://github.com/charmandercha/ArchiDoc
 https://github.com/microsandbox/microsandbox
+https://github.com/jezweb/roo-commander
 https://pythontutor.com/c.html#mode=edit
 https://pythontutor.com/articles/c-cpp-visualizer.html
+https://pmbanugo.me/blog/peer-programming-with-llms
 https://gitingest.com/
 https://www.qodo.ai/blog/rag-for-large-scale-code-repos/
 https://blog.voyageai.com/2024/12/04/code-retrieval-eval/
