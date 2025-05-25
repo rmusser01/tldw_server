@@ -40,6 +40,24 @@ class LLMManagerConfig(BaseModel):
     # Global settings for the library
     app_config: Dict[str, Any] = {} # To pass through parts of your project_config.settings
 
+class LlamaCppConfig(BaseHandlerConfig):
+    executable_path: FilePath = Path("vendor/llama.cpp/server") # Default path to llama.cpp server executable
+    models_dir: DirectoryPath = Path("models/gguf_models")    # Directory for GGUF model files
+    default_host: str = "127.0.0.1"
+    default_port: int = 8080
+    default_n_gpu_layers: int = 0  # Sensible default, user should override
+    default_ctx_size: int = 2048
+    default_threads: Optional[int] = None # Let llama.cpp decide by default
+    # Add other common llama.cpp server arguments you want to default or control
+    # e.g., default_main_gpu, default_tensor_split, etc.
+    log_output_file: Optional[Path] = None # Optional: Path to save llama.cpp server logs
+
+    class Config:
+        arbitrary_types_allowed = True
+        # If executable_path or models_dir might not exist at config load time,
+        # you might need to remove FilePath/DirectoryPath validation temporarily
+        # or ensure they are created before loading the config.
+
 #
 # End of LLM_Inference_Schemas.py
 #######################################################################################################################
