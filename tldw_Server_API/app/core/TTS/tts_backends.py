@@ -103,7 +103,7 @@ class OpenAIAPIBackend(TTSBackendBase):
             raise
 
 
-# --- Concrete Backend for Your Local Kokoro ---
+# --- Concrete Backend for Your Local ro ---
 class LocalKokoroBackend(TTSBackendBase):
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)

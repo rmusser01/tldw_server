@@ -3,7 +3,11 @@
 ## Introduction
 
 
-
+https://news.ycombinator.com/item?id=44106944\
+https://en.wikipedia.org/wiki/John_Amos_Comenius
+https://en.wikipedia.org/wiki/Janua_Linguarum_Reserata
+https://en.wikipedia.org/wiki/Orbis_Pictus
+https://www.youtube.com/watch?v=zDmW5hJPsvQ&t=2880s
 
 ### Link Dump:
 repo2txt integration/clone https://github.com/abinthomasonline/repo2txt

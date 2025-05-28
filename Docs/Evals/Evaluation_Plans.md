@@ -23,6 +23,7 @@ https://github.com/JackHopkins/factorio-learning-environment
 https://github.com/lechmazur
 https://arxiv.org/abs/2503.05244
 https://liveideabench.com/
+https://b-score.github.io/
 https://arxiv.org/abs/2504.12312
 https://github.com/JohannesGaessler/elo_hellm
 https://arxiv.org/abs/2407.09141

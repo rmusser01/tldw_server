@@ -16,6 +16,7 @@ https://arxiv.org/pdf/2401.17043
 https://arxiv.org/pdf/2502.14802
 https://arxiv.org/abs/2412.12300
 https://docs.exa.ai/examples/demo-hallucination-detector
+https://www.microsoft.com/en-us/research/blog/claimify-extracting-high-quality-claims-from-language-model-outputs/
 https://github.com/hzy312/knowledge-r1
 Unsorted
 https://ai.gopubby.com/8-common-mistakes-in-vector-search-and-how-to-avoid-them-e48d849c23f8
