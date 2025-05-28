@@ -76,6 +76,7 @@ https://docs.replit.com/replitai/agent
 https://news.ycombinator.com/item?id=43925732
 https://uxplanet.org/ui-design-with-chatgpt-4o-4d79b2a32008
 https://bolt.new/
+https://www.nngroup.com/articles/ux-copy-sizes/
 https://github.com/rmusser01/agentic_rag/tree/main
 https://www.bloomberg.com/ux/2021/10/14/designing-the-terminal-for-color-accessibility/
 https://github.com/astramind-ai/Pulsar

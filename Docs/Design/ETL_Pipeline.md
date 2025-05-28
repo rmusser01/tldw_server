@@ -17,6 +17,7 @@ https://towardsdatascience.com/ai-powered-information-extraction-and-matchmaking
 https://github.com/databridge-org/databridge-core
 https://github.com/cocoindex-io/cocoindex
 https://github.com/AIDC-AI/Ovis
+https://github.com/hashangit/Extract2MD
 https://github.com/matthsena/AlcheMark
   https://github.com/run-llama/llama_cloud_services
 https://github.com/kellyjonbrazil/jc

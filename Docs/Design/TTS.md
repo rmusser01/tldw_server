@@ -21,9 +21,13 @@ https://github.com/taresh18/TTSizer
 https://decodingml.substack.com/p/deploying-agents-as-real-time-apis
 https://github.com/Nighthawk42/mOrpheus
 https://github.com/RobViren/kvoicewalk
+https://github.com/w-okada/voice-changer
 https://github.com/Plachtaa/seed-vc
 https://github.com/QuantiusBenignus/blahst/
 https://jordandarefsky.com/blog/2024/parakeet/
+https://www.reddit.com/r/LocalLLaMA/comments/1kvknlo/speechless_speech_instruction_training_without/
+https://arxiv.org/abs/2505.17417
+https://pub.towardsai.net/%EF%B8%8F-building-a-local-speech-to-text-system-with-parakeet-tdt-0-6b-v2-ebd074ba8a4c
 https://www.tamingllms.com/notebooks/input.html#generating-long-form-content
 https://github.com/collabora/WhisperLive
 https://github.com/Lex-au/Vocalis?tab=readme-ov-file

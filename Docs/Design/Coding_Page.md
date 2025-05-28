@@ -14,6 +14,8 @@ https://github.com/cyclotruc/gitdigest
 https://github.com/simonw/files-to-prompt
 https://github.com/yamadashy/repomix/tree/main
 https://github.com/chanhx/crabviz
+https://docs.python.org/3/library/ast.html
+https://jedi.readthedocs.io/en/latest/
 https://carper.ai/diff-models-a-new-way-to-edit-code/
 https://www.partywave.site/show/research/Graph-Based%20Source%20Code%20Analysis
 https://github.com/abinthomasonline/repo2txt
