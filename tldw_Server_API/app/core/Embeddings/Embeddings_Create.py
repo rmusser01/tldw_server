@@ -542,7 +542,7 @@ def create_embeddings_batch(texts: List[str],
     if not texts:
         return []
 
-    emb_cfg = user_embedding_config.get('user_embedding_config')
+    emb_cfg = user_embedding_config.get('embedding_config')
     if not emb_cfg:
         logging.error("`user_embedding_config` not found in `user_embedding_config`.")
         raise ValueError("`user_embedding_config` missing from application configuration.")
@@ -623,7 +623,7 @@ def create_embeddings_batch(texts: List[str],
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
 
-            # FIXME - this should be chunked
+            # This function doesn't take large chunks, things are pre-chunked before getting here.
             payload = {"texts": texts, "model": model_name}  # Adjust payload as per your local API spec
 
             response = requests.post(api_url, json=payload, headers=headers)
