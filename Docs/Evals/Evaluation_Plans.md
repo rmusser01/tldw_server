@@ -13,15 +13,21 @@
 - [VLM Evaluations](#vlm-evals)
 ----------------------------------------------------------------------------------------------------------------
 
-
-
-
+https://arxiv.org/pdf/2502.17601
+https://github.com/t3dotgg/SnitchBench
+https://github.com/sam-paech/slop-forensics
+https://huggingface.co/NousResearch/Minos-v1
+https://github.com/yelboudouri/RPEval
+https://cookbook.openai.com/examples/stripe_model_eval/selecting_a_model_based_on_stripe_conversion
+https://github.com/boson-ai/EmergentTTS-Eval-public
 https://www.leahtharin.com/p/107-andres-glusman-why-your-ab-tests
 https://github.com/collect-intel/llm-judge-bias-suite
 https://www.cip.org/blog/llm-judges-are-unreliable
 https://github.com/JackHopkins/factorio-learning-environment
 https://github.com/lechmazur
+https://github.com/google/lmeval
 https://arxiv.org/abs/2503.05244
+https://www.vgbench.com/
 https://liveideabench.com/
 https://b-score.github.io/
 https://arxiv.org/abs/2504.12312

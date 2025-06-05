@@ -117,7 +117,7 @@ STORM
     https://github.com/stanford-oval/storm/blob/main/examples/storm_examples/run_storm_wiki_claude.py
     https://storm-project.stanford.edu/research/storm/
 
-
+https://github.com/rickyang1114/multimodal-deepresearcher/
 https://github.com/assafelovic/gpt-researcher
 https://arxiv.org/abs/2411.15114
 https://github.com/masterFoad/NanoSage
@@ -144,7 +144,10 @@ https://www.ginkgonotes.com/
 https://github.com/camel-ai/owl
 https://huggingface.co/papers/2505.16938
 https://github.com/Just-Curieous/Curie
-
+https://github.com/RUC-NLPIR/WebThinker
+https://github.com/Alpha-Innovator/NovelSeek
+https://arxiv.org/abs/2505.19253
+https://github.com/google-gemini/gemini-fullstack-langgraph-quickstart
 https://github.com/AsyncFuncAI/deepwiki-open
 https://github.com/alienet1109/BookWorld
 https://github.com/jina-ai/node-DeepResearch[v1-f.py](../../../Sky/v1-f.py)

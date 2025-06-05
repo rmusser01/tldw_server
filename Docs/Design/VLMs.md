@@ -11,7 +11,8 @@ https://huggingface.co/collections/Qwen/qwen25-omni-67de1e5f0f9464dc6314b36e
 https://docs.inferless.com/how-to-guides/deploy-gemma-27b-it
 https://github.com/ByteDance-Seed/Bagel
 https://github.com/TIGER-AI-Lab/QuickVideo
-
+https://huggingface.co/nvidia/Llama-3.1-Nemotron-Nano-VL-8B-V1
+https://huggingface.co/papers/2505.23621
 MAMBA
     https://ivy-lvlm.github.io/Video-MA2MBA/
 

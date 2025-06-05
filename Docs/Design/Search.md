@@ -7,3 +7,4 @@ https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1
 https://github.com/quickwit-oss/tantivy
 https://arxiv.org/abs/2501.05366
 https://github.com/ItsArnavSh/gitfindr
+https://exa.ai/

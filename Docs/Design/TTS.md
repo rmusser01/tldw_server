@@ -18,11 +18,18 @@ https://metis-demo.github.io/#metis-tts
 https://github.com/Extraltodeus/Quick-slap-tkinter-dia/blob/main/README.md
 https://github.com/RobViren/kokovoicelab
 https://github.com/taresh18/TTSizer
+https://www.reddit.com/r/LocalLLaMA/comments/1l3c8is/grmrv3_a_set_of_models_for_reliable_grammar/
+https://huggingface.co/spaces/webml-community/conversational-webgpu/tree/main
+https://github.com/huggingface/transformers.js-examples/tree/main/conversational-webgpu
+https://github.com/Shadowfita/parakeet-tdt-0.6b-v2-fastapi
 https://decodingml.substack.com/p/deploying-agents-as-real-time-apis
 https://github.com/Nighthawk42/mOrpheus
 https://github.com/RobViren/kvoicewalk
 https://github.com/w-okada/voice-changer
 https://github.com/Plachtaa/seed-vc
+https://github.com/resemble-ai/chatterbox
+https://github.com/lamm-mit/PDF2Audio
+https://huggingface.co/Zyphra/Zonos-v0.1-hybrid
 https://github.com/QuantiusBenignus/blahst/
 https://jordandarefsky.com/blog/2024/parakeet/
 https://www.reddit.com/r/LocalLLaMA/comments/1kvknlo/speechless_speech_instruction_training_without/
@@ -64,7 +71,7 @@ https://index-tts.github.io/#section2
 https://arxiv.org/abs/2504.03289
 https://github.com/yukiarimo/hanasu
 https://github.com/taresh18/conversify-speech
-
+https://github.com/playht/playdiffusion
 https://huggingface.co/senstella/csm-expressiva-1b
 https://github.com/KartDriver/mira_converse/blob/main/server/src/server_audio_core.py
 https://github.com/zenforic/csm-multi
@@ -73,14 +80,17 @@ https://github.com/tarun7r/Vocal-Agent
 https://huggingface.co/DavidBrowne17/Muchi
 https://www.reddit.com/r/LocalLLaMA/comments/1jcufi6/improvements_to_kokoro_tts_v10/
     https://github.com/nazdridoy/kokoro-tts
+https://github.com/davidbrowne17/chatterbox-streaming
 https://webrtchacks.com/the-unofficial-guide-to-openai-realtime-webrtc-api/
+https://github.com/petermg/Chatterbox-TTS-Extended
 https://github.com/canopyai/Orpheus-TTS
     https://github.com/canopyai/Orpheus-TTS
     https://github.com/isaiahbjork/orpheus-tts-local/
     https://github.com/Lex-au/Orpheus-FastAPI
 webrtc
 https://huggingface.co/spaces/fastrtc/talk-to-claude/blob/main/app.py
-https://github.com/freddyaboulton/fastrtc
+https://github.com/freddyaboulton/fastrtchttps://github.com/rhulha/Speech2Speech
+
 
 Canary
     https://huggingface.co/nvidia/canary-1b-flash

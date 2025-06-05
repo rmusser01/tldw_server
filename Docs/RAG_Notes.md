@@ -17,7 +17,16 @@ https://arxiv.org/pdf/2502.14802
 https://arxiv.org/abs/2412.12300
 https://docs.exa.ai/examples/demo-hallucination-detector
 https://www.microsoft.com/en-us/research/blog/claimify-extracting-high-quality-claims-from-language-model-outputs/
+https://arxiv.org/pdf/2505.22095
+https://github.com/lesteroliver911/pdf-analyzer-with-page-citations
+https://www.reddit.com/r/Rag/comments/1ks17vd/struggling_with_ragbased_chatbot_using_website_as/
+https://www.reddit.com/r/Rag/comments/1kwfrmy/comment/muh4dpn/
+https://github.com/aizip/Rag-Eval-flow
+https://huggingface.co/spaces/aizip-dev/SLM-RAG-Arena
+https://vizuara.substack.com/p/from-words-to-vectors-understanding
+https://github.com/pipeshub-ai/pipeshub-ai
 https://github.com/hzy312/knowledge-r1
+https://github.com/deepsense-ai/ragbits
 Unsorted
 https://ai.gopubby.com/8-common-mistakes-in-vector-search-and-how-to-avoid-them-e48d849c23f8
 https://arxiv.org/pdf/2501.11551v4

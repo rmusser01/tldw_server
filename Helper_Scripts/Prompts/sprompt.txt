@@ -1,0 +1,200 @@
+<s>You are a bulleted notes specialist. ```When creating comprehensive bulleted notes, you should follow these guidelines: Use multiple headings based on the referenced topics, not categories like quotes or terms. Headings should be surrounded by bold formatting and not be listed as bullet points themselves. Leave no space between headings and their corresponding list items underneath. Important terms within the content should be emphasized by setting them in bold font. Any text that ends with a colon should also be bolded. Before submitting your response, review the instructions, and make any corrections necessary to adhered to the specified format. Do not reference these instructions within the notes.``` \nBased on the content between backticks create comprehensive bulleted notes.
+**Bulleted Note Creation Guidelines**
+
+**Headings**:
+- Based on referenced topics, not categories like quotes or terms
+- Surrounded by **bold** formatting 
+- Not listed as bullet points
+- No space between headings and list items underneath
+
+**Emphasis**:
+- **Important terms** set in bold font
+- **Text ending in a colon**: also bolded
+
+**Review**:
+- Ensure adherence to specified format
+- Do not reference these instructions in your response.</s> {{ .Prompt }}
+
+
+
+
+
+
+
+
+
+
+
+https://gist.github.com/Tostino/81eeee9781e519044950332b4e64bef1
+inkbot summary of summaries
+<#system#>
+Your main objective is to condense the content of the document into a concise summary, capturing the main points and themes.
+<#chat#>
+<#user#>
+To craft a Final Summary:
+
+1. Read Summarized Sections: Carefully review all the summarized sections of the document. Ensure that you have a clear understanding of the main points, key details, and essential information presented in each section.
+2. Identify Main Themes: As you go through the summarized sections, identify the main themes and topics that are prevalent throughout the document. Make a list of these themes as they will form the backbone of your final summary.
+3. Consolidate Information: Merge the information from the different summarized sections, focusing on the main themes you have identified. Avoid redundancy and ensure that the consolidated information flows logically.
+4. Preserve Essential Details: While consolidating, ensure that you preserve the essential details and nuances that are crucial for understanding the document. Consider the type of document and the level of detail required to accurately capture its essence.
+5. Check for Completeness: After drafting the final summary, review it to ensure that it accurately represents the main ideas, themes, and essential details of the document.
+
+Please remember to be thorough, and ensure that the final summary is a true reflection of the document’s content and purpose.
+<#user_context#>
+Summarized Sections:
+Chunk (1 of 3):
+The Franco-Prussian War of 1870-71 is about to begin due to the growing rivalry between the French Empire and the German Kingdom of Prussia. Prussian Prime Minister Otto von Bismarck dreams of a united Germany under Prussian leadership and sees the war as an opportunity to bind the southern German states to Prussia. French Emperor Napoleon III and Empress Eugénie also have dreams of a glorious French Empire and see the rise of Prussia as a threat. The crisis that triggers the war begins in Spain, where Leopold von Hohenzollern-Sigmaringen is chosen to be the new Spanish king. This news is seen as explosive in Paris, as it is unacceptable to the French government that the Prussian royal house might also rule Spain. French Foreign Minister the Duc de Gramont sees this as an opportunity to humiliate Prussia or win a war against them. He demands that Prussia force Leopold to refuse the Spanish offer, but Prussian King Wilhelm I refuses to make the declaration. This leads to the Ems Dispatch, a manipulated message by Bismarck that reaches French newspapers on July 14, shocking the French government and pushing them towards war.
+
+Chunk (2 of 3):
+On July 14th, the Council of Ministers meets to discuss the demands made by French Foreign Minister Gramont to the Prussians. The ministers, who had not approved these demands, are divided but eventually agree to Emperor Napoleon III's proposal for an international conference to resolve the crisis and avoid war. However, Empress Eugénie and War Minister Le Boeuf pressure Napoleon III to scrap the conference and mobilize the army, and he gives in. This informal declaration of war against Prussia leads to a heated debate in the French Parliament the next day, where members ultimately vote to declare war and provide war credits. The French population is described as being in a state of fervor and excitement, with bands marching through the streets and people expressing their enthusiasm for war. In response, Prussia and its allies also mobilize their armies. In Bavaria, there is a debate among lawmakers about whether to join the war, with concerns raised about the safety of the Palatinate region. Some lawmakers argue that the Spanish throne question has nothing to do with Germany and that they do not want their region to suffer the horrors of war.
+
+Chunk (3 of 3):
+Bavaria and the southern kingdom of Württemberg are hesitant about joining the war, fearing the pacification of their kingdoms and jeopardizing their good relations with France. However, both kingdoms ultimately mobilize their armies. The Grand Duchy of Baden, despite having good relations with Prussia, decides to mobilize as they believe only Prussia can protect them in the event of war. With the mobilization of the Grand Duchy of Hesse, Prussian King Wilhelm I now commands a full German army, but there is still no official declaration of war. The Ems Dispatch has given the war proponents in France and Prussia the excuse they need, with Empress Eugénie and Bismarck using the war to achieve their respective goals. Next week, the Franco-Prussian War will officially begin, marking the start of a new Prussian Empire.
+<#bot#>
+The Franco-Prussian War of 1870-71 was instigated by the growing tension between France and Prussia, fueled by the latter's ambition to unite Germany under its rule and the former's desire to maintain its own imperial dominance. The conflict began when the French government objected to the candidacy of Leopold von Hohenzollern-Sigmaringen as the new Spanish king, which they saw as a threat to their interests. This led to a series of events that culminated in the Ems Dispatch, a manipulated message from Prussian Prime Minister Otto von Bismarck, which incensed the French government and pushed them towards war. Despite initial plans for an international conference to resolve the crisis, French Empress Eugénie and War Minister Le Boeuf pressured Emperor Napoleon III to mobilize the army, leading to an unofficial declaration of war. Both France and Prussia mobilized their armies, with some German kingdoms like Bavaria and Württemberg initially hesitant but ultimately joining the conflict. The Grand Duchy of Baden joined out of fear of Prussian retaliation, while the Grand Duchy of Hesse did so due to its belief in Prussian protection. The Ems Dispatch provided the necessary justification for war proponents in both countries, allowing Empress Eugénie and Bismarck to pursue their individual agendas. Thus, the Franco-Prussian War formally commenced, marking the beginning of a new era for Prussia.
+<#user#>
+
+
+
+
+
+
+
+
+
+
+
+https://gist.github.com/Tostino/cacb1cecdf2eb7386baf565d157f56a0
+inkbot Chunked Summary
+<#meta#>
+- Date: 2023-10-05
+- Task: summary
+<#system#>
+Your main objective is to condense the content of the document into a concise summary, capturing the main points and themes.
+<#chat#>
+<#user#>
+Please read the provided Original section to understand the context and content. Use this understanding to generate a summary of the Original section, incorporating relevant details and maintaining coherence with the Prior Summary.
+
+Notes:
+- The Prior Summary was created from the chunk of the document directly preceding this chunk.
+- Ignore the details already included in the Prior Summary when creating the new Summary.
+- Focus on summarizing the Original section, taking into account the context provided by the Prior Summary.
+- Ignore any details about sponsorships/advertisements in the text.
+<#user_context#>
+Prior Summary:
+Meituan, China's third-largest tech company, has the majority share of the Chinese online hotel booking market. In addition to its food delivery service, Meituan offers travel and hotel booking products. The company has expanded its services to include supply chain, online advertising tools, and cloud-based enterprise resource planning software for small business merchants. Meituan follows a strategy called the "Food Plus Platform," similar to WeChat's super app model. The food delivery business is crucial for Meituan as it drives traffic and cross-selling opportunities for its other services. Meituan's scale allows for efficient delivery operations and low-cost leadership. Meituan has backing from both Alibaba and Tencent, with Tencent's favorable feature placement within the WeChat ecosystem. Alibaba sold its stake in Meituan, citing its focus on its own online-to-offline services division.
+
+Original (Chunk 3 of 3 total):
+Alibaba thereafter began developing several directly competing services to Meituan. As Meituan finished up in 2020, they warned investors to expect several quarters of operating losses as the company continues its battles and expands into community buying. To fund this expansion, the company raised $10 billion by selling debt and equity.
+
+Wang is so willing to stir up dust with titans like Alibaba because he is, in general, very comfortable with competition. Meituan's style of horizontal expansion means charging forward into a field of crowded incumbents. This latest competitive push takes Meituan into community purchasing with its Meituan Select service. Community purchasing is a new Chinese e-commerce trend where communities can set up local groups for bulk buying. It's kind of like Groupon but more localized. Pinduoduo pioneered this model where people can band together to unlock group discounts. Founded in 2015, Pinduoduo is now worth $140 billion and its founder Colin Huang is one of China's richest people. The community group buying concept began in China's hinterlands, massive cities with millions of people that nobody has ever heard of, like Dandong, Panjing, and Fushun. It's a titanic market estimated to be worth $100 billion in 2021. Meituan is not going to win it though without a fight. Meituan Select directly competes with JD.com's Dingdong Maicai, Xingshen Youxuan, Pinduoduo's Duoduo Maicai, Alibaba's Taobao Maicai, and Didi Chuxing's Chengxin Youxuan. I should mention, interestingly enough, Pinduoduo is also a Tencent investment. Having scaled up in their early days due to their usage of WeChat groups and mini-programs, the Meituan team is definitely not afraid of stepping on their siblings' toes. Wang is a student of history. In interviews, he quotes Chairman Mao and cites the Hundred Regiments Offensive, a glorious WWII Chinese victory commanded by CCP Kuomintang General Peng Dehuai. He would be a great astronomy viewer. Considering Wang's knowledge of history, a recently deleted post on his social media is worth closing with. In May 2021, he posted on the social media network fanfo.com a 1,000-year-old poem by Zhang Jie titled "The Book-Burning Pit". Then he deleted it because he knew he'd done goofed. Meituan's stock crashed to a seven-month low as the market immediately saw the post as a criticism of Beijing and its recent antitrust moves. The Chinese government has been very sensitive to such things, starting with the very public beatdown of Alibaba Group after the Jack Ma speech. Meituan is very comfortable with conflict. They have carried their zen through years of battles and horizontal industry invasions. But now perhaps they have come across an opponent against which they cannot win. Alright, everyone, that is it for tonight. Thanks for watching. If you want more content, you can like and subscribe to the channel. I would like if you did. Remember to sign up for the email newsletter. And if you want to send me an email, drop me a line at john@asianometry.com. I love getting letters from viewers. Until next time, I will see you guys later.
+
+Summary (Chunk 3 of 3 total):
+<#bot#>
+Meituan, China's third-largest tech company, is expanding into community buying with its Meituan Select service, competing with existing players like JD.com's Dingdong Maicai, Xingshen Youxuan, Pinduoduo's Duoduo Maicai, Alibaba's Taobao Maicai, and Didi Chuxing's Chengxin Youxuan. Despite having a strong presence in various industries, Meituan may face challenges in winning over the community buying market. Wang, the CEO of Meituan, is known for his comfort with competition and his historical knowledge, often referencing Chairman Mao and the Hundred Regiments Offensive. However, Meituan's recent post on social media criticizing Beijing's antitrust moves caused their stock to crash, indicating potential sensitivity from the government.
+<#user#>
+
+
+
+
+
+
+
+
+
+
+
+
+
+https://gist.github.com/Tostino/4ba4e7e7988348134a7256fd1cbbf4ff
+inkbot one-shot summary
+<#system#>
+Your main objective is to condense the content of the document into a concise summary, capturing the main points and themes.
+<#chat#>
+<#user#>
+Please read the provided Original section to understand the context and content. Use this understanding to generate a summary of the Original section. Separate the article into chunks, and sequentially create a summary for each chunk. Focus on summarizing the Original section, ignoring any details about sponsorships/advertisements in the text.
+
+Summarized Sections:
+1. For each chunk, provide a concise summary. Start each summary with "Chunk (X of Y):" where X is the current chunk number and Y is the total number of chunks.
+
+To craft a Final Summary:
+1. Read the Summarized Sections: Carefully review all the summarized sections you have generated. Ensure that you understand the main points, key details, and essential information from each section.
+2. Identify Main Themes: Identify the main themes and topics that are prevalent throughout the summarized sections. These themes will form the backbone of your final summary.
+3. Consolidate Information: Merge the information from the different summarized sections, focusing on the main themes you have identified. Avoid redundancy and ensure the consolidated information flows logically.
+4. Preserve Essential Details: Preserve the essential details and nuances that are crucial for understanding the document. Consider the type of document and the level of detail required to capture its essence.
+5. Draft the Final Summary: After considering all the above points, draft a final summary that represents the main ideas, themes, and essential details of the document. Start this section with "Final Summary:"
+
+Ensure that your final output is thorough, and accurately reflects the document’s content and purpose.
+<#user_context#>
+Original:
+This episode is supported by The Great Courses Plus.
+
+Outer space, when used and shared peacefully, offers incredible benefits to humanity in communication, science, and soon resource gathering and even settlement. But there are some who eye the heavens with distinctly unpeaceful, even warlike motives.
+
+The decades directly following World War II were a time of optimism in many ways. Industrialization was finally improving the quality of life for a lot of us. Science was making incredible bounds. And our sights were set on the stars. It seemed to many that we were on a trajectory to a space-faring technological utopia. The United Federation of Planets was just around the corner.
+
+But the possibility of a much darker space age also loomed, one in which the space around the Earth became highly militarized and, in fact, massively weaponized.
+
+In 1957, the Soviet Union launched Sputnik 1, the world's first artificial satellite. They also tested the first intercontinental ballistic missile, ICBM. The space race had begun, and it inspired some incredible advances in science and exploration, culminating in the moon landing in '69. It also inspired a race to win the military advantage of low Earth orbit.
+
+By the early '60s, the United States and the USSR were regularly launching satellites of all types and rapidly accumulating increasingly advanced ICBMs. Those ICBMs were the first space weaponry. While they don't actually enter orbit, they exceed the altitudes of most low-Earth orbit satellites, hitting around 1,200 kilometers at the peak of their trajectories. Despite definitely being in space, these are called suborbital trajectories because they don't actually reach orbital velocity. Ballistic means that most of the journey is unpowered. ICBMs follow the parabolic path dictated by gravity when they're between an initial boost phase and an optional final guided phase.
+
+ICBM technology quickly developed to the point that a single missile could deliver multiple nuclear warheads several thousand kilometers away in a half hour. One Soviet program, the Fractional Orbital Bombardment System, actually did enter true orbit, and it would allow multiple warheads to be delivered anywhere in the world from any direction.
+
+As the arms race proceeded, both superpowers also turned to space to defend against this rising existential threat. Reconnaissance satellites, Spysats in particular, provided a level of intelligence gathering previously impossible across the Iron Curtain. This was really the only effective way to monitor the rapid proliferation of launch facilities. Now, those early spy sats came long before digital cameras, and so film canisters were ejected by the satellites and retrieved either on the surface or in mid-parachute descent. The Soviets did build one spy satellite that contained actual spies. These were the Almaz space stations. Crews of two to three cosmonauts slash peeping Toms could develop film on board for rapid response to anything they spotted. Only two of these were ever actually crewed for brief periods between '74 and '77. The first Almaz station, Salyut 3, was also the very first weaponized satellite. It was equipped with a 23-millimeter autocannon designed to defend against enemy anti-satellite measures. It was only ever fired once as a test. But if we're talking about satellite weapons platforms, we should talk about Star Wars. And by that, I mean the Strategic Defense Initiative, announced by Ronald Reagan in 1983. It was an attempt to break the stalemate of the arms race and transcend the dubious security of mutually assured destruction by vastly increasing the United States' missile defense capabilities. It included much-expanded surface-launch anti-ballistic missile (ABM) networks, but also, get this, an atomic bomb-powered X-ray laser satellite. This was the Excalibur program, and it very nearly saw the launch of what could only be described as a space-based superweapon.
+
+A quick review on lasers: They work by exciting electrons in a substance to high energy states. Then, by passing electromagnetic radiation at a wavelength tuned to an energy level transition in that substance, stimulated emission can occur. The excited electron releases its energy as a photon that exactly matches the phase and direction of the seed photon. This produces a beam of coherent light, making it possible to deliver very large intensities in very narrow beams. X-ray lasers were seen as extremely promising in missile defense because they can completely vaporize metal. X-rays are quickly absorbed in the atmosphere, but in the vacuum of space, these lasers can have ranges of many hundreds, even thousands of kilometers.
+
+Now, normal lasers bounce the beam back and forth through a gain medium to build up power. But X-rays can't be reflected easily. So a powerful X-ray laser needs to start with a powerful X-ray source. For Excalibur, that source was a nuclear bomb set off behind an array of laser tubes. The satellite doesn't survive the blast, but that's OK. One blast is enough to power several dozen X-ray lasers, and each of those can take out an ICBM. The dream of Excalibur was that a small number of platforms could take out the entire Soviet missile fleet, even if it were launched simultaneously. The media derisively nicknamed the strategic defense initiative "Star Wars." It absorbed many hundreds of millions in funding from 1983 to 1990, but ultimately it was defunded for two reasons. One, it was never clear whether any of the 10 underground test detonations produced anything near the promised laser amplification. And two, no one could come up with a decent plan to protect the satellites. These things would need to live in more near orbits, highly elliptical orbits that allowed them to spend most of their time above a particular location on the surface, i.e. Russia. But that left them extremely susceptible to attack by missiles.
+
+Another slight issue with the Excalibur program was that it would pretty thoroughly violate the Outer Space Treaty. This treaty, ratified by the US in 1967, prohibits signatories from placing nukes or other weapons of mass destruction in orbit or on a celestial body. The treaty is now ratified by 107 nations and seriously limits the potential for nuclear space war. ICBMs are still allowed because they don't actually enter orbit, but the nuke-powered Excalibur was a definite no-no. The Outer Space Treaty does have its loopholes. So-called conventional weapons are allowed in space, so non-nuke-powered lasers and also the potentially very deadly kinetic impact weapons.
+
+The successor to Excalibur, Brilliant Pebbles, was just such a weapon. A kinetic weapon does all of its damage by hitting things with fast-moving, non-explosive chunks of matter. Brilliant Pebbles proposed an orbiting weapons platform that delivered non-explosive missiles to destroy ICBMs. Besides not violating the Outer Space Treaty, this plan beat Excalibur because you didn't need to destroy the weapons platform to use it. That meant a few Pebbles could be launched to protect against an incoming anti-satellite missile while leaving the platform functional. But even this proposal proved too expensive, and it was canceled in the early 90s.
+
+Another example of a kinetic impact proposal was Project Thor. It was never a funded project, as far as we know, but the idea was to drop nine-ton, six-meter-long tungsten cylinders from orbit. They would strike the ground at Mach 10 with a destructive equivalent of more than 11 tons of TNT, similar to the lowest yield tactical nukes. These rods from God had a pretty niche application: very sudden precision strikes with no surface launch signature to serve as a warning, and they wouldn't violate the Outer Space Treaty.
+
+By the way, both Excalibur and Brilliant Pebbles were considered as anti-satellite weapons, ASATs, as well as being anti-ICBM measures. But research into destroying satellites began much earlier. In the two years following the launch of Sputnik, the US was already testing anti-satellite missiles launched from a B-47 bomber. However, the first successful ASAT missile was in 1985 when a US F-15 fighter launched a specialized missile that destroyed SolWind, a retired solar observatory satellite.
+
+The USSR pursued some very different ASAT paths. Their Istrebitel Sputnik, literally Satellite Fighter, was a missile designed to actually enter orbit and maneuver up close to its target satellite before exploding. By the early 70s, these things were successfully damaging test satellites. The program was even upgraded in the late 70s to be effective against the upcoming US space shuttle.
+
+True to their Western stereotypes as Bond supervillains, the USSR also played around with powerful ground-based lasers, which supposedly blinded some US spy satellites, and particle beams, actual death rays, which never really worked.
+
+Then there was the Polyus spacecraft, a full-fledged orbiting battle station that would have had a megawatt laser designed to take out the as-yet-unlaunched US anti-missile satellites. Polyus never became operational, though it was very close.
+
+Over the decades, multiple nations have worked on adapting suborbital ballistic missiles to target satellites. However, very few satellites have ever been destroyed in this way. In 2007, China destroyed one of its own weather satellites with a missile. And this was scary in two ways. One, the resulting debris massively increased the amount of space junk in low Earth orbit. Something like 1/6th of currently tracked debris is from this one event. And two, it also sparked a new race to develop a sat capability. The US quickly followed in 2008 by destroying one of its own spy sats with a repurposed ship-based anti-ballistic missile. The official line is that the satellite was decaying from orbit. And the purpose of its destruction was to avoid the unlikely event of its fuel tank of toxic hydrazine from reaching the ground. Whether or not this was the true main motive, at the very least, the debris wasn't as dangerous as the Chinese explosion because that debris's orbit will decay much more quickly. Currently, the US, Russia, China, Israel, and India have either functioning or developmental ASAT missile capabilities. There's a potential new arms race threatening. That's concerning. Even a few destroyed satellites could begin a chain reaction as the resulting debris hits and destroys more satellites in the increasingly crowded low Earth orbit. There's a serious risk of wreathing the Earth in a growing shell of mangled silicon and metal. As real as that risk is, we once risked much worse. The Cold War arms race was on track to fill Earth's orbit with satellite-destroying weaponry and nuclear warheads. For the most part, and for the moment, saner heads have prevailed, and humanity remains committed to the peaceful use of outer spacetime.
+
+Thanks to The Great Courses Plus for sponsoring this episode. The Great Courses Plus is a digital learning service that allows you to learn about a range of topics from Ivy League professors and other educators from around the world. Go to thegreatcoursesplus.com/spacetime and get access to a library of different video lectures about science, math, history, literature, or even how to cook, play chess, or become a photographer. New subjects, lectures, and professors are added every month.
+
+The course, Understanding the Inventions that Changed the World, by Professor Bernard Carlson, is a real journey through the history of human ingenuity. It covers nuclear energy and weaponry, as well as satellites. But I think I had the most fun with the episode on the invention of the crossbow. They were, of course, one of the early kinetic bombardment weapons.
+
+With The Great Courses Plus, you can watch as many different lectures as you want, anytime, anywhere, without tests or exams. Help support the series and start your free one-month trial by clicking on the link below or going to thegreatcoursesplus.com/spacetime.
+
+As always, thanks so much to all of our Patreon supporters. Spacetime remains a passion project for all of us, but you help make it a financially viable passion project. And today, I want to give a special huge thanks to Big Bang contributor Joshua Davis. Joshua, we saved up your contribution to buy one of those six-foot-tall tungsten rods from God for the studio. We have no idea what we're going to do with it, but it seemed like something we should have. And we named it Josh, in your honor.
+
+And speaking of weaponized space, for anyone who doesn't want to get their eyes burned out by accidentally looking at the August 21st total solar eclipse, we made some space-time eclipse glasses. We're shipping them to all Patreon contributors at the $5 level and above, or to anyone who joins up at or increases to that level in the month of July. At least until we run out of glasses.
+
+OK, let's get to your comments from last week, when we talked about tricks for solving the impossible equations of quantum field theory. Roses of Boss noticed that the theoretical electron mass going to infinity sounds a lot like the ultraviolet catastrophe of the pre-Max Planck description of blackbody radiation. Well, very, very well spotted. In fact, the analogy is so relevant that physicists call the infinities resulting from high energy loops ultraviolet divergences in reference to the ultraviolet catastrophe.
+
+Nicholas Aiello asks if it's possible that electrons have no fundamental mass and are made up entirely of self-energy. Well, in a sense, that's actually the case. The so-called bare mass of an electron comes from its interaction with the Higgs field. It's not the same as the self-energy interaction, but it's analogous in some ways. The Higgs field exchanges weak hypercharge with the electron via W bosons, causing its chirality to flip. We talk about this in our Higgs mechanism episode. It's a very different interaction to the self-energy interaction, but the result is the same. Electron mass comes from its interaction with other fields, be it the Higgs field for the bare mass or the electromagnetic field for the self-energy correction to that mass.
+
+Zach Crawford asks, how do we know that two electrons scatter off each other rather than just pass through each other, given that both electrons are identical? Well, thanks for asking. In fact, we have no idea which outgoing electron corresponds to which incoming electron. All we know is the momenta of all of those electrons. When we draw the Feynman diagrams for electron scattering, we need to include separate diagrams in which the ingoing electrons swap places. Now, a few of you asked why it is that each additional vertex reduces the probability contribution of a given Feynman diagram by around a factor of 100. And actually, a few of you answered this in the comments also. But let me take a shot.
+
+Every one of those vertices represents an interaction between the electron and the electromagnetic fields. The probability of that interaction is governed by the coupling constant between those fields. So the electric charge, which in turn depends on the fine structure constant.
+
+In fact, the probability amplitude added at each vertex is proportional to the square root of the fine structure constant. Probability itself is the square of the probability amplitude. So that's the square root of 1 over 137 squared, which is just the fine structure constant, which is close to 1%.
+
+For every additional interaction between the EM and the electron field, so every additional vertex, another one of these 1% probability events has to occur. Only name left here thinks our videos are good and stuff, but will unsubscribe if we set the fine structure constant to 1 over 100 once more. Wow, OCD much? I think we have a particle physicist in the house. You guys think you're so cool measuring the fine structure constant to better than one part in a billion? I feel like I'm doing precision astrophysics if I set pi to 3 instead of 1.
+<#bot#>
+Summarized Sections:
+Chunk (1 of 3):
+During the decades following World War II, there was a period of optimism and advancements in technology, including the space race and the development of satellites and intercontinental ballistic missiles (ICBMs). The United States and the Soviet Union competed to gain the military advantage in low Earth orbit, with the Soviet Union testing the first intercontinental ballistic missile and the United States launching satellites and ICBMs. The arms race continued, leading to the development of reconnaissance satellites and the creation of the Strategic Defense Initiative, also known as Star Wars, which aimed to increase the United States' missile defense capabilities. The initiative included the use of an atomic bomb-powered X-ray laser satellite, known as Excalibur, but it was eventually defunded due to technical challenges and concerns about violating the Outer Space Treaty. Another proposal, Brilliant Pebbles, involved using kinetic weapons to destroy ICBMs, but it was also cancelled due to high costs.
+
+Chunk (2 of 3):
+The United States and the Soviet Union have both explored various methods of destroying satellites, with the United States testing anti-satellite missiles launched from a B-47 bomber in the years following the launch of Sputnik. The Soviet Union developed the Istrebitel Sputnik, a missile designed to enter orbit and destroy satellites, and also experimented with ground-based lasers and particle beams. The Polyus spacecraft, a battle station equipped with a megawatt laser, was also considered by the USSR but never became operational. Multiple nations have worked on adapting suborbital ballistic missiles to target satellites, but few satellites have been successfully destroyed in this way. China destroyed one of its own weather satellites in 2007, sparking a new arms race and raising concerns about the potential for a chain reaction of destroyed satellites in low Earth orbit.
+
+Chunk (3 of 3):
+The Cold War arms race between the United States and the Soviet Union brought the possibility of filling Earth's orbit with satellite-destroying weaponry and nuclear warheads. However, saner heads have prevailed, and humanity has remained committed to the peaceful use of outer space. The Great Courses Plus, a digital learning service, is mentioned as a resource for learning about various topics, including the history of inventions and the invention of the crossbow. The episode concludes by thanking Patreon supporters and mentioning the distribution of space-time eclipse glasses to contributors.
+
+Final Summary:
+Post World War II, the space race between the United States and the Soviet Union led to significant advancements in technology, including the development of satellites and intercontinental ballistic missiles (ICBMs). The Strategic Defense Initiative, also known as Star Wars, was a U.S. initiative to enhance missile defense capabilities, utilizing an atomic bomb-powered X-ray laser satellite called Excalibur. However, technical challenges and treaty violations led to the defunding of this initiative. Kinetic weapons system, Brilliant Pebbles, was also proposed but scrapped due to high costs. Both countries have explored various methods of destroying satellites, with the U.S. testing anti-satellite missiles and the Soviet Union developing the Istrebitel Sputnik and ground-based lasers. China's destruction of one of its own weather satellites in 2007 sparked a new arms race, raising concerns about a chain reaction of destroyed satellites in low Earth orbit. Despite the arms race, humanity has generally remained committed to the peaceful use of outer space.
+<#user#>

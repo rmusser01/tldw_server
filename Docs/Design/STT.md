@@ -8,6 +8,9 @@ https://huggingface.co/spaces/hf-audio/open_asr_leaderboard
 https://github.com/EvolvingLMMs-Lab/Aero-1
 https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2
 https://github.com/cxyfer/GeminiASR
+https://huggingface.co/Banafo/Kroko-ASR
+https://huggingface.co/livekit/turn-detector
+https://github.com/livekit/agents/tree/main/livekit-plugins/livekit-plugins-turn-detector
 https://github.com/senstella/parakeet-mlx
 Benchmark
     https://github.com/dnhkng/GLaDOS/blob/main/src/glados/ASR/asr.py

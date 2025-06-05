@@ -20,13 +20,18 @@ https://github.com/Roy3838/Observer
 https://www.geoffreylitt.com/2025/04/12/how-i-made-a-useful-ai-assistant-with-one-sqlite-table-and-a-handful-of-cron-jobs
 https://github.com/Pythagora-io/gpt-pilot
 https://github.com/Fosowl/agenticSeek
-
+https://huggingface.co/blog/python-tiny-agents
 https://github.com/3-ark/Cognito-AI_Sidekick
-
+https://medium.com/@yugank.aman/top-agentic-ai-design-patterns-for-architecting-ai-systems-397798b44d5c
 https://huggingface.co/eurecom-ds/Phi-3-mini-4k-socratic
 https://giovannigatti.github.io/socratic-llm/
 https://ceur-ws.org/Vol-3879/AIxEDU2024_paper_26.pdf
+https://xata.io/blog/built-xata-mcp-server
+https://qspeak.app/
+https://github.com/Zie619/n8n-workflows
 
+https://gerred.github.io/building-an-agentic-system/
+https://forgecode.dev/blog/ai-agent-best-practices/
 
 
 

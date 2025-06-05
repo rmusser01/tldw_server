@@ -6,7 +6,7 @@
 https://github.com/eyaltoledano/claude-task-master
 https://github.com/n8n-io/self-hosted-ai-starter-kit
 https://github.com/shopify/roast
-
+https://arxiv.org/abs/2505.23006
 
 
 

@@ -20,6 +20,9 @@ https://docs.anthropic.com/en/docs/build-with-claude/citations
 https://mattyyeung.github.io/deterministic-quoting
 https://github.com/tangzhy/RealCritic
 https://huggingface.co/papers/2502.09604
+https://github.com/nicremo/notebookLM-citation
+https://www.reddit.com/r/notebooklm/comments/1kxiusg/comment/mvb2b73/
+
 https://github.com/voidism/SelfCite
 https://www.reddit.com/r/LocalLLaMA/comments/1j5lym7/lightweight_hallucination_detector_for_local_rag/
 https://liveideabench.com/
