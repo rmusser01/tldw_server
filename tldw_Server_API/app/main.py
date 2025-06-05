@@ -51,6 +51,10 @@ from tldw_Server_API.app.api.v1.endpoints.sync import router as sync_router
 #
 # Tools Endpoint
 from tldw_Server_API.app.api.v1.endpoints.tools import router as tools_router
+#
+# MCP Endpoint
+from tldw_Server_API.app.api.v1.endpoints.mcp import router as mcp_router
+from tldw_Server_API.app.api.v1.schemas.mcp_schemas import Implementation
 ## Trash Endpoint
 #from tldw_Server_API.app.api.v1.endpoints.trash import router as trash_router
 #
@@ -208,6 +212,10 @@ app.include_router(sync_router, prefix="/api/v1/sync", tags=["sync"])
 
 # Router for Tools endpoint
 app.include_router(tools_router, prefix="/api/v1/tools", tags=["tools"])
+
+
+# Router for MCP endpoint
+app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
 
 
 # Router for trash endpoints - deletion of media items / trash file handling (FIXME: Secure delete vs lag on delete?)
