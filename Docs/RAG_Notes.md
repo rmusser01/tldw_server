@@ -28,6 +28,7 @@ https://github.com/pipeshub-ai/pipeshub-ai
 https://github.com/hzy312/knowledge-r1
 https://github.com/deepsense-ai/ragbits
 Unsorted
+https://softwaredoug.com/blog/2024/08/06/i-made-search-worse-elasticsearch
 https://ai.gopubby.com/8-common-mistakes-in-vector-search-and-how-to-avoid-them-e48d849c23f8
 https://arxiv.org/pdf/2501.11551v4
 https://x.com/antoine_chaffin/status/1925555110521798925

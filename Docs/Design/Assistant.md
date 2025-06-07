@@ -29,7 +29,7 @@ https://ceur-ws.org/Vol-3879/AIxEDU2024_paper_26.pdf
 https://xata.io/blog/built-xata-mcp-server
 https://qspeak.app/
 https://github.com/Zie619/n8n-workflows
-
+https://www.chatprd.ai/howiai
 https://gerred.github.io/building-an-agentic-system/
 https://forgecode.dev/blog/ai-agent-best-practices/
 

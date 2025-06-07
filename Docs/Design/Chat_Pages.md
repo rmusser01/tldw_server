@@ -21,7 +21,7 @@ https://github.com/t41372/Open-LLM-VTuber
     https://prompt.16x.engineer/
 	https://www.librechat.ai/docs/features/fork
 	https://github.com/danny-avila/LibreChat
-
+https://github.com/PioneerMNDR/MousyHub
 ### Introduction
 
 
