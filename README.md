@@ -1,66 +1,41 @@
 <div align="center">
 
-<h1>tldw server</h1>
+<h1>tldw/chatbook server</h1>
 
 [![License](https://img.shields.io/badge/license-apache2.0-green)](https://img.shields.io/badge/license-apache2.0-green)
 [![madewithlove](https://img.shields.io/badge/made_with-%E2%9D%A4-red?style=for-the-badge&labelColor=orange)](https://github.com/rmusser01/tldw) 
 
 <h3>Your Personal(or Team's) Research Assistant & Multi-Tool</h3>
-<h3>Download, Transcribe, Summarize/Analyze & then Chat with/about Videos, Audio, Documents, Web Articles, and Books.</h3>
-<h3>Chat with your ingested content using LLMs, and search across all of it.</h3>
-<h3>Interact with/Chat through the major local LLM APIs, and the major commercial LLM APIs.</h3>
+<h3>Chat with Local+Remote LLMs, Ingest Media (Videos, Audio, Documents, Web Articles, Books) and analyze/chat about it</h3>
+<h3>Keep it all tracked and tagged, all locally via SQLite</h3>
+<h3>Interact with/use APIs via your client of choice.</h3>
 
 
-## All Automated. All Local. All Yours.
+## Your own local, open-source, ChatGPT-like
 </div>
 
-### Latest Update (5/X/2025):
-- README needs to be updated....
-- tl/dr: 
-  - The API is functional!
-  - API works! Not all exposed endpoints are fully functional yet, but the core functionality is there. (RAG, Syncing, and Characters endpoints)
-  - WIP Endpoints:
-      - /embedding/embeddings - Generate embeddings for input text.
-      - /chat/characters endpoint - Create, Edit, Delete, and List Characters.
-      - /retrieval_agent/retrieval/` - Endpoint for performing RAG-related operations.
-      - /research/ - Endpoint for performing research-related operations. (WIP, currently only Arxiv and Semantic Scholar are implemented)
-  - Working Endpoints: 
+
+### Version 0.1.0 6/X/2025
+- Taken a lot longer than expected.
+- This is a major update to the project, with a focus on the API and TUI app.
+- The gradio application has been deprecated in favor of a standalone API.
+  - The gradio application will continue to remain available, with no further updates.
+- The new focus is on the FastAPI API.
+  - This has been built from the ground up to be robust, secure and stable.
+  - 
+- **API Endpoints Working Currently**
     - All /media/ endpoints.
+      - Either Process and Chunk media and return it to the caller, or ingest it into the server database.
     - /chat/completions endpoint - Full OpenAI API compatibility, with some additional features.
     - /Chunking endpoint - Chunk input text or file for processing.
     - /notes/ endpoint - Create, Edit, Delete, and List Notes.
     - /prompts/ endpoint - Create, Edit, Delete, and List Prompts.
-- Since it's moving to an API-first approach, there won't be a standard GUI for the app for a while. (The TUI app tldw_chatbook will be the primary interface while its worked on)
-  - The project is being actively developed, and I am looking for help with the GUI. (webapp specifically, but help with TUI is also welcome))
-  - If you want to help out, please reach out via the Issues page, discussions page, discord or email.
-- Currently, there are two main development focuses of the project:
-  - The API
-    - Migration from the existing MediaDB to the new API DB. The biggest change is the combination of the chat DBs into one, and allowing for synchronization of the DBs. So you'll be able to have your local instance synced with your 'home' server. (WIP)
-    - Once the Sync Library is fully implemented, tested, and confirmed working, I'll be working on the API endpoints for the sync library. (should be quick)
-    - After that, I'll be working on the API endpoint for 'search' aka RAG. (Will be revisiting the pipeline for improvements)
-    - After RAG, I'll be revisiting the Chat Library for chat dictionary support and other improvements relating to it.
-  - The GUI
-    - I am not a web dev. I do however, happen to know that TUIs exist, and as such, am building one at https://github.com/rmusser01/tldw_chatbook (currently usable as a standalone chat client)
-    - It will be the primary/'official' GUI for the tldw server (for now, eventually will do a webUI and make that the main UI)
-    - The app, 'tldw_chatbook' or 'chatbook', is a TUI built using [Textual](https://textual.textualize.io/). It is designed to be a standalone chat client, so that it can be used separately from tldw.
-    - The goal of chatbook is to provide a simple, easy-to-use interface for interacting with the tldw server API, completely offline and local.
-    - This means that ideally, every server option/API endpoint (minus user reg?) will be available/exposed for interaction in chatbook.
-    - Where this is going, is that you'll be able to have your local chatbook client, and be able to sync it to your home server, and download your chats/settings/media DB.
-    - You'll also be able to use the '/media/process-*' endpoints, to process your media, store the results in your local media DB, and then sync it to your home server if you want.
-    - So you can keep your local media DB up to date, and then sync it to your home server/vice versa.
-    - This has extended the timeline for an initial release, but I think it will be worth it in the end.
-    - I do plan on opening up a Discord server for the project, but I don't have the time to manage it right now. So if you want to help out, please feel free to reach out via the Issues page, discussions page or email.
-- 
 
-### [Public Demo on HuggingFace Spaces](https://huggingface.co/spaces/oceansweep/Vid-Summarizer/?__theme=dark)- Demo is not working!
-- Demo is not currently working and is being updated. Please use the local version for now.
-<details> 
-<summary>Public Demo Info</summary>
-
-- Please note that YouTube blocks requests from the demo. You have to provide a logged-in session cookie to bypass it :frowning_face: 
-- Placeholder content is included for the demo. HuggingFace API is also setup in it, so you can select that as your API.)
-</details>
-
+- **WIP Endpoints:**
+      - /embedding/embeddings - Generate embeddings for input text.
+      - /chat/characters endpoint - Create, Edit, Delete, and List Characters.
+      - /retrieval_agent/retrieval/` - Endpoint for performing RAG-related operations.
+      - /research/ - Endpoint for performing research-related operations. (WIP, currently only Arxiv and Semantic Scholar are implemented)
 
 #### About this Project
 <details>
@@ -69,8 +44,14 @@
 - This project started as a tool by `the-crypt-keeper` to perform summarization of YouTube videos.
 - I forked it, to add a couple features as I wanted to use it to help me consume conference videos at a faster pace. I kept adding/improving things and now it's a fully different tool/focus.
 - You can find the original scripts by `the-crypt-keeper` in the `tldw-original-scripts` directory, a snapshot of the files before I made my changes.
-- The GUI is currently a placeholder. Please excuse its crappiness for now. It will be replaced with a FastAPI backend and a new JS frontend. (Gradio is a placeholder UI)
+- The original idea was to speed up processing of YouTube videos, but it has since evolved into a full-fledged research and knowledge management tool.
+- The goal now is to build towards something like `The Primer` from `The Diamond Age`
 </details>
+
+
+#### [Old Public Gradio Demo on HuggingFace Spaces](https://huggingface.co/spaces/oceansweep/Vid-Summarizer/?__theme=dark)- Demo is not working!
+
+
 
 ### Screenshots of the UI
 Screenshot of the Frontpage ![Screenshot](Docs/Screenshots/blank-front.png)
