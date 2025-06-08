@@ -12,6 +12,10 @@ Evals
 https://huggingface.co/spaces/LISA-Kadi/LISA-demo/tree/main
 https://arxiv.org/abs/2412.07965
 https://arxiv.org/abs/2501.08292
+https://docs.exa.ai/examples/demo-hallucination-detector
+https://www.microsoft.com/en-us/research/blog/claimify-extracting-high-quality-claims-from-language-model-outputs/
+https://stark.stanford.edu/
+https://github.com/aizip/Rag-Eval-flow
 https://huggingface.co/QuantFactory/gemma-7b-aps-it-GGUF
 https://huggingface.co/google/gemma-7b-aps-it
 https://github.com/cvs-health/uqlm

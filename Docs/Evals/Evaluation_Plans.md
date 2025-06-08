@@ -15,6 +15,15 @@
 
 https://arxiv.org/pdf/2502.17601
 https://github.com/t3dotgg/SnitchBench
+https://arxiv.org/abs/2503.10357
+https://github.com/IAAR-Shanghai/CRUD_RAG
+https://arxiv.org/abs/2412.12300
+
+
+
+
+Creation
+    https://github.com/huggingface/yourbench
 https://github.com/sam-paech/slop-forensics
 https://huggingface.co/NousResearch/Minos-v1
 https://github.com/yelboudouri/RPEval

@@ -1,63 +1,17 @@
 # RAG Notes
 
 
-https://medium.com/@eliot64/bridging-legal-ai-and-trust-how-we-won-the-llm-x-law-hackathon-45081a8681d9
-https://github.com/Kain-90/RAG-Play
-https://github.com/superlinear-ai/raglite
-https://levelup.gitconnected.com/testing-18-rag-techniques-to-find-the-best-094d166af27f
-https://arxiv.org/abs/2503.10357
-https://arxiv.org/pdf/2502.08826v2
-https://github.com/yale-nlp/MCTS-RAG
-https://arxiv.org/abs/2503.21729
-https://arxiv.org/pdf/2501.00332
-https://arxiv.org/html/2503.21460v1
-https://github.com/huggingface/yourbench
-https://arxiv.org/pdf/2401.17043
-https://arxiv.org/pdf/2502.14802
-https://arxiv.org/abs/2412.12300
-https://docs.exa.ai/examples/demo-hallucination-detector
-https://www.microsoft.com/en-us/research/blog/claimify-extracting-high-quality-claims-from-language-model-outputs/
-https://arxiv.org/pdf/2505.22095
-https://github.com/lesteroliver911/pdf-analyzer-with-page-citations
-https://www.reddit.com/r/Rag/comments/1ks17vd/struggling_with_ragbased_chatbot_using_website_as/
-https://www.reddit.com/r/Rag/comments/1kwfrmy/comment/muh4dpn/
-https://github.com/aizip/Rag-Eval-flow
-https://huggingface.co/spaces/aizip-dev/SLM-RAG-Arena
-https://vizuara.substack.com/p/from-words-to-vectors-understanding
-https://github.com/pipeshub-ai/pipeshub-ai
-https://github.com/hzy312/knowledge-r1
-https://github.com/deepsense-ai/ragbits
 Unsorted
-https://softwaredoug.com/blog/2024/08/06/i-made-search-worse-elasticsearch
-https://ai.gopubby.com/8-common-mistakes-in-vector-search-and-how-to-avoid-them-e48d849c23f8
-https://arxiv.org/pdf/2501.11551v4
-https://x.com/antoine_chaffin/status/1925555110521798925
-https://huggingface.co/lightonai/Reason-ModernColBERT
-https://docs.anthropic.com/en/api/files-create
-https://github.com/HKUDS/LightRAG
-https://medium.com/@robertdennyson/pathrag-the-enterprise-knowledge-graph-roadmap-from-data-burden-to-corporate-wisdom-and-3d832ff24148
-https://levelup.gitconnected.com/testing-18-rag-techniques-to-find-the-best-094d166af27f
-https://aiexpjourney.substack.com/p/the-mystery-of-rag-optimization-insights
-https://ai.plainenglish.io/part-2-chatting-with-my-companys-brain-how-i-built-my-ai-knowledge-buddy-16a38b59792b
-https://medium.com/data-science-collective/ai-engineering-3-3-dataset-engineering-inference-optimization-and-architecture-and-user-aac4ddf43c23
-https://engineeringblog.yelp.com/2025/02/search-query-understanding-with-LLMs.html
-https://github.com/ibm-granite/granite-io/blob/main/docs/design.md
+	https://levelup.gitconnected.com/testing-18-rag-techniques-to-find-the-best-094d166af27f
 https://www.jeremykun.com/2015/04/06/markov-chain-monte-carlo-without-all-the-bullshit/
-https://mode-rag.readthedocs.io/en/latest/
-https://productiv-ai.guide/start/multi-source-rag-openwebui/
-https://huggingface.co/posts/Kseniase/836565977783893
-https://github.com/nishchaljs/MobiRAG
-https://huggingface.co/PleIAs/Pleias-RAG-1B-gguf
-https://huggingface.co/PleIAs/Pleias-RAG-1B
 https://medium.com/ai-exploration-journey/how-hirag-turns-data-chaos-into-structured-knowledge-magic-ai-innovations-and-insights-35-d637b9a58d80
-https://universalrag.github.io/
-https://github.com/Terry-Xu-666/NodeRAG
-https://arxiv.org/abs/2504.13587
-https://patann.dev/
-https://substack.com/home/post/p-161922553
+
 https://github.com/microsoft/LMOps/tree/main/corag
 https://www.figma.com/slides/eq8UzeTluT3qLKOpzlLj8y/LlamaIndex-Talk--Document-Agents-?node-id=51004-814&t=7F9MAlkLnukNb3f6-0
 
+
+Factual Extraction RAG
+	https://medium.com/@eliot64/bridging-legal-ai-and-trust-how-we-won-the-llm-x-law-hackathon-45081a8681d9
 
 
 Models
@@ -157,9 +111,15 @@ Fine-tuning RAG Models
 		https://arxiv.org/abs/2403.10131
 
 
+Multi-Modal
+	https://arxiv.org/pdf/2502.08826v2
+
 
 
 RAG 'Styles'
+	Adaptive
+		https://arxiv.org/pdf/2505.22095
+		https://arxiv.org/abs/2503.21729
 	Agentic
 		https://arxiv.org/pdf/2501.09136v1
 		https://arxiv.org/pdf/2412.17149
@@ -191,6 +151,8 @@ RAG 'Styles'
 		https://arxiv.org/abs/2410.13765
 	MAIN-rag
 		https://arxiv.org/abs/2501.00332
+	MCTS
+		https://github.com/yale-nlp/MCTS-RAG
 	RankCOT
 		https://arxiv.org/pdf/2502.17888
 		https://github.com/NEUIR/RankCoT
@@ -209,6 +171,7 @@ RAG 'Styles'
 	TrustRAG
 		https://arxiv.org/pdf/2501.00879
 	VLM
+		https://github.com/HKUDS/LightRAG
 		https://github.com/llm-lab-org/Multimodal-RAG-Survey
 		https://lascari.ai/writing/2025/02/10/image-gen-tagging/
 		https://arxiv.org/abs/2502.08826
@@ -217,6 +180,7 @@ RAG 'Styles'
 		https://github.com/tjmlabs/ColiVara
 		https://huggingface.co/vidore/colqwen2-v0.1
 		https://colivara.com/
+		https://github.com/lesteroliver911/pdf-analyzer-with-page-citations
 		https://pub.towardsai.net/multimodal-rag-unveiled-a-deep-dive-into-cutting-edge-advancements-0eeb514c3ac4
 		https://arxiv.org/abs/2502.20964
 
@@ -230,6 +194,8 @@ Retrieval
 	https://weaviate.io/blog/late-chunking
 	https://softwaredoug.com/blog/2025/02/08/elasticsearch-hybrid-search
 	https://arxiv.org/abs/2412.03736
+	https://softwaredoug.com/blog/2024/08/06/i-made-search-worse-elasticsearch
+	https://arxiv.org/pdf/2501.00332
 	DRIFT
 		https://www.microsoft.com/en-us/research/blog/introducing-drift-search-combining-global-and-local-search-methods-to-improve-quality-and-efficiency/
 	FunnelRAG
@@ -288,6 +254,7 @@ Vector-related
 	- https://medium.com/@yufan1602/modular-rag-and-rag-flow-part-ii-77b62bf8a5d3
 	- https://www.anyscale.com/blog/a-comprehensive-guide-for-building-rag-based-llm-applications-part-1
 		* https://github.com/ray-project/llm-applications
+	- https://levelup.gitconnected.com/testing-18-rag-techniques-to-find-the-best-094d166af27f
 
 Papers
 	- Rags to Riches - https://huggingface.co/papers/2406.12824
@@ -313,6 +280,10 @@ Papers
 	* https://python.langchain.com/v0.1/docs/modules/data_connection/document_transformers/
 
 
+- Evals
+	* https://github.com/Kain-90/RAG-Play
+
+
 - Multi-Modal RAG
 	* https://docs.llamaindex.ai/en/v0.10.17/examples/multi_modal/multi_modal_pdf_tables.html
 	* https://archive.is/oIhNp
@@ -324,6 +295,9 @@ Papers
 - Cross-Encoder Ranking
 	* Deep Neural network that processes two input sequences together as a single input. Allows the model to directly compare and contrast the inputs, understanding their relationship in a more integrated and nuanced manner.
 	* https://www.sbert.net/examples/applications/retrieve_rerank/README.html
+
+Existing
+	https://github.com/superlinear-ai/raglite
 
 
 
@@ -357,7 +331,12 @@ Papers
 - **Retrieval**
 	* F
 - **Post-Retrieval**
-	* 
+	1. Stuff
+	2. Query Strategy
+	    * Factual Strategy: Focuses on retrieving precise facts and figures.
+	    * Analytical Strategy: Aims for comprehensive coverage of a topic, exploring different aspects.
+  	  * Opinion Strategy: Tries to gather diverse viewpoints on a subjective issue.
+    	* Contextual Strategy: Incorporates user-specific context to tailor the retrieval.
 - **Generation & Post-Generation** 
 	- Prompt Compression
 		* https://github.com/microsoft/LLMLingua
