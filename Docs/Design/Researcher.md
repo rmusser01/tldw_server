@@ -129,6 +129,7 @@ https://github.com/sentient-agi/OpenDeepSearch
 https://github.com/qx-labs/agents-deep-research
 https://researcher.iqidis.ai
 https://github.com/tegridydev/abstract-agent
+https://github.com/atineiatte/deep-research-at-home
 https://github.com/zjunlp/OmniThink
 https://searchthearxiv.com/
 https://github.com/neuml/annotateai

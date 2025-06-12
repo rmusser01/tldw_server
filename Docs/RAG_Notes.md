@@ -5,7 +5,13 @@ Unsorted
 	https://levelup.gitconnected.com/testing-18-rag-techniques-to-find-the-best-094d166af27f
 https://www.jeremykun.com/2015/04/06/markov-chain-monte-carlo-without-all-the-bullshit/
 https://medium.com/ai-exploration-journey/how-hirag-turns-data-chaos-into-structured-knowledge-magic-ai-innovations-and-insights-35-d637b9a58d80
+https://arxiv.org/pdf/2506.00054
 
+https://aclanthology.org/2024.acl-long.585/
+https://dl.acm.org/doi/10.1145/3626772.3657853
+https://aclanthology.org/2024.findings-emnlp.449/
+https://aclanthology.org/2024.acl-long.540/
+https://github.com/calubkk/RAAT
 https://github.com/microsoft/LMOps/tree/main/corag
 https://www.figma.com/slides/eq8UzeTluT3qLKOpzlLj8y/LlamaIndex-Talk--Document-Agents-?node-id=51004-814&t=7F9MAlkLnukNb3f6-0
 

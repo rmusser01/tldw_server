@@ -8,13 +8,14 @@ Use of temporary files for storage.
 Use of pydub for audio manipulation.
 Use of pydub for audio merging.
 
-
-
+https://github.com/rsxdalv/chatterbox/tree/streaming
+https://github.com/randombk/chatterbox-vllm
 https://generativeai.pub/glm-4-voice-9b-real-time-multilingual-voice-conversation-ai-install-locally-in-minutes-ce2fcd6c8fd8
 https://github.com/KartDriver/mira_converse?tab=readme-ov-file
 https://huggingface.co/kyutai
 https://github.com/bytedance/MegaTTS3
     https://modelscope.cn/models/ACoderPassBy/MegaTTS-SFT/files
+https://github.com/petermg/Chatterbox-TTS-Extended/tree/main
 https://github.com/kyutai-labs/hibiki
 https://metis-demo.github.io/#metis-tts
 https://github.com/Extraltodeus/Quick-slap-tkinter-dia/blob/main/README.md
