@@ -44,23 +44,13 @@ import logging
 from typing import List, Dict, Optional, Any, Union, Set
 #
 # Third-Party Libraries
+from loguru import logger
 #
 # Local Imports
 #
 ########################################################################################################################
 #
 # Functions:
-
-
-# --- Logging Setup ---
-# It's good practice to have a logger. If not configured elsewhere,
-# a basic configuration can be uncommented or set up in the application.
-logger = logging.getLogger(__name__)
-
-
-# Example basic config:
-# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(name)s - %(threadName)s - %(message)s')
-
 
 # --- Custom Exceptions ---
 class CharactersRAGDBError(Exception):
@@ -177,6 +167,18 @@ CREATE TABLE IF NOT EXISTS character_cards(
   client_id     TEXT     NOT NULL DEFAULT 'unknown',
   version       INTEGER  NOT NULL DEFAULT 1
 );
+
+/* Ensure default character card (ID 1) exists */
+INSERT OR IGNORE INTO character_cards
+    (id, name, description, personality, scenario, system_prompt, image,
+     post_history_instructions, first_message, message_example,
+     creator_notes, alternate_greetings, tags, creator, character_version, extensions,
+     created_at, last_modified, client_id, version, deleted)
+VALUES
+    (1, 'Default Assistant', 'A general-purpose assistant.', NULL, NULL, NULL, NULL, NULL,
+     'Hello! How can I help you today?', NULL, NULL, '[]', '[]', 'System', '1.0', '{}',
+     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'system_init', 1, 0);
+/* End of insertion of default character card */
 
 CREATE VIRTUAL TABLE IF NOT EXISTS character_cards_fts
 USING fts5(
@@ -1037,6 +1039,61 @@ UPDATE db_schema_version
                 if hasattr(self._local, 'conn'):
                     self._local.conn = None
 
+    def backup_database(self, backup_file_path: str) -> bool:
+        """
+        Creates a backup of the current database to the specified file path.
+
+        Args:
+            backup_file_path (str): The path to save the backup database file.
+
+        Returns:
+            bool: True if the backup was successful, False otherwise.
+        """
+        logger.info(f"Starting database backup from '{self.db_path_str}' to '{backup_file_path}'")
+        # src_conn is managed by get_connection and should not be closed by this method directly
+        # backup_conn is local to this method and must be closed
+        backup_conn: Optional[sqlite3.Connection] = None
+        try:
+            # Ensure the backup file path is not the same as the source for file-based DBs
+            if not self.is_memory_db and self.db_path.resolve() == Path(backup_file_path).resolve():
+                logger.error("Backup path cannot be the same as the source database path.")
+                raise ValueError("Backup path cannot be the same as the source database path.")
+
+            src_conn = self.get_connection()
+
+            # Ensure parent directory for backup_file_path exists
+            backup_db_path_obj = Path(backup_file_path)
+            backup_db_path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+            backup_conn = sqlite3.connect(str(backup_db_path_obj)) # Use string path for connect
+
+            logger.debug(f"Source DB connection: {src_conn}")
+            logger.debug(f"Backup DB connection: {backup_conn} to file {str(backup_db_path_obj)}")
+
+            # Perform the backup
+            src_conn.backup(backup_conn, pages=0, progress=None)
+
+            logger.info(f"Database backup successful from '{self.db_path_str}' to '{str(backup_db_path_obj)}'")
+            return True
+        except ValueError as ve: # Catch specific ValueError for path mismatch first
+            logger.error(f"ValueError during database backup: {ve}", exc_info=True)
+            return False
+        except sqlite3.Error as e:
+            logger.error(f"SQLite error during database backup: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error during database backup: {e}", exc_info=True)
+            return False
+        finally:
+            if backup_conn:
+                try:
+                    backup_conn.close()
+                    logger.debug("Closed backup database connection.")
+                except sqlite3.Error as e:
+                    logger.warning(f"Error closing backup database connection: {e}")
+            # Source connection (src_conn) is managed by the thread-local mechanism
+            # and should not be closed here to allow continued use of the DB instance.
+
     # --- Query Execution ---
     def execute_query(self, query: str, params: Optional[Union[tuple, Dict[str, Any]]] = None, *, commit: bool = False,
                       script: bool = False) -> sqlite3.Cursor:
@@ -1572,7 +1629,7 @@ UPDATE db_schema_version
             logger.error(f"Database error listing character cards: {e}")
             raise
 
-    def update_character_card(self, character_id: int, card_data: Dict[str, Any], expected_version: int) -> bool:
+    def update_character_card(self, character_id: int, card_data: Dict[str, Any], expected_version: int) -> bool | None:
         """
         Updates an existing character card using optimistic locking.
 
@@ -1733,7 +1790,7 @@ UPDATE db_schema_version
                 exc_info=True)
             raise CharactersRAGDBError(f"Unexpected error updating character card: {e}") from e
 
-    def soft_delete_character_card(self, character_id: int, expected_version: int) -> bool:
+    def soft_delete_character_card(self, character_id: int, expected_version: int) -> bool | None:
         """
         Soft-deletes a character card using optimistic locking.
 
@@ -1841,6 +1898,7 @@ UPDATE db_schema_version
         Raises:
             CharactersRAGDBError: For database errors during the search.
         """
+        safe_search_term = f'"{search_term}"'
         query = """
                 SELECT cc.*
                 FROM character_cards_fts fts
@@ -1854,7 +1912,7 @@ UPDATE db_schema_version
             rows = cursor.fetchall()
             return [self._deserialize_row_fields(row, self._CHARACTER_CARD_JSON_FIELDS) for row in rows if row]
         except CharactersRAGDBError as e:
-            logger.error(f"Error searching character cards for '{search_term}': {e}")
+            logger.error(f"Error searching character cards for '{safe_search_term}': {e}")
             raise
 
     # --- Conversation Methods ---
@@ -1976,7 +2034,7 @@ UPDATE db_schema_version
             logger.error(f"Database error fetching conversations for character ID {character_id}: {e}")
             raise
 
-    def update_conversation(self, conversation_id: str, update_data: Dict[str, Any], expected_version: int) -> bool:
+    def update_conversation(self, conversation_id: str, update_data: Dict[str, Any], expected_version: int) -> bool | None:
         """
         Updates an existing conversation using optimistic locking.
 
@@ -2136,7 +2194,7 @@ UPDATE db_schema_version
             logger.error(f"Unexpected Python error in update_conversation for ID {conversation_id}: {e}", exc_info=True)
             raise CharactersRAGDBError(f"Unexpected error during update_conversation: {e}") from e
 
-    def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool:
+    def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool | None:
         """
         Soft-deletes a conversation using optimistic locking.
 
@@ -2233,6 +2291,10 @@ UPDATE db_schema_version
         Raises:
             CharactersRAGDBError: For database search errors.
         """
+        if not title_query.strip():
+            logger.warning("Empty title_query provided for conversation search. Returning empty list.")
+            return []
+        safe_search_term = f'"{title_query}"'
         base_query = """
                      SELECT c.*
                      FROM conversations_fts fts
@@ -2252,7 +2314,7 @@ UPDATE db_schema_version
             cursor = self.execute_query(base_query, tuple(params_list))
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError as e:
-            logger.error(f"Error searching conversations for title '{title_query}': {e}")
+            logger.error(f"Error searching conversations for title '{safe_search_term}': {e}")
             raise
 
     # --- Message Methods ---
@@ -2366,27 +2428,25 @@ UPDATE db_schema_version
                                       order_by_timestamp: str = "ASC") -> List[Dict[str, Any]]:
         """
         Lists messages for a specific conversation.
-
         Returns non-deleted messages, ordered by `timestamp` according to `order_by_timestamp`.
-        Includes all fields, including `image_data` and `image_mime_type`.
-
-        Args:
-            conversation_id: The UUID of the conversation.
-            limit: Maximum number of messages to return. Defaults to 100.
-            offset: Number of messages to skip. Defaults to 0.
-            order_by_timestamp: Sort order for 'timestamp' field ("ASC" or "DESC").
-                                Defaults to "ASC".
-
-        Returns:
-            A list of message dictionaries. Can be empty.
-
-        Raises:
-            InputError: If `order_by_timestamp` has an invalid value.
-            CharactersRAGDBError: For database errors.
+        Crucially, it also ensures the parent conversation is not soft-deleted.
         """
         if order_by_timestamp.upper() not in ["ASC", "DESC"]:
             raise InputError("order_by_timestamp must be 'ASC' or 'DESC'.")
-        query = f"SELECT id, conversation_id, parent_message_id, sender, content, image_data, image_mime_type, timestamp, ranking, last_modified, version, client_id, deleted FROM messages WHERE conversation_id = ? AND deleted = 0 ORDER BY timestamp {order_by_timestamp} LIMIT ? OFFSET ?"  # Explicitly list columns
+
+        # The new query joins with conversations to check its 'deleted' status.
+        query = f"""
+            SELECT m.id, m.conversation_id, m.parent_message_id, m.sender, m.content, 
+                   m.image_data, m.image_mime_type, m.timestamp, m.ranking, 
+                   m.last_modified, m.version, m.client_id, m.deleted 
+            FROM messages m
+            JOIN conversations c ON m.conversation_id = c.id
+            WHERE m.conversation_id = ? 
+              AND m.deleted = 0
+              AND c.deleted = 0
+            ORDER BY m.timestamp {order_by_timestamp} 
+            LIMIT ? OFFSET ?
+        """
         try:
             cursor = self.execute_query(query, (conversation_id, limit, offset))
             return [dict(row) for row in cursor.fetchall()]
@@ -2394,7 +2454,7 @@ UPDATE db_schema_version
             logger.error(f"Database error fetching messages for conversation ID {conversation_id}: {e}")
             raise
 
-    def update_message(self, message_id: str, update_data: Dict[str, Any], expected_version: int) -> bool:
+    def update_message(self, message_id: str, update_data: Dict[str, Any], expected_version: int) -> bool | None:
         """
         Updates an existing message using optimistic locking.
 
@@ -2511,7 +2571,7 @@ UPDATE db_schema_version
                          exc_info=True)
             raise
 
-    def soft_delete_message(self, message_id: str, expected_version: int) -> bool:
+    def soft_delete_message(self, message_id: str, expected_version: int) -> bool | None:
         """
         Soft-deletes a message using optimistic locking.
 
@@ -2604,6 +2664,7 @@ UPDATE db_schema_version
         Raises:
             CharactersRAGDBError: For database search errors.
         """
+        safe_search_term = f'"{content_query}"'
         base_query = """
                      SELECT m.*
                      FROM messages_fts fts
@@ -2623,7 +2684,7 @@ UPDATE db_schema_version
             cursor = self.execute_query(base_query, tuple(params_list))
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError as e:
-            logger.error(f"Error searching messages for content '{content_query}': {e}")
+            logger.error(f"Error searching messages for content '{safe_search_term}': {e}")
             raise
 
     # --- Keyword, KeywordCollection, Note Methods (CRUD + Search) ---
@@ -2817,7 +2878,7 @@ UPDATE db_schema_version
     def _update_generic_item(self, table_name: str, item_id: Union[int, str],
                              update_data: Dict[str, Any], expected_version: int,
                              allowed_fields: List[str], pk_col_name: str = "id",
-                             unique_col_name_in_data: Optional[str] = None) -> bool:
+                             unique_col_name_in_data: Optional[str] = None) -> bool | None:
         """
         Internal helper: Updates an item in a table using optimistic locking.
 
@@ -2944,7 +3005,7 @@ UPDATE db_schema_version
         # No implicit return None, function should return True or raise.
 
     def _soft_delete_generic_item(self, table_name: str, item_id: Union[int, str],
-                                  expected_version: int, pk_col_name: str = "id") -> bool:
+                                  expected_version: int, pk_col_name: str = "id") -> bool | None:
         """
         Internal helper: Soft-deletes an item in a table using optimistic locking.
 
@@ -3189,7 +3250,8 @@ UPDATE db_schema_version
         Returns:
             A list of matching keyword dictionaries.
         """
-        return self._search_generic_items_fts("keywords_fts", "keywords", "keyword", search_term, limit)
+        safe_search_term = f'"{search_term}"'
+        return self._search_generic_items_fts("keywords_fts", "keywords", "keyword", safe_search_term, limit)
 
     # Keyword Collections
     def add_keyword_collection(self, name: str, parent_id: Optional[int] = None) -> Optional[int]:
@@ -3309,7 +3371,8 @@ UPDATE db_schema_version
         )
 
     def search_keyword_collections(self, search_term: str, limit: int = 10) -> List[Dict[str, Any]]:
-        return self._search_generic_items_fts("keyword_collections_fts", "keyword_collections", "name", search_term,
+        safe_search_term = f'"{search_term}"'
+        return self._search_generic_items_fts("keyword_collections_fts", "keyword_collections", "name", safe_search_term,
                                               limit)
 
     # Notes (Now with UUID and specific methods)
@@ -3352,7 +3415,7 @@ UPDATE db_schema_version
         # Using _list_generic_items but ensuring table name and order_by_col are correct for notes
         return self._list_generic_items("notes", "last_modified DESC", limit, offset)
 
-    def update_note(self, note_id: str, update_data: Dict[str, Any], expected_version: int) -> bool:
+    def update_note(self, note_id: str, update_data: Dict[str, Any], expected_version: int) -> bool | None:
         if not update_data:
             raise InputError("No data provided for note update.")
 
@@ -3420,7 +3483,7 @@ UPDATE db_schema_version
                          exc_info=True)
             raise
 
-    def soft_delete_note(self, note_id: str, expected_version: int) -> bool:
+    def soft_delete_note(self, note_id: str, expected_version: int) -> bool | None:
         now = self._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
 
@@ -3473,19 +3536,21 @@ UPDATE db_schema_version
 
     def search_notes(self, search_term: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Searches notes_fts (title and content). Corrected JOIN condition."""
-        # notes_fts matches against title and content
-        # FTS table column group: notes_fts
-        # Content table: notes, content_rowid: rowid (maps to notes.rowid)
+        # FTS5 requires wrapping terms with special characters in double quotes
+        # to be treated as a literal phrase.
+        safe_search_term = f'"{search_term}"'
+
         query = """
                 SELECT main.*
                 FROM notes_fts fts
-                         JOIN notes main ON fts.rowid = main.rowid -- Corrected Join condition
-                WHERE fts.notes_fts MATCH ? \
+                         JOIN notes main ON fts.rowid = main.rowid
+                WHERE fts.notes_fts MATCH ?
                   AND main.deleted = 0
-                ORDER BY rank LIMIT ? \
+                ORDER BY rank LIMIT ?
                 """
         try:
-            cursor = self.execute_query(query, (search_term, limit))
+            # Pass the quoted string as the parameter
+            cursor = self.execute_query(query, (safe_search_term, limit))
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError as e:
             logger.error(f"Error searching notes for '{search_term}': {e}")

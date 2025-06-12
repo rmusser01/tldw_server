@@ -32,11 +32,11 @@ https://github.com/Zie619/n8n-workflows
 https://www.chatprd.ai/howiai
 https://gerred.github.io/building-an-agentic-system/
 https://forgecode.dev/blog/ai-agent-best-practices/
+https://medium.com/data-science-collective/ten-lessons-from-a-year-building-ai-agents-in-legaltech-86a77f515757
+https://jngiam.bearblog.dev/mcp-large-data/
+https://ai.plainenglish.io/local-ai-automated-capture-building-your-own-knowledge-management-system-bbe583006927
 
-
-
-
-
+https://arxiv.org/abs/2502.05589
 
 
 

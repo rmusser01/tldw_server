@@ -12,6 +12,6 @@ https://github.com/scrapinghub/article-extraction-benchmark
 https://github.com/D4Vinci/Scrapling
 https://github.com/rmusser01/nicar-2025-scraping
 https://www.diffordsguide.com/
-
-
+https://github.com/ulixee/hero
+https://github.com/devflowinc/firecrawl-simple?tab=readme-ov-file
 

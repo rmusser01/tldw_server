@@ -12,7 +12,7 @@
 - [Embeddings Retrieval Evaluation](#embeddings-retrieval-eval)
 - [VLM Evaluations](#vlm-evals)
 ----------------------------------------------------------------------------------------------------------------
-
+https://review.firstround.com/figma-ai-eval-process/
 https://arxiv.org/pdf/2502.17601
 https://github.com/t3dotgg/SnitchBench
 https://github.com/sam-paech/slop-forensics

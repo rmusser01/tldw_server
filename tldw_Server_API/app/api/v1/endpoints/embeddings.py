@@ -1,11 +1,9 @@
 import base64
-import struct
-from typing import List, Union, Literal, Optional
+from typing import List, Union, Optional
 
 import numpy as np
 import tiktoken # type: ignore
 from fastapi import APIRouter, HTTPException, Body
-from pydantic import BaseModel, Field, ConfigDict
 
 from tldw_Server_API.app.api.v1.schemas.embeddings_models import CreateEmbeddingResponse, CreateEmbeddingRequest, \
     EmbeddingData, EmbeddingUsage
@@ -13,7 +11,7 @@ from tldw_Server_API.app.api.v1.schemas.embeddings_models import CreateEmbedding
 # Assuming Embeddings_Create.py and Utils.py are in a path reachable by Python.
 # Adjust the import path based on your actual project structure.
 try:
-    from tldw_Server_API.app.core.Embeddings.Embeddings_Create import (
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import (
         create_embeddings_batch,
         default_embedding_provider, # Updated name
         default_embedding_model,    # Updated name

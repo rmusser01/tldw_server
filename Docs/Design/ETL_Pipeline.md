@@ -27,7 +27,7 @@ https://github.com/QwenLM/Qwen-Agent
   https://github.com/QwenLM/Qwen-Agent/blob/main/examples/assistant_rag.py
   https://github.com/QwenLM/Qwen-Agent/blob/main/examples/parallel_doc_qa.py
 https://github.com/bytedance/Dolphin
-
+https://blog.det.life/i-spent-5-hours-understanding-how-uber-built-their-etl-pipelines-9079735c9103
 
 
 ## ETL Pipelines

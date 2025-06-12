@@ -8,7 +8,7 @@ import threading
 # 3rd-Party Imports:
 import chromadb
 from chromadb import Settings
-from chromadb.errors import ChromaError, DuplicateIDError
+from chromadb.errors import ChromaError
 from itertools import islice
 import numpy as np
 from chromadb.api.models.Collection import Collection
@@ -16,7 +16,7 @@ from chromadb.api.types import QueryResult
 #
 # Local Imports:
 from tldw_Server_API.app.core.Chunking.Chunk_Lib import chunk_for_embedding  # Assuming this is correct
-from tldw_Server_API.app.core.Embeddings.Embeddings_Create import create_embedding, create_embeddings_batch
+from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import create_embedding, create_embeddings_batch
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze  # Assuming this is correct
 from tldw_Server_API.app.core.Utils.Utils import logger  # Assuming this is 'logging' aliased or a custom logger
 #

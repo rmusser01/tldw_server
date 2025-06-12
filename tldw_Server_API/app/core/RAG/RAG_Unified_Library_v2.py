@@ -25,7 +25,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 
 # Embeddings & Vector DB
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import chroma_client, store_in_chroma
-from tldw_Server_API.app.core.Embeddings.Embeddings_Create import create_embedding, embedding_provider, embedding_model, \
+from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import create_embedding, embedding_provider, embedding_model, \
     embedding_api_url, create_embeddings_batch  # From RAG_Persona_Chat
 
 # LLM Calls

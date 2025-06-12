@@ -24,6 +24,8 @@ https://www.turingpost.com/p/arize1
 https://github.com/dontriskit/awesome-ai-system-prompts
 https://github.com/anthropics/prompt-eng-interactive-tutorial
 https://github.com/snarktank/ai-dev-tasks
+https://docs.roocode.com/community/maestro
+https://github.com/tensorzero/tensorzero
 https://nmn.gl/blog/ai-prompt-engineering
 https://addyo.substack.com/p/the-prompt-engineering-playbook-for
 https://github.com/microsoft/generative-ai-for-beginners
