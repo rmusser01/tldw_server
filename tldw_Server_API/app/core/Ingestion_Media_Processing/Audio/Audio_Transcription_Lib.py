@@ -45,10 +45,19 @@ import wave
 # Import Local
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename, logging
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram, timeit
-from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.config import load_and_log_configs, loaded_config_data
 
 
 #
+#######################################################################################################################
+# Constants
+#
+
+# Get configuration values or use defaults
+media_config = loaded_config_data.get('media_processing', {}) if loaded_config_data else {}
+AUDIO_TRANSCRIPTION_BUFFER_SIZE_MB = media_config.get('audio_transcription_buffer_size_mb', 10)
+"""int: Maximum buffer size for audio transcription in MB."""
+
 #######################################################################################################################
 # Function Definitions
 #
@@ -388,6 +397,9 @@ class PartialTranscriptionThread(threading.Thread):
         self.audio_buffer = b""
         # We only keep last X seconds in memory for partial
         self.max_partial_bytes = int(self.partial_chunk_seconds * self.sample_rate * self.channels * 2)
+        # Also enforce a hard limit based on configuration
+        max_buffer_bytes = AUDIO_TRANSCRIPTION_BUFFER_SIZE_MB * 1024 * 1024
+        self.max_partial_bytes = min(self.max_partial_bytes, max_buffer_bytes)
 
         self.last_ts = time.time()
 

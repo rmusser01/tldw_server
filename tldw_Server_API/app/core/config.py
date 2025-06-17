@@ -664,6 +664,24 @@ def load_and_log_configs():
         save_character_chats = config_parser_object.get('Auto-Save', 'save_character_chats', fallback='False')
         save_rag_chats = config_parser_object.get('Auto-Save', 'save_rag_chats', fallback='False')
 
+        # Media Processing Limits
+        max_audio_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_audio_file_size_mb', fallback='500'))
+        max_pdf_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_pdf_file_size_mb', fallback='50'))
+        max_video_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_video_file_size_mb', fallback='1000'))
+        max_epub_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_epub_file_size_mb', fallback='100'))
+        max_document_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_document_file_size_mb', fallback='50'))
+        # Processing timeouts
+        pdf_conversion_timeout_seconds = int(config_parser_object.get('Media-Processing', 'pdf_conversion_timeout_seconds', fallback='300'))
+        audio_processing_timeout_seconds = int(config_parser_object.get('Media-Processing', 'audio_processing_timeout_seconds', fallback='600'))
+        video_processing_timeout_seconds = int(config_parser_object.get('Media-Processing', 'video_processing_timeout_seconds', fallback='1200'))
+        # Archive processing limits
+        max_archive_internal_files = int(config_parser_object.get('Media-Processing', 'max_archive_internal_files', fallback='100'))
+        max_archive_uncompressed_size_mb = int(config_parser_object.get('Media-Processing', 'max_archive_uncompressed_size_mb', fallback='200'))
+        # Transcription settings
+        audio_transcription_buffer_size_mb = int(config_parser_object.get('Media-Processing', 'audio_transcription_buffer_size_mb', fallback='10'))
+        # General settings
+        uuid_generation_length = int(config_parser_object.get('Media-Processing', 'uuid_generation_length', fallback='8'))
+
         # Local API Timeout
         local_api_timeout = config_parser_object.get('Local-API', 'local_api_timeout', fallback='90')
 
@@ -1038,6 +1056,20 @@ def load_and_log_configs():
                 'save_video_transcripts': save_video_transcripts,
             },
             'processing_choice': processing_choice,
+            'media_processing': {
+                'max_audio_file_size_mb': max_audio_file_size_mb,
+                'max_pdf_file_size_mb': max_pdf_file_size_mb,
+                'max_video_file_size_mb': max_video_file_size_mb,
+                'max_epub_file_size_mb': max_epub_file_size_mb,
+                'max_document_file_size_mb': max_document_file_size_mb,
+                'pdf_conversion_timeout_seconds': pdf_conversion_timeout_seconds,
+                'audio_processing_timeout_seconds': audio_processing_timeout_seconds,
+                'video_processing_timeout_seconds': video_processing_timeout_seconds,
+                'max_archive_internal_files': max_archive_internal_files,
+                'max_archive_uncompressed_size_mb': max_archive_uncompressed_size_mb,
+                'audio_transcription_buffer_size_mb': audio_transcription_buffer_size_mb,
+                'uuid_generation_length': uuid_generation_length
+            },
             'chat_dictionaries': {
                 'enable_chat_dictionaries': enable_chat_dictionaries,
                 'post_gen_replacement': post_gen_replacement,

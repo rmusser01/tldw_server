@@ -37,6 +37,7 @@ import requests
 import yt_dlp
 #
 # Local Imports
+from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Utils.Utils import downloaded_files, \
@@ -50,8 +51,40 @@ from tldw_Server_API.app.core.Chunking.Chunk_Lib import improved_chunking_proces
 # Constants
 #
 
-MAX_FILE_SIZE = 500 * 1024 * 1024
-"""int: Maximum allowed file size for downloads and local files in bytes (500MB)."""
+# Get configuration values or use defaults
+media_config = loaded_config_data.get('media_processing', {}) if loaded_config_data else {}
+MAX_FILE_SIZE = media_config.get('max_audio_file_size_mb', 500) * 1024 * 1024
+"""int: Maximum allowed file size for downloads and local files in bytes."""
+UUID_LENGTH = media_config.get('uuid_generation_length', 8)
+"""int: Length of UUID strings to generate for unique identifiers."""
+
+#######################################################################################################################
+# Custom Exceptions
+#
+
+class AudioDownloadError(Exception):
+    """Raised when audio download fails."""
+    pass
+
+class AudioFileSizeError(AudioDownloadError):
+    """Raised when audio file exceeds size limit."""
+    pass
+
+class AudioCookieError(AudioDownloadError):
+    """Raised when there's an issue with cookies during download."""
+    pass
+
+class AudioProcessingError(Exception):
+    """Base exception for audio processing errors."""
+    pass
+
+class AudioTranscriptionError(AudioProcessingError):
+    """Raised when audio transcription fails."""
+    pass
+
+class AudioConversionError(AudioProcessingError):
+    """Raised when audio format conversion fails."""
+    pass
 
 #######################################################################################################################
 # Function Definitions
@@ -120,14 +153,14 @@ def download_audio_file(url: str, target_temp_dir: str, use_cookies: bool = Fals
             try:
                 original_filename = Path(urlparse(url).path).name
                 if not original_filename: # Handle case where path ends in /
-                    original_filename = f"downloaded_audio_{uuid.uuid4().hex[:8]}"
+                    original_filename = f"downloaded_audio_{uuid.uuid4().hex[:UUID_LENGTH]}"
             except Exception:
-                original_filename = f"downloaded_audio_{uuid.uuid4().hex[:8]}"
+                original_filename = f"downloaded_audio_{uuid.uuid4().hex[:UUID_LENGTH]}"
 
         base_name = sanitize_filename(Path(original_filename).stem)
         extension = Path(original_filename).suffix or ".mp3" # Default to .mp3 if no extension
         base_name = base_name[:50] if base_name else "audio" # Ensure base_name is not empty and not too long
-        unique_id = uuid.uuid4().hex[:8]
+        unique_id = uuid.uuid4().hex[:UUID_LENGTH]
         file_name = f"{base_name}_{unique_id}{extension}"
 
         save_dir = Path(target_temp_dir) # Use the provided temp_dir
@@ -162,13 +195,17 @@ def download_audio_file(url: str, target_temp_dir: str, use_cookies: bool = Fals
         raise requests.RequestException(f"Download failed for {url}. Reason: {err_msg}") from e
     except ValueError as e: # Handles file size and cookie format issues
         logging.error(f"Value error during download from {url}: {e}")
-        raise
+        if "exceeds the maximum allowed size" in str(e):
+            raise AudioFileSizeError(f"Audio file from {url} exceeds maximum size limit") from e
+        elif "cookies" in str(e).lower():
+            raise AudioCookieError(f"Invalid cookie format for {url}: {e}") from e
+        raise AudioDownloadError(f"Value error during download from {url}: {e}") from e
     except TypeError as e: # Handles cookie type issues
         logging.error(f"Type error with cookies for {url}: {e}")
-        raise
+        raise AudioCookieError(f"Cookie type error for {url}: {e}") from e
     except Exception as e:
         logging.error(f"Unexpected error downloading audio file from {url}: {type(e).__name__} - {e}", exc_info=True)
-        raise Exception(f"Unexpected download error for {url}") from e # Re-raise generic
+        raise AudioDownloadError(f"Unexpected download error for {url}: {type(e).__name__} - {str(e)}") from e
 
 
 def process_audio_files(

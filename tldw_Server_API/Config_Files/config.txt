@@ -1,6 +1,25 @@
 [Processing]
 processing_choice = cuda
 
+[Media-Processing]
+# File size limits (in MB)
+max_audio_file_size_mb = 500
+max_pdf_file_size_mb = 50
+max_video_file_size_mb = 1000
+max_epub_file_size_mb = 100
+max_document_file_size_mb = 50
+# Processing timeouts (in seconds)
+pdf_conversion_timeout_seconds = 300
+audio_processing_timeout_seconds = 600
+video_processing_timeout_seconds = 1200
+# Archive processing limits
+max_archive_internal_files = 100
+max_archive_uncompressed_size_mb = 200
+# Transcription settings
+audio_transcription_buffer_size_mb = 10
+# General settings
+uuid_generation_length = 8
+
 [Chat-Dictionaries]
 enable_chat_dictionaries = True
 post_gen_replacement = False

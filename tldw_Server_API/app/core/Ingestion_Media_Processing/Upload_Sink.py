@@ -14,6 +14,7 @@ import yara
 import zipfile
 #
 # Local Imports (adjust path as per your project structure)
+from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 
@@ -54,6 +55,9 @@ class ValidationResult:
                 f"mime='{self.detected_mime_type}', ext='{self.detected_extension}')")
 
 
+# Get configuration values or use defaults
+media_config = loaded_config_data.get('media_processing', {}) if loaded_config_data else {}
+
 # Default configurations for common media types
 # These can be overridden or extended via FileValidator's constructor
 DEFAULT_MEDIA_TYPE_CONFIG = {
@@ -61,13 +65,13 @@ DEFAULT_MEDIA_TYPE_CONFIG = {
         "allowed_extensions": {'.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'},
         "allowed_mimetypes": {'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/flac', 'audio/aac', 'audio/ogg',
                               'audio/mp4', 'audio/x-m4a'},
-        "max_size_mb": 100,
+        "max_size_mb": media_config.get('max_audio_file_size_mb', 500),
     },
     "video": {
         "allowed_extensions": {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv'},
         "allowed_mimetypes": {'video/mp4', 'video/x-msvideo', 'video/quicktime', 'video/x-matroska', 'video/webm',
                               'video/x-flv'},
-        "max_size_mb": 1024,
+        "max_size_mb": media_config.get('max_video_file_size_mb', 1000),
     },
     "image": {
         "allowed_extensions": {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'},
@@ -86,17 +90,17 @@ DEFAULT_MEDIA_TYPE_CONFIG = {
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             'text/plain', 'text/markdown', 'text/rtf', 'text/csv', 'application/rtf', 'application/x-rtf',
         },
-        "max_size_mb": 50,
+        "max_size_mb": media_config.get('max_document_file_size_mb', 50),
     },
     "ebook": {
         "allowed_extensions": {'.epub', '.mobi', '.azw'},
         "allowed_mimetypes": {'application/epub+zip', 'application/x-mobipocket-ebook'},
-        "max_size_mb": 50,
+        "max_size_mb": media_config.get('max_epub_file_size_mb', 100),
     },
     "pdf": {
         "allowed_extensions": {'.pdf'},
         "allowed_mimetypes": {'application/pdf'},
-        "max_size_mb": 100,
+        "max_size_mb": media_config.get('max_pdf_file_size_mb', 50),
     },
     "html": {
         "allowed_extensions": {'.html', '.htm'},
@@ -113,10 +117,10 @@ DEFAULT_MEDIA_TYPE_CONFIG = {
     "archive": {
         "allowed_extensions": {'.zip'},  # Example: only zip initially
         "allowed_mimetypes": {'application/zip', 'application/x-zip-compressed'},
-        "max_size_mb": 200,
+        "max_size_mb": media_config.get('max_archive_uncompressed_size_mb', 200),
         "scan_contents": True,  # Flag to indicate archive contents should be scanned
-        "max_internal_files": 1000,  # Max files inside archive
-        "max_internal_uncompressed_size_mb": 500,  # Max total uncompressed size
+        "max_internal_files": media_config.get('max_archive_internal_files', 100),
+        "max_internal_uncompressed_size_mb": media_config.get('max_archive_uncompressed_size_mb', 200),
     },
 }
 
@@ -165,6 +169,10 @@ class FileValidator:
     def _compile_yara_rules(self, rules_path: str):
         if not self.yara_available: return None
         try:
+            # Check if the rules file exists
+            if not os.path.exists(rules_path):
+                logging.warning(f"Yara rules file not found at {rules_path}. Yara scanning will be disabled.")
+                return None
             rules = yara.compile(filepath=rules_path)
             logging.info(f"Yara rules compiled successfully from {rules_path}.")
             return rules
@@ -355,6 +363,22 @@ class FileValidator:
                         for member in zip_ref.infolist():
                             if member.is_dir(): continue  # Skip directories
 
+                            # Path traversal prevention
+                            # Normalize and validate the member filename
+                            member_filename = member.filename
+                            # Check for path traversal attempts
+                            if '..' in member_filename or member_filename.startswith('/') or ':' in member_filename:
+                                logging.warning(f"Skipping potentially malicious archive member: {member_filename}")
+                                issues.append(f"Archive contains potentially malicious path: {member_filename}")
+                                continue
+                            
+                            # Additional check: ensure the extracted path stays within extract_dir
+                            intended_path = (extract_dir / member_filename).resolve()
+                            if not str(intended_path).startswith(str(extract_dir.resolve())):
+                                logging.warning(f"Path traversal attempt detected: {member_filename}")
+                                issues.append(f"Archive contains path traversal attempt: {member_filename}")
+                                continue
+
                             extracted_count += 1
                             if extracted_count > max_internal_files:  # Double check during extraction
                                 issues.append(
@@ -368,9 +392,7 @@ class FileValidator:
                                 break  # Stop extraction
 
                             # Secure extraction:
-                            # zipfile by default should handle path traversal by normalizing paths,
-                            # but be cautious with very old Python versions or untrusted zipfile library.
-                            # For extreme security, one might check `member.filename` for `../` etc.
+                            # Now that we've validated the path, proceed with extraction
                             try:
                                 zip_ref.extract(member, path=extract_dir)
                                 internal_file_path = extract_dir / member.filename

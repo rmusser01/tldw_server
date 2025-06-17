@@ -22,14 +22,17 @@ import pymupdf
 import pymupdf4llm
 #
 # Import Local
+from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.Utils.Utils import logging as logger
 #
 # Constants
-MAX_FILE_SIZE_MB = 50
-CONVERSION_TIMEOUT_SECONDS = 300
+# Get configuration values or use defaults
+media_config = loaded_config_data.get('media_processing', {}) if loaded_config_data else {}
+MAX_FILE_SIZE_MB = media_config.get('max_pdf_file_size_mb', 50)
+CONVERSION_TIMEOUT_SECONDS = media_config.get('pdf_conversion_timeout_seconds', 300)
 #
 #######################################################################################################################
 # Function Definitions
