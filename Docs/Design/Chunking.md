@@ -21,5 +21,6 @@
 https://gleen.ai/blog/agentic-chunking-enhancing-rag-answers-for-completeness-and-accuracy/
 https://github.com/carlosplanchon/betterhtmlchunking
 https://github.com/segment-any-text/wtpsplit
+https://github.com/Unsiloed-AI/Unsiloed-chunker
 
 

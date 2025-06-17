@@ -15,6 +15,7 @@ https://blog.det.life/from-scrolls-to-similarity-search-building-a-movie-recomme
 https://9to5google.com/2025/01/08/google-discover-daily-listen/
 https://www.dogesec.com/blog/full_text_rss_atom_blog_feeds/
 https://arxiv.org/abs/2411.19352
+https://huggingface.co/datasets/yandex/yambda
 https://joeyehand.com/blog/2025/01/15/i-ditched-the-algorithm-for-rssand-you-should-too/
 https://arxiv.org/abs/2412.18082
 https://huggingface.co/papers/2505.14680

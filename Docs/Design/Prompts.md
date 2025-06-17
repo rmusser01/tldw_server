@@ -21,7 +21,17 @@ https://github.com/MIATECHPARTNERS/PromptChains
 https://github.com/mazen160/llmquery/
 https://juuzt.ai/knowledge-base/prompt-frameworks/
 https://www.turingpost.com/p/arize1
+https://github.com/snarktank/ai-dev-tasks
+https://github.com/dxlong2000/NLPromptEval
+    https://arxiv.org/html/2506.06950v1
+https://cline.bot/prompts
+https://github.com/victorcarre6/llm-memorization
+https://github.com/matank001/cursor-security-rules
 https://github.com/dontriskit/awesome-ai-system-prompts
+https://arxiv.org/abs/2506.06950
+https://github.com/lenankamp/AITextADV
+https://github.com/tensorzero/tensorzero
+https://www.tensorzero.com/blog/reverse-engineering-cursors-llm-client/
 https://github.com/anthropics/prompt-eng-interactive-tutorial
 https://github.com/snarktank/ai-dev-tasks
 https://docs.roocode.com/community/maestro

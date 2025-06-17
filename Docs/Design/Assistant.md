@@ -11,6 +11,7 @@ https://github.com/abdibrokhim/paper-ai-voice-assistant
 https://arxiv.org/abs/2504.02197
 https://github.com/yankooliveira/toads
 https://github.com/kortix-ai/suna
+https://github.com/joinly-ai/joinly
 https://github.com/dyad-sh/dyad
 https://github.com/homanmirgolbabaee/arxiv-wizard-search?tab=readme-ov-file#-arxiv-research-assistant
 https://www.youtube.com/watch?v=D7_ipDqhtwk
@@ -35,7 +36,7 @@ https://forgecode.dev/blog/ai-agent-best-practices/
 https://medium.com/data-science-collective/ten-lessons-from-a-year-building-ai-agents-in-legaltech-86a77f515757
 https://jngiam.bearblog.dev/mcp-large-data/
 https://ai.plainenglish.io/local-ai-automated-capture-building-your-own-knowledge-management-system-bbe583006927
-
+https://docs.anthropic.com/en/docs/claude-code/common-workflows#run-parallel-claude-code-sessions-with-git-worktrees
 https://arxiv.org/abs/2502.05589
 
 

@@ -22,6 +22,7 @@ https://silverbullet.md/
 https://github.com/silverbulletmd/silverbullet
 https://github.com/glowingjade/obsidian-smart-composer
 https://www.deepwriter.com
+https://arxiv.org/abs/2506.04180
 https://github.com/kleer001/Text_Loom
 https://arxiv.org/abs/2503.17126
 https://github.com/langchain-ai/open-canvas

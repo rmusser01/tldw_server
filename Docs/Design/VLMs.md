@@ -13,6 +13,12 @@ https://github.com/ByteDance-Seed/Bagel
 https://github.com/TIGER-AI-Lab/QuickVideo
 https://huggingface.co/nvidia/Llama-3.1-Nemotron-Nano-VL-8B-V1
 https://huggingface.co/papers/2505.23621
+https://huggingface.co/nanonets/Nanonets-OCR-s
+https://arxiv.org/abs/2506.10821
+
+
+
+
 MAMBA
     https://ivy-lvlm.github.io/Video-MA2MBA/
 
