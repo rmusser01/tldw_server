@@ -11,15 +11,27 @@
 <h3>Interact with/use APIs via your client of choice.</h3>
 
 
-## Your own local, open-source, ChatGPT-like
+## Your own Local, Open-Source, ChatGPT-like tool for Research, Knowledge Management, and Media Analysis.
 </div>
+
+
+### QuickStart
+```bash
+git clone https://github.com/rmusser01/tldw # Clone the repository
+python3 -m venv .tldw_venv # Setup a virtual environment
+source .tldw_venv/bin/activate # or .tldw_venv\Scripts\activate for Windows
+pip install -r requirements.txt # install required packages
+python -m uvicorn tldw_Server_API.app.main:app # Launch the FastAPI server
+Browse to 127.0.0.1:8000/docs # Open the API docs in your browser
+```
+
 
 
 ### Version 0.1.0 6/X/2025
 - Taken a lot longer than expected.
 - This is a major update to the project, with a focus on the API and TUI app.
 - The gradio application has been deprecated in favor of a standalone API.
-  - The gradio application will continue to remain available, with no further updates.
+  - The gradio application will remain available, with no further updates.
 - The new focus is on the FastAPI API.
   - This has been built from the ground up to be robust, secure and stable.
   - 

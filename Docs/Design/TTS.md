@@ -22,9 +22,15 @@ https://github.com/Extraltodeus/Quick-slap-tkinter-dia/blob/main/README.md
 https://github.com/RobViren/kokovoicelab
 https://github.com/taresh18/TTSizer
 https://www.reddit.com/r/LocalLLaMA/comments/1l3c8is/grmrv3_a_set_of_models_for_reliable_grammar/
+https://github.com/dexter-xD/rhythm
+https://github.com/Jeremy-Harper/chatterboxPro
 https://huggingface.co/spaces/webml-community/conversational-webgpu/tree/main
 https://github.com/huggingface/transformers.js-examples/tree/main/conversational-webgpu
 https://github.com/Shadowfita/parakeet-tdt-0.6b-v2-fastapi
+https://github.com/devnen/Chatterbox-TTS-Server
+https://github.com/PyAV-Org/PyAV
+https://github.com/santinic/audiblez
+https://github.com/nazdridoy/kokoro-tts
 https://decodingml.substack.com/p/deploying-agents-as-real-time-apis
 https://github.com/Nighthawk42/mOrpheus
 https://github.com/RobViren/kvoicewalk

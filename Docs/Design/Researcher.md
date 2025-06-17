@@ -118,6 +118,9 @@ STORM
     https://storm-project.stanford.edu/research/storm/
 
 https://github.com/rickyang1114/multimodal-deepresearcher/
+https://www.microsoft.com/en-us/research/wp-content/uploads/2025/06/Code_Researcher-1.pdf
+https://github.com/Paper2Poster/Paper2Poster
+https://www.anthropic.com/engineering/built-multi-agent-research-system
 https://github.com/assafelovic/gpt-researcher
 https://arxiv.org/abs/2411.15114
 https://github.com/masterFoad/NanoSage
@@ -139,6 +142,7 @@ https://pub.towardsai.net/learn-anything-with-ai-and-the-feynman-technique-00a33
 https://github.com/dzhng/deep-research
 https://github.com/thunlp/LLMxMapReduce/
 https://github.com/eRuaro/open-gemini-deep-research
+https://github.com/JasonHonKL/spy-search
 https://github.com/atineiatte/deep-research-at-home
 https://help.openalex.org/hc/en-us/articles/24396686889751-About-us
 https://www.ginkgonotes.com/

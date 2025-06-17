@@ -14,11 +14,13 @@ https://aclanthology.org/2024.acl-long.540/
 https://github.com/calubkk/RAAT
 https://github.com/microsoft/LMOps/tree/main/corag
 https://www.figma.com/slides/eq8UzeTluT3qLKOpzlLj8y/LlamaIndex-Talk--Document-Agents-?node-id=51004-814&t=7F9MAlkLnukNb3f6-0
+https://ai.plainenglish.io/visual-grounding-rag-with-docling-9696d02054f2
+https://lukew.com/ff/entry.asp?2106?ref=sidebar
 
 
 Factual Extraction RAG
 	https://medium.com/@eliot64/bridging-legal-ai-and-trust-how-we-won-the-llm-x-law-hackathon-45081a8681d9
-
+	https://github.com/pkargupta/claimspect
 
 Models
 	https://huggingface.co/THUDM/GLM-Z1-32B-0414
