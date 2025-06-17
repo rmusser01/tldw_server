@@ -81,23 +81,50 @@ class DatabaseType(Enum):
 ########################################################################################################################
 # Chat History Management
 ########################################################################################################################
-def save_chat_history(history: List[Tuple[str, str]]) -> str:
+def save_chat_history(history: List[Tuple[str, str]], cleanup_after_hours: int = RAG_SEARCH_CONFIG.get('temp_file_cleanup_hours', 24)) -> str:
+    """
+    Save chat history to a temporary file with automatic cleanup.
+    
+    Args:
+        history: List of (user_message, bot_response) tuples
+        cleanup_after_hours: Hours after which the temp file will be cleaned up (default: 24)
+    
+    Returns:
+        Path to the temporary file
+    """
     log_counter("save_chat_history_attempt")
     start_time = time.time()
-    # NOTE: Using delete=False means these files are not automatically cleaned up.
-    # Consider a proper storage strategy if these are not truly temporary.
-    # FIXME
     try:
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8') as temp_file:
             json.dump(history, temp_file)
-            save_duration = time.time() - start_time
-            log_histogram("save_chat_history_duration", save_duration)
-            log_counter("save_chat_history_success")
-            return temp_file.name
+            temp_file_path = temp_file.name
+        
+        # Schedule cleanup of the temporary file
+        _schedule_temp_file_cleanup(temp_file_path, cleanup_after_hours)
+        
+        save_duration = time.time() - start_time
+        log_histogram("save_chat_history_duration", save_duration)
+        log_counter("save_chat_history_success")
+        return temp_file_path
     except Exception as e:
         log_counter("save_chat_history_error", labels={"error": str(e)})
         logging.error(f"Error saving chat history: {str(e)}")
         raise
+
+
+def _schedule_temp_file_cleanup(file_path: str, cleanup_after_hours: int):
+    """Schedule cleanup of temporary file using a background thread."""
+    def cleanup_file():
+        time.sleep(cleanup_after_hours * 3600)  # Convert hours to seconds
+        try:
+            if os.path.exists(file_path):
+                os.unlink(file_path)
+                logging.debug(f"Cleaned up temporary chat history file: {file_path}")
+        except Exception as e:
+            logging.warning(f"Failed to cleanup temporary file {file_path}: {e}")
+    
+    cleanup_thread = threading.Thread(target=cleanup_file, daemon=True)
+    cleanup_thread.start()
 
 
 def load_chat_history(file: IO[str]) -> List[Tuple[str, str]]:
@@ -150,8 +177,8 @@ def embed_and_store_chat_messages(
                 "character_id": character_id,
                 "turn_index": idx,
                 "conversation_title": conversation_title,
-                "original_user_message": user_msg[:256],
-                "original_bot_response": bot_msg[:256]
+                "original_user_message": user_msg[:RAG_SEARCH_CONFIG.get('metadata_content_preview_chars', 256)],
+                "original_bot_response": bot_msg[:RAG_SEARCH_CONFIG.get('metadata_content_preview_chars', 256)]
             }
             metadatas_list.append(metadata)
 
@@ -288,7 +315,7 @@ def generate_answer(api_choice: Optional[str], context: str, query: str) -> str:
     processed_query_part = process_user_input(initial_query_for_chatdict, rag_prompt_entries)
     logging.debug(f"Processed query part for RAG: {processed_query_part}")
 
-    max_context_len_chars = int(config.get('LLM_Limits', 'max_context_chars_rag', fallback=15000))
+    max_context_len_chars = int(config.get('LLM_Limits', 'max_context_chars_rag', fallback=RAG_SEARCH_CONFIG.get('max_context_chars_rag', 15000)))
     if len(context) > max_context_len_chars:
         logging.warning(f"Context length ({len(context)} chars) exceeds limit ({max_context_len_chars}). Truncating.")
         context = context[:max_context_len_chars - len("... (context truncated)")] + "... (context truncated)"
@@ -546,7 +573,7 @@ def perform_full_text_search(
 
                 if not conv_ids_to_search_within and character_id_context is not None:
                     # Fetch all convos for this character if no specific conv_ids given
-                    char_conversations = char_rag_db.get_conversations_for_character(character_id_context, limit=1000)
+                    char_conversations = char_rag_db.get_conversations_for_character(character_id_context, limit=RAG_SEARCH_CONFIG.get('max_conversations_per_character', 1000))
                     conv_ids_to_search_within = [c['id'] for c in char_conversations]
 
                 if conv_ids_to_search_within:
@@ -689,12 +716,12 @@ def fetch_relevant_ids_by_keywords(
             if db_type == DatabaseType.RAG_CHAT or db_type == DatabaseType.CHARACTER_CHAT:  # Conversations
                 for kw_id in relevant_keyword_ids:
                     convs = char_rag_db.get_conversations_for_keyword(kw_id,
-                                                                      limit=500)  # High limit for comprehensive ID gathering
+                                                                      limit=RAG_SEARCH_CONFIG.get('max_conversations_for_keyword', 500))  # High limit for comprehensive ID gathering
                     for conv in convs:
                         ids_set.add(str(conv['id']))  # Conversation ID is UUID string
             elif db_type == DatabaseType.RAG_NOTES:  # Notes
                 for kw_id in relevant_keyword_ids:
-                    notes = char_rag_db.get_notes_for_keyword(kw_id, limit=500)
+                    notes = char_rag_db.get_notes_for_keyword(kw_id, limit=RAG_SEARCH_CONFIG.get('max_notes_for_keyword', 500))
                     for note in notes:
                         ids_set.add(str(note['id']))  # Note ID is UUID string
             elif db_type == DatabaseType.CHARACTER_CARDS:
@@ -712,7 +739,7 @@ def fetch_relevant_ids_by_keywords(
                     return []
 
                     # Fetch all active character cards (this is the inefficient part)
-                all_cards = char_rag_db.list_character_cards(limit=100000)  # Potentially very many
+                all_cards = char_rag_db.list_character_cards(limit=RAG_SEARCH_CONFIG.get('max_character_cards_fetch', 100000))  # Potentially very many
 
                 normalized_keyword_texts = {kw.lower().strip() for kw in keyword_texts}
 
@@ -1024,7 +1051,7 @@ def fetch_all_chat_ids_for_character(char_rag_db: CharactersRAGDB, character_id:
     start_time = time.time()
     try:
         # get_conversations_for_character returns List[Dict]
-        conversations = char_rag_db.get_conversations_for_character(character_id=character_id, limit=10000) # High limit
+        conversations = char_rag_db.get_conversations_for_character(character_id=character_id, limit=RAG_SEARCH_CONFIG.get('max_conversations_per_character', 10000)) # High limit
         # Filter out deleted conversations if the DB method doesn't do it already
         chat_ids = [conv['id'] for conv in conversations if isinstance(conv, dict) and 'id' in conv and not conv.get('deleted')]
 
@@ -1071,7 +1098,7 @@ def enhanced_rag_pipeline_chat(
             if relevant_kw_ids:
                 conv_ids_set = set()
                 for kw_id in relevant_kw_ids:
-                    convs_for_kw = char_rag_db.get_conversations_for_keyword(kw_id, limit=100)
+                    convs_for_kw = char_rag_db.get_conversations_for_keyword(kw_id, limit=RAG_SEARCH_CONFIG.get('max_conversations_for_keyword', 100))
                     for conv in convs_for_kw:
                         # Filter by character_id AND ensure conversation is not deleted
                         if conv.get('character_id') == character_id and not conv.get('deleted'):
@@ -1512,87 +1539,6 @@ def perform_rag_notes_vector_search(
     return search_results
 
 
-
-########################################################################################################################
-# Placeholder for Preprocessing (from RAG_Library_2.py)
-# This needs significant thought regarding how different content types are embedded
-# and stored in ChromaDB, especially for items from CharactersRAGDB.
-########################################################################################################################
-# def preprocess_all_content_unified(
-#         media_db: Optional[MediaDatabase] = None,
-#         char_rag_db: Optional[CharactersRAGDB] = None,
-#         # ... other parameters for specific preprocessing tasks ...
-# ):
-#     logging.info("Starting unified preprocessing...")
-#
-#     if media_db:
-#         unprocessed_media = media_db.get_unprocessed_media() # Assuming this method exists
-#         logging.info(f"Found {len(unprocessed_media)} unprocessed media items in Media_DB.")
-#         for item in unprocessed_media:
-#             media_id = item['id']
-#             content = item['content']
-#             media_type = item['type']
-#             file_name = item.get('title', f"{media_type}_{media_id}")
-#             # NOTE: ChromaDB collection strategy needs careful design.
-#             # One collection per item is generally not scalable.
-#             # Consider collections per content type (e.g., "articles", "videos_transcripts")
-#             # or a single large collection with good metadata filtering.
-#             collection_name_media = f"media_content_type_{media_type}" # Example
-#             try:
-#                 # This is where you'd call a function like ChromaDB_Library.process_and_store_content
-#                 # but adapted for this unified context.
-#                 # process_and_store_generic_content(
-#                 #    content_to_embed=content,
-#                 #    collection_name=collection_name_media,
-#                 #    metadata={"source_db": "MediaDB", "media_id": str(media_id), "type": media_type, ...},
-#                 #    item_id_for_chroma=f"media_{media_id}" # Unique ID for Chroma doc
-#                 # )
-#                 logging.info(f"Placeholder: Would process and embed media_id {media_id}")
-#                 media_db.mark_media_as_processed(media_id)
-#             except Exception as e_media_proc:
-#                 logging.error(f"Error processing MediaDB item {media_id}: {e_media_proc}", exc_info=True)
-#
-#     if char_rag_db:
-#         # --- RAG Notes ---
-#         # You'd need a way to get "unprocessed" notes if they are to be embedded.
-#         # For example, all notes without a corresponding ChromaDB entry.
-#         all_notes = char_rag_db.list_notes(limit=100000) # Potentially very large
-#         logging.info(f"Found {len(all_notes)} notes in CharactersRAGDB for potential embedding.")
-#         notes_collection_name = "character_rag_notes" # Example collection
-#         for note in all_notes:
-#             if not note.get('deleted'):
-#                 note_id_uuid = note['id']
-#                 note_content = note['content']
-#                 # Check if already embedded, e.g., by querying ChromaDB for "note_" + note_id_uuid
-#                 # if not already_embedded(notes_collection_name, f"note_{note_id_uuid}"):
-#                 # process_and_store_generic_content(
-#                 #    content_to_embed=note_content,
-#                 #    collection_name=notes_collection_name,
-#                 #    metadata={"source_db": "CharactersRAGDB_Notes", "note_uuid": note_id_uuid, "title": note.get('title'), ...},
-#                 #    item_id_for_chroma=f"note_{note_id_uuid}"
-#                 # )
-#                 logging.info(f"Placeholder: Would process and embed RAG Note UUID {note_id_uuid}")
-#
-#         # --- Character Cards ---
-#         # Similar logic for character cards if their fields (description, personality, etc.) are to be embedded.
-#         all_cards = char_rag_db.list_character_cards(limit=10000)
-#         logging.info(f"Found {len(all_cards)} character cards for potential embedding.")
-#         cards_collection_name = "character_rag_cards"
-#         for card in all_cards:
-#            if not card.get('deleted'):
-#                 card_id_int = card['id']
-#                 # Construct a combined text from card fields for embedding
-#                 card_text_to_embed = f"Name: {card.get('name')}\nDescription: {card.get('description')}\nPersonality: {card.get('personality')}"
-#                 # if not already_embedded(cards_collection_name, f"charcard_{card_id_int}"):
-#                 # process_and_store_generic_content(
-#                 #    content_to_embed=card_text_to_embed,
-#                 #    collection_name=cards_collection_name,
-#                 #    metadata={"source_db": "CharactersRAGDB_Cards", "card_id": str(card_id_int), "name": card.get('name'), ...},
-#                 #    item_id_for_chroma=f"charcard_{card_id_int}"
-#                 # )
-#                 logging.info(f"Placeholder: Would process and embed Character Card ID {card_id_int}")
-#
-#     logging.info("Unified preprocessing finished (placeholders).")
 
 #
 # End of unified_rag_service.py

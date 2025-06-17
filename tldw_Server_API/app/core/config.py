@@ -55,6 +55,23 @@ RAG_SEARCH_CONFIG = {
     "web_vector_top_k": 10,
     "llm_context_document_limit": 10,
     "chat_context_limit": 10,
+    # Database query limits
+    "max_conversations_per_character": 1000,
+    "max_conversations_for_keyword": 500,
+    "max_notes_for_keyword": 500,
+    "max_character_cards_fetch": 100000,
+    "max_notes_fetch": 100000,
+    "max_media_search_limit": 10000,
+    # Embedding and vector search
+    "max_embedding_batch_size": 100,
+    "max_vector_search_results": 1000,
+    # Content limits
+    "max_context_chars_rag": 15000,
+    "metadata_content_preview_chars": 256,
+    # Cleanup settings
+    "temp_file_cleanup_hours": 24,
+    # Pagination defaults
+    "default_results_per_page": 50,
 }
 
 
