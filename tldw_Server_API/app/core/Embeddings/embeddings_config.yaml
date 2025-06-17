@@ -1,0 +1,66 @@
+# Example configuration for the embeddings scale-out architecture
+
+redis:
+  url: redis://localhost:6379
+  max_connections: 50
+  decode_responses: true
+
+worker_pools:
+  chunking:
+    worker_type: chunking
+    num_workers: 2
+    queue_name: embeddings:chunking
+    consumer_group: chunking-workers
+    batch_size: 1
+    poll_interval_ms: 100
+    max_retries: 3
+    heartbeat_interval: 30
+    shutdown_timeout: 30
+    metrics_interval: 60
+    default_chunk_size: 1000
+    default_overlap: 200
+
+  embedding:
+    worker_type: embedding
+    num_workers: 3
+    queue_name: embeddings:embedding
+    consumer_group: embedding-workers
+    batch_size: 16
+    poll_interval_ms: 100
+    max_retries: 3
+    heartbeat_interval: 30
+    shutdown_timeout: 30
+    metrics_interval: 60
+    gpu_allocation: [0, 1]  # Use first 2 GPUs, workers will round-robin
+    default_model_provider: huggingface
+    default_model_name: sentence-transformers/all-MiniLM-L6-v2
+    max_model_cache_size: 5
+    model_unload_timeout: 300
+
+  storage:
+    worker_type: storage
+    num_workers: 1
+    queue_name: embeddings:storage
+    consumer_group: storage-workers
+    batch_size: 100
+    poll_interval_ms: 100
+    max_retries: 3
+    heartbeat_interval: 30
+    shutdown_timeout: 30
+    metrics_interval: 60
+    chroma_batch_size: 100
+    transaction_timeout: 30
+
+# Monitoring and auto-scaling
+enable_monitoring: true
+monitoring_port: 9090
+log_level: INFO
+
+enable_autoscaling: true
+scale_up_threshold: 0.8
+scale_down_threshold: 0.2
+scale_check_interval: 60
+
+# Resource limits
+max_total_workers: 20
+max_memory_gb: 32.0
