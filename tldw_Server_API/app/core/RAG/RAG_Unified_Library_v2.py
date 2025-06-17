@@ -23,6 +23,13 @@ from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase as 
     DatabaseError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
+# RAG Exception Hierarchy
+from tldw_Server_API.app.core.RAG.exceptions import (
+    RAGError, RAGSearchError, RAGConfigurationError, RAGDatabaseError,
+    RAGEmbeddingError, RAGGenerationError, RAGValidationError, RAGTimeoutError,
+    wrap_database_error, wrap_search_error, handle_rag_error
+)
+
 # Embeddings & Vector DB
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import chroma_client, store_in_chroma
 from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import create_embedding, embedding_provider, embedding_model, \
@@ -216,38 +223,99 @@ def embed_and_store_chat_messages(
 
 def perform_vector_search_chat_messages(query: str, relevant_conversation_ids: List[str], k: int = 10) -> List[
     Dict[str, Any]]:
+    """
+    Perform vector search on chat messages with comprehensive error handling.
+    
+    Args:
+        query: Search query string
+        relevant_conversation_ids: List of conversation IDs to search within
+        k: Maximum number of results to return
+        
+    Returns:
+        List of search results with content, metadata, and distance scores
+        
+    Raises:
+        RAGValidationError: If input parameters are invalid
+        RAGSearchError: If search operation fails but should be retried
+        RAGEmbeddingError: If embedding generation fails
+    """
     log_counter("perform_vector_search_chat_messages_attempt")
     start_time = time.time()
 
+    # Input validation
+    if not query or not query.strip():
+        raise RAGValidationError(
+            "Query cannot be empty",
+            field_name="query",
+            field_value=query,
+            operation="vector_search_chat_messages"
+        )
+    
     if not relevant_conversation_ids:
         logging.debug("No relevant_conversation_ids provided for chat message vector search.")
         return []
 
     try:
         collection_name = config.get('Embeddings', 'chat_embeddings_collection', fallback="chat_message_embeddings")
+        
+        # Get ChromaDB collection with proper error handling
         try:
             collection = chroma_client.get_collection(name=collection_name)
-        except ValueError: # Or more specific like chromadb.errors.CollectionNotDefinedError
+        except ValueError:
+            # Collection doesn't exist - this is expected in some cases
             logging.warning(f"ChromaDB collection '{collection_name}' not found for chat message vector search.")
             return []
-        except chromadb.errors.CollectionNotDefinedError as ce: # Catch other chroma errors
-            logging.error(f"ChromaDB error getting collection '{collection_name}': {ce}", exc_info=True)
+        except chromadb.errors.CollectionNotDefinedError:
+            logging.warning(f"ChromaDB collection '{collection_name}' not defined for chat message vector search.")
             return []
+        except Exception as e:
+            raise RAGDatabaseError(
+                f"Failed to access ChromaDB collection '{collection_name}'",
+                database_name="ChromaDB",
+                operation_type="get_collection",
+                original_error=e
+            )
 
+        # Generate query embedding
+        try:
+            query_embedding = create_embedding(query, embedding_provider, embedding_model, embedding_api_url)
+            if not query_embedding:
+                raise RAGEmbeddingError(
+                    "Embedding generation returned empty result",
+                    embedding_provider=embedding_provider,
+                    model_name=embedding_model,
+                    context={"query_length": len(query)}
+                )
+        except Exception as e:
+            if isinstance(e, RAGEmbeddingError):
+                raise
+            raise RAGEmbeddingError(
+                "Failed to generate query embedding for chat message vector search",
+                embedding_provider=embedding_provider,
+                model_name=embedding_model,
+                original_error=e
+            )
 
-        query_embedding = create_embedding(query, embedding_provider, embedding_model, embedding_api_url)
-        if not query_embedding:
-            logging.error("Failed to generate query embedding for chat message vector search.")
-            return []
+        # Perform vector search
+        try:
+            where_filter = {"conversation_id": {"$in": relevant_conversation_ids}}
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                where=where_filter,
+                n_results=k,
+                include=["documents", "metadatas", "distances"]
+            )
+        except Exception as e:
+            raise RAGSearchError(
+                "ChromaDB vector search query failed",
+                search_type="vector_chat_messages",
+                query=query,
+                database_type="ChromaDB",
+                context={"collection_name": collection_name, "conversation_count": len(relevant_conversation_ids)},
+                original_error=e
+            )
 
-        where_filter = {"conversation_id": {"$in": relevant_conversation_ids}}
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            where=where_filter,
-            n_results=k,
-            include=["documents", "metadatas", "distances"]
-        )
-
+        # Process results
         search_results = []
         if results['documents'] and results['documents'][0]:
             for doc, meta, dist in zip(results['documents'][0], results['metadatas'][0], results['distances'][0]):
@@ -258,15 +326,20 @@ def perform_vector_search_chat_messages(query: str, relevant_conversation_ids: L
         log_histogram("perform_vector_search_chat_messages_duration", duration)
         log_counter("perform_vector_search_chat_messages_success", labels={"result_count": len(search_results)})
         return search_results
-    # CHANGED: Added more specific error handling for Chroma if possible, otherwise general
-    except chromadb.errors.ChromaError as ce:
-        log_counter("perform_vector_search_chat_messages_error", labels={"error_type": "ChromaError", "error": str(ce)})
-        logging.error(f"ChromaDB error in perform_vector_search_chat_messages: {ce}", exc_info=True)
-        return []
+        
+    except (RAGValidationError, RAGSearchError, RAGEmbeddingError, RAGDatabaseError):
+        # Re-raise RAG-specific errors
+        raise
     except Exception as e:
-        log_counter("perform_vector_search_chat_messages_error", labels={"error_type": "General", "error": str(e)})
-        logging.error(f"Error in perform_vector_search_chat_messages: {e}", exc_info=True)
-        return []
+        # Wrap unexpected errors
+        log_counter("perform_vector_search_chat_messages_error", labels={"error_type": "Unexpected", "error": str(e)})
+        raise RAGSearchError(
+            "Unexpected error in chat message vector search",
+            search_type="vector_chat_messages",
+            query=query,
+            context={"conversation_count": len(relevant_conversation_ids)},
+            original_error=e
+        )
 
 
 ########################################################################################################################
@@ -288,15 +361,57 @@ def get_app_configs(): # CHANGED: Helper to load configs once
 
 
 def generate_answer(api_choice: Optional[str], context: str, query: str) -> str:
+    """
+    Generate an answer using LLM with RAG context and comprehensive error handling.
+    
+    Args:
+        api_choice: The API provider to use (e.g., 'openai', 'anthropic')
+        context: The retrieved context from RAG search
+        query: The user's question
+        
+    Returns:
+        Generated answer string
+        
+    Raises:
+        RAGValidationError: If required parameters are invalid
+        RAGConfigurationError: If API configuration is missing or invalid
+        RAGGenerationError: If LLM generation fails
+    """
     log_counter("generate_answer_attempt", labels={"api_choice": api_choice or "default"})
     start_time = time.time()
     logging.debug("Entering generate_answer function")
 
-    # CHANGED: Use helper to get configs
-    loaded_config_data = get_app_configs()
-    if not loaded_config_data:
-        logging.error("Failed to load configurations for generate_answer.")
-        return "Error: System configuration missing."
+    # Input validation
+    if not query or not query.strip():
+        raise RAGValidationError(
+            "Query cannot be empty",
+            field_name="query",
+            field_value=query
+        )
+    
+    if api_choice and not api_choice.strip():
+        raise RAGValidationError(
+            "API choice cannot be empty string",
+            field_name="api_choice",
+            field_value=api_choice
+        )
+
+    # Load configuration with error handling
+    try:
+        loaded_config_data = get_app_configs()
+        if not loaded_config_data:
+            raise RAGConfigurationError(
+                "Failed to load application configurations",
+                config_section="app_configs"
+            )
+    except Exception as e:
+        if isinstance(e, RAGConfigurationError):
+            raise
+        raise RAGConfigurationError(
+            "Error loading application configurations",
+            config_section="app_configs",
+            original_error=e
+        )
 
     chat_dict_config = loaded_config_data.get('chat_dictionaries', {})
     rag_prompts_file_path = chat_dict_config.get('chat_dict_RAG_prompts')
@@ -328,9 +443,12 @@ def generate_answer(api_choice: Optional[str], context: str, query: str) -> str:
         specific_api_config = loaded_config_data.get(api_config_key, {})
 
         if not specific_api_config or 'api_key' not in specific_api_config : # Check if dict itself is empty or key missing
-            logging.error(f"Configuration for API '{api_choice}' (key: {api_config_key}) not found or missing API key.")
-            log_counter("generate_answer_error", labels={"api_choice": api_choice, "error": "API_config_missing"})
-            return f"Error: Configuration for API '{api_choice}' is missing or incomplete."
+            raise RAGConfigurationError(
+                f"Configuration for API '{api_choice}' is missing or incomplete",
+                config_section=api_config_key,
+                config_key="api_key",
+                context={"available_configs": list(loaded_config_data.keys())}
+            )
 
         try:
             chat_message = processed_query_part
@@ -347,47 +465,87 @@ def generate_answer(api_choice: Optional[str], context: str, query: str) -> str:
                 "clearly state that the provided context is not helpful and then answer the question "
                 "based on your general knowledge. Be concise and directly answer the question."
             )
-            chat_temperature = float(specific_api_config.get('temperature', 0.7))
-            chat_model = specific_api_config.get('model') # This should be the actual model name string
-            chat_max_tokens = int(specific_api_config.get('max_tokens', 1000))
-            chat_topp = specific_api_config.get('topp') # May need float conversion if not None
-            chat_topk = specific_api_config.get('topk') # May need int conversion if not None
-            chat_minp = specific_api_config.get('minp') # May need float
-            chat_maxp = specific_api_config.get('maxp') # May need float
-
-            # Convert to appropriate types if not None
-            chat_topp = float(chat_topp) if chat_topp is not None else None
-            chat_topk = int(chat_topk) if chat_topk is not None else None
-            chat_minp = float(chat_minp) if chat_minp is not None else None
-            chat_maxp = float(chat_maxp) if chat_maxp is not None else None
-
+            
+            # Parse configuration with validation
+            try:
+                chat_temperature = float(specific_api_config.get('temperature', 0.7))
+                chat_max_tokens = int(specific_api_config.get('max_tokens', 1000))
+                chat_model = specific_api_config.get('model')
+                
+                # Convert optional parameters with validation
+                chat_topp = float(specific_api_config.get('topp')) if specific_api_config.get('topp') is not None else None
+                chat_topk = int(specific_api_config.get('topk')) if specific_api_config.get('topk') is not None else None
+                chat_minp = float(specific_api_config.get('minp')) if specific_api_config.get('minp') is not None else None
+                chat_maxp = float(specific_api_config.get('maxp')) if specific_api_config.get('maxp') is not None else None
+            except (ValueError, TypeError) as e:
+                raise RAGConfigurationError(
+                    f"Invalid configuration values for API '{api_choice}'",
+                    config_section=api_config_key,
+                    context={"config_values": specific_api_config},
+                    original_error=e
+                )
 
             logging.debug(f"Calling `chat` function with: api_endpoint='{api_choice_lower}', "
                           f"temperature={chat_temperature}, model='{chat_model}', max_tokens={chat_max_tokens}")
 
-            result = chat(
-                message=chat_message, history=[], media_content=chat_media_content,
-                selected_parts=chat_selected_parts, api_endpoint=api_choice_lower, # This is the 'provider' like 'openai', 'anthropic'
-                api_key=chat_api_key, custom_prompt=None, temperature=chat_temperature,
-                system_message=rag_system_message, streaming=False, minp=chat_minp,
-                maxp=chat_maxp, model=chat_model, topp=chat_topp, topk=chat_topk, # Pass the actual model name
-                chatdict_entries=None, max_tokens=chat_max_tokens # Pass the pre-parsed rag_prompt_entries if needed by chat()
-            )
+            # Call LLM with comprehensive error handling
+            try:
+                result = chat(
+                    message=chat_message, history=[], media_content=chat_media_content,
+                    selected_parts=chat_selected_parts, api_endpoint=api_choice_lower, # This is the 'provider' like 'openai', 'anthropic'
+                    api_key=chat_api_key, custom_prompt=None, temperature=chat_temperature,
+                    system_message=rag_system_message, streaming=False, minp=chat_minp,
+                    maxp=chat_maxp, model=chat_model, topp=chat_topp, topk=chat_topk, # Pass the actual model name
+                    chatdict_entries=None, max_tokens=chat_max_tokens # Pass the pre-parsed rag_prompt_entries if needed by chat()
+                )
+                
+                if not result or not result.strip():
+                    raise RAGGenerationError(
+                        "LLM returned empty response",
+                        api_provider=api_choice_lower,
+                        model_name=chat_model,
+                        context_length=len(context)
+                    )
 
-            answer_generation_duration = time.time() - start_time
-            log_histogram("generate_answer_duration", answer_generation_duration, labels={"api_choice": api_choice})
-            log_counter("generate_answer_success", labels={"api_choice": api_choice})
-            return result
+                answer_generation_duration = time.time() - start_time
+                log_histogram("generate_answer_duration", answer_generation_duration, labels={"api_choice": api_choice})
+                log_counter("generate_answer_success", labels={"api_choice": api_choice})
+                return result
 
+            except Exception as e:
+                if "timeout" in str(e).lower():
+                    raise RAGTimeoutError(
+                        f"LLM API call timed out for {api_choice}",
+                        operation_type="llm_generation",
+                        context={"api_provider": api_choice_lower, "model": chat_model},
+                        original_error=e
+                    )
+                else:
+                    raise RAGGenerationError(
+                        f"LLM generation failed for API '{api_choice}'",
+                        api_provider=api_choice_lower,
+                        model_name=chat_model,
+                        context_length=len(context),
+                        original_error=e
+                    )
+
+        except (RAGConfigurationError, RAGGenerationError, RAGTimeoutError):
+            # Re-raise RAG-specific errors
+            raise
         except Exception as e:
-            log_counter("generate_answer_error", labels={"api_choice": api_choice, "error": str(e)})
-            logging.error(f"Error in generate_answer calling `chat` function for API '{api_choice}': {str(e)}",
-                          exc_info=True)
-            return "An error occurred while generating the answer using the chat function."
+            # Wrap unexpected errors in generation context
+            raise RAGGenerationError(
+                f"Unexpected error during answer generation for API '{api_choice}'",
+                api_provider=api_choice_lower,
+                context={"has_context": bool(context), "query_length": len(query)},
+                original_error=e
+            )
     else:
-        log_counter("generate_answer_error", labels={"api_choice": "None", "error": "API_choice_not_provided"})
-        logging.error("API choice not provided to generate_answer.")
-        return "Error: API choice not specified for generating answer."
+        raise RAGValidationError(
+            "API choice must be specified for answer generation",
+            field_name="api_choice",
+            field_value=api_choice
+        )
 
 
 def perform_general_vector_search(query: str, relevant_media_ids: Optional[List[str]] = None, top_k: int = 10) -> List[
@@ -662,16 +820,34 @@ def perform_full_text_search(
                     labels={"database_type": database_type.value, "result_count": len(results)})
         return results
 
-    except (MediaDBError, CharactersRAGDBError, ValueError) as e:
+    except (MediaDBError, CharactersRAGDBError) as db_error:
         log_counter("perform_full_text_search_error",
-                    labels={"database_type": database_type.value, "error_type": type(e).__name__})
-        logging.error(f"DB error in FTS ({database_type.value}): {str(e)}", exc_info=True)
-        raise
+                    labels={"database_type": database_type.value, "error_type": type(db_error).__name__})
+        # Wrap database-specific errors in RAG context
+        raise wrap_database_error(
+            db_error,
+            operation="full_text_search",
+            database_type=database_type.value,
+            query=query[:100] + "..." if len(query) > 100 else query
+        )
+    except ValueError as val_error:
+        log_counter("perform_full_text_search_error",
+                    labels={"database_type": database_type.value, "error_type": "ValueError"})
+        raise RAGValidationError(
+            f"Invalid parameters for FTS in {database_type.value}",
+            context={"database_type": database_type.value, "query": query},
+            original_error=val_error
+        )
     except Exception as e:
         log_counter("perform_full_text_search_error",
                     labels={"database_type": database_type.value, "error_type": type(e).__name__})
-        logging.error(f"Error in FTS ({database_type.value}): {str(e)}", exc_info=True)
-        raise
+        raise RAGSearchError(
+            f"Unexpected error in full-text search for {database_type.value}",
+            search_type="full_text",
+            query=query,
+            database_type=database_type.value,
+            original_error=e
+        )
 
 
 def fetch_relevant_ids_by_keywords(
@@ -725,46 +901,35 @@ def fetch_relevant_ids_by_keywords(
                     for note in notes:
                         ids_set.add(str(note['id']))  # Note ID is UUID string
             elif db_type == DatabaseType.CHARACTER_CARDS:
-                # CHANGED: Strict tag-based filtering for Character Cards.
-                # This requires loading cards and checking their 'tags' field in Python
-                # because ChaChaNotes_DB FTS does not index the 'tags' JSON field.
-                # NOTE: This is INEFFICIENT for large numbers of character cards.
-                # Ideal solution: Enhance ChaChaNotes_DB to support querying tags directly
-                # (e.g., JSON functions if SQLite version supports, or a normalized tag mapping table).
-
+                # OPTIMIZED: Use database-level tag filtering for efficient character card search
+                # This replaces the previous inefficient approach that loaded all cards into memory
+                
                 if not keyword_texts:  # No keywords to filter by
-                    # Optionally, return all card IDs if no keywords are specified,
-                    # or an empty list if keywords are mandatory for this path.
-                    # For now, returning empty if no keywords, consistent with other paths.
+                    # Return empty list if no keywords are specified, consistent with other paths
                     return []
 
-                    # Fetch all active character cards (this is the inefficient part)
-                all_cards = char_rag_db.list_character_cards(limit=RAG_SEARCH_CONFIG.get('max_character_cards_fetch', 100000))  # Potentially very many
-
-                normalized_keyword_texts = {kw.lower().strip() for kw in keyword_texts}
-
-                for card in all_cards:  # card is a dict
-                    if card.get('deleted'):
-                        continue
-
-                    tags_str = card.get('tags')  # This is a JSON string or None
-                    card_tags_set = set()
-                    if tags_str:
-                        try:
-                            tags_list = json.loads(tags_str)
-                            if isinstance(tags_list, list):
-                                card_tags_set = {str(tag).lower().strip() for tag in tags_list}
-                        except json.JSONDecodeError:
-                            logging.warning(
-                                f"Could not parse tags JSON for character card ID {card.get('id')}: {tags_str}")
-
-                    # Check if ALL provided keywords are present in the card's tags
-                    # To match original intent of "filter by keyword", this should be ANY keyword.
-                    # If it should be ALL keywords, change `any` to `all`.
-                    # User said "search only cards that have been tagged with a specific keyword" - implies ANY.
-                    if normalized_keyword_texts and not card_tags_set.isdisjoint(
-                            normalized_keyword_texts):  # isdisjoint is false if there's an intersection
-                        ids_set.add(str(card['id']))  # Character Card ID is int
+                try:
+                    # Use the new efficient database-level tag search
+                    matching_cards = char_rag_db.search_character_cards_by_tags(
+                        tag_keywords=keyword_texts,
+                        limit=RAG_SEARCH_CONFIG.get('max_character_cards_fetch', 100000)
+                    )
+                    
+                    # Extract card IDs from the results
+                    for card in matching_cards:
+                        if not card.get('deleted'):  # Extra safety check
+                            ids_set.add(str(card['id']))  # Character Card ID is int
+                            
+                    logging.debug(f"Found {len(ids_set)} character cards matching tags: {keyword_texts}")
+                    
+                except CharactersRAGDBError as db_error:
+                    # Log and fallback for database errors
+                    logging.error(f"Database error searching character cards by tags {keyword_texts}: {db_error}")
+                    return []  # Fallback to empty results for graceful degradation
+                except Exception as e:
+                    # Log unexpected errors but don't crash the search
+                    logging.error(f"Unexpected error searching character cards by tags {keyword_texts}: {e}")
+                    return []  # Fallback to empty results rather than crashing the entire search
             else:
                 logging.warning(f"Unsupported db_type '{db_type}' for keyword ID fetching.")
                 return None

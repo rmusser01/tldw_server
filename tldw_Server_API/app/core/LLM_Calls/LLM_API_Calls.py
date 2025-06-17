@@ -36,7 +36,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 # Import Local libraries
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.Utils.Utils import logging
-from tldw_Server_API.app.core.Chat.Chat_Functions import ChatAuthenticationError, ChatRateLimitError, \
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError, ChatRateLimitError, \
     ChatBadRequestError, ChatProviderError, ChatConfigurationError
 #
 #######################################################################################################################
