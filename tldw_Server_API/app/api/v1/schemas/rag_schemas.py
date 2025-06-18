@@ -118,6 +118,7 @@ class SearchSettings(BaseModel):
     chunk_settings: Optional[ChunkSearchSettings] = None
     graph_settings: Optional[GraphSearchSettings] = None
     num_sub_queries: int = Field(default=5, description="For 'hyde' or 'rag_fusion' strategies.")
+    search_databases: Optional[List[str]] = Field(None, description="List of databases to search")
 
 # --- GenerationConfig Sub-Models ---
 class ToolFunctionDefinition(BaseModel):
@@ -165,6 +166,7 @@ class RetrievalAgentRequest(BaseModel):
     use_system_context: bool = True
     mode: AgentModeEnum = AgentModeEnum.RAG
     needs_initial_conversation_name: Optional[bool] = None
+    api_config: Optional[Dict[str, Any]] = Field(None, description="API configuration including provider and keys")
 
 
     @model_validator(mode='after')
@@ -315,6 +317,10 @@ class SearchApiRequest(SearchParameterFields): # Inherits top-level fields
     search_mode: SearchModeEnum = SearchModeEnum.CUSTOM # Reuse existing enum
     # search_settings is Optional and of type SearchParameterFields itself
     search_settings: Optional[SearchParameterFields] = None # This allows nested SearchParameterFields
+    # Additional fields for database selection and date filtering
+    search_databases: Optional[List[str]] = Field(None, description="List of databases to search (e.g., ['media_db', 'notes'])")
+    date_range_start: Optional[str] = Field(None, description="Start date for filtering results (ISO format)")
+    date_range_end: Optional[str] = Field(None, description="End date for filtering results (ISO format)")
 
 
 # --- Response model for the new Search API Endpoint ---

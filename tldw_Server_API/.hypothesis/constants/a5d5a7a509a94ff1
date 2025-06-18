@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/endpoints/rag.py
+# hypothesis_version: 6.135.11
+
+[0.0, 0.5, 0.7, 200, 2000, '*', '...', '/agent', '/retrieval', '/search', 'Cache-Control', 'Connection', 'Retrieval Agent', 'USER_DB_BASE_DIR', 'Unknown Source', 'Untitled', 'answer', 'api_key', 'api_provider', 'chachanotes_user_dbs', 'character_cards', 'chat_history', 'chroma', 'citation', 'content', 'context_size', 'date_end', 'date_range_end', 'date_range_start', 'date_start', 'filters_provided', 'hybrid_search_flag', 'id', 'keep-alive', 'limit_applied', 'link', 'max_tokens', 'media_db', 'mode', 'model', 'no-cache', 'notes', 'offset_applied', 'rag_config_provided', 'role', 'search_databases', 'search_mode', 'search_mode_used', 'snippet', 'source', 'source_id', 'sources', 'sources_searched', 'sources_used', 'streaming_requested', 'system_prompt', 'temperature', 'text/event-stream', 'title', 'type', 'user_id']

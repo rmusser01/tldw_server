@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Icon Generator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    .icon-container {
+      margin: 20px;
+      display: flex;
+      gap: 20px;
+    }
+    canvas {
+      border: 1px solid #ddd;
+    }
+  </style>
+</head>
+<body>
+  <h1>TLDW Extension Icon Generator</h1>
+  <p>Right-click and save each icon with the appropriate filename</p>
+  
+  <div class="icon-container">
+    <div>
+      <h3>icon-16.png</h3>
+      <canvas id="icon16" width="16" height="16"></canvas>
+    </div>
+    <div>
+      <h3>icon-48.png</h3>
+      <canvas id="icon48" width="48" height="48"></canvas>
+    </div>
+    <div>
+      <h3>icon-128.png</h3>
+      <canvas id="icon128" width="128" height="128"></canvas>
+    </div>
+  </div>
+
+  <script>
+    function drawIcon(canvasId, size) {
+      const canvas = document.getElementById(canvasId);
+      const ctx = canvas.getContext('2d');
+      
+      // Background
+      ctx.fillStyle = '#2c3e50';
+      ctx.fillRect(0, 0, size, size);
+      
+      // Text
+      ctx.fillStyle = 'white';
+      ctx.font = `bold ${size * 0.35}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('TL', size / 2, size * 0.35);
+      ctx.fillText('DW', size / 2, size * 0.65);
+      
+      // Convert to PNG and create download link
+      canvas.style.cursor = 'pointer';
+      canvas.onclick = () => {
+        const link = document.createElement('a');
+        link.download = `icon-${size}.png`;
+        link.href = canvas.toDataURL();
+        link.click();
+      };
+    }
+
+    // Generate icons
+    drawIcon('icon16', 16);
+    drawIcon('icon48', 48);
+    drawIcon('icon128', 128);
+  </script>
+</body>
+</html>

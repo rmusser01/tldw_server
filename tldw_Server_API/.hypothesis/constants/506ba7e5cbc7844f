@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/DB_Management/DB_Manager.py
+# hypothesis_version: 6.135.11
+
+[9200, 'DB_BACKUP_DIR', 'Database', 'backup_path', 'bigsearch', 'database_backups', 'elasticsearch', 'elasticsearch_host', 'elasticsearch_port', 'error', 'include_content', 'include_deleted', 'limit', 'localhost', 'offset', 'postgres', 'sqlite', 'sqlite_path', 'type']

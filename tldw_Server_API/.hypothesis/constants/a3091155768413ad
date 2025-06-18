@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/main.py
+# hypothesis_version: 6.135.11
+
+['*', '/', '/api/v1/audio', '/api/v1/characters', '/api/v1/chat', '/api/v1/chunking', '/api/v1/embedding', '/api/v1/media', '/api/v1/notes', '/api/v1/prompts', '/api/v1/research', '/api/v1/sync', '/api/v1/tools', '/favicon.ico', '/health', '/static', '0.0.1', 'DEBUG', 'audio', 'character, persona', 'chat', 'chunking', 'embedding', 'favicon.ico', 'healthy', 'http://127.0.0.1', 'http://localhost', 'image/x-icon', 'media', 'message', 'notes', 'prompts', 'research', 'retrieval_agent', 'static', 'status', 'sync', 'tldw API', 'tools', 'uvicorn', 'uvicorn.access', 'uvicorn.error']

@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/RAG/rag_service/processing.py
+# hypothesis_version: 6.135.11
+
+[0.0, 0.85, 0.9, 100, 200, 4096, ' | ', '. ', '...', 'combination_method', 'context_documents', 'conversation_title', 'doc_id', 'enable_reranking', 'enable_snippets', 'final', 'meta', 'partial', 'processing_time', 'score', 'snippet_length', 'snippets', 'source_distribution', 'source_diversity', 'text', 'timestamp', 'title', 'total_documents', 'truncated', 'unique_documents', 'weighted']

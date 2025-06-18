@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>TLDW Server Assistant - Settings</title>
+  <link rel="stylesheet" href="../css/options.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>TLDW Server Assistant Settings</h1>
+    </header>
+
+    <main>
+      <section class="settings-section">
+        <h2>Server Configuration</h2>
+        
+        <div class="form-group">
+          <label for="serverUrl">Server URL</label>
+          <input type="url" id="serverUrl" class="form-control" placeholder="http://localhost:8000">
+          <small class="help-text">The base URL of your TLDW server instance</small>
+        </div>
+        
+        <div class="form-group">
+          <label for="apiToken">API Token</label>
+          <input type="password" id="apiToken" class="form-control" placeholder="Your API Bearer token">
+          <small class="help-text">Bearer token for authentication (found in your server's API_BEARER environment variable)</small>
+        </div>
+        
+        <div class="form-actions">
+          <button id="testConnection" class="btn btn-secondary">Test Connection</button>
+          <span id="connectionStatus" class="status-message"></span>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>Default Settings</h2>
+        
+        <div class="form-group">
+          <label for="defaultModel">Default Chat Model</label>
+          <select id="defaultModel" class="form-control">
+            <option value="">None</option>
+            <option value="gpt-4">GPT-4</option>
+            <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+            <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+            <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label for="defaultTemperature">Default Temperature</label>
+          <input type="range" id="defaultTemperature" class="form-control" min="0" max="2" step="0.1" value="0.7">
+          <span id="temperatureValue">0.7</span>
+        </div>
+        
+        <div class="form-group">
+          <label for="maxTokens">Default Max Tokens</label>
+          <input type="number" id="maxTokens" class="form-control" min="1" max="4096" value="1000">
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>Behavior Settings</h2>
+        
+        <div class="form-group checkbox-group">
+          <label>
+            <input type="checkbox" id="autoLoadChats">
+            Automatically load recent chats on startup
+          </label>
+        </div>
+        
+        <div class="form-group checkbox-group">
+          <label>
+            <input type="checkbox" id="streamResponses">
+            Stream chat responses (when supported)
+          </label>
+        </div>
+        
+        <div class="form-group checkbox-group">
+          <label>
+            <input type="checkbox" id="showNotifications">
+            Show desktop notifications
+          </label>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>Quick Prompt Creation</h2>
+        <div id="promptCreation" style="display: none;">
+          <div class="form-group">
+            <label for="promptName">Prompt Name</label>
+            <input type="text" id="promptName" class="form-control" placeholder="Enter prompt name">
+          </div>
+          
+          <div class="form-group">
+            <label for="promptContent">Prompt Content</label>
+            <textarea id="promptContent" class="form-control" rows="5"></textarea>
+          </div>
+          
+          <div class="form-actions">
+            <button id="savePrompt" class="btn btn-primary">Save Prompt</button>
+            <button id="cancelPrompt" class="btn btn-secondary">Cancel</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>Data Management</h2>
+        
+        <div class="form-actions">
+          <button id="exportSettings" class="btn btn-secondary">Export Settings</button>
+          <button id="importSettings" class="btn btn-secondary">Import Settings</button>
+          <input type="file" id="importFile" accept=".json" style="display: none;">
+        </div>
+        
+        <div class="form-actions danger-zone">
+          <button id="clearCache" class="btn btn-danger">Clear Cache</button>
+          <button id="resetSettings" class="btn btn-danger">Reset All Settings</button>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <button id="saveSettings" class="btn btn-primary">Save Settings</button>
+      <button id="cancelSettings" class="btn btn-secondary">Cancel</button>
+    </footer>
+  </div>
+
+  <script src="../js/browser-polyfill.js"></script>
+  <script src="../js/options.js"></script>
+</body>
+</html>

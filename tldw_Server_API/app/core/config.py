@@ -74,6 +74,63 @@ RAG_SEARCH_CONFIG = {
     "default_results_per_page": 50,
 }
 
+# Configuration for the new modular RAG service
+RAG_SERVICE_CONFIG = {
+    # General settings
+    "batch_size": 32,
+    "num_workers": 4,  # Limited for multi-user server
+    "log_level": "INFO",
+    "log_performance_metrics": True,
+    
+    # Cache configuration
+    "cache": {
+        "enable_cache": True,
+        "max_cache_size": 1000,
+        "cache_ttl": 3600,  # 1 hour
+        "cache_search_results": True,
+        "cache_embeddings": True,
+        "cache_llm_responses": False  # Don't cache LLM responses by default
+    },
+    
+    # Retriever configuration
+    "retriever": {
+        "fts_top_k": 10,
+        "vector_top_k": 10,
+        "hybrid_alpha": 0.5,  # Balance between keyword and vector search
+        "enable_web_search": False,
+        "web_search_top_k": 5,
+        "enable_re_ranking": True,
+        "re_ranking_model": "flashrank",
+        "timeout_seconds": 30
+    },
+    
+    # Processor configuration
+    "processor": {
+        "enable_reranking": True,
+        "reranking_model": "flashrank",
+        "reranking_top_k": 10,
+        "enable_deduplication": True,
+        "dedup_threshold": 0.85,
+        "max_context_length": 4096,
+        "context_padding_tokens": 100,
+        "enable_metadata_filtering": True,
+        "token_counter": "tiktoken"
+    },
+    
+    # Generator configuration
+    "generator": {
+        "default_model": "gpt-3.5-turbo",
+        "default_temperature": 0.7,
+        "default_max_tokens": 2000,
+        "enable_streaming": True,
+        "stream_chunk_size": 50,
+        "enable_citations": True,
+        "citation_style": "inline",
+        "enable_fallback": True,
+        "fallback_behavior": "simple_answer"
+    }
+}
+
 
 def load_openai_mappings() -> Dict:
     # Determine path relative to this file.

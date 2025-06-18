@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/endpoints/embeddings.py
+# hypothesis_version: 6.135.11
+
+[0.0001, 0.001, 0.01, 0.1, 300, 400, 500, 768, 1536, 2048, '/embeddings', 'Embeddings', 'base64', 'cl100k_base', 'placeholder_model', 'placeholder_provider', 'tolist', 'utf-8']
