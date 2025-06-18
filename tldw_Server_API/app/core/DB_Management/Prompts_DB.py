@@ -296,8 +296,8 @@ class PromptsDatabase:
                 is_closed = True
                 try:
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.warning(f"Failed to close database connection: {e}")
                 self._local.conn = None
 
         if is_closed:

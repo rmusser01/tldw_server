@@ -5502,8 +5502,8 @@ async def _download_url_async(
         if 'target_path' in locals() and target_path.exists():
             try:
                 target_path.unlink()
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug(f"Failed to remove temporary file {target_path}: {e}")
         raise ConnectionError(f"HTTP error {e.response.status_code} for {url}") from e
     except httpx.RequestError as e:
         logger.error(f"Request error downloading {url}: {e}")
@@ -5514,8 +5514,8 @@ async def _download_url_async(
         if 'target_path' in locals() and target_path.exists():
             try:
                 target_path.unlink()
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug(f"Failed to remove temporary file {target_path}: {e}")
         raise ValueError(str(e)) from e  # Re-raise the specific error
     except Exception as e:
         logger.error(f"Error processing download for {url}: {e}", exc_info=True)
@@ -5523,8 +5523,8 @@ async def _download_url_async(
         if 'target_path' in locals() and target_path.exists():
             try:
                 target_path.unlink()
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug(f"Failed to remove temporary file {target_path}: {e}")
         raise RuntimeError(f"Failed to download or save {url}: {e}") from e  # Use RuntimeError for unexpected
 
 #

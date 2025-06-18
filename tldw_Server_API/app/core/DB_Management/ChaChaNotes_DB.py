@@ -953,8 +953,8 @@ UPDATE db_schema_version
                     f"Thread-local connection for {self.db_path_str} was closed or became unusable. Reopening.")
                 try:
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to close database connection: {e}")
                 conn = None
 
         if not conn:

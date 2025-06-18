@@ -134,12 +134,11 @@ async def lifespan(app: FastAPI):
 
 
 # --- FIX: Add CORS Middleware ---
-origins = [
-    "http://localhost",
-    "http://127.0.0.1",
-    # Add any other origins your frontend/tests might use
-    "*", # Use with caution, be more specific in production
-]
+# Import from config
+from tldw_Server_API.app.core.config import ALLOWED_ORIGINS
+
+# Use configured origins
+origins = ALLOWED_ORIGINS if ALLOWED_ORIGINS else ["*"]
 
 # FIXME - CORS
 # # -- If you have any global middleware, add it here --
