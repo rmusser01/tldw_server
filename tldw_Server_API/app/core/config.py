@@ -198,6 +198,25 @@ def load_settings():
     jwt_algorithm = "HS256"
     access_token_expire_minutes = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
+    # --- Redis Configuration ---
+    # Load from comprehensive config first, then environment variables, then defaults
+    if comprehensive_config and 'Redis' in comprehensive_config:
+        redis_config = comprehensive_config.get('Redis', {})
+        redis_host = os.getenv("REDIS_HOST", redis_config.get('redis_host', 'localhost'))
+        redis_port = int(os.getenv("REDIS_PORT", redis_config.get('redis_port', '6379')))
+        redis_db = int(os.getenv("REDIS_DB", redis_config.get('redis_db', '0')))
+        cache_ttl = int(os.getenv("CACHE_TTL", redis_config.get('cache_ttl', '300')))
+        redis_enabled = os.getenv("REDIS_ENABLED", str(redis_config.get('redis_enabled', 'false'))).lower() == "true"
+    else:
+        # Fallback to environment variables and defaults
+        redis_host = os.getenv("REDIS_HOST", "localhost")
+        redis_port = int(os.getenv("REDIS_PORT", "6379"))
+        redis_db = int(os.getenv("REDIS_DB", "0"))
+        cache_ttl = int(os.getenv("CACHE_TTL", "300"))
+        redis_enabled = os.getenv("REDIS_ENABLED", "false").lower() == "true"
+    
+    redis_url = os.getenv("REDIS_URL", f"redis://{redis_host}:{redis_port}/{redis_db}")
+
     # Base directory for all user-specific data: ACTUAL_PROJECT_ROOT/user_databases/
     default_user_data_base_dir = ACTUAL_PROJECT_ROOT / "user_databases"
     user_data_base_dir_str = os.getenv("USER_DB_BASE_DIR", str(default_user_data_base_dir.resolve()))
@@ -243,6 +262,24 @@ def load_settings():
         "USERS_DB_CONFIGURED": users_db_configured,
         "SERVER_CLIENT_ID": SERVER_CLIENT_ID,
 
+        # Redis Configuration
+        "REDIS_HOST": redis_host,
+        "REDIS_PORT": redis_port,
+        "REDIS_DB": redis_db,
+        "REDIS_URL": redis_url,
+        "CACHE_TTL": cache_ttl,
+        "REDIS_ENABLED": redis_enabled,
+
+        # Chat Configuration - Load from config file with default
+        "CHAT_DICT_MAX_TOKENS": int(
+            comprehensive_config.get('Chat-Dictionaries', {}).get('max_tokens', '5000')
+        ),
+
+        # Web Scraping Configuration - Load from config file with default
+        "STEALTH_WAIT_MS": int(
+            comprehensive_config.get('Web-Scraping', {}).get('stealth_wait_ms', '5000')
+        ),
+
         # Merge relevant parts from comprehensive_config
         # Embedding Config
         "EMBEDDING_CONFIG": comprehensive_config.get("embedding_config", {
@@ -263,12 +300,12 @@ def load_settings():
 
     # --- Warnings ---
     if config_dict["SINGLE_USER_MODE"] and config_dict["SINGLE_USER_API_KEY"] == "default-secret-key-for-single-user":
-        print("!!! WARNING: Using default API_KEY for single-user mode. Set the API_KEY environment variable for security. !!!")
-        print(f"DEBUGPRINT: Using default API_KEY for single-user mode: '{config_dict['SINGLE_USER_API_KEY']}'")
+        logger.warning("Using default API_KEY for single-user mode. Set the API_KEY environment variable for security.")
+        logger.debug(f"Using default API_KEY for single-user mode: '{config_dict['SINGLE_USER_API_KEY']}'")
     if not config_dict["SINGLE_USER_MODE"] and config_dict["JWT_SECRET_KEY"] == "a_very_insecure_default_secret_key_for_dev_only":
-        print("!!! SECURITY WARNING: Using default JWT_SECRET_KEY in multi-user mode. Set a strong JWT_SECRET_KEY environment variable! !!!")
+        logger.critical("SECURITY WARNING: Using default JWT_SECRET_KEY in multi-user mode. Set a strong JWT_SECRET_KEY environment variable!")
     if not config_dict["SINGLE_USER_MODE"] and not config_dict["USERS_DB_CONFIGURED"]:
-         print("!!! WARNING: Multi-user mode enabled (APP_MODE=multi), but USERS_DB_ENABLED is not 'true'. User authentication will likely fail. !!!")
+         logger.warning("Multi-user mode enabled (APP_MODE=multi), but USERS_DB_ENABLED is not 'true'. User authentication will likely fail.")
 
     # Create necessary directories if they don't exist
     # Ensure main SQLite database directory exists
@@ -1352,7 +1389,9 @@ def load_and_log_configs():
                 'web_scraper_retry_count': web_scraper_retry_count,
                 'web_scraper_retry_timeout': web_scraper_retry_timeout,
                 'web_scraper_stealth_playwright': web_scraper_stealth_playwright,
-            }
+            },
+            'Redis': config_parser_object['Redis'] if 'Redis' in config_parser_object else {},
+            'Web-Scraping': config_parser_object['Web-Scraping'] if 'Web-Scraping' in config_parser_object else {}
         }
         return return_dict
     except Exception as e:

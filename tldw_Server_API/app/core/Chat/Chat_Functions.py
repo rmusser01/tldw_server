@@ -2000,7 +2000,7 @@ def apply_replacement_once(text: str, entry: ChatDictionary) -> Tuple[str, int]:
 def process_user_input(
     user_input: str,
     entries: List[ChatDictionary],
-    max_tokens: int = 5000,
+    max_tokens: int = None,
     strategy: str = "sorted_evenly"
 ) -> str:
     """
@@ -2033,6 +2033,15 @@ def process_user_input(
         The processed user input string after all applicable transformations.
         Returns the original input if critical errors occur.
     """
+    # Set default max_tokens if not provided
+    if max_tokens is None:
+        # Try to get from config first, then fallback to hardcoded default
+        try:
+            from tldw_Server_API.app.core.config import config
+            max_tokens = config.get("CHAT_DICT_MAX_TOKENS", 5000)
+        except:
+            max_tokens = 5000
+    
     current_time = datetime.now()
     original_input_for_fallback = user_input # Save for critical error case
     temp_user_input = user_input

@@ -125,10 +125,10 @@ async def lifespan(app: FastAPI):
     # Shutdown code
     global test_db_instance_ref
     if test_db_instance_ref and hasattr(test_db_instance_ref, 'close_all_connections'):
-        print("--- App Shutdown: Closing DB connections ---")
+        logger.info("App Shutdown: Closing DB connections")
         test_db_instance_ref.close_all_connections()
     else:
-        print("--- App Shutdown: No test DB instance found to close ---")
+        logger.info("App Shutdown: No test DB instance found to close")
 #
 ############################# End of Test DB Handling###################
 

@@ -1539,7 +1539,8 @@ def extract_domain(url: str) -> str:
         parsed_uri = urlparse(url)
         domain = parsed_uri.netloc
         return domain.replace('www.', '')
-    except:
+    except Exception as e:
+        logging.warning(f"Failed to extract domain from URL {url}: {str(e)}")
         return url
 
 

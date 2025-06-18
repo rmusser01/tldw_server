@@ -588,3 +588,15 @@ backup_count = 5
 #   gemini-1.5-flash-8b
 #   aqa
 #   text-embedding-004
+
+[Redis]
+# Redis cache configuration
+redis_enabled = False
+redis_host = localhost
+redis_port = 6379
+redis_db = 0
+cache_ttl = 300
+
+[Web-Scraping]
+# Web scraping timeouts and delays
+stealth_wait_ms = 5000

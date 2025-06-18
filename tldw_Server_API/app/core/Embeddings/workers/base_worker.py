@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import os
 import signal
 import time
 from abc import ABC, abstractmethod
@@ -12,7 +13,7 @@ from typing import Any, Dict, List, Optional, Type, TypeVar
 
 import redis.asyncio as redis
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..queue_schemas import EmbeddingJobMessage, JobInfo, JobStatus, WorkerMetrics
 
@@ -24,7 +25,10 @@ class WorkerConfig(BaseModel):
     """Base configuration for workers"""
     worker_id: str
     worker_type: str
-    redis_url: str = "redis://localhost:6379"
+    redis_url: str = Field(
+        default_factory=lambda: os.getenv("REDIS_URL", "redis://localhost:6379"),
+        description="Redis connection URL"
+    )
     queue_name: str
     consumer_group: str
     batch_size: int = 1

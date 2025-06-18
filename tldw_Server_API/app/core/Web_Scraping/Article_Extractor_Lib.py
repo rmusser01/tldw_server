@@ -126,7 +126,13 @@ async def scrape_article(url: str, custom_cookies: Optional[List[Dict[str, Any]]
 
                    # If stealth is enabled, give the page extra time to finish loading/spawning content
                     if stealth_enabled:
-                        await page.wait_for_timeout(5000)  # 5-second delay
+                        # Try to get from config, fallback to hardcoded default
+                        try:
+                            from tldw_Server_API.app.core.config import config
+                            stealth_wait_ms = config.get("STEALTH_WAIT_MS", 5000)
+                        except:
+                            stealth_wait_ms = 5000
+                        await page.wait_for_timeout(stealth_wait_ms)  # configurable delay
                     else:
                         # Alternatively, wait for network to be idle
                         await page.wait_for_load_state("networkidle", timeout=timeout_ms)

@@ -198,7 +198,8 @@ class LlamaCppHandler(BaseLLMHandler):
                         try:
                             pgid = await asyncio.to_thread(os.getpgid, pid)  # Re-fetch pgid in case
                             await asyncio.to_thread(os.killpg, pgid, signal.SIGKILL)
-                        except:  # Broad except for kill fallback
+                        except (ProcessLookupError, PermissionError, OSError) as e:  # Specific exceptions for kill fallback
+                            self.logger.warning(f"Failed to kill process group {pgid}: {str(e)}. Falling back to kill.")
                             process_to_stop.kill()
                     await process_to_stop.wait()
             else:
@@ -316,7 +317,8 @@ class LlamaCppHandler(BaseLLMHandler):
                     else:
                         try:
                             os.killpg(os.getpgid(pid), signal.SIGKILL)
-                        except:
+                        except (ProcessLookupError, PermissionError, OSError) as e:
+                            self.logger.warning(f"Failed to kill process group for PID {pid}: {str(e)}. Falling back to kill.")
                             proc.kill()
             if self._active_server_log_handle:
                 self._active_server_log_handle.close()

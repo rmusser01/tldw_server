@@ -55,7 +55,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 #
 # --- Core Libraries (New) ---
 # Configuration (Import settings if needed directly, else handled by dependencies)
-# from tldw_Server_API.app.core.config import settings
+# from tldw_Server_API.app.core.config import settings, config
 # Authentication & User Identification (Primary Dependency)
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
 # Database Instance Dependency (Gets DB based on User)
@@ -116,7 +116,7 @@ from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     ProcessedMediaWikiPage,
     media_wiki_global_config
 )
-from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.config import settings, config
 from tldw_Server_API.app.services.web_scraping_service import process_web_scraping_task
 #
 # MediaWiki
@@ -139,10 +139,21 @@ router = APIRouter()
 
 # Rate Limiter + Cache Setup
 limiter = Limiter(key_func=get_remote_address)
-# FIXME - Should be optional
-# Configure Redis cache
-cache = redis.Redis(host='localhost', port=6379, db=0)
-CACHE_TTL = 300  # 5 minutes
+
+# Configure Redis cache (optional based on config)
+cache = None
+CACHE_TTL = config['CACHE_TTL']
+if config['REDIS_ENABLED']:
+    try:
+        cache = redis.Redis(host=config['REDIS_HOST'], port=config['REDIS_PORT'], db=config['REDIS_DB'])
+        # Test connection
+        cache.ping()
+        logger.info(f"Redis cache enabled at {config['REDIS_HOST']}:{config['REDIS_PORT']}")
+    except Exception as e:
+        logger.warning(f"Failed to connect to Redis: {str(e)}. Running without cache.")
+        cache = None
+else:
+    logger.info("Redis cache disabled by configuration")
 
 
 # ---------------------------
@@ -156,37 +167,47 @@ def get_cache_key(request: Request) -> str:
 
 def cache_response(key: str, response: Dict) -> None:
     """Store response in cache with ETag"""
-    content = json.dumps(response)
-    etag = hashlib.md5(content.encode()).hexdigest()
-    cache.setex(key, CACHE_TTL, f"{etag}|{content}")
+    if cache is None:
+        return
+    try:
+        content = json.dumps(response)
+        etag = hashlib.md5(content.encode()).hexdigest()
+        cache.setex(key, CACHE_TTL, f"{etag}|{content}")
+    except Exception as e:
+        logger.warning(f"Failed to cache response: {str(e)}")
 
 async def get_cached_response(key: str) -> Optional[tuple]: # Changed to async def
     """Retrieve cached response with ETag (Async Version)"""
-    # Await the asynchronous cache retrieval operation
-    cached_value = await cache.get(key) # Added await
+    if cache is None:
+        return None
+    
+    try:
+        # Await the asynchronous cache retrieval operation
+        cached_value = await cache.get(key) # Added await
 
-    if cached_value:
-        # Now cached_value should be the actual data (likely bytes)
-        try:
-            # Decode assuming UTF-8, handle potential errors
-            decoded_string = cached_value.decode('utf-8')
-            # Split carefully, ensure it splits correctly
-            parts = decoded_string.split('|', 1)
-            if len(parts) == 2:
-                etag, content_str = parts
-                # Parse JSON, handle potential errors
-                content = json.loads(content_str)
-                return (etag, content)
-            else:
-                # Log or handle cases where the format is unexpected
-                # logging.warning(f"Cached value for key '{key}' has unexpected format: {decoded_string}")
-                print(f"Warning: Cached value for key '{key}' has unexpected format: {decoded_string}")
-                return None
-        except (UnicodeDecodeError, json.JSONDecodeError, AttributeError, ValueError) as e:
-            # Log or handle errors during decoding/parsing
-            # logging.error(f"Error processing cached value for key '{key}': {e}")
-            print(f"Error processing cached value for key '{key}': {e}")
-            return None # Or raise an exception if appropriate
+        if cached_value:
+            # Now cached_value should be the actual data (likely bytes)
+            try:
+                # Decode assuming UTF-8, handle potential errors
+                decoded_string = cached_value.decode('utf-8')
+                # Split carefully, ensure it splits correctly
+                parts = decoded_string.split('|', 1)
+                if len(parts) == 2:
+                    etag, content_str = parts
+                    # Parse JSON, handle potential errors
+                    content = json.loads(content_str)
+                    return (etag, content)
+                else:
+                    # Log or handle cases where the format is unexpected
+                    logger.warning(f"Cached value for key '{key}' has unexpected format: {decoded_string}")
+                    return None
+            except (UnicodeDecodeError, json.JSONDecodeError, AttributeError, ValueError) as e:
+                # Log or handle errors during decoding/parsing
+                logger.error(f"Error processing cached value for key '{key}': {e}")
+                return None # Or raise an exception if appropriate
+    except Exception as e:
+        logger.warning(f"Failed to retrieve cached response: {str(e)}")
+        return None
 
     return None # Cache miss
 # --- How to call this function ---

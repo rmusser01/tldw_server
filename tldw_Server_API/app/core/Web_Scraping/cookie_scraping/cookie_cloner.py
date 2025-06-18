@@ -83,7 +83,8 @@ def get_chrome_cookies(domain_name):
             if sys.platform == 'win32':
                 try:
                     decrypted_value = win32crypt.CryptUnprotectData(encrypted_value, None, None, None, 0)[1]
-                except:
+                except Exception as e:
+                    # Fallback to edge cookie decryption if CryptUnprotectData fails
                     decrypted_value = decrypt_edge_cookie(encrypted_value, key)
             else:
                 decrypted_value = decrypt_edge_cookie(encrypted_value, key)
@@ -234,7 +235,7 @@ def get_edge_cookies(domain_name):
                     try:
                         # Try to decrypt using CryptUnprotectData
                         decrypted_value = win32crypt.CryptUnprotectData(encrypted_value, None, None, None, 0)[1]
-                    except:
+                    except Exception as e:
                         # If failed, use custom decryption
                         decrypted_value = decrypt_edge_cookie(encrypted_value, key)
                 else:

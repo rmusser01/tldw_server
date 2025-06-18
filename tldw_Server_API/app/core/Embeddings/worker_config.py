@@ -1,13 +1,17 @@
 # worker_config.py
 # Configuration schemas for worker pools and orchestration
 
+import os
 from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
 class RedisConfig(BaseModel):
     """Redis connection configuration"""
-    url: str = Field(default="redis://localhost:6379", description="Redis connection URL")
+    url: str = Field(
+        default_factory=lambda: os.getenv("REDIS_URL", "redis://localhost:6379"), 
+        description="Redis connection URL"
+    )
     max_connections: int = Field(default=50, ge=1, description="Maximum connections in pool")
     decode_responses: bool = Field(default=True, description="Decode responses to strings")
 

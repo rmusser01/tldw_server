@@ -8,12 +8,13 @@ import sqlite3 # For specific error types
 from typing import List, Dict, Optional, Tuple
 #
 # Third-Party Imports
+from loguru import logger
 #
 # Local Imports
 try:
     from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase, ConflictError, DatabaseError, InputError
 except ImportError:
-    print("ERROR: Could not import the 'Media_DB' library. Make sure Media_DB.py is accessible.")
+    logger.error("Could not import the 'Media_DB' library. Make sure Media_DB.py is accessible.")
 #
 #######################################################################################################################
 #
