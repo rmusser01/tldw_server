@@ -6,6 +6,103 @@ let currentConversationId = null;
 let selectedCharacterId = null;
 let selectedPromptTemplate = null;
 
+// Toast notification system
+class ToastManager {
+  constructor() {
+    this.container = null;
+    this.toasts = new Set();
+  }
+
+  init() {
+    this.container = document.getElementById('toast-container');
+    if (!this.container) {
+      console.error('Toast container not found');
+    }
+  }
+
+  show(message, type = 'info', title = null, duration = 4000) {
+    if (!this.container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    const icon = document.createElement('div');
+    icon.className = 'toast-icon';
+    
+    const content = document.createElement('div');
+    content.className = 'toast-content';
+    
+    if (title) {
+      const titleElement = document.createElement('div');
+      titleElement.className = 'toast-title';
+      titleElement.textContent = title;
+      content.appendChild(titleElement);
+    }
+    
+    const messageElement = document.createElement('div');
+    messageElement.className = 'toast-message';
+    messageElement.textContent = message;
+    content.appendChild(messageElement);
+    
+    const closeButton = document.createElement('button');
+    closeButton.className = 'toast-close';
+    closeButton.innerHTML = '×';
+    closeButton.onclick = () => this.hide(toast);
+    
+    toast.appendChild(icon);
+    toast.appendChild(content);
+    toast.appendChild(closeButton);
+    
+    this.container.appendChild(toast);
+    this.toasts.add(toast);
+    
+    // Auto-hide after duration
+    if (duration > 0) {
+      setTimeout(() => this.hide(toast), duration);
+    }
+    
+    return toast;
+  }
+
+  hide(toast) {
+    if (!toast || !this.toasts.has(toast)) return;
+    
+    toast.classList.add('toast-hiding');
+    setTimeout(() => {
+      if (toast.parentNode) {
+        toast.parentNode.removeChild(toast);
+      }
+      this.toasts.delete(toast);
+    }, 300);
+  }
+
+  success(message, title = 'Success') {
+    return this.show(message, 'success', title);
+  }
+
+  error(message, title = 'Error') {
+    return this.show(message, 'error', title, 6000);
+  }
+
+  warning(message, title = 'Warning') {
+    return this.show(message, 'warning', title, 5000);
+  }
+
+  info(message, title = null) {
+    return this.show(message, 'info', title);
+  }
+
+  loading(message, title = 'Loading...') {
+    const toast = this.show(message, 'info', title, 0);
+    const spinner = document.createElement('div');
+    spinner.className = 'loading-spinner';
+    toast.querySelector('.toast-icon').appendChild(spinner);
+    return toast;
+  }
+}
+
+const toast = new ToastManager();
+
 // Initialize popup
 document.addEventListener('DOMContentLoaded', async () => {
   await initializePopup();
@@ -14,32 +111,110 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function initializePopup() {
+  // Initialize toast system
+  toast.init();
+  
   // Check connection status
   const isConnected = await apiClient.checkConnection();
-  updateConnectionStatus(isConnected);
+  const status = apiClient.getConnectionStatus();
+  updateConnectionStatus(isConnected, status);
+  
+  // Start connection monitoring
+  startConnectionMonitoring();
   
   // Load initial data
   if (isConnected) {
     loadPrompts();
     loadCharacters();
     loadMediaList();
+    toast.success('Connected to TLDW Server', 'Connected');
+  } else {
+    toast.error('Failed to connect to TLDW Server. Check your settings.', 'Connection Failed');
   }
 }
 
-function updateConnectionStatus(isConnected) {
+function updateConnectionStatus(isConnected, statusInfo = null) {
   const statusDot = document.getElementById('connectionStatus');
   const statusText = document.getElementById('connectionText');
   
   if (isConnected) {
     statusDot.classList.add('connected');
-    statusDot.classList.remove('error');
+    statusDot.classList.remove('error', 'warning');
     statusText.textContent = 'Connected';
+    statusText.title = statusInfo?.lastSuccessful ? 
+      `Last successful: ${statusInfo.lastSuccessful.toLocaleTimeString()}` : 
+      'Connected to TLDW Server';
   } else {
     statusDot.classList.add('error');
-    statusDot.classList.remove('connected');
-    statusText.textContent = 'Disconnected';
+    statusDot.classList.remove('connected', 'warning');
+    
+    if (statusInfo?.consecutiveFailures > 0) {
+      statusText.textContent = `Disconnected (${statusInfo.consecutiveFailures} failures)`;
+      statusText.title = statusInfo.lastError ? 
+        `Last error: ${statusInfo.lastError.message}` : 
+        'Connection failed';
+    } else {
+      statusText.textContent = 'Disconnected';
+      statusText.title = 'Not connected to TLDW Server';
+    }
   }
 }
+
+// Enhanced connection monitoring
+let connectionCheckInterval = null;
+let isRetrying = false;
+
+function startConnectionMonitoring() {
+  // Check connection every 30 seconds
+  connectionCheckInterval = setInterval(async () => {
+    if (isRetrying) return; // Don't overlap with manual retries
+    
+    const isConnected = await apiClient.checkConnection();
+    const status = apiClient.getConnectionStatus();
+    updateConnectionStatus(isConnected, status);
+  }, 30000);
+}
+
+function stopConnectionMonitoring() {
+  if (connectionCheckInterval) {
+    clearInterval(connectionCheckInterval);
+    connectionCheckInterval = null;
+  }
+}
+
+async function retryConnection() {
+  if (isRetrying) return;
+  
+  isRetrying = true;
+  const statusText = document.getElementById('connectionText');
+  const originalText = statusText.textContent;
+  
+  try {
+    statusText.textContent = 'Retrying...';
+    const isConnected = await apiClient.checkConnection(true); // Enable retry
+    const status = apiClient.getConnectionStatus();
+    
+    updateConnectionStatus(isConnected, status);
+    
+    if (isConnected) {
+      toast.success('Reconnected to TLDW Server');
+      // Reload data after reconnection
+      loadPrompts();
+      loadCharacters();
+      loadMediaList();
+    } else {
+      toast.error('Failed to reconnect. Check your server settings.');
+    }
+  } catch (error) {
+    toast.error(`Connection retry failed: ${error.message}`);
+    statusText.textContent = originalText;
+  } finally {
+    isRetrying = false;
+  }
+}
+
+// Make updateConnectionStatus available globally for API client callback
+window.updateConnectionStatus = updateConnectionStatus;
 
 // Tab functionality
 function setupTabs() {
@@ -81,8 +256,7 @@ function setupEventListeners() {
     if (e.key === 'Enter') searchPrompts();
   });
   document.getElementById('createPrompt').addEventListener('click', () => {
-    // Open prompt creation dialog
-    alert('Prompt creation UI coming soon!');
+    openPromptModal();
   });
   document.getElementById('exportPrompts').addEventListener('click', exportPrompts);
   
@@ -115,6 +289,17 @@ function setupEventListeners() {
     e.preventDefault();
     browserAPI.tabs.create({ url: 'https://github.com/rmusser01/tldw_server' });
   });
+  
+  // Connection status retry
+  document.getElementById('connectionText').addEventListener('click', () => {
+    const status = apiClient.getConnectionStatus();
+    if (!status.isConnected) {
+      retryConnection();
+    }
+  });
+  
+  // Add cursor pointer style for disconnected status
+  document.getElementById('connectionText').style.cursor = 'pointer';
 }
 
 // Chat functionality
@@ -124,7 +309,7 @@ async function sendChatMessage() {
   const model = document.getElementById('modelSelect').value;
   
   if (!message || !model) {
-    alert('Please enter a message and select a model');
+    toast.warning('Please enter a message and select a model');
     return;
   }
   
@@ -171,6 +356,7 @@ async function sendChatMessage() {
   } catch (error) {
     console.error('Chat error:', error);
     addMessageToChat('system', `Error: ${error.message}`);
+    toast.error(`Chat request failed: ${error.message}`);
   }
 }
 
@@ -202,6 +388,7 @@ async function loadPrompts() {
     displayPrompts(response.prompts);
   } catch (error) {
     console.error('Failed to load prompts:', error);
+    toast.error('Failed to load prompts from server');
   }
 }
 
@@ -217,6 +404,7 @@ async function searchPrompts() {
     displayPrompts(response.results);
   } catch (error) {
     console.error('Search failed:', error);
+    toast.error('Prompt search failed');
   }
 }
 
@@ -247,11 +435,11 @@ function displayPrompts(prompts) {
     
     template.querySelector('.use-prompt').addEventListener('click', () => {
       selectedPromptTemplate = prompt.name;
-      alert(`Selected prompt: ${prompt.name}`);
+      toast.success(`Selected prompt: ${prompt.name}`);
     });
     
     template.querySelector('.edit-prompt').addEventListener('click', () => {
-      alert('Edit functionality coming soon!');
+      toast.info('Edit functionality is coming soon!');
     });
     
     container.appendChild(template);
@@ -284,7 +472,7 @@ async function exportPrompts() {
     }
   } catch (error) {
     console.error('Export failed:', error);
-    alert('Failed to export prompts');
+    toast.error('Failed to export prompts');
   }
 }
 
@@ -296,6 +484,7 @@ async function loadCharacters() {
     updateCharacterSelect(characters);
   } catch (error) {
     console.error('Failed to load characters:', error);
+    toast.error('Failed to load characters from server');
   }
 }
 
@@ -311,6 +500,7 @@ async function searchCharacters() {
     displayCharacters(characters);
   } catch (error) {
     console.error('Search failed:', error);
+    toast.error('Character search failed');
   }
 }
 
@@ -339,7 +529,7 @@ function displayCharacters(characters) {
     template.querySelector('.select-character').addEventListener('click', () => {
       selectedCharacterId = character.id.toString();
       document.getElementById('characterSelect').value = selectedCharacterId;
-      alert(`Selected character: ${character.name}`);
+      toast.success(`Selected character: ${character.name}`);
     });
     
     container.appendChild(template);
@@ -368,11 +558,11 @@ async function importCharacterFile(event) {
   
   try {
     const response = await apiClient.importCharacterCard(file);
-    alert(`Character imported successfully: ${response.character.name}`);
+    toast.success(`Character imported successfully: ${response.character.name}`);
     loadCharacters();
   } catch (error) {
     console.error('Import failed:', error);
-    alert('Failed to import character');
+    toast.error(`Failed to import character: ${error.message}`);
   }
 }
 
@@ -383,6 +573,7 @@ async function loadMediaList() {
     displayMediaItems(response.media_items);
   } catch (error) {
     console.error('Failed to load media:', error);
+    toast.error('Failed to load media items from server');
   }
 }
 
@@ -416,17 +607,17 @@ function displayMediaItems(items) {
 async function processMediaUrl() {
   const url = document.getElementById('mediaUrl').value.trim();
   if (!url) {
-    alert('Please enter a URL');
+    toast.warning('Please enter a URL');
     return;
   }
   
   try {
     const response = await apiClient.processMediaUrl(url);
-    alert('Media processed successfully!');
+    toast.success('Media processed successfully!');
     loadMediaList();
   } catch (error) {
     console.error('Processing failed:', error);
-    alert('Failed to process media');
+    toast.error(`Failed to process media: ${error.message}`);
   }
 }
 
@@ -451,11 +642,11 @@ async function processMediaFile(event) {
   
   try {
     const response = await apiClient.processMediaFile(file, endpoint);
-    alert('File processed successfully!');
+    toast.success('File processed successfully!');
     loadMediaList();
   } catch (error) {
     console.error('Processing failed:', error);
-    alert('Failed to process file');
+    toast.error(`Failed to process file: ${error.message}`);
   }
 }
 
@@ -464,7 +655,7 @@ async function viewMediaItem(id) {
     const item = await apiClient.getMediaItem(id);
     // Open in new tab or display in modal
     console.log('Media item:', item);
-    alert(`Viewing: ${item.title}`);
+    toast.info(`Viewing: ${item.title}`);
   } catch (error) {
     console.error('Failed to load media item:', error);
   }
@@ -480,5 +671,82 @@ async function summarizeMediaItem(id) {
     document.getElementById('chatInput').value = `Please summarize the following content:\n\n${item.content || item.transcript || 'Content not available'}`;
   } catch (error) {
     console.error('Failed to summarize:', error);
+    toast.error('Failed to load content for summarization');
+  }
+}
+
+// Modal functionality
+function openPromptModal() {
+  const modal = document.getElementById('prompt-modal');
+  modal.style.display = 'flex';
+  
+  // Reset form
+  document.getElementById('prompt-form').reset();
+  
+  // Setup event listeners
+  setupModalEventListeners();
+}
+
+function closePromptModal() {
+  const modal = document.getElementById('prompt-modal');
+  modal.style.display = 'none';
+}
+
+function setupModalEventListeners() {
+  // Close button
+  document.querySelector('.modal-close').onclick = closePromptModal;
+  
+  // Cancel button
+  document.getElementById('cancel-prompt').onclick = closePromptModal;
+  
+  // Save button
+  document.getElementById('save-prompt').onclick = saveNewPrompt;
+  
+  // Click outside to close
+  document.getElementById('prompt-modal').onclick = (e) => {
+    if (e.target.id === 'prompt-modal') {
+      closePromptModal();
+    }
+  };
+  
+  // Escape key to close
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closePromptModal();
+    }
+  });
+}
+
+async function saveNewPrompt() {
+  const name = document.getElementById('prompt-name').value.trim();
+  const details = document.getElementById('prompt-details').value.trim();
+  const content = document.getElementById('prompt-content').value.trim();
+  const keywordsText = document.getElementById('prompt-keywords').value.trim();
+  
+  if (!name || !content) {
+    toast.warning('Name and content are required');
+    return;
+  }
+  
+  const keywords = keywordsText ? keywordsText.split(',').map(k => k.trim()).filter(k => k) : [];
+  
+  const promptData = {
+    name: name,
+    details: details || null,
+    content: content,
+    keywords: keywords
+  };
+  
+  try {
+    const loadingToast = toast.loading('Creating prompt...');
+    const response = await apiClient.createPrompt(promptData);
+    toast.hide(loadingToast);
+    
+    toast.success(`Prompt "${name}" created successfully`);
+    closePromptModal();
+    loadPrompts(); // Refresh the prompts list
+  } catch (error) {
+    console.error('Failed to create prompt:', error);
+    toast.error(`Failed to create prompt: ${error.message}`);
   }
 }

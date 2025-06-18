@@ -117,6 +117,43 @@
     </footer>
   </div>
 
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Modal Dialog for Prompt Creation -->
+  <div id="prompt-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Create New Prompt</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="prompt-form">
+          <div class="form-group">
+            <label for="prompt-name">Name:</label>
+            <input type="text" id="prompt-name" class="form-control" required>
+          </div>
+          <div class="form-group">
+            <label for="prompt-details">Description:</label>
+            <textarea id="prompt-details" class="form-control" rows="2"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="prompt-content">Content:</label>
+            <textarea id="prompt-content" class="form-control" rows="6" required></textarea>
+          </div>
+          <div class="form-group">
+            <label for="prompt-keywords">Keywords (comma-separated):</label>
+            <input type="text" id="prompt-keywords" class="form-control">
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="cancel-prompt">Cancel</button>
+        <button type="button" class="btn btn-primary" id="save-prompt">Save Prompt</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Templates -->
   <template id="message-template">
     <div class="message">

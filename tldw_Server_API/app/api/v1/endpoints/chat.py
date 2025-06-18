@@ -6,6 +6,7 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 # Imports
 # ---------------------------------------------------------------------------
+from tldw_Server_API.app.core.config import AUTH_BEARER_PREFIX
 import asyncio
 import base64
 import datetime
@@ -249,7 +250,7 @@ async def create_chat_completion(
     if not expected_token:
         logger.critical("API_BEARER environment variable is not set. Authentication cannot be verified.")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server authentication is misconfigured.")
-    if Token.replace("Bearer ", "", 1).strip() != expected_token:
+    if Token.replace(AUTH_BEARER_PREFIX, "", 1).strip() != expected_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token.")
 
     if not request_data.messages:

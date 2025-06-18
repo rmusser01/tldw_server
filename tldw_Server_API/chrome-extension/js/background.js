@@ -38,13 +38,42 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
 // Handle keyboard shortcuts
 chrome.commands.onCommand.addListener(async (command) => {
-  if (command === 'send-to-chat') {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    chrome.tabs.sendMessage(tab.id, { action: 'getSelection' }, async (response) => {
-      if (response && response.text) {
-        await handleSendToChat(response.text, tab);
-      }
-    });
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  
+  switch (command) {
+    case 'send-to-chat':
+      chrome.tabs.sendMessage(tab.id, { action: 'getSelection' }, async (response) => {
+        if (response && response.text) {
+          await handleSendToChat(response.text, tab);
+        } else {
+          showNotification('No Text Selected', 'Please select some text first');
+        }
+      });
+      break;
+      
+    case 'save-as-prompt':
+      chrome.tabs.sendMessage(tab.id, { action: 'getSelection' }, async (response) => {
+        if (response && response.text) {
+          await handleSaveAsPrompt(response.text, tab);
+        } else {
+          showNotification('No Text Selected', 'Please select some text first');
+        }
+      });
+      break;
+      
+    case 'process-page':
+      await handleProcessAsMedia({ pageUrl: tab.url }, tab);
+      break;
+      
+    case 'quick-summarize':
+      chrome.tabs.sendMessage(tab.id, { action: 'getSelection' }, async (response) => {
+        if (response && response.text) {
+          await handleQuickSummarize(response.text, tab);
+        } else {
+          showNotification('No Text Selected', 'Please select some text first');
+        }
+      });
+      break;
   }
 });
 
@@ -131,8 +160,55 @@ async function handleSaveAsPrompt(text, tab) {
     sourceTitle: tab.title
   });
   
-  // Open options page to prompt creation section
-  chrome.runtime.openOptionsPage();
+  // Open popup to prompt creation
+  chrome.action.openPopup();
+  showNotification('Text Saved', 'Selected text ready for prompt creation');
+}
+
+async function handleQuickSummarize(text, tab) {
+  if (!text) return;
+  
+  try {
+    const config = await chrome.storage.sync.get(['serverUrl', 'apiToken']);
+    const response = await fetch(`${config.serverUrl || 'http://localhost:8000'}/api/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Token': `Bearer ${config.apiToken || ''}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4',
+        messages: [
+          {
+            role: 'user',
+            content: `Please provide a concise summary of the following text:\n\n${text}`
+          }
+        ],
+        stream: false
+      })
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      const summary = data.choices?.[0]?.message?.content || 'No summary generated';
+      
+      // Store summary for popup display
+      await chrome.storage.local.set({
+        quickSummary: summary,
+        summaryText: text,
+        sourceUrl: tab.url,
+        sourceTitle: tab.title
+      });
+      
+      showNotification('Summary Ready', 'Quick summary generated successfully');
+      chrome.action.openPopup();
+    } else {
+      showNotification('Summary Failed', 'Failed to generate summary');
+    }
+  } catch (error) {
+    console.error('Quick summarize error:', error);
+    showNotification('Summary Error', 'Failed to connect to server');
+  }
 }
 
 async function handleApiRequest(endpoint, options) {
@@ -173,26 +249,45 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
-// Periodic connection check
-setInterval(async () => {
-  try {
-    const config = await chrome.storage.sync.get(['serverUrl', 'apiToken']);
-    const response = await fetch(`${config.serverUrl || 'http://localhost:8000'}/api/v1/media/`, {
-      method: 'GET',
-      headers: {
-        'Token': `Bearer ${config.apiToken || ''}`
+// Enhanced periodic connection check with backoff
+let connectionFailures = 0;
+let maxFailures = 5;
+
+function scheduleConnectionCheck(delay = 30000) {
+  setTimeout(async () => {
+    try {
+      const config = await chrome.storage.sync.get(['serverUrl', 'apiToken']);
+      const response = await fetch(`${config.serverUrl || 'http://localhost:8000'}/api/v1/media/`, {
+        method: 'GET',
+        headers: {
+          'Token': `Bearer ${config.apiToken || ''}`
+        },
+        timeout: 10000
+      });
+      
+      // Update badge based on connection status
+      if (response.ok) {
+        chrome.action.setBadgeText({ text: '' });
+        connectionFailures = 0;
+        scheduleConnectionCheck(30000); // Normal interval
+      } else {
+        throw new Error(`HTTP ${response.status}`);
       }
-    });
-    
-    // Update badge based on connection status
-    if (response.ok) {
-      chrome.action.setBadgeText({ text: '' });
-    } else {
+    } catch (error) {
+      connectionFailures++;
       chrome.action.setBadgeText({ text: '!' });
       chrome.action.setBadgeBackgroundColor({ color: '#e74c3c' });
+      
+      // Exponential backoff for failed connections
+      const nextDelay = connectionFailures < maxFailures ? 
+        Math.min(30000 * Math.pow(2, connectionFailures - 1), 300000) : // Max 5 minutes
+        300000; // Check every 5 minutes after max failures
+      
+      console.log(`Connection check failed (${connectionFailures}/${maxFailures}), next check in ${nextDelay/1000}s`);
+      scheduleConnectionCheck(nextDelay);
     }
-  } catch (error) {
-    chrome.action.setBadgeText({ text: '!' });
-    chrome.action.setBadgeBackgroundColor({ color: '#e74c3c' });
-  }
-}, 30000); // Check every 30 seconds
+  }, delay);
+}
+
+// Start connection monitoring
+scheduleConnectionCheck(5000); // Initial check after 5 seconds

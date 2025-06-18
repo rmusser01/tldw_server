@@ -23,6 +23,33 @@ from loguru import logger#
 # Client ID used by the Server API itself when writing to sync logs
 SERVER_CLIENT_ID = "SERVER_API_V1"
 
+# --- CORS Configuration ---
+# List of allowed origins for CORS
+ALLOWED_ORIGINS = [
+    "http://localhost",
+    "http://localhost:8080",
+    "http://127.0.0.1",
+    "http://127.0.0.1:8080",
+    "https://localhost",
+    "https://localhost:8080",
+]
+
+# --- API Configuration ---
+# API version prefix for all endpoints
+API_V1_PREFIX = "/api/v1"
+
+# Authentication prefix
+AUTH_BEARER_PREFIX = "Bearer "
+
+# --- Server Configuration ---
+# Default server host and port
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8000
+
+# --- Database Configuration ---
+# Default database type
+DEFAULT_DB_TYPE = "sqlite3"
+
 # --- File Validation/YARA Settings ---
 YARA_RULES_PATH: Optional[str] = None # e.g., "/app/yara_rules/index.yar"
 MAGIC_FILE_PATH: Optional[str] = os.getenv("MAGIC_FILE_PATH", None) # e.g., "/app/magic.mgc"

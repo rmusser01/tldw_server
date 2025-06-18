@@ -135,7 +135,7 @@ async def lifespan(app: FastAPI):
 
 # --- FIX: Add CORS Middleware ---
 # Import from config
-from tldw_Server_API.app.core.config import ALLOWED_ORIGINS
+from tldw_Server_API.app.core.config import ALLOWED_ORIGINS, API_V1_PREFIX
 
 # Use configured origins
 origins = ALLOWED_ORIGINS if ALLOWED_ORIGINS else ["*"]
@@ -163,57 +163,57 @@ async def root():
     return {"message": "Welcome to the tldw API; If you're seeing this, the server is running!"}
 
 # Router for media endpoints/media file handling
-app.include_router(media_router, prefix="/api/v1/media", tags=["media"])
+app.include_router(media_router, prefix=f"{API_V1_PREFIX}/media", tags=["media"])
 
 # Router for /audio/ endpoints
-app.include_router(audio_router, prefix="/api/v1/audio", tags=["audio"])
+app.include_router(audio_router, prefix=f"{API_V1_PREFIX}/audio", tags=["audio"])
 
 
 # Router for chat endpoints/chat temp-file handling
-app.include_router(chat_router, prefix="/api/v1/chat", tags=["chat"])
+app.include_router(chat_router, prefix=f"{API_V1_PREFIX}/chat", tags=["chat"])
 
 
 # Router for chat endpoints/chat temp-file handling
-app.include_router(character_router, prefix="/api/v1/characters", tags=["character, persona"])
+app.include_router(character_router, prefix=f"{API_V1_PREFIX}/characters", tags=["character, persona"])
 
 
 # Router for Chunking Endpoint
-app.include_router(chunking_router, prefix="/api/v1/chunking", tags=["chunking"])
+app.include_router(chunking_router, prefix=f"{API_V1_PREFIX}/chunking", tags=["chunking"])
 
 
 # Router for Embedding Endpoint
-app.include_router(embeddings_router, prefix="/api/v1/embedding", tags=["embedding"])
+app.include_router(embeddings_router, prefix=f"{API_V1_PREFIX}/embedding", tags=["embedding"])
 
 
 # Router for Note Management endpoints
-app.include_router(notes_router, prefix="/api/v1/notes", tags=["notes"])
+app.include_router(notes_router, prefix=f"{API_V1_PREFIX}/notes", tags=["notes"])
 
 
 # Router for Prompt Management endpoints
-app.include_router(prompt_router, prefix="/api/v1/prompts", tags=["prompts"])
+app.include_router(prompt_router, prefix=f"{API_V1_PREFIX}/prompts", tags=["prompts"])
 
 
 # Router for RAG endpoint
-app.include_router(retrieval_agent_router, prefix="/api/v1/retrieval_agent", tags=["retrieval_agent"])
+app.include_router(retrieval_agent_router, prefix=f"{API_V1_PREFIX}/retrieval_agent", tags=["retrieval_agent"])
 
 
 # Router for Research endpoint
-app.include_router(research_router, prefix="/api/v1/research", tags=["research"])
+app.include_router(research_router, prefix=f"{API_V1_PREFIX}/research", tags=["research"])
 
 
 # Router for Sync endpoint
-app.include_router(sync_router, prefix="/api/v1/sync", tags=["sync"])
+app.include_router(sync_router, prefix=f"{API_V1_PREFIX}/sync", tags=["sync"])
 
 
 # Router for Tools endpoint
-app.include_router(tools_router, prefix="/api/v1/tools", tags=["tools"])
+app.include_router(tools_router, prefix=f"{API_V1_PREFIX}/tools", tags=["tools"])
 
 
 # Router for trash endpoints - deletion of media items / trash file handling (FIXME: Secure delete vs lag on delete?)
-#app.include_router(trash_router, prefix="/api/v1/trash", tags=["trash"])
+#app.include_router(trash_router, prefix=f"{API_V1_PREFIX}/trash", tags=["trash"])
 
 # Router for authentication endpoint
-#app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+#app.include_router(auth_router, prefix=f"{API_V1_PREFIX}/auth", tags=["auth"])
 # The docs at http://localhost:8000/docs will show an “Authorize” button. You can log in by calling POST /api/v1/auth/login with a form that includes username and password. The docs interface is automatically aware because we used OAuth2PasswordBearer.
 
 # Health check
