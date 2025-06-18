@@ -53,9 +53,39 @@
 
       <!-- Prompts Tab -->
       <div id="prompts-tab" class="tab-pane">
-        <div class="search-container">
-          <input type="text" id="promptSearch" class="search-input" placeholder="Search prompts...">
-          <button id="searchPromptsBtn" class="btn btn-secondary">Search</button>
+        <div class="enhanced-search-container">
+          <div class="search-input-group">
+            <input type="text" id="promptSearch" class="search-input" placeholder="Search prompts...">
+            <button id="searchPromptsBtn" class="btn btn-secondary">Search</button>
+            <button id="clearPromptSearch" class="btn btn-icon" title="Clear search">✕</button>
+          </div>
+          
+          <div class="search-filters">
+            <select id="promptSortBy" class="form-control">
+              <option value="name">Sort by Name</option>
+              <option value="created_at">Sort by Date</option>
+              <option value="usage">Sort by Usage</option>
+            </select>
+            <select id="promptFilterBy" class="form-control">
+              <option value="">All Categories</option>
+              <option value="writing">Writing</option>
+              <option value="analysis">Analysis</option>
+              <option value="coding">Coding</option>
+              <option value="creative">Creative</option>
+              <option value="business">Business</option>
+            </select>
+          </div>
+          
+          <div class="search-suggestions" id="promptSearchSuggestions" style="display: none;">
+            <!-- Search suggestions will be populated here -->
+          </div>
+          
+          <div class="recent-searches" id="promptRecentSearches" style="display: none;">
+            <div class="recent-header">Recent Searches</div>
+            <div class="recent-items" id="promptRecentItems">
+              <!-- Recent searches will be populated here -->
+            </div>
+          </div>
         </div>
         
         <div class="prompts-list" id="promptsList">
@@ -70,9 +100,38 @@
 
       <!-- Characters Tab -->
       <div id="characters-tab" class="tab-pane">
-        <div class="search-container">
-          <input type="text" id="characterSearch" class="search-input" placeholder="Search characters...">
-          <button id="searchCharactersBtn" class="btn btn-secondary">Search</button>
+        <div class="enhanced-search-container">
+          <div class="search-input-group">
+            <input type="text" id="characterSearch" class="search-input" placeholder="Search characters...">
+            <button id="searchCharactersBtn" class="btn btn-secondary">Search</button>
+            <button id="clearCharacterSearch" class="btn btn-icon" title="Clear search">✕</button>
+          </div>
+          
+          <div class="search-filters">
+            <select id="characterSortBy" class="form-control">
+              <option value="name">Sort by Name</option>
+              <option value="created_at">Sort by Date</option>
+              <option value="popularity">Sort by Popularity</option>
+            </select>
+            <select id="characterFilterBy" class="form-control">
+              <option value="">All Types</option>
+              <option value="assistant">Assistant</option>
+              <option value="creative">Creative</option>
+              <option value="roleplay">Roleplay</option>
+              <option value="expert">Expert</option>
+            </select>
+          </div>
+          
+          <div class="search-suggestions" id="characterSearchSuggestions" style="display: none;">
+            <!-- Search suggestions will be populated here -->
+          </div>
+          
+          <div class="recent-searches" id="characterRecentSearches" style="display: none;">
+            <div class="recent-header">Recent Searches</div>
+            <div class="recent-items" id="characterRecentItems">
+              <!-- Recent searches will be populated here -->
+            </div>
+          </div>
         </div>
         
         <div class="characters-grid" id="charactersList">
@@ -98,6 +157,30 @@
             <label>Or upload a file:</label>
             <input type="file" id="mediaFileInput" accept="video/*,audio/*,.pdf,.epub,.doc,.docx">
             <button id="processFile" class="btn btn-primary">Process File</button>
+          </div>
+          
+          <div class="batch-operations">
+            <h4>Batch Operations</h4>
+            <div class="batch-buttons">
+              <button id="processAllTabs" class="btn btn-secondary batch-btn">
+                <span class="batch-icon">🗂️</span>
+                Process All Tabs
+              </button>
+              <button id="saveAllBookmarks" class="btn btn-secondary batch-btn">
+                <span class="batch-icon">🔖</span>
+                Save All Bookmarks
+              </button>
+              <button id="processSelectedTabs" class="btn btn-secondary batch-btn">
+                <span class="batch-icon">☑️</span>
+                Process Selected
+              </button>
+            </div>
+            <div id="batchProgress" class="batch-progress" style="display: none;">
+              <div class="progress-bar">
+                <div class="progress-fill" id="batchProgressFill"></div>
+              </div>
+              <div class="progress-text" id="batchProgressText">0/0 completed</div>
+            </div>
           </div>
         </div>
         

@@ -4,8 +4,68 @@
 // Browser API compatibility
 const browserAPI = (typeof browser !== 'undefined') ? browser : chrome;
 
+// Cleanup tracking
+const eventListeners = new Map();
+let isContentScriptActive = true;
+
+// Helper function to add tracked event listeners
+function addTrackedEventListener(element, event, handler, options = false) {
+  const key = `${element.constructor.name}-${event}-${handler.name}`;
+  if (!eventListeners.has(key)) {
+    element.addEventListener(event, handler, options);
+    eventListeners.set(key, { element, event, handler, options });
+  }
+}
+
+// Helper function to remove tracked event listeners
+function removeTrackedEventListener(element, event, handler) {
+  const key = `${element.constructor.name}-${event}-${handler.name}`;
+  if (eventListeners.has(key)) {
+    element.removeEventListener(event, handler);
+    eventListeners.delete(key);
+  }
+}
+
+// Cleanup function for when content script is unloaded
+function cleanupContentScript() {
+  isContentScriptActive = false;
+  
+  // Remove all tracked event listeners
+  eventListeners.forEach(({ element, event, handler }) => {
+    try {
+      element.removeEventListener(event, handler);
+    } catch (e) {
+      console.warn('Error removing event listener:', e);
+    }
+  });
+  eventListeners.clear();
+  
+  // Clear timeouts
+  if (selectionTimeout) {
+    clearTimeout(selectionTimeout);
+    selectionTimeout = null;
+  }
+  
+  // Remove floating button
+  if (floatingButton && floatingButton.parentNode) {
+    floatingButton.parentNode.removeChild(floatingButton);
+    floatingButton = null;
+  }
+  
+  // Remove quick actions menu
+  removeQuickActions();
+  
+  // Disable element highlighting
+  disableElementHighlight();
+}
+
+// Listen for page unload to cleanup
+window.addEventListener('beforeunload', cleanupContentScript);
+
 // Listen for messages from the background script
 browserAPI.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (!isContentScriptActive) return;
+  
   if (request.action === 'getSelection') {
     const selectedText = window.getSelection().toString();
     sendResponse({ text: selectedText });
@@ -50,15 +110,17 @@ function createFloatingButton() {
     display: none;
   `;
   
-  button.addEventListener('mouseenter', () => {
+  const mouseEnterHandler = () => {
     button.style.transform = 'scale(1.1)';
-  });
+  };
   
-  button.addEventListener('mouseleave', () => {
+  const mouseLeaveHandler = () => {
     button.style.transform = 'scale(1)';
-  });
+  };
   
-  button.addEventListener('click', handleFloatingButtonClick);
+  addTrackedEventListener(button, 'mouseenter', mouseEnterHandler);
+  addTrackedEventListener(button, 'mouseleave', mouseLeaveHandler);
+  addTrackedEventListener(button, 'click', handleFloatingButtonClick);
   
   return button;
 }
@@ -125,7 +187,7 @@ function showQuickActions(x, y, text) {
   
   // Remove menu when clicking outside
   setTimeout(() => {
-    document.addEventListener('click', removeQuickActions);
+    addTrackedEventListener(document, 'click', removeQuickActions);
   }, 100);
 }
 
@@ -134,7 +196,7 @@ function removeQuickActions() {
   if (menu) {
     menu.remove();
   }
-  document.removeEventListener('click', removeQuickActions);
+  removeTrackedEventListener(document, 'click', removeQuickActions);
 }
 
 function handleQuickAction(action, text) {
@@ -173,16 +235,20 @@ function throttledSelectionCheck() {
 }
 
 // Monitor text selection with throttling
-document.addEventListener('mouseup', () => {
+const mouseUpHandler = () => {
+  if (!isContentScriptActive) return;
   clearTimeout(selectionTimeout);
   selectionTimeout = setTimeout(throttledSelectionCheck, 200);
-});
+};
 
-// Also check on selection change (keyboard selection)
-document.addEventListener('selectionchange', () => {
+const selectionChangeHandler = () => {
+  if (!isContentScriptActive) return;
   clearTimeout(selectionTimeout);
   selectionTimeout = setTimeout(throttledSelectionCheck, 300);
-});
+};
+
+addTrackedEventListener(document, 'mouseup', mouseUpHandler);
+addTrackedEventListener(document, 'selectionchange', selectionChangeHandler);
 
 // Initialize content script
 function initContentScript() {
@@ -195,7 +261,8 @@ function initContentScript() {
   });
   
   // Add keyboard shortcuts
-  document.addEventListener('keydown', (e) => {
+  const keydownHandler = (e) => {
+    if (!isContentScriptActive) return;
     // Ctrl/Cmd + Shift + T: Send selection to chat
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'T') {
       e.preventDefault();
@@ -204,22 +271,24 @@ function initContentScript() {
         handleQuickAction('sendToChat', selectedText);
       }
     }
-  });
+  };
+  
+  addTrackedEventListener(document, 'keydown', keydownHandler);
 }
 
 // Highlight elements on hover (for future element selection feature)
 let highlightedElement = null;
 
 function enableElementHighlight() {
-  document.addEventListener('mouseover', highlightElement);
-  document.addEventListener('mouseout', unhighlightElement);
-  document.addEventListener('click', selectElement);
+  addTrackedEventListener(document, 'mouseover', highlightElement);
+  addTrackedEventListener(document, 'mouseout', unhighlightElement);
+  addTrackedEventListener(document, 'click', selectElement);
 }
 
 function disableElementHighlight() {
-  document.removeEventListener('mouseover', highlightElement);
-  document.removeEventListener('mouseout', unhighlightElement);
-  document.removeEventListener('click', selectElement);
+  removeTrackedEventListener(document, 'mouseover', highlightElement);
+  removeTrackedEventListener(document, 'mouseout', unhighlightElement);
+  removeTrackedEventListener(document, 'click', selectElement);
   unhighlightElement();
 }
 
