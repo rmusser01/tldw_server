@@ -149,21 +149,39 @@ function handleQuickAction(action, text) {
   });
 }
 
-// Monitor text selection
+// Optimized text selection monitoring with throttling
+let lastSelectionCheck = 0;
+const SELECTION_THROTTLE_MS = 300;
+
+function throttledSelectionCheck() {
+  const now = Date.now();
+  if (now - lastSelectionCheck < SELECTION_THROTTLE_MS) {
+    return;
+  }
+  lastSelectionCheck = now;
+  
+  const selectedText = window.getSelection().toString().trim();
+  if (selectedText && selectedText.length > 10) {
+    if (floatingButton) {
+      floatingButton.style.display = 'flex';
+    }
+  } else {
+    if (floatingButton) {
+      floatingButton.style.display = 'none';
+    }
+  }
+}
+
+// Monitor text selection with throttling
 document.addEventListener('mouseup', () => {
   clearTimeout(selectionTimeout);
-  selectionTimeout = setTimeout(() => {
-    const selectedText = window.getSelection().toString().trim();
-    if (selectedText && selectedText.length > 10) {
-      if (floatingButton) {
-        floatingButton.style.display = 'flex';
-      }
-    } else {
-      if (floatingButton) {
-        floatingButton.style.display = 'none';
-      }
-    }
-  }, 500);
+  selectionTimeout = setTimeout(throttledSelectionCheck, 200);
+});
+
+// Also check on selection change (keyboard selection)
+document.addEventListener('selectionchange', () => {
+  clearTimeout(selectionTimeout);
+  selectionTimeout = setTimeout(throttledSelectionCheck, 300);
 });
 
 // Initialize content script
