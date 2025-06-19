@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/RAG/rag_service/integration.py
+# hypothesis_version: 6.135.11
+
+[200, 500, ',', '...', '.tldw_chatbook', 'ChatHistory', 'FTS', 'Hybrid', 'Keyword', 'MEDIA_DB', 'MediaDB', 'NOTES', 'Notes', 'RAG service closed', 'Untitled', 'answer', 'cache', 'cache_enabled', 'chroma', 'citation', 'close', 'config', 'content', 'context', 'context_preview', 'context_size', 'hybrid_search_alpha', 'id', 'initialized', 'keywords', 'metadata', 'reranking_enabled', 'score', 'snippet', 'source', 'source_documents', 'sources', 'title', 'type']

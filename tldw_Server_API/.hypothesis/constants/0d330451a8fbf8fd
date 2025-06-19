@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/RAG/rag_service/generation.py
+# hypothesis_version: 6.135.11
+
+[0.01, 0.5, 0.7, 100, 197, 200, 1024, '. ', '...', 'Untitled', '_', 'content', 'conversation_title', 'default_generator', 'default_model', 'default_provider', 'default_temperature', 'fallback', 'generate_response', 'generator', 'llm', 'max_tokens', 'mock_delay', 'model', 'provider', 'stream', 'stream_chunk_size', 'stream_response', 'streaming', 'temperature', 'text', 'title']

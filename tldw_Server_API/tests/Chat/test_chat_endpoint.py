@@ -751,8 +751,8 @@ def test_create_chat_completion_with_tools_unit(
     tool_choice_payload = ToolChoiceOption(type="function", function=ToolChoiceFunction(name="get_current_weather"))
 
     request_with_tools = default_chat_request_data.model_copy(update={
-        "tools": [t.model_dump(exclude_none=True) for t in tools_payload],  # Must be dicts
-        "tool_choice": tool_choice_payload.model_dump(exclude_none=True)  # Must be dict
+        "tools": tools_payload,  # Pass the actual ToolDefinition objects
+        "tool_choice": tool_choice_payload  # Pass the actual ToolChoiceOption object
     })
     request_data_dict = request_with_tools.model_dump(exclude_none=True)
 

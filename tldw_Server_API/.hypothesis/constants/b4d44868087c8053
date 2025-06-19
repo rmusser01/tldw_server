@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/Third_Party/Semantic_Scholar.py
+# hypothesis_version: 6.135.11
+
+[429, 500, 502, 503, 504, ',', ', ', '-', 'Art', 'Biology', 'Book', 'BookSection', 'Business', 'CaseReport', 'Chemistry', 'ClinicalTrial', 'Computer Science', 'Conference', 'Dataset', 'Economics', 'Editorial', 'Education', 'Engineering', 'GET', 'Geography', 'Geology', 'HEAD', 'History', 'JournalArticle', 'Law', 'LettersAndComments', 'Linguistics', 'Materials Science', 'Mathematics', 'Medicine', 'MetaAnalysis', 'News', 'OPTIONS', 'Philosophy', 'Physics', 'Political Science', 'Psychology', 'Review', 'Sociology', 'Study', 'authors', 'data', 'fields', 'fieldsOfStudy', 'http://', 'https://', 'limit', 'minCitationCount', 'name', 'next', 'offset', 'openAccessPdf', 'publicationTypes', 'query', 'total', 'venue', 'year']

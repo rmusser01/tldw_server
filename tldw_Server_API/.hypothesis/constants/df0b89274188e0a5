@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/services/web_scraping_service.py
+# hypothesis_version: 6.135.11
+
+[1.0, 500, ',', 'Individual URLs', 'No summary available', 'Recursive Scraping', 'Sitemap', 'Text', 'URL Level', 'Unknown', 'Untitled', 'articles', 'author', 'content', 'ephemeral', 'ephemeral-ok', 'media_id', 'media_ids', 'persist', 'persist-ok', 'results', 'scrape_method', 'source', 'status', 'summary', 'title', 'total_articles', 'url', 'web-scraping-import', 'web_document']

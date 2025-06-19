@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/endpoints/audio.py
+# hypothesis_version: 6.135.11
+
+[b'--final_boundary_for_non_streamed--', 0.1, 404, '/speech', '/v1/audio', '21m00Tcm4TlvDq8ikWAM', 'Cache-Control', 'Content-Disposition', 'Not found', 'Rachel', 'X-Accel-Buffering', 'aac', 'af_bella', 'alloy', 'audio/aac', 'audio/flac', 'audio/mpeg', 'audio/opus', 'audio/wav', 'bella', 'description', 'echo', 'eleven_english_v1', 'error', 'fable', 'flac', 'invalid_model', 'kokoro_local', 'message', 'models', 'mp3', 'no', 'no-cache', 'nova', 'onyx', 'opus', 'pcm', 'shimmer', 'tts-1', 'tts-1-hd', 'type', 'voices', 'wav']

@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/RAG/rag_service/cache.py
+# hypothesis_version: 6.135.11
+
+[1000, 'Cache cleared', 'cache', 'hit_rate', 'hits', 'max_size', 'misses', 'r', 'size', 'stats', 'timestamp', 'total_requests', 'ttl', 'utf-8', 'value', 'w']

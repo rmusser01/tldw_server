@@ -60,7 +60,7 @@ class UserRAGServiceCache:
                     try:
                         entry['service'].cleanup()
                     except Exception as e:
-                        logger.warning(f"Error cleaning up RAG service for user {user_id}: {e}")
+                        logging.warning(f"Error cleaning up RAG service for user {user_id}: {e}")
                 del self._cache[user_id]
                 return None
             
@@ -75,7 +75,7 @@ class UserRAGServiceCache:
                     try:
                         old_entry['service'].cleanup()
                     except Exception as e:
-                        logger.warning(f"Error cleaning up old RAG service for user {user_id}: {e}")
+                        logging.warning(f"Error cleaning up old RAG service for user {user_id}: {e}")
             
             self._cache[user_id] = {
                 'service': service,
@@ -95,7 +95,7 @@ class UserRAGServiceCache:
                         try:
                             entry['service'].cleanup()
                         except Exception as e:
-                            logger.warning(f"Error cleaning up RAG service for user {user_id}: {e}")
+                            logging.warning(f"Error cleaning up RAG service for user {user_id}: {e}")
             
             for user_id in expired_users:
                 del self._cache[user_id]
@@ -114,6 +114,11 @@ class UserRAGServiceCache:
                     except Exception as e:
                         logging.warning(f"Error cleaning up RAG service during cache clear: {e}")
             self._cache.clear()
+    
+    def __contains__(self, user_id: int) -> bool:
+        """Check if a user has a cached service."""
+        with self._lock:
+            return user_id in self._cache
 
 _user_rag_services = UserRAGServiceCache()
 
@@ -374,10 +379,10 @@ async def run_retrieval_agent(
                             "content": msg.get('content', '')
                         })
                 
-                logger.info(f"Loaded {len(conversation_history)} messages from conversation {request_body.conversation_id}")
+                logging.info(f"Loaded {len(conversation_history)} messages from conversation {request_body.conversation_id}")
                 
             except Exception as e:
-                logger.warning(f"Failed to load conversation history for {request_body.conversation_id}: {e}")
+                logging.warning(f"Failed to load conversation history for {request_body.conversation_id}: {e}")
                 # Continue without history rather than failing the request
                 conversation_history = []
             

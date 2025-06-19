@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/Third_Party/Arxiv.py
+# hypothesis_version: 6.135.11
+
+[0.5, 429, 500, 502, 503, 504, '+AND+', ', ', '/abs/', 'N/A', 'T', 'abstract', 'all:*', 'application/pdf', 'author', 'authors', 'category', 'descending', 'entry', 'href', 'http://', 'https://', 'id', 'link', 'lxml-xml', 'max_results', 'name', 'pdf', 'pdf_url', 'published', 'published_date', 'rel', 'related', 'relevance', 'search_query', 'sortBy', 'sortOrder', 'start', 'summary', 'term', 'title', 'type', 'xml']

@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/endpoints/research.py
+# hypothesis_version: 6.135.11
+
+[400, 500, 502, 504, 600, '%Y-%m-%d', ', ', '/arxiv-search', 'HTTP Error', 'None', 'Search arXiv Papers', 'X-Token', 'author', 'data', 'document', 'fields_of_study', 'min_citations', 'next', 'offset', 'openAccessPdf', 'publication_types', 'query', 'timed out', 'total', 'venue', 'year', 'year_range']

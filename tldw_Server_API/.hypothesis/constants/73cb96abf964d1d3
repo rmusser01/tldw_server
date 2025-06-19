@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/endpoints/characters_endpoint.py
+# hypothesis_version: 6.135.11
+
+[100, 1000, '/', '/import', '/search/', '/{character_id}', 'Characters', 'Create character', 'Delete character', 'Get character by ID', 'ID of the character.', 'List characters', 'N/A', 'Search characters', 'Update character', 'alternate_greetings', 'entity_id', 'extensions', 'id', 'image', 'image_base64', 'image_present', 'name', 'tags', 'utf-8', 'version']

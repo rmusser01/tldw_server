@@ -9,7 +9,7 @@ from typing import Dict, List, Any, Optional, Literal
 #
 # 3rd-party imports
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, validator, computed_field, field_validator
+from pydantic import BaseModel, Field, validator, computed_field, field_validator, ConfigDict
 from pydantic_core.core_schema import ValidationInfo
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.MediaWiki.Media_Wiki import load_mediawiki_import_config
@@ -33,10 +33,11 @@ class MediaItemResponse(BaseModel):
     keywords: List[str]
     timestamps: List[str]
 
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             datetime: lambda v: v.isoformat()
         }
+    )
 
 class PaginationInfo(BaseModel):
     page: int
@@ -202,9 +203,9 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
 
     # Use alias for 'keywords' field to accept 'keywords' in the form data
     # but internally work with 'keywords_str' before parsing.
-    model_config = {
-        "populate_by_name": True # Allows using 'alias' for fields
-    }
+    model_config = ConfigDict(
+        populate_by_name=True  # Allows using 'alias' for fields
+    )
 
     @field_validator('start_time', 'end_time')
     @classmethod
@@ -244,9 +245,9 @@ class MediaItemProcessResponse(BaseModel):
     analysis_details: Optional[Dict[str, Any]] # e.g., whisper model used, summarization prompt
     error: Optional[str] # Detailed error message if status != 'Success'
     warnings: Optional[List[str]] # For non-critical issues
-    model_config = {
-        "extra": "forbid",  # Disallow extra fields not defined in the model
-    }
+    model_config = ConfigDict(
+        extra="forbid"  # Disallow extra fields not defined in the model
+    )
 
 ######################## Video Ingestion Model ###################################
 #
