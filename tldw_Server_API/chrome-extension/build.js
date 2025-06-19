@@ -20,7 +20,8 @@ const FILES_TO_COPY = [
   'js/content.js',
   'js/options.js',
   'js/popup.js',
-  'js/utils/'
+  'js/utils/',
+  'js/background-v2.js'
 ];
 
 // Clean build directory
@@ -98,10 +99,6 @@ function buildChromeV2() {
   // Copy V2 specific files
   fs.copyFileSync('manifest-v2.json', path.join(CHROME_V2_DIR, 'manifest.json'));
   
-  // Copy the background-v2.js as background.js (since manifest references background.js)
-  const bgScriptDest = path.join(CHROME_V2_DIR, 'js/background.js');
-  fs.copyFileSync('js/background-v2.js', bgScriptDest);
-  
   console.log('Chrome V2 build complete!');
 }
 
@@ -115,12 +112,8 @@ function buildFirefox() {
   // Copy V2 manifest (Firefox uses V2)
   fs.copyFileSync('manifest-v2.json', path.join(FIREFOX_DIR, 'manifest.json'));
   
-  // Copy the background-v2.js as background.js (since manifest references background.js)
-  const bgScriptDest = path.join(FIREFOX_DIR, 'js/background.js');
-  fs.copyFileSync('js/background-v2.js', bgScriptDest);
-  
-  // Update popup and options scripts to use compat-utils
-  updateScriptsForFirefox(FIREFOX_DIR);
+  // Skip updating scripts for Firefox - they already have browser API compatibility
+  // updateScriptsForFirefox(FIREFOX_DIR);
   
   console.log('Firefox build complete!');
   console.log('To load in Firefox: about:debugging → This Firefox → Load Temporary Add-on');
@@ -130,7 +123,8 @@ function buildFirefox() {
 // Update scripts for Firefox compatibility
 function updateScriptsForFirefox(targetDir) {
   const scriptsToUpdate = [
-    'js/popup.js',
+    // popup.js already has browser API compatibility built in
+    // 'js/popup.js',
     'js/options.js',
     'js/content.js'
   ];
