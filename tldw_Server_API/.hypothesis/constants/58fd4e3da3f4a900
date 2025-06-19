@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/RAG/rag_service/config.py
-# hypothesis_version: 6.135.11
-
-[0.5, 0.7, 0.85, 128, 384, 512, 1000, 1024, 3600, 4096, '.config', 'INFO', 'RAGConfig', 'RAG_DEFAULT_MODEL', 'RAG_ENABLE_CACHE', 'RAG_ENABLE_RERANKING', 'RAG_FTS_TOP_K', 'RAG_VECTOR_TOP_K', 'all-MiniLM-L6-v2', 'batch_size', 'cache', 'character_embeddings', 'chat_embeddings', 'chroma', 'config.toml', 'cosine', 'default_model', 'enable_cache', 'enable_reranking', 'fts_top_k', 'generator', 'log_level', 'media_embeddings', 'notes_embeddings', 'num_workers', 'persist_directory', 'processor', 'rag', 'rb', 'retriever', 'tldw_cli', 'tldw_rag', 'true', 'use_gpu', 'vector_top_k', 'weighted']

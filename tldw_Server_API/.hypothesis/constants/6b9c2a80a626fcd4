@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/Security/Security.py
-# hypothesis_version: 6.135.11
-
-['HS256', 'JWT_SECRET_KEY', 'auto', 'bcrypt', 'exp', 'iat', 'sub', 'user_id']

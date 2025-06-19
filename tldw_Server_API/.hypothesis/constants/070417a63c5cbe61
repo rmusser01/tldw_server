@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/Prompt_Management/Prompts_Interop.py
-# hypothesis_version: 6.135.11
-
-['\n--- Adding Data ---', '\n--- Sync Log ---', ':memory:', 'Another test prompt.', 'Basic Template', 'Interop Test', 'My First Prompt', 'My Second Prompt', 'None', 'Tell me a joke.', 'Write a short story.', '__main__', 'change_id', 'csv', 'details', 'example', 'funny', 'keywords', 'story', 'test']

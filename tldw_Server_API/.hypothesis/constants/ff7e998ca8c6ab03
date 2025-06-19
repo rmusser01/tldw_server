@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/schemas/media_request_models.py
-# hypothesis_version: 6.135.11
-
-[100, 200, 300, 400, 500, 1000, ',', 'Error', 'Pending', 'Skip redirect pages.', 'Success', 'Type of media', 'Warning', '\\d+', '\\d{1,2}:\\d{2}:\\d{2}', 'audio', 'before', 'chunk_method', 'chunk_overlap', 'chunk_size', 'chunking', 'content', 'cookies', 'default_size', 'distil-large-v3', 'docling', 'document', 'ebook', 'ebook_chapters', 'en', 'end_time', 'english', 'forbid', 'individual', 'json', 'keywords', 'paragraphs', 'pdf', 'persist', 'pymupdf', 'pymupdf4llm', 'recursive_scraping', 'relevance', 'semantic', 'sentences', 'sitemap', 'start_time', 'title', 'tokens', 'url_level', 'use_cookies', 'video', 'words']

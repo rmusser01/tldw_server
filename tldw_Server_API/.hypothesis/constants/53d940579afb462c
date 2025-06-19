@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/schemas/media_response_models.py
-# hypothesis_version: 6.135.11
-
-[120.5, 3600.5, 123, 456, 1500, 8500, '/api/v1/media/123', '00:00:00', '00:00:05', '00:00:15', '00:01:12', '01:15:30', 'Alice', 'Bob', 'Extracted metadata.', 'Item processed.', 'Jane Doe', 'My Awesome Video', 'My Video', 'My XML Document', 'Searchable Document', 'Success', 'Tech Podcast Ep. 5', 'Type of the media.', 'Understanding AI', 'ai', 'allow', 'analysis', 'audio', 'content', 'document', 'duration', 'eph-xyz123', 'episode', 'example', 'guests', 'important', 'keywords', 'machine learning', 'media_id', 'metadata', 'model', 'persist-ok', 'podcast', 'processing', 'prompt', 'search', 'source', 'success', 'summary', 'tech', 'technology', 'text', 'timestamp_option', 'timestamps', 'title', 'transcription_model', 'type', 'url', 'video', 'whisper-large-v3', 'word_count']

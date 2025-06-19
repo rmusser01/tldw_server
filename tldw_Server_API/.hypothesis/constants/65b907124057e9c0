@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/schemas/sync_server_models.py
-# hypothesis_version: 6.135.11
-
-[12340, 12345, 12346, 12350, '2023-10-27T10:30:00Z', '2023-10-27T10:35:00Z', '2023-10-27T11:00:00Z', 'Keywords', 'Media', 'change_id', 'changes', 'client_abc_123', 'client_id', 'client_other_456', 'client_xyz_789', 'create', 'entity', 'entity_uuid', 'example', 'latest_change_id', 'operation', 'payload', 'timestamp', 'update', 'version']
