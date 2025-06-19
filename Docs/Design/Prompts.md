@@ -64,7 +64,7 @@ https://github.com/xufangzhi/phi-Decoding
     https://arxiv.org/html/2503.13288v1
 https://github.com/elder-plinius/CL4R1T4S/tree/main
 COSTAR
-Context, Objective, Style, Tone, Audience, Response
+Context, Objective, Style, Tone, Audience, Response 
 https://towardsdatascience.com/how-i-won-singapores-gpt-4-prompt-engineering-competition-34c195a93d41
 ```
 Context: This is about setting the stage. You tell the AI the backstory of what you’re asking. Imagine saying, “We’re planning a birthday party,” instead of just blurting out, “How do I bake a cake?” This way, the AI gets the full picture and can give you a better answer.
