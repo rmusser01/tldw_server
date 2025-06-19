@@ -170,7 +170,11 @@ filterwarnings = [
 ]
 markers = [
     "unit: marks tests as unit tests",
-    # add other custom marks here
+    "integration: marks tests as integration tests",
+    "external_api: marks tests that require external API access",
+    "local_llm_service: marks tests that require local LLM service",
+    "timeout: marks tests with custom timeout settings", 
+    "benchmark: marks performance benchmark tests"
 ]
 ###########################
 # Async.io

@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/RAG/rag_service/utils.py
-# hypothesis_version: 6.135.11
-
-[0.0, 0.5, 0.8, 0.85, 1.0, 128, 512, 'Unknown', '\\b\\w+\\b', 'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'but', 'by', 'can', 'cannot', 'chunk_index', 'cl100k_base', 'could', 'did', 'do', 'document_id', 'does', 'for', 'from', 'gpt-3.5-turbo', 'had', 'has', 'have', 'id', 'in', 'is', 'may', 'metadata', 'might', 'minmax', 'must', 'of', 'on', 'or', 'score', 'shall', 'should', 'source_id', 'source_type', 'the', 'title', 'to', 'utf-8', 'was', 'were', 'will', 'with', 'would', 'zscore']

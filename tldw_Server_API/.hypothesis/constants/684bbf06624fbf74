@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/schemas/audio_schemas.py
-# hypothesis_version: 6.135.11
-
-[0.25, 1.0, 4.0, 'aac', 'af_heart', 'flac', 'kokoro', 'mp3', 'opus', 'pcm', 'wav']

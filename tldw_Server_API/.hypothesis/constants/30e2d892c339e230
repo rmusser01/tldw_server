@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/LLM_Calls/Local_Summarization_Lib.py
-# hypothesis_version: 6.135.11
-
-[0.7, 0.95, 200, 429, 500, 502, 503, 504, 4096, 8096, 'Authorization', 'Content-Type', '[DONE]', '_summary.txt', 'accept', 'api_ip', 'api_key', 'api_keys', 'api_retries', 'api_retry_delay', 'api_timeout', 'api_url', 'application/json', 'chat', 'choices', 'content', 'content-type', 'created', 'custom_openai_api', 'custom_openai_api_2', 'data:', 'data: ', 'delta', 'done', 'http://', 'https://', 'id', 'kobold', 'kobold_api', 'kobold_openai', 'llama_api', 'local_api_ip', 'max_context_length', 'max_length', 'max_tokens', 'message', 'messages', 'min_tokens', 'mode', 'model', 'models', 'object', 'ollama_api', 'ooba_api', 'prompt', 'response', 'results', 'role', 'segments', 'stream', 'streaming', 'summary', 'system', 'tabby', 'tabby_api', 'temperature', 'text', 'top_p', 'true', 'usage', 'user', 'utf-8', 'vllm_api', 'w', '{']

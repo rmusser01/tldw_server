@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/RAG/rag_service/metrics.py
-# hypothesis_version: 6.135.11
-
-[0.0, 100, 1000, ',', 'count', 'counter_totals', 'counters', 'error_rate', 'errors', 'gauges', 'latencies', 'max', 'mean', 'median', 'min', 'p95', 'p99', 'rag_requests', 'timestamp', 'uptime_seconds', '|']

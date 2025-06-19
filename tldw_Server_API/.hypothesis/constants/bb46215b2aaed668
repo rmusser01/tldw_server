@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/endpoints/prompts.py
-# hypothesis_version: 6.135.11
-
-[100, 1000, '/', '/export', '/keywords/', '/keywords/export-csv', '/search', '/sync-log', '/{prompt_identifier}', 'Add a new keyword', 'Basic Template', 'Create a new prompt', 'Database error.', 'Items per page', 'No prompts found', 'None', 'Page number', 'Prompt not found.', 'Search prompts', 'Search term(s)', 'Soft delete a prompt', 'csv', 'deleted', 'id', 'markdown', 'not found', 'rb', 'utf-8']
