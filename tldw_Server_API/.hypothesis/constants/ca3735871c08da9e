@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/Evaluations/ms_g_eval.py
-# hypothesis_version: 6.135.11
-
-[0.7, 120, '(?<!\\S)\\d+(?:\\.\\d+)?', 'Config_Files', 'MetricLoggerManager', 'Results: %s', 'anthropic', 'average_coherence', 'average_consistency', 'average_fluency', 'average_relevance', 'average_scores', 'cohere', 'coherence', 'config.txt', 'consistency', 'deepseek', 'fluency', 'geval_results.json', 'groq', 'huggingface', 'kobold', 'llama.cpp', 'local-llm', 'mistral', 'models', 'name', 'ollama', 'ooba', 'openai', 'openrouter', 'relevance', 'scores', 'tabbyapi', 'vllm', 'w', '{{Document}}', '{{Summary}}']

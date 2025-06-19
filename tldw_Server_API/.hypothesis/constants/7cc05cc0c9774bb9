@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/Metrics/metrics_logger.py
-# hypothesis_version: 6.135.11
-
-[0.1, 1024, 'Z', 'counter', 'event', 'function', 'histogram', 'labels', 'metric', 'timestamp', 'type', 'value']

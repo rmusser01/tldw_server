@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/RAG/exceptions.py
-# hypothesis_version: 6.135.11
-
-[100, 200, ' | ', ', ', '...', 'api_provider', 'collection_name', 'config_key', 'config_section', 'configuration', 'context', 'context_length', 'database', 'database_name', 'database_type', 'embedding', 'embedding_provider', 'entity_id', 'entity_type', 'error_type', 'field_name', 'field_value', 'generation', 'message', 'model_name', 'operation', 'operation_type', 'original_error', 'query', 'search', 'search_type', 'timeout', 'timeout_seconds', 'validation', 'validation_rule']

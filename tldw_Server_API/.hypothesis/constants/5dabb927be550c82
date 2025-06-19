@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/API_Deps/Prompts_DB_Deps.py
-# hypothesis_version: 6.135.11
-
-['SELECT 1', 'SERVER_CLIENT_ID', 'USER_DB_BASE_DIR', 'id', 'prompts_user_dbs']

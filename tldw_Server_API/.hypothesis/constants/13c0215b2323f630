@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/Sync/Sync_Client.py
-# hypothesis_version: 6.135.11
-
-[' AND version = ?', ' WHERE uuid = ?', '.', '/', '/sync/get', '/sync/send', '1970-01-01 00:00:00', '?', 'Accept', 'ClientSyncEngine', 'Content-Type', 'Keywords', 'Media', 'MediaKeywords', 'No response body', 'Sync cycle complete.', 'Unknown', '_', '__main__', '`client_id` = ?', '`deleted` = ?', '`last_modified` = ?', '`version` = ?', 'application/json', 'change_id', 'changes', 'client_abc_123', 'client_id', 'content', 'create', 'delete', 'deleted', 'entity', 'entity_uuid', 'id', 'keyword', 'keyword_uuid', 'last_modified', 'latest_change_id', 'link', 'media_uuid', 'operation', 'payload', 'r', 'server_timestamp', 'since_change_id', 'test_sync_keyword', 'timestamp', 'title', 'unlink', 'update', 'uuid', 'version', 'w']

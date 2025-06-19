@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/endpoints/chunking.py
-# hypothesis_version: 6.135.11
-
-[1024, '/chunk_file', '/chunk_text', 'Chunking', 'Text Processing', 'adaptive', 'api_key', 'api_name', 'data', 'default_api', 'description', 'gpt2', 'language', 'llm_api_settings', 'max_size', 'max_tokens', 'max_tokens_per_step', 'method', 'model', 'multi_level', 'openai', 'overlap', 'provider', 'rolling_summarize', 'summarization_detail', 'system_message', 'temp', 'temperature', 'utf-8']

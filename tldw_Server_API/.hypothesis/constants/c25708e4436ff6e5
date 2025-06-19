@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/schemas/notes_schemas.py
-# hypothesis_version: 6.135.11
-
-[100, 255, 'Content of the note', 'The keyword text', 'Title of the note', 'UUID of the note']
