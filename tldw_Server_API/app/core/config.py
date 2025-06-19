@@ -226,6 +226,9 @@ def load_settings():
     access_token_expire_minutes = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
     # --- Redis Configuration ---
+    # Initialize comprehensive_config early to avoid UnboundLocalError
+    comprehensive_config = {}
+    
     # Load from comprehensive config first, then environment variables, then defaults
     if comprehensive_config and 'Redis' in comprehensive_config:
         redis_config = comprehensive_config.get('Redis', {})
@@ -258,7 +261,6 @@ def load_settings():
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
     # Load comprehensive configurations (API keys, embedding settings, etc.)
-    comprehensive_config = {}
     try:
         comprehensive_config = load_and_log_configs() # This function is already defined in your provided code
         if comprehensive_config is None:
@@ -1443,6 +1445,9 @@ except Exception as e:  # Should be less likely to hit this outer if inner one i
 # --- Global Settings Object ---
 # Load the settings when the module is imported
 settings = load_settings()
+
+# For backward compatibility with code expecting 'config'
+config = settings
 
 
 # --- Optional: Export individual variables if needed for backward compatibility (less recommended) ---

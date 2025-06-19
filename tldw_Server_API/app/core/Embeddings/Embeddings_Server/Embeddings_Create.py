@@ -885,5 +885,16 @@ def create_embedding(
     return embedding_data
 
 #
+# Legacy exports for backward compatibility
+# Load embedding configuration from settings
+from tldw_Server_API.app.core.config import settings
+
+embedding_config = settings.get("EMBEDDING_CONFIG", {})
+embedding_provider = embedding_config.get('embedding_provider', 'openai')
+embedding_model = embedding_config.get('embedding_model', 'text-embedding-3-small')
+embedding_api_url = embedding_config.get('embedding_api_url', 'http://localhost:8080/v1/embeddings')
+embedding_api_key = embedding_config.get('embedding_api_key', '')
+
+#
 # End of File.
 #######################################################################################################################

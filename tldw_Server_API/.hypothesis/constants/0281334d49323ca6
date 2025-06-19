@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/Embeddings/ChromaDB_Library.py
+# hypothesis_version: 6.135.11
+
+[200, '...', '0', 'EMBEDDING_CONFIG', 'SINGLE_USER_FIXED_ID', 'USER_DB_BASE_DIR', 'allow_reset', 'anonymized_telemetry', 'chroma_storage', 'chromadb.', 'chunk_index', 'collection', 'content', 'contextualized', 'data', 'default_collection', 'default_model_id', 'distance', 'distances', 'documents', 'does not exist', 'embedding', 'embedding_config', 'embedding_dimension', 'embeddings', 'file_name', 'gpt-3.5-turbo', 'id', 'ids', 'media_id', 'metadata', 'metadatas', 'models', 'not found', 'source_model_id', 'text', 'total_chunks', 'uri', 'uris', 'user_embeddings_for_']

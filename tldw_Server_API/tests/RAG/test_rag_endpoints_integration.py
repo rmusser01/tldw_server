@@ -13,9 +13,10 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 from uuid import uuid4
+from unittest import mock
 
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
@@ -56,27 +57,30 @@ def media_db(test_db_dir, test_user):
             "title": "Introduction to RAG",
             "content": "Retrieval-Augmented Generation (RAG) combines the power of retrieval systems with generative models. It allows AI systems to access external knowledge bases to provide more accurate and up-to-date information.",
             "url": "https://example.com/rag-intro",
-            "type": "article",
-            "media_metadata": {"author": "AI Expert", "date": "2024-01-15"}
+            "media_type": "article",
+            "author": "AI Expert",
+            "ingestion_date": "2024-01-15"
         },
         {
             "title": "Machine Learning Basics",
             "content": "Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed. It includes supervised, unsupervised, and reinforcement learning.",
             "url": "https://example.com/ml-basics",
-            "type": "article",
-            "media_metadata": {"author": "ML Teacher", "date": "2024-02-01"}
+            "media_type": "article",
+            "author": "ML Teacher",
+            "ingestion_date": "2024-02-01"
         },
         {
             "title": "Vector Databases Explained",
             "content": "Vector databases are specialized databases designed to store and query high-dimensional vector embeddings. They are essential for semantic search and RAG applications, enabling efficient similarity search.",
             "url": "https://example.com/vector-db",
-            "type": "video",
-            "media_metadata": {"duration": "15:30", "date": "2024-03-10"}
+            "media_type": "video",
+            "author": "Video Creator",
+            "ingestion_date": "2024-03-10"
         }
     ]
     
     for item in sample_media:
-        db.add_media_item(**item)
+        db.add_media_with_keywords(**item)
     
     yield db
     db.close_connection()
@@ -89,16 +93,14 @@ def chacha_db(test_db_dir, test_user):
     db = CharactersRAGDB(str(db_path), client_id=str(test_user.id))
     
     # Add sample notes
-    note1_id = db.create_note(
+    note1_id = db.add_note(
         title="RAG Implementation Notes",
-        content="Key points for RAG implementation: 1) Choose appropriate embedding model, 2) Optimize chunk size, 3) Implement proper re-ranking",
-        is_private=False
+        content="Key points for RAG implementation: 1) Choose appropriate embedding model, 2) Optimize chunk size, 3) Implement proper re-ranking"
     )
     
-    note2_id = db.create_note(
+    note2_id = db.add_note(
         title="Meeting Notes - AI Strategy",
-        content="Discussed moving to RAG-based system for better accuracy. Need to evaluate different vector databases and embedding models.",
-        is_private=False
+        content="Discussed moving to RAG-based system for better accuracy. Need to evaluate different vector databases and embedding models."
     )
     
     # Add a character card
@@ -111,17 +113,24 @@ def chacha_db(test_db_dir, test_user):
         'client_id': str(test_user.id)
     })
     
-    # Add chat history
+    # Add conversation and messages
     conv_id = str(uuid4())
-    db.save_chat_history(
-        conversation_id=conv_id,
-        character_id=char_id,
-        conversation_name="RAG Discussion",
-        chat_history=[
-            ("What is RAG?", "RAG stands for Retrieval-Augmented Generation..."),
-            ("How does it work?", "RAG works by first retrieving relevant documents...")
-        ]
-    )
+    conv_id = db.add_conversation({
+        'id': conv_id,
+        'character_id': char_id,
+        'title': "RAG Discussion",
+        'client_id': str(test_user.id)
+    })
+    
+    # Add messages to the conversation
+    messages = [
+        {"conversation_id": conv_id, "sender": "user", "content": "What is RAG?"},
+        {"conversation_id": conv_id, "sender": "assistant", "content": "RAG stands for Retrieval-Augmented Generation..."},
+        {"conversation_id": conv_id, "sender": "user", "content": "How does it work?"},
+        {"conversation_id": conv_id, "sender": "assistant", "content": "RAG works by first retrieving relevant documents..."}
+    ]
+    for msg in messages:
+        db.add_message(msg)
     
     yield db
     db.close_connection()
@@ -138,7 +147,8 @@ def auth_headers(test_user):
 @pytest.fixture
 async def async_client():
     """Create an async test client."""
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
 
 
@@ -152,12 +162,12 @@ class TestRAGSearchIntegration:
         _user_rag_services.clear()
         
         # Mock the database dependencies
-        with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
-            with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
-                with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
+        with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
+            with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
+                with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
                     
                     response = await async_client.post(
-                        "/retrieval/search",
+                        "/api/v1/retrieval_agent/retrieval/search",
                         json={
                             "querystring": "RAG implementation",
                             "search_mode": "advanced",
@@ -188,12 +198,12 @@ class TestRAGSearchIntegration:
         """Test search with filters applied."""
         _user_rag_services.clear()
         
-        with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
-            with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
-                with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
+        with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
+            with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
+                with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
                     
                     response = await async_client.post(
-                        "/retrieval/search",
+                        "/api/v1/retrieval_agent/retrieval/search",
                         json={
                             "querystring": "machine learning",
                             "search_mode": "custom",
@@ -221,12 +231,12 @@ class TestRAGSearchIntegration:
         """Test hybrid search combining keyword and semantic search."""
         _user_rag_services.clear()
         
-        with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
-            with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
-                with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
+        with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
+            with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
+                with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
                     
                     response = await async_client.post(
-                        "/retrieval/search",
+                        "/api/v1/retrieval_agent/retrieval/search",
                         json={
                             "querystring": "vector embeddings",
                             "search_mode": "advanced",
@@ -265,14 +275,14 @@ class TestRAGAgentIntegration:
                 "context_size": 500
             }
         
-        with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
-            with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
-                with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
+        with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
+            with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
+                with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
                     # Mock the RAG service's generate_answer method
-                    with pytest.mock.patch('tldw_Server_API.app.core.RAG.rag_service.integration.RAGService.generate_answer', side_effect=mock_generate):
+                    with mock.patch('tldw_Server_API.app.core.RAG.rag_service.integration.RAGService.generate_answer', side_effect=mock_generate):
                         
                         response = await async_client.post(
-                            "/retrieval/agent",
+                            "/api/v1/retrieval_agent/retrieval/agent",
                             json={
                                 "message": {
                                     "role": "user",
@@ -318,13 +328,13 @@ class TestRAGAgentIntegration:
                 "context_size": 300
             }
         
-        with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
-            with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
-                with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
-                    with pytest.mock.patch('tldw_Server_API.app.core.RAG.rag_service.integration.RAGService.generate_answer', side_effect=mock_generate):
+        with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
+            with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
+                with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
+                    with mock.patch('tldw_Server_API.app.core.RAG.rag_service.integration.RAGService.generate_answer', side_effect=mock_generate):
                         
                         response = await async_client.post(
-                            "/retrieval/agent",
+                            "/api/v1/retrieval_agent/retrieval/agent",
                             json={
                                 "message": {
                                     "role": "user",
@@ -351,15 +361,15 @@ class TestRAGAgentIntegration:
             yield {"type": "content", "content": "RAG is great!"}
             yield {"type": "citation", "citation": {"id": "1", "source": "test", "title": "Test Source"}}
         
-        with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
-            with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
-                with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
-                    with pytest.mock.patch('tldw_Server_API.app.core.RAG.rag_service.integration.RAGService.generate_answer_stream', return_value=mock_stream()):
+        with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
+            with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
+                with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
+                    with mock.patch('tldw_Server_API.app.core.RAG.rag_service.integration.RAGService.generate_answer_stream', return_value=mock_stream()):
                         
                         # Use the synchronous test client for streaming
                         with TestClient(app) as client:
                             response = client.post(
-                                "/retrieval/agent",
+                                "/api/v1/retrieval_agent/retrieval/agent",
                                 json={
                                     "message": {
                                         "role": "user",
@@ -408,13 +418,13 @@ class TestRAGAgentIntegration:
                 "context_size": 200
             }
         
-        with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
-            with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
-                with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
-                    with pytest.mock.patch('tldw_Server_API.app.core.RAG.rag_service.integration.RAGService.generate_answer', side_effect=mock_generate):
+        with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
+            with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
+                with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
+                    with mock.patch('tldw_Server_API.app.core.RAG.rag_service.integration.RAGService.generate_answer', side_effect=mock_generate):
                         
                         response = await async_client.post(
-                            "/retrieval/agent",
+                            "/api/v1/retrieval_agent/retrieval/agent",
                             json={
                                 "messages": [
                                     {"role": "user", "content": "What is machine learning?"},
@@ -448,12 +458,12 @@ class TestRAGServiceCaching:
         
         # Make requests for both users
         for user in [user1, user2]:
-            with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
-                with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
-                    with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=user):
+            with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', return_value=media_db):
+                with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_chacha_db_for_user', return_value=chacha_db):
+                    with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=user):
                         
                         response = await async_client.post(
-                            "/retrieval/search",
+                            "/api/v1/retrieval_agent/retrieval/search",
                             json={"querystring": "test", "limit": 1},
                             headers={"Authorization": f"Bearer test_token_{user.id}"}
                         )
@@ -476,11 +486,11 @@ class TestErrorScenarios:
         _user_rag_services.clear()
         
         # Mock database error
-        with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', side_effect=Exception("DB connection failed")):
-            with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
+        with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_media_db_for_user', side_effect=Exception("DB connection failed")):
+            with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
                 
                 response = await async_client.post(
-                    "/retrieval/search",
+                    "/api/v1/retrieval_agent/retrieval/search",
                     json={"querystring": "test"},
                     headers=auth_headers
                 )
@@ -491,7 +501,7 @@ class TestErrorScenarios:
     async def test_invalid_search_parameters(self, async_client, auth_headers):
         """Test validation of search parameters."""
         response = await async_client.post(
-            "/retrieval/search",
+            "/api/v1/retrieval_agent/retrieval/search",
             json={
                 "querystring": "",  # Empty query
                 "limit": -1,  # Invalid limit
@@ -507,15 +517,15 @@ class TestErrorScenarios:
         """Test handling of RAG service initialization errors."""
         _user_rag_services.clear()
         
-        with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.RAGService') as mock_service_class:
-            mock_service = pytest.mock.AsyncMock()
+        with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.RAGService') as mock_service_class:
+            mock_service = mock.AsyncMock()
             mock_service.initialize.side_effect = Exception("Failed to initialize")
             mock_service_class.return_value = mock_service
             
-            with pytest.mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
+            with mock.patch('tldw_Server_API.app.api.v1.endpoints.rag.get_request_user', return_value=test_user):
                 
                 response = await async_client.post(
-                    "/retrieval/agent",
+                    "/api/v1/retrieval_agent/retrieval/agent",
                     json={
                         "message": {"role": "user", "content": "test"},
                         "mode": "rag"

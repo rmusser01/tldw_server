@@ -131,6 +131,9 @@ def test_create_chat_completion_no_template(
 
     response = client.post("/api/v1/chat/completions", json=request_data_dict, headers={"Token": valid_auth_token})
 
+    if response.status_code != status.HTTP_200_OK:
+        print(f"Response status: {response.status_code}")
+        print(f"Response body: {response.text}")
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["choices"][0]["message"]["content"] == mock_response_data["choices"][0]["message"][
         "content"]  # Check relevant part

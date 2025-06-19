@@ -3,7 +3,7 @@
 
 # FIXME - File is dummy code, needs to be updated
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 class UserCreate(BaseModel):
     username: str
@@ -16,8 +16,7 @@ class UserRead(BaseModel):
     email: str = None
     is_active: bool
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 class Token(BaseModel):
     access_token: str

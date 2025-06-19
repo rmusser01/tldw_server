@@ -245,8 +245,7 @@ class ChatCompletionRequest(BaseModel):
     # --- Optional Character Chat Parameters ---
     character_id: Optional[str] = Field(None, description="Optional ID of the character to use for context.")
     conversation_id: Optional[str] = Field(None, description="Optional ID of the conversation to use for context.")
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")
 
     @model_validator(mode='before')
     def check_logprobs(cls, values):

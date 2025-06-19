@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/core/RAG/rag_service/app.py
+# hypothesis_version: 6.135.11
+
+['Cache cleared', 'elapsed_time', 'embed_and_store', 'max_context_length', 'num_documents_used', 'num_sources_searched', 'rag_pipeline', 'rag_requests', 'results', 'retrieval', 'search', 'search_requests', 'sources', 'total_tokens', '|']

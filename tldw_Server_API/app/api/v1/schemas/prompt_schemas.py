@@ -2,7 +2,7 @@
 #
 # Imports
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, validator
 from datetime import datetime
 #
 # Third-party Imports
@@ -27,8 +27,7 @@ class KeywordResponse(KeywordBase):
     # last_modified: datetime # If you want to expose these
     # version: int
 
-    class Config:
-        orm_mode = True  # For compatibility if directly mapping from DB model in future
+    model_config = ConfigDict(from_attributes=True)  # For compatibility if directly mapping from DB model in future
 
 
 # --- Prompt Schemas ---
@@ -61,8 +60,7 @@ class PromptResponse(PromptBase):
     keywords: List[str] = Field(default_factory=list, description="Keywords associated with the prompt.")
     deleted: bool = Field(..., description="Indicates if the prompt is soft-deleted.")
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PromptBriefResponse(BaseModel):
@@ -72,8 +70,7 @@ class PromptBriefResponse(BaseModel):
     author: Optional[str]
     last_modified: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PaginatedPromptsResponse(BaseModel):
@@ -111,8 +108,7 @@ class SyncLogEntryResponse(BaseModel):
     version: int
     payload: Optional[Dict[str, Any]]
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 #
 # End of prompts_schemas.py

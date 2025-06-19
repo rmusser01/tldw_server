@@ -4,7 +4,7 @@
 # Imports
 from pathlib import Path
 from typing import Optional, Dict, Any
-from pydantic import BaseModel, DirectoryPath, FilePath, HttpUrl
+from pydantic import BaseModel, ConfigDict, DirectoryPath, FilePath, HttpUrl
 #
 #########################################################################################################################
 #
@@ -22,8 +22,7 @@ class HuggingFaceConfig(BaseHandlerConfig):
     default_device_map: str = "auto"
     default_torch_dtype: str = "torch.bfloat16" # Store as string, convert later
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class LlamafileConfig(BaseHandlerConfig):
@@ -52,11 +51,10 @@ class LlamaCppConfig(BaseHandlerConfig):
     # e.g., default_main_gpu, default_tensor_split, etc.
     log_output_file: Optional[Path] = None # Optional: Path to save llama.cpp server logs
 
-    class Config:
-        arbitrary_types_allowed = True
-        # If executable_path or models_dir might not exist at config load time,
-        # you might need to remove FilePath/DirectoryPath validation temporarily
-        # or ensure they are created before loading the config.
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    # If executable_path or models_dir might not exist at config load time,
+    # you might need to remove FilePath/DirectoryPath validation temporarily
+    # or ensure they are created before loading the config.
 
 #
 # End of LLM_Inference_Schemas.py

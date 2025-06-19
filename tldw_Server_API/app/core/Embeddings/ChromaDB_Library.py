@@ -796,3 +796,36 @@ class ChromaDBManager:
 #
 # End of Functions for ChromaDB
 #######################################################################################################################
+
+# Compatibility layer for legacy code expecting module-level functions
+# This creates a default instance for single-user mode or tests
+_default_chroma_manager = None
+_manager_lock = threading.Lock()
+
+def get_default_chroma_manager():
+    """Get or create the default ChromaDB manager for backward compatibility."""
+    global _default_chroma_manager
+    with _manager_lock:
+        if _default_chroma_manager is None:
+            # Use default user ID 0 for single-user mode
+            from tldw_Server_API.app.core.config import settings
+            user_id = str(settings.get("SINGLE_USER_FIXED_ID", "0"))
+            embedding_config = settings.get("EMBEDDING_CONFIG", {})
+            _default_chroma_manager = ChromaDBManager(user_id=user_id, user_embedding_config=embedding_config)
+        return _default_chroma_manager
+
+# Legacy function exports for backward compatibility
+def store_in_chroma(texts, embeddings, ids, metadatas, collection_name="default_collection"):
+    """Legacy function for storing embeddings in ChromaDB."""
+    manager = get_default_chroma_manager()
+    return manager.store_in_chroma(texts=texts, embeddings=embeddings, ids=ids, 
+                                  metadatas=metadatas, collection_name=collection_name)
+
+# Create a chroma_client property for backward compatibility
+class ChromaClientProxy:
+    """Proxy object that delegates to the default manager's chroma_client."""
+    def __getattr__(self, name):
+        manager = get_default_chroma_manager()
+        return getattr(manager.chroma_client, name)
+
+chroma_client = ChromaClientProxy()

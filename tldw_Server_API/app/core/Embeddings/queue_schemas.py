@@ -4,7 +4,7 @@
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class JobStatus(str, Enum):
@@ -72,8 +72,7 @@ class EmbeddingJobMessage(BaseModel):
     max_retries: int = Field(default=3, ge=0)
     trace_id: Optional[str] = Field(None, description="For distributed tracing")
     
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 # Chunking stage message
@@ -122,8 +121,7 @@ class JobInfo(BaseModel):
     total_chunks: int = Field(default=0, ge=0)
     current_stage: Optional[str] = None
     
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 # Worker health/metrics
