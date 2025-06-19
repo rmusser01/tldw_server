@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py
-# hypothesis_version: 6.135.11
-
-[-2.0, 0.0, 1.0, 2.0, 128, 'DEFAULT_LLM_PROVIDER', 'allow', 'anthropic', 'api_keys', 'assistant', 'auto', 'before', 'cohere', 'config.toml', 'content', 'custom-openai-api', 'custom-openai-api-2', 'data:image', 'deepseek', 'function', 'function_call', 'google', 'groq', 'high', 'huggingface', 'image_url', 'json_object', 'kobold', 'llama.cpp', 'local-llm', 'logprobs', 'low', 'mistral', 'none', 'ollama', 'ooba', 'openai', 'openrouter', 'required', 'system', 'tabbyapi', 'text', 'tool', 'tool_calls', 'top_logprobs', 'url', 'user', 'vllm']

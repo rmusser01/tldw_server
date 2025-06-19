@@ -1,4 +1,0 @@
-# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/schemas/chunking_schema.py
-# hypothesis_version: 6.135.11
-
-[0.0, 1.0, 2.0, 'Chunking parameters.', 'adaptive', 'after', 'before', 'data', 'gpt2', 'input_text.txt', 'json_list', 'language', 'max_size', 'max_tokens_per_step', 'method', 'multi_level', 'overlap', 'paragraphs', 'sentences', 'summarization_detail', 'temperature', 'tokens', 'words']
