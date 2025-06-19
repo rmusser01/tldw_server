@@ -108,9 +108,11 @@ class UserRAGServiceCache:
             for entry in self._cache.values():
                 if 'service' in entry:
                     try:
-                        entry['service'].cleanup()
+                        # RAGService may not have a cleanup method
+                        if hasattr(entry['service'], 'cleanup'):
+                            entry['service'].cleanup()
                     except Exception as e:
-                        logger.warning(f"Error cleaning up RAG service during cache clear: {e}")
+                        logging.warning(f"Error cleaning up RAG service during cache clear: {e}")
             self._cache.clear()
 
 _user_rag_services = UserRAGServiceCache()
@@ -121,9 +123,9 @@ def cleanup_expired_rag_services():
     try:
         cleaned_count = _user_rag_services.cleanup_expired()
         if cleaned_count > 0:
-            logger.info(f"Cleaned up {cleaned_count} expired RAG services")
+            logging.info(f"Cleaned up {cleaned_count} expired RAG services")
     except Exception as e:
-        logger.error(f"Error during RAG service cleanup: {e}")
+        logging.error(f"Error during RAG service cleanup: {e}")
 
 
 async def get_rag_service_for_user(
