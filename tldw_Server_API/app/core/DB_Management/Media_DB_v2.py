@@ -1180,6 +1180,9 @@ class MediaDatabase:
             # LIKE search conditions
             like_conditions = []
             like_params = []
+            
+            # For LIKE queries, strip quotes from phrase searches
+            like_search_query = search_query.strip('"') if search_query.startswith('"') and search_query.endswith('"') else search_query
 
             # FTS on 'title', 'content'
             if any(f in sanitized_text_search_fields for f in ["title", "content"]):
@@ -1225,12 +1228,12 @@ class MediaDatabase:
                     if field in sanitized_text_search_fields:
                         # Contains matching (standard)
                         title_content_like_parts.append(f"m.{field} LIKE ? COLLATE NOCASE")
-                        like_params.append(f"%{search_query}%")
+                        like_params.append(f"%{like_search_query}%")
 
                         # For short search terms, also add "ends with" matching to catch cases like "ToDo" when searching for "Do"
-                        if len(search_query) <= 2 and not (search_query.startswith('"') and search_query.endswith('"')):
+                        if len(like_search_query) <= 2 and not (search_query.startswith('"') and search_query.endswith('"')):
                             title_content_like_parts.append(f"m.{field} LIKE ? COLLATE NOCASE")
-                            like_params.append(f"%{search_query}")
+                            like_params.append(f"%{like_search_query}")
                 if title_content_like_parts:
                     like_conditions.append(f"({' OR '.join(title_content_like_parts)})")
 
@@ -1246,12 +1249,12 @@ class MediaDatabase:
 
                     # Contains matching (standard)
                     like_parts.append(f"m.{field} LIKE ? COLLATE NOCASE")
-                    like_params.append(f"%{search_query}%") # search_query here should be the raw query, not the FTS one
+                    like_params.append(f"%{like_search_query}%") # search_query here should be the raw query, not the FTS one
 
                     # For short search terms, also add "ends with" matching to catch cases like "ToDo" when searching for "Do"
-                    if len(search_query) <= 2 and not (search_query.startswith('"') and search_query.endswith('"')):
+                    if len(like_search_query) <= 2 and not (search_query.startswith('"') and search_query.endswith('"')):
                         like_parts.append(f"m.{field} LIKE ? COLLATE NOCASE")
-                        like_params.append(f"%{search_query}")
+                        like_params.append(f"%{like_search_query}")
                 if like_parts:
                     like_conditions.append(f"({' OR '.join(like_parts)})")
 

@@ -527,11 +527,11 @@ def test_chat_api_call_tools_and_tool_choice_unit(mock_llm_api_call_handlers_for
     # For a more robust test, ensure the mock_handler is called with these or that your
     # PROVIDER_PARAM_MAP is updated if the internal handler uses different names.
 
-    # Simplified assertion: check if tools and tool_choice are present in the call if the handler accepts them
-    # This part of the test depends on how `chat_with_openai` is implemented to receive these.
-    # If it uses **kwargs:
-    assert "tools" in called_kwargs  # This will FAIL if not explicitly mapped or handled by **kwargs in chat_with_openai
-    assert "tool_choice" in called_kwargs  # This will FAIL
+    # Check if tools and tool_choice are present in the call
+    # According to PROVIDER_PARAM_MAP['openai'], these map directly to 'tools' and 'tool_choice'
+    # So they should be present in called_kwargs if the mock handler accepts **kwargs
+    assert "tools" in called_kwargs
+    assert "tool_choice" in called_kwargs
     assert called_kwargs["tools"] == tools_payload
     assert called_kwargs["tool_choice"] == "auto"
 

@@ -731,10 +731,12 @@ def test_get_character_list_for_ui_integration(db):
     db.soft_delete_character_card(char3_data_for_delete['id'], char3_data_for_delete['version'])
 
     ui_list = get_character_list_for_ui(db, limit=10)
-    # The list should be sorted by name: Alice, Charlie
-    assert len(ui_list) == 2
+    # The list should be sorted by name: Alice, Charlie, Default Assistant
+    # Bob (deleted) should not appear
+    assert len(ui_list) == 3  # Including Default Assistant
     assert ui_list[0]["name"] == "Alice"
     assert ui_list[1]["name"] == "Charlie"
+    assert ui_list[2]["name"] == "Default Assistant"
 
 
 

@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/schemas/embeddings_models.py
+# hypothesis_version: 6.135.11
+
+['base64', 'embedding', 'float', 'forbid', 'list']

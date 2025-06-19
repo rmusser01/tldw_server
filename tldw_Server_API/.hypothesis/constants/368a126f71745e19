@@ -1,0 +1,4 @@
+# file: /Users/appledev/Working/tldw_server/tldw_Server_API/app/api/v1/endpoints/sync.py
+# hypothesis_version: 6.135.11
+
+[' AND version = ?', ' WHERE uuid = ?', '%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%SZ', '/get', '/send', '1970-01-01T00:00:00Z', '?', 'Keywords', 'Media', 'MediaKeywords', 'No changes received.', 'Z', '_', '`client_id` = ?', '`deleted` = ?', '`last_modified` = ?', '`version` = ?', 'change_id', 'client_id', 'content', 'create', 'delete', 'deleted', 'entity', 'entity_uuid', 'errors', 'id', 'keyword', 'keyword_uuid', 'last_modified', 'link', 'media_uuid', 'message', 'operation', 'payload', 'status', 'success', 'title', 'unlink', 'update', 'uuid', 'value', 'version']
