@@ -17,6 +17,9 @@ https://www.linkedin.com/blog/engineering/product-design/building-collaborative-
 https://github.com/lks-ai/prowl
 https://rentry.co/samplers
 https://github.com/asgeirtj/system_prompts_leaks/blob/main/claude.txt
+https://openai.com/index/emergent-misalignment/
+
+https://arxiv.org/abs/2506.13681
 https://github.com/MIATECHPARTNERS/PromptChains
 https://github.com/mazen160/llmquery/
 https://juuzt.ai/knowledge-base/prompt-frameworks/

@@ -16,6 +16,10 @@ https://github.com/microsoft/LMOps/tree/main/corag
 https://www.figma.com/slides/eq8UzeTluT3qLKOpzlLj8y/LlamaIndex-Talk--Document-Agents-?node-id=51004-814&t=7F9MAlkLnukNb3f6-0
 https://ai.plainenglish.io/visual-grounding-rag-with-docling-9696d02054f2
 https://lukew.com/ff/entry.asp?2106?ref=sidebar
+https://github.com/topoteretes/cognee
+https://arxiv.org/abs/2505.23052
+
+
 
 
 Factual Extraction RAG

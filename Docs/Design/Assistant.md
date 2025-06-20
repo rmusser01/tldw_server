@@ -17,9 +17,13 @@ https://github.com/homanmirgolbabaee/arxiv-wizard-search?tab=readme-ov-file#-arx
 https://www.youtube.com/watch?v=D7_ipDqhtwk
 https://chatboxai.app/en
 https://github.com/camel-ai/camel
+https://arxiv.org/abs/2506.12915
+    https://huggingface.co/datasets/PersonalAILab/PersonaFeedback
 https://github.com/Roy3838/Observer
 https://www.geoffreylitt.com/2025/04/12/how-i-made-a-useful-ai-assistant-with-one-sqlite-table-and-a-handful-of-cron-jobs
 https://github.com/Pythagora-io/gpt-pilot
+https://github.com/mierak/rmpc
+https://github.com/e-p-armstrong/augmentoolkit
 https://github.com/Fosowl/agenticSeek
 https://huggingface.co/blog/python-tiny-agents
 https://github.com/3-ark/Cognito-AI_Sidekick

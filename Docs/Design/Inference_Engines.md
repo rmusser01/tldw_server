@@ -28,6 +28,10 @@ https://kaitchup.substack.com/p/how-well-does-qwen3-handle-4-bit
 https://github.com/intel/neural-compressor/tree/v3.2
 https://southbridge-research.notion.site/Entropixplained-11e5fec70db18022b083d7d7b0e93505
 https://arxiv.org/abs/2506.06105
+https://arxiv.org/abs/2506.12928v1
+
+
+https://github.com/codelion/optillm/tree/main/optillm/plugins/deepthink
 https://magazine.sebastianraschka.com/p/practical-tips-for-finetuning-llms?utm_medium=email
 https://magazine.sebastianraschka.com/p/lora-and-dora-from-scratch?utm_medium=email
 https://arxiv.org/abs/2405.09673

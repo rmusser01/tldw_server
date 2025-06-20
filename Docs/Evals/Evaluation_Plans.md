@@ -18,8 +18,12 @@ https://github.com/t3dotgg/SnitchBench
 https://arxiv.org/abs/2503.10357
 https://github.com/IAAR-Shanghai/CRUD_RAG
 https://arxiv.org/abs/2412.12300
+https://huggingface.co/tencent/SongGeneration
+https://github.com/aizip/Rag-Eval-flow
 
-
+RAG
+    https://huggingface.co/datasets/teilomillet/wikipeqa
+    https://www.reddit.com/r/LocalLLaMA/comments/1lee4pd/wikipeqa_an_evaluation_dataset_for_both/
 
 
 Creation
@@ -32,6 +36,8 @@ https://github.com/boson-ai/EmergentTTS-Eval-public
 https://www.leahtharin.com/p/107-andres-glusman-why-your-ab-tests
 https://github.com/collect-intel/llm-judge-bias-suite
 https://www.cip.org/blog/llm-judges-are-unreliable
+https://github.com/nicolaus625/CMI-bench
+
 https://github.com/JackHopkins/factorio-learning-environment
 https://github.com/lechmazur
 https://github.com/google/lmeval

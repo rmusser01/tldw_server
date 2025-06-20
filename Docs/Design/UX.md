@@ -98,7 +98,7 @@ https://oumi.ai/blog/posts/introducing-halloumi
 https://brandingstyleguides.com
 https://zeroheight.com/how-we-document/design-system-report-2025-brought-to-you-by-zeroheight/
 https://www.a11y-collective.com/blog/cognitive-accessibility/
-
+https://stytch.com/blog/if-an-ai-agent-cant-figure-out-how-your-api-works-neither-can-your-users/
 https://atomicdesign.bradfrost.com/chapter-1/
 https://bolters.io/
 https://github.com/abhishekkrthakur/aiaio

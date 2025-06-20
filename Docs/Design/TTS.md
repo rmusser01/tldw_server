@@ -24,6 +24,8 @@ https://github.com/taresh18/TTSizer
 https://www.reddit.com/r/LocalLLaMA/comments/1l3c8is/grmrv3_a_set_of_models_for_reliable_grammar/
 https://github.com/dexter-xD/rhythm
 https://github.com/Jeremy-Harper/chatterboxPro
+https://kyutai.org/next/stt
+https://huggingface.co/kyutai/stt-2.6b-en
 https://huggingface.co/spaces/webml-community/conversational-webgpu/tree/main
 https://github.com/huggingface/transformers.js-examples/tree/main/conversational-webgpu
 https://github.com/Shadowfita/parakeet-tdt-0.6b-v2-fastapi
