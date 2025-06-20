@@ -422,6 +422,7 @@ def test_local_provider_non_streaming_no_template(
 
 
 # --- Invalid Key Test (for a commercial provider that needs a key) ---
+@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "invalid_key"})
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") # Mock the shim
 def test_chat_integration_invalid_key_for_commercial_provider_standalone(
     mock_chat_api_call_shim, client, valid_auth_token, mock_db_dependencies_for_integration

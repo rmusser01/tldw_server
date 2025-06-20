@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Union
 #
 # 3rd-party imports
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, ConfigDict
 #
 # Local Imports
 #
@@ -88,8 +88,7 @@ class VersionDetailResponse(BaseModel):
     # Conditionally include content based on 'include_content' query param
     content: Optional[str] = Field(None, description="The full content of this version (if requested).", json_schema_extra={"example": "This is the text content for version 2..."})
 
-    class Config:
-        orm_mode = True # If fetching directly from an ORM model like SQLAlchemy
+    model_config = ConfigDict(from_attributes=True)  # If fetching directly from an ORM model like SQLAlchemy
 
 class MediaDetailResponse(BaseModel):
     """Response model for retrieving a single media item's details (GET /{media_id})."""
@@ -102,11 +101,11 @@ class MediaDetailResponse(BaseModel):
     versions: List[VersionDetailResponse] = Field([], description="List of document versions, if applicable.") # <-- ADDED, default empty list
 
 
-    class Config:
+    model_config = ConfigDict(
         # If your source data might have extra fields not in the model, use this:
         # extra = "ignore"
         # Example for schema generation
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "media_id": 123,
                 "source": {
@@ -130,6 +129,7 @@ class MediaDetailResponse(BaseModel):
                 "timestamps": ["00:00:00", "00:00:15"]
             }
         }
+    )
 
 
 # --- /api/v1/media/{media_id}/versions ---
@@ -145,8 +145,7 @@ class MediaDetailResponse(BaseModel):
 #     # Conditionally include content based on 'include_content' query param
 #     content: Optional[str] = Field(None, description="The full content of this version (if requested).", json_schema_extra={"example": "This is the text content for version 2..."})
 #
-#     class Config:
-#         orm_mode = True # If fetching directly from an ORM model like SQLAlchemy
+#     model_config = ConfigDict(from_attributes=True)  # If fetching directly from an ORM model like SQLAlchemy
 
 class VersionListResponse(BaseModel):
     """Response model for listing versions of a media item."""
@@ -222,9 +221,10 @@ class MediaItemProcessResult(BaseModel):
     # --- General Message ---
     message: Optional[str] = Field(None, description="General status message (e.g., for skipped items).", json_schema_extra={"example": "Media exists (ID: 456), overwrite=False"})
 
-    class Config:
+    model_config = ConfigDict(
         # Allow extra fields if processing functions might return them
-        extra = "allow"
+        extra="allow"
+    )
 
 
 class BatchMediaAddResponse(BaseModel):

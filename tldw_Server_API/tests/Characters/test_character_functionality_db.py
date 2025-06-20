@@ -530,12 +530,17 @@ class TestCharacterCardRetrieval:
         assert populated_db.get_character_card_by_name(self.char3_data["name"]) is None
 
     def test_list_characters_empty(self, db: CharactersRAGDB):
-        assert db.list_character_cards() == []
+        # Database has a default character card, so we check for exactly 1 card
+        cards = db.list_character_cards()
+        assert len(cards) == 1
+        assert cards[0]["name"] == "Default Assistant"
 
     def test_list_characters_populated(self, populated_db: CharactersRAGDB):
         cards = populated_db.list_character_cards()
-        assert len(cards) == 2
+        # +1 for the default character
+        assert len(cards) == 3
         card_names = [c["name"] for c in cards]
+        assert "Default Assistant" in card_names
         assert self.char1_data["name"] in card_names
         assert self.char2_data["name"] in card_names
         assert self.char3_data["name"] not in card_names
@@ -543,7 +548,7 @@ class TestCharacterCardRetrieval:
     def test_list_characters_pagination_and_order(self, populated_db: CharactersRAGDB):
         cards_limit1 = populated_db.list_character_cards(limit=1)
         assert len(cards_limit1) == 1
-        # Order is by name. "Char One", "Char Two"
+        # Order is by name. With default character: "Char One", "Char Two", "Default Assistant"
         assert cards_limit1[0]["name"] == "Char One"
 
         cards_offset1 = populated_db.list_character_cards(limit=1, offset=1)
@@ -551,8 +556,10 @@ class TestCharacterCardRetrieval:
         assert cards_offset1[0]["name"] == "Char Two"
 
         cards_all = populated_db.list_character_cards(limit=10)
-        assert len(cards_all) == 2
-        assert cards_all[0]["name"] < cards_all[1]["name"]
+        assert len(cards_all) == 3  # Including default character
+        # Check ordering (alphabetical)
+        for i in range(len(cards_all) - 1):
+            assert cards_all[i]["name"] < cards_all[i + 1]["name"]
 
 
 class TestCharacterCardUpdate:

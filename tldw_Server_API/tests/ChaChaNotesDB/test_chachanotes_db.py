@@ -200,15 +200,23 @@ class TestCharacterCards:
         assert retrieved["description"] == card_data["description"]
 
     def test_list_character_cards(self, db_instance: CharactersRAGDB):
-        assert db_instance.list_character_cards() == []
+        # Get initial count (database has a default character card)
+        initial_cards = db_instance.list_character_cards()
+        initial_count = len(initial_cards)
+        
         card_data1 = _create_sample_card_data("List1")
         card_data2 = _create_sample_card_data("List2")
         db_instance.add_character_card(card_data1)
         db_instance.add_character_card(card_data2)
         cards = db_instance.list_character_cards()
-        assert len(cards) == 2
+        assert len(cards) == initial_count + 2
+        
+        # Find the newly added cards (exclude the default one)
+        new_cards = [c for c in cards if c['name'] in [card_data1["name"], card_data2["name"]]]
+        assert len(new_cards) == 2
+        
         # Sort by name for predictable order if names are unique and sortable
-        sorted_cards = sorted(cards, key=lambda c: c['name'])
+        sorted_cards = sorted(new_cards, key=lambda c: c['name'])
         assert sorted_cards[0]["name"] == card_data1["name"]
         assert sorted_cards[1]["name"] == card_data2["name"]
 
@@ -267,7 +275,7 @@ class TestCharacterCards:
 
         update_payload = {"description": "Conflict Update"}
         # Updated match string to be more flexible or exact
-        expected_error_regex = r"Update failed: version mismatch \(db has 2, client expected 1\) for character_cards ID 1\."
+        expected_error_regex = rf"Update failed: version mismatch \(db has 2, client expected 1\) for character_cards ID {card_id}\."
         with pytest.raises(ConflictError, match=expected_error_regex):
             db_instance.update_character_card(card_id, update_payload, expected_version=client_expected_version)
 

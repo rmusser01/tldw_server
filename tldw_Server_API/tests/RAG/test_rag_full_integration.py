@@ -11,7 +11,7 @@ from typing import Dict, Any, List
 from unittest.mock import patch, Mock
 import pytest
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 import sqlite3
 
 from tldw_Server_API.app.main import app
@@ -179,10 +179,11 @@ class TestRAGFullIntegration:
                     mock_chacha_db.return_value = Mock(db_path=str(user1_env["chacha_db"]))
                     
                     # Create test client
-                    async with AsyncClient(app=app, base_url="http://test") as client:
+                    transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
                         # Test 1: Basic search
                         response = await client.post(
-                            "/retrieval/search",
+                            "/api/v1/retrieval_agent/search",
                             json={
                                 "querystring": "RAG retrieval",
                                 "search_mode": "basic",
@@ -198,7 +199,7 @@ class TestRAGFullIntegration:
                         
                         # Test 2: Search with database selection
                         response = await client.post(
-                            "/retrieval/search",
+                            "/api/v1/retrieval_agent/search",
                             json={
                                 "querystring": "implementation",
                                 "search_databases": ["media_db", "notes"],
@@ -213,7 +214,7 @@ class TestRAGFullIntegration:
                         
                         # Test 3: Search with date filters
                         response = await client.post(
-                            "/retrieval/search",
+                            "/api/v1/retrieval_agent/search",
                             json={
                                 "querystring": "machine learning",
                                 "date_range_start": "2024-01-01T00:00:00",
@@ -254,10 +255,11 @@ class TestRAGFullIntegration:
                         mock_llm.generate = mock_llm_generate
                         mock_llm_class.return_value = mock_llm
                         
-                        async with AsyncClient(app=app, base_url="http://test") as client:
+                        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
                             # Test 1: Basic RAG generation
                             response = await client.post(
-                                "/retrieval/agent",
+                                "/api/v1/retrieval_agent/agent",
                                 json={
                                     "message": {
                                         "role": "user",
@@ -282,7 +284,7 @@ class TestRAGFullIntegration:
                             
                             # Test 2: Research mode
                             response = await client.post(
-                                "/retrieval/agent",
+                                "/api/v1/retrieval_agent/agent",
                                 json={
                                     "message": {
                                         "role": "user",
@@ -317,7 +319,8 @@ class TestRAGFullIntegration:
         conn.commit()
         conn.close()
         
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
             # Search as user1
             with patch('tldw_Server_API.app.core.AuthNZ.User_DB_Handling.get_request_user') as mock_auth:
                 mock_auth.return_value = test_users[0]
@@ -328,7 +331,7 @@ class TestRAGFullIntegration:
                         mock_chacha_db.return_value = Mock(db_path=str(user1_env["chacha_db"]))
                         
                         response = await client.post(
-                            "/retrieval/search",
+                            "/api/v1/retrieval_agent/search",
                             json={
                                 "querystring": "User2 Specific Document",
                                 "search_mode": "basic"
@@ -350,7 +353,7 @@ class TestRAGFullIntegration:
                         mock_chacha_db.return_value = Mock(db_path=str(user2_env["chacha_db"]))
                         
                         response = await client.post(
-                            "/retrieval/search",
+                            "/api/v1/retrieval_agent/search",
                             json={
                                 "querystring": "User2 Specific Document",
                                 "search_mode": "basic"
@@ -391,9 +394,10 @@ class TestRAGFullIntegration:
                     with patch('tldw_Server_API.app.core.RAG.rag_service.integration.RAGService.generate_answer_stream') as mock_stream:
                         mock_stream.return_value = mock_llm_stream()
                         
-                        async with AsyncClient(app=app, base_url="http://test") as client:
+                        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
                             response = await client.post(
-                                "/retrieval/agent",
+                                "/api/v1/retrieval_agent/agent",
                                 json={
                                     "message": {
                                         "role": "user",
@@ -425,7 +429,8 @@ class TestRAGFullIntegration:
     @pytest.mark.asyncio
     async def test_error_handling(self, test_users):
         """Test error handling throughout the pipeline."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
             with patch('tldw_Server_API.app.core.AuthNZ.User_DB_Handling.get_request_user') as mock_auth:
                 mock_auth.return_value = test_users[0]
                 
@@ -491,7 +496,8 @@ class TestRAGFullIntegration:
                         mock_llm.generate = mock_llm_generate
                         mock_llm_class.return_value = mock_llm
                         
-                        async with AsyncClient(app=app, base_url="http://test") as client:
+                        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
                             # First message
                             response1 = await client.post(
                                 "/retrieval/agent",
@@ -602,7 +608,8 @@ class TestRAGPerformance:
                         mock_media_db.return_value = Mock(db_path=str(large_dataset_env["db_path"]))
                         mock_chacha_db.return_value = Mock(db_path=str(large_dataset_env["user_dir"] / "chachanotes_user_dbs" / "user_chacha_notes_rag.sqlite"))
                         
-                        async with AsyncClient(app=app, base_url="http://test") as client:
+                        transport = ASGITransport(app=app)
+                        async with AsyncClient(transport=transport, base_url="http://test") as client:
                             # Measure search time
                             start_time = time.time()
                             

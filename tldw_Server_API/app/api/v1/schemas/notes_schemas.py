@@ -4,7 +4,7 @@
 from typing import Optional, List, Any, Dict
 from datetime import datetime
 # 3rd-party Libraries
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 #
 # Local Imports
 #
@@ -38,8 +38,7 @@ class NoteResponse(NoteBase):
     client_id: str = Field(..., description="Client ID that last modified the note")
     deleted: bool = Field(..., description="Whether the note is soft-deleted")
 
-    class Config:
-        from_attributes = True  # Pydantic V2 (formerly orm_mode)
+    model_config = ConfigDict(from_attributes=True)  # Pydantic V2 (formerly orm_mode)
 
 
 # --- Keyword Schemas ---
@@ -59,8 +58,7 @@ class KeywordResponse(KeywordBase):
     client_id: str = Field(..., description="Client ID that last modified the keyword")
     deleted: bool = Field(..., description="Whether the keyword is soft-deleted")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Linking Schemas ---

@@ -5,7 +5,7 @@
 from typing import List, Optional
 #
 # 3rd-party Libraries
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 #
 # Local Imports
 #
@@ -31,9 +31,9 @@ class SyncLogEntry(BaseModel):
     version: int = Field(..., description="The version number of the entity *after* this change was applied.")
     payload: str = Field(..., description="A JSON string containing the state of the entity after the change (or minimal info for deletes/links).")
 
-    class Config:
+    model_config = ConfigDict(
         # Example for generating schema documentation if using OpenAPI/Swagger
-        schema_extra = {
+        json_schema_extra={
             "example": {
                 "change_id": 12345,
                 "entity": "Media",
@@ -45,6 +45,7 @@ class SyncLogEntry(BaseModel):
                 "payload": '{"uuid": "f47ac10b-58cc-4372-a567-0e02b2c3d479", "title": "Updated Title", "last_modified": "2023-10-27T10:30:00Z", "version": 6, "client_id": "client_abc_123", "deleted": 0, "prev_version": 5, ...}'
             }
         }
+    )
 
 class ClientChangesPayload(BaseModel):
     """
@@ -55,8 +56,8 @@ class ClientChangesPayload(BaseModel):
     changes: List[SyncLogEntry] = Field(..., description="A list of sync log entries representing local changes made on the client.")
     last_processed_server_id: int = Field(0, description="The 'change_id' of the last entry received from the server that this client successfully processed. Helps server determine delta.")
 
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "client_id": "client_xyz_789",
                 "changes": [
@@ -74,6 +75,7 @@ class ClientChangesPayload(BaseModel):
                 "last_processed_server_id": 12340 # Last server change ID client processed
             }
         }
+    )
 
 class ServerChangesResponse(BaseModel):
     """
@@ -83,8 +85,8 @@ class ServerChangesResponse(BaseModel):
     changes: List[SyncLogEntry] = Field(..., description="A list of sync log entries from the server's perspective for the requesting user, filtered to exclude changes originating from the requesting client.")
     latest_change_id: int = Field(..., description="The highest 'change_id' currently present in the user's sync log on the server. Used by the client to know the server's current state.")
 
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "changes": [
                      {
@@ -101,6 +103,7 @@ class ServerChangesResponse(BaseModel):
                 "latest_change_id": 12350 # Highest ID on server for this user
             }
         }
+    )
 
 #
 # End of sync_server_models.py

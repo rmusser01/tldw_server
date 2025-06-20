@@ -72,8 +72,8 @@ def default_chat_request_data():
 def default_chat_request_data_error_stream():
     """Provides a default ChatCompletionRequest object for error streaming tests."""
     return ChatCompletionRequest(
-        model=DEFAULT_MODEL_NAME_UNIT,
-        messages=DEFAULT_USER_MESSAGES_FOR_SCHEMA_UNIT,
+        model=DEFAULT_MODEL_NAME,  # Use the locally defined constant
+        messages=DEFAULT_USER_MESSAGES_FOR_SCHEMA,  # Use the locally defined constant
         stream=True # Ensure stream is true for this test
     )
 
@@ -106,6 +106,7 @@ def mock_media_db():
 # --- Unit Tests for the Endpoint ---
 
 @pytest.mark.unit
+@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test_key"})
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 @patch(
@@ -165,6 +166,7 @@ def test_create_chat_completion_no_template(
 # Ensure they use the `default_chat_request_data` fixture where appropriate.
 
 @pytest.mark.unit
+@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test_key"})
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.apply_template_to_string")
@@ -216,6 +218,7 @@ def test_create_chat_completion_success_streaming(  # Added default_chat_request
 
 
 @pytest.mark.unit
+@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test_key"})
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.apply_template_to_string")
@@ -251,6 +254,7 @@ def test_system_message_extraction(
 
 
 @pytest.mark.unit
+@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test_key"})
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.apply_template_to_string")
@@ -438,6 +442,7 @@ def test_keyless_provider_proceeds_without_key(  # Added default_chat_request_da
 
 
 @pytest.mark.unit
+@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test_key"})
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")  # Corrected patch target
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.apply_template_to_string")
@@ -524,6 +529,7 @@ def test_chat_api_call_exception_handling_unit(
 
 
 @pytest.mark.unit
+@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test_key"})
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.apply_template_to_string")
@@ -554,18 +560,15 @@ def test_non_iterable_stream_generator_from_shim(
 
     app.dependency_overrides = {}
 
-DEFAULT_MODEL_NAME_UNIT = "test-model-unit-error-stream"
-DEFAULT_USER_MESSAGES_FOR_SCHEMA_UNIT = [
-    ChatCompletionUserMessageParam(role="user", content="Test stream with error")
-]
 @pytest.mark.unit
+@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test_key"})
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")  # Patches the alias used in chat.py
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.apply_template_to_string")
 def test_error_within_stream_generator(
         mock_apply_template, mock_load_template, mock_chat_api_call,
-        client, default_chat_request_data, valid_auth_token, mock_media_db, mock_chat_db
-, default_chat_request_data_error_stream):
+        client, default_chat_request_data_error_stream, valid_auth_token, mock_media_db, mock_chat_db
+):
     # Simulate that the default template (or any) is found and is a passthrough
     # or correctly loaded if it's DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name
     mock_load_template.return_value = DEFAULT_RAW_PASSTHROUGH_TEMPLATE
@@ -620,7 +623,7 @@ def test_error_within_stream_generator(
     metadata_json = json.loads(events[0].split("data: ", 1)[1])
     expected_conv_id = metadata_json["conversation_id"]  # Get the actual conv_id from metadata
     assert expected_conv_id == "mock_conv_id_xyz"
-    assert metadata_json["model"] == DEFAULT_MODEL_NAME_UNIT
+    assert metadata_json["model"] == DEFAULT_MODEL_NAME
 
     # 2. Check for "Good start..." data chunk formatted by the endpoint
     # This part might be tricky if the error occurs before the first data yield is fully processed by sse_event_generator
@@ -671,6 +674,7 @@ def test_error_within_stream_generator(
 
 
 @pytest.mark.unit
+@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test_key"})
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 def test_create_chat_completion_with_optional_params(
@@ -729,6 +733,7 @@ def test_create_chat_completion_with_optional_params(
 
 
 @pytest.mark.unit
+@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test_key"})
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 def test_create_chat_completion_with_tools_unit(
@@ -751,8 +756,8 @@ def test_create_chat_completion_with_tools_unit(
     tool_choice_payload = ToolChoiceOption(type="function", function=ToolChoiceFunction(name="get_current_weather"))
 
     request_with_tools = default_chat_request_data.model_copy(update={
-        "tools": [t.model_dump(exclude_none=True) for t in tools_payload],  # Must be dicts
-        "tool_choice": tool_choice_payload.model_dump(exclude_none=True)  # Must be dict
+        "tools": tools_payload,  # Pass the actual ToolDefinition objects
+        "tool_choice": tool_choice_payload  # Pass the actual ToolChoiceOption object
     })
     request_data_dict = request_with_tools.model_dump(exclude_none=True)
 
@@ -768,6 +773,7 @@ def test_create_chat_completion_with_tools_unit(
 
 
 @pytest.mark.unit
+@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test_key"})
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")  # Mock this
 def test_create_chat_completion_character_not_found_uses_defaults(
@@ -810,6 +816,7 @@ def test_create_chat_completion_character_not_found_uses_defaults(
 
 
 @pytest.mark.unit
+@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test_key"})
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 def test_create_chat_completion_template_file_not_found(
