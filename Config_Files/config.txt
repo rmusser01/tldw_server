@@ -1,5 +1,5 @@
 [Processing]
-processing_choice = cuda
+processing_choice = cpu
 
 [Chat-Dictionaries]
 enable_chat_dictionaries = True

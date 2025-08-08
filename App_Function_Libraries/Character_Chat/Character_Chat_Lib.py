@@ -288,7 +288,15 @@ def extract_json_from_image(image_file):
         if hasattr(image_file, 'seek'):
             image_file.seek(0)
 
-        with Image.open(image_file) as img:
+        # Add error handling for invalid images
+        try:
+            img = Image.open(image_file)
+        except Exception as e:
+            logging.error(f"Failed to open image file: {e}")
+            log_counter("extract_json_from_image_open_error", labels={"error": str(e)})
+            return None
+        
+        with img:
             logging.debug("Image opened successfully")
             metadata = img.text
             if 'chara' in metadata:
@@ -415,7 +423,10 @@ def parse_v2_card(card_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             return None
 
         # 'data' should hold the actual card information.
-        data = card_data.get('data', {})
+        data = card_data.get('data')
+        if data is None:
+            logging.error("No 'data' field found in V2 card")
+            return None
         # List of fields that must be present in V2.
         required_fields = ['name', 'description', 'personality', 'scenario', 'first_mes', 'mes_example']
         for field in required_fields:
