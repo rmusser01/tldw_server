@@ -291,7 +291,7 @@ def extract_json_from_image(image_file):
         # Add error handling for invalid images
         try:
             img = Image.open(image_file)
-        except Exception as e:
+        except (IOError, ValueError) as e:
             logging.error(f"Failed to open image file: {e}")
             log_counter("extract_json_from_image_open_error", labels={"error": str(e)})
             return None
