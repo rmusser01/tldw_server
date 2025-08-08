@@ -38,8 +38,8 @@ pyannote.audio
 PyAudio~=0.2.14
 pydub~=0.25.1
 pydantic==2.10.6 # I didn't think I could hate Gradio more than I already did.
-pymupdf
-pymupdf4llm
+pymupdf~=1.26.3
+pymupdf4llm~=0.0.27
 docling~=2.4.0
 #PyAudioWPatch # For windows system recording
 pypandoc~=1.13
