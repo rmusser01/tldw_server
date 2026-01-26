@@ -1519,14 +1519,14 @@ jobs:
 
       - name: Upload test results (Linux ${{ matrix.python }})
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: full-suite-ubuntu-py${{ matrix.python }}
           path: test-results-linux-${{ matrix.python }}
 
       - name: Upload coverage artifact
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-ubuntu-py${{ matrix.python }}
           path: coverage.xml
@@ -2759,14 +2759,14 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: full-suite-${{ matrix.os }}-py3.12
           path: test-results-${{ matrix.os }}-3.12
 
       - name: Upload coverage artifact
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-${{ matrix.os }}-py3.12
           path: coverage.xml

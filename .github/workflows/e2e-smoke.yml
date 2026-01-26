@@ -68,7 +68,7 @@ jobs:
           PY
       - name: Upload server log (single-user)
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
 
         with:
           path: |
@@ -124,7 +124,7 @@ jobs:
           PY
       - name: Upload server log (multi-user)
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: server-log-multi
           path: server-multi.log
