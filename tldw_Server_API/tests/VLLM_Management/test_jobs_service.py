@@ -10,7 +10,12 @@ from starlette.requests import Request
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import vllm_management as vm
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
-from tldw_Server_API.app.core.VLLM_Management.service import VLLMManagementService
+from tldw_Server_API.app.core.VLLM_Management.executors.base import ProbeResult
+from tldw_Server_API.app.core.VLLM_Management.service import (
+    VLLMManagementService,
+    build_default_executor_map,
+    build_probe_headers,
+)
 from tldw_Server_API.app.core.VLLM_Management.sqlite_repo import SqliteVLLMInstanceRepository
 
 
@@ -116,3 +121,126 @@ def test_start_endpoint_returns_job_metadata_instead_of_blocking(tmp_path):
     assert body["requested_action"] == "start"
     assert body["instance_id"] == created.instance_id
 
+
+@pytest.mark.unit
+def test_probe_instance_does_not_promote_probe_required_capabilities_without_probe_evidence(tmp_path):
+    class _ReachabilityOnlyExecutor:
+        def probe(self, instance):  # noqa: ANN001
+            return ProbeResult(
+                status="healthy",
+                reachable=True,
+                base_url="http://127.0.0.1:8016/v1",
+                capabilities={},
+            )
+
+    repo = SqliteVLLMInstanceRepository(db_path=tmp_path / "vllm_instances.db")
+    instance = repo.create_instance(
+        vm.VLLMInstanceCreateRequest(
+            name="embed-box",
+            execution_mode="local",
+            launch_spec={"model": "BAAI/bge-m3", "port": 8016},
+            declared_capabilities={"chat": True, "embeddings": True, "vision": True},
+        ).to_domain()
+    )
+    repo.update_instance_runtime(
+        instance.instance_id,
+        {
+            "desired_state": "running",
+            "observed_state": "starting",
+        },
+    )
+    service = VLLMManagementService(repository=repo, executors={"local": _ReachabilityOnlyExecutor()})
+
+    service.probe_instance(instance.instance_id)
+    updated = repo.get_instance(instance.instance_id)
+
+    assert updated is not None
+    assert updated.observed_state == "healthy"
+    assert updated.effective_capabilities["chat"] is True
+    assert updated.effective_capabilities["embeddings"] is False
+    assert updated.effective_capabilities["vision"] is False
+
+
+@pytest.mark.unit
+def test_build_probe_headers_supports_custom_api_key_header_shape():
+    instance = vm.VLLMInstanceCreateRequest(
+        name="proxy-box",
+        execution_mode="local",
+        transport_config={"probe_headers": {"X-Probe-Token": "probe-secret"}},
+        launch_spec={
+            "model": "Qwen/Qwen2.5-7B-Instruct",
+            "api_key": "managed-secret",
+            "api_key_header_name": "X-API-Key",
+            "api_key_header_prefix": "Token",
+        },
+    ).to_domain()
+
+    headers = build_probe_headers(instance)
+
+    assert headers == {
+        "X-Probe-Token": "probe-secret",
+        "X-API-Key": "Token managed-secret",
+    }
+
+
+@pytest.mark.unit
+def test_default_probe_uses_configured_auth_headers(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _DummyResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001
+            return False
+
+        def read(self) -> bytes:
+            return b"{}"
+
+    def fake_urlopen(request, timeout=0):  # noqa: ANN001
+        captured["headers"] = dict(request.header_items())
+        captured["timeout"] = timeout
+        return _DummyResponse()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.VLLM_Management.service.urlopen",
+        fake_urlopen,
+    )
+
+    repo_request = vm.VLLMInstanceCreateRequest(
+        name="header-box",
+        execution_mode="local",
+        transport_config={"probe_headers": {"X-Probe-Token": "probe-secret"}},
+        launch_spec={
+            "model": "Qwen/Qwen2.5-7B-Instruct",
+            "port": 8017,
+            "api_key": "managed-secret",
+            "api_key_header_name": "X-API-Key",
+            "api_key_header_prefix": "Token",
+        },
+    ).to_domain()
+
+    from tldw_Server_API.app.core.VLLM_Management.models import VLLMInstanceRecord
+
+    instance = VLLMInstanceRecord(
+        instance_id="header-box",
+        name=repo_request.name,
+        execution_mode=repo_request.execution_mode,
+        transport_config=repo_request.transport_config,
+        launch_spec=repo_request.launch_spec,
+        routing_policy=repo_request.routing_policy,
+        declared_capabilities=repo_request.declared_capabilities,
+        desired_state="running",
+        observed_state="starting",
+        created_at="2026-03-10T00:00:00+00:00",
+        updated_at="2026-03-10T00:00:00+00:00",
+    )
+
+    probe = build_default_executor_map()["local"].probe(instance)
+
+    assert probe.reachable is True
+    assert captured["headers"] == {
+        "X-probe-token": "probe-secret",
+        "X-api-key": "Token managed-secret",
+    }
+    assert captured["timeout"] == 3

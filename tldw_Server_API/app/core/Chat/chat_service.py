@@ -100,6 +100,7 @@ from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_runtime_caps,
 )
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
+from tldw_Server_API.app.core.VLLM_Management import infer_chat_request_capabilities
 from tldw_Server_API.app.core.VLLM_Management.resolver import resolve_vllm_instance_for_request
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationCapabilityError,
@@ -2061,11 +2062,12 @@ def build_call_params_from_request(
 
     provider_instance_id = getattr(request_data, "provider_instance_id", None)
     if provider_instance_id or target_api_provider == "vllm":
+        required_capabilities = infer_chat_request_capabilities(getattr(request_data, "messages", None))
         try:
             managed_route = resolve_vllm_instance_for_request(
                 provider=target_api_provider,
                 provider_instance_id=provider_instance_id,
-                required_capability="chat",
+                required_capability=required_capabilities,
             )
         except ValueError as exc:
             raise ChatBadRequestError(provider=target_api_provider, message=str(exc)) from exc

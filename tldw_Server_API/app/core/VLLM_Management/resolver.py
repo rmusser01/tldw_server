@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
@@ -74,7 +74,7 @@ def resolve_vllm_instance_for_request(
     *,
     provider: str | None,
     provider_instance_id: str | None,
-    required_capability: str | None,
+    required_capability: str | Iterable[str] | None,
     repository: VLLMInstanceRepository | None = None,
 ) -> ResolvedVLLMRoute | None:
     """Resolve the managed vLLM instance for a request.
@@ -103,11 +103,19 @@ def resolve_vllm_instance_for_request(
         declared_capabilities=instance.declared_capabilities,
         probed_capabilities=instance.probed_capabilities,
     )
-    if required_capability and not effective_capabilities.get(required_capability, False):
-        raise ValueError(
-            f"Managed vLLM instance '{instance.instance_id}' does not support required capability "
-            f"'{required_capability}'"
-        )
+    normalized_required_capabilities: tuple[str, ...]
+    if required_capability is None:
+        normalized_required_capabilities = ()
+    elif isinstance(required_capability, str):
+        normalized_required_capabilities = (required_capability,)
+    else:
+        normalized_required_capabilities = tuple(str(item) for item in required_capability if str(item))
+    for capability in normalized_required_capabilities:
+        if not effective_capabilities.get(capability, False):
+            raise ValueError(
+                f"Managed vLLM instance '{instance.instance_id}' does not support required capability "
+                f"'{capability}'"
+            )
 
     model = instance.launch_spec.get("served_model_name") or instance.launch_spec.get("model")
     api_key = instance.launch_spec.get("api_key")

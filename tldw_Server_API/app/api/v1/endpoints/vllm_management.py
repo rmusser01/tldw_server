@@ -22,6 +22,19 @@ from tldw_Server_API.app.core.VLLM_Management import (
 from tldw_Server_API.app.core.VLLM_Management.service import VLLMManagementService
 
 router = APIRouter()
+_REDACTED = "[REDACTED]"
+_SENSITIVE_EXACT_KEYS = {
+    "api_key",
+    "authorization",
+    "identity_file",
+    "passphrase",
+    "private_key_path",
+    "secret",
+    "secret_ref",
+}
+_SENSITIVE_KEY_SUBSTRINGS = ("password", "token")
+_REDACT_ALL_VALUE_KEYS = {"extra_headers", "headers", "probe_headers"}
+_SENSITIVE_COMMAND_FLAGS = {"--api-key"}
 
 
 def _resolve_vllm_repository() -> VLLMInstanceRepository:
@@ -35,8 +48,56 @@ def _resolve_vllm_management_service(
     return VLLMManagementService(repository=repository, job_manager=job_manager)
 
 
+def _is_sensitive_key(key: str) -> bool:
+    lowered = key.strip().lower()
+    if lowered in _SENSITIVE_EXACT_KEYS:
+        return True
+    return any(part in lowered for part in _SENSITIVE_KEY_SUBSTRINGS)
+
+
+def _redact_command_argv(argv: list[object]) -> list[object]:
+    redacted: list[object] = []
+    redact_next = False
+    for token in argv:
+        token_str = str(token)
+        if redact_next:
+            redacted.append(_REDACTED)
+            redact_next = False
+            continue
+        redacted.append(token)
+        if token_str in _SENSITIVE_COMMAND_FLAGS:
+            redact_next = True
+    return redacted
+
+
+def _redact_mapping(value: object, *, redact_all_values: bool = False) -> object:
+    if isinstance(value, dict):
+        redacted: dict[str, object] = {}
+        for raw_key, nested_value in value.items():
+            key = str(raw_key)
+            if redact_all_values or _is_sensitive_key(key):
+                redacted[key] = _REDACTED
+                continue
+            if key in _REDACT_ALL_VALUE_KEYS and isinstance(nested_value, dict):
+                redacted[key] = {str(nested_key): _REDACTED for nested_key in nested_value.keys()}
+                continue
+            if key in {"command", "launcher_command"} and isinstance(nested_value, list):
+                redacted[key] = _redact_command_argv(nested_value)
+                continue
+            redacted[key] = _redact_mapping(nested_value)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_mapping(item, redact_all_values=redact_all_values) for item in value]
+    return value
+
+
 def _serialize_instance(record: object) -> VLLMInstanceRecordResponse:
-    return VLLMInstanceRecordResponse.model_validate(record)
+    response = VLLMInstanceRecordResponse.model_validate(record)
+    data = response.model_dump()
+    data["transport_config"] = _redact_mapping(data.get("transport_config") or {})
+    data["launch_spec"] = _redact_mapping(data.get("launch_spec") or {})
+    data["executor_handle"] = _redact_mapping(data.get("executor_handle") or {})
+    return VLLMInstanceRecordResponse.model_validate(data)
 
 
 def _sync_default_route(

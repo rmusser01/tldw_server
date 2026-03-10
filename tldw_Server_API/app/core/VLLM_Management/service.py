@@ -8,7 +8,7 @@ import shlex
 import subprocess  # nosec B404 - required for explicit argv-based SSH launcher execution
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from loguru import logger
 
@@ -93,10 +93,38 @@ def vllm_management_queue() -> str:
     return str(os.getenv("VLLM_MANAGEMENT_JOBS_QUEUE") or VLLM_MANAGEMENT_QUEUE).strip() or VLLM_MANAGEMENT_QUEUE
 
 
-def _probe_http_endpoint(base_url: str) -> ProbeResult:
+def build_probe_headers(instance: Any) -> dict[str, str]:
+    """Build health-check headers for a managed instance."""
+
+    launch_spec = dict(getattr(instance, "launch_spec", {}) or {})
+    transport_config = dict(getattr(instance, "transport_config", {}) or {})
+    headers: dict[str, str] = {}
+
+    probe_headers = transport_config.get("probe_headers") or launch_spec.get("probe_headers") or {}
+    if isinstance(probe_headers, dict):
+        for key, value in probe_headers.items():
+            if value is None:
+                continue
+            headers[str(key)] = str(value)
+
+    api_key = launch_spec.get("api_key")
+    if api_key is not None:
+        header_name = str(launch_spec.get("api_key_header_name") or "Authorization").strip() or "Authorization"
+        header_prefix = launch_spec.get("api_key_header_prefix")
+        if header_prefix is None:
+            header_prefix = "Bearer" if header_name.lower() == "authorization" else ""
+        header_prefix = str(header_prefix).strip()
+        api_key_value = str(api_key)
+        headers[header_name] = f"{header_prefix} {api_key_value}".strip() if header_prefix else api_key_value
+
+    return headers
+
+
+def _probe_http_endpoint(base_url: str, *, headers: dict[str, str] | None = None) -> ProbeResult:
     models_url = f"{base_url.rstrip('/')}/models"
     try:
-        with urlopen(models_url, timeout=3) as response:  # nosec B310 - trusted operator-configured target
+        request = Request(models_url, headers=dict(headers or {}), method="GET")
+        with urlopen(request, timeout=3) as response:  # nosec B310 - trusted operator-configured target
             _ = response.read()
         return ProbeResult(status="healthy", reachable=True, base_url=base_url)
     except HTTPError as exc:
@@ -110,7 +138,8 @@ def _probe_http_endpoint(base_url: str) -> ProbeResult:
 def build_default_executor_map() -> dict[str, VLLMExecutor]:
     local_executor = LocalVLLMExecutor(
         probe_func=lambda instance: _probe_http_endpoint(
-            str(instance.last_known_base_url or instance.launch_spec.get("base_url") or f"http://127.0.0.1:{instance.launch_spec.get('port') or 8000}/v1")
+            str(instance.last_known_base_url or instance.launch_spec.get("base_url") or f"http://127.0.0.1:{instance.launch_spec.get('port') or 8000}/v1"),
+            headers=build_probe_headers(instance),
         )
     )
     ssh_executor = SSHVLLMExecutor(
@@ -121,7 +150,8 @@ def build_default_executor_map() -> dict[str, VLLMExecutor]:
                 or instance.transport_config.get("base_url")
                 or instance.launch_spec.get("base_url")
                 or f"http://{instance.transport_config.get('host')}:{instance.launch_spec.get('port') or instance.transport_config.get('service_port') or 8000}/v1"
-            )
+            ),
+            headers=build_probe_headers(instance),
         ),
     )
     return {
@@ -283,7 +313,10 @@ class VLLMManagementService:
                 probed_capabilities=probe.capabilities,
             )
         elif probe.reachable:
-            effective_capabilities = normalize_capabilities(instance.declared_capabilities)
+            effective_capabilities = derive_effective_capabilities(
+                declared_capabilities=instance.declared_capabilities,
+                probed_capabilities={},
+            )
         else:
             effective_capabilities = {}
         observed_state = "healthy" if probe.reachable else ("stopped" if desired_state == "stopped" else "unhealthy")
@@ -321,6 +354,7 @@ __all__ = [
     "VLLM_MANAGEMENT_DOMAIN",
     "VLLM_JOB_TYPE_BY_ACTION",
     "VLLMManagementService",
+    "build_probe_headers",
     "build_default_executor_map",
     "vllm_management_queue",
 ]

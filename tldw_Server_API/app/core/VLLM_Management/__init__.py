@@ -3,6 +3,7 @@
 from .capabilities import derive_effective_capabilities, normalize_capabilities
 from .command_builder import build_vllm_serve_argv
 from .models import VLLMInstanceCreate, VLLMInstanceRecord
+from .request_capabilities import infer_chat_request_capabilities
 from .repository import VLLMInstanceRepository
 from .resolver import (
     ResolvedVLLMRoute,
@@ -21,5 +22,6 @@ __all__ = [
     "VLLMInstanceCreate",
     "VLLMInstanceRecord",
     "VLLMInstanceRepository",
+    "infer_chat_request_capabilities",
     "resolve_vllm_instance_for_request",
 ]

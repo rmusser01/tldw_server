@@ -54,6 +54,51 @@ def test_build_call_params_injects_resolved_vllm_route(monkeypatch):
     assert cleaned_args["model"] == "Qwen/Qwen2.5-VL-7B-Instruct"
 
 
+def test_build_call_params_requires_vision_for_image_messages(monkeypatch):
+    request_data = ChatCompletionRequest(
+        api_provider="vllm",
+        provider_instance_id="vision-id",
+        model="legacy-model",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "describe this image"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+                ],
+            }
+        ],
+    )
+    captured: dict[str, object] = {}
+
+    def fake_resolver(**kwargs: object) -> ResolvedVLLMRoute:
+        captured.update(kwargs)
+        return ResolvedVLLMRoute(
+            instance_id="vision-id",
+            base_url="http://10.0.0.9:8000/v1",
+            model="Qwen/Qwen2.5-VL-7B-Instruct",
+            api_key="managed-secret",
+            effective_capabilities={"chat": True, "vision": True},
+        )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.resolve_vllm_instance_for_request",
+        fake_resolver,
+    )
+
+    cleaned_args = build_call_params_from_request(
+        request_data=request_data,
+        target_api_provider="vllm",
+        provider_api_key=None,
+        templated_llm_payload=request_data.messages,
+        final_system_message=None,
+        app_config=None,
+    )
+
+    assert set(captured["required_capability"]) == {"chat", "vision"}
+    assert cleaned_args["base_url"] == "http://10.0.0.9:8000/v1"
+
+
 def test_embeddings_helper_maps_managed_vllm_to_openai(monkeypatch):
     def fake_resolver(**_: object) -> ResolvedVLLMRoute:
         return ResolvedVLLMRoute(

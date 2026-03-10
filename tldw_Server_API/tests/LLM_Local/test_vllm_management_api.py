@@ -79,6 +79,52 @@ def test_create_instance_returns_backend_metadata_and_persisted_record(tmp_path)
 
 
 @pytest.mark.unit
+def test_admin_responses_redact_managed_vllm_secrets(tmp_path):
+    repo = SqliteVLLMInstanceRepository(db_path=tmp_path / "vllm_instances.db")
+    app = _make_app(repo)
+
+    with TestClient(app) as client:
+        create_response = client.post(
+            "/api/v1/llm/providers/vllm/instances",
+            json={
+                "name": "secure-box",
+                "execution_mode": "ssh",
+                "transport_config": {
+                    "host": "gpu.internal",
+                    "port": 22,
+                    "user": "ubuntu",
+                    "auth": {
+                        "secret_ref": "VLLM_SSH_KEY_PATH",
+                        "private_key_path": "/tmp/id_ed25519",
+                    },
+                    "probe_headers": {"X-Probe-Token": "probe-secret"},
+                    "launcher_path": "/usr/local/bin/tldw-vllm-launcher",
+                },
+                "launch_spec": {
+                    "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+                    "port": 8001,
+                    "api_key": "managed-secret",
+                },
+                "declared_capabilities": {"chat": True, "vision": True},
+            },
+        )
+        instance_id = create_response.json()["instance"]["instance_id"]
+        detail_response = client.get(f"/api/v1/llm/providers/vllm/instances/{instance_id}")
+        list_response = client.get("/api/v1/llm/providers/vllm/instances")
+
+    for body in (
+        create_response.json(),
+        detail_response.json(),
+        list_response.json()["instances"][0],
+    ):
+        instance = body["instance"] if "instance" in body else body
+        assert instance["launch_spec"]["api_key"] == "[REDACTED]"
+        assert instance["transport_config"]["auth"]["secret_ref"] == "[REDACTED]"
+        assert instance["transport_config"]["auth"]["private_key_path"] == "[REDACTED]"
+        assert instance["transport_config"]["probe_headers"]["X-Probe-Token"] == "[REDACTED]"
+
+
+@pytest.mark.unit
 def test_patch_list_default_and_delete_flow(tmp_path):
     repo = SqliteVLLMInstanceRepository(db_path=tmp_path / "vllm_instances.db")
     app = _make_app(repo)
@@ -134,4 +180,3 @@ def test_patch_list_default_and_delete_flow(tmp_path):
     assert delete_response.status_code == 200, delete_response.text
     assert delete_response.json()["deleted"] is True
     assert repo.get_instance(instance_id) is None
-
