@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
+from .capabilities import derive_effective_capabilities
 from .repository import VLLMInstanceRepository
 from .sqlite_repo import SqliteVLLMInstanceRepository
 
@@ -34,10 +35,6 @@ def _default_repository_path() -> Path:
 @lru_cache(maxsize=1)
 def _default_repository() -> SqliteVLLMInstanceRepository:
     return SqliteVLLMInstanceRepository(_default_repository_path())
-
-
-def _normalize_capabilities(raw: dict[str, Any]) -> dict[str, bool]:
-    return {str(key): bool(value) for key, value in (raw or {}).items()}
 
 
 def _normalize_base_url(raw: str) -> str:
@@ -102,7 +99,10 @@ def resolve_vllm_instance_for_request(
             raise ValueError(f"Managed vLLM instance '{selected_instance_id}' was not found")
         raise ValueError(f"Default managed vLLM instance '{selected_instance_id}' was not found")
 
-    effective_capabilities = _normalize_capabilities(instance.declared_capabilities)
+    effective_capabilities = derive_effective_capabilities(
+        declared_capabilities=instance.declared_capabilities,
+        probed_capabilities={},
+    )
     if required_capability and not effective_capabilities.get(required_capability, False):
         raise ValueError(
             f"Managed vLLM instance '{instance.instance_id}' does not support required capability "
