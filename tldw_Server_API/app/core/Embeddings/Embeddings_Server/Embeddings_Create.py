@@ -536,6 +536,7 @@ class ONNXModelCfg(BaseModelCfg):
 class OpenAIModelCfg(BaseModelCfg):
     provider: Literal["openai"] = "openai"
     api_key: str | None = None
+    api_url: str | None = None
     dimensions: int | None = None
 
 

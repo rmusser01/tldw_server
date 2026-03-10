@@ -60,3 +60,21 @@ def test_build_adapter_request_omits_internal_chat_metadata() -> None:
 
     assert provider == "openai"
     assert not any(key.startswith("_chat_") for key in request)
+
+
+def test_server_resolved_base_url_override_bypasses_allowlist(monkeypatch):
+    monkeypatch.setattr(byok_helpers, "resolve_byok_base_url_allowlist", lambda: set())
+    monkeypatch.setattr(byok_helpers, "validate_base_url_override", lambda value: value)
+    args = _base_args()
+    args.update(
+        {
+            "api_provider": "vllm",
+            "base_url": "http://10.0.0.9:8000/v1",
+            "server_resolved_base_url_override": True,
+        }
+    )
+
+    provider, request, _internal = chat_service._build_adapter_request_from_chat_args(args)
+
+    assert provider == "vllm"
+    assert request["base_url"] == "http://10.0.0.9:8000/v1"

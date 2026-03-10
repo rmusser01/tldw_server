@@ -828,6 +828,10 @@ class ChatCompletionRequest(BaseModel):
             "mode, objective, provider boundary, and failure handling."
         ),
     )
+    provider_instance_id: Optional[str] = Field(
+        default=None,
+        description="[Extension] Optional managed provider instance identifier for request-scoped routing.",
+    )
 
     @field_validator("api_provider")
     @classmethod

@@ -100,6 +100,7 @@ from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_runtime_caps,
 )
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
+from tldw_Server_API.app.core.VLLM_Management.resolver import resolve_vllm_instance_for_request
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationCapabilityError,
     StructuredGenerationError,
@@ -1690,6 +1691,13 @@ def _resolve_base_url_override(provider: str, chat_args: dict[str, Any]) -> str 
         base_url = chat_args.get("api_base_url")
     if base_url is None:
         return None
+    if chat_args.get("server_resolved_base_url_override"):
+        from tldw_Server_API.app.core.AuthNZ.byok_helpers import validate_base_url_override
+
+        try:
+            return validate_base_url_override(base_url)
+        except ValueError as exc:
+            raise ChatBadRequestError(provider=(provider or "").strip().lower() or None, message=str(exc)) from exc
     provider_key = (provider or "").strip().lower()
     from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
         is_trusted_base_url_request,
@@ -1797,6 +1805,7 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "caller_request",
         "principal",
         "auth_user",
+        "server_resolved_base_url_override",
         "trusted_base_url_override",
         "_structured_requested_response_format",
         "stream",
@@ -1804,6 +1813,7 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "history_message_limit",
         "history_message_order",
         "slash_command_injection_mode",
+        "provider_instance_id",
     }
     for key, value in chat_args.items():
         if key in skip_keys or key.startswith("_chat_") or value is None:
@@ -1935,6 +1945,7 @@ def build_call_params_from_request(
         exclude_none=True,
         exclude={
             "api_provider",
+            "provider_instance_id",
             "messages",
             "character_id",
             "conversation_id",
@@ -2047,6 +2058,25 @@ def build_call_params_from_request(
     )
     if app_config is not None:
         call_params["app_config"] = app_config
+
+    provider_instance_id = getattr(request_data, "provider_instance_id", None)
+    if provider_instance_id or target_api_provider == "vllm":
+        try:
+            managed_route = resolve_vllm_instance_for_request(
+                provider=target_api_provider,
+                provider_instance_id=provider_instance_id,
+                required_capability="chat",
+            )
+        except ValueError as exc:
+            raise ChatBadRequestError(provider=target_api_provider, message=str(exc)) from exc
+        if managed_route is not None:
+            call_params["base_url"] = managed_route.base_url
+            call_params["server_resolved_base_url_override"] = True
+            call_params["trusted_base_url_override"] = True
+            if managed_route.model:
+                call_params["model"] = managed_route.model
+            if not call_params.get("api_key") and managed_route.api_key:
+                call_params["api_key"] = managed_route.api_key
 
     # Filter Nones; keep explicit None for system_message only if provided
     cleaned_args = {k: v for k, v in call_params.items() if v is not None}
