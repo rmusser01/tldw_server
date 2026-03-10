@@ -13,6 +13,7 @@
 ---
 
 ### Task 1: Create the Persistent vLLM Instance Repository
+**Status:** Complete
 
 **Files:**
 - Create: `tldw_Server_API/app/core/VLLM_Management/__init__.py`
@@ -117,6 +118,7 @@ git commit -m "feat: add persistent vllm instance repository"
 ```
 
 ### Task 2: Add the Request-Scoped Instance Resolver
+**Status:** Complete
 
 **Files:**
 - Create: `tldw_Server_API/app/core/VLLM_Management/resolver.py`
@@ -210,6 +212,7 @@ git commit -m "feat: add request scoped vllm instance routing"
 ```
 
 ### Task 3: Build the Structured Command Builder and Capability Model
+**Status:** Complete
 
 **Files:**
 - Create: `tldw_Server_API/app/core/VLLM_Management/command_builder.py`
@@ -292,6 +295,7 @@ git commit -m "feat: add vllm command builder and capability model"
 ```
 
 ### Task 4: Implement the Local and SSH Executors
+**Status:** Complete
 
 **Files:**
 - Create: `tldw_Server_API/app/core/VLLM_Management/executors/__init__.py`
@@ -381,6 +385,7 @@ git commit -m "feat: add vllm local and ssh executors"
 ```
 
 ### Task 5: Add the Admin API for Instance CRUD and Default Routing
+**Status:** Complete
 
 **Files:**
 - Create: `tldw_Server_API/app/api/v1/schemas/vllm_management.py`
@@ -470,6 +475,7 @@ git commit -m "feat: add vllm instance management api"
 ```
 
 ### Task 6: Add Jobs-Backed Start, Stop, Restart, Probe, and Reconciliation
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/VLLM_Management/models.py`
@@ -569,6 +575,7 @@ git commit -m "feat: add job backed vllm lifecycle orchestration"
 ```
 
 ### Task 7: Expose Managed vLLM Metadata in Provider Listings and Embeddings
+**Status:** Not Started
 
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/endpoints/llm_providers.py`
@@ -640,6 +647,7 @@ git commit -m "feat: expose managed vllm metadata and embeddings routing"
 ```
 
 ### Task 8: Build the Admin UI and Client Wiring
+**Status:** Not Started
 
 **Files:**
 - Create: `apps/packages/ui/src/components/Option/Admin/VllmAdminPage.tsx`
@@ -724,6 +732,7 @@ git commit -m "feat: add managed vllm admin ui"
 ```
 
 ### Task 9: Verify, Secure, and Document the Final Slice
+**Status:** Not Started
 
 **Files:**
 - Modify: `README.md`

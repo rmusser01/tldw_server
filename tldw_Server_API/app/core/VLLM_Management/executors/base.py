@@ -29,6 +29,7 @@ class ProbeResult:
     reachable: bool
     base_url: str | None = None
     detail: str | None = None
+    capabilities: dict[str, bool] = field(default_factory=dict)
 
 
 class VLLMExecutor(Protocol):

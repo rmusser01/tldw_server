@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_roles
 from tldw_Server_API.app.api.v1.schemas.vllm_management import (
     VLLMDefaultRouteRequest,
@@ -9,6 +10,7 @@ from tldw_Server_API.app.api.v1.schemas.vllm_management import (
     VLLMDeleteResponse,
     VLLMInstanceCreateRequest,
     VLLMInstanceEnvelope,
+    VLLMInstanceJobResponse,
     VLLMInstanceListResponse,
     VLLMInstanceRecordResponse,
     VLLMInstanceUpdateRequest,
@@ -17,12 +19,20 @@ from tldw_Server_API.app.core.VLLM_Management import (
     VLLMInstanceRepository,
     get_default_vllm_instance_repository,
 )
+from tldw_Server_API.app.core.VLLM_Management.service import VLLMManagementService
 
 router = APIRouter()
 
 
 def _resolve_vllm_repository() -> VLLMInstanceRepository:
     return get_default_vllm_instance_repository()
+
+
+def _resolve_vllm_management_service(
+    repository: VLLMInstanceRepository = Depends(_resolve_vllm_repository),
+    job_manager=Depends(get_job_manager),
+) -> VLLMManagementService:
+    return VLLMManagementService(repository=repository, job_manager=job_manager)
 
 
 def _serialize_instance(record: object) -> VLLMInstanceRecordResponse:
@@ -148,3 +158,85 @@ async def set_default_vllm_instance(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return VLLMDefaultRouteResponse(default_instance_id=repository.get_default_instance_id())
+
+
+def _job_response(*, action: str, instance_id: str, job: dict[str, object]) -> VLLMInstanceJobResponse:
+    return VLLMInstanceJobResponse(
+        instance_id=instance_id,
+        requested_action=action,
+        job_id=int(job.get("id") or 0),
+        job_uuid=str(job.get("uuid")) if job.get("uuid") is not None else None,
+        status=str(job.get("status") or "queued"),
+    )
+
+
+@router.post(
+    "/llm/providers/vllm/instances/{instance_id}/start",
+    response_model=VLLMInstanceJobResponse,
+    status_code=202,
+    dependencies=[Depends(check_rate_limit), Depends(require_roles("admin"))],
+)
+async def start_vllm_instance(
+    instance_id: str,
+    _: dict[str, object] = Body(default_factory=dict),
+    service: VLLMManagementService = Depends(_resolve_vllm_management_service),
+) -> VLLMInstanceJobResponse:
+    try:
+        job = service.enqueue_start(instance_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _job_response(action="start", instance_id=instance_id, job=job)
+
+
+@router.post(
+    "/llm/providers/vllm/instances/{instance_id}/stop",
+    response_model=VLLMInstanceJobResponse,
+    status_code=202,
+    dependencies=[Depends(check_rate_limit), Depends(require_roles("admin"))],
+)
+async def stop_vllm_instance(
+    instance_id: str,
+    _: dict[str, object] = Body(default_factory=dict),
+    service: VLLMManagementService = Depends(_resolve_vllm_management_service),
+) -> VLLMInstanceJobResponse:
+    try:
+        job = service.enqueue_stop(instance_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _job_response(action="stop", instance_id=instance_id, job=job)
+
+
+@router.post(
+    "/llm/providers/vllm/instances/{instance_id}/restart",
+    response_model=VLLMInstanceJobResponse,
+    status_code=202,
+    dependencies=[Depends(check_rate_limit), Depends(require_roles("admin"))],
+)
+async def restart_vllm_instance(
+    instance_id: str,
+    _: dict[str, object] = Body(default_factory=dict),
+    service: VLLMManagementService = Depends(_resolve_vllm_management_service),
+) -> VLLMInstanceJobResponse:
+    try:
+        job = service.enqueue_restart(instance_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _job_response(action="restart", instance_id=instance_id, job=job)
+
+
+@router.post(
+    "/llm/providers/vllm/instances/{instance_id}/probe",
+    response_model=VLLMInstanceJobResponse,
+    status_code=202,
+    dependencies=[Depends(check_rate_limit), Depends(require_roles("admin"))],
+)
+async def probe_vllm_instance(
+    instance_id: str,
+    _: dict[str, object] = Body(default_factory=dict),
+    service: VLLMManagementService = Depends(_resolve_vllm_management_service),
+) -> VLLMInstanceJobResponse:
+    try:
+        job = service.enqueue_probe(instance_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _job_response(action="probe", instance_id=instance_id, job=job)

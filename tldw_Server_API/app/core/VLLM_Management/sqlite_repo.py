@@ -13,6 +13,22 @@ from .models import VLLMInstanceCreate, VLLMInstanceRecord, utc_now_iso
 
 _SCHEMA_VERSION = 2
 _DEFAULT_INSTANCE_KEY = "default_instance_id"
+_ALLOWED_UPDATE_COLUMNS = {
+    "name",
+    "execution_mode",
+    "transport_config_json",
+    "launch_spec_json",
+    "routing_policy_json",
+    "declared_capabilities_json",
+    "desired_state",
+    "observed_state",
+    "probed_capabilities_json",
+    "effective_capabilities_json",
+    "last_known_base_url",
+    "last_error",
+    "executor_handle_json",
+    "updated_at",
+}
 
 
 class SqliteVLLMInstanceRepository:
@@ -296,14 +312,18 @@ class SqliteVLLMInstanceRepository:
 
         normalized_updates = list(updates)
         normalized_updates.append(("updated_at", utc_now_iso()))
+        invalid_columns = [column for column, _ in normalized_updates if column not in _ALLOWED_UPDATE_COLUMNS]
+        if invalid_columns:
+            raise ValueError(f"Unsupported managed vLLM update columns: {invalid_columns}")
         assignments = ", ".join(f"{column} = ?" for column, _ in normalized_updates)
         params = [value for _, value in normalized_updates]
         params.append(instance_id)
+        query = f"UPDATE vllm_instances SET {assignments} WHERE instance_id = ?"  # nosec B608
 
         with self._lock:
             with self._connect() as conn:
                 cursor = conn.execute(
-                    f"UPDATE vllm_instances SET {assignments} WHERE instance_id = ?",
+                    query,
                     params,
                 )
                 if cursor.rowcount == 0:

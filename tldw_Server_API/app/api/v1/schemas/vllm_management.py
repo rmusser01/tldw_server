@@ -86,3 +86,12 @@ class VLLMDeleteResponse(BaseModel):
     backend: str = "vllm"
     deleted: bool
     instance_id: str
+
+
+class VLLMInstanceJobResponse(BaseModel):
+    backend: str = "vllm"
+    instance_id: str
+    requested_action: str
+    job_id: int
+    job_uuid: str | None = None
+    status: str
