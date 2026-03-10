@@ -39,3 +39,8 @@ class VLLMInstanceRecord:
     observed_state: str
     created_at: str
     updated_at: str
+    probed_capabilities: dict[str, Any] = field(default_factory=dict)
+    effective_capabilities: dict[str, Any] = field(default_factory=dict)
+    last_known_base_url: str | None = None
+    last_error: str | None = None
+    executor_handle: dict[str, Any] = field(default_factory=dict)

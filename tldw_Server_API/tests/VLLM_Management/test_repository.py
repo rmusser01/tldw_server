@@ -45,3 +45,49 @@ def test_repository_lists_created_instances(tmp_path):
 
     assert [record.instance_id for record in records] == [first.instance_id, second.instance_id]
     assert [record.name for record in records] == ["embed-box", "vision-box"]
+
+
+def test_repository_updates_instance_spec_and_runtime_metadata(tmp_path):
+    repo = SqliteVLLMInstanceRepository(db_path=tmp_path / "vllm_instances.db")
+    created = repo.create_instance(_instance_payload("embed-box"))
+
+    updated = repo.update_instance(
+        created.instance_id,
+        {
+            "name": "embed-box-v2",
+            "routing_policy": {"is_default": True},
+            "declared_capabilities": {"chat": False, "embeddings": True},
+        },
+    )
+    runtime = repo.update_instance_runtime(
+        created.instance_id,
+        {
+            "desired_state": "running",
+            "observed_state": "healthy",
+            "probed_capabilities": {"embeddings": True},
+            "effective_capabilities": {"embeddings": True},
+            "last_known_base_url": "http://127.0.0.1:8010/v1",
+            "last_error": None,
+            "executor_handle": {"pid": 4242},
+        },
+    )
+
+    assert updated.name == "embed-box-v2"
+    assert updated.routing_policy["is_default"] is True
+    assert runtime.observed_state == "healthy"
+    assert runtime.probed_capabilities == {"embeddings": True}
+    assert runtime.effective_capabilities == {"embeddings": True}
+    assert runtime.last_known_base_url == "http://127.0.0.1:8010/v1"
+    assert runtime.executor_handle == {"pid": 4242}
+
+
+def test_repository_delete_instance_clears_default_route(tmp_path):
+    repo = SqliteVLLMInstanceRepository(db_path=tmp_path / "vllm_instances.db")
+    created = repo.create_instance(_instance_payload("delete-me"))
+    repo.set_default_instance(created.instance_id)
+
+    deleted = repo.delete_instance(created.instance_id)
+
+    assert deleted is True
+    assert repo.get_instance(created.instance_id) is None
+    assert repo.get_default_instance_id() is None

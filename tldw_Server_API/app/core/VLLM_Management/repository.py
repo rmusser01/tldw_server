@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from typing import Protocol
 
 from .models import VLLMInstanceCreate, VLLMInstanceRecord
@@ -18,6 +19,15 @@ class VLLMInstanceRepository(Protocol):
 
     def list_instances(self) -> list[VLLMInstanceRecord]:
         """Return all managed instances."""
+
+    def update_instance(self, instance_id: str, patch: dict[str, Any]) -> VLLMInstanceRecord:
+        """Update mutable instance spec fields and return the persisted record."""
+
+    def update_instance_runtime(self, instance_id: str, patch: dict[str, Any]) -> VLLMInstanceRecord:
+        """Persist observed runtime metadata and return the persisted record."""
+
+    def delete_instance(self, instance_id: str) -> bool:
+        """Delete an instance and return whether a record was removed."""
 
     def set_default_instance(self, instance_id: str | None) -> None:
         """Set or clear the default managed vLLM instance."""

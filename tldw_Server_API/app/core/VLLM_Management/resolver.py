@@ -33,7 +33,7 @@ def _default_repository_path() -> Path:
 
 
 @lru_cache(maxsize=1)
-def _default_repository() -> SqliteVLLMInstanceRepository:
+def get_default_vllm_instance_repository() -> SqliteVLLMInstanceRepository:
     return SqliteVLLMInstanceRepository(_default_repository_path())
 
 
@@ -88,7 +88,7 @@ def resolve_vllm_instance_for_request(
     if provider_key != "vllm":
         return None
 
-    repo = repository or _default_repository()
+    repo = repository or get_default_vllm_instance_repository()
     selected_instance_id = provider_instance_id or repo.get_default_instance_id()
     if not selected_instance_id:
         return None
@@ -99,9 +99,9 @@ def resolve_vllm_instance_for_request(
             raise ValueError(f"Managed vLLM instance '{selected_instance_id}' was not found")
         raise ValueError(f"Default managed vLLM instance '{selected_instance_id}' was not found")
 
-    effective_capabilities = derive_effective_capabilities(
+    effective_capabilities = instance.effective_capabilities or derive_effective_capabilities(
         declared_capabilities=instance.declared_capabilities,
-        probed_capabilities={},
+        probed_capabilities=instance.probed_capabilities,
     )
     if required_capability and not effective_capabilities.get(required_capability, False):
         raise ValueError(

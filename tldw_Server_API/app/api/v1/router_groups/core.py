@@ -233,6 +233,13 @@ def iter_core_router_specs() -> Iterable[RouterSpec]:
             route_key="llm",
         ),
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.vllm_management",
+            log_name="vllm_management",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("llm",),
+            route_key="llm",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.messages",
             log_name="messages",
             prefix=f"{API_V1_PREFIX}",
