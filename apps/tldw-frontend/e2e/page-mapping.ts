@@ -609,6 +609,16 @@ export const PAGE_MAPPINGS: PageMapping[] = [
     checklistItems: CHECKLIST_TEMPLATES.admin
   },
   {
+    name: "Admin vLLM",
+    category: "admin",
+    webuiPath: "/admin/vllm",
+    extensionOptionsPath: "/admin/vllm",
+    extensionSidepanelPath: null,
+    sharedComponent: "OptionAdminVllm",
+    session: 6,
+    checklistItems: CHECKLIST_TEMPLATES.admin
+  },
+  {
     name: "Evaluations Settings",
     category: "settings",
     webuiPath: "/settings/evaluations",

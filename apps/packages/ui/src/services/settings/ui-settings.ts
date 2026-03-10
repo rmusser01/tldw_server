@@ -451,6 +451,7 @@ export const HEADER_SHORTCUT_IDS = [
   "admin-llamacpp",
   "admin-mlx",
   "admin-monitoring",
+  "admin-vllm",
   "settings",
   "account",
   "billing"

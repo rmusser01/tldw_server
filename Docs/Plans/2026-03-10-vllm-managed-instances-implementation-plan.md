@@ -647,7 +647,7 @@ git commit -m "feat: expose managed vllm metadata and embeddings routing"
 ```
 
 ### Task 8: Build the Admin UI and Client Wiring
-**Status:** Not Started
+**Status:** Complete
 
 **Files:**
 - Create: `apps/packages/ui/src/components/Option/Admin/VllmAdminPage.tsx`
