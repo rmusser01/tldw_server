@@ -761,19 +761,30 @@ def _resolve_model_and_provider(model: str | None, provider: str | None) -> tupl
 def _resolve_managed_vllm_embeddings_route(
     *,
     provider: str | None,
+    explicit_provider: str | None = None,
     provider_instance_id: str | None,
     model: str | None,
 ) -> tuple[object | None, str, str | None]:
+    resolved_provider = (provider or "").strip().lower()
+    explicit_provider_key = (explicit_provider or "").strip().lower()
+    target_provider = resolved_provider
+    if provider_instance_id:
+        if explicit_provider_key and explicit_provider_key != "vllm":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="provider_instance_id is only supported with provider='vllm'",
+            )
+        target_provider = "vllm"
     try:
         managed_route = resolve_vllm_instance_for_request(
-            provider=provider,
+            provider=target_provider,
             provider_instance_id=provider_instance_id,
             required_capability="embeddings",
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if managed_route is None:
-        return None, (provider or "").strip().lower(), model
+        return None, resolved_provider, model
     return managed_route, "openai", managed_route.model or model
 
 
@@ -2315,6 +2326,7 @@ async def create_embedding_endpoint(
         provider = (provider or "").lower()
         managed_vllm_route, provider, model = _resolve_managed_vllm_embeddings_route(
             provider=provider,
+            explicit_provider=embedding_request.provider,
             provider_instance_id=embedding_request.provider_instance_id,
             model=model,
         )
@@ -2980,6 +2992,7 @@ async def create_embeddings_batch_endpoint(
     model, provider = _resolve_model_and_provider(payload.model, payload.provider)
     managed_vllm_route, provider, model = _resolve_managed_vllm_embeddings_route(
         provider=provider,
+        explicit_provider=payload.provider,
         provider_instance_id=payload.provider_instance_id,
         model=model,
     )

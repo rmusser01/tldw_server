@@ -575,7 +575,7 @@ git commit -m "feat: add job backed vllm lifecycle orchestration"
 ```
 
 ### Task 7: Expose Managed vLLM Metadata in Provider Listings and Embeddings
-**Status:** Not Started
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/endpoints/llm_providers.py`
