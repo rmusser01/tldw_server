@@ -57,6 +57,12 @@ class ShellSSHRunner:
         ]
         auth = dict(auth or {})
         identity_file = auth.get("identity_file") or auth.get("private_key_path")
+        if not identity_file:
+            secret_ref = str(auth.get("secret_ref") or "").strip()
+            if secret_ref:
+                resolved_identity = str(os.getenv(secret_ref) or "").strip()
+                if resolved_identity:
+                    identity_file = resolved_identity
         if identity_file:
             argv.extend(["-i", str(identity_file)])
         if auth.get("strict_host_key_checking") is False:

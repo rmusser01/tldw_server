@@ -82,3 +82,11 @@ Examples
 - Streaming inference:
   async for line in handler.stream_inference(prompt="Hello"):
       print(line.strip())
+
+Managed vLLM Instances
+- `Local_LLM` still covers the in-process/self-hosted `llama.cpp` and `llamafile` handlers.
+- Managed `vLLM` now uses a separate control plane under `tldw_Server_API/app/core/VLLM_Management/`.
+- Admin APIs live under `/api/v1/llm/providers/vllm/instances` with Jobs-backed `start`, `stop`, `restart`, and `probe` actions.
+- Request-scoped routing uses `provider_instance_id` instead of mutating global `vllm_api` config. Chat requests target `api_provider="vllm"`; embeddings requests may set `provider="vllm"` plus `provider_instance_id`.
+- The managed `vLLM` path supports multiple local or SSH-backed instances, but `tldw_server` must be able to reach each resolved `base_url` directly.
+- See `Docs/User_Guides/Integrations_Experiments/Managed_vLLM.md` for the lifecycle, SSH launcher contract, and routing examples.

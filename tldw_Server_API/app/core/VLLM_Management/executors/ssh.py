@@ -27,6 +27,15 @@ def _derive_base_url(instance: VLLMInstanceRecord) -> str:
     return f"{scheme}://{host}:{port}/v1"
 
 
+def _resolve_transport_user(transport: dict[str, Any]) -> str | None:
+    user = transport.get("user")
+    if user is None:
+        user = transport.get("username")
+    if user is None:
+        return None
+    return str(user)
+
+
 class SSHVLLMExecutor:
     def __init__(
         self,
@@ -51,7 +60,7 @@ class SSHVLLMExecutor:
             command,
             host=transport["host"],
             port=int(transport.get("port") or 22),
-            user=transport["user"],
+            user=_resolve_transport_user(transport),
             auth=transport.get("auth"),
         )
         handle = dict(result) if isinstance(result, dict) else {"result": result}
@@ -70,7 +79,7 @@ class SSHVLLMExecutor:
             command,
             host=transport["host"],
             port=int(transport.get("port") or 22),
-            user=transport["user"],
+            user=_resolve_transport_user(transport),
             auth=transport.get("auth"),
         )
         return StopResult(status="stopped", forced=False)
