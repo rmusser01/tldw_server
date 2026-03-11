@@ -25,3 +25,18 @@ struct HelperResponse: Encodable {
         case message
     }
 }
+
+struct TemplateValidationResponse {
+    let protocolVersion: String
+    let helperVersion: String
+    let templateID: String
+    let source: String
+    let ready: Bool
+    let reasons: [String]
+}
+
+struct VMRecord {
+    let vmID: String
+    let state: String
+    let healthy: Bool
+}
