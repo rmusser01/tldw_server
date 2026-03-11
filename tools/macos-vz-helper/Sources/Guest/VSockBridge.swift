@@ -1,6 +1,6 @@
 import Foundation
 
-private let guestProtocolVersion = "1"
+let guestProtocolVersion = "1"
 
 protocol GuestReadinessBridging {
     func waitUntilReady(vmID: String, timeoutSeconds: TimeInterval) throws
@@ -107,12 +107,12 @@ private struct GuestErrorResponse: Decodable {
 }
 
 protocol GuestTransporting {
-    func sendReadyRequest(vmID: String, requestData: Data, timeoutSeconds: TimeInterval) throws -> Data
+    func waitUntilGuestReady(vmID: String, timeoutSeconds: TimeInterval) throws
     func sendExecRequest(vmID: String, requestData: Data, timeoutSeconds: TimeInterval) throws -> Data
 }
 
 private final class UnimplementedGuestTransport: GuestTransporting {
-    func sendReadyRequest(vmID: String, requestData: Data, timeoutSeconds: TimeInterval) throws -> Data {
+    func waitUntilGuestReady(vmID: String, timeoutSeconds: TimeInterval) throws {
         throw GuestBridgeError.guestReadinessNotImplemented
     }
 
@@ -131,27 +131,7 @@ final class VSockBridge: GuestBridging {
     }
 
     func waitUntilReady(vmID: String, timeoutSeconds: TimeInterval) throws {
-        let requestID = UUID().uuidString
-        let requestData = try encoder.encode(
-            GuestReadyRequest(
-                protocolVersion: guestProtocolVersion,
-                requestID: requestID,
-                type: "ready"
-            )
-        )
-        let responseData = try transport.sendReadyRequest(
-            vmID: vmID,
-            requestData: requestData,
-            timeoutSeconds: timeoutSeconds
-        )
-        if let error = try? decoder.decode(GuestErrorResponse.self, from: responseData) {
-            throw GuestBridgeError.guestOperationFailed(code: error.errorCode, message: error.message)
-        }
-        let response = try decoder.decode(GuestReadyResponse.self, from: responseData)
-        try validateProtocol(responseProtocolVersion: response.protocolVersion, responseRequestID: response.requestID, requestID: requestID)
-        guard response.status == "ready" else {
-            throw GuestBridgeError.guestNotReady(response.status)
-        }
+        try transport.waitUntilGuestReady(vmID: vmID, timeoutSeconds: timeoutSeconds)
     }
 
     func exec(

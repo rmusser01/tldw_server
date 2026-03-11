@@ -3,7 +3,7 @@ import Testing
 import Virtualization
 @testable import MacOSVZHelperDaemon
 
-@Test func bootDriverStartsMachineForCanonicalBundleSpec() throws {
+@Test func bootDriverCreatesVSockListenerStateBeforeStart() throws {
     let workspace = try bootDriverWorkspaceDirectory()
     let bundleDirectory = try bootDriverBundleDirectory()
     defer {
@@ -11,24 +11,28 @@ import Virtualization
         try? FileManager.default.removeItem(at: workspace)
     }
 
-    let machineProvider = RecordingVirtualMachineProvider()
+    let sessionManager = VSockSessionManager()
+    let machineProvider = TransportRecordingVirtualMachineProvider(sessionManager: sessionManager)
     let driver = VirtualizationLinuxBootDriver(
         templateValidator: TemplateValidator(),
         configurationBuilder: VZLinuxConfigurationBuilder(),
-        machineProvider: machineProvider
+        machineProvider: machineProvider,
+        sessionManager: sessionManager,
+        connectionTokenFactory: { "token-transport" }
     )
 
     try driver.boot(
-        vmID: "vm-bundle",
+        vmID: "vm-transport",
         templatePath: bundleDirectory.path(),
         workspacePath: workspace.path()
     )
 
-    #expect(machineProvider.recordedConfigurations.count == 1)
-    #expect(machineProvider.startCallCount == 1)
+    #expect(machineProvider.listenerInstalled == true)
+    #expect(machineProvider.sessionPreparedBeforeStart == true)
+    #expect(sessionManager.hasPreparedSession(vmID: "vm-transport") == true)
 }
 
-@Test func bootDriverStopsTrackedMachine() throws {
+@Test func bootDriverInjectsVMIDAndConnectionTokenIntoGuestConfig() throws {
     let workspace = try bootDriverWorkspaceDirectory()
     let bundleDirectory = try bootDriverBundleDirectory()
     defer {
@@ -36,56 +40,72 @@ import Virtualization
         try? FileManager.default.removeItem(at: workspace)
     }
 
-    let machineProvider = RecordingVirtualMachineProvider()
+    let machineProvider = TransportRecordingVirtualMachineProvider()
     let driver = VirtualizationLinuxBootDriver(
         templateValidator: TemplateValidator(),
         configurationBuilder: VZLinuxConfigurationBuilder(),
-        machineProvider: machineProvider
+        machineProvider: machineProvider,
+        sessionManager: VSockSessionManager(),
+        connectionTokenFactory: { "token-fixed" }
     )
 
     try driver.boot(
-        vmID: "vm-stop",
+        vmID: "vm-config",
         templatePath: bundleDirectory.path(),
         workspacePath: workspace.path()
     )
 
-    try driver.stop(vmID: "vm-stop")
+    let configuration = try #require(machineProvider.recordedConfiguration)
+    let bootLoader = try #require(configuration.bootLoader as? VZLinuxBootLoader)
+    let commandLine = bootLoader.commandLine
 
-    #expect(machineProvider.stopCallCount == 1)
+    #expect(commandLine.contains("TLDW_AGENT_GUEST_VM_ID=vm-config"))
+    #expect(commandLine.contains("TLDW_AGENT_GUEST_CONNECTION_TOKEN=token-fixed"))
+    #expect(commandLine.contains("TLDW_AGENT_GUEST_HOST_VSOCK_PORT=1024"))
+    #expect(commandLine.contains("TLDW_AGENT_GUEST_WORKSPACE_ROOT=/workspace"))
 }
 
-private final class RecordingVirtualMachineProvider: VirtualMachineProviding {
-    private(set) var recordedConfigurations: [VZVirtualMachineConfiguration] = []
-    private(set) var startCallCount = 0
-    private(set) var stopCallCount = 0
+private final class TransportRecordingVirtualMachineProvider: VirtualMachineProviding {
+    private let sessionManager: VSockSessionManager?
+    private(set) var recordedConfiguration: VZVirtualMachineConfiguration?
+    private(set) var listenerInstalled = false
+    private(set) var sessionPreparedBeforeStart = false
+
+    init(sessionManager: VSockSessionManager? = nil) {
+        self.sessionManager = sessionManager
+    }
 
     func makeVirtualMachine(configuration: VZVirtualMachineConfiguration) throws -> VirtualMachineControlling {
-        recordedConfigurations.append(configuration)
-        return RecordingVirtualMachine(
-            onStart: { self.startCallCount += 1 },
-            onStop: { self.stopCallCount += 1 }
+        recordedConfiguration = configuration
+        return TransportRecordingVirtualMachine(
+            onInstall: {
+                self.listenerInstalled = true
+            },
+            onStart: {
+                self.sessionPreparedBeforeStart = self.sessionManager?.hasPreparedSession(vmID: "vm-transport") ?? false
+            }
         )
     }
 }
 
-private final class RecordingVirtualMachine: VirtualMachineControlling {
+private final class TransportRecordingVirtualMachine: VirtualMachineControlling {
+    private let onInstall: () -> Void
     private let onStart: () -> Void
-    private let onStop: () -> Void
 
-    init(onStart: @escaping () -> Void, onStop: @escaping () -> Void) {
+    init(onInstall: @escaping () -> Void, onStart: @escaping () -> Void) {
+        self.onInstall = onInstall
         self.onStart = onStart
-        self.onStop = onStop
     }
 
     func start() throws {
         onStart()
     }
 
-    func stop() throws {
-        onStop()
-    }
+    func stop() throws {}
 
-    func installSocketListener(_ listener: VZVirtioSocketListener, port: UInt32) throws {}
+    func installSocketListener(_ listener: VZVirtioSocketListener, port: UInt32) throws {
+        onInstall()
+    }
 }
 
 private func bootDriverWorkspaceDirectory() throws -> URL {

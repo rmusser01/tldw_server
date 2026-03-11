@@ -5,8 +5,19 @@ enum VZLinuxConfigurationBuilderError: Error {
     case workspaceDirectoryMissing
 }
 
+struct GuestTransportMetadata: Equatable {
+    let vmID: String
+    let connectionToken: String
+    let hostPort: UInt32
+    let workspaceRoot: String
+}
+
 protocol VZLinuxConfigurationBuilding {
-    func build(spec: TemplateBootSpec, workspacePath: String) throws -> VZVirtualMachineConfiguration
+    func build(
+        spec: TemplateBootSpec,
+        workspacePath: String,
+        guestTransport: GuestTransportMetadata?
+    ) throws -> VZVirtualMachineConfiguration
 }
 
 struct VZLinuxConfigurationBuilder: VZLinuxConfigurationBuilding {
@@ -18,14 +29,18 @@ struct VZLinuxConfigurationBuilder: VZLinuxConfigurationBuilding {
         self.memorySize = memorySize
     }
 
-    func build(spec: TemplateBootSpec, workspacePath: String) throws -> VZVirtualMachineConfiguration {
+    func build(
+        spec: TemplateBootSpec,
+        workspacePath: String,
+        guestTransport: GuestTransportMetadata? = nil
+    ) throws -> VZVirtualMachineConfiguration {
         var isDirectory = ObjCBool(false)
         guard FileManager.default.fileExists(atPath: workspacePath, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw VZLinuxConfigurationBuilderError.workspaceDirectoryMissing
         }
 
         let configuration = VZVirtualMachineConfiguration()
-        configuration.bootLoader = try bootLoader(for: spec)
+        configuration.bootLoader = try bootLoader(for: spec, guestTransport: guestTransport)
         configuration.cpuCount = cpuCount
         configuration.memorySize = memorySize
         configuration.storageDevices = [try storageDevice(for: spec)]
@@ -35,12 +50,12 @@ struct VZLinuxConfigurationBuilder: VZLinuxConfigurationBuilding {
         return configuration
     }
 
-    private func bootLoader(for spec: TemplateBootSpec) throws -> VZBootLoader {
+    private func bootLoader(for spec: TemplateBootSpec, guestTransport: GuestTransportMetadata?) throws -> VZBootLoader {
         switch spec {
         case let .bundle(bundle):
             let bootLoader = VZLinuxBootLoader(kernelURL: URL(fileURLWithPath: bundle.kernelPath))
             bootLoader.initialRamdiskURL = bundle.initrdPath.map { URL(fileURLWithPath: $0) }
-            bootLoader.commandLine = "console=hvc0 root=/dev/vda rw"
+            bootLoader.commandLine = linuxCommandLine(guestTransport: guestTransport)
             return bootLoader
         case let .rawDisk(rawDisk):
             switch rawDisk.bootLoaderKind {
@@ -48,10 +63,30 @@ struct VZLinuxConfigurationBuilder: VZLinuxConfigurationBuilding {
                 return VZEFIBootLoader()
             case .linuxKernel:
                 let bootLoader = VZLinuxBootLoader(kernelURL: URL(fileURLWithPath: rawDisk.diskImagePath))
-                bootLoader.commandLine = "console=hvc0"
+                bootLoader.commandLine = linuxCommandLine(guestTransport: guestTransport, base: "console=hvc0")
                 return bootLoader
             }
         }
+    }
+
+    private func linuxCommandLine(
+        guestTransport: GuestTransportMetadata?,
+        base: String = "console=hvc0 root=/dev/vda rw"
+    ) -> String {
+        guard let guestTransport else {
+            return base
+        }
+
+        let guestEnv = [
+            "TLDW_AGENT_GUEST_VM_ID=\(guestTransport.vmID)",
+            "TLDW_AGENT_GUEST_CONNECTION_TOKEN=\(guestTransport.connectionToken)",
+            "TLDW_AGENT_GUEST_HOST_VSOCK_PORT=\(guestTransport.hostPort)",
+            "TLDW_AGENT_GUEST_WORKSPACE_ROOT=\(guestTransport.workspaceRoot)",
+        ]
+            .map { "systemd.setenv=\($0)" }
+            .joined(separator: " ")
+
+        return "\(base) \(guestEnv)"
     }
 
     private func storageDevice(for spec: TemplateBootSpec) throws -> VZVirtioBlockDeviceConfiguration {

@@ -24,12 +24,13 @@ final class VZLinuxVMManager {
 
     init(
         registry: VMRegistry = VMRegistry(),
-        bootDriver: VZBootDriving = VirtualizationLinuxBootDriver(),
-        guestBridge: GuestBridging = VSockBridge()
+        bootDriver: VZBootDriving? = nil,
+        guestBridge: GuestBridging? = nil,
+        sessionManager: VSockSessionManager = VSockSessionManager()
     ) {
         self.registry = registry
-        self.bootDriver = bootDriver
-        self.guestBridge = guestBridge
+        self.bootDriver = bootDriver ?? VirtualizationLinuxBootDriver(sessionManager: sessionManager)
+        self.guestBridge = guestBridge ?? VSockBridge(transport: sessionManager)
     }
 
     @discardableResult

@@ -3,21 +3,20 @@ import Testing
 @testable import MacOSVZHelperDaemon
 
 final class RecordingGuestTransport: GuestTransporting {
-    private(set) var readyPayload: [String: Any]?
     private(set) var execPayload: [String: Any]?
     private(set) var readyVMID: String?
     private(set) var execVMID: String?
     private(set) var readyTimeout: TimeInterval?
     private(set) var execTimeout: TimeInterval?
-    var readyResponseFactory: (([String: Any]) -> Data)?
+    var readyError: Error?
     var execResponseFactory: (([String: Any]) -> Data)?
 
-    func sendReadyRequest(vmID: String, requestData: Data, timeoutSeconds: TimeInterval) throws -> Data {
+    func waitUntilGuestReady(vmID: String, timeoutSeconds: TimeInterval) throws {
         readyVMID = vmID
         readyTimeout = timeoutSeconds
-        let payload = try JSONSerialization.jsonObject(with: requestData) as? [String: Any] ?? [:]
-        readyPayload = payload
-        return readyResponseFactory?(payload) ?? Data()
+        if let readyError {
+            throw readyError
+        }
     }
 
     func sendExecRequest(vmID: String, requestData: Data, timeoutSeconds: TimeInterval) throws -> Data {
@@ -31,22 +30,12 @@ final class RecordingGuestTransport: GuestTransporting {
 
 @Test func vsockBridgeEncodesReadyRequestsAndAcceptsReadyResponses() throws {
     let transport = RecordingGuestTransport()
-    transport.readyResponseFactory = { payload in
-        let requestID = payload["request_id"] as? String ?? ""
-        return Data(
-            """
-            {"protocol_version":"1","request_id":"\(requestID)","status":"ready","workspace_root":"/workspace"}
-            """.utf8
-        )
-    }
     let bridge = VSockBridge(transport: transport)
 
     try bridge.waitUntilReady(vmID: "vm-ready", timeoutSeconds: 9)
 
     #expect(transport.readyVMID == "vm-ready")
     #expect(transport.readyTimeout == 9)
-    #expect(transport.readyPayload?["protocol_version"] as? String == "1")
-    #expect(transport.readyPayload?["type"] as? String == "ready")
 }
 
 @Test func vsockBridgeEncodesExecRequestsAndReturnsGuestExecResult() throws {

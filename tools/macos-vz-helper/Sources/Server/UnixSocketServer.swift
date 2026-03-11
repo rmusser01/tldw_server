@@ -281,6 +281,16 @@ final class UnixSocketServer {
             return "guest_readiness_not_implemented"
         case GuestBridgeError.guestExecNotImplemented:
             return "guest_exec_not_implemented"
+        case VSockSessionError.requestTimedOut:
+            return "guest_transport_timeout"
+        case VSockSessionError.connectionNotReady:
+            return "guest_not_ready"
+        case VSockSessionError.connectionRejected:
+            return "guest_connection_rejected"
+        case VSockSessionError.requestAlreadyInFlight:
+            return "guest_request_in_flight"
+        case VSockSessionError.closed:
+            return "guest_transport_closed"
         default:
             return "helper_internal_error"
         }

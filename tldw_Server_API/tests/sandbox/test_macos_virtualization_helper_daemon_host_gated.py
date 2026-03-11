@@ -5,6 +5,7 @@ import subprocess  # nosec B404 - subprocess is required to launch the repo-loca
 import sys
 import tempfile
 import time
+import warnings
 from pathlib import Path
 
 import pytest
@@ -143,6 +144,8 @@ def test_macos_helper_daemon_canonical_bundle_boot_smoke(monkeypatch, tmp_path: 
         text=True,
     )
 
+    created_vm_id: str | None = None
+    cleanup_error: Exception | None = None
     try:
         client = MacOSVirtualizationHelperClient(socket_path=str(socket_path), timeout_sec=0.5)
         deadline = time.time() + 5.0
@@ -183,15 +186,25 @@ def test_macos_helper_daemon_canonical_bundle_boot_smoke(monkeypatch, tmp_path: 
                 }
             )
         except MacOSVirtualizationHelperFailure as exc:
-            if exc.error_code == "boot_not_implemented":
-                pytest.fail("expected canonical bundle boot path to move past boot_not_implemented")
-            if exc.error_code == "guest_readiness_not_implemented":
-                pytest.skip("canonical bundle boot reached guest readiness; vsock guest transport is not wired yet")
             pytest.fail(f"unexpected helper create_vm failure: {exc.error_code}")
         else:
             if response.vm_id != "bundle-smoke-vm":
                 pytest.fail(f"expected vm_id 'bundle-smoke-vm', got {response.vm_id!r}")
+            if response.state != "running":
+                pytest.fail(f"expected state 'running', got {response.state!r}")
+            created_vm_id = response.vm_id
+            status = client.get_vm_status(response.vm_id)
+            if status.state != "running":
+                pytest.fail(f"expected running vm status, got {status.state!r}")
+            if status.healthy is not True:
+                pytest.fail(f"expected healthy=True, got {status.healthy!r}")
     finally:
+        if created_vm_id:
+            try:
+                client = MacOSVirtualizationHelperClient(socket_path=str(socket_path), timeout_sec=0.5)
+                client.terminate_vm(created_vm_id)
+            except Exception as exc:  # pragma: no cover - cleanup warning path only
+                cleanup_error = exc
         process.terminate()
         try:
             process.wait(timeout=5)
@@ -199,3 +212,8 @@ def test_macos_helper_daemon_canonical_bundle_boot_smoke(monkeypatch, tmp_path: 
             process.kill()
             process.wait(timeout=5)
         socket_path.unlink(missing_ok=True)
+        if cleanup_error is not None:
+            warnings.warn(
+                f"failed to terminate helper smoke vm {created_vm_id}: {cleanup_error}",
+                stacklevel=1,
+            )
