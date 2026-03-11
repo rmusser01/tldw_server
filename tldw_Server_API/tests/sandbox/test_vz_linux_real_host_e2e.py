@@ -15,6 +15,11 @@ from tldw_Server_API.app.core.Sandbox.streams import get_hub
 from tldw_Server_API.app.core.testing import is_truthy
 
 
+def _expect(condition: bool, message: str) -> None:
+    if not condition:
+        pytest.fail(message)
+
+
 def _configure_sqlite_store(monkeypatch, tmp_path: Path) -> None:
     db_path = str(tmp_path / "sandbox_store.db")
     root_dir = str(tmp_path / "sandbox_root")
@@ -103,9 +108,9 @@ def test_vz_linux_real_ephemeral_run_smoke(monkeypatch, tmp_path: Path) -> None:
         for frame in frames
         if frame.get("type") == "stdout"
     )
-    assert status.phase == RunPhase.completed
-    assert status.exit_code == 0
-    assert "vz-linux-e2e" in stdout_text
+    _expect(status.phase == RunPhase.completed, f"Expected completed phase, got {status.phase!r}")
+    _expect(status.exit_code == 0, f"Expected exit code 0, got {status.exit_code!r}")
+    _expect("vz-linux-e2e" in stdout_text, f"Expected stdout token in output, got {stdout_text!r}")
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS host only")
@@ -168,14 +173,17 @@ def test_vz_linux_real_session_reuse_smoke(monkeypatch, tmp_path: Path) -> None:
         )
         control_after_second = service._orch.get_vz_session_control(session.id)
 
-        assert first.phase == RunPhase.completed
-        assert second.phase == RunPhase.completed
-        assert control_after_first is not None
-        assert control_after_second is not None
-        assert control_after_first["vm_id"] == control_after_second["vm_id"]
-        assert service.destroy_session(session.id) is True
+        _expect(first.phase == RunPhase.completed, f"Expected first run completed, got {first.phase!r}")
+        _expect(second.phase == RunPhase.completed, f"Expected second run completed, got {second.phase!r}")
+        _expect(control_after_first is not None, "Expected VZ session control after first run")
+        _expect(control_after_second is not None, "Expected VZ session control after second run")
+        _expect(
+            control_after_first["vm_id"] == control_after_second["vm_id"],
+            "Expected second run to reuse the same vz_linux vm_id",
+        )
+        _expect(service.destroy_session(session.id) is True, "Expected session destruction to succeed")
         destroyed = True
-        assert service._orch.get_vz_session_control(session.id) is None
+        _expect(service._orch.get_vz_session_control(session.id) is None, "Expected VZ session control cleanup")
     finally:
         if session_id and not destroyed:
             service.destroy_session(session_id)
