@@ -24,7 +24,7 @@ final class VZLinuxVMManager {
 
     init(
         registry: VMRegistry = VMRegistry(),
-        bootDriver: VZBootDriving = PlaceholderVZBootDriver(),
+        bootDriver: VZBootDriving = VirtualizationLinuxBootDriver(),
         guestBridge: GuestBridging = VSockBridge()
     ) {
         self.registry = registry

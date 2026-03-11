@@ -88,4 +88,31 @@ enum TemplateBootSpec: Equatable {
             return spec.validationStrength
         }
     }
+
+    var workspaceMountTag: String {
+        switch self {
+        case let .bundle(spec):
+            return spec.workspaceMountTag
+        case let .rawDisk(spec):
+            return spec.workspaceMountTag
+        }
+    }
+
+    var vsockPort: UInt32 {
+        switch self {
+        case let .bundle(spec):
+            return spec.vsockPort
+        case let .rawDisk(spec):
+            return spec.vsockPort
+        }
+    }
+
+    var guestAgentPath: String {
+        switch self {
+        case let .bundle(spec):
+            return spec.guestAgentPath
+        case let .rawDisk(spec):
+            return spec.guestAgentPath
+        }
+    }
 }
