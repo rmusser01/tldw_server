@@ -17,7 +17,8 @@ let package = Package(
         .testTarget(
             name: "MacOSVZHelperDaemonTests",
             dependencies: ["MacOSVZHelperDaemon"],
-            path: "Tests"
+            path: "Tests",
+            exclude: ["TemplateFixtures"]
         ),
     ]
 )
