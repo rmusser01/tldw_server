@@ -115,6 +115,18 @@ Example dry run:
 The dry run still writes `build-info.json` so provenance can be inspected
 without a privileged Linux build host.
 
+## Container Wrapper
+
+`scripts/run-linux-builder-container.sh` is a thin wrapper around the native
+Linux builder. It exists for execution convenience only and must not become a
+second build implementation.
+
+Example dry run:
+
+```bash
+./scripts/run-linux-builder-container.sh --dry-run --output-dir /tmp/vz-linux-build
+```
+
 ## Quick Start
 
 ```bash

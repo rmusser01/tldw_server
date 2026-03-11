@@ -92,6 +92,8 @@ Its current role is narrow:
 - stage and enable `workspace.mount` plus `tldw-agent-guest.service`
 - verify the expected guest binary path before later VM/image automation lands
 - provide the guest-mode binary that now serves the first request/response guest protocol
+- expose a thin Linux-container wrapper around the same builder flow when
+  direct Linux build tooling is not available on the host
 
 Expected operator flow later:
 
