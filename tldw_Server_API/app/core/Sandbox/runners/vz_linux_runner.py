@@ -231,6 +231,7 @@ class VZLinuxRunner(VZBaseRunner):
         workspace = session_workspace
         created_workspace = False
         vm_id: str | None = None
+        template_ref: str | None = None
         session_mode = bool(str(spec.session_id or "").strip())
         should_terminate_vm = True
 
@@ -263,8 +264,22 @@ class VZLinuxRunner(VZBaseRunner):
                 and str(session_control.get("vm_id") or "").strip()
             ):
                 vm_id = str(session_control.get("vm_id") or "").strip()
+                template_ref = str(session_control.get("template_id") or "").strip() or spec.base_image
                 should_terminate_vm = False
             else:
+                template_validation = helper.validate_template(
+                    {
+                        "runtime": self.runtime_type.value,
+                        "template": spec.base_image,
+                    }
+                )
+                if not bool(template_validation.get("ready")):
+                    template_reasons = [
+                        str(reason) for reason in template_validation.get("reasons", []) if str(reason).strip()
+                    ]
+                    reason_text = ", ".join(template_reasons) if template_reasons else "template_invalid"
+                    raise RuntimeError(reason_text)
+                template_ref = str(template_validation.get("template_id") or "").strip() or spec.base_image
                 vm = helper.create_vm(
                     {
                         "runtime": self.runtime_type.value,
@@ -273,7 +288,7 @@ class VZLinuxRunner(VZBaseRunner):
                         "session_mode": session_mode,
                         "workspace_path": workspace,
                         "workspace_mount": "virtiofs",
-                        "template": spec.base_image,
+                        "template": template_ref,
                         "network_policy": str(spec.network_policy or "deny_all").strip().lower() or "deny_all",
                     }
                 )
@@ -283,7 +298,7 @@ class VZLinuxRunner(VZBaseRunner):
                     self._store_session_control(
                         session_id=spec.session_id,
                         vm_id=vm.vm_id,
-                        template_id=spec.base_image,
+                        template_id=template_ref,
                         workspace_mount=workspace,
                     )
             self._register_active_run(run_id, vm_id, workspace if created_workspace else None)

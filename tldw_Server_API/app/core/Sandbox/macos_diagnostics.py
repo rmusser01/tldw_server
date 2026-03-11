@@ -147,15 +147,49 @@ def _template_status(
     }
 
 
+def _vz_linux_template_status() -> dict[str, object]:
+    raw_source = str(os.getenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE") or "").strip()
+    source = raw_source or None
+    reasons: list[str] = []
+    ready = False
+    configured = bool(source)
+
+    if not configured:
+        reasons.append("template_unconfigured")
+        reasons.append(_VZ_LINUX_TEMPLATE_MISSING_REASON)
+        return {
+            "configured": configured,
+            "ready": ready,
+            "source": source,
+            "reasons": reasons,
+        }
+
+    try:
+        validation = MacOSVirtualizationHelperClient().validate_template(
+            {"runtime": RuntimeType.vz_linux.value, "template": source}
+        )
+        ready = bool(validation.get("ready"))
+        helper_reasons = [str(reason) for reason in validation.get("reasons", []) if str(reason).strip()]
+        reasons.extend(helper_reasons)
+    except MacOSVirtualizationHelperUnavailable as exc:
+        reasons.append(str(exc) or "macos_virtualization_helper_unavailable")
+
+    if not ready and not reasons:
+        reasons.append(_VZ_LINUX_TEMPLATE_MISSING_REASON)
+
+    return {
+        "configured": configured,
+        "ready": ready,
+        "source": source,
+        "reasons": reasons,
+    }
+
+
 def probe_templates() -> dict[str, dict[str, object]]:
     """Report template readiness for the VZ runtime families."""
 
     return {
-        "vz_linux": _template_status(
-            source_env_key="TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE",
-            ready_env_key="TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY",
-            missing_reason=_VZ_LINUX_TEMPLATE_MISSING_REASON,
-        ),
+        "vz_linux": _vz_linux_template_status(),
         "vz_macos": _template_status(
             source_env_key="TLDW_SANDBOX_VZ_MACOS_TEMPLATE_SOURCE",
             ready_env_key="TLDW_SANDBOX_VZ_MACOS_TEMPLATE_READY",

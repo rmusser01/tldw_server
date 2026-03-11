@@ -31,7 +31,8 @@ class SandboxImageStore:
 
     The initial implementation is intentionally lightweight: it records template
     metadata and returns deterministic clone manifests without performing APFS
-    cloning yet.
+    cloning yet. It is not the authoritative source of runnable-template truth;
+    the macOS helper owns validation for templates that can actually boot.
     """
 
     def __init__(self, root_path: str | Path) -> None:

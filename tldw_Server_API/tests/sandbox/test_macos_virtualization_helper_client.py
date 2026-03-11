@@ -331,3 +331,46 @@ def test_socket_helper_maps_error_payload_to_helper_failure(monkeypatch) -> None
 
     assert excinfo.value.error_code == "template_invalid"
     assert "template path is invalid" in str(excinfo.value)
+
+
+def test_socket_helper_supports_register_and_validate_template(monkeypatch) -> None:
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    requests = _install_fake_helper_socket(
+        monkeypatch,
+        responses={
+            "register_template": {
+                "protocol_version": "1",
+                "helper_version": "0.1.0",
+                "template_id": "vz_linux:ubuntu-24.04",
+                "source": "/tmp/ubuntu-24.04.img",
+                "ready": True,
+                "reasons": [],
+                "details": {"runtime": "vz_linux"},
+            },
+            "validate_template": {
+                "protocol_version": "1",
+                "helper_version": "0.1.0",
+                "template_id": "vz_linux:ubuntu-24.04",
+                "source": "/tmp/ubuntu-24.04.img",
+                "ready": True,
+                "reasons": [],
+                "details": {"runtime": "vz_linux"},
+            },
+        },
+    )
+
+    client = MacOSVirtualizationHelperClient()
+
+    registered = client.register_template(
+        {"runtime": "vz_linux", "template": "/tmp/ubuntu-24.04.img"}
+    )
+    validated = client.validate_template(
+        {"runtime": "vz_linux", "template": "/tmp/ubuntu-24.04.img"}
+    )
+
+    assert registered["template_id"] == "vz_linux:ubuntu-24.04"
+    assert validated["ready"] is True
+    assert [entry["operation"] for entry in requests] == [
+        "register_template",
+        "validate_template",
+    ]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+from pathlib import Path
 from typing import Any
 
 from tldw_Server_API.app.core.testing import is_truthy
@@ -71,6 +72,16 @@ class MacOSVirtualizationHelperClient:
     def list_vms(self) -> HelperVMListReply:
         payload = self._request("list_vms", {})
         return parse_helper_vm_list(payload)
+
+    def register_template(self, request: dict[str, Any]) -> dict[str, Any]:
+        if is_truthy(os.getenv("TEST_MODE")):
+            return self._fake_template_reply(request)
+        return self._request("register_template", request)
+
+    def validate_template(self, request: dict[str, Any]) -> dict[str, Any]:
+        if is_truthy(os.getenv("TEST_MODE")):
+            return self._fake_template_reply(request)
+        return self._request("validate_template", request)
 
     def create_vm(self, request: dict[str, Any]) -> HelperVMReply:
         if is_truthy(os.getenv("TEST_MODE")):
@@ -192,6 +203,35 @@ class MacOSVirtualizationHelperClient:
                 message=str(response.get("message") or "").strip(),
             )
         return response
+
+    def _fake_template_reply(self, request: dict[str, Any]) -> dict[str, Any]:
+        runtime = str(request.get("runtime") or "vz_linux").strip().lower() or "vz_linux"
+        template = str(request.get("template") or request.get("source") or "").strip()
+        template_name = template.rsplit("/", 1)[-1] if template else ""
+        template_id = str(request.get("template_id") or "").strip() or (
+            f"{runtime}:{template_name}" if template_name else ""
+        )
+        ready_env = {
+            "vz_linux": "TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY",
+            "vz_macos": "TLDW_SANDBOX_VZ_MACOS_TEMPLATE_READY",
+        }.get(runtime, "TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY")
+        missing_reason = {
+            "vz_linux": "vz_linux_template_missing",
+            "vz_macos": "macos_template_missing",
+        }.get(runtime, "template_missing")
+        ready = bool(template) and is_truthy(os.getenv(ready_env))
+        reasons = [] if ready else ([missing_reason] if template else ["template_unconfigured"])
+        if template and not template_id:
+            template_id = f"{runtime}:{Path(template).name}"
+        return {
+            "protocol_version": self._protocol_version,
+            "helper_version": "test-mode",
+            "template_id": template_id or None,
+            "source": template or None,
+            "ready": ready,
+            "reasons": reasons,
+            "details": {"runtime": runtime},
+        }
 
     @staticmethod
     def _read_response(client: socket.socket) -> dict[str, Any]:

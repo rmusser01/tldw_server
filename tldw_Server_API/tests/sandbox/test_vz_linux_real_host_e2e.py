@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.config import clear_config_cache, settings as app_settings
+from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+    MacOSVirtualizationHelperUnavailable,
+)
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RuntimeType, SessionSpec
 from tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner import VZLinuxRunner
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
@@ -52,6 +55,16 @@ def _require_vz_linux_real_host_e2e(monkeypatch, tmp_path: Path) -> str:
         pytest.skip("TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE is required")
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "1")
     monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "0")
+    try:
+        validation = VZLinuxRunner.helper_client_cls().validate_template(
+            {"runtime": RuntimeType.vz_linux.value, "template": base_image}
+        )
+    except MacOSVirtualizationHelperUnavailable as exc:
+        pytest.skip(f"vz_linux helper unavailable for template validation: {exc}")
+    if not bool(validation.get("ready")):
+        template_reasons = [str(reason) for reason in validation.get("reasons", []) if str(reason).strip()]
+        reason_text = ", ".join(template_reasons) if template_reasons else "template_invalid"
+        pytest.skip(f"vz_linux template validation unavailable: {reason_text}")
     return base_image
 
 
@@ -71,6 +84,23 @@ def test_vz_linux_real_host_e2e_requires_base_image_env(monkeypatch, tmp_path: P
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE", raising=False)
 
     with pytest.raises(pytest.skip.Exception, match="BASE_IMAGE"):
+        _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
+
+
+def test_vz_linux_real_host_e2e_requires_helper_validated_template(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_E2E", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE", "bad-template")
+
+    class _FailingHelper:
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            assert request["template"] == "bad-template"
+            return {"ready": False, "reasons": ["template_invalid"]}
+
+    monkeypatch.setattr(VZLinuxRunner, "helper_client_cls", _FailingHelper)
+
+    with pytest.raises(pytest.skip.Exception, match="template_invalid"):
         _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
 
 

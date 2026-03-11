@@ -89,6 +89,7 @@ def test_collect_macos_diagnostics_reports_missing_helper_and_templates(monkeypa
 def test_collect_macos_diagnostics_reports_real_vz_linux_execution_mode(monkeypatch) -> None:
     _patch_macos_host(monkeypatch)
     monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE", "/tmp/vz-linux.img")
 
     class _FakeHelper:
         def ping(self):
@@ -98,6 +99,15 @@ def test_collect_macos_diagnostics_reports_real_vz_linux_execution_mode(monkeypa
                 status="ok",
                 details={"transport": "unix"},
             )
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            assert request["runtime"] == "vz_linux"
+            return {
+                "template_id": "vz_linux:ubuntu-24.04",
+                "source": request["template"],
+                "ready": True,
+                "reasons": [],
+            }
 
     monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FakeHelper)
     monkeypatch.setattr(
@@ -135,6 +145,8 @@ def test_collect_macos_diagnostics_reports_real_vz_linux_execution_mode(monkeypa
     assert data["helper"]["transport"] == "unix"
     assert data["helper"]["protocol_version"] == "1"
     assert data["helper"]["helper_version"] == "0.1.0"
+    assert data["templates"]["vz_linux"]["ready"] is True
+    assert data["templates"]["vz_linux"]["reasons"] == []
 
 
 def test_collect_macos_diagnostics_separates_policy_from_host_readiness(monkeypatch) -> None:
@@ -159,6 +171,62 @@ def test_collect_macos_diagnostics_uses_optional_operator_metadata_env(monkeypat
 
     assert data["helper"]["path"] == "/tmp/macos-helper"
     assert data["templates"]["vz_linux"]["source"] == "/tmp/vz-linux.img"
+
+
+def test_collect_macos_diagnostics_reports_helper_validated_template_failure(monkeypatch) -> None:
+    _patch_macos_host(monkeypatch)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE", "/tmp/vz-linux.img")
+
+    class _FailingTemplateHelper:
+        def ping(self):
+            return HelperPingReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                status="ok",
+                details={"transport": "unix"},
+            )
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            return {
+                "template_id": None,
+                "source": request["template"],
+                "ready": False,
+                "reasons": ["template_invalid"],
+            }
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FailingTemplateHelper)
+    monkeypatch.setattr(
+        diagnostics_module,
+        "collect_runtime_preflights",
+        lambda network_policy="deny_all": {
+            RuntimeType.vz_linux: RuntimePreflightResult(
+                runtime=RuntimeType.vz_linux,
+                available=False,
+                reasons=["template_invalid"],
+                execution_mode="none",
+            ),
+            RuntimeType.vz_macos: RuntimePreflightResult(
+                runtime=RuntimeType.vz_macos,
+                available=False,
+                reasons=["macos_virtualization_helper_unavailable"],
+                execution_mode="none",
+            ),
+            RuntimeType.seatbelt: RuntimePreflightResult(
+                runtime=RuntimeType.seatbelt,
+                available=False,
+                reasons=["seatbelt_unavailable"],
+                execution_mode="none",
+                supported_trust_levels=["trusted"],
+            ),
+        },
+    )
+
+    data = diagnostics_module.collect_macos_diagnostics()
+
+    assert data["templates"]["vz_linux"]["configured"] is True
+    assert data["templates"]["vz_linux"]["ready"] is False
+    assert data["templates"]["vz_linux"]["reasons"] == ["template_invalid"]
 
 
 def test_collect_macos_diagnostics_does_not_trust_ready_env_without_reachable_helper(monkeypatch) -> None:
