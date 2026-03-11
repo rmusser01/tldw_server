@@ -89,6 +89,7 @@ Its current role is narrow:
 
 - build `tldw-agent-guest`
 - install it into a rootfs-like directory
+- stage and enable `workspace.mount` plus `tldw-agent-guest.service`
 - verify the expected guest binary path before later VM/image automation lands
 - provide the guest-mode binary that now serves the first request/response guest protocol
 

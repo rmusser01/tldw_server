@@ -15,11 +15,16 @@ TARGET_DIR="${ROOTFS}/usr/local/bin"
 TARGET_BIN="${TARGET_DIR}/tldw-agent-guest"
 SYSTEMD_DIR="${ROOTFS}/etc/systemd/system"
 SYSTEMD_UNIT="${SYSTEMD_DIR}/tldw-agent-guest.service"
+WORKSPACE_MOUNT_UNIT="${SYSTEMD_DIR}/workspace.mount"
+WANTS_DIR="${SYSTEMD_DIR}/multi-user.target.wants"
+WORKSPACE_DIR="${ROOTFS}/workspace"
 GOCACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tldw-agent-go.XXXXXX")"
 trap 'rm -rf "${GOCACHE_DIR}"' EXIT
 
 mkdir -p "${TARGET_DIR}"
 mkdir -p "${SYSTEMD_DIR}"
+mkdir -p "${WANTS_DIR}"
+mkdir -p "${WORKSPACE_DIR}"
 
 (
   cd "${AGENT_DIR}"
@@ -29,3 +34,7 @@ mkdir -p "${SYSTEMD_DIR}"
 
 chmod +x "${TARGET_BIN}"
 install -m 0644 "${IMAGE_DIR}/systemd/tldw-agent-guest.service" "${SYSTEMD_UNIT}"
+install -m 0644 "${IMAGE_DIR}/systemd/workspace.mount" "${WORKSPACE_MOUNT_UNIT}"
+
+ln -sfn ../tldw-agent-guest.service "${WANTS_DIR}/tldw-agent-guest.service"
+ln -sfn ../workspace.mount "${WANTS_DIR}/workspace.mount"

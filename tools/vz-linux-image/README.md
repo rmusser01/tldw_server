@@ -8,7 +8,7 @@ This directory holds the first reproducible local image/rootfs path for the
 The current slice is intentionally narrow:
 
 - build the guest-mode `tldw-agent`
-- install it plus the guest service unit into a rootfs-like directory
+- install it plus the guest service and workspace mount units into a rootfs-like directory
 - emit a canonical bundle directory with `manifest.json`, `kernel`, optional
   `initrd`, and `rootfs.img`
 - verify the staged layout with a smoke-check script
@@ -50,6 +50,7 @@ bash ./scripts/build-bundle.sh "${BUNDLE_DIR}"
 
 ```text
 <rootfs>/
+  workspace/
   usr/
     local/
       bin/
@@ -58,6 +59,10 @@ bash ./scripts/build-bundle.sh "${BUNDLE_DIR}"
     systemd/
       system/
         tldw-agent-guest.service
+        workspace.mount
+        multi-user.target.wants/
+          tldw-agent-guest.service
+          workspace.mount
 
 <bundle>/
   manifest.json
@@ -66,9 +71,9 @@ bash ./scripts/build-bundle.sh "${BUNDLE_DIR}"
   initrd  # optional
 ```
 
-The systemd unit is staged as the canonical guest-startup asset. The actual
-long-lived in-guest transport wiring is completed in later VM boot and guest
-execution slices.
+The install script now also stages `/workspace`, installs `workspace.mount`,
+and enables both `workspace.mount` and `tldw-agent-guest.service` by creating
+the expected `multi-user.target.wants/` symlinks inside the rootfs.
 
 ## Helper Smoke
 

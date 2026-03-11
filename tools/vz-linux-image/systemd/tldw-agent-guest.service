@@ -1,6 +1,7 @@
 [Unit]
 Description=tldw guest agent
-After=multi-user.target
+Requires=workspace.mount
+After=workspace.mount
 
 [Service]
 Type=simple

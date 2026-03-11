@@ -49,3 +49,19 @@ def test_bundle_builder_emits_manifest_and_expected_paths(tmp_path: Path) -> Non
 
     assert (rootfs_dir / "usr/local/bin/tldw-agent-guest").is_file()
     assert (rootfs_dir / "etc/systemd/system/tldw-agent-guest.service").is_file()
+    assert (rootfs_dir / "etc/systemd/system/workspace.mount").is_file()
+    assert (rootfs_dir / "workspace").is_dir()
+
+    guest_service = (rootfs_dir / "etc/systemd/system/tldw-agent-guest.service").read_text(encoding="utf-8")
+    assert "Requires=workspace.mount" in guest_service
+    assert "After=workspace.mount" in guest_service
+
+    workspace_mount = (rootfs_dir / "etc/systemd/system/workspace.mount").read_text(encoding="utf-8")
+    assert "What=workspace" in workspace_mount
+    assert "Where=/workspace" in workspace_mount
+    assert "Type=virtiofs" in workspace_mount
+
+    wants_dir = rootfs_dir / "etc/systemd/system/multi-user.target.wants"
+    assert wants_dir.is_dir()
+    assert (wants_dir / "tldw-agent-guest.service").is_symlink()
+    assert (wants_dir / "workspace.mount").is_symlink()
