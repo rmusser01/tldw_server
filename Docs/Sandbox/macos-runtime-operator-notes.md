@@ -121,3 +121,25 @@ Current diagnostics are still env-driven scaffolding:
 - template source metadata is optional and comes from `TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE` and `TLDW_SANDBOX_VZ_MACOS_TEMPLATE_SOURCE`
 - `vz_linux` reports `execution_mode=real` when helper/template readiness succeeds
 - `vz_macos` reports `execution_mode=fake` only when `TLDW_SANDBOX_VZ_MACOS_FAKE_EXEC=1`
+
+## Real Host E2E Smoke
+
+There is now an opt-in pytest smoke module for proving real `vz_linux`
+execution on a prepared Apple silicon macOS host:
+
+- `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py`
+
+Required env for that module:
+
+- `TLDW_SANDBOX_VZ_LINUX_E2E=1`
+- `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<guest-template-id-or-base-image>`
+- real helper/template readiness required by normal `vz_linux` preflight
+
+The helper function in that test module also forces:
+
+- `SANDBOX_ENABLE_EXECUTION=1`
+- `SANDBOX_BACKGROUND_EXECUTION=0`
+
+That keeps the smoke path synchronous and prevents it from silently using the
+fake helper contract. On unprepared hosts, the module should skip with explicit
+reasons instead of reporting a fake pass.

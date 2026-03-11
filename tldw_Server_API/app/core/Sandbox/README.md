@@ -56,6 +56,7 @@ Current limitations:
 - `seatbelt` real execution still depends on deprecated `sandbox-exec` and may be blocked by an enclosing sandbox even on macOS hosts.
 - `vz_linux` supports session VM reuse through persisted VZ session-control metadata; `vz_macos` does not.
 - `seatbelt` is intentionally conservative and should not be treated as equivalent to a VM boundary.
+- Real host `vz_linux` smoke coverage is opt-in through `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py` and requires `TLDW_SANDBOX_VZ_LINUX_E2E=1`, `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<value>`, `SANDBOX_ENABLE_EXECUTION=1`, and `SANDBOX_BACKGROUND_EXECUTION=0`.
 
 ## Operations And Development
 

@@ -59,6 +59,16 @@ def test_vz_linux_real_host_e2e_requires_opt_in(monkeypatch, tmp_path: Path) -> 
         _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
 
 
+def test_vz_linux_real_host_e2e_requires_base_image_env(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_E2E", "1")
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE", raising=False)
+
+    with pytest.raises(pytest.skip.Exception, match="BASE_IMAGE"):
+        _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS host only")
 def test_vz_linux_real_ephemeral_run_smoke(monkeypatch, tmp_path: Path) -> None:
     base_image = _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
