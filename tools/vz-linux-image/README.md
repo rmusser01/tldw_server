@@ -67,6 +67,21 @@ rootfs:
 - `tldw-agent-guest.service`
 - `workspace.mount`
 
+## Rootfs Image Packing
+
+`scripts/pack-rootfs-image.sh` turns a prepared rootfs directory into
+`rootfs.img`.
+
+The canonical packing path is directory-to-ext4 via `mke2fs -d`, which keeps
+the source rootfs directory intact and avoids turning image packing into a
+loop-mount-only workflow.
+
+Example dry run:
+
+```bash
+./scripts/pack-rootfs-image.sh --dry-run --rootfs /tmp/vz-rootfs --output-image /tmp/rootfs.img
+```
+
 ## Quick Start
 
 ```bash
