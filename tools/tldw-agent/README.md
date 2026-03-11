@@ -45,6 +45,23 @@ cd tldw-agent
 go build -o bin/tldw-agent-host ./cmd/tldw-agent-host
 ```
 
+## Local Verification In `tldw_server2`
+
+This tree is now also used for the `vz_linux` helper/guest roadmap inside
+`tldw_server2`.
+
+During that work, existing host/native-messaging and ACP behavior must keep
+building and testing cleanly before any guest-mode changes are accepted.
+
+Use the repo-local verification script:
+
+```bash
+bash ./scripts/verify-local-build.sh
+```
+
+The script builds into a temporary directory and runs `go test ./...`, so it
+does not recreate compiled binaries inside the source tree.
+
 ### Install Native Messaging Host
 
 **macOS/Linux (Chrome):**
