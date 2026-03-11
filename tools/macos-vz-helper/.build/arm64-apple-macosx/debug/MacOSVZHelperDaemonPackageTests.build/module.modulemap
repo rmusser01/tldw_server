@@ -1,0 +1,4 @@
+module MacOSVZHelperDaemonPackageTests {
+    header "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/vz-linux-real-execution-dev/tools/macos-vz-helper/.build/arm64-apple-macosx/debug/MacOSVZHelperDaemonPackageTests.build/MacOSVZHelperDaemonPackageTests-Swift.h"
+    requires objc
+}
