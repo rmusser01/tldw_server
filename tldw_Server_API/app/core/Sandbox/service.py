@@ -37,7 +37,10 @@ from .models import (
     SessionSpec,
     TrustLevel,
 )
-from .macos_virtualization.helper_client import MacOSVirtualizationHelperClient
+from .macos_virtualization.helper_client import (
+    MacOSVirtualizationHelperClient,
+    MacOSVirtualizationHelperFailure,
+)
 from .macos_diagnostics import collect_macos_diagnostics
 from .orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
 from .policy import SandboxPolicy, SandboxPolicyConfig, compute_policy_hash
@@ -1931,9 +1934,14 @@ class SandboxService:
         runtime = str(control.get("runtime") or "").strip().lower()
         vm_id = str(control.get("vm_id") or "").strip()
         if runtime in {RuntimeType.vz_linux.value, RuntimeType.vz_macos.value} and vm_id:
-            terminated = bool(MacOSVirtualizationHelperClient().terminate_vm(vm_id))
+            try:
+                terminated = bool(MacOSVirtualizationHelperClient().terminate_vm(vm_id))
+            except MacOSVirtualizationHelperFailure as exc:
+                if exc.error_code not in {"vm_not_found", "already_terminated"}:
+                    raise
+                terminated = False
             if not terminated:
-                raise RuntimeError(f"{runtime}_session_vm_terminate_failed")
+                logger.info("{} session vm {} already absent during cleanup", runtime, vm_id)
         self._orch.delete_vz_session_control(session_id)
 
     def _destroy_session_serialized(self, session_id: str) -> bool:

@@ -374,3 +374,34 @@ def test_socket_helper_supports_register_and_validate_template(monkeypatch) -> N
         "register_template",
         "validate_template",
     ]
+
+
+def test_socket_helper_maps_missing_vm_status_and_terminate_to_nonfatal_results(monkeypatch) -> None:
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    _install_fake_helper_socket(
+        monkeypatch,
+        responses={
+            "get_vm_status": {
+                "protocol_version": "1",
+                "helper_version": "0.1.0",
+                "error_code": "vm_not_found",
+                "message": "missing vm",
+            },
+            "terminate_vm": {
+                "protocol_version": "1",
+                "helper_version": "0.1.0",
+                "error_code": "already_terminated",
+                "message": "already gone",
+            },
+        },
+    )
+
+    client = MacOSVirtualizationHelperClient()
+
+    status = client.get_vm_status("vm-missing")
+    terminated = client.terminate_vm("vm-missing")
+
+    assert status.healthy is False
+    assert status.state == "missing"
+    assert status.details["error_code"] == "vm_not_found"
+    assert terminated is False

@@ -160,13 +160,30 @@ class MacOSVirtualizationHelperClient:
                 healthy=True,
                 details={"transport": "fake"},
             )
-        payload = self._request("get_vm_status", {"vm_id": vm_id})
+        try:
+            payload = self._request("get_vm_status", {"vm_id": vm_id})
+        except MacOSVirtualizationHelperFailure as exc:
+            if exc.error_code in {"vm_not_found", "already_terminated"}:
+                return HelperVMStatusReply(
+                    protocol_version=self._protocol_version,
+                    helper_version="unknown",
+                    vm_id=str(vm_id or "").strip(),
+                    state="missing",
+                    healthy=False,
+                    details={"error_code": exc.error_code},
+                )
+            raise
         return parse_helper_vm_status(payload)
 
     def terminate_vm(self, vm_id: str) -> bool:
         if is_truthy(os.getenv("TEST_MODE")):
             return True
-        payload = self._request("terminate_vm", {"vm_id": vm_id})
+        try:
+            payload = self._request("terminate_vm", {"vm_id": vm_id})
+        except MacOSVirtualizationHelperFailure as exc:
+            if exc.error_code in {"vm_not_found", "already_terminated"}:
+                return False
+            raise
         return bool(payload.get("terminated"))
 
     def _request(self, operation: str, request: dict[str, Any]) -> dict[str, Any]:

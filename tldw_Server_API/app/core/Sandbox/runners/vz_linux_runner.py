@@ -193,6 +193,14 @@ class VZLinuxRunner(VZBaseRunner):
             agent_ready=True,
         )
 
+    def _delete_session_control(self, session_id: str | None) -> None:
+        sid = str(session_id or "").strip()
+        if not sid or self._session_control_store is None:
+            return
+        deleter = getattr(self._session_control_store, "delete_vz_session_control", None)
+        if callable(deleter):
+            deleter(sid)
+
     @classmethod
     def cancel_run(cls, run_id: str) -> bool:
         vm_id, run_dir = cls._clear_active_run(run_id)
@@ -263,10 +271,15 @@ class VZLinuxRunner(VZBaseRunner):
                 and bool(session_control.get("agent_ready"))
                 and str(session_control.get("vm_id") or "").strip()
             ):
-                vm_id = str(session_control.get("vm_id") or "").strip()
-                template_ref = str(session_control.get("template_id") or "").strip() or spec.base_image
-                should_terminate_vm = False
-            else:
+                candidate_vm_id = str(session_control.get("vm_id") or "").strip()
+                status = helper.get_vm_status(candidate_vm_id)
+                if bool(status.healthy):
+                    vm_id = candidate_vm_id
+                    template_ref = str(session_control.get("template_id") or "").strip() or spec.base_image
+                    should_terminate_vm = False
+                else:
+                    self._delete_session_control(spec.session_id)
+            if not vm_id:
                 template_validation = helper.validate_template(
                     {
                         "runtime": self.runtime_type.value,
