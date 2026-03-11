@@ -73,6 +73,16 @@ operator-provided until the repo grows that subproject.
 
 Current image handling is manifest-driven rather than real APFS cloning.
 
+There is now an in-repo reference-image/rootfs scaffold for `vz_linux` under:
+
+- `tools/vz-linux-image/`
+
+Its current role is narrow:
+
+- build `tldw-agent-guest`
+- install it into a rootfs-like directory
+- verify the expected guest binary path before later VM/image automation lands
+
 Expected operator flow later:
 
 1. Prepare a sealed template image per runtime family.
