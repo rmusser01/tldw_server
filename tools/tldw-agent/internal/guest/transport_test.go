@@ -76,3 +76,57 @@ func TestGuestServerServeStreamRejectsUnsupportedRequests(t *testing.T) {
 		t.Fatalf("expected request ID %q, got %q", "req-unsupported", resp.RequestID)
 	}
 }
+
+func TestGuestTransportRejectsWrongProtocolVersion(t *testing.T) {
+	root := t.TempDir()
+	server, err := NewServer(root)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	var input bytes.Buffer
+	input.WriteString(`{"protocol_version":"999","request_id":"req-wrong-version","type":"handshake","vm_id":"vm-1","connection_token":"token-1"}` + "\n")
+
+	var output bytes.Buffer
+	if err := server.ServeStream(&input, &output); err != nil {
+		t.Fatalf("ServeStream() error = %v", err)
+	}
+
+	var resp ErrorResponse
+	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &resp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if resp.ErrorCode != "protocol_mismatch" {
+		t.Fatalf("expected protocol_mismatch, got %q", resp.ErrorCode)
+	}
+	if resp.RequestID != "req-wrong-version" {
+		t.Fatalf("expected request ID %q, got %q", "req-wrong-version", resp.RequestID)
+	}
+}
+
+func TestGuestTransportAcceptsHeartbeatWithoutExec(t *testing.T) {
+	root := t.TempDir()
+	server, err := NewServer(root)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	var input bytes.Buffer
+	input.WriteString(`{"protocol_version":"1","request_id":"req-heartbeat","type":"heartbeat","vm_id":"vm-heartbeat"}` + "\n")
+
+	var output bytes.Buffer
+	if err := server.ServeStream(&input, &output); err != nil {
+		t.Fatalf("ServeStream() error = %v", err)
+	}
+
+	var resp HeartbeatResponse
+	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &resp); err != nil {
+		t.Fatalf("unmarshal heartbeat response: %v", err)
+	}
+	if resp.Status != "alive" {
+		t.Fatalf("expected heartbeat status alive, got %q", resp.Status)
+	}
+	if resp.VMID != "vm-heartbeat" {
+		t.Fatalf("expected vm_id %q, got %q", "vm-heartbeat", resp.VMID)
+	}
+}

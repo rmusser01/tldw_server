@@ -63,6 +63,17 @@ func (s *Server) handleMessage(payload []byte) ([]byte, error) {
 	}
 
 	switch envelope.Type {
+	case "handshake":
+		var request HandshakeRequest
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return encodeMessage(&ErrorResponse{
+				ProtocolVersion: ProtocolVersion,
+				RequestID:       envelope.RequestID,
+				ErrorCode:       "invalid_request",
+				Message:         "invalid handshake request",
+			})
+		}
+		return encodeMessage(s.Handshake(request))
 	case "ready":
 		var request ReadyRequest
 		if err := json.Unmarshal(payload, &request); err != nil {
@@ -74,6 +85,28 @@ func (s *Server) handleMessage(payload []byte) ([]byte, error) {
 			})
 		}
 		return encodeMessage(s.Ready(request))
+	case "heartbeat":
+		var request HeartbeatRequest
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return encodeMessage(&ErrorResponse{
+				ProtocolVersion: ProtocolVersion,
+				RequestID:       envelope.RequestID,
+				ErrorCode:       "invalid_request",
+				Message:         "invalid heartbeat request",
+			})
+		}
+		return encodeMessage(s.Heartbeat(request))
+	case "reconnect":
+		var request ReconnectRequest
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return encodeMessage(&ErrorResponse{
+				ProtocolVersion: ProtocolVersion,
+				RequestID:       envelope.RequestID,
+				ErrorCode:       "invalid_request",
+				Message:         "invalid reconnect request",
+			})
+		}
+		return encodeMessage(s.Reconnect(request))
 	case "exec":
 		var request ExecRequest
 		if err := json.Unmarshal(payload, &request); err != nil {

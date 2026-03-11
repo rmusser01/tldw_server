@@ -32,3 +32,33 @@ func (s *Server) Ready(req ReadyRequest) ReadyResponse {
 		WorkspaceRoot:   s.session.Root(),
 	}
 }
+
+func (s *Server) Handshake(req HandshakeRequest) HandshakeAck {
+	return HandshakeAck{
+		ProtocolVersion: ProtocolVersion,
+		RequestID:       req.RequestID,
+		Type:            "handshake_ack",
+		Status:          "accepted",
+		VMID:            req.VMID,
+	}
+}
+
+func (s *Server) Heartbeat(req HeartbeatRequest) HeartbeatResponse {
+	return HeartbeatResponse{
+		ProtocolVersion: ProtocolVersion,
+		RequestID:       req.RequestID,
+		Type:            "heartbeat",
+		Status:          "alive",
+		VMID:            req.VMID,
+	}
+}
+
+func (s *Server) Reconnect(req ReconnectRequest) ReconnectAck {
+	return ReconnectAck{
+		ProtocolVersion: ProtocolVersion,
+		RequestID:       req.RequestID,
+		Type:            "reconnect_ack",
+		Status:          "accepted",
+		VMID:            req.VMID,
+	}
+}

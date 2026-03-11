@@ -16,6 +16,32 @@ This document defines the first guest protocol used between the Swift
 
 ## Core Messages
 
+### Handshake request
+
+```json
+{
+  "protocol_version": "1",
+  "request_id": "req-handshake",
+  "type": "handshake",
+  "vm_id": "vm-1",
+  "connection_token": "token-1",
+  "guest_version": "1.0.0",
+  "workspace_root": "/workspace"
+}
+```
+
+### Handshake ack
+
+```json
+{
+  "protocol_version": "1",
+  "request_id": "req-handshake",
+  "type": "handshake_ack",
+  "status": "accepted",
+  "vm_id": "vm-1"
+}
+```
+
 ### Readiness request
 
 ```json
@@ -34,6 +60,53 @@ This document defines the first guest protocol used between the Swift
   "request_id": "req-ready",
   "status": "ready",
   "workspace_root": "/workspace"
+}
+```
+
+### Heartbeat request
+
+```json
+{
+  "protocol_version": "1",
+  "request_id": "req-heartbeat",
+  "type": "heartbeat",
+  "vm_id": "vm-1"
+}
+```
+
+### Heartbeat response
+
+```json
+{
+  "protocol_version": "1",
+  "request_id": "req-heartbeat",
+  "type": "heartbeat",
+  "status": "alive",
+  "vm_id": "vm-1"
+}
+```
+
+### Reconnect request
+
+```json
+{
+  "protocol_version": "1",
+  "request_id": "req-reconnect",
+  "type": "reconnect",
+  "vm_id": "vm-1",
+  "connection_token": "token-1"
+}
+```
+
+### Reconnect ack
+
+```json
+{
+  "protocol_version": "1",
+  "request_id": "req-reconnect",
+  "type": "reconnect_ack",
+  "status": "accepted",
+  "vm_id": "vm-1"
 }
 ```
 

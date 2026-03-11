@@ -2,6 +2,24 @@ package guest
 
 const ProtocolVersion = "1"
 
+type HandshakeRequest struct {
+	ProtocolVersion string `json:"protocol_version"`
+	RequestID       string `json:"request_id"`
+	Type            string `json:"type"`
+	VMID            string `json:"vm_id"`
+	ConnectionToken string `json:"connection_token"`
+	GuestVersion    string `json:"guest_version,omitempty"`
+	WorkspaceRoot   string `json:"workspace_root,omitempty"`
+}
+
+type HandshakeAck struct {
+	ProtocolVersion string `json:"protocol_version"`
+	RequestID       string `json:"request_id"`
+	Type            string `json:"type,omitempty"`
+	Status          string `json:"status"`
+	VMID            string `json:"vm_id"`
+}
+
 type ReadyRequest struct {
 	ProtocolVersion string `json:"protocol_version"`
 	RequestID       string `json:"request_id"`
@@ -13,6 +31,37 @@ type ReadyResponse struct {
 	RequestID       string `json:"request_id"`
 	Status          string `json:"status"`
 	WorkspaceRoot   string `json:"workspace_root,omitempty"`
+}
+
+type HeartbeatRequest struct {
+	ProtocolVersion string `json:"protocol_version"`
+	RequestID       string `json:"request_id"`
+	Type            string `json:"type"`
+	VMID            string `json:"vm_id"`
+}
+
+type HeartbeatResponse struct {
+	ProtocolVersion string `json:"protocol_version"`
+	RequestID       string `json:"request_id"`
+	Type            string `json:"type,omitempty"`
+	Status          string `json:"status"`
+	VMID            string `json:"vm_id"`
+}
+
+type ReconnectRequest struct {
+	ProtocolVersion string `json:"protocol_version"`
+	RequestID       string `json:"request_id"`
+	Type            string `json:"type"`
+	VMID            string `json:"vm_id"`
+	ConnectionToken string `json:"connection_token"`
+}
+
+type ReconnectAck struct {
+	ProtocolVersion string `json:"protocol_version"`
+	RequestID       string `json:"request_id"`
+	Type            string `json:"type,omitempty"`
+	Status          string `json:"status"`
+	VMID            string `json:"vm_id"`
 }
 
 type ExecRequest struct {
