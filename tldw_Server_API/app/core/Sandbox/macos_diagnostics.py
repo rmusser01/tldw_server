@@ -223,7 +223,58 @@ def probe_runtime_statuses(
     return statuses
 
 
-def collect_macos_diagnostics() -> dict[str, Any]:
+def probe_reconciliation(orchestrator: Any | None = None) -> dict[str, object]:
+    """Compare persisted VZ session rows with live helper VM state when available."""
+
+    summary: dict[str, object] = {
+        "computed": False,
+        "persisted_sessions": 0,
+        "live_vms": 0,
+        "stale_session_ids": [],
+        "orphaned_vm_ids": [],
+        "reasons": [],
+    }
+    if orchestrator is None:
+        return summary
+
+    lister = getattr(orchestrator, "list_vz_session_controls", None)
+    if not callable(lister):
+        summary["reasons"] = ["vz_session_listing_unavailable"]
+        return summary
+
+    persisted_rows = [dict(row) for row in lister() or [] if isinstance(row, dict)]
+    summary["persisted_sessions"] = len(persisted_rows)
+
+    try:
+        live = MacOSVirtualizationHelperClient().list_vms()
+    except MacOSVirtualizationHelperUnavailable as exc:
+        summary["reasons"] = [str(exc) or "macos_virtualization_helper_unavailable"]
+        return summary
+
+    live_vm_ids = {
+        str(vm.vm_id).strip()
+        for vm in list(live.vms or [])
+        if str(getattr(vm, "vm_id", "")).strip()
+    }
+    persisted_vm_by_session = {
+        str(row.get("id") or "").strip(): str(row.get("vm_id") or "").strip()
+        for row in persisted_rows
+        if str(row.get("id") or "").strip() and str(row.get("vm_id") or "").strip()
+    }
+    persisted_vm_ids = {vm_id for vm_id in persisted_vm_by_session.values() if vm_id}
+
+    summary["computed"] = True
+    summary["live_vms"] = len(live_vm_ids)
+    summary["stale_session_ids"] = sorted(
+        session_id
+        for session_id, vm_id in persisted_vm_by_session.items()
+        if vm_id not in live_vm_ids
+    )
+    summary["orphaned_vm_ids"] = sorted(vm_id for vm_id in live_vm_ids if vm_id not in persisted_vm_ids)
+    return summary
+
+
+def collect_macos_diagnostics(orchestrator: Any | None = None) -> dict[str, Any]:
     """Aggregate host, helper, template, and runtime diagnostics for admin callers."""
 
     host = probe_host()
@@ -231,9 +282,11 @@ def collect_macos_diagnostics() -> dict[str, Any]:
     templates = probe_templates()
     runtime_preflights = collect_runtime_preflights(network_policy="deny_all")
     runtimes = probe_runtime_statuses(runtime_preflights=runtime_preflights)
+    reconciliation = probe_reconciliation(orchestrator)
     return {
         "host": host,
         "helper": helper,
         "templates": templates,
         "runtimes": runtimes,
+        "reconciliation": reconciliation,
     }

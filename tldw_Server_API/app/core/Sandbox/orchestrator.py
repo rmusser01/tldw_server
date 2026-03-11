@@ -1434,6 +1434,10 @@ class SandboxOrchestrator:
     def delete_vz_session_control(self, session_id: str) -> bool:
         return bool(self._store.delete_vz_session_control(str(session_id)))
 
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        rows = self._store.list_vz_session_controls()
+        return [dict(row) for row in rows if isinstance(row, dict)]
+
     # -----------------
     # Admin listing helpers
     # -----------------

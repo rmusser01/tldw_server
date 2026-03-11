@@ -223,6 +223,9 @@ class SandboxStore:
     def delete_vz_session_control(self, session_id: str) -> bool:
         raise NotImplementedError
 
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
     def get_user_artifact_bytes(self, user_id: str) -> int:
         return 0
 
@@ -740,6 +743,14 @@ class InMemoryStore(SandboxStore):
     def delete_vz_session_control(self, session_id: str) -> bool:
         with self._lock:
             return self._vz_sessions.pop(str(session_id), None) is not None
+
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                dict(row)
+                for row in self._vz_sessions.values()
+                if isinstance(row, dict)
+            ]
 
     def get_user_artifact_bytes(self, user_id: str) -> int:
         with self._lock:
@@ -1910,6 +1921,17 @@ class SQLiteStore(SandboxStore):
             except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
                 deleted = 0
             return deleted > 0
+
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at "
+                "FROM sandbox_vz_sessions ORDER BY id"
+            )
+            rows = [dict(row) for row in cur.fetchall() or []]
+            for row in rows:
+                row["agent_ready"] = bool(row.get("agent_ready"))
+            return rows
 
     def get_user_artifact_bytes(self, user_id: str) -> int:
         with self._lock, self._conn() as con:
@@ -3169,6 +3191,14 @@ class PostgresStore(SandboxStore):
             except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
                 deleted = 0
             return deleted > 0
+
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at "
+                "FROM sandbox_vz_sessions ORDER BY id"
+            )
+            return [dict(row) for row in cur.fetchall() or [] if isinstance(row, dict)]
 
     def get_user_artifact_bytes(self, user_id: str) -> int:
         with self._lock, self._conn() as con, con.cursor() as cur:

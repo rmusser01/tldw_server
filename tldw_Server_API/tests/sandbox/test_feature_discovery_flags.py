@@ -161,6 +161,7 @@ def test_runtimes_discovery_keeps_macos_diagnostics_summarized(monkeypatch) -> N
     assert "helper" not in vz_linux
     assert "templates" not in vz_linux
     assert "remediation" not in vz_linux
+    assert "reconciliation" not in vz_linux
     assert "supported_trust_levels" in vz_linux
     assert isinstance(vz_linux.get("host"), dict)
 
@@ -180,6 +181,7 @@ def test_macos_diagnostics_runtime_reasons_align_with_feature_discovery(monkeypa
     assert diagnostics["runtimes"]["vz_linux"]["reasons"] == discovery["vz_linux"]["reasons"]
     assert diagnostics["runtimes"]["vz_macos"]["reasons"] == discovery["vz_macos"]["reasons"]
     assert diagnostics["runtimes"]["seatbelt"]["supported_trust_levels"] == discovery["seatbelt"]["supported_trust_levels"]
+    assert "reconciliation" in diagnostics
 
 
 def test_runtimes_discovery_keeps_seatbelt_network_claims_best_effort(monkeypatch) -> None:

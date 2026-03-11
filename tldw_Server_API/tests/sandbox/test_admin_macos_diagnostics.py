@@ -98,6 +98,14 @@ def _diagnostics_payload() -> dict:
                 "remediation": "Configure the macOS virtualization helper and mark it ready.",
             }
         },
+        "reconciliation": {
+            "computed": False,
+            "persisted_sessions": 0,
+            "live_vms": 0,
+            "stale_session_ids": [],
+            "orphaned_vm_ids": [],
+            "reasons": ["macos_virtualization_helper_unavailable"],
+        }
     }
 
 
@@ -112,10 +120,11 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
 
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body.keys()) == {"host", "helper", "templates", "runtimes"}
+    assert set(body.keys()) == {"host", "helper", "templates", "runtimes", "reconciliation"}
     assert body["host"]["supported"] is True
     assert body["runtimes"]["vz_linux"]["execution_mode"] == "none"
     assert body["helper"]["protocol_version"] is None
+    assert body["reconciliation"]["computed"] is False
 
 
 def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch) -> None:
@@ -132,6 +141,10 @@ def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch
     payload["runtimes"]["vz_linux"]["reasons"] = []
     payload["runtimes"]["vz_linux"]["execution_mode"] = "real"
     payload["runtimes"]["vz_linux"]["remediation"] = None
+    payload["reconciliation"]["computed"] = True
+    payload["reconciliation"]["persisted_sessions"] = 1
+    payload["reconciliation"]["live_vms"] = 1
+    payload["reconciliation"]["reasons"] = []
 
     fake_service = SimpleNamespace(macos_diagnostics=lambda: payload)
     monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
@@ -147,3 +160,4 @@ def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch
     assert body["runtimes"]["vz_linux"]["execution_mode"] == "real"
     assert body["helper"]["protocol_version"] == "1"
     assert body["helper"]["helper_version"] == "0.1.0"
+    assert body["reconciliation"]["computed"] is True

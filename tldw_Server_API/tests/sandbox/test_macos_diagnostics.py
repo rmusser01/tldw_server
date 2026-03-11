@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import tldw_Server_API.app.core.Sandbox.macos_diagnostics as diagnostics_module
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType
-from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import HelperPingReply
+from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
+    HelperPingReply,
+    HelperVMListReply,
+    HelperVMStatusReply,
+)
 from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 
 
@@ -56,6 +60,14 @@ def _sample_diagnostics_payload() -> dict:
                 "execution_mode": "fake",
                 "remediation": None,
             }
+        },
+        "reconciliation": {
+            "computed": True,
+            "persisted_sessions": 1,
+            "live_vms": 1,
+            "stale_session_ids": [],
+            "orphaned_vm_ids": [],
+            "reasons": [],
         },
     }
 
@@ -282,7 +294,7 @@ def test_service_macos_diagnostics_returns_probe_payload(monkeypatch) -> None:
     expected = _sample_diagnostics_payload()
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Sandbox.service.collect_macos_diagnostics",
-        lambda: expected,
+        lambda orchestrator=None: expected,
     )
 
     svc = SandboxService()
@@ -299,3 +311,85 @@ def test_admin_schema_accepts_macos_diagnostics_payload() -> None:
 
     assert model.host.supported is True
     assert model.runtimes["vz_linux"].execution_mode == "fake"
+    assert model.reconciliation is not None
+    assert model.reconciliation.computed is True
+
+
+def test_collect_macos_diagnostics_reports_reconciliation_mismatches(monkeypatch) -> None:
+    _patch_macos_host(monkeypatch)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE", "/tmp/vz-linux.img")
+
+    class _FakeHelper:
+        def ping(self):
+            return HelperPingReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                status="ok",
+                details={"transport": "unix"},
+            )
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            return {
+                "template_id": "vz_linux:ubuntu-24.04",
+                "source": request["template"],
+                "ready": True,
+                "reasons": [],
+            }
+
+        def list_vms(self):
+            return HelperVMListReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                vms=[
+                    HelperVMStatusReply(
+                        protocol_version="1",
+                        helper_version="0.1.0",
+                        vm_id="vm-live",
+                        state="running",
+                        healthy=True,
+                    )
+                ],
+            )
+
+    class _FakeOrchestrator:
+        def list_vz_session_controls(self):
+            return [
+                {"id": "sess-stale", "vm_id": "vm-stale"},
+                {"id": "sess-live", "vm_id": "vm-live"},
+            ]
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FakeHelper)
+    monkeypatch.setattr(
+        diagnostics_module,
+        "collect_runtime_preflights",
+        lambda network_policy="deny_all": {
+            RuntimeType.vz_linux: RuntimePreflightResult(
+                runtime=RuntimeType.vz_linux,
+                available=True,
+                reasons=[],
+                execution_mode="real",
+            ),
+            RuntimeType.vz_macos: RuntimePreflightResult(
+                runtime=RuntimeType.vz_macos,
+                available=False,
+                reasons=["macos_virtualization_helper_unavailable"],
+                execution_mode="none",
+            ),
+            RuntimeType.seatbelt: RuntimePreflightResult(
+                runtime=RuntimeType.seatbelt,
+                available=False,
+                reasons=["seatbelt_unavailable"],
+                execution_mode="none",
+                supported_trust_levels=["trusted"],
+            ),
+        },
+    )
+
+    data = diagnostics_module.collect_macos_diagnostics(_FakeOrchestrator())
+
+    assert data["reconciliation"]["computed"] is True
+    assert data["reconciliation"]["persisted_sessions"] == 2
+    assert data["reconciliation"]["live_vms"] == 1
+    assert data["reconciliation"]["stale_session_ids"] == ["sess-stale"]
+    assert data["reconciliation"]["orphaned_vm_ids"] == []

@@ -42,8 +42,10 @@ def test_collect_macos_diagnostics_smoke_on_real_host() -> None:
     assert "helper" in data
     assert "templates" in data
     assert "runtimes" in data
+    assert "reconciliation" in data
     assert isinstance(data["host"].get("macos_version"), (str, type(None)))
     assert data["runtimes"]["vz_linux"]["execution_mode"] in {"real", "none", "fake"}
+    assert isinstance(data["reconciliation"].get("computed"), bool)
     if data["runtimes"]["vz_linux"]["available"]:
         assert data["runtimes"]["vz_linux"]["execution_mode"] == "real"
 

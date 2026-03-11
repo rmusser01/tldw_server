@@ -993,7 +993,7 @@ class SandboxService:
         ]
 
     def macos_diagnostics(self) -> dict[str, object]:
-        return collect_macos_diagnostics()
+        return collect_macos_diagnostics(self._orch)
 
     def _audit_run_completion(self, *, user_id: str | int | None, run_id: str, status: RunStatus, spec_version: str, session_id: str | None) -> None:
         """Log a completion audit event in a fire-and-forget manner."""
