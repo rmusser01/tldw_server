@@ -45,6 +45,28 @@ Current pinned defaults:
 - architecture: `arm64`
 - kernel package: `linux-image-arm64`
 
+## Debian Rootfs Builder
+
+`scripts/build-debian-rootfs.sh` is the first Linux-native entrypoint for
+turning Debian inputs into a prepared rootfs directory.
+
+Example dry run:
+
+```bash
+./scripts/build-debian-rootfs.sh --dry-run --profile minimal --output-rootfs /tmp/vz-rootfs
+```
+
+Real execution is Linux-only and currently expects root privileges for
+`debootstrap`, chrooted package installation, and rootfs preparation.
+
+The canonical staging path now also installs boot/debug affordances into the
+rootfs:
+
+- `/etc/modules-load.d/vsock.conf`
+- `serial-getty@ttyS0.service` enablement
+- `tldw-agent-guest.service`
+- `workspace.mount`
+
 ## Quick Start
 
 ```bash

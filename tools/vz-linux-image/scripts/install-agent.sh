@@ -17,6 +17,9 @@ SYSTEMD_DIR="${ROOTFS}/etc/systemd/system"
 SYSTEMD_UNIT="${SYSTEMD_DIR}/tldw-agent-guest.service"
 WORKSPACE_MOUNT_UNIT="${SYSTEMD_DIR}/workspace.mount"
 WANTS_DIR="${SYSTEMD_DIR}/multi-user.target.wants"
+GETTY_WANTS_DIR="${SYSTEMD_DIR}/getty.target.wants"
+MODULES_LOAD_DIR="${ROOTFS}/etc/modules-load.d"
+VSOCK_MODULES_FILE="${MODULES_LOAD_DIR}/vsock.conf"
 WORKSPACE_DIR="${ROOTFS}/workspace"
 GOCACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tldw-agent-go.XXXXXX")"
 trap 'rm -rf "${GOCACHE_DIR}"' EXIT
@@ -24,6 +27,8 @@ trap 'rm -rf "${GOCACHE_DIR}"' EXIT
 mkdir -p "${TARGET_DIR}"
 mkdir -p "${SYSTEMD_DIR}"
 mkdir -p "${WANTS_DIR}"
+mkdir -p "${GETTY_WANTS_DIR}"
+mkdir -p "${MODULES_LOAD_DIR}"
 mkdir -p "${WORKSPACE_DIR}"
 
 (
@@ -36,5 +41,11 @@ chmod +x "${TARGET_BIN}"
 install -m 0644 "${IMAGE_DIR}/systemd/tldw-agent-guest.service" "${SYSTEMD_UNIT}"
 install -m 0644 "${IMAGE_DIR}/systemd/workspace.mount" "${WORKSPACE_MOUNT_UNIT}"
 
+cat > "${VSOCK_MODULES_FILE}" <<'EOF'
+vsock
+vmw_vsock_virtio_transport
+EOF
+
 ln -sfn ../tldw-agent-guest.service "${WANTS_DIR}/tldw-agent-guest.service"
 ln -sfn ../workspace.mount "${WANTS_DIR}/workspace.mount"
+ln -sfn /lib/systemd/system/serial-getty@.service "${GETTY_WANTS_DIR}/serial-getty@ttyS0.service"
