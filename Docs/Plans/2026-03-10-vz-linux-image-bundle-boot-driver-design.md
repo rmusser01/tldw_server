@@ -65,7 +65,9 @@ The helper should treat this bundle as the primary supported format.
 
 Compatibility mode should still allow a raw self-booting disk image path, but the
 helper should mark it as weaker validation and rely more heavily on runtime guest
-readiness before declaring the VM healthy.
+readiness before declaring the VM healthy. The raw-disk path should stay a distinct
+compatibility boot flow instead of pretending to be the canonical bundle format with
+missing fields.
 
 ## Guest Startup Contract
 
@@ -125,16 +127,26 @@ The helper should split resolution from boot:
   - validates only file existence and compatibility mode
   - returns a weaker boot spec
 
-Both feed one normalized helper-side boot specification containing:
+Both feed one normalized helper-side boot resolution interface, but not one flat
+field bag. The helper should use two explicit boot-spec variants:
 
-- `bootMode`
-- `kernelPath`
-- optional `initrdPath`
-- `rootfsPath`
-- `workspaceMountTag`
-- `vsockPort`
-- `guestAgentPath`
-- `validationStrength`
+- bundle boot spec:
+  - `bootMode`
+  - `kernelPath`
+  - optional `initrdPath`
+  - `rootfsPath`
+  - `workspaceMountTag`
+  - `vsockPort`
+  - `guestAgentPath`
+  - `validationStrength`
+- raw-disk compatibility boot spec:
+  - `bootMode`
+  - `diskImagePath`
+  - `workspaceMountTag`
+  - `vsockPort`
+  - `guestAgentPath`
+  - `bootLoaderKind`
+  - `validationStrength`
 
 ### Canonical bundle boot path
 
@@ -150,7 +162,8 @@ Both feed one normalized helper-side boot specification containing:
 ### Raw disk compatibility path
 
 1. validate the image file exists
-2. construct the compatibility boot path for that image type
+2. construct the compatibility boot path for that image type, starting with an EFI
+   loader for self-booting disk images
 3. boot the VM
 4. still require guest-agent readiness before the VM becomes healthy
 
@@ -186,7 +199,8 @@ Testing should be staged around the canonical bundle.
 ### Native helper tests
 
 - canonical bundle creates a real boot config
-- raw disk compatibility creates a weaker boot config
+- raw disk compatibility creates a compatibility boot config with its own boot-loader
+  path
 - helper returns honest validation data for both modes
 
 ### Reference image tests

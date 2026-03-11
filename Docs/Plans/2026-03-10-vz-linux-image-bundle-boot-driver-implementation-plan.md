@@ -4,7 +4,7 @@
 
 **Goal:** Add a canonical `vz_linux` image bundle format, helper-side template resolution/validation, reference-image bundle tooling, and a real Linux VM boot driver on Apple silicon macOS hosts.
 
-**Architecture:** Keep Python unchanged at the sandbox API layer and make the helper the source of truth for bundle validation and boot behavior. Introduce a canonical bundle format in `tools/vz-linux-image/`, normalize both bundle and raw-disk inputs into one helper-side boot spec, and wire that boot spec into a real `Virtualization.framework` Linux boot path that still requires guest-agent readiness before a VM becomes healthy.
+**Architecture:** Keep Python unchanged at the sandbox API layer and make the helper the source of truth for bundle validation and boot behavior. Introduce a canonical bundle format in `tools/vz-linux-image/`, resolve bundle and raw-disk inputs through one helper-side resolution interface with distinct boot-spec variants, and wire those variants into the appropriate `Virtualization.framework` boot paths while still requiring guest-agent readiness before a VM becomes healthy.
 
 **Tech Stack:** Python, Swift Package Manager, `Virtualization.framework`, Go, systemd image assets, pytest, Swift Testing, Go test
 
@@ -51,14 +51,23 @@ Expected: FAIL because the manifest types do not exist yet.
 
 - Add `TemplateManifest.swift` with a Codable manifest model
 - Add `TemplateBootSpec.swift` with:
-  - `bootMode`
-  - `kernelPath`
-  - optional `initrdPath`
-  - `rootfsPath`
-  - `workspaceMountTag`
-  - `vsockPort`
-  - `guestAgentPath`
-  - `validationStrength`
+  - an explicit bundle boot-spec variant with:
+    - `bootMode`
+    - `kernelPath`
+    - optional `initrdPath`
+    - `rootfsPath`
+    - `workspaceMountTag`
+    - `vsockPort`
+    - `guestAgentPath`
+    - `validationStrength`
+  - an explicit raw-disk compatibility boot-spec variant with:
+    - `bootMode`
+    - `diskImagePath`
+    - `workspaceMountTag`
+    - `vsockPort`
+    - `guestAgentPath`
+    - `bootLoaderKind`
+    - `validationStrength`
 - Add one canonical fixture manifest under `Tests/TemplateFixtures/bundle/manifest.json`
 - Document the same manifest contract in `tools/vz-linux-image/docs/bundle-format.md`
 
@@ -86,7 +95,7 @@ git commit -m "feat(vz_linux): define canonical image bundle manifest"
 - Create: `tools/macos-vz-helper/Sources/Templates/RawDiskTemplateResolver.swift`
 - Modify: `tools/macos-vz-helper/Sources/Templates/TemplateValidator.swift`
 - Create: `tools/macos-vz-helper/Tests/TemplateResolverTests.swift`
-- Create: `tools/macos-vz-helper/Tests/TemplateFixtures/raw-disk/rootfs.img`
+- Create: `tools/macos-vz-helper/Tests/TemplateFixtures/raw-disk/disk.img`
 
 **Step 1: Write the failing resolver tests**
 
@@ -107,6 +116,7 @@ The raw-disk test should expect:
 
 - `bootMode == .rawDisk`
 - `validationStrength == .compatibility`
+- `diskImagePath` is populated without requiring kernel/initrd fields
 
 **Step 2: Run the tests to verify they fail**
 
@@ -143,7 +153,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add tools/macos-vz-helper/Sources/Templates/BundleTemplateResolver.swift tools/macos-vz-helper/Sources/Templates/RawDiskTemplateResolver.swift tools/macos-vz-helper/Sources/Templates/TemplateValidator.swift tools/macos-vz-helper/Tests/TemplateResolverTests.swift tools/macos-vz-helper/Tests/TemplateFixtures/raw-disk/rootfs.img
+git add tools/macos-vz-helper/Sources/Templates/BundleTemplateResolver.swift tools/macos-vz-helper/Sources/Templates/RawDiskTemplateResolver.swift tools/macos-vz-helper/Sources/Templates/TemplateValidator.swift tools/macos-vz-helper/Tests/TemplateResolverTests.swift tools/macos-vz-helper/Tests/TemplateFixtures/raw-disk/disk.img
 git commit -m "feat(vz_linux): resolve bundle and raw disk templates"
 ```
 
@@ -189,7 +199,9 @@ Expected: FAIL because the scripts and bundle output do not exist yet.
   - creates a canonical bundle directory layout
 - Update the `Makefile` and README with the new bundle-building entrypoint
 
-The first version can use placeholder kernel/rootfs inputs as long as the bundle layout is deterministic and testable.
+The first version must not use synthetic placeholder kernel or rootfs files. It can
+consume operator-supplied real inputs or checked-in minimal test assets, but the
+canonical bundle builder should fail fast when required boot artifacts are absent.
 
 **Step 4: Run the test to verify it passes**
 
@@ -223,7 +235,7 @@ Add tests that expect:
 
 ```swift
 @Test func configurationBuilderCreatesLinuxBootLoaderForBundleSpec() throws {}
-@Test func configurationBuilderCreatesDiskAttachmentForRawDiskSpec() throws {}
+@Test func configurationBuilderCreatesCompatibilityBootPathForRawDiskSpec() throws {}
 ```
 
 The canonical bundle test should assert that:
@@ -232,6 +244,13 @@ The canonical bundle test should assert that:
 - optional initrd is included when present
 - a `VZVirtioFileSystemDeviceConfiguration` is created with the manifest tag
 - a `VZVirtioSocketDeviceConfiguration` is present
+
+The raw-disk compatibility test should assert that:
+
+- the raw-disk spec does not require kernel/initrd fields
+- a compatibility boot loader is created for self-booting images, starting with
+  `VZEFIBootLoader`
+- storage attachment is created from the disk-image path
 
 **Step 2: Run the tests to verify they fail**
 
@@ -246,7 +265,8 @@ Expected: FAIL because the real builder and boot driver do not exist yet.
 **Step 3: Write the minimal implementation**
 
 - Add `VZLinuxConfigurationBuilder` that converts `TemplateBootSpec` into:
-  - Linux boot loader
+  - the canonical bundle Linux boot path
+  - the raw-disk compatibility boot path
   - storage attachment
   - virtio-fs device configuration
   - virtio socket device configuration
@@ -255,7 +275,9 @@ Expected: FAIL because the real builder and boot driver do not exist yet.
   - validates it
   - starts a `VZVirtualMachine`
   - tracks enough state to stop it later
-- Update `VZLinuxVMManager` to use the real driver instead of the placeholder for the canonical bundle path
+- Update `VZLinuxVMManager` to use the real driver instead of the placeholder for
+  the canonical bundle path, while keeping the raw-disk lane explicitly marked as
+  compatibility mode
 
 **Step 4: Run the tests to verify they pass**
 
@@ -279,6 +301,7 @@ git commit -m "feat(vz_linux): add real helper boot configuration"
 **Files:**
 - Modify: `tools/macos-vz-helper/Sources/Server/HelperService.swift`
 - Modify: `tools/macos-vz-helper/Sources/Server/UnixSocketServer.swift`
+- Modify: `tools/macos-vz-helper/PROTOCOL.md`
 - Modify: `tldw_Server_API/app/core/Sandbox/macos_virtualization/helper_client.py`
 - Modify: `tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_client.py`
 - Modify: `Docs/Sandbox/macos-runtime-operator-notes.md`
@@ -310,6 +333,8 @@ Expected: FAIL because the helper payload/details do not yet include the richer 
 - Extend helper `validate_template` responses to include:
   - `boot_mode`
   - `validation_strength`
+- Update `tools/macos-vz-helper/PROTOCOL.md` so the frozen host-helper contract stays
+  aligned with the implementation plan
 - Keep the Python helper client tolerant and backward-compatible
 - Update the operator docs and sandbox README to describe the canonical bundle as the primary artifact format
 
@@ -326,7 +351,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add tools/macos-vz-helper/Sources/Server/HelperService.swift tools/macos-vz-helper/Sources/Server/UnixSocketServer.swift tldw_Server_API/app/core/Sandbox/macos_virtualization/helper_client.py tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_client.py Docs/Sandbox/macos-runtime-operator-notes.md tldw_Server_API/app/core/Sandbox/README.md
+git add tools/macos-vz-helper/Sources/Server/HelperService.swift tools/macos-vz-helper/Sources/Server/UnixSocketServer.swift tools/macos-vz-helper/PROTOCOL.md tldw_Server_API/app/core/Sandbox/macos_virtualization/helper_client.py tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_client.py Docs/Sandbox/macos-runtime-operator-notes.md tldw_Server_API/app/core/Sandbox/README.md
 git commit -m "feat(vz_linux): expose bundle validation through helper protocol"
 ```
 
@@ -339,10 +364,14 @@ git commit -m "feat(vz_linux): expose bundle validation through helper protocol"
 
 **Step 1: Write the failing host-gated smoke expectations**
 
-Extend the helper-daemon smoke test so that, when a canonical bundle env is present, it expects:
+Keep the existing helper-daemon smoke focused on daemon reachability and template
+validation. Add a separate canonical-bundle boot smoke so that, when a canonical
+bundle env is present, it expects:
 
 - helper `validate_template` reports `boot_mode=bundle`
-- helper `create_vm` no longer returns `boot_not_implemented`
+- helper `validate_template` reports `validation_strength=strong`
+- canonical bundle boot smoke reaches real `create_vm` success instead of
+  `boot_not_implemented`
 
 The new env should be:
 
@@ -363,7 +392,8 @@ Expected: skip on an unprepared host, or fail until the real boot path is wired.
 
 **Step 3: Write the minimal implementation**
 
-- Add the new host-gated smoke path
+- Keep the daemon-contract smoke narrow and add the new host-gated canonical-bundle
+  boot smoke path
 - Update the existing `vz_linux` E2E docstrings and comments so the canonical bundle is the preferred artifact
 - Keep raw disk support available as compatibility mode
 
@@ -375,7 +405,8 @@ Run:
 source ../../.venv/bin/activate && TLDW_SANDBOX_VZ_LINUX_BUNDLE_SMOKE=1 TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH=/abs/path/to/bundle python -m pytest tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_daemon_host_gated.py -q
 ```
 
-Expected: PASS on a prepared Apple silicon host with a valid bundle; otherwise explicit skip reasons
+Expected: PASS on a prepared Apple silicon host with a valid canonical bundle;
+otherwise explicit skip reasons
 
 **Step 5: Commit**
 
