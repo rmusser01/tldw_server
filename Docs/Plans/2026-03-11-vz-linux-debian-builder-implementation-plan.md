@@ -8,6 +8,8 @@
 
 **Tech Stack:** shell scripts, Debian `debootstrap`, loopback/ext filesystem tooling, Python pytest, existing `tools/vz-linux-image` bundle scripts
 
+**Doctrine Alignment:** This plan follows `Docs/Sandbox/sandbox-architecture-doctrine.md`, especially the canonical-artifact rule, provenance requirements, and the requirement that canonical VM images include enough debug affordances to make boot/readiness failures diagnosable.
+
 ---
 
 ### Task 1: Add Package Profiles And Builder Defaults
@@ -118,6 +120,9 @@ Expected: FAIL because the builder script does not exist yet.
   - runs `debootstrap --arch=arm64`
   - installs profile packages inside the rootfs
   - calls `install-agent.sh` on the built rootfs
+- extend staging so the canonical rootfs also includes:
+  - vsock module-loading configuration
+  - serial console enablement
 - Reuse `builder-defaults.sh` for suite/arch/kernel defaults
 - Update the README with the rootfs-builder entrypoint
 
@@ -175,7 +180,8 @@ Expected: FAIL because the packer script does not exist yet.
   - validates the rootfs directory
   - accepts size/output args
   - supports `--dry-run`
-  - creates `rootfs.img` from the directory using Linux filesystem tooling
+  - creates `rootfs.img` from the directory using a directory-to-ext4 path such
+    as `mke2fs -d` when possible
   - does not mutate the source rootfs directory in place
 
 **Step 4: Run the tests to verify they pass**
@@ -258,6 +264,7 @@ git commit -m "feat(vz_linux): add kernel artifact extraction"
 - Modify: `tools/vz-linux-image/Makefile`
 - Modify: `tools/vz-linux-image/scripts/build-bundle.sh`
 - Create: `tools/vz-linux-image/tests/test_build_debian_bundle.py`
+- Create: `tools/vz-linux-image/tests/test_build_metadata.py`
 - Modify: `tools/vz-linux-image/README.md`
 
 **Step 1: Write the failing tests**
@@ -270,6 +277,12 @@ def test_build_debian_bundle_dry_run_prints_all_artifact_paths():
     assert "rootfs/" in result.stdout
     assert "rootfs.img" in result.stdout
     assert "bundle/" in result.stdout
+
+def test_build_metadata_includes_suite_profile_and_kernel_package():
+    metadata = load_build_metadata("/tmp/out/build-info.json")
+    assert metadata["suite"] == "bookworm"
+    assert metadata["profile"] == "minimal"
+    assert "kernel_package" in metadata
 ```
 
 **Step 2: Run the tests to verify they fail**
@@ -289,12 +302,21 @@ Expected: FAIL because the orchestration script does not exist yet.
   - image packing
   - kernel/initrd extraction
   - existing canonical bundle emission
+- Emit `build-info.json` next to the output artifacts with:
+  - suite
+  - profile
+  - architecture
+  - kernel package
+  - selected package list
+  - source artifact paths when provided
+  - validation-strength or canonical-artifact marker when appropriate
 - Default to keeping intermediates in:
   - `rootfs/`
   - `rootfs.img`
   - `kernel`
   - `initrd`
   - `bundle/`
+  - `build-info.json`
 - Add cleanup/keep-intermediates flags
 - Expose the new entrypoint via the `Makefile`
 
@@ -311,7 +333,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add tools/vz-linux-image/scripts/build-debian-bundle.sh tools/vz-linux-image/Makefile tools/vz-linux-image/scripts/build-bundle.sh tools/vz-linux-image/tests/test_build_debian_bundle.py tools/vz-linux-image/README.md
+git add tools/vz-linux-image/scripts/build-debian-bundle.sh tools/vz-linux-image/Makefile tools/vz-linux-image/scripts/build-bundle.sh tools/vz-linux-image/tests/test_build_debian_bundle.py tools/vz-linux-image/tests/test_build_metadata.py tools/vz-linux-image/README.md
 git commit -m "feat(vz_linux): add debian bundle builder"
 ```
 
@@ -436,4 +458,3 @@ Expected: helper smoke and `vz_linux` E2E pass on a prepared host.
 git add tools/vz-linux-image/README.md Docs/Sandbox/macos-runtime-operator-notes.md tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_daemon_host_gated.py tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py
 git commit -m "test(vz_linux): validate debian bundle builder output"
 ```
-

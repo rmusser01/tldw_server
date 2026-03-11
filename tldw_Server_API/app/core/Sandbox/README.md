@@ -38,6 +38,12 @@ Trust-level rules:
 - `SandboxOrchestrator` owns session/run lifecycle, queueing, idempotency, and artifact storage.
 - `SandboxService` is the integration point for policy admission, runtime preflights, execution dispatch, and runtime discovery.
 - Runtime capability snapshots are collected in `runtime_capabilities.py`.
+- Subsystem-wide sandbox rules now live in `Docs/Sandbox/sandbox-architecture-doctrine.md`.
+  Future runtime work should reference that doctrine for:
+  - layered readiness and source-of-truth ownership
+  - canonical vs compatibility artifact paths
+  - audit and provenance expectations
+  - lifecycle and reconciliation rules
 - macOS scaffolding currently includes:
   - a Unix-socket helper client plus protocol models in `macos_virtualization/`
   - frozen helper contract docs in `tools/macos-vz-helper/`

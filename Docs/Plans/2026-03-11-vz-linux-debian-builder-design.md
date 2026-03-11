@@ -7,6 +7,14 @@
 Define the most pragmatic long-term-stable path for producing a reproducible,
 bootable Debian stable arm64 canonical bundle for `vz_linux`.
 
+This design follows the subsystem-wide rules in
+`Docs/Sandbox/sandbox-architecture-doctrine.md`, especially:
+
+- canonical artifact path vs compatibility path
+- layered readiness and runtime-owned truth
+- required provenance metadata
+- debug affordances in canonical VM images
+
 The builder should stay repo-owned, Linux-built, and compatible with the
 existing canonical bundle format already consumed by the Swift helper:
 
@@ -46,6 +54,8 @@ The builder should be directory-first:
 3. pack the rootfs directory into `rootfs.img`
 4. extract the kernel and initrd artifacts
 5. emit the final canonical bundle
+6. emit a small `build-info.json` alongside the output artifacts capturing suite,
+   profile, kernel package, and builder inputs
 
 This is the most stable path because it keeps one real implementation and one
 thin wrapper, avoids macOS-specific build tricks, and keeps every artifact
@@ -75,9 +85,14 @@ The canonical output directory should keep intermediates by default:
 - `kernel`
 - `initrd`
 - `bundle/`
+- `build-info.json`
 
 Later cleanup flags can remove intermediates, but the early builder should favor
 debuggability.
+
+The canonical bundle is the strong-validation path. Weaker compatibility inputs
+may still exist elsewhere in the subsystem, but this builder produces the
+canonical repo-owned artifact family.
 
 ## Profiles And Packages
 
@@ -143,13 +158,12 @@ Native Linux path may require elevated privileges for:
 
 - `debootstrap`
 - chroot/nspawn package installation
-- loopback image creation
-- mount operations during image packing
+- mount operations during package-install or inspection phases
 
 Containerized Linux may require:
 
 - privileged container execution
-- loop/mount device access
+- mount device access
 
 macOS is not a supported build host for this slice. macOS consumes the resulting
 bundle but should not own the build.
@@ -172,6 +186,7 @@ Testing should be layered:
 
 - guest-agent staging
 - unit staging and enablement
+- serial-console and vsock-startup staging
 - package-list composition
 - bundle-layout validation on fake artifacts
 
@@ -198,10 +213,14 @@ This slice is complete when:
 - the builder can extract the matching kernel and initrd
 - the builder emits the existing canonical bundle format without manual artifact
   assembly
+- the builder emits `build-info.json` with enough provenance to explain exactly
+  which suite, profile, kernel package, and inputs produced the bundle
 - the staged rootfs contains:
   - `tldw-agent-guest`
   - `tldw-agent-guest.service`
   - `workspace.mount`
+  - vsock module-loading configuration
+  - serial-console enablement
   - enabled unit symlinks
 - a prepared macOS Apple silicon host can consume the resulting bundle in the
   helper smoke and `vz_linux` E2E path
@@ -211,6 +230,7 @@ This slice is complete when:
 This slice should not include:
 
 - macOS-hosted image building
+- Apple-container convenience builders on macOS
 - APFS clone provisioning
 - `vz_macos` image automation
 - CI-hosted full image builds
