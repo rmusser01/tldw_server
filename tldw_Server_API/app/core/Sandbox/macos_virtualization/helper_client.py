@@ -57,6 +57,8 @@ class MacOSVirtualizationHelperClient:
 
     def ping(self) -> HelperPingReply:
         if is_truthy(os.getenv("TEST_MODE")):
+            if not is_truthy(os.getenv("TLDW_SANDBOX_MACOS_HELPER_READY")):
+                raise MacOSVirtualizationHelperUnavailable("macos_virtualization_helper_unavailable")
             return HelperPingReply(
                 protocol_version=self._protocol_version,
                 helper_version="test-mode",

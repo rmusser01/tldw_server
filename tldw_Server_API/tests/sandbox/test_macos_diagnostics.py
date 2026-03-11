@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import tldw_Server_API.app.core.Sandbox.macos_diagnostics as diagnostics_module
+from tldw_Server_API.app.core.Sandbox.models import RuntimeType
+from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import HelperPingReply
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 
 
 def _patch_macos_host(monkeypatch) -> None:
@@ -33,6 +36,8 @@ def _sample_diagnostics_payload() -> dict:
             "executable": True,
             "ready": True,
             "transport": "fake",
+            "protocol_version": "1",
+            "helper_version": "0.1.0",
             "reasons": [],
         },
         "templates": {
@@ -58,7 +63,7 @@ def _sample_diagnostics_payload() -> dict:
 def test_collect_macos_diagnostics_reports_missing_helper_and_templates(monkeypatch) -> None:
     _patch_macos_host(monkeypatch)
     monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.delenv("TLDW_SANDBOX_MACOS_HELPER_PATH", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_MACOS_HELPER_SOCKET", raising=False)
     monkeypatch.delenv("TLDW_SANDBOX_MACOS_HELPER_READY", raising=False)
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE", raising=False)
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", raising=False)
@@ -72,6 +77,8 @@ def test_collect_macos_diagnostics_reports_missing_helper_and_templates(monkeypa
     assert data["helper"]["configured"] is False
     assert data["helper"]["path"] is None
     assert data["helper"]["ready"] is False
+    assert data["helper"]["protocol_version"] is None
+    assert data["helper"]["helper_version"] is None
     assert data["templates"]["vz_linux"]["configured"] is False
     assert data["templates"]["vz_linux"]["source"] is None
     assert data["templates"]["vz_linux"]["ready"] is False
@@ -81,17 +88,53 @@ def test_collect_macos_diagnostics_reports_missing_helper_and_templates(monkeypa
 
 def test_collect_macos_diagnostics_reports_real_vz_linux_execution_mode(monkeypatch) -> None:
     _patch_macos_host(monkeypatch)
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_READY", "1")
-    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", "1")
-    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_AVAILABLE", "1")
-    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    class _FakeHelper:
+        def ping(self):
+            return HelperPingReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                status="ok",
+                details={"transport": "unix"},
+            )
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FakeHelper)
+    monkeypatch.setattr(
+        diagnostics_module,
+        "collect_runtime_preflights",
+        lambda network_policy="deny_all": {
+            RuntimeType.vz_linux: RuntimePreflightResult(
+                runtime=RuntimeType.vz_linux,
+                available=True,
+                reasons=[],
+                execution_mode="real",
+            ),
+            RuntimeType.vz_macos: RuntimePreflightResult(
+                runtime=RuntimeType.vz_macos,
+                available=False,
+                reasons=["macos_virtualization_helper_unavailable"],
+                execution_mode="none",
+            ),
+            RuntimeType.seatbelt: RuntimePreflightResult(
+                runtime=RuntimeType.seatbelt,
+                available=False,
+                reasons=["seatbelt_unavailable"],
+                execution_mode="none",
+                supported_trust_levels=["trusted"],
+            ),
+        },
+    )
 
     data = diagnostics_module.collect_macos_diagnostics()
 
     assert data["runtimes"]["vz_linux"]["available"] is True
     assert data["runtimes"]["vz_linux"]["execution_mode"] == "real"
     assert data["runtimes"]["vz_linux"]["reasons"] == []
+    assert data["helper"]["ready"] is True
+    assert data["helper"]["transport"] == "unix"
+    assert data["helper"]["protocol_version"] == "1"
+    assert data["helper"]["helper_version"] == "0.1.0"
 
 
 def test_collect_macos_diagnostics_separates_policy_from_host_readiness(monkeypatch) -> None:
@@ -118,17 +161,51 @@ def test_collect_macos_diagnostics_uses_optional_operator_metadata_env(monkeypat
     assert data["templates"]["vz_linux"]["source"] == "/tmp/vz-linux.img"
 
 
-def test_collect_macos_diagnostics_treats_ready_helper_as_configured_without_path(monkeypatch) -> None:
+def test_collect_macos_diagnostics_does_not_trust_ready_env_without_reachable_helper(monkeypatch) -> None:
     _patch_macos_host(monkeypatch)
-    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.delenv("TEST_MODE", raising=False)
     monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_READY", "1")
     monkeypatch.delenv("TLDW_SANDBOX_MACOS_HELPER_PATH", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_MACOS_HELPER_SOCKET", raising=False)
+
+    class _FailingHelper:
+        def ping(self):
+            raise diagnostics_module.MacOSVirtualizationHelperUnavailable(
+                "macos_virtualization_helper_unavailable"
+            )
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FailingHelper)
+    monkeypatch.setattr(
+        diagnostics_module,
+        "collect_runtime_preflights",
+        lambda network_policy="deny_all": {
+            RuntimeType.vz_linux: RuntimePreflightResult(
+                runtime=RuntimeType.vz_linux,
+                available=False,
+                reasons=["macos_virtualization_helper_unavailable"],
+                execution_mode="none",
+            ),
+            RuntimeType.vz_macos: RuntimePreflightResult(
+                runtime=RuntimeType.vz_macos,
+                available=False,
+                reasons=["macos_virtualization_helper_unavailable"],
+                execution_mode="none",
+            ),
+            RuntimeType.seatbelt: RuntimePreflightResult(
+                runtime=RuntimeType.seatbelt,
+                available=False,
+                reasons=["seatbelt_unavailable"],
+                execution_mode="none",
+                supported_trust_levels=["trusted"],
+            ),
+        },
+    )
 
     data = diagnostics_module.collect_macos_diagnostics()
 
-    assert data["helper"]["configured"] is True
-    assert data["helper"]["ready"] is True
-    assert "macos_helper_path_unconfigured" not in data["helper"]["reasons"]
+    assert data["helper"]["configured"] is False
+    assert data["helper"]["ready"] is False
+    assert "macos_virtualization_helper_unavailable" in data["helper"]["reasons"]
 
 
 def test_service_macos_diagnostics_returns_probe_payload(monkeypatch) -> None:

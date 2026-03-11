@@ -77,6 +77,8 @@ def _diagnostics_payload() -> dict:
             "executable": False,
             "ready": False,
             "transport": None,
+            "protocol_version": None,
+            "helper_version": None,
             "reasons": ["macos_helper_missing"],
         },
         "templates": {
@@ -113,12 +115,15 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
     assert set(body.keys()) == {"host", "helper", "templates", "runtimes"}
     assert body["host"]["supported"] is True
     assert body["runtimes"]["vz_linux"]["execution_mode"] == "none"
+    assert body["helper"]["protocol_version"] is None
 
 
 def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch) -> None:
     payload = _diagnostics_payload()
     payload["helper"]["configured"] = True
     payload["helper"]["ready"] = True
+    payload["helper"]["protocol_version"] = "1"
+    payload["helper"]["helper_version"] = "0.1.0"
     payload["helper"]["reasons"] = []
     payload["templates"]["vz_linux"]["configured"] = True
     payload["templates"]["vz_linux"]["ready"] = True
@@ -140,3 +145,5 @@ def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch
     body = resp.json()
     assert body["runtimes"]["vz_linux"]["available"] is True
     assert body["runtimes"]["vz_linux"]["execution_mode"] == "real"
+    assert body["helper"]["protocol_version"] == "1"
+    assert body["helper"]["helper_version"] == "0.1.0"

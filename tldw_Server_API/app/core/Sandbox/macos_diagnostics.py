@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import os
 import platform
-import sys
 from pathlib import Path
 from typing import Any
 
 from tldw_Server_API.app.core.testing import is_truthy
 
+from .macos_virtualization.helper_client import (
+    MacOSVirtualizationHelperClient,
+    MacOSVirtualizationHelperUnavailable,
+)
 from .models import RuntimeType
 from .runtime_capabilities import RuntimePreflightResult, collect_runtime_preflights
 from .runners.vz_common import vz_host_facts
@@ -75,23 +78,37 @@ def probe_helper() -> dict[str, object]:
     """Report helper readiness plus optional operator metadata such as local path facts."""
 
     raw_path = str(os.getenv("TLDW_SANDBOX_MACOS_HELPER_PATH") or "").strip()
-    path = raw_path or None
-    ready = _truthy(os.getenv("TLDW_SANDBOX_MACOS_HELPER_READY"))
-    configured = bool(path) or ready
+    raw_socket = str(os.getenv("TLDW_SANDBOX_MACOS_HELPER_SOCKET") or "").strip()
+    path = raw_path or raw_socket or None
     exists = bool(path and Path(path).exists())
-    executable = bool(path and exists and os.access(path, os.X_OK))
+    executable = bool(raw_path and exists and os.access(raw_path, os.X_OK))
+    configured = bool(path)
+    ready = False
+    transport: str | None = None
+    protocol_version: str | None = None
+    helper_version: str | None = None
     reasons: list[str] = []
 
     if not configured:
         reasons.append("macos_helper_path_unconfigured")
     elif not exists:
         reasons.append("macos_helper_path_missing")
-    elif not executable:
+    elif raw_path and not executable:
         reasons.append("macos_helper_not_executable")
-    if not ready:
+
+    try:
+        ping = MacOSVirtualizationHelperClient().ping()
+        ready = str(ping.status).strip().lower() == "ok"
+        configured = configured or ready
+        transport = str(ping.details.get("transport") or "").strip() or None
+        protocol_version = str(ping.protocol_version or "").strip() or None
+        helper_version = str(ping.helper_version or "").strip() or None
+    except MacOSVirtualizationHelperUnavailable as exc:
+        reasons.append(str(exc) or "macos_virtualization_helper_unavailable")
+
+    if not ready and "macos_virtualization_helper_unavailable" not in reasons:
         reasons.append("macos_helper_missing")
 
-    transport = "fake" if _truthy(os.getenv("TEST_MODE")) and ready else None
     return {
         "configured": configured,
         "path": path,
@@ -99,6 +116,8 @@ def probe_helper() -> dict[str, object]:
         "executable": executable,
         "ready": ready,
         "transport": transport,
+        "protocol_version": protocol_version,
+        "helper_version": helper_version,
         "reasons": reasons,
     }
 

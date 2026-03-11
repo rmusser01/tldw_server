@@ -289,6 +289,8 @@ class SandboxAdminMacOSHelperDiagnostics(BaseModel):
     executable: bool
     ready: bool
     transport: str | None = None
+    protocol_version: str | None = None
+    helper_version: str | None = None
     reasons: list[str] = Field(default_factory=list)
 
 

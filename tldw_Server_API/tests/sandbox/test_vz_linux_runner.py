@@ -30,12 +30,25 @@ def test_vz_linux_fake_run_completes(monkeypatch) -> None:
 def test_vz_linux_preflight_requires_execution_readiness(monkeypatch) -> None:
     monkeypatch.setattr(vz_common.sys, "platform", "darwin")
     monkeypatch.setattr(vz_common.platform, "machine", lambda: "arm64")
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_AVAILABLE", "1")
-    monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_READY", "1")
-    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", "1")
+    monkeypatch.delenv("TEST_MODE", raising=False)
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
-    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_EXEC_READY", raising=False)
+
+    calls: list[dict[str, object]] = []
+
+    class _FakeHelper:
+        def validate_vz_linux_host(self, request: dict[str, object]) -> dict[str, object]:
+            calls.append(dict(request))
+            return {
+                "protocol_version": "1",
+                "helper_version": "0.1.0",
+                "available": True,
+                "reasons": [],
+                "execution_mode": "real",
+                "transport": "vsock",
+                "details": {"runtime": "vz_linux"},
+            }
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
 
     result = VZLinuxRunner().preflight(network_policy="deny_all")
 
@@ -43,6 +56,7 @@ def test_vz_linux_preflight_requires_execution_readiness(monkeypatch) -> None:
     assert result.reasons == []
     assert result.execution_mode == "real"
     assert result.enforcement_ready == {"deny_all": True, "allowlist": False}
+    assert calls == [{"network_policy": "deny_all"}]
 
 
 def test_vz_linux_start_run_executes_real_ephemeral_vm_command(monkeypatch, tmp_path) -> None:
