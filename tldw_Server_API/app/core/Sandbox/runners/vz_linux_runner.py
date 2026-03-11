@@ -8,6 +8,7 @@ import tempfile
 import threading
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -42,6 +43,9 @@ class VZLinuxRunner(VZBaseRunner):
     _active_lock = threading.RLock()
     _active_vm: dict[str, str] = {}
     _active_run_dir: dict[str, str] = {}
+
+    def __init__(self, session_control_store: Any | None = None) -> None:
+        self._session_control_store = session_control_store
 
     def preflight(self, network_policy: str | None = None) -> RuntimePreflightResult:
         host = vz_host_facts()
@@ -156,6 +160,39 @@ class VZLinuxRunner(VZBaseRunner):
             return {}
         return artifacts_map
 
+    def _load_session_control(self, session_id: str | None) -> dict[str, Any] | None:
+        sid = str(session_id or "").strip()
+        if not sid or self._session_control_store is None:
+            return None
+        getter = getattr(self._session_control_store, "get_vz_session_control", None)
+        if not callable(getter):
+            return None
+        row = getter(sid)
+        return dict(row) if isinstance(row, dict) else None
+
+    def _store_session_control(
+        self,
+        *,
+        session_id: str | None,
+        vm_id: str,
+        template_id: str | None,
+        workspace_mount: str | None,
+    ) -> None:
+        sid = str(session_id or "").strip()
+        if not sid or self._session_control_store is None:
+            return
+        putter = getattr(self._session_control_store, "put_vz_session_control", None)
+        if not callable(putter):
+            return
+        putter(
+            session_id=sid,
+            runtime=self.runtime_type.value,
+            vm_id=str(vm_id),
+            template_id=(str(template_id) if template_id is not None else None),
+            workspace_mount=(str(workspace_mount) if workspace_mount is not None else None),
+            agent_ready=True,
+        )
+
     @classmethod
     def cancel_run(cls, run_id: str) -> bool:
         vm_id, run_dir = cls._clear_active_run(run_id)
@@ -194,6 +231,8 @@ class VZLinuxRunner(VZBaseRunner):
         workspace = session_workspace
         created_workspace = False
         vm_id: str | None = None
+        session_mode = bool(str(spec.session_id or "").strip())
+        should_terminate_vm = True
 
         with contextlib.suppress(_VZ_NONCRITICAL_EXCEPTIONS):
             hub.publish_event(
@@ -215,23 +254,42 @@ class VZLinuxRunner(VZBaseRunner):
             self._write_inline_files(workspace, spec.files_inline)
 
             helper = self.helper_client_cls()
-            vm = helper.create_vm(
-                {
-                    "runtime": self.runtime_type.value,
-                    "vm_name": run_id,
-                    "run_id": run_id,
-                    "session_mode": False,
-                    "workspace_path": workspace,
-                    "workspace_mount": "virtiofs",
-                    "template": spec.base_image,
-                    "network_policy": str(spec.network_policy or "deny_all").strip().lower() or "deny_all",
-                }
-            )
-            vm_id = vm.vm_id
-            self._register_active_run(run_id, vm.vm_id, workspace if created_workspace else None)
+            session_control = self._load_session_control(spec.session_id)
+            if (
+                session_mode
+                and isinstance(session_control, dict)
+                and str(session_control.get("runtime") or "").strip().lower() == self.runtime_type.value
+                and bool(session_control.get("agent_ready"))
+                and str(session_control.get("vm_id") or "").strip()
+            ):
+                vm_id = str(session_control.get("vm_id") or "").strip()
+                should_terminate_vm = False
+            else:
+                vm = helper.create_vm(
+                    {
+                        "runtime": self.runtime_type.value,
+                        "vm_name": run_id,
+                        "run_id": run_id,
+                        "session_mode": session_mode,
+                        "workspace_path": workspace,
+                        "workspace_mount": "virtiofs",
+                        "template": spec.base_image,
+                        "network_policy": str(spec.network_policy or "deny_all").strip().lower() or "deny_all",
+                    }
+                )
+                vm_id = vm.vm_id
+                should_terminate_vm = not session_mode
+                if session_mode:
+                    self._store_session_control(
+                        session_id=spec.session_id,
+                        vm_id=vm.vm_id,
+                        template_id=spec.base_image,
+                        workspace_mount=workspace,
+                    )
+            self._register_active_run(run_id, vm_id, workspace if created_workspace else None)
 
             reply = helper.exec_guest(
-                vm_id=vm.vm_id,
+                vm_id=vm_id,
                 request={
                     "argv": list(spec.command or []),
                     "cwd": "/workspace",
@@ -259,7 +317,7 @@ class VZLinuxRunner(VZBaseRunner):
             logger.error("vz_linux execution error for run {}: {}", run_id, exc)
             message = f"vz_linux execution error: {exc}"
         finally:
-            if vm_id:
+            if vm_id and should_terminate_vm:
                 with contextlib.suppress(_VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS):
                     self.helper_client_cls().terminate_vm(vm_id)
             _active_vm_id, run_dir = self._clear_active_run(run_id)

@@ -58,6 +58,9 @@ def test_start_vz_linux_run_with_execution_preflight_dispatches_real_runner(monk
         reasons: list[str] = []
 
     class _FakeRunner:
+        def __init__(self, session_control_store=None) -> None:
+            calls.append(("init", session_control_store is svc._orch))
+
         def preflight(self, network_policy: str | None = None):
             calls.append(("preflight", network_policy))
             return _FakePreflight()
@@ -96,6 +99,7 @@ def test_start_vz_linux_run_with_execution_preflight_dispatches_real_runner(monk
 
     assert result.phase == RunPhase.completed
     assert calls == [
+        ("init", True),
         ("preflight", "deny_all"),
         (
             "start_run",

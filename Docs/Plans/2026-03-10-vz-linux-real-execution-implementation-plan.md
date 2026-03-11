@@ -314,7 +314,7 @@ git commit -m "feat(vz_linux): persist and clean up session vm control metadata"
 ```
 
 ### Task 5: Reuse running vz_linux VMs for sandbox sessions
-**Status:** In Progress
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py`
@@ -377,7 +377,7 @@ git commit -m "feat(vz_linux): reuse session vms for sandbox sessions"
 ```
 
 ### Task 6: Verify ACP compatibility without redesigning the ACP manager
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:**
 - Test: `tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py`

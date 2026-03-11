@@ -281,10 +281,11 @@ class SandboxService:
         spec: RunSpec,
         workspace_path: str | None,
     ) -> RunStatus:
-        preflight = VZLinuxRunner().preflight(network_policy=spec.network_policy)
+        runner = VZLinuxRunner(session_control_store=self._orch)
+        preflight = runner.preflight(network_policy=spec.network_policy)
         if not preflight.available:
             raise SandboxPolicy.RuntimeUnavailable(RuntimeType.vz_linux, reasons=list(preflight.reasons or []))
-        return VZLinuxRunner().start_run(run_id, spec, workspace_path)
+        return runner.start_run(run_id, spec, workspace_path)
 
     def _start_vz_macos_run_with_execution_preflight(
         self,
