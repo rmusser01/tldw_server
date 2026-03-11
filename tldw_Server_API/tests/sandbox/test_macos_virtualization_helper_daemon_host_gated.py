@@ -40,7 +40,10 @@ def _require_canonical_bundle_smoke() -> Path:
         pytest.skip("Set TLDW_SANDBOX_VZ_LINUX_BUNDLE_SMOKE=1 to enable canonical bundle smoke")
     bundle_text = str(os.getenv("TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH") or "").strip()
     if not bundle_text:
-        pytest.skip("TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH is required")
+        pytest.skip(
+            "TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH is required; point it at the "
+            "bundle/ output from tools/vz-linux-image/scripts/build-debian-bundle.sh"
+        )
     bundle_path = Path(bundle_text)
     if not bundle_path.exists():
         pytest.skip(f"canonical bundle path does not exist: {bundle_path}")

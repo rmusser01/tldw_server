@@ -53,7 +53,10 @@ def _require_vz_linux_real_host_e2e(monkeypatch, tmp_path: Path) -> str:
         pytest.skip("Set TLDW_SANDBOX_VZ_LINUX_E2E=1 to enable this test")
     base_image = str(os.getenv("TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE") or "").strip()
     if not base_image:
-        pytest.skip("TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE is required")
+        pytest.skip(
+            "TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE is required; prefer the "
+            "canonical bundle output from tools/vz-linux-image/scripts/build-debian-bundle.sh"
+        )
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "1")
     monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "0")
     helper = VZLinuxRunner.helper_client_cls()
