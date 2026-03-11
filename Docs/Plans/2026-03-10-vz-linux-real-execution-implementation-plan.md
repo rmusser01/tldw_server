@@ -13,6 +13,7 @@
 ---
 
 ### Task 1: Expand the macOS helper and guest-agent protocol contracts
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/macos_virtualization/models.py`
@@ -78,6 +79,7 @@ git commit -m "test(vz_linux): add helper protocol contracts for vm create and e
 ```
 
 ### Task 2: Replace env-only vz_linux preflight with helper/template validation
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/runners/vz_common.py`
@@ -143,6 +145,7 @@ git commit -m "feat(vz_linux): validate real helper and template readiness in pr
 ```
 
 ### Task 3: Implement ephemeral vz_linux run execution through the helper
+**Status:** In Progress
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/runners/vz_common.py`
@@ -218,6 +221,7 @@ git commit -m "feat(vz_linux): execute ephemeral runs through native helper"
 ```
 
 ### Task 4: Persist and clean up vz_linux session VM control metadata
+**Status:** Not Started
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/store.py`
@@ -310,6 +314,7 @@ git commit -m "feat(vz_linux): persist and clean up session vm control metadata"
 ```
 
 ### Task 5: Reuse running vz_linux VMs for sandbox sessions
+**Status:** Not Started
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py`
@@ -372,6 +377,7 @@ git commit -m "feat(vz_linux): reuse session vms for sandbox sessions"
 ```
 
 ### Task 6: Verify ACP compatibility without redesigning the ACP manager
+**Status:** Not Started
 
 **Files:**
 - Test: `tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py`
@@ -414,6 +420,7 @@ git commit -m "test(vz_linux): preserve acp sandbox session contract"
 ```
 
 ### Task 7: Update diagnostics, operator docs, and host-gated smoke coverage
+**Status:** Not Started
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/macos_diagnostics.py`
@@ -465,6 +472,7 @@ git commit -m "docs(vz_linux): publish real execution readiness and smoke covera
 ```
 
 ### Task 8: Run the final verification slice and prepare review
+**Status:** Not Started
 
 **Files:**
 - Modify: `Docs/Sandbox/macos-runtime-operator-notes.md` if verification reveals drift

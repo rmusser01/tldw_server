@@ -79,6 +79,21 @@ def test_collect_macos_diagnostics_reports_missing_helper_and_templates(monkeypa
     assert data["runtimes"]["vz_linux"]["execution_mode"] == "none"
 
 
+def test_collect_macos_diagnostics_reports_real_vz_linux_execution_mode(monkeypatch) -> None:
+    _patch_macos_host(monkeypatch)
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_READY", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_AVAILABLE", "1")
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+
+    data = diagnostics_module.collect_macos_diagnostics()
+
+    assert data["runtimes"]["vz_linux"]["available"] is True
+    assert data["runtimes"]["vz_linux"]["execution_mode"] == "real"
+    assert data["runtimes"]["vz_linux"]["reasons"] == []
+
+
 def test_collect_macos_diagnostics_separates_policy_from_host_readiness(monkeypatch) -> None:
     _patch_macos_host(monkeypatch)
     monkeypatch.setenv("TEST_MODE", "1")

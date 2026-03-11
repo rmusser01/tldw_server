@@ -39,6 +39,8 @@ def _remediation_for_reasons(reasons: list[str]) -> str | None:
         return None
     if "macos_required" in reasons or "apple_silicon_required" in reasons:
         return "Run this runtime on an Apple silicon macOS host."
+    if "macos_virtualization_helper_unavailable" in reasons:
+        return "Install or start the macOS virtualization helper service."
     if "macos_helper_missing" in reasons:
         return "Configure the macOS virtualization helper and mark it ready."
     if _VZ_LINUX_TEMPLATE_MISSING_REASON in reasons or _VZ_MACOS_TEMPLATE_MISSING_REASON in reasons:
@@ -153,11 +155,16 @@ def probe_runtime_statuses(
     for runtime in (RuntimeType.vz_linux, RuntimeType.vz_macos, RuntimeType.seatbelt):
         preflight = runtime_preflights.get(runtime)
         reasons = list((preflight.reasons if preflight else []) or [])
+        preflight_execution_mode = str((preflight.execution_mode if preflight else "") or "").strip().lower()
         statuses[runtime.value] = {
             "available": bool(preflight.available) if preflight is not None else False,
             "supported_trust_levels": list((preflight.supported_trust_levels if preflight else []) or []),
             "reasons": reasons,
-            "execution_mode": _execution_mode_for_runtime(runtime),
+            "execution_mode": (
+                preflight_execution_mode
+                if preflight_execution_mode in {"fake", "real"}
+                else _execution_mode_for_runtime(runtime)
+            ),
             "remediation": _remediation_for_reasons(reasons),
         }
     return statuses

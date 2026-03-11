@@ -41,3 +41,17 @@ def test_helper_create_vm_fails_closed_without_test_mode(monkeypatch) -> None:
 
     with pytest.raises(MacOSVirtualizationHelperUnavailable):
         client.create_vm({"runtime": "vz_linux", "vm_name": "vz-linux-run-2"})
+
+
+def test_fake_helper_validates_vz_linux_host_readiness(monkeypatch) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_READY", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_AVAILABLE", "1")
+
+    client = MacOSVirtualizationHelperClient()
+    result = client.validate_vz_linux_host({"network_policy": "deny_all"})
+
+    assert result["available"] is True
+    assert result["execution_mode"] == "real"
+    assert result["reasons"] == []

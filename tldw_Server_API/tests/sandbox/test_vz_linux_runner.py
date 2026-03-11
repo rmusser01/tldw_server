@@ -27,6 +27,7 @@ def test_vz_linux_fake_run_completes(monkeypatch) -> None:
 def test_vz_linux_preflight_requires_execution_readiness(monkeypatch) -> None:
     monkeypatch.setattr(vz_common.sys, "platform", "darwin")
     monkeypatch.setattr(vz_common.platform, "machine", lambda: "arm64")
+    monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_AVAILABLE", "1")
     monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_READY", "1")
     monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", "1")
@@ -35,5 +36,7 @@ def test_vz_linux_preflight_requires_execution_readiness(monkeypatch) -> None:
 
     result = VZLinuxRunner().preflight(network_policy="deny_all")
 
-    assert result.available is False
-    assert "real_execution_not_implemented" in result.reasons
+    assert result.available is True
+    assert result.reasons == []
+    assert result.execution_mode == "real"
+    assert result.enforcement_ready == {"deny_all": True, "allowlist": False}
