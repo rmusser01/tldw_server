@@ -11,7 +11,7 @@
 ---
 
 ### Task 1: Add host-gating and isolated-store helpers for real vz_linux E2E
-**Status:** Not Started
+**Status:** Complete
 
 **Files:**
 - Create: `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py`
@@ -73,7 +73,7 @@ git commit -m "test(vz_linux): add real-host e2e gating helpers"
 ```
 
 ### Task 2: Add the real ephemeral vz_linux smoke test
-**Status:** Not Started
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py`
@@ -136,7 +136,7 @@ git commit -m "test(vz_linux): add real ephemeral host smoke test"
 ```
 
 ### Task 3: Add the real session reuse and cleanup smoke test
-**Status:** Not Started
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py`
@@ -211,7 +211,7 @@ git commit -m "test(vz_linux): add real session reuse host smoke test"
 ```
 
 ### Task 4: Document the opt-in contract and verify the new module
-**Status:** Not Started
+**Status:** Complete
 
 **Files:**
 - Modify: `Docs/Sandbox/macos-runtime-operator-notes.md`
@@ -258,7 +258,7 @@ git commit -m "docs(vz_linux): document real host e2e contract"
 ```
 
 ### Task 5: Final verification and handoff
-**Status:** Not Started
+**Status:** Complete
 
 **Files:**
 - Verify: `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py`
