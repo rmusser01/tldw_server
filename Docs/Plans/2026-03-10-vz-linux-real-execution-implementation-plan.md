@@ -221,7 +221,7 @@ git commit -m "feat(vz_linux): execute ephemeral runs through native helper"
 ```
 
 ### Task 4: Persist and clean up vz_linux session VM control metadata
-**Status:** In Progress
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/store.py`
@@ -314,7 +314,7 @@ git commit -m "feat(vz_linux): persist and clean up session vm control metadata"
 ```
 
 ### Task 5: Reuse running vz_linux VMs for sandbox sessions
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py`

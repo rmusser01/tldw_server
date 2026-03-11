@@ -37,6 +37,7 @@ from .models import (
     SessionSpec,
     TrustLevel,
 )
+from .macos_virtualization.helper_client import MacOSVirtualizationHelperClient
 from .macos_diagnostics import collect_macos_diagnostics
 from .orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
 from .policy import SandboxPolicy, SandboxPolicyConfig, compute_policy_hash
@@ -1922,9 +1923,22 @@ class SandboxService:
         session_root = os.path.dirname(ws_path) if os.path.basename(ws_path) == "workspace" else ws_path
         shutil.rmtree(session_root, ignore_errors=True)
 
+    def _cleanup_vz_session_control(self, session_id: str) -> None:
+        control = self._orch.get_vz_session_control(session_id)
+        if not isinstance(control, dict):
+            return
+        runtime = str(control.get("runtime") or "").strip().lower()
+        vm_id = str(control.get("vm_id") or "").strip()
+        if runtime in {RuntimeType.vz_linux.value, RuntimeType.vz_macos.value} and vm_id:
+            terminated = bool(MacOSVirtualizationHelperClient().terminate_vm(vm_id))
+            if not terminated:
+                raise RuntimeError(f"{runtime}_session_vm_terminate_failed")
+        self._orch.delete_vz_session_control(session_id)
+
     def _destroy_session_serialized(self, session_id: str) -> bool:
         ws = self._orch.get_session_workspace_path(session_id)
         if not ws:
+            self._cleanup_vz_session_control(session_id)
             destroyed = bool(self._orch.destroy_session(session_id))
             if destroyed:
                 with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
@@ -1934,6 +1948,7 @@ class SandboxService:
 
         destroyed = False
         with self._workspace_operation_lock(session_id, ws):
+            self._cleanup_vz_session_control(session_id)
             destroyed = bool(self._orch.destroy_session(session_id, remove_workspace_tree=False))
             if destroyed:
                 with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
