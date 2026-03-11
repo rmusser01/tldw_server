@@ -39,7 +39,8 @@ Trust-level rules:
 - `SandboxService` is the integration point for policy admission, runtime preflights, execution dispatch, and runtime discovery.
 - Runtime capability snapshots are collected in `runtime_capabilities.py`.
 - macOS scaffolding currently includes:
-  - fake-backed helper contract in `macos_virtualization/`
+  - a Unix-socket helper client plus protocol models in `macos_virtualization/`
+  - frozen helper contract docs in `tools/macos-vz-helper/`
   - manifest/image-store contract in `image_store.py`
   - a real helper-backed `vz_linux` runner with ephemeral execution plus session VM reuse
   - a fake-backed `vz_macos` runner
@@ -55,8 +56,9 @@ Current limitations:
 - `seatbelt` control files and isolated `HOME`/temp dirs live outside the writable workspace and are removed after each run.
 - `seatbelt` real execution still depends on deprecated `sandbox-exec` and may be blocked by an enclosing sandbox even on macOS hosts.
 - `vz_linux` supports session VM reuse through persisted VZ session-control metadata; `vz_macos` does not.
+- `vz_linux` admin diagnostics now include reconciliation data comparing persisted VZ session-control rows against live helper VM state.
 - `seatbelt` is intentionally conservative and should not be treated as equivalent to a VM boundary.
-- Real host `vz_linux` smoke coverage is opt-in through `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py` and requires `TLDW_SANDBOX_VZ_LINUX_E2E=1`, `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<value>`, `SANDBOX_ENABLE_EXECUTION=1`, and `SANDBOX_BACKGROUND_EXECUTION=0`.
+- Real host `vz_linux` smoke coverage is opt-in through `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py` and requires `TLDW_SANDBOX_VZ_LINUX_E2E=1`, `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<value>`, `TLDW_SANDBOX_MACOS_HELPER_SOCKET=<socket>`, `SANDBOX_ENABLE_EXECUTION=1`, and `SANDBOX_BACKGROUND_EXECUTION=0`.
 
 ## Operations And Development
 
@@ -72,7 +74,8 @@ Current limitations:
 `/api/v1/sandbox/runtimes` is the summarized discovery surface used by clients and ACP.
 `/api/v1/sandbox/admin/macos-diagnostics` is an admin-only diagnostics surface for
 operator troubleshooting and exposes helper/template readiness details that are not
-included in the public discovery payload.
+included in the public discovery payload, plus reconciliation data for persisted
+`vz_linux` session-control rows versus live helper VM state.
 
 Selected configuration knobs:
 
@@ -81,6 +84,7 @@ Selected configuration knobs:
   - `SANDBOX_QUEUE_TTL_SEC`
   - `SANDBOX_IDEMPOTENCY_TTL_SEC`
 - macOS scaffolding:
+  - `TLDW_SANDBOX_MACOS_HELPER_SOCKET`
   - `TLDW_SANDBOX_MACOS_HELPER_READY`
   - `TLDW_SANDBOX_MACOS_HELPER_PATH`
   - `TLDW_SANDBOX_VZ_LINUX_AVAILABLE`

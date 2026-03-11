@@ -32,24 +32,42 @@ This is not yet a guide for shipping the full macOS runtime roadmap. The current
 
 ## Helper And Template Readiness
 
-The VM scaffolding is controlled by explicit readiness signals.
+`vz_linux` now treats the helper daemon as the source of truth for runtime readiness.
+The expected control plane is:
 
-Required env flags today:
+- a local Unix-socket helper daemon
+- a successful helper `ping` carrying `protocol_version` and `helper_version`
+- helper-backed `validate_host` for runtime availability
+- helper-backed `validate_template` for runnable-template truth
+
+Required real-helper config for `vz_linux`:
+
+- `TLDW_SANDBOX_MACOS_HELPER_SOCKET=/path/to/helper.sock`
+
+Test/scaffold env flags still exist, but they are no longer the stable readiness
+path for real `vz_linux` execution. They remain relevant for `TEST_MODE` and
+other scaffold-only paths:
 
 - `TLDW_SANDBOX_MACOS_HELPER_READY=1`
-- `TLDW_SANDBOX_VZ_LINUX_AVAILABLE=1`
 - `TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY=1`
+- `TLDW_SANDBOX_VZ_LINUX_AVAILABLE=1`
 - `TLDW_SANDBOX_VZ_MACOS_AVAILABLE=1`
 - `TLDW_SANDBOX_VZ_MACOS_FAKE_EXEC=1`
 - `TLDW_SANDBOX_VZ_MACOS_TEMPLATE_READY=1`
 
-`vz_linux` uses those readiness signals to expose a real helper-backed execution path.
-`vz_macos` still stays unavailable without its fake execution flag and exposes
-`real_execution_not_implemented` in preflight/discovery.
+`vz_linux` uses helper-backed truth outside `TEST_MODE` and exposes a real
+execution path only when the helper and template are both validated.
+`vz_macos` still stays scaffold-only and exposes `real_execution_not_implemented`
+in preflight/discovery unless its fake execution flags are enabled.
 
-The helper contract lives under `tldw_Server_API/app/core/Sandbox/macos_virtualization/`.
+The helper contract lives under:
 
-The intended production shape is a native signed helper or service that owns `Virtualization.framework` lifecycle operations. The current Python-side helper client is a contract stub with fake transport in test mode.
+- `tldw_Server_API/app/core/Sandbox/macos_virtualization/`
+- `tools/macos-vz-helper/`
+
+The repo now contains a real Unix-socket Python client and a frozen first-pass
+protocol contract for an in-repo helper daemon. The native daemon itself is still
+operator-provided until the repo grows that subproject.
 
 ## Template Preparation Flow
 
@@ -90,9 +108,10 @@ Today, the image store implements template registration plus deterministic run-c
 It is admin-only and returns:
 
 - detailed host readiness, including macOS version
-- helper readiness, with optional configured path and transport metadata
+- helper readiness, including transport, protocol version, and helper version when reachable
 - template readiness for `vz_linux` and `vz_macos`, with optional template source metadata
 - per-runtime execution mode and remediation hints
+- reconciliation data comparing persisted VZ session rows with live helper VM state
 
 Use the admin endpoint when you are validating host setup or trying to explain why a
 runtime is unavailable. Use `/api/v1/sandbox/runtimes` for client-facing discovery;
@@ -113,13 +132,14 @@ ACP sandbox session creation now performs runtime preflight validation before ca
 - No allowlist networking for the new macOS runtimes
 - No `vz_macos` warm-session VM reuse yet
 
-Current diagnostics are still env-driven scaffolding:
+Current diagnostics are mixed-mode:
 
-- helper readiness is gated by `TLDW_SANDBOX_MACOS_HELPER_READY`
-- helper path metadata is optional and comes from `TLDW_SANDBOX_MACOS_HELPER_PATH`
-- template readiness is gated by `TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY` and `TLDW_SANDBOX_VZ_MACOS_TEMPLATE_READY`
-- template source metadata is optional and comes from `TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE` and `TLDW_SANDBOX_VZ_MACOS_TEMPLATE_SOURCE`
-- `vz_linux` reports `execution_mode=real` when helper/template readiness succeeds
+- outside `TEST_MODE`, `vz_linux` helper readiness comes from helper `ping`, `validate_host`, `validate_template`, and `list_vms`
+- helper socket discovery for real `vz_linux` uses `TLDW_SANDBOX_MACOS_HELPER_SOCKET`
+- helper path metadata is still optional and comes from `TLDW_SANDBOX_MACOS_HELPER_PATH`
+- `vz_macos` readiness remains scaffolded through `TLDW_SANDBOX_VZ_MACOS_*`
+- fake helper/template env flags still drive test-mode scaffolding
+- `vz_linux` reports `execution_mode=real` only when the helper-backed path is reachable and the template validates
 - `vz_macos` reports `execution_mode=fake` only when `TLDW_SANDBOX_VZ_MACOS_FAKE_EXEC=1`
 
 ## Real Host E2E Smoke
@@ -133,7 +153,9 @@ Required env for that module:
 
 - `TLDW_SANDBOX_VZ_LINUX_E2E=1`
 - `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<guest-template-id-or-base-image>`
-- real helper/template readiness required by normal `vz_linux` preflight
+- `TLDW_SANDBOX_MACOS_HELPER_SOCKET=/path/to/helper.sock`
+- real helper reachability required through helper `ping`
+- helper-backed template validation required through `validate_template`
 
 The helper function in that test module also forces:
 
@@ -142,4 +164,4 @@ The helper function in that test module also forces:
 
 That keeps the smoke path synchronous and prevents it from silently using the
 fake helper contract. On unprepared hosts, the module should skip with explicit
-reasons instead of reporting a fake pass.
+helper-or-template reasons instead of reporting a fake pass.

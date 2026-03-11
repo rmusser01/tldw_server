@@ -30,9 +30,9 @@ The merged `vz_linux` work provides:
 What is still missing is proof that a real operator-installed helper plus a real
 Linux template can execute commands end-to-end on host hardware.
 
-The current Python helper client is still a contract stub outside `TEST_MODE`, so
-this design must assume a real native helper exists on the host where the test is
-run.
+The repo now contains a real Unix-socket helper client and a frozen helper
+protocol contract, but it still assumes a real native helper daemon exists on the
+host where the test is run.
 
 ## 3. Review Corrections Applied
 
@@ -102,6 +102,9 @@ The real-host test should require explicit operator input:
   - hard opt-in gate
 - `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<value>`
   - the `RunSpec.base_image` / session base image to use for the guest
+- `TLDW_SANDBOX_MACOS_HELPER_SOCKET=/path/to/helper.sock`
+  - the real helper transport endpoint used for `ping`, `validate_host`, and
+    `validate_template`
 - `SANDBOX_ENABLE_EXECUTION=1`
   - required for the session-backed smoke test because `SandboxService` only
     runs the queued sandbox job when execution is enabled
@@ -113,8 +116,10 @@ The real-host test should require explicit operator input:
     separate parallel config system
 
 The test should not use `TEST_MODE`, fake helper flags, or fake execution flags.
-If only the Python stub is present, the test must skip or fail based on the real
-preflight result rather than silently falling back.
+It should first prove helper reachability with `ping` and assert that a
+`protocol_version` is present, then prove runnable-template truth through
+`validate_template`. If only scaffolding is present, the test must skip or fail
+based on those real helper calls rather than silently falling back.
 
 ## 7. Test Cases
 
@@ -165,6 +170,8 @@ Skip with explicit reasons when:
 - host architecture is not Apple silicon
 - `TLDW_SANDBOX_VZ_LINUX_E2E` is not enabled
 - `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE` is missing
+- helper `ping` is unreachable
+- helper-backed `validate_template` says the base image is not runnable
 - `vz_linux` preflight is unavailable because helper/template readiness is not
   satisfied
 

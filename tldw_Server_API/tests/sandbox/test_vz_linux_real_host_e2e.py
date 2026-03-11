@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.config import clear_config_cache, settings as app_
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
     MacOSVirtualizationHelperUnavailable,
 )
+from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import HelperPingReply
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RuntimeType, SessionSpec
 from tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner import VZLinuxRunner
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
@@ -55,8 +56,14 @@ def _require_vz_linux_real_host_e2e(monkeypatch, tmp_path: Path) -> str:
         pytest.skip("TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE is required")
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "1")
     monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "0")
+    helper = VZLinuxRunner.helper_client_cls()
     try:
-        validation = VZLinuxRunner.helper_client_cls().validate_template(
+        ping = helper.ping()
+    except MacOSVirtualizationHelperUnavailable as exc:
+        pytest.skip(f"vz_linux helper unavailable for ping: {exc}")
+    _expect(bool(str(ping.protocol_version).strip()), "Expected helper protocol_version from ping")
+    try:
+        validation = helper.validate_template(
             {"runtime": RuntimeType.vz_linux.value, "template": base_image}
         )
     except MacOSVirtualizationHelperUnavailable as exc:
@@ -94,6 +101,14 @@ def test_vz_linux_real_host_e2e_requires_helper_validated_template(monkeypatch, 
     monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE", "bad-template")
 
     class _FailingHelper:
+        def ping(self):
+            return HelperPingReply(
+                protocol_version="1",
+                helper_version="test-mode",
+                status="ok",
+                details={"transport": "fake"},
+            )
+
         def validate_template(self, request: dict[str, object]) -> dict[str, object]:
             assert request["template"] == "bad-template"
             return {"ready": False, "reasons": ["template_invalid"]}
@@ -101,6 +116,22 @@ def test_vz_linux_real_host_e2e_requires_helper_validated_template(monkeypatch, 
     monkeypatch.setattr(VZLinuxRunner, "helper_client_cls", _FailingHelper)
 
     with pytest.raises(pytest.skip.Exception, match="template_invalid"):
+        _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
+
+
+def test_vz_linux_real_host_e2e_requires_helper_ping(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_E2E", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE", "ubuntu-24.04")
+
+    class _UnavailableHelper:
+        def ping(self):
+            raise MacOSVirtualizationHelperUnavailable("macos_virtualization_helper_unavailable")
+
+    monkeypatch.setattr(VZLinuxRunner, "helper_client_cls", _UnavailableHelper)
+
+    with pytest.raises(pytest.skip.Exception, match="helper unavailable for ping"):
         _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
 
 
