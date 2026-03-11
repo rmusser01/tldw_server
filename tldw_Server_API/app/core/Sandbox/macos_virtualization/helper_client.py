@@ -60,3 +60,9 @@ class MacOSVirtualizationHelperClient:
                 details={"vm_id": str(vm_id or "").strip() or None, "transport": "vsock"},
             )
         raise MacOSVirtualizationHelperUnavailable("macos_virtualization_helper_unavailable")
+
+    def terminate_vm(self, vm_id: str) -> bool:
+        del vm_id
+        if is_truthy(os.getenv("TEST_MODE")):
+            return True
+        raise MacOSVirtualizationHelperUnavailable("macos_virtualization_helper_unavailable")

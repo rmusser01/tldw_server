@@ -145,7 +145,7 @@ git commit -m "feat(vz_linux): validate real helper and template readiness in pr
 ```
 
 ### Task 3: Implement ephemeral vz_linux run execution through the helper
-**Status:** In Progress
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/runners/vz_common.py`
@@ -221,7 +221,7 @@ git commit -m "feat(vz_linux): execute ephemeral runs through native helper"
 ```
 
 ### Task 4: Persist and clean up vz_linux session VM control metadata
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/store.py`
