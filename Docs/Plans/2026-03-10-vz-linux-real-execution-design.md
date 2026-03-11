@@ -127,6 +127,11 @@ Responsibilities:
 
 This helper should be the component that directly owns `Virtualization.framework`, not Python.
 
+This repo currently only contains the Python client and contract scaffolding for that helper.
+Unless a native helper source tree is added during implementation, the repo-side milestone should
+be explicit that it integrates with an operator-installed helper binary or service and fails closed
+when that helper is unavailable.
+
 ### 6.2 Guest agent
 
 The Linux guest image must boot with a guest agent installed and enabled.
@@ -182,6 +187,13 @@ For ACP and session-oriented runs:
   - guest-agent readiness state
 - later commands reuse the VM only while that health state is still authoritative
 - stale or unhealthy VMs fail closed and must be recreated explicitly by the session path
+- destroying a sandbox session must terminate the stored VM even when no run is active
+
+For ACP specifically, the first real `vz_linux` milestone should preserve the existing ACP model:
+
+- ACP still uses one long-lived interactive sandbox run inside the session VM
+- ACP prompt reuse stays inside that existing stream-oriented run path
+- no ACP protocol redesign is required just to make the underlying `vz_linux` VM real
 
 ## 8. Template and Bootstrap Story
 

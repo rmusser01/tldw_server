@@ -8,6 +8,8 @@
 
 **Tech Stack:** FastAPI service layer, existing sandbox orchestrator/store, Python dataclasses, pytest, Apple `Virtualization.framework` helper contract, Linux guest agent over vsock, `virtiofs`.
 
+**Implementation Note:** This repo currently contains the Python-side helper client and protocol seams, not a native helper source tree. Unless a helper source tree is added during execution, the repo work should integrate against an operator-installed helper binary/service and keep automated tests on a fake helper contract plus host-gated compatibility smoke tests.
+
 ---
 
 ### Task 1: Expand the macOS helper and guest-agent protocol contracts
@@ -215,19 +217,20 @@ git add tldw_Server_API/app/core/Sandbox/runners/vz_common.py tldw_Server_API/ap
 git commit -m "feat(vz_linux): execute ephemeral runs through native helper"
 ```
 
-### Task 4: Persist vz_linux session VM control metadata for reuse
+### Task 4: Persist and clean up vz_linux session VM control metadata
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/store.py`
 - Modify: `tldw_Server_API/app/core/Sandbox/orchestrator.py`
 - Modify: `tldw_Server_API/app/core/Sandbox/service.py`
 - Create: `tldw_Server_API/tests/sandbox/test_vz_linux_session_control_store.py`
+- Create: `tldw_Server_API/tests/sandbox/test_vz_linux_session_cleanup.py`
 
 **Step 1: Write the failing test**
 
 ```python
 def test_store_persists_vz_linux_session_control_metadata(tmp_path: Path) -> None:
-    store = SQLiteSandboxStore(db_path=str(tmp_path / "sandbox.db"))
+    store = SQLiteStore(db_path=str(tmp_path / "sandbox.db"))
 
     store.put_vz_session_control(
         session_id="sess-1",
@@ -243,6 +246,30 @@ def test_store_persists_vz_linux_session_control_metadata(tmp_path: Path) -> Non
     assert row["vm_id"] == "vm-session-1"
     assert row["template_id"] == "vz_linux:ubuntu-24.04"
     assert row["agent_ready"] is True
+
+
+def test_destroy_session_terminates_persisted_vz_linux_vm(monkeypatch) -> None:
+    terminated: list[str] = []
+
+    class _FakeHelper:
+        def terminate_vm(self, vm_id: str) -> bool:
+            terminated.append(vm_id)
+            return True
+
+    monkeypatch.setattr(service_module, "MacOSVirtualizationHelperClient", lambda: _FakeHelper())
+
+    svc = SandboxService()
+    svc._orch.put_vz_session_control(
+        session_id="sess-1",
+        runtime="vz_linux",
+        vm_id="vm-session-1",
+        template_id="vz_linux:ubuntu-24.04",
+        workspace_mount="/tmp/ws",
+        agent_ready=True,
+    )
+
+    assert svc.destroy_session("sess-1") is True
+    assert terminated == ["vm-session-1"]
 ```
 
 **Step 2: Run test to verify it fails**
@@ -261,29 +288,34 @@ def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:
 
 def delete_vz_session_control(self, session_id: str) -> bool:
     ...
+
+def _destroy_session_serialized(self, session_id: str) -> bool:
+    control = self._orch.get_vz_session_control(session_id)
+    if control and control.get("vm_id"):
+        MacOSVirtualizationHelperClient().terminate_vm(str(control["vm_id"]))
+        self._orch.delete_vz_session_control(session_id)
+    ...
 ```
 
 **Step 4: Run test to verify it passes**
 
-Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_session_control_store.py -v`
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_session_control_store.py tldw_Server_API/tests/sandbox/test_vz_linux_session_cleanup.py -v`
 Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add tldw_Server_API/app/core/Sandbox/store.py tldw_Server_API/app/core/Sandbox/orchestrator.py tldw_Server_API/app/core/Sandbox/service.py tldw_Server_API/tests/sandbox/test_vz_linux_session_control_store.py
-git commit -m "feat(vz_linux): persist session vm control metadata"
+git add tldw_Server_API/app/core/Sandbox/store.py tldw_Server_API/app/core/Sandbox/orchestrator.py tldw_Server_API/app/core/Sandbox/service.py tldw_Server_API/tests/sandbox/test_vz_linux_session_control_store.py tldw_Server_API/tests/sandbox/test_vz_linux_session_cleanup.py
+git commit -m "feat(vz_linux): persist and clean up session vm control metadata"
 ```
 
-### Task 5: Reuse running vz_linux VMs for sandbox sessions and ACP-backed flows
+### Task 5: Reuse running vz_linux VMs for sandbox sessions
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py`
 - Modify: `tldw_Server_API/app/core/Sandbox/service.py`
-- Modify: `tldw_Server_API/app/core/Agent_Client_Protocol/sandbox_runner_client.py`
 - Modify: `tldw_Server_API/tests/sandbox/test_macos_runtime_service_dispatch.py`
 - Create: `tldw_Server_API/tests/sandbox/test_vz_linux_session_lifecycle.py`
-- Modify: `tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py`
 
 **Step 1: Write the failing test**
 
@@ -311,7 +343,7 @@ def test_vz_linux_session_reuses_existing_vm_for_second_run(monkeypatch, tmp_pat
 
 **Step 2: Run test to verify it fails**
 
-Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_session_lifecycle.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py -v`
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_session_lifecycle.py -v`
 Expected: FAIL because session-scoped VM reuse does not exist yet.
 
 **Step 3: Write minimal implementation**
@@ -329,17 +361,59 @@ reply = helper.exec_guest(vm_id=vm_id, request=exec_request)
 
 **Step 4: Run test to verify it passes**
 
-Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_session_lifecycle.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py -v`
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_session_lifecycle.py tldw_Server_API/tests/sandbox/test_macos_runtime_service_dispatch.py -v`
 Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py tldw_Server_API/app/core/Sandbox/service.py tldw_Server_API/app/core/Agent_Client_Protocol/sandbox_runner_client.py tldw_Server_API/tests/sandbox/test_macos_runtime_service_dispatch.py tldw_Server_API/tests/sandbox/test_vz_linux_session_lifecycle.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py
-git commit -m "feat(vz_linux): reuse session vms for sandbox and acp flows"
+git add tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py tldw_Server_API/app/core/Sandbox/service.py tldw_Server_API/tests/sandbox/test_macos_runtime_service_dispatch.py tldw_Server_API/tests/sandbox/test_vz_linux_session_lifecycle.py
+git commit -m "feat(vz_linux): reuse session vms for sandbox sessions"
 ```
 
-### Task 6: Update diagnostics, operator docs, and host-gated smoke coverage
+### Task 6: Verify ACP compatibility without redesigning the ACP manager
+
+**Files:**
+- Test: `tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py`
+- Modify only if required: `tldw_Server_API/app/core/Agent_Client_Protocol/sandbox_runner_client.py`
+
+**Step 1: Write the failing test**
+
+```python
+async def test_acp_sandbox_runner_vz_linux_contract_still_uses_stream_backed_session(monkeypatch) -> None:
+    manager = ACPSandboxRunnerManager(config=_sandbox_config(runtime="vz_linux"))
+    session_id = await manager.create_session(cwd="/workspace", user_id=7)
+    control = await manager._get_session_control_record(session_id)
+
+    assert control["sandbox_session_id"]
+    assert control["run_id"]
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py -v`
+Expected: FAIL only if `vz_linux` real-exec integration accidentally breaks the existing ACP stream/session contract.
+
+**Step 3: Write minimal implementation**
+
+```python
+# Prefer no ACP manager code changes.
+# Only adjust ACP code if the real vz_linux runtime/control metadata contract requires it.
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py -v`
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py tldw_Server_API/app/core/Agent_Client_Protocol/sandbox_runner_client.py
+git commit -m "test(vz_linux): preserve acp sandbox session contract"
+```
+
+### Task 7: Update diagnostics, operator docs, and host-gated smoke coverage
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/macos_diagnostics.py`
@@ -390,7 +464,7 @@ git add tldw_Server_API/app/core/Sandbox/macos_diagnostics.py Docs/Sandbox/macos
 git commit -m "docs(vz_linux): publish real execution readiness and smoke coverage"
 ```
 
-### Task 7: Run the final verification slice and prepare review
+### Task 8: Run the final verification slice and prepare review
 
 **Files:**
 - Modify: `Docs/Sandbox/macos-runtime-operator-notes.md` if verification reveals drift
