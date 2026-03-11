@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.config import clear_config_cache, settings as app_settings
+from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RuntimeType
+from tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner import VZLinuxRunner
+from tldw_Server_API.app.core.Sandbox.streams import get_hub
 from tldw_Server_API.app.core.testing import is_truthy
 
 
@@ -53,3 +56,42 @@ def test_vz_linux_real_host_e2e_requires_opt_in(monkeypatch, tmp_path: Path) -> 
 
     with pytest.raises(pytest.skip.Exception, match="TLDW_SANDBOX_VZ_LINUX_E2E"):
         _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS host only")
+def test_vz_linux_real_ephemeral_run_smoke(monkeypatch, tmp_path: Path) -> None:
+    base_image = _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_MACOS_HELPER_READY", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_AVAILABLE", raising=False)
+    runner = VZLinuxRunner()
+    preflight = runner.preflight(network_policy="deny_all")
+    if not preflight.available or preflight.execution_mode != "real":
+        pytest.skip(f"vz_linux real execution unavailable: {preflight.reasons}")
+
+    run_id = "vz-linux-real-ephemeral"
+    hub = get_hub()
+    hub._buffers.pop(run_id, None)  # type: ignore[attr-defined]
+    status = runner.start_run(
+        run_id,
+        RunSpec(
+            session_id=None,
+            runtime=RuntimeType.vz_linux,
+            base_image=base_image,
+            command=["/bin/echo", "vz-linux-e2e"],
+            network_policy="deny_all",
+        ),
+        session_workspace=None,
+    )
+
+    frames = list(hub._buffers.get(run_id, []))  # type: ignore[attr-defined]
+    stdout_text = "".join(
+        str(frame.get("data", ""))
+        for frame in frames
+        if frame.get("type") == "stdout"
+    )
+    assert status.phase == RunPhase.completed
+    assert status.exit_code == 0
+    assert "vz-linux-e2e" in stdout_text
