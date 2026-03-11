@@ -17,6 +17,7 @@ provider_priority:
   - higgs       # Advanced multi-lingual
   - index_tts   # IndexTTS2 (local, expressive zero-shot)
   - qwen3_tts   # Qwen3-TTS (local, multilingual; disabled by default)
+  - fish_s2     # Fish Audio S2 via upstream HTTP server (disabled by default)
 
 # Provider-specific configurations
 providers:
@@ -320,6 +321,22 @@ providers:
       warmup_on_startup: false
       idle_shutdown_seconds: 900
       resident_mode: false
+
+  # Fish Audio S2 Configuration (remote Fish HTTP server)
+  fish_s2:
+    enabled: false
+    backend: "native_http"
+    base_url: "http://127.0.0.1:8080"
+    api_key: null
+    timeout: 120
+    verify_api_key_on_init: false
+    model: "s2-pro"
+    sample_rate: 24000
+    max_text_length: 5000
+    extra_params:
+      default_chunk_length: 200
+      default_normalize: true
+      default_use_memory_cache: "off"
 
 # Voice mappings for cross-provider compatibility
 # NOTE: Providers like index_tts rely on uploaded reference audio; the
