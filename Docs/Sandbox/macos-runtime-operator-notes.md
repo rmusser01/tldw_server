@@ -65,9 +65,14 @@ The helper contract lives under:
 - `tldw_Server_API/app/core/Sandbox/macos_virtualization/`
 - `tools/macos-vz-helper/`
 
-The repo now contains a real Unix-socket Python client and a frozen first-pass
-protocol contract for an in-repo helper daemon. The native daemon itself is still
-operator-provided until the repo grows that subproject.
+The repo now contains:
+
+- a real Unix-socket Python client
+- a first-party Swift helper daemon subproject in `tools/macos-vz-helper/`
+- a first guest-protocol bridge in `tools/tldw-agent/` for guest-mode `tldw-agent`
+
+What is still incomplete is the actual `Virtualization.framework` boot path and
+the real vsock transport binding. The protocol and daemon surfaces are now in-repo.
 
 ## Template Preparation Flow
 
@@ -82,6 +87,7 @@ Its current role is narrow:
 - build `tldw-agent-guest`
 - install it into a rootfs-like directory
 - verify the expected guest binary path before later VM/image automation lands
+- provide the guest-mode binary that now serves the first request/response guest protocol
 
 Expected operator flow later:
 
@@ -175,3 +181,25 @@ The helper function in that test module also forces:
 That keeps the smoke path synchronous and prevents it from silently using the
 fake helper contract. On unprepared hosts, the module should skip with explicit
 helper-or-template reasons instead of reporting a fake pass.
+
+## Helper Daemon Smoke
+
+There is also an opt-in cross-language smoke test for the first-party helper daemon:
+
+- `tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_daemon_host_gated.py`
+
+Required env for that module:
+
+- `TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1`
+- optional `TLDW_SANDBOX_MACOS_HELPER_BINARY=/abs/path/to/macos-vz-helper`
+
+By default it looks for the built helper binary at:
+
+- `tools/macos-vz-helper/.build/debug/macos-vz-helper`
+
+What it proves today:
+
+- the real Python helper client can talk to the real Swift daemon over a Unix socket
+- helper `ping` returns the frozen protocol and helper versions
+- helper-backed `validate_template` works against a real temporary file path
+- `create_vm` currently fails honestly with `boot_not_implemented` until the real VM boot driver lands

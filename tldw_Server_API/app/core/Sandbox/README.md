@@ -41,6 +41,8 @@ Trust-level rules:
 - macOS scaffolding currently includes:
   - a Unix-socket helper client plus protocol models in `macos_virtualization/`
   - frozen helper contract docs in `tools/macos-vz-helper/`
+  - a first-party Swift helper daemon that now serves the helper protocol over a real Unix socket
+  - migrated `tools/tldw-agent/` guest mode that now serves the first request/response guest protocol over a generic stream transport
   - manifest/image-store contract in `image_store.py`
   - a real helper-backed `vz_linux` runner with ephemeral execution plus session VM reuse
   - a fake-backed `vz_macos` runner
@@ -57,8 +59,10 @@ Current limitations:
 - `seatbelt` real execution still depends on deprecated `sandbox-exec` and may be blocked by an enclosing sandbox even on macOS hosts.
 - `vz_linux` supports session VM reuse through persisted VZ session-control metadata; `vz_macos` does not.
 - `vz_linux` admin diagnostics now include reconciliation data comparing persisted VZ session-control rows against live helper VM state.
+- the helper daemon and guest protocol are now real at the socket/stream level, but the actual `Virtualization.framework` boot driver and vsock transport binding are still incomplete.
 - `seatbelt` is intentionally conservative and should not be treated as equivalent to a VM boundary.
 - Real host `vz_linux` smoke coverage is opt-in through `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py` and requires `TLDW_SANDBOX_VZ_LINUX_E2E=1`, `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<value>`, `TLDW_SANDBOX_MACOS_HELPER_SOCKET=<socket>`, `SANDBOX_ENABLE_EXECUTION=1`, and `SANDBOX_BACKGROUND_EXECUTION=0`.
+- Real helper-daemon smoke coverage is opt-in through `tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_daemon_host_gated.py` and requires `TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1`.
 
 ## Operations And Development
 

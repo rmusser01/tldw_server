@@ -1,0 +1,107 @@
+import Foundation
+import Testing
+@testable import MacOSVZHelperDaemon
+
+final class RecordingGuestTransport: GuestTransporting {
+    private(set) var readyPayload: [String: Any]?
+    private(set) var execPayload: [String: Any]?
+    private(set) var readyVMID: String?
+    private(set) var execVMID: String?
+    private(set) var readyTimeout: TimeInterval?
+    private(set) var execTimeout: TimeInterval?
+    var readyResponseFactory: (([String: Any]) -> Data)?
+    var execResponseFactory: (([String: Any]) -> Data)?
+
+    func sendReadyRequest(vmID: String, requestData: Data, timeoutSeconds: TimeInterval) throws -> Data {
+        readyVMID = vmID
+        readyTimeout = timeoutSeconds
+        let payload = try JSONSerialization.jsonObject(with: requestData) as? [String: Any] ?? [:]
+        readyPayload = payload
+        return readyResponseFactory?(payload) ?? Data()
+    }
+
+    func sendExecRequest(vmID: String, requestData: Data, timeoutSeconds: TimeInterval) throws -> Data {
+        execVMID = vmID
+        execTimeout = timeoutSeconds
+        let payload = try JSONSerialization.jsonObject(with: requestData) as? [String: Any] ?? [:]
+        execPayload = payload
+        return execResponseFactory?(payload) ?? Data()
+    }
+}
+
+@Test func vsockBridgeEncodesReadyRequestsAndAcceptsReadyResponses() throws {
+    let transport = RecordingGuestTransport()
+    transport.readyResponseFactory = { payload in
+        let requestID = payload["request_id"] as? String ?? ""
+        return Data(
+            """
+            {"protocol_version":"1","request_id":"\(requestID)","status":"ready","workspace_root":"/workspace"}
+            """.utf8
+        )
+    }
+    let bridge = VSockBridge(transport: transport)
+
+    try bridge.waitUntilReady(vmID: "vm-ready", timeoutSeconds: 9)
+
+    #expect(transport.readyVMID == "vm-ready")
+    #expect(transport.readyTimeout == 9)
+    #expect(transport.readyPayload?["protocol_version"] as? String == "1")
+    #expect(transport.readyPayload?["type"] as? String == "ready")
+}
+
+@Test func vsockBridgeEncodesExecRequestsAndReturnsGuestExecResult() throws {
+    let transport = RecordingGuestTransport()
+    transport.execResponseFactory = { payload in
+        let requestID = payload["request_id"] as? String ?? ""
+        return Data(
+            """
+            {"protocol_version":"1","request_id":"\(requestID)","exit_code":0,"stdout":"ok\\n","stderr":""}
+            """.utf8
+        )
+    }
+    let bridge = VSockBridge(transport: transport)
+
+    let result = try bridge.exec(
+        vmID: "vm-exec",
+        argv: ["/bin/echo", "ok"],
+        cwd: "/workspace",
+        env: ["FOO": "1"],
+        timeoutSeconds: 15
+    )
+
+    #expect(result.exitCode == 0)
+    #expect(result.stdout == "ok\n")
+    #expect(result.stderr == "")
+    #expect(transport.execVMID == "vm-exec")
+    #expect(transport.execTimeout == 15)
+    #expect(transport.execPayload?["type"] as? String == "exec")
+    let argv = transport.execPayload?["argv"] as? [String]
+    #expect(argv == ["/bin/echo", "ok"])
+}
+
+@Test func vsockBridgeMapsGuestErrorResponsesToStructuredFailure() throws {
+    let transport = RecordingGuestTransport()
+    transport.execResponseFactory = { payload in
+        let requestID = payload["request_id"] as? String ?? ""
+        return Data(
+            """
+            {"protocol_version":"1","request_id":"\(requestID)","error_code":"exec_failed","message":"guest command failed"}
+            """.utf8
+        )
+    }
+    let bridge = VSockBridge(transport: transport)
+
+    do {
+        _ = try bridge.exec(
+            vmID: "vm-fail",
+            argv: ["/bin/false"],
+            cwd: "/workspace",
+            env: [:],
+            timeoutSeconds: 5
+        )
+        Issue.record("expected guest operation failure")
+    } catch let GuestBridgeError.guestOperationFailed(code, message) {
+        #expect(code == "exec_failed")
+        #expect(message == "guest command failed")
+    }
+}
