@@ -39,6 +39,9 @@ The expected control plane is:
 - a successful helper `ping` carrying `protocol_version` and `helper_version`
 - helper-backed `validate_host` for runtime availability
 - helper-backed `validate_template` for runnable-template truth
+- successful template validation now reports `boot_mode` plus
+  `validation_strength`, so operators can distinguish canonical bundles from
+  raw-disk compatibility mode
 
 Required real-helper config for `vz_linux`:
 
@@ -201,5 +204,9 @@ What it proves today:
 
 - the real Python helper client can talk to the real Swift daemon over a Unix socket
 - helper `ping` returns the frozen protocol and helper versions
-- helper-backed `validate_template` works against a real temporary file path
-- `create_vm` currently fails honestly with `boot_not_implemented` until the real VM boot driver lands
+- helper-backed `validate_template` works against a real temporary file path and
+  can now surface `boot_mode` and `validation_strength` when template resolution
+  succeeds
+- `create_vm` now goes through the real boot-driver path; concrete failures depend
+  on template validity, host readiness, and guest readiness until the canonical
+  bundle host smoke is wired

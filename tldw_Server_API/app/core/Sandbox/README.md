@@ -60,6 +60,8 @@ Current limitations:
 - `vz_linux` supports session VM reuse through persisted VZ session-control metadata; `vz_macos` does not.
 - `vz_linux` admin diagnostics now include reconciliation data comparing persisted VZ session-control rows against live helper VM state.
 - the helper daemon and guest protocol are now real at the socket/stream level, but the actual `Virtualization.framework` boot driver and vsock transport binding are still incomplete.
+- helper-backed template validation now distinguishes canonical bundles from
+  raw-disk compatibility mode through `boot_mode` and `validation_strength`.
 - `seatbelt` is intentionally conservative and should not be treated as equivalent to a VM boundary.
 - Real host `vz_linux` smoke coverage is opt-in through `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py` and requires `TLDW_SANDBOX_VZ_LINUX_E2E=1`, `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<value>`, `TLDW_SANDBOX_MACOS_HELPER_SOCKET=<socket>`, `SANDBOX_ENABLE_EXECUTION=1`, and `SANDBOX_BACKGROUND_EXECUTION=0`.
 - Real helper-daemon smoke coverage is opt-in through `tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_daemon_host_gated.py` and requires `TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1`.

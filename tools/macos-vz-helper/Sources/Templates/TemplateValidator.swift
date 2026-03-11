@@ -20,13 +20,15 @@ final class TemplateValidator {
         let templateID = "\(runtime):\(templateName)"
 
         do {
-            _ = try resolve(runtime: runtime, templatePath: trimmedPath)
+            let spec = try resolve(runtime: runtime, templatePath: trimmedPath)
             return TemplateValidationResponse(
                 protocolVersion: protocolVersion,
                 helperVersion: helperVersion,
                 templateID: templateID,
                 source: trimmedPath,
                 ready: true,
+                bootMode: spec.bootMode.rawValue,
+                validationStrength: spec.validationStrength.rawValue,
                 reasons: []
             )
         } catch let error as TemplateResolutionError {
@@ -36,6 +38,8 @@ final class TemplateValidator {
                 templateID: templateID,
                 source: trimmedPath,
                 ready: false,
+                bootMode: nil,
+                validationStrength: nil,
                 reasons: [error.reason(for: runtime)]
             )
         } catch {
@@ -45,6 +49,8 @@ final class TemplateValidator {
                 templateID: templateID,
                 source: trimmedPath,
                 ready: false,
+                bootMode: nil,
+                validationStrength: nil,
                 reasons: [missingReason(for: runtime)]
             )
         }

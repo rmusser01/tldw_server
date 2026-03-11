@@ -81,6 +81,21 @@ Every failure response should include:
 }
 ```
 
+### `validate_template`
+
+```json
+{
+  "protocol_version": "1",
+  "helper_version": "0.1.0",
+  "template_id": "vz_linux:bundle",
+  "source": "/tmp/vz-linux-bundle",
+  "ready": true,
+  "boot_mode": "bundle",
+  "validation_strength": "strong",
+  "reasons": []
+}
+```
+
 ### `list_vms`
 
 ```json
@@ -106,5 +121,7 @@ Every failure response should include:
 
 - Python must reject incompatible `protocol_version` values.
 - Helper runtime truth wins over env-only scaffolding.
+- Template validation must report `boot_mode` and `validation_strength` when the
+  helper can resolve the template successfully.
 - Python remains the source of truth for sandbox sessions; the helper only reports
   runtime VM state.

@@ -32,6 +32,8 @@ struct TemplateValidationResponse: Encodable {
     let templateID: String
     let source: String
     let ready: Bool
+    let bootMode: String?
+    let validationStrength: String?
     let reasons: [String]
 
     private enum CodingKeys: String, CodingKey {
@@ -40,6 +42,8 @@ struct TemplateValidationResponse: Encodable {
         case templateID = "template_id"
         case source
         case ready
+        case bootMode = "boot_mode"
+        case validationStrength = "validation_strength"
         case reasons
     }
 }

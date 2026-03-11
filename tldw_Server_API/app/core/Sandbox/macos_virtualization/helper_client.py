@@ -240,12 +240,23 @@ class MacOSVirtualizationHelperClient:
         reasons = [] if ready else ([missing_reason] if template else ["template_unconfigured"])
         if template and not template_id:
             template_id = f"{runtime}:{Path(template).name}"
+        boot_mode = None
+        validation_strength = None
+        if ready:
+            if Path(template).suffix == ".img":
+                boot_mode = "raw_disk"
+                validation_strength = "compatibility"
+            else:
+                boot_mode = "bundle"
+                validation_strength = "strong"
         return {
             "protocol_version": self._protocol_version,
             "helper_version": "test-mode",
             "template_id": template_id or None,
             "source": template or None,
             "ready": ready,
+            "boot_mode": boot_mode,
+            "validation_strength": validation_strength,
             "reasons": reasons,
             "details": {"runtime": runtime},
         }

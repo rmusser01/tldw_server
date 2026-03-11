@@ -127,6 +127,25 @@ def test_fake_helper_validates_vz_linux_host_readiness(monkeypatch) -> None:
     assert result["reasons"] == []
 
 
+def test_fake_helper_validate_template_includes_boot_metadata(monkeypatch) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", "1")
+
+    client = MacOSVirtualizationHelperClient()
+
+    bundle_validation = client.validate_template(
+        {"runtime": "vz_linux", "template": "/tmp/canonical-bundle"}
+    )
+    raw_validation = client.validate_template(
+        {"runtime": "vz_linux", "template": "/tmp/raw-disk.img"}
+    )
+
+    assert bundle_validation["boot_mode"] == "bundle"
+    assert bundle_validation["validation_strength"] == "strong"
+    assert raw_validation["boot_mode"] == "raw_disk"
+    assert raw_validation["validation_strength"] == "compatibility"
+
+
 def test_parse_helper_ping_exposes_protocol_and_helper_versions() -> None:
     result = parse_helper_ping(
         {
@@ -344,6 +363,8 @@ def test_socket_helper_supports_register_and_validate_template(monkeypatch) -> N
                 "template_id": "vz_linux:ubuntu-24.04",
                 "source": "/tmp/ubuntu-24.04.img",
                 "ready": True,
+                "boot_mode": "raw_disk",
+                "validation_strength": "compatibility",
                 "reasons": [],
                 "details": {"runtime": "vz_linux"},
             },
@@ -353,6 +374,8 @@ def test_socket_helper_supports_register_and_validate_template(monkeypatch) -> N
                 "template_id": "vz_linux:ubuntu-24.04",
                 "source": "/tmp/ubuntu-24.04.img",
                 "ready": True,
+                "boot_mode": "raw_disk",
+                "validation_strength": "compatibility",
                 "reasons": [],
                 "details": {"runtime": "vz_linux"},
             },
@@ -370,10 +393,59 @@ def test_socket_helper_supports_register_and_validate_template(monkeypatch) -> N
 
     assert registered["template_id"] == "vz_linux:ubuntu-24.04"
     assert validated["ready"] is True
+    assert registered["boot_mode"] == "raw_disk"
+    assert validated["validation_strength"] == "compatibility"
     assert [entry["operation"] for entry in requests] == [
         "register_template",
         "validate_template",
     ]
+
+
+def test_helper_validate_template_preserves_validation_strength_and_boot_mode(monkeypatch) -> None:
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    _install_fake_helper_socket(
+        monkeypatch,
+        responses={
+            "validate_template": [
+                {
+                    "protocol_version": "1",
+                    "helper_version": "0.1.0",
+                    "template_id": "vz_linux:bundle",
+                    "source": "/tmp/bundle",
+                    "ready": True,
+                    "boot_mode": "bundle",
+                    "validation_strength": "strong",
+                    "reasons": [],
+                    "details": {"runtime": "vz_linux"},
+                },
+                {
+                    "protocol_version": "1",
+                    "helper_version": "0.1.0",
+                    "template_id": "vz_linux:raw",
+                    "source": "/tmp/raw.img",
+                    "ready": True,
+                    "boot_mode": "raw_disk",
+                    "validation_strength": "compatibility",
+                    "reasons": [],
+                    "details": {"runtime": "vz_linux"},
+                },
+            ],
+        },
+    )
+
+    client = MacOSVirtualizationHelperClient()
+
+    bundle_validation = client.validate_template(
+        {"runtime": "vz_linux", "template": "/tmp/bundle"}
+    )
+    raw_validation = client.validate_template(
+        {"runtime": "vz_linux", "template": "/tmp/raw.img"}
+    )
+
+    assert bundle_validation["boot_mode"] == "bundle"
+    assert bundle_validation["validation_strength"] == "strong"
+    assert raw_validation["boot_mode"] == "raw_disk"
+    assert raw_validation["validation_strength"] == "compatibility"
 
 
 def test_socket_helper_maps_missing_vm_status_and_terminate_to_nonfatal_results(monkeypatch) -> None:
