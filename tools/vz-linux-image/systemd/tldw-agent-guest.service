@@ -1,0 +1,12 @@
+[Unit]
+Description=tldw guest agent
+After=multi-user.target
+
+[Service]
+Type=simple
+Environment=TLDW_AGENT_GUEST_WORKSPACE_ROOT=/workspace
+ExecStart=/usr/local/bin/tldw-agent-guest
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

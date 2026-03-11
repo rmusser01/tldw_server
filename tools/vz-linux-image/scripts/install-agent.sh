@@ -13,10 +13,13 @@ REPO_ROOT="$(cd "${IMAGE_DIR}/../.." && pwd)"
 AGENT_DIR="${REPO_ROOT}/tools/tldw-agent"
 TARGET_DIR="${ROOTFS}/usr/local/bin"
 TARGET_BIN="${TARGET_DIR}/tldw-agent-guest"
+SYSTEMD_DIR="${ROOTFS}/etc/systemd/system"
+SYSTEMD_UNIT="${SYSTEMD_DIR}/tldw-agent-guest.service"
 GOCACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tldw-agent-go.XXXXXX")"
 trap 'rm -rf "${GOCACHE_DIR}"' EXIT
 
 mkdir -p "${TARGET_DIR}"
+mkdir -p "${SYSTEMD_DIR}"
 
 (
   cd "${AGENT_DIR}"
@@ -25,3 +28,4 @@ mkdir -p "${TARGET_DIR}"
 )
 
 chmod +x "${TARGET_BIN}"
+install -m 0644 "${IMAGE_DIR}/systemd/tldw-agent-guest.service" "${SYSTEMD_UNIT}"
