@@ -69,3 +69,19 @@ bash ./scripts/build-bundle.sh "${BUNDLE_DIR}"
 The systemd unit is staged as the canonical guest-startup asset. The actual
 long-lived in-guest transport wiring is completed in later VM boot and guest
 execution slices.
+
+## Helper Smoke
+
+The canonical bundle can also drive the host-gated helper smoke:
+
+```bash
+TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1 \
+TLDW_SANDBOX_VZ_LINUX_BUNDLE_SMOKE=1 \
+TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH="${BUNDLE_DIR}" \
+source ../../.venv/bin/activate && \
+python -m pytest tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_daemon_host_gated.py -q
+```
+
+At the current slice, a prepared host should validate the canonical bundle and
+move past the old `boot_not_implemented` path. The likely remaining ceiling is
+guest readiness until the real vsock guest transport is wired.

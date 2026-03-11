@@ -72,6 +72,17 @@ def _require_vz_linux_real_host_e2e(monkeypatch, tmp_path: Path) -> str:
         template_reasons = [str(reason) for reason in validation.get("reasons", []) if str(reason).strip()]
         reason_text = ", ".join(template_reasons) if template_reasons else "template_invalid"
         pytest.skip(f"vz_linux template validation unavailable: {reason_text}")
+    expected_boot_mode = "raw_disk" if Path(base_image).suffix == ".img" else "bundle"
+    expected_validation_strength = "compatibility" if expected_boot_mode == "raw_disk" else "strong"
+    _expect(
+        validation.get("boot_mode") == expected_boot_mode,
+        f"Expected helper validation boot_mode {expected_boot_mode!r}, got {validation.get('boot_mode')!r}",
+    )
+    _expect(
+        validation.get("validation_strength") == expected_validation_strength,
+        "Expected helper validation_strength "
+        f"{expected_validation_strength!r}, got {validation.get('validation_strength')!r}",
+    )
     return base_image
 
 

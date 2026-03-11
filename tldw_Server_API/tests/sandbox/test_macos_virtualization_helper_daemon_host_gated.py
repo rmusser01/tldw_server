@@ -34,6 +34,18 @@ def _require_helper_daemon_smoke() -> Path:
     pytest.skip("macOS helper daemon binary is not available; build tools/macos-vz-helper first")
 
 
+def _require_canonical_bundle_smoke() -> Path:
+    if not is_truthy(os.getenv("TLDW_SANDBOX_VZ_LINUX_BUNDLE_SMOKE")):
+        pytest.skip("Set TLDW_SANDBOX_VZ_LINUX_BUNDLE_SMOKE=1 to enable canonical bundle smoke")
+    bundle_text = str(os.getenv("TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH") or "").strip()
+    if not bundle_text:
+        pytest.skip("TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH is required")
+    bundle_path = Path(bundle_text)
+    if not bundle_path.exists():
+        pytest.skip(f"canonical bundle path does not exist: {bundle_path}")
+    return bundle_path
+
+
 def test_macos_helper_daemon_smoke_over_real_unix_socket(monkeypatch, tmp_path: Path) -> None:
     binary_path = _require_helper_daemon_smoke()
     monkeypatch.delenv("TEST_MODE", raising=False)
@@ -90,22 +102,95 @@ def test_macos_helper_daemon_smoke_over_real_unix_socket(monkeypatch, tmp_path: 
             pytest.fail(f"expected template validation ready=True, got {validation!r}")
         if validation["template_id"] != "vz_linux:template.img":
             pytest.fail(f"expected template_id 'vz_linux:template.img', got {validation['template_id']!r}")
+        if validation.get("boot_mode") != "raw_disk":
+            pytest.fail(f"expected boot_mode 'raw_disk', got {validation.get('boot_mode')!r}")
+        if validation.get("validation_strength") != "compatibility":
+            pytest.fail(
+                "expected validation_strength 'compatibility', "
+                f"got {validation.get('validation_strength')!r}"
+            )
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        socket_path.unlink(missing_ok=True)
 
-        with pytest.raises(MacOSVirtualizationHelperFailure) as excinfo:
-            client.create_vm(
+
+def test_macos_helper_daemon_canonical_bundle_boot_smoke(monkeypatch, tmp_path: Path) -> None:
+    binary_path = _require_helper_daemon_smoke()
+    bundle_path = _require_canonical_bundle_smoke()
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    socket_fd, socket_name = tempfile.mkstemp(  # nosec B108 - AF_UNIX paths must stay short on macOS, so this smoke test intentionally allocates under /tmp.
+        prefix="macos-vz-helper-bundle-",
+        suffix=".sock",
+        dir="/tmp",  # nosec B108
+    )
+    os.close(socket_fd)
+    socket_path = Path(socket_name)
+    socket_path.unlink(missing_ok=True)
+
+    env = os.environ.copy()
+    env["TLDW_SANDBOX_MACOS_HELPER_SOCKET"] = str(socket_path)
+    process = subprocess.Popen(  # nosec B603 - binary_path is repo-controlled or explicitly user-provided for this smoke test.
+        [str(binary_path)],
+        cwd=str(binary_path.parent),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        client = MacOSVirtualizationHelperClient(socket_path=str(socket_path), timeout_sec=0.5)
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            if process.poll() is not None:
+                stderr_text = process.stderr.read() if process.stderr else ""
+                pytest.fail(f"helper daemon exited early: {stderr_text}")
+            try:
+                client.ping()
+                break
+            except MacOSVirtualizationHelperUnavailable:
+                time.sleep(0.1)
+        else:
+            pytest.fail("helper daemon did not accept ping within timeout")
+
+        validation = client.validate_template(
+            {"runtime": "vz_linux", "template": str(bundle_path)}
+        )
+        if validation["ready"] is not True:
+            reasons = ", ".join(str(reason) for reason in validation.get("reasons", []))
+            pytest.skip(f"canonical bundle validation unavailable: {reasons or 'template_invalid'}")
+        if validation.get("boot_mode") != "bundle":
+            pytest.fail(f"expected boot_mode 'bundle', got {validation.get('boot_mode')!r}")
+        if validation.get("validation_strength") != "strong":
+            pytest.fail(
+                "expected validation_strength 'strong', "
+                f"got {validation.get('validation_strength')!r}"
+            )
+
+        try:
+            response = client.create_vm(
                 {
                     "runtime": "vz_linux",
-                    "vm_name": "smoke-vm",
-                    "template": str(template_path),
+                    "vm_name": "bundle-smoke-vm",
+                    "template": str(bundle_path),
                     "workspace_path": str(tmp_path),
-                    "timeout_sec": 1,
+                    "timeout_sec": 5,
                 }
             )
-
-        if excinfo.value.error_code != "boot_not_implemented":
-            pytest.fail(
-                f"expected boot_not_implemented helper error, got {excinfo.value.error_code!r}"
-            )
+        except MacOSVirtualizationHelperFailure as exc:
+            if exc.error_code == "boot_not_implemented":
+                pytest.fail("expected canonical bundle boot path to move past boot_not_implemented")
+            if exc.error_code == "guest_readiness_not_implemented":
+                pytest.skip("canonical bundle boot reached guest readiness; vsock guest transport is not wired yet")
+            pytest.fail(f"unexpected helper create_vm failure: {exc.error_code}")
+        else:
+            if response.vm_id != "bundle-smoke-vm":
+                pytest.fail(f"expected vm_id 'bundle-smoke-vm', got {response.vm_id!r}")
     finally:
         process.terminate()
         try:
