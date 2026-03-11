@@ -8,8 +8,10 @@ These notes cover the current macOS runtime scaffolding for the sandbox subsyste
 - `vz_macos`
 - `seatbelt`
 
-This is not a guide for shipping real guest execution yet. The current implementation exposes runtime identities, policy admission, discovery metadata, helper/image-store contracts, and fake-backed runner paths.
-The exception is `seatbelt`, which now has a real trusted-workflow subprocess path on compatible macOS hosts.
+This is not yet a guide for shipping the full macOS runtime roadmap. The current implementation exposes runtime identities, policy admission, discovery metadata, helper/image-store contracts, and one real VM-backed path:
+- `vz_linux` now supports helper-backed ephemeral execution plus session VM reuse.
+- `vz_macos` remains scaffold-only.
+- `seatbelt` has a real trusted-workflow subprocess path on compatible macOS hosts.
 
 ## Host Assumptions
 
@@ -36,13 +38,13 @@ Required env flags today:
 
 - `TLDW_SANDBOX_MACOS_HELPER_READY=1`
 - `TLDW_SANDBOX_VZ_LINUX_AVAILABLE=1`
-- `TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC=1`
 - `TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY=1`
 - `TLDW_SANDBOX_VZ_MACOS_AVAILABLE=1`
 - `TLDW_SANDBOX_VZ_MACOS_FAKE_EXEC=1`
 - `TLDW_SANDBOX_VZ_MACOS_TEMPLATE_READY=1`
 
-Without the fake execution flag, the VZ runtimes stay unavailable and expose
+`vz_linux` uses those readiness signals to expose a real helper-backed execution path.
+`vz_macos` still stays unavailable without its fake execution flag and exposes
 `real_execution_not_implemented` in preflight/discovery.
 
 The helper contract lives under `tldw_Server_API/app/core/Sandbox/macos_virtualization/`.
@@ -71,7 +73,8 @@ Today, the image store implements template registration plus deterministic run-c
   - `vz_linux`
   - `vz_macos`
   - `seatbelt`
-- Warm-session optimization is not implemented yet and should not be assumed by operators.
+- `vz_linux` session-mode reuse exists now and reuses a persisted VM for later commands in the same sandbox session.
+- `vz_macos` still has no warm-session optimization.
 
 ## Discovery And ACP
 
@@ -99,14 +102,16 @@ ACP sandbox session creation now performs runtime preflight validation before ca
 
 ## Current Limits
 
-- No real `vz_linux` or `vz_macos` guest command execution yet
+- `vz_linux` real guest command execution is available behind helper/template readiness on Apple silicon macOS hosts
+- `vz_linux` session VM reuse persists VM control metadata and reuses the same VM for later sandbox-session runs
+- `vz_macos` still has no real guest command execution
 - `seatbelt` real execution is available for trusted workflows when `sandbox-exec` is present and not blocked by an enclosing sandbox
 - `sandbox-exec` is deprecated and should be treated as a compatibility-gated bridge, not the long-term macOS isolation foundation
 - `seatbelt` availability depends on `sandbox-exec` existing on the host, but its summarized discovery payload still keeps `strict_deny_all_supported=false`
 - `seatbelt` runner-owned control files plus isolated `HOME` and temp directories are created outside the writable workspace and removed after each run
 - No APFS clone execution path yet
 - No allowlist networking for the new macOS runtimes
-- No warm-session VM reuse yet
+- No `vz_macos` warm-session VM reuse yet
 
 Current diagnostics are still env-driven scaffolding:
 
@@ -114,4 +119,5 @@ Current diagnostics are still env-driven scaffolding:
 - helper path metadata is optional and comes from `TLDW_SANDBOX_MACOS_HELPER_PATH`
 - template readiness is gated by `TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY` and `TLDW_SANDBOX_VZ_MACOS_TEMPLATE_READY`
 - template source metadata is optional and comes from `TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE` and `TLDW_SANDBOX_VZ_MACOS_TEMPLATE_SOURCE`
-- `execution_mode=fake` depends on the corresponding `*_FAKE_EXEC=1` flag
+- `vz_linux` reports `execution_mode=real` when helper/template readiness succeeds
+- `vz_macos` reports `execution_mode=fake` only when `TLDW_SANDBOX_VZ_MACOS_FAKE_EXEC=1`

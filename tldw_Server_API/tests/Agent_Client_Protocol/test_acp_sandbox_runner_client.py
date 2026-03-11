@@ -186,6 +186,112 @@ async def test_create_session_rejects_seatbelt_without_standard_opt_in(monkeypat
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_session_persists_stream_backed_control_for_vz_linux(monkeypatch) -> None:
+    manager = ACPSandboxRunnerManager(
+        ACPSandboxConfig(
+            enabled=True,
+            runtime="vz_linux",
+            network_policy="deny_all",
+            agent_command="/usr/local/bin/codex",
+            ssh_enabled=False,
+        )
+    )
+    monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "1")
+    monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "1")
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_AVAILABLE", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_READY", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", "1")
+
+    import tldw_Server_API.app.core.Agent_Client_Protocol.sandbox_runner_client as src
+
+    class _Obj:
+        def __init__(self, obj_id: str) -> None:
+            self.id = obj_id
+
+    capture: dict[str, object] = {}
+    persisted: dict[str, object] = {}
+
+    class _FakeSandboxService:
+        def __init__(self) -> None:
+            self.cancelled: list[str] = []
+            self.destroyed: list[str] = []
+
+        def create_session(self, **kwargs):
+            capture["session_spec"] = kwargs.get("spec")
+            return _Obj("sandbox-session-vz")
+
+        def start_run_scaffold(self, **kwargs):
+            capture["run_spec"] = kwargs.get("spec")
+            return _Obj("run-vz")
+
+        def cancel_run(self, run_id: str) -> None:
+            self.cancelled.append(run_id)
+
+        def destroy_session(self, session_id: str) -> None:
+            self.destroyed.append(session_id)
+
+    class _FakeHub:
+        def subscribe_with_buffer(self, run_id: str) -> asyncio.Queue:
+            return asyncio.Queue()
+
+        def push_stdin(self, run_id: str, data: bytes) -> None:
+            return None
+
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeStreamClient:
+        def __init__(self, send_bytes) -> None:
+            self._send_bytes = send_bytes
+
+        def set_notification_handler(self, handler) -> None:
+            return None
+
+        def set_request_handler(self, handler) -> None:
+            return None
+
+        async def start(self) -> None:
+            return None
+
+        async def call(self, method: str, payload: dict[str, object]):
+            if method == "initialize":
+                return _CallResult({"agentCapabilities": {}})
+            if method == "session/new":
+                return _CallResult({"sessionId": "acp-session-vz"})
+            if method == "_tldw/session/close":
+                return _CallResult({})
+            raise AssertionError(f"unexpected method: {method}")
+
+        async def close(self) -> None:
+            return None
+
+    class _Store:
+        def put_acp_session_control(self, **kwargs) -> None:
+            persisted.update(kwargs)
+
+        def delete_acp_session_control(self, session_id: str) -> bool:
+            return True
+
+    fake_service = _FakeSandboxService()
+    monkeypatch.setattr(src.sandbox_ep, "_service", fake_service, raising=True)
+    monkeypatch.setattr(src, "get_hub", lambda: _FakeHub())
+    monkeypatch.setattr(src, "ACPStreamClient", _FakeStreamClient)
+    monkeypatch.setattr(manager, "_get_sandbox_store", lambda: _Store())
+
+    session_id = await manager.create_session(cwd="/workspace", user_id=7)
+
+    assert session_id == "acp-session-vz"
+    assert getattr(capture.get("session_spec"), "runtime", None) == RuntimeType.vz_linux
+    assert persisted["sandbox_session_id"] == "sandbox-session-vz"
+    assert persisted["run_id"] == "run-vz"
+
+    await manager.close_session(session_id)
+
+
+@pytest.mark.unit
 def test_validate_runtime_requirements_uses_single_lima_preflight(monkeypatch) -> None:
     manager = ACPSandboxRunnerManager(
         ACPSandboxConfig(

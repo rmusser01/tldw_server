@@ -377,7 +377,7 @@ git commit -m "feat(vz_linux): reuse session vms for sandbox sessions"
 ```
 
 ### Task 6: Verify ACP compatibility without redesigning the ACP manager
-**Status:** In Progress
+**Status:** Complete
 
 **Files:**
 - Test: `tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py`
@@ -420,7 +420,7 @@ git commit -m "test(vz_linux): preserve acp sandbox session contract"
 ```
 
 ### Task 7: Update diagnostics, operator docs, and host-gated smoke coverage
-**Status:** Not Started
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/macos_diagnostics.py`
@@ -472,7 +472,7 @@ git commit -m "docs(vz_linux): publish real execution readiness and smoke covera
 ```
 
 ### Task 8: Run the final verification slice and prepare review
-**Status:** Not Started
+**Status:** Complete
 
 **Files:**
 - Modify: `Docs/Sandbox/macos-runtime-operator-notes.md` if verification reveals drift

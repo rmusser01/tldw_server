@@ -22,7 +22,7 @@
 - `docker`: general-purpose default runtime with existing interactive support.
 - `firecracker`: VM-oriented Linux isolation path.
 - `lima`: strict macOS-host VM path with explicit deny-all readiness checks.
-- `vz_linux`: Apple `Virtualization.framework` Linux guest scaffold on Apple silicon macOS hosts.
+- `vz_linux`: Apple `Virtualization.framework` Linux guest runtime on Apple silicon macOS hosts, with real helper-backed ephemeral execution and session VM reuse.
 - `vz_macos`: Apple `Virtualization.framework` macOS guest scaffold on Apple silicon macOS hosts.
 - `seatbelt`: host-local process isolation runtime for conservative trusted macOS workflows, compatibility-gated by deprecated `sandbox-exec`.
 
@@ -41,18 +41,20 @@ Trust-level rules:
 - macOS scaffolding currently includes:
   - fake-backed helper contract in `macos_virtualization/`
   - manifest/image-store contract in `image_store.py`
-  - fake-backed runners for `vz_linux` and `vz_macos`
+  - a real helper-backed `vz_linux` runner with ephemeral execution plus session VM reuse
+  - a fake-backed `vz_macos` runner
   - a real trusted-only `seatbelt` runner that stages a run-local workspace and launches through `sandbox-exec`
 
 Current limitations:
 
-- Real `Virtualization.framework` execution is not implemented yet.
-- `vz_linux` and `vz_macos` require helper/template readiness plus `*_FAKE_EXEC=1`; otherwise discovery reports `real_execution_not_implemented`.
+- `vz_macos` real `Virtualization.framework` execution is not implemented yet.
+- `vz_linux` requires helper/template readiness and reports `execution_mode=real` when the helper-backed path is available.
+- `vz_macos` still requires helper/template readiness plus `*_FAKE_EXEC=1`; otherwise discovery reports `real_execution_not_implemented`.
 - Strict allowlist networking is not implemented for `vz_linux`, `vz_macos`, or `seatbelt`.
 - `seatbelt` discovery may be `available=True` while `strict_deny_all_supported=False`; deny-all is a best-effort host policy claim, not a VM-grade guarantee.
 - `seatbelt` control files and isolated `HOME`/temp dirs live outside the writable workspace and are removed after each run.
 - `seatbelt` real execution still depends on deprecated `sandbox-exec` and may be blocked by an enclosing sandbox even on macOS hosts.
-- Warm session VM reuse is not implemented yet.
+- `vz_linux` supports session VM reuse through persisted VZ session-control metadata; `vz_macos` does not.
 - `seatbelt` is intentionally conservative and should not be treated as equivalent to a VM boundary.
 
 ## Operations And Development
@@ -81,7 +83,6 @@ Selected configuration knobs:
   - `TLDW_SANDBOX_MACOS_HELPER_READY`
   - `TLDW_SANDBOX_MACOS_HELPER_PATH`
   - `TLDW_SANDBOX_VZ_LINUX_AVAILABLE`
-  - `TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC`
   - `TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY`
   - `TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE`
   - `TLDW_SANDBOX_VZ_MACOS_AVAILABLE`

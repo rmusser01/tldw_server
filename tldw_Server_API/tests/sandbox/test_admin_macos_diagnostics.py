@@ -113,3 +113,30 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
     assert set(body.keys()) == {"host", "helper", "templates", "runtimes"}
     assert body["host"]["supported"] is True
     assert body["runtimes"]["vz_linux"]["execution_mode"] == "none"
+
+
+def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch) -> None:
+    payload = _diagnostics_payload()
+    payload["helper"]["configured"] = True
+    payload["helper"]["ready"] = True
+    payload["helper"]["reasons"] = []
+    payload["templates"]["vz_linux"]["configured"] = True
+    payload["templates"]["vz_linux"]["ready"] = True
+    payload["templates"]["vz_linux"]["reasons"] = []
+    payload["runtimes"]["vz_linux"]["available"] = True
+    payload["runtimes"]["vz_linux"]["reasons"] = []
+    payload["runtimes"]["vz_linux"]["execution_mode"] = "real"
+    payload["runtimes"]["vz_linux"]["remediation"] = None
+
+    fake_service = SimpleNamespace(macos_diagnostics=lambda: payload)
+    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+
+    app = _build_app_with_overrides(_make_principal(is_admin=True))
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/sandbox/admin/macos-diagnostics")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["runtimes"]["vz_linux"]["available"] is True
+    assert body["runtimes"]["vz_linux"]["execution_mode"] == "real"

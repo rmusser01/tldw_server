@@ -20,6 +20,9 @@ def test_vz_linux_preflight_smoke_on_real_host() -> None:
     assert isinstance(result.available, bool)
     assert isinstance(result.host, dict)
     assert "os" in result.host
+    assert result.execution_mode in {"real", "none"}
+    if result.available:
+        assert result.execution_mode == "real"
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS host only")
@@ -40,6 +43,9 @@ def test_collect_macos_diagnostics_smoke_on_real_host() -> None:
     assert "templates" in data
     assert "runtimes" in data
     assert isinstance(data["host"].get("macos_version"), (str, type(None)))
+    assert data["runtimes"]["vz_linux"]["execution_mode"] in {"real", "none", "fake"}
+    if data["runtimes"]["vz_linux"]["available"]:
+        assert data["runtimes"]["vz_linux"]["execution_mode"] == "real"
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS host only")
