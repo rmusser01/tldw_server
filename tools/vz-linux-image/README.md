@@ -82,6 +82,20 @@ Example dry run:
 ./scripts/pack-rootfs-image.sh --dry-run --rootfs /tmp/vz-rootfs --output-image /tmp/rootfs.img
 ```
 
+## Kernel And Initrd Extraction
+
+`scripts/extract-kernel-artifacts.sh` copies the booted kernel and matching
+initrd out of a prepared rootfs into the canonical bundle artifact names:
+
+- `kernel`
+- `initrd`
+
+Example dry run:
+
+```bash
+./scripts/extract-kernel-artifacts.sh --dry-run --rootfs /tmp/vz-rootfs --output-dir /tmp/vz-boot
+```
+
 ## Quick Start
 
 ```bash
