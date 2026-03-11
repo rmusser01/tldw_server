@@ -27,6 +27,24 @@ that later VM/image work will consume.
 - `TLDW_VZ_LINUX_BUNDLE_INITRD`
   - optional initrd file to copy into the canonical bundle
 
+## Builder Profiles
+
+The Debian builder path uses repo-owned plain-text package profiles:
+
+- `profiles/minimal.packages`
+  - canonical reference image profile
+- `profiles/debug.packages`
+  - additive troubleshooting profile layered on top of `minimal`
+
+Defaults and profile composition helpers live in
+`scripts/builder-defaults.sh`.
+
+Current pinned defaults:
+
+- suite: `bookworm`
+- architecture: `arm64`
+- kernel package: `linux-image-arm64`
+
 ## Quick Start
 
 ```bash
