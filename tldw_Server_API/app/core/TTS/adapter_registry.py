@@ -82,6 +82,7 @@ class TTSProvider(Enum):
     OMNIVOICE = "omnivoice"
     LUX_TTS = "lux_tts"
     KITTEN_TTS = "kitten_tts"
+    FISH_S2 = "fish_s2"
     # Additional providers
     ALLTALK = "alltalk"  # TODO: Implement AllTalk adapter
     MOCK = "mock"  # Mock provider for testing
@@ -118,6 +119,9 @@ def _build_tts_provider_aliases() -> dict[str, TTSProvider]:
         "echotts": TTSProvider.ECHO_TTS,
         "kittentts": TTSProvider.KITTEN_TTS,
         "vibevoice-asr": TTSProvider.VIBEVOICE,
+        "fish-s2-pro": TTSProvider.FISH_S2,
+        "s2-pro": TTSProvider.FISH_S2,
+        "fishaudio/s2-pro": TTSProvider.FISH_S2,
     }
     for alias, provider in explicit_aliases.items():
         for token in _provider_alias_tokens(alias):
@@ -294,6 +298,7 @@ class TTSAdapterRegistry:
         TTSProvider.OMNIVOICE: "tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter.OmniVoiceAdapter",
         TTSProvider.LUX_TTS: "tldw_Server_API.app.core.TTS.adapters.luxtts_adapter.LuxTTSAdapter",
         TTSProvider.KITTEN_TTS: "tldw_Server_API.app.core.TTS.adapters.kitten_tts_adapter.KittenTTSAdapter",
+        TTSProvider.FISH_S2: "tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter.FishS2Adapter",
     }
 
     @classmethod
@@ -1204,6 +1209,13 @@ class TTSAdapterFactory:
         "kittenml/kitten-tts-nano-0.8": TTSProvider.KITTEN_TTS,
         "kittenml/kitten-tts-nano-0.8-fp32": TTSProvider.KITTEN_TTS,
         "kittenml/kitten-tts-nano-0.8-int8": TTSProvider.KITTEN_TTS,
+
+        # Fish Audio S2 models
+        "fish_s2": TTSProvider.FISH_S2,
+        "fish-s2": TTSProvider.FISH_S2,
+        "fish-s2-pro": TTSProvider.FISH_S2,
+        "s2-pro": TTSProvider.FISH_S2,
+        "fishaudio/s2-pro": TTSProvider.FISH_S2,
     }
 
     def __init__(self, config: Optional[dict[str, Any]] = None):

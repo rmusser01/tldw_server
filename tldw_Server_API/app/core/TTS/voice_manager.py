@@ -111,6 +111,13 @@ PROVIDER_REQUIREMENTS = {
         "duration": {"min": 3, "max": 30},
         "sample_rate": 24000,
         "convert_to": "wav",
+    },
+    "fish_s2": {
+        "formats": [".wav", ".mp3", ".flac", ".ogg", ".m4a", ".opus"],
+        "max_size_mb": 50,
+        "duration": {"min": 3, "max": 60},
+        "sample_rate": 24000,
+        "convert_to": "wav"
     }
 }
 

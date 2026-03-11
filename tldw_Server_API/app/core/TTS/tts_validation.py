@@ -194,6 +194,10 @@ class ProviderLimits:
             "max_text_length": 5000,
             "languages": ["en"],
             "valid_formats": {"mp3", "opus", "aac", "flac", "wav", "pcm"},
+        },
+        "fish_s2": {
+            "max_text_length": 5000,
+            "valid_formats": {"wav", "mp3", "opus", "pcm"},
             "min_speed": 0.25,
             "max_speed": 4.0,
         }
@@ -300,6 +304,7 @@ class TTSInputValidator:
         "lux_tts": 5000,
         "qwen3_tts": 5000,
         "omnivoice": 5000,
+        "fish_s2": 5000,
         "default": 5000,
     }
 
@@ -357,6 +362,7 @@ class TTSInputValidator:
         "lux_tts": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.FLAC, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.PCM},
         "qwen3_tts": {AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.WAV, AudioFormat.PCM},
         "omnivoice": {AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.FLAC, AudioFormat.WAV, AudioFormat.PCM},
+        "fish_s2": {AudioFormat.WAV, AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.PCM},
     }
 
     # Voice reference file validation
@@ -601,6 +607,16 @@ class TTSInputValidator:
             # Validate format
             if request.format:
                 self._validate_format(request.format, provider)
+
+            if provider == "fish_s2" and request.stream and request.format != AudioFormat.WAV:
+                raise TTSUnsupportedFormatError(
+                    "Fish S2 streaming only supports WAV format",
+                    provider=provider,
+                    details={
+                        "requested_format": request.format.value,
+                        "supported_streaming_formats": [AudioFormat.WAV.value],
+                    },
+                )
 
             # Validate language (allow extra_params.language override)
             language = request.language
