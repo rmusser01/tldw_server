@@ -5,7 +5,7 @@ from typing import Any
 
 from tldw_Server_API.app.core.testing import is_truthy
 
-from .models import HelperVMReply
+from .models import HelperExecReply, HelperVMReply
 
 
 class MacOSVirtualizationHelperUnavailable(RuntimeError):
@@ -22,6 +22,19 @@ class MacOSVirtualizationHelperClient:
             return HelperVMReply(
                 vm_id=vm_name,
                 state="created",
-                details={"runtime": runtime or None, "transport": "fake"},
+                details={"runtime": runtime or None, "transport": "vsock"},
+            )
+        raise MacOSVirtualizationHelperUnavailable("macos_virtualization_helper_unavailable")
+
+    def exec_guest(self, *, vm_id: str, request: dict[str, Any]) -> HelperExecReply:
+        if is_truthy(os.getenv("TEST_MODE")):
+            argv = list(request.get("argv") or [])
+            stdout = b""
+            if argv[:2] == ["/bin/echo", "ok"]:
+                stdout = b"ok\n"
+            return HelperExecReply(
+                exit_code=0,
+                stdout=stdout,
+                details={"vm_id": str(vm_id or "").strip() or None, "transport": "vsock"},
             )
         raise MacOSVirtualizationHelperUnavailable("macos_virtualization_helper_unavailable")
