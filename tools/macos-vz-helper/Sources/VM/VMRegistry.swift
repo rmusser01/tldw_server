@@ -21,4 +21,10 @@ final class VMRegistry {
         defer { lock.unlock() }
         return records.values.sorted { $0.vmID < $1.vmID }
     }
+
+    func remove(vmID: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        records.removeValue(forKey: vmID)
+    }
 }

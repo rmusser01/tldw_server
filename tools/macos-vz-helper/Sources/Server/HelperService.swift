@@ -9,9 +9,20 @@ final class HelperService {
     private let protocolVersion = "1"
     private let helperVersion = "0.1.0"
     private let hostFacts: HostFacts
+    private let templateValidator: TemplateValidator
+    private let registry: VMRegistry
+    private let vmManager: VZLinuxVMManager
 
-    init(hostFacts: HostFacts = HostFacts(isMacOS: true, isAppleSilicon: true)) {
+    init(
+        hostFacts: HostFacts = HostFacts(isMacOS: true, isAppleSilicon: true),
+        templateValidator: TemplateValidator = TemplateValidator(),
+        registry: VMRegistry = VMRegistry(),
+        vmManager: VZLinuxVMManager? = nil
+    ) {
         self.hostFacts = hostFacts
+        self.templateValidator = templateValidator
+        self.registry = registry
+        self.vmManager = vmManager ?? VZLinuxVMManager(registry: registry)
     }
 
     func ping() -> HelperResponse {
@@ -57,5 +68,64 @@ final class HelperService {
             errorCode: nil,
             message: nil
         )
+    }
+
+    func validateTemplate(runtime: String, templatePath: String) -> TemplateValidationResponse {
+        templateValidator.validate(runtime: runtime, templatePath: templatePath)
+    }
+
+    func createVM(
+        vmID: String,
+        templatePath: String,
+        workspacePath: String,
+        readinessTimeoutSeconds: TimeInterval
+    ) throws -> HelperVMResponse {
+        let record = try vmManager.createVM(
+            vmID: vmID,
+            templatePath: templatePath,
+            workspacePath: workspacePath,
+            readinessTimeoutSeconds: readinessTimeoutSeconds
+        )
+        return HelperVMResponse(
+            vmID: record.vmID,
+            state: record.state,
+            details: ["transport": "vsock"]
+        )
+    }
+
+    func getVMStatus(vmID: String) -> HelperVMStatusResponse? {
+        guard let record = registry.status(vmID: vmID) else {
+            return nil
+        }
+        return HelperVMStatusResponse(
+            protocolVersion: protocolVersion,
+            helperVersion: helperVersion,
+            vmID: record.vmID,
+            state: record.state,
+            healthy: record.healthy,
+            details: ["transport": "vsock"]
+        )
+    }
+
+    func listVMs() -> HelperVMListResponse {
+        let vms = registry.list().map { record in
+            HelperVMStatusResponse(
+                protocolVersion: protocolVersion,
+                helperVersion: helperVersion,
+                vmID: record.vmID,
+                state: record.state,
+                healthy: record.healthy,
+                details: ["transport": "vsock"]
+            )
+        }
+        return HelperVMListResponse(
+            protocolVersion: protocolVersion,
+            helperVersion: helperVersion,
+            vms: vms
+        )
+    }
+
+    func terminateVM(vmID: String) throws -> Bool {
+        try vmManager.terminateVM(vmID: vmID)
     }
 }

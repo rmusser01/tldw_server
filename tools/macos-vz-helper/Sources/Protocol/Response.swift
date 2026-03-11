@@ -40,3 +40,24 @@ struct VMRecord {
     let state: String
     let healthy: Bool
 }
+
+struct HelperVMResponse {
+    let vmID: String
+    let state: String
+    let details: [String: String]
+}
+
+struct HelperVMStatusResponse {
+    let protocolVersion: String
+    let helperVersion: String
+    let vmID: String
+    let state: String
+    let healthy: Bool
+    let details: [String: String]
+}
+
+struct HelperVMListResponse {
+    let protocolVersion: String
+    let helperVersion: String
+    let vms: [HelperVMStatusResponse]
+}
