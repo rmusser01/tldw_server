@@ -96,6 +96,25 @@ Example dry run:
 ./scripts/extract-kernel-artifacts.sh --dry-run --rootfs /tmp/vz-rootfs --output-dir /tmp/vz-boot
 ```
 
+## Top-Level Debian Bundle Builder
+
+`scripts/build-debian-bundle.sh` orchestrates the whole canonical builder flow:
+
+1. build a Debian rootfs directory
+2. pack it into `rootfs.img`
+3. extract `kernel` and `initrd`
+4. assemble the final canonical bundle
+5. emit `build-info.json`
+
+Example dry run:
+
+```bash
+./scripts/build-debian-bundle.sh --dry-run --output-dir /tmp/vz-linux-build
+```
+
+The dry run still writes `build-info.json` so provenance can be inspected
+without a privileged Linux build host.
+
 ## Quick Start
 
 ```bash
