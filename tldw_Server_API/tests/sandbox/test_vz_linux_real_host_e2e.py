@@ -8,8 +8,9 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.config import clear_config_cache, settings as app_settings
-from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RuntimeType
+from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RuntimeType, SessionSpec
 from tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner import VZLinuxRunner
+from tldw_Server_API.app.core.Sandbox.service import SandboxService
 from tldw_Server_API.app.core.Sandbox.streams import get_hub
 from tldw_Server_API.app.core.testing import is_truthy
 
@@ -95,3 +96,76 @@ def test_vz_linux_real_ephemeral_run_smoke(monkeypatch, tmp_path: Path) -> None:
     assert status.phase == RunPhase.completed
     assert status.exit_code == 0
     assert "vz-linux-e2e" in stdout_text
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS host only")
+def test_vz_linux_real_session_reuse_smoke(monkeypatch, tmp_path: Path) -> None:
+    base_image = _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_MACOS_HELPER_READY", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_AVAILABLE", raising=False)
+    runner = VZLinuxRunner()
+    preflight = runner.preflight(network_policy="deny_all")
+    if not preflight.available or preflight.execution_mode != "real":
+        pytest.skip(f"vz_linux real execution unavailable: {preflight.reasons}")
+
+    service = SandboxService()
+    session_id: str | None = None
+    destroyed = False
+    try:
+        session = service.create_session(
+            user_id="e2e-user",
+            spec=SessionSpec(
+                runtime=RuntimeType.vz_linux,
+                base_image=base_image,
+                network_policy="deny_all",
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={"spec_version": "1.0", "runtime": "vz_linux", "base_image": base_image},
+        )
+        session_id = session.id
+
+        first = service.start_run_scaffold(
+            user_id="e2e-user",
+            spec=RunSpec(
+                session_id=session.id,
+                runtime=RuntimeType.vz_linux,
+                base_image=base_image,
+                command=["/bin/echo", "first"],
+                network_policy="deny_all",
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={"session_id": session.id, "runtime": "vz_linux", "command": ["/bin/echo", "first"]},
+        )
+        control_after_first = service._orch.get_vz_session_control(session.id)
+
+        second = service.start_run_scaffold(
+            user_id="e2e-user",
+            spec=RunSpec(
+                session_id=session.id,
+                runtime=RuntimeType.vz_linux,
+                base_image=base_image,
+                command=["/bin/echo", "second"],
+                network_policy="deny_all",
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={"session_id": session.id, "runtime": "vz_linux", "command": ["/bin/echo", "second"]},
+        )
+        control_after_second = service._orch.get_vz_session_control(session.id)
+
+        assert first.phase == RunPhase.completed
+        assert second.phase == RunPhase.completed
+        assert control_after_first is not None
+        assert control_after_second is not None
+        assert control_after_first["vm_id"] == control_after_second["vm_id"]
+        assert service.destroy_session(session.id) is True
+        destroyed = True
+        assert service._orch.get_vz_session_control(session.id) is None
+    finally:
+        if session_id and not destroyed:
+            service.destroy_session(session_id)
