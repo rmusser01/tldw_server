@@ -87,6 +87,8 @@ final class HelperService {
             readinessTimeoutSeconds: readinessTimeoutSeconds
         )
         return HelperVMResponse(
+            protocolVersion: protocolVersion,
+            helperVersion: helperVersion,
             vmID: record.vmID,
             state: record.state,
             details: ["transport": "vsock"]
@@ -127,5 +129,29 @@ final class HelperService {
 
     func terminateVM(vmID: String) throws -> Bool {
         try vmManager.terminateVM(vmID: vmID)
+    }
+
+    func execGuest(
+        vmID: String,
+        argv: [String],
+        cwd: String,
+        env: [String: String],
+        timeoutSeconds: TimeInterval
+    ) throws -> HelperExecResponse {
+        let result = try vmManager.execGuest(
+            vmID: vmID,
+            argv: argv,
+            cwd: cwd,
+            env: env,
+            timeoutSeconds: timeoutSeconds
+        )
+        return HelperExecResponse(
+            protocolVersion: protocolVersion,
+            helperVersion: helperVersion,
+            exitCode: result.exitCode,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            details: ["transport": "vsock", "vm_id": vmID]
+        )
     }
 }

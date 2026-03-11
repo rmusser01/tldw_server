@@ -20,12 +20,12 @@ final class PlaceholderVZBootDriver: VZBootDriving {
 final class VZLinuxVMManager {
     private let registry: VMRegistry
     private let bootDriver: VZBootDriving
-    private let guestBridge: GuestReadinessBridging
+    private let guestBridge: GuestBridging
 
     init(
         registry: VMRegistry = VMRegistry(),
         bootDriver: VZBootDriving = PlaceholderVZBootDriver(),
-        guestBridge: GuestReadinessBridging = VSockBridge()
+        guestBridge: GuestBridging = VSockBridge()
     ) {
         self.registry = registry
         self.bootDriver = bootDriver
@@ -58,5 +58,24 @@ final class VZLinuxVMManager {
         try bootDriver.stop(vmID: vmID)
         registry.remove(vmID: vmID)
         return true
+    }
+
+    func execGuest(
+        vmID: String,
+        argv: [String],
+        cwd: String,
+        env: [String: String],
+        timeoutSeconds: TimeInterval
+    ) throws -> GuestExecResult {
+        guard let record = registry.status(vmID: vmID), record.healthy else {
+            throw GuestBridgeError.guestExecNotImplemented
+        }
+        return try guestBridge.exec(
+            vmID: vmID,
+            argv: argv,
+            cwd: cwd,
+            env: env,
+            timeoutSeconds: timeoutSeconds
+        )
     }
 }

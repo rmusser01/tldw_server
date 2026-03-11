@@ -26,13 +26,22 @@ struct HelperResponse: Encodable {
     }
 }
 
-struct TemplateValidationResponse {
+struct TemplateValidationResponse: Encodable {
     let protocolVersion: String
     let helperVersion: String
     let templateID: String
     let source: String
     let ready: Bool
     let reasons: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol_version"
+        case helperVersion = "helper_version"
+        case templateID = "template_id"
+        case source
+        case ready
+        case reasons
+    }
 }
 
 struct VMRecord {
@@ -41,23 +50,92 @@ struct VMRecord {
     let healthy: Bool
 }
 
-struct HelperVMResponse {
+struct HelperVMResponse: Encodable {
+    let protocolVersion: String
+    let helperVersion: String
     let vmID: String
     let state: String
     let details: [String: String]
+
+    private enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol_version"
+        case helperVersion = "helper_version"
+        case vmID = "vm_id"
+        case state
+        case details
+    }
 }
 
-struct HelperVMStatusResponse {
+struct HelperVMStatusResponse: Encodable {
     let protocolVersion: String
     let helperVersion: String
     let vmID: String
     let state: String
     let healthy: Bool
     let details: [String: String]
+
+    private enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol_version"
+        case helperVersion = "helper_version"
+        case vmID = "vm_id"
+        case state
+        case healthy
+        case details
+    }
 }
 
-struct HelperVMListResponse {
+struct HelperVMListResponse: Encodable {
     let protocolVersion: String
     let helperVersion: String
     let vms: [HelperVMStatusResponse]
+
+    private enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol_version"
+        case helperVersion = "helper_version"
+        case vms
+    }
+}
+
+struct HelperExecResponse: Encodable {
+    let protocolVersion: String
+    let helperVersion: String
+    let exitCode: Int
+    let stdout: String
+    let stderr: String
+    let details: [String: String]
+
+    private enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol_version"
+        case helperVersion = "helper_version"
+        case exitCode = "exit_code"
+        case stdout
+        case stderr
+        case details
+    }
+}
+
+struct HelperTerminateResponse: Encodable {
+    let protocolVersion: String
+    let helperVersion: String
+    let terminated: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol_version"
+        case helperVersion = "helper_version"
+        case terminated
+    }
+}
+
+struct HelperErrorResponse: Encodable {
+    let protocolVersion: String
+    let helperVersion: String
+    let errorCode: String
+    let message: String
+
+    private enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol_version"
+        case helperVersion = "helper_version"
+        case errorCode = "error_code"
+        case message
+    }
 }

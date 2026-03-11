@@ -5,7 +5,7 @@ let service = HelperService()
 let server = UnixSocketServer(socketPath: socketPath, service: service)
 
 do {
-    try server.start()
+    try server.run()
 } catch {
     fputs("macos-vz-helper failed to start: \(error)\n", stderr)
     exit(1)

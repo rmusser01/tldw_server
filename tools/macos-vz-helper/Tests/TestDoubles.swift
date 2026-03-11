@@ -18,6 +18,16 @@ final class RecordingBootDriver: VZBootDriving {
     }
 }
 
-final class ReadyGuestBridge: GuestReadinessBridging {
+final class ReadyGuestBridge: GuestBridging {
     func waitUntilReady(vmID: String, timeoutSeconds: TimeInterval) throws {}
+
+    func exec(
+        vmID: String,
+        argv: [String],
+        cwd: String,
+        env: [String : String],
+        timeoutSeconds: TimeInterval
+    ) throws -> GuestExecResult {
+        GuestExecResult(exitCode: 0, stdout: "", stderr: "")
+    }
 }
