@@ -121,10 +121,12 @@ async def test_backend_add_reference_posts_expected_payload(monkeypatch):
 
     captured = {}
 
-    async def fake_fetch(*, method, url, json=None, headers=None, timeout=None, **_kwargs):
+    async def fake_fetch(*, method, url, json=None, data=None, files=None, headers=None, timeout=None, **_kwargs):
         captured["method"] = method
         captured["url"] = url
         captured["json"] = json
+        captured["data"] = data
+        captured["files"] = files
         captured["headers"] = headers
         captured["timeout"] = timeout
         return _FakeResponse(json_data={"reference_id": "tldw_u1_voice-1"})
@@ -143,11 +145,16 @@ async def test_backend_add_reference_posts_expected_payload(monkeypatch):
     assert result == {"reference_id": "tldw_u1_voice-1"}
     assert captured["method"] == "POST"
     assert captured["url"] == "http://fish.local/v1/references/add"
-    assert captured["json"] == {
-        "reference_id": "tldw_u1_voice-1",
-        "audio_b64": "QUJD",
+    assert captured["json"] is None
+    assert captured["data"] == {
+        "id": "tldw_u1_voice-1",
         "text": "hello there",
     }
+    assert captured["files"] == {
+        "audio": ("reference.wav", b"ABC", "audio/wav"),
+    }
+    assert captured["headers"] == {"Authorization": "Bearer secret"}
+    assert captured["timeout"] == backend.timeout
 
 
 @pytest.mark.asyncio
