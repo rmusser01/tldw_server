@@ -5,6 +5,7 @@ Tests the main service logic, adapter selection, and request processing
 with mocked dependencies.
 """
 
+import base64
 import pytest
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 import asyncio
@@ -805,6 +806,124 @@ async def test_custom_voice_stores_qwen3_prompt_metadata(tts_service, monkeypatc
     assert metadata is not None
     assert metadata.voice_clone_prompt_b64 == "PROMPTDATA"
     assert metadata.voice_clone_prompt_format == "qwen3_tts_prompt_v1"
+
+
+@pytest.mark.unit
+async def test_fish_custom_voice_reuses_remote_reference_metadata(tts_service, monkeypatch):
+    class _FakeVoiceManager:
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            return b"audio-bytes"
+
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(
+                voice_id=voice_id,
+                reference_text="stored text",
+                provider_artifacts={
+                    "fish_s2": {
+                        "remote_reference_id": "tldw_u1_voice-1",
+                        "reference_text": "stored text",
+                    }
+                },
+            )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+
+    req = OpenAISpeechRequest(
+        model="fish_s2",
+        input="hello",
+        voice="custom:voice-1",
+        response_format="wav",
+        stream=False,
+    )
+    tts_request = tts_service._convert_request(req)
+
+    await tts_service._apply_custom_voice_reference(tts_request, user_id=1, provider_hint="fish_s2")
+    await tts_service._apply_fish_s2_reference_context(tts_request, user_id=1, provider_hint="fish_s2")
+
+    assert tts_request.extra_params.get("reference_id") == "tldw_u1_voice-1"
+    assert "references" not in tts_request.extra_params
+
+
+@pytest.mark.unit
+async def test_fish_custom_voice_falls_back_to_inline_reference(tts_service, monkeypatch):
+    class _FakeVoiceManager:
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            return b"audio-bytes"
+
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(
+                voice_id=voice_id,
+                reference_text="stored text",
+                provider_artifacts={},
+            )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+
+    req = OpenAISpeechRequest(
+        model="fish_s2",
+        input="hello",
+        voice="custom:voice-1",
+        response_format="wav",
+        stream=False,
+    )
+    tts_request = tts_service._convert_request(req)
+
+    await tts_service._apply_custom_voice_reference(tts_request, user_id=1, provider_hint="fish_s2")
+    await tts_service._apply_fish_s2_reference_context(tts_request, user_id=1, provider_hint="fish_s2")
+
+    assert tts_request.extra_params.get("reference_id") is None
+    assert tts_request.extra_params.get("references") == [
+        {
+            "audio_b64": base64.b64encode(b"audio-bytes").decode("ascii"),
+            "text": "stored text",
+        }
+    ]
+
+
+@pytest.mark.unit
+async def test_fish_reference_id_resolves_local_voice_id(tts_service, monkeypatch):
+    class _FakeVoiceManager:
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            return b"audio-bytes"
+
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(
+                voice_id=voice_id,
+                reference_text="stored text",
+                provider_artifacts={
+                    "fish_s2": {
+                        "remote_reference_id": "tldw_u1_voice-1",
+                    }
+                },
+            )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+
+    req = OpenAISpeechRequest(
+        model="fish_s2",
+        input="hello",
+        voice="alloy",
+        response_format="wav",
+        stream=False,
+        extra_params={"reference_id": "voice-1"},
+    )
+    tts_request = tts_service._convert_request(req)
+
+    await tts_service._apply_fish_s2_reference_context(tts_request, user_id=1, provider_hint="fish_s2")
+
+    assert tts_request.extra_params.get("reference_id") == "tldw_u1_voice-1"
 
 # ========================================================================
 # Caching Tests
