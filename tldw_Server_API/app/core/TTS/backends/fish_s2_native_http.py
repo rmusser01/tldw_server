@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -93,17 +95,29 @@ class FishS2NativeHttpBackend(FishS2Backend):
         audio_b64: str,
         reference_text: str,
     ) -> dict[str, Any]:
-        payload = {
-            "reference_id": reference_id,
-            "audio_b64": audio_b64,
+        try:
+            audio_bytes = base64.b64decode(audio_b64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise TTSValidationError(
+                "Fish S2 reference audio must be valid base64",
+                provider=self.PROVIDER_KEY,
+                details={"reference_id": reference_id},
+            ) from exc
+
+        form_data = {
+            "id": reference_id,
             "text": reference_text,
+        }
+        files = {
+            "audio": ("reference.wav", audio_bytes, "audio/wav"),
         }
         try:
             response = await afetch(
                 method="POST",
                 url=f"{self.base_url}/v1/references/add",
                 headers=self._headers(),
-                json=payload,
+                data=form_data,
+                files=files,
                 timeout=self.timeout,
             )
         except Exception as exc:
