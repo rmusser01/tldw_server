@@ -354,3 +354,151 @@ async def preview_voice(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate voice preview"
         ) from e
+
+
+@router.post(
+    "/providers/fish_s2/references",
+    summary="Create or sync a managed Fish S2 reference",
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(
+            require_token_scope(
+                "any",
+                require_if_present=True,
+                endpoint_id=VOICE_SCOPE_UPLOAD,
+                count_as=VOICE_COUNTER_TYPE,
+            )
+        ),
+    ],
+)
+async def create_fish_s2_reference(
+    request: Request,
+    voice_id: Optional[str] = Form(default=None, description="Existing stored voice ID to sync"),
+    reference_text: Optional[str] = Form(default=None, description="Transcript of the reference audio"),
+    name: Optional[str] = Form(default=None, description="Name when creating from a new upload"),
+    description: Optional[str] = Form(default=None, description="Description when creating from a new upload"),
+    force: bool = Form(default=False, description="Recreate the remote Fish reference even if already cached"),
+    file: Optional[UploadFile] = File(default=None, description="Optional audio upload when creating a new managed reference"),
+    current_user: User = Depends(get_request_user),
+    tts_service: TTSServiceV2 = Depends(get_tts_service),
+):
+    """Create a managed Fish S2 reference from an existing stored voice or a new upload."""
+    request_id = ensure_request_id(request)
+    if voice_id:
+        if file is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_http_error_detail("Provide either voice_id or file, not both", request_id),
+            )
+        file_content = None
+        filename = None
+    else:
+        if file is None or not name or not reference_text:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_http_error_detail(
+                    "file, name, and reference_text are required when voice_id is not provided",
+                    request_id,
+                ),
+            )
+        file_content = await file.read()
+        filename = file.filename
+
+    try:
+        return await tts_service.create_fish_s2_reference(
+            user_id=current_user.id,
+            voice_id=voice_id,
+            file_content=file_content,
+            filename=filename,
+            name=name,
+            description=description,
+            reference_text=reference_text,
+            force=force,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        if e.__class__.__name__ == "VoiceProcessingError":
+            logger.warning(f"Fish S2 reference creation failed: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_http_error_detail("Fish S2 reference creation failed", request_id, exc=e),
+            ) from e
+        logger.error(f"Fish S2 reference creation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create Fish S2 reference",
+        ) from e
+
+
+@router.get(
+    "/providers/fish_s2/references",
+    summary="List managed Fish S2 references for the current user",
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(
+            require_token_scope(
+                "any",
+                require_if_present=True,
+                endpoint_id=VOICE_SCOPE_LIST,
+                count_as=VOICE_COUNTER_TYPE,
+            )
+        ),
+    ],
+)
+async def list_fish_s2_references(
+    current_user: User = Depends(get_request_user),
+    tts_service: TTSServiceV2 = Depends(get_tts_service),
+):
+    """List Fish S2 managed references from local user-scoped metadata."""
+    try:
+        references = await tts_service.list_fish_s2_references(user_id=current_user.id)
+        return {"references": references, "count": len(references)}
+    except Exception as e:
+        logger.error(f"Fish S2 reference listing error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list Fish S2 references",
+        ) from e
+
+
+@router.delete(
+    "/providers/fish_s2/references/{reference_id}",
+    summary="Delete a managed Fish S2 reference",
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(
+            require_token_scope(
+                "any",
+                require_if_present=True,
+                endpoint_id=VOICE_SCOPE_DELETE,
+                count_as=VOICE_COUNTER_TYPE,
+            )
+        ),
+    ],
+)
+async def delete_fish_s2_reference(
+    request: Request,
+    reference_id: str = Path(..., description="Local Fish S2 reference ID"),
+    current_user: User = Depends(get_request_user),
+    tts_service: TTSServiceV2 = Depends(get_tts_service),
+):
+    """Delete the remote Fish S2 reference while preserving the local voice asset."""
+    request_id = ensure_request_id(request)
+    try:
+        return await tts_service.delete_fish_s2_reference(
+            user_id=current_user.id,
+            reference_id=reference_id,
+        )
+    except Exception as e:
+        if e.__class__.__name__ == "VoiceProcessingError":
+            logger.warning(f"Fish S2 reference deletion failed: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=_http_error_detail("Fish S2 reference not found", request_id, exc=e),
+            ) from e
+        logger.error(f"Fish S2 reference deletion error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete Fish S2 reference",
+        ) from e

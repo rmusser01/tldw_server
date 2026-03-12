@@ -151,3 +151,55 @@ async def test_adapter_returns_streaming_response(monkeypatch):
     assert response.audio_stream is not None
     chunks = [chunk async for chunk in response.audio_stream]
     assert chunks == [b"a", b"b", b"c"]
+
+
+@pytest.mark.asyncio
+async def test_adapter_add_and_delete_reference_delegate_to_backend(monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter import FishS2Adapter
+
+    class _BackendWithRefs(_FakeBackend):
+        def __init__(self):
+            super().__init__()
+            self.add_calls = []
+            self.delete_calls = []
+
+        async def add_reference(self, *, reference_id, audio_b64, reference_text):
+            self.add_calls.append(
+                {
+                    "reference_id": reference_id,
+                    "audio_b64": audio_b64,
+                    "reference_text": reference_text,
+                }
+            )
+            return {"reference_id": reference_id}
+
+        async def delete_reference(self, *, reference_id):
+            self.delete_calls.append(reference_id)
+            return True
+
+    backend = _BackendWithRefs()
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter._build_backend",
+        lambda config: backend,
+    )
+
+    adapter = FishS2Adapter({"backend": "native_http", "base_url": "http://fish.local"})
+    await adapter.ensure_initialized()
+
+    created = await adapter.add_reference(
+        reference_id="tldw_u1_voice-1",
+        audio_b64="QUJD",
+        reference_text="hello there",
+    )
+    deleted = await adapter.delete_reference(reference_id="tldw_u1_voice-1")
+
+    assert created == {"reference_id": "tldw_u1_voice-1"}
+    assert deleted is True
+    assert backend.add_calls == [
+        {
+            "reference_id": "tldw_u1_voice-1",
+            "audio_b64": "QUJD",
+            "reference_text": "hello there",
+        }
+    ]
+    assert backend.delete_calls == ["tldw_u1_voice-1"]

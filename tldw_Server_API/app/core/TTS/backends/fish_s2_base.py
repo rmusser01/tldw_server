@@ -26,3 +26,15 @@ class FishS2Backend(Protocol):
         extra_params: dict[str, Any] | None,
     ) -> FishS2SynthesisResult:
         """Generate speech or return a byte stream for a request."""
+
+    async def add_reference(
+        self,
+        *,
+        reference_id: str,
+        audio_b64: str,
+        reference_text: str,
+    ) -> dict[str, Any]:
+        """Create or update a managed Fish reference."""
+
+    async def delete_reference(self, *, reference_id: str) -> bool:
+        """Delete a managed Fish reference."""

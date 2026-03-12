@@ -6,10 +6,14 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import TTSAuthenticationError
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int = 200, content: bytes = b"audio", text: str = "ok"):
+    def __init__(self, status_code: int = 200, content: bytes = b"audio", text: str = "ok", json_data=None):
         self.status_code = status_code
         self.content = content
         self.text = text
+        self._json_data = json_data
+
+    def json(self):
+        return self._json_data
 
 
 @pytest.mark.asyncio
@@ -107,3 +111,67 @@ async def test_backend_maps_401_to_authentication_error(monkeypatch):
             reference_id=None,
             extra_params=None,
         )
+
+
+@pytest.mark.asyncio
+async def test_backend_add_reference_posts_expected_payload(monkeypatch):
+    from tldw_Server_API.app.core.TTS.backends.fish_s2_native_http import FishS2NativeHttpBackend
+
+    backend = FishS2NativeHttpBackend({"base_url": "http://fish.local", "api_key": "secret"})
+
+    captured = {}
+
+    async def fake_fetch(*, method, url, json=None, headers=None, timeout=None, **_kwargs):
+        captured["method"] = method
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return _FakeResponse(json_data={"reference_id": "tldw_u1_voice-1"})
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.backends.fish_s2_native_http.afetch",
+        fake_fetch,
+    )
+
+    result = await backend.add_reference(
+        reference_id="tldw_u1_voice-1",
+        audio_b64="QUJD",
+        reference_text="hello there",
+    )
+
+    assert result == {"reference_id": "tldw_u1_voice-1"}
+    assert captured["method"] == "POST"
+    assert captured["url"] == "http://fish.local/v1/references/add"
+    assert captured["json"] == {
+        "reference_id": "tldw_u1_voice-1",
+        "audio_b64": "QUJD",
+        "text": "hello there",
+    }
+
+
+@pytest.mark.asyncio
+async def test_backend_delete_reference_posts_expected_payload(monkeypatch):
+    from tldw_Server_API.app.core.TTS.backends.fish_s2_native_http import FishS2NativeHttpBackend
+
+    backend = FishS2NativeHttpBackend({"base_url": "http://fish.local"})
+
+    captured = {}
+
+    async def fake_fetch(*, method, url, json=None, **_kwargs):
+        captured["method"] = method
+        captured["url"] = url
+        captured["json"] = json
+        return _FakeResponse(status_code=204)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.backends.fish_s2_native_http.afetch",
+        fake_fetch,
+    )
+
+    deleted = await backend.delete_reference(reference_id="tldw_u1_voice-1")
+
+    assert deleted is True
+    assert captured["method"] == "DELETE"
+    assert captured["url"] == "http://fish.local/v1/references/delete"
+    assert captured["json"] == {"reference_id": "tldw_u1_voice-1"}
