@@ -9,9 +9,9 @@ Developer-oriented details (architecture, provider matrix, configuration, and te
 ## Features
 
 ### Core Capabilities
-- **Multi-Provider Support**: OpenAI, ElevenLabs, and local adapters (Kokoro, KittenTTS, PocketTTS, LuxTTS, Higgs, Chatterbox, Dia, VibeVoice, VibeVoice Realtime, Qwen3-TTS, IndexTTS2, NeuTTS, Supertonic, Supertonic2, EchoTTS) with a mock adapter for testing.
+- **Multi-Provider Support**: OpenAI, ElevenLabs, Fish Audio S2, and local adapters (Kokoro, KittenTTS, PocketTTS, LuxTTS, Higgs, Chatterbox, Dia, VibeVoice, VibeVoice Realtime, Qwen3-TTS, IndexTTS2, NeuTTS, Supertonic, Supertonic2, EchoTTS) with a mock adapter for testing.
 - **Managed Sidecars**: OmniVoice runs behind a dedicated loopback sidecar runtime instead of sharing the main server interpreter.
-- **Voice Cloning**: Voice reference audio accepted by PocketTTS, LuxTTS, Higgs, Chatterbox, Dia, VibeVoice, Qwen3-TTS, NeuTTS, IndexTTS2, and EchoTTS (ElevenLabs supports user voices via API).
+- **Voice Cloning**: Voice reference audio accepted by Fish Audio S2, PocketTTS, LuxTTS, Higgs, Chatterbox, Dia, VibeVoice, Qwen3-TTS, NeuTTS, IndexTTS2, and EchoTTS (ElevenLabs supports user voices via API).
 - **Streaming Audio**: Real-time chunked streaming across adapters; NeuTTS enables streaming when a quantized (GGUF) backbone is loaded; VibeVoice Realtime uses a WS backend.
 - **Format Support**: Adapter-specific coverage spanning MP3, WAV, OPUS, FLAC, PCM, AAC, and OGG via the shared `AudioFormat` enum.
 - **OpenAI Compatibility**: Drop-in replacement for OpenAI TTS API
@@ -26,6 +26,7 @@ Developer-oriented details (architecture, provider matrix, configuration, and te
 |----------|------|-----------|---------------|--------------|
 | **OpenAI** | Commercial API | EN* | ❌ | Industry standard, HD quality |
 | **ElevenLabs** | Commercial API | 29 | ✅ (Pro/user voices) | Premium quality, emotion control |
+| **Fish Audio S2** | Remote HTTP server | Multi | ✅ (managed refs) | S2 Pro via upstream Fish server, user-scoped reference routing |
 | **Kokoro** | Local ONNX | EN (US/GB) | ❌ | Lightweight, CPU-friendly, offline |
 | **KittenTTS** | Local ONNX | EN | ❌ | Small local ONNX voices, first-use download, pinned HF revisions |
 | **PocketTTS** | Local ONNX | EN | ✅ (reference) | Zero-shot cloning, streaming ONNX |

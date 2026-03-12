@@ -22,6 +22,54 @@ OPENAI_API_KEY=your-api-key-here
 ELEVENLABS_API_KEY=your-api-key-here
 ```
 
+### Fish Audio S2
+
+Fish Audio S2 is currently supported through the upstream Fish HTTP server.
+The tldw provider key is `fish_s2`, and v1 expects the `native_http` backend.
+
+#### Upstream Server
+
+Start Fish Speech's API server separately and expose its `/v1/tts` and
+`/v1/references/*` routes. A typical local deployment uses:
+
+```bash
+python tools/api_server.py --host 127.0.0.1 --port 8080
+```
+
+#### Configuration (YAML)
+
+Enable `fish_s2` in `tldw_Server_API/Config_Files/tts_providers_config.yaml`:
+
+```yaml
+providers:
+  fish_s2:
+    enabled: true
+    backend: "native_http"
+    base_url: "http://127.0.0.1:8080"
+    api_key: null
+    timeout: 120
+    model: "s2-pro"
+    sample_rate: 24000
+    max_text_length: 5000
+    extra_params:
+      default_chunk_length: 200
+      default_normalize: true
+      default_use_memory_cache: "off"
+```
+
+#### Request Notes
+
+- Model aliases include `fish_s2`, `fish-s2-pro`, `s2-pro`, and `fishaudio/s2-pro`.
+- Streaming is WAV-only for the native Fish server path.
+- Managed references are user-scoped through:
+  - `POST /api/v1/audio/providers/fish_s2/references`
+  - `GET /api/v1/audio/providers/fish_s2/references`
+  - `DELETE /api/v1/audio/providers/fish_s2/references/{reference_id}`
+- `extra_params.reference_id` uses the local stored `voice_id`, not the backend
+  Fish reference ID.
+- `voice=custom:<voice_id>` reuses existing Fish metadata when present and falls
+  back to an inline reference payload built from the stored voice sample.
+
 ## Local Model Providers
 
 ### One-Command Installers (Recommended)
