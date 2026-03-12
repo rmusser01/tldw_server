@@ -466,6 +466,7 @@ class TTSServiceV2:
                 config=self._get_validation_config(),
             )
             await self._apply_custom_voice_reference(tts_request, user_id, provider_hint)
+            await self._apply_fish_s2_reference_context(tts_request, user_id, provider_hint)
 
             adapter = await self._get_adapter(request.model, provider, overrides=provider_overrides)
             if not adapter and fallback:
@@ -2682,6 +2683,86 @@ class TTSServiceV2:
             logger.debug(
                 "Failed to persist Qwen3 voice_clone_prompt for {} (request_id={}): {}",
                 raw_id,
+                request_id or "unknown",
+                exc,
+            )
+
+    async def _apply_fish_s2_reference_context(
+        self,
+        request: TTSRequest,
+        user_id: Optional[int],
+        provider_hint: Optional[str],
+    ) -> None:
+        """Resolve Fish S2 logical references into backend-ready request fields."""
+        if not user_id or (provider_hint or "").lower() != "fish_s2":
+            return
+
+        extras = request.extra_params or {}
+        if not isinstance(extras, dict):
+            extras = {}
+
+        explicit_reference_id = extras.get("reference_id")
+        local_voice_id: Optional[str] = None
+        if isinstance(explicit_reference_id, str) and explicit_reference_id.strip():
+            local_voice_id = explicit_reference_id.strip()
+        elif isinstance(request.voice, str) and request.voice.startswith("custom:"):
+            local_voice_id = request.voice.split("custom:", 1)[-1].strip() or None
+
+        if not local_voice_id:
+            request.extra_params = extras
+            return
+
+        try:
+            from tldw_Server_API.app.core.TTS.voice_manager import VoiceProcessingError, get_voice_manager
+
+            voice_manager = get_voice_manager()
+            metadata = await voice_manager.load_reference_metadata(user_id, local_voice_id)
+
+            fish_artifacts = {}
+            if metadata and isinstance(metadata.provider_artifacts, dict):
+                fish_artifacts = metadata.provider_artifacts.get("fish_s2") or {}
+
+            remote_reference_id = None
+            if isinstance(fish_artifacts, dict):
+                remote_reference_id = fish_artifacts.get("remote_reference_id") or fish_artifacts.get("reference_id")
+
+            if remote_reference_id:
+                extras["reference_id"] = str(remote_reference_id)
+                extras.pop("references", None)
+                request.extra_params = extras
+                return
+
+            reference_text = (
+                extras.get("reference_text")
+                or extras.get("ref_text")
+                or extras.get("voice_reference_text")
+                or (fish_artifacts.get("reference_text") if isinstance(fish_artifacts, dict) else None)
+                or (metadata.reference_text if metadata else None)
+            )
+
+            voice_bytes = request.voice_reference
+            if voice_bytes is None:
+                try:
+                    voice_bytes = await voice_manager.load_voice_reference_audio(user_id, local_voice_id)
+                    request.voice_reference = voice_bytes
+                except VoiceProcessingError:
+                    voice_bytes = None
+
+            if isinstance(voice_bytes, (bytes, bytearray)) and reference_text:
+                extras.pop("reference_id", None)
+                extras["references"] = [
+                    {
+                        "audio_b64": base64.b64encode(bytes(voice_bytes)).decode("ascii"),
+                        "text": str(reference_text),
+                    }
+                ]
+
+            request.extra_params = extras
+        except _TTS_NONCRITICAL_EXCEPTIONS as exc:
+            request_id, _ = self._get_tts_request_observability(request)
+            logger.debug(
+                "Fish S2 reference resolution failed for {} (request_id={}): {}",
+                local_voice_id,
                 request_id or "unknown",
                 exc,
             )
