@@ -194,6 +194,42 @@ class FishS2Adapter(TTSAdapter):
             model=normalized_request.model,
         )
 
+    async def add_reference(
+        self,
+        *,
+        reference_id: str,
+        audio_b64: str,
+        reference_text: str,
+    ) -> dict[str, Any]:
+        if not await self.ensure_initialized():
+            raise TTSProviderNotConfiguredError(
+                "Fish S2 adapter not initialized",
+                provider=self.PROVIDER_KEY,
+            )
+        if self._backend is None:
+            raise TTSProviderInitializationError(
+                "Fish S2 backend is not available",
+                provider=self.PROVIDER_KEY,
+            )
+        return await self._backend.add_reference(
+            reference_id=reference_id,
+            audio_b64=audio_b64,
+            reference_text=reference_text,
+        )
+
+    async def delete_reference(self, *, reference_id: str) -> bool:
+        if not await self.ensure_initialized():
+            raise TTSProviderNotConfiguredError(
+                "Fish S2 adapter not initialized",
+                provider=self.PROVIDER_KEY,
+            )
+        if self._backend is None:
+            raise TTSProviderInitializationError(
+                "Fish S2 backend is not available",
+                provider=self.PROVIDER_KEY,
+            )
+        return await self._backend.delete_reference(reference_id=reference_id)
+
     def _normalize_request(self, request: TTSRequest) -> TTSRequest:
         extras = dict(request.extra_params or {})
         voice = request.voice

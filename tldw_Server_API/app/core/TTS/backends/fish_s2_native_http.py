@@ -86,6 +86,50 @@ class FishS2NativeHttpBackend(FishS2Backend):
         self._raise_for_response_error(response)
         return getattr(response, "content", b"") or b""
 
+    async def add_reference(
+        self,
+        *,
+        reference_id: str,
+        audio_b64: str,
+        reference_text: str,
+    ) -> dict[str, Any]:
+        payload = {
+            "reference_id": reference_id,
+            "audio_b64": audio_b64,
+            "text": reference_text,
+        }
+        try:
+            response = await afetch(
+                method="POST",
+                url=f"{self.base_url}/v1/references/add",
+                headers=self._headers(),
+                json=payload,
+                timeout=self.timeout,
+            )
+        except Exception as exc:
+            self._raise_transport_error(exc)
+
+        self._raise_for_response_error(response)
+        data = self._response_json(response)
+        if isinstance(data, dict):
+            return data
+        return {"reference_id": reference_id}
+
+    async def delete_reference(self, *, reference_id: str) -> bool:
+        try:
+            response = await afetch(
+                method="DELETE",
+                url=f"{self.base_url}/v1/references/delete",
+                headers=self._headers(),
+                json={"reference_id": reference_id},
+                timeout=self.timeout,
+            )
+        except Exception as exc:
+            self._raise_transport_error(exc)
+
+        self._raise_for_response_error(response)
+        return True
+
     @property
     def _tts_url(self) -> str:
         return f"{self.base_url}/v1/tts"
@@ -189,6 +233,16 @@ class FishS2NativeHttpBackend(FishS2Backend):
         if self._is_timeout_error(exc):
             raise timeout_error(self.PROVIDER_KEY, timeout_seconds=self.timeout) from exc
         raise network_error(self.PROVIDER_KEY, exc) from exc
+
+    @staticmethod
+    def _response_json(response: Any) -> Any:
+        try:
+            json_fn = getattr(response, "json", None)
+            if callable(json_fn):
+                return json_fn()
+        except Exception:
+            return None
+        return None
 
     @staticmethod
     def _normalize_api_key(value: Any) -> str | None:
