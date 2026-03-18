@@ -17,6 +17,7 @@ from typing import Any, ClassVar
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.Jobs_Repository import JobsRepository, JobsSession
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
@@ -157,6 +158,7 @@ class JobManager:
         db_url: str | None = None,
         clock: JobManager.Clock | None = None,
         enforce_leases: bool | None = None,
+        jobs_repository: JobsRepository | None = None,
     ):
         """Initialize JobManager.
 
@@ -206,6 +208,11 @@ class JobManager:
                 else:
                     self.db_path = ensure_jobs_tables(db_path)
         self._conn = None  # Lazily opened per operation
+        self._jobs_repository = jobs_repository or (
+            JobsRepository.for_postgres(self.db_url)
+            if self.backend == "postgres"
+            else JobsRepository.for_sqlite(self.db_path)
+        )
 
         self._enforce_override = enforce_leases
         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
@@ -225,36 +232,29 @@ class JobManager:
         """Globally gate new acquisitions during graceful shutdown."""
         cls._ACQUIRE_GATE_ENABLED = bool(enabled)
 
-    def _count_active_jobs_for_user(self, user_id: str) -> int:
+    def _count_active_jobs_for_user(
+        self,
+        user_id: str,
+        *,
+        session: JobsSession | None = None,
+    ) -> int:
         """Count jobs with active status (queued or processing) for a user.
 
         Args:
             user_id: The owner_user_id to count active jobs for.
+            session: Optional repository-backed session to reuse.
 
         Returns:
             Number of active jobs for this user.
         """
-        conn = self._connect()
         try:
-            if self.backend == "postgres":
-                with self._pg_cursor(conn) as cur:
-                    cur.execute(
-                        "SELECT COUNT(*) AS c FROM jobs WHERE owner_user_id = %s AND status IN ('queued', 'processing')",
-                        (user_id,),
-                    )
-                    row = cur.fetchone()
-                    return int(row["c"] if isinstance(row, dict) else (row[0] if row else 0))
-            else:
-                row = conn.execute(
-                    "SELECT COUNT(*) FROM jobs WHERE owner_user_id = ? AND status IN ('queued', 'processing')",
-                    (user_id,),
-                ).fetchone()
-                return int(row[0] if row else 0)
+            return self._jobs_repository.count_active_jobs_for_user(
+                user_id,
+                session=session,
+            )
         except _JOB_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(f"Failed to count active jobs for user {user_id}: {exc}")
             return 0
-        finally:
-            conn.close()
 
     @staticmethod
     def _map_fair_share_score_to_priority(score: int) -> int:
@@ -1097,24 +1097,6 @@ class JobManager:
         if queue not in allowed_queues:
             raise ValueError(f"Queue '{queue}' not allowed for domain '{domain}'. Allowed: {allowed_queues}")  # noqa: TRY003
 
-        # Fair-share scheduling: enforce per-user concurrency limits and adjust priority
-        if owner_user_id:
-            try:
-                scheduler = _get_fair_share()
-                active_count = self._count_active_jobs_for_user(owner_user_id)
-                if not scheduler.can_submit(owner_user_id, active_count):
-                    raise BadRequestError(
-                        f"User {owner_user_id} has reached the maximum concurrent job limit "
-                        f"({scheduler.max_per_user})"
-                    )
-                fair_priority = scheduler.calculate_priority(owner_user_id, active_count)
-                fair_priority_mapped = self._map_fair_share_score_to_priority(fair_priority)
-                priority = min(priority, fair_priority_mapped)
-            except BadRequestError:
-                raise
-            except _JOB_NONCRITICAL_EXCEPTIONS as _fs_exc:
-                logger.warning(f"Fair-share scheduling check skipped: {_fs_exc}")
-
         # Secret hygiene (reject/redact)
         try:
             cleaned, found, where = self._scan_and_redact_secrets(payload)
@@ -1142,7 +1124,26 @@ class JobManager:
 
         # Note: completion_token enforcement applies to finalize paths (complete/fail), not creation.
         conn = self._connect()
+        repo_session = JobsSession(self.backend, conn)
         try:
+            # Fair-share scheduling: enforce per-user concurrency limits and adjust priority
+            if owner_user_id:
+                try:
+                    scheduler = _get_fair_share()
+                    active_count = self._count_active_jobs_for_user(owner_user_id, session=repo_session)
+                    if not scheduler.can_submit(int(owner_user_id), active_count):
+                        raise ValueError(  # noqa: TRY003
+                            f"User {owner_user_id} has reached the maximum concurrent job limit "
+                            f"({scheduler.max_per_user})"
+                        )
+                    fair_priority = scheduler.calculate_priority(int(owner_user_id), active_count)
+                    fair_priority_mapped = self._map_fair_share_score_to_priority(fair_priority)
+                    priority = min(priority, fair_priority_mapped)
+                except ValueError:
+                    raise
+                except _JOB_NONCRITICAL_EXCEPTIONS as _fs_exc:
+                    logger.warning(f"Fair-share scheduling check skipped: {_fs_exc}")
+
             try:
                 with job_span(
                     "job.create",
@@ -1340,30 +1341,23 @@ class JobManager:
                                 )
                             return d
                         # Non-idempotent insert
-                        cur.execute(
-                            (
-                                "INSERT INTO jobs (uuid, domain, queue, job_type, owner_user_id, project_id, batch_group, idempotency_key, payload, result, status, priority, max_retries, retry_count, available_at, created_at, updated_at, request_id, trace_id) "
-                                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NULL, 'queued', %s, %s, 0, %s, NOW(), NOW(), %s, %s) RETURNING *"
-                            ),
-                            (
-                                uuid_val,
-                                domain,
-                                queue,
-                                job_type,
-                                owner_user_id,
-                                project_id,
-                                batch_group,
-                                idempotency_key,
-                                payload_json,
-                                priority,
-                                max_retries,
-                                avail_param if avail_param else None,
-                                request_id,
-                                trace_id,
-                            ),
+                        d = self._jobs_repository.insert_job(
+                            domain=domain,
+                            queue=queue,
+                            job_type=job_type,
+                            payload_json=payload_json,
+                            owner_user_id=owner_user_id,
+                            project_id=project_id,
+                            batch_group=batch_group,
+                            idempotency_key=idempotency_key,
+                            priority=priority,
+                            max_retries=max_retries,
+                            available_at=avail_param if avail_param else None,
+                            request_id=request_id,
+                            trace_id=trace_id,
+                            created_at=_now_dt,
+                            session=repo_session,
                         )
-                        row = cur.fetchone()
-                        d = dict(row)
                         # SLA check: queue latency (Postgres create path)
                         try:
                             pol = self._get_sla_policy(d.get("domain"), d.get("queue"), d.get("job_type"))
@@ -1536,50 +1530,22 @@ class JobManager:
                                         )
                                     return d
                             # Non-idempotent (or no existing row on IGNORE path): normal insert
-                            conn.execute(
-                                """
-                                INSERT INTO jobs (
-                                  uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
-                                  idempotency_key, payload, result, status, priority, max_retries,
-                                  retry_count, available_at, created_at, updated_at, request_id, trace_id
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?, ?, ?)
-                                """,
-                                (
-                                    uuid_val,
-                                    domain,
-                                    queue,
-                                    job_type,
-                                    owner_user_id,
-                                    project_id,
-                                    batch_group,
-                                    idempotency_key,
-                                    json.dumps(payload),
-                                    priority,
-                                    max_retries,
-                                    (
-                                        avail_param_sqlite.strftime("%Y-%m-%d %H:%M:%S")
-                                        if avail_param_sqlite
-                                        else None
-                                    ),
-                                    now,
-                                    now,
-                                    request_id,
-                                    trace_id,
-                                ),
-                            )
-                            job_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-                            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                            d = (
-                                dict(row)
-                                if row
-                                else {
-                                    "id": job_id,
-                                    "uuid": uuid_val,
-                                    "status": "queued",
-                                    "domain": domain,
-                                    "queue": queue,
-                                    "job_type": job_type,
-                                }
+                            d = self._jobs_repository.insert_job(
+                                domain=domain,
+                                queue=queue,
+                                job_type=job_type,
+                                payload_json=payload_json,
+                                owner_user_id=owner_user_id,
+                                project_id=project_id,
+                                batch_group=batch_group,
+                                idempotency_key=idempotency_key,
+                                priority=priority,
+                                max_retries=max_retries,
+                                available_at=avail_param_sqlite,
+                                request_id=request_id,
+                                trace_id=trace_id,
+                                created_at=_now_dt,
+                                session=repo_session,
                             )
                             try:
                                 self._update_gauges(domain=domain, queue=queue, job_type=job_type)
