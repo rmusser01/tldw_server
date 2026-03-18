@@ -63,3 +63,23 @@ Then confirm the branch is clean and GitHub reports PR 908 as mergeable.
 - Using the PR 908 side blindly could drop a base-branch fix if one of the redesign commits predates it and did not already absorb it.
 - Rebase conflict labels (`ours` vs `theirs`) are easy to misuse; for this workflow, the replayed PR 908 commit side is the one that should win in overlapping files.
 - The branch must be force-pushed after rebase, so verification needs to happen before publishing.
+
+## Implementation Notes
+
+- The rebase onto `feat/production-readiness-gaps` stopped in the expected overlapping files:
+  - `tldw_Server_API/app/core/Jobs/manager.py`
+  - `tldw_Server_API/tests/Jobs/test_fair_share_integration.py`
+  - `tldw_Server_API/app/services/stripe_metering_service.py`
+- The branch was replayed with the PR 908 side as the authoritative version in those overlaps.
+- After the rebase completed, the Stripe metering suite exposed five carry-forward regressions caused by losing later stacked fixes during the conflict resolution.
+- Those were restored directly by:
+  - adding PostgreSQL `date` coercion in `AuthNZ_Metering_Repository.py`
+  - restoring Stripe runtime gating and non-missing error propagation in `stripe_metering_service.py`
+  - restoring the `_stripe_ok()` test helper in `test_stripe_metering.py`
+
+## Verification
+
+- `python -m pytest tldw_Server_API/tests/Billing/test_authnz_metering_repository.py tldw_Server_API/tests/Jobs/test_fair_share_integration.py tldw_Server_API/tests/Jobs/test_jobs_repository.py tldw_Server_API/tests/test_stripe_metering.py -v`
+  - Result: `46 passed, 5 warnings`
+- `python -m bandit -r tldw_Server_API/app/core/Jobs/manager.py tldw_Server_API/app/core/DB_Management/Jobs_Repository.py tldw_Server_API/app/core/DB_Management/AuthNZ_Metering_Repository.py tldw_Server_API/app/services/stripe_metering_service.py -f json -o /tmp/bandit_pr908_merge_conflict_resolution.json`
+  - Result: `0` findings, `0` errors

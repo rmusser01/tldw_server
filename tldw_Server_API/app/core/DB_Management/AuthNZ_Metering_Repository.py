@@ -8,6 +8,7 @@ shapes before returning dictionaries to the orchestration layer.
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
 
 
@@ -30,6 +31,13 @@ class _AuthNZMeteringRepositoryBase:
     def _is_postgres(conn: Any) -> bool:
         """Detect whether the acquired connection exposes asyncpg-style methods."""
         return hasattr(conn, "fetchrow")
+
+    @staticmethod
+    def _coerce_day(value: str | date) -> date:
+        """Return a concrete date object for PostgreSQL DATE bindings."""
+        if isinstance(value, date):
+            return value
+        return datetime.strptime(str(value), "%Y-%m-%d").date()
 
 
 class AuthNZUsageDailyRepository(_AuthNZMeteringRepositoryBase):
@@ -62,17 +70,18 @@ class AuthNZUsageDailyRepository(_AuthNZMeteringRepositoryBase):
                 row["bytes_in_total"] = 0
         return rows
 
-    async def fetch_usage_for_date(self, target_date: str) -> list[dict[str, Any]]:
+    async def fetch_usage_for_date(self, target_date: str | date) -> list[dict[str, Any]]:
         """Return per-user usage rows for a billing date with legacy fallback."""
         pool = await self._get_db_pool()
         async with pool.acquire() as conn:
             if self._is_postgres(conn):
+                pg_day = self._coerce_day(target_date)
                 try:
                     rows = await conn.fetch(
                         "SELECT user_id, requests, errors, bytes_total, "
                         "COALESCE(bytes_in_total, 0) AS bytes_in_total, latency_avg_ms "
                         "FROM usage_daily WHERE day = $1",
-                        target_date,
+                        pg_day,
                     )
                     return [dict(r) for r in rows]
                 except Exception as exc:
@@ -81,7 +90,7 @@ class AuthNZUsageDailyRepository(_AuthNZMeteringRepositoryBase):
                     rows = await conn.fetch(
                         "SELECT user_id, requests, errors, bytes_total, latency_avg_ms "
                         "FROM usage_daily WHERE day = $1",
-                        target_date,
+                        pg_day,
                     )
                     legacy_rows = [dict(r) for r in rows]
                     for row in legacy_rows:
@@ -244,18 +253,19 @@ class AuthNZMeteringSyncLogRepository(_AuthNZMeteringRepositoryBase):
         self,
         *,
         user_id: int,
-        day: str,
+        day: str | date,
         subscription_id: str,
     ) -> bool:
         """Check whether a subscription/day pair has already been synced."""
         pool = await self._get_db_pool()
         async with pool.acquire() as conn:
             if self._is_postgres(conn):
+                pg_day = self._coerce_day(day)
                 row = await conn.fetchval(
                     "SELECT 1 FROM metering_sync_log "
                     "WHERE user_id = $1 AND day = $2 AND stripe_subscription_id = $3",
                     user_id,
-                    day,
+                    pg_day,
                     subscription_id,
                 )
                 return row is not None
@@ -271,7 +281,7 @@ class AuthNZMeteringSyncLogRepository(_AuthNZMeteringRepositoryBase):
         self,
         *,
         user_id: int,
-        day: str,
+        day: str | date,
         subscription_id: str,
         requests: int,
         bytes_total: int,
@@ -280,6 +290,7 @@ class AuthNZMeteringSyncLogRepository(_AuthNZMeteringRepositoryBase):
         pool = await self._get_db_pool()
         async with pool.acquire() as conn:
             if self._is_postgres(conn):
+                pg_day = self._coerce_day(day)
                 await conn.execute(
                     "INSERT INTO metering_sync_log "
                     "(user_id, day, stripe_subscription_id, requests_synced, bytes_synced) "
@@ -289,7 +300,7 @@ class AuthNZMeteringSyncLogRepository(_AuthNZMeteringRepositoryBase):
                     "    bytes_synced = EXCLUDED.bytes_synced, "
                     "    synced_at = CURRENT_TIMESTAMP",
                     user_id,
-                    day,
+                    pg_day,
                     subscription_id,
                     requests,
                     bytes_total,
@@ -304,15 +315,16 @@ class AuthNZMeteringSyncLogRepository(_AuthNZMeteringRepositoryBase):
             )
             await conn.commit()
 
-    async def fetch_sync_totals(self, target_date: str) -> list[dict[str, Any]]:
+    async def fetch_sync_totals(self, target_date: str | date) -> list[dict[str, Any]]:
         """Return previously recorded sync totals for reconciliation output."""
         pool = await self._get_db_pool()
         async with pool.acquire() as conn:
             if self._is_postgres(conn):
+                pg_day = self._coerce_day(target_date)
                 rows = await conn.fetch(
                     "SELECT user_id, stripe_subscription_id, requests_synced, bytes_synced "
                     "FROM metering_sync_log WHERE day = $1",
-                    target_date,
+                    pg_day,
                 )
                 return [dict(r) for r in rows]
 

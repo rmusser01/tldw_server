@@ -123,6 +123,15 @@ class StripeMeteringService:
             return None
         return AuthNZMeteringSyncLogRepository(db_pool=pool)
 
+    @staticmethod
+    def _is_missing_stripe_resource_error(exc: Exception) -> bool:
+        """Return True when Stripe reports a missing subscription/resource."""
+        code = str(getattr(exc, "code", "") or "").lower()
+        if code == "resource_missing":
+            return True
+        message = str(exc).lower()
+        return "no such subscription" in message or "resource missing" in message
+
     async def _query_usage_for_date(
         self,
         pool: Any | None,
@@ -174,12 +183,18 @@ class StripeMeteringService:
             # No metered item found — return None so caller can skip
             return None
         except Exception as exc:
+            if self._is_missing_stripe_resource_error(exc):
+                logger.warning(
+                    "Stripe subscription {} is missing; skipping metering sync",
+                    subscription_id,
+                )
+                return None
             logger.warning(
                 "Failed to retrieve subscription items for {}: {}",
                 subscription_id,
                 exc,
             )
-            return None
+            raise
 
     async def _ensure_metering_sync_table(self, pool: Any | None) -> None:
         """Create the ``metering_sync_log`` tracking table if it does not exist."""
@@ -551,4 +566,4 @@ class StripeMeteringService:
     @property
     def is_enabled(self) -> bool:
         """Whether Stripe metering is enabled."""
-        return self._enabled and bool(self._stripe_key)
+        return self._enabled and bool(self._stripe_key) and STRIPE_AVAILABLE

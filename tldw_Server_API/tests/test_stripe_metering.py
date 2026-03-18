@@ -20,6 +20,20 @@ import pytest
 from tldw_Server_API.app.services import stripe_metering_service as _sms_module
 from tldw_Server_API.app.services.stripe_metering_service import StripeMeteringService
 
+
+def _stripe_ok():
+    """Pretend Stripe is installed and provide a mock module when needed."""
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    stack.enter_context(patch.object(_sms_module, "STRIPE_AVAILABLE", True))
+    if _sms_module.stripe is None:
+        fake_stripe = MagicMock()
+        fake_stripe.api_key = None
+        stack.enter_context(patch.object(_sms_module, "stripe", fake_stripe))
+    return stack
+
+
 @pytest.fixture
 def mock_stripe() -> MagicMock:
     mock = MagicMock()
