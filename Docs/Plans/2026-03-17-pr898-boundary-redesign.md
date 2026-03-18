@@ -2,15 +2,41 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
+**Status:** Complete
+
+## Execution Summary
+
+Completed on `2026-03-17` in worktree `codex-pr898-boundary-redesign`.
+
+Implemented commits:
+
+- `de8569d55` `refactor: add jobs repository boundary`
+- `217722302` `refactor: route fair share through jobs repository`
+- `126e71d31` `refactor: add authnz metering repositories`
+- `71fe7f9a8` `refactor: split stripe metering orchestration from persistence`
+
+Final verification:
+
+- `python -m pytest tldw_Server_API/tests/test_stripe_metering.py tldw_Server_API/tests/Billing/test_authnz_metering_repository.py -v`
+  - Result: `28 passed`
+- `python -m pytest tldw_Server_API/tests/AuthNZ/test_consent_endpoints.py tldw_Server_API/tests/AuthNZ/test_audit_chain_integration.py tldw_Server_API/tests/Billing/test_overage_enforcement_integration.py tldw_Server_API/tests/Billing/test_authnz_metering_repository.py tldw_Server_API/tests/Jobs/test_fair_share_integration.py tldw_Server_API/tests/Jobs/test_jobs_repository.py tldw_Server_API/tests/test_stripe_metering.py -v`
+  - Result: `67 passed`
+- `python -m bandit -r tldw_Server_API/app/core/Jobs/manager.py tldw_Server_API/app/core/DB_Management/Jobs_Repository.py tldw_Server_API/app/core/DB_Management/AuthNZ_Metering_Repository.py tldw_Server_API/app/services/stripe_metering_service.py -f json -o /tmp/bandit_pr898_boundary_redesign.json`
+  - Result: `0` findings, `0` errors
+
 **Goal:** Redesign Jobs and Stripe metering persistence boundaries so `JobManager` and the Stripe metering service become orchestration façades backed by explicit repository/session layers.
 
 **Architecture:** Introduce a dedicated Jobs repository/session layer under `app/core/DB_Management`, plus AuthNZ-backed repositories for metering usage, subscriptions, and sync-log persistence. Refactor `JobManager` and Stripe metering to depend on those layers instead of embedding SQL and schema bootstrap logic directly.
+
+**Naming note:** This plan keeps the existing repository conventions under `app/core/DB_Management`, including the current package and module naming style already used throughout the codebase, rather than introducing a one-off naming scheme for only this refactor.
 
 **Tech Stack:** Python 3.11, FastAPI, SQLite, PostgreSQL/asyncpg, psycopg, pytest, loguru, Bandit
 
 ---
 
 ### Task 1: Add Jobs Repository Scaffolding
+
+**Status:** Complete
 
 **Files:**
 - Create: `tldw_Server_API/app/core/DB_Management/Jobs_Repository.py`
@@ -43,7 +69,7 @@ def test_create_job_session_can_read_and_write_in_one_transaction():
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_repository.py -v
 ```
 
@@ -65,7 +91,7 @@ Keep backend-specific SQL inside this file only.
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_repository.py -v
 ```
 
@@ -79,6 +105,8 @@ git commit -m "refactor: add jobs repository boundary"
 ```
 
 ### Task 2: Refactor JobManager To Use The Repository Boundary
+
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Jobs/manager.py`
@@ -103,7 +131,7 @@ def test_create_job_reuses_repository_session_for_fair_share(monkeypatch):
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Jobs/test_fair_share_integration.py tldw_Server_API/tests/Jobs/test_jobs_repository.py -v
 ```
 
@@ -125,7 +153,7 @@ Do not change the public `create_job()` call signature.
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Jobs/test_fair_share_integration.py tldw_Server_API/tests/Jobs/test_jobs_repository.py -v
 ```
 
@@ -139,6 +167,8 @@ git commit -m "refactor: route fair share through jobs repository"
 ```
 
 ### Task 3: Add Metering Repositories
+
+**Status:** Complete
 
 **Files:**
 - Create: `tldw_Server_API/app/core/DB_Management/AuthNZ_Metering_Repository.py`
@@ -175,7 +205,7 @@ async def test_sync_log_repository_ensures_and_records_schema():
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Billing/test_authnz_metering_repository.py -v
 ```
 
@@ -189,14 +219,14 @@ Add repository classes for:
 - subscription lookup
 - sync-log schema/bootstrap and sync state
 
-Keep all SQL and DDL in this module. Normalize SQLite/PostgreSQL row shapes before returning.
+Keep all SQL and DDL in this module. Normalize SQLite/PostgreSQL row shapes before returning. Keeping the three metering repositories in one boundary module is intentional for this pass because they share the same AuthNZ pool semantics and form one cohesive metering persistence surface.
 
 **Step 4: Run the repository tests again**
 
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Billing/test_authnz_metering_repository.py -v
 ```
 
@@ -210,6 +240,8 @@ git commit -m "refactor: add authnz metering repositories"
 ```
 
 ### Task 4: Refactor Stripe Metering Into Orchestration Plus Repositories
+
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/services/stripe_metering_service.py`
@@ -237,7 +269,7 @@ async def test_sync_daily_usage_uses_repositories_and_records_sync():
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/test_stripe_metering.py tldw_Server_API/tests/Billing/test_authnz_metering_repository.py -v
 ```
 
@@ -259,7 +291,7 @@ Preserve the external return payloads.
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/test_stripe_metering.py tldw_Server_API/tests/Billing/test_authnz_metering_repository.py -v
 ```
 
@@ -274,6 +306,8 @@ git commit -m "refactor: split stripe metering orchestration from persistence"
 
 ### Task 5: Run Full Verification And Update PR Threading
 
+**Status:** Complete
+
 **Files:**
 - Modify: `Docs/Plans/2026-03-17-pr898-boundary-redesign-design.md`
 - Modify: `Docs/Plans/2026-03-17-pr898-boundary-redesign.md`
@@ -287,7 +321,7 @@ git commit -m "refactor: split stripe metering orchestration from persistence"
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/AuthNZ/test_consent_endpoints.py \
   tldw_Server_API/tests/AuthNZ/test_audit_chain_integration.py \
@@ -305,7 +339,7 @@ Expected: all pass.
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m bandit -r \
   tldw_Server_API/app/core/Jobs/manager.py \
   tldw_Server_API/app/core/DB_Management/Jobs_Repository.py \
@@ -329,9 +363,4 @@ git add Docs/Plans/2026-03-17-pr898-boundary-redesign-design.md Docs/Plans/2026-
 git commit -m "docs: finalize boundary redesign execution notes"
 ```
 
-Plan complete and saved to `Docs/Plans/2026-03-17-pr898-boundary-redesign.md`. Two execution options:
-
-1. Subagent-Driven (this session) - I dispatch fresh subagent per task, review between tasks, fast iteration
-2. Parallel Session (separate) - Open new session with executing-plans, batch execution with checkpoints
-
-Which approach?
+Plan complete and execution notes are now finalized in this file.

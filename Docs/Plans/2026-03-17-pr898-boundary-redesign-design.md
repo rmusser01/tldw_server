@@ -1,5 +1,16 @@
 # PR 898 Jobs and Metering Boundary Redesign
 
+## Implementation Status
+
+Completed on `2026-03-17` in worktree `codex-pr898-boundary-redesign`.
+
+Implemented commits:
+
+- `de8569d55` `refactor: add jobs repository boundary`
+- `217722302` `refactor: route fair share through jobs repository`
+- `126e71d31` `refactor: add authnz metering repositories`
+- `71fe7f9a8` `refactor: split stripe metering orchestration from persistence`
+
 ## Context
 
 PR 898 fixed the production correctness issues, but three larger architecture comments remain:
@@ -30,7 +41,9 @@ This follow-up intentionally takes the broader redesign path rather than another
 
 Add a new DB layer under `tldw_Server_API/app/core/DB_Management` that owns Jobs persistence.
 
-Planned pieces:
+This redesign intentionally follows the repository's existing `DB_Management` package and module naming conventions instead of introducing a one-off snake_case subtree just for this boundary.
+
+Implemented pieces:
 
 - `JobsRepository`
   - Public persistence API for job reads/writes needed by `JobManager`.
@@ -48,24 +61,26 @@ Planned pieces:
 - payload hygiene / secret rejection
 - orchestration of repository calls
 
-The key structural change is that `create_job()` will ask the repository for a transactional session, perform the active-job count through that session, compute fair-share priority, and persist the job through the same session. That removes the extra connection and removes the raw SQL from `manager.py`.
+The implemented structural change is that `create_job()` now reuses a repository-backed session for fair-share counting and the non-idempotent insert path. That removes the extra connection for those operations and narrows the raw-SQL footprint in `manager.py` to the remaining idempotent create path.
 
 ### 2. Metering Boundary
 
 Split Stripe metering into orchestration and repository concerns.
 
-Planned pieces:
+Implemented pieces:
 
-- `AuthnzUsageDailyRepository`
+- `AuthNZUsageDailyRepository`
   - Reads `usage_daily` and handles legacy-schema fallback (`bytes_in_total` missing).
-- `AuthnzBillingSubscriptionRepository`
+- `AuthNZBillingSubscriptionRepository`
   - Resolves active Stripe subscriptions through membership and org-owner paths.
-- `AuthnzMeteringSyncLogRepository`
+- `AuthNZMeteringSyncLogRepository`
   - Owns `metering_sync_log` schema/bootstrap, duplicate checks, sync writes, and sync-total reads.
-- `StripeMeteringOrchestrator` or a refactored `StripeMeteringService`
+- Refactored `StripeMeteringService`
   - Keeps Stripe API calls, per-user sync flow, and reconciliation assembly.
+  - Accepts injected repositories and optional pool injection for testing or alternate composition.
 
-The service layer will no longer contain SQL or table DDL. It will depend on injected repository interfaces plus a DB pool provider and Stripe client adapter.
+The service layer no longer owns the metering SQL or DDL. Its persistence helpers are now thin adapters over the repository layer, with a compatibility path that still acquires a shared pool in the default service configuration.
+The three repository types currently live in one metering module because they form a single persistence boundary with shared AuthNZ pool semantics and a small public surface. They can be split later if the boundary grows materially.
 
 ### 3. Schema Ownership
 
@@ -87,7 +102,7 @@ This is intentionally less ambitious than introducing a global migration subsyst
 ### Metering Sync Flow
 
 1. Caller invokes `StripeMeteringService.sync_daily_usage(...)`.
-2. Service acquires/injects AuthNZ DB pool once.
+2. Service either uses injected repositories directly or acquires a shared AuthNZ DB pool for the default repository path.
 3. Sync-log repository ensures schema.
 4. Usage repository reads daily usage rows.
 5. Subscription repository resolves Stripe subscription per user.
@@ -137,11 +152,20 @@ This is intentionally less ambitious than introducing a global migration subsyst
 - Add any new repository unit tests to that verification command.
 - Run Bandit on touched Jobs/DB/metering files before publishing.
 
+## Verification
+
+- `python -m pytest tldw_Server_API/tests/test_stripe_metering.py tldw_Server_API/tests/Billing/test_authnz_metering_repository.py -v`
+  - Result: `28 passed`
+- `python -m pytest tldw_Server_API/tests/AuthNZ/test_consent_endpoints.py tldw_Server_API/tests/AuthNZ/test_audit_chain_integration.py tldw_Server_API/tests/Billing/test_overage_enforcement_integration.py tldw_Server_API/tests/Billing/test_authnz_metering_repository.py tldw_Server_API/tests/Jobs/test_fair_share_integration.py tldw_Server_API/tests/Jobs/test_jobs_repository.py tldw_Server_API/tests/test_stripe_metering.py -v`
+  - Result: `67 passed`
+- `python -m bandit -r tldw_Server_API/app/core/Jobs/manager.py tldw_Server_API/app/core/DB_Management/Jobs_Repository.py tldw_Server_API/app/core/DB_Management/AuthNZ_Metering_Repository.py tldw_Server_API/app/services/stripe_metering_service.py -f json -o /tmp/bandit_pr898_boundary_redesign.json`
+  - Result: `0` findings, `0` errors
+
 ## Risks
 
 - `JobManager` is used pervasively, so constructor changes must stay backward-compatible or defaultable.
 - Repository/session abstractions can accidentally duplicate existing `JobManager` logic if the split is not kept strict.
-- Stripe metering tests currently patch service internals; they will need careful rewrite to avoid coupling to deleted helpers.
+- The remaining idempotent create branch in `JobManager.create_job()` still uses module-local SQL and can be split further in a later pass if maintainers want the repository boundary to own that path too.
 
 ## Recommended PR Strategy
 
