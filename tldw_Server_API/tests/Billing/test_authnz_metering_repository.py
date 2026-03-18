@@ -39,6 +39,37 @@ class _FakeSqliteConn:
 
 
 class TestAuthNZUsageDailyRepository:
+    def test_duplicate_subscription_error_is_exported_from_core_exceptions(self):
+        from tldw_Server_API.app.core import exceptions as core_exceptions
+
+        assert hasattr(core_exceptions, "DuplicateActiveSubscriptionError")
+
+    @pytest.mark.asyncio
+    async def test_get_db_pool_refreshes_global_pool_when_not_injected(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import tldw_Server_API.app.core.AuthNZ.database as database_module
+        from tldw_Server_API.app.core.DB_Management.AuthNZ_Metering_Repository import (
+            AuthNZUsageDailyRepository,
+        )
+
+        first_pool = object()
+        second_pool = object()
+        pools = [first_pool, second_pool]
+
+        async def _fake_get_db_pool() -> object:
+            return pools.pop(0)
+
+        monkeypatch.setattr(database_module, "get_db_pool", _fake_get_db_pool)
+        repo = AuthNZUsageDailyRepository()
+
+        resolved_first = await repo._get_db_pool()
+        resolved_second = await repo._get_db_pool()
+
+        assert resolved_first is first_pool
+        assert resolved_second is second_pool
+
     @pytest.mark.asyncio
     async def test_fetch_usage_for_date_normalizes_legacy_rows(self):
         from tldw_Server_API.app.core.DB_Management.AuthNZ_Metering_Repository import (

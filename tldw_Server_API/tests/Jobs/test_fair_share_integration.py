@@ -315,6 +315,26 @@ class _FakePostgresCursor:
         return {"c": 0}
 
 
+class _FakePostgresIdempotencyCursor:
+    def __init__(self, existing_row: dict[str, Any]) -> None:
+        self._existing_row = existing_row
+        self._last_query = ""
+
+    def __enter__(self) -> "_FakePostgresIdempotencyCursor":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    def execute(self, query: str, params: tuple[Any, ...] | None = None) -> None:
+        self._last_query = query
+
+    def fetchone(self) -> dict[str, Any] | None:
+        if "SELECT * FROM jobs WHERE domain = %s" in self._last_query:
+            return self._existing_row
+        return None
+
+
 class _FakeSqliteConnection:
     is_fake_sqlite = True
 
@@ -343,6 +363,31 @@ class _FakeSqliteConnection:
 
 
 class TestFairShareRepositoryIntegration:
+    def test_idempotent_retry_returns_existing_job_even_when_at_limit(self, job_manager, monkeypatch):
+        monkeypatch.setenv("JOBS_MAX_PER_USER", "1")
+        import tldw_Server_API.app.core.Jobs.manager as mgr_mod
+        mgr_mod._fair_share = None
+
+        first = job_manager.create_job(
+            domain="chatbooks",
+            queue="default",
+            job_type="export",
+            payload={"attempt": 1},
+            owner_user_id="42",
+            idempotency_key="idem-limit-replay",
+        )
+
+        replay = job_manager.create_job(
+            domain="chatbooks",
+            queue="default",
+            job_type="export",
+            payload={"attempt": 2},
+            owner_user_id="42",
+            idempotency_key="idem-limit-replay",
+        )
+
+        assert replay["id"] == first["id"]
+
     def test_create_job_reuses_repository_session_for_fair_share(self, tmp_path, monkeypatch):
         monkeypatch.setenv("JOBS_MAX_PER_USER", "10")
         import tldw_Server_API.app.core.Jobs.manager as mgr_mod
@@ -431,6 +476,59 @@ class TestFairShareRepositoryIntegration:
         assert repo.insert_sessions
         assert events.index("pg_cursor_enter") < events.index("count_active_jobs")
         assert repo.count_sessions[0] is repo.insert_sessions[0]
+
+    def test_postgres_idempotent_retry_returns_existing_job_when_fair_share_blocks(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("JOBS_MAX_PER_USER", "1")
+        monkeypatch.setenv("JOBS_PG_SKIP_SCHEMA_INIT", "1")
+        import tldw_Server_API.app.core.Jobs.manager as mgr_mod
+        mgr_mod._fair_share = None
+
+        repo = TrackingJobsRepository(
+            backend="postgres",
+            db_url="postgres://jobs.test/review_cleanup",
+        )
+        job_manager = JobManager(
+            backend="postgres",
+            db_url="postgres://jobs.test/review_cleanup",
+            jobs_repository=repo,
+        )
+        fake_conn = _FakePostgresConnection([])
+        existing_row = {
+            "id": 321,
+            "uuid": "job-existing-321",
+            "domain": "chatbooks",
+            "queue": "default",
+            "job_type": "export",
+            "owner_user_id": "42",
+            "request_id": None,
+            "trace_id": None,
+            "retry_count": 0,
+        }
+        monkeypatch.setattr(repo, "_connect", lambda: fake_conn)
+        monkeypatch.setattr(
+            job_manager,
+            "_pg_cursor",
+            lambda conn: _FakePostgresIdempotencyCursor(existing_row),
+        )
+
+        with patch.object(
+            job_manager,
+            "_apply_fair_share_submission_policy",
+            side_effect=BadRequestError("User 42 has reached the maximum concurrent job limit (1)"),
+        ):
+            replay = job_manager.create_job(
+                domain="chatbooks",
+                queue="default",
+                job_type="export",
+                payload={"attempt": 2},
+                owner_user_id="42",
+                idempotency_key="idem-pg-limit-replay",
+            )
+
+        assert replay["id"] == existing_row["id"]
 
     def test_sqlite_fair_share_count_runs_inside_write_transaction(self, tmp_path, monkeypatch):
         monkeypatch.setenv("JOBS_MAX_PER_USER", "10")

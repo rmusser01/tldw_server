@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
 
@@ -155,3 +156,29 @@ class TestJobsRepositorySqlite:
         assert pool.acquired == 1
         assert pool.released == 1
         assert pool.closed == 1
+
+
+class TestJobsRepositoryValidation:
+    def test_rejects_unsupported_backend(self):
+        from tldw_Server_API.app.core.DB_Management.Jobs_Repository import JobsRepository
+
+        with pytest.raises(BadRequestError, match="Unsupported jobs repository backend"):
+            JobsRepository(backend="mysql")
+
+    def test_requires_sqlite_db_path_without_pool(self):
+        from tldw_Server_API.app.core.DB_Management.Jobs_Repository import JobsRepository
+
+        with pytest.raises(BadRequestError, match="SQLite jobs repository requires db_path"):
+            JobsRepository(backend="sqlite")
+
+    def test_requires_postgres_db_url_without_pool(self):
+        from tldw_Server_API.app.core.DB_Management.Jobs_Repository import JobsRepository
+
+        with pytest.raises(BadRequestError, match="Postgres jobs repository requires db_url"):
+            JobsRepository(backend="postgres")
+
+    def test_rejects_pool_without_acquire(self, tmp_path):
+        from tldw_Server_API.app.core.DB_Management.Jobs_Repository import JobsRepository
+
+        with pytest.raises(BadRequestError, match="connection_pool must define an acquire"):
+            JobsRepository.for_sqlite(tmp_path / "jobs_repo_bad_pool.db", connection_pool=object())

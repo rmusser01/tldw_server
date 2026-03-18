@@ -38,6 +38,10 @@ class BadRequestError(ValueError):
     """Raised when a caller provides invalid arguments for an operation."""
 
 
+class DuplicateActiveSubscriptionError(RuntimeError):
+    """Raised when a user resolves to more than one active billing subscription."""
+
+
 class ValidationError(BadRequestError):
     """Raised when validation of input parameters fails."""
 

@@ -12,9 +12,7 @@ import inspect
 from datetime import date, datetime
 from typing import Any
 
-
-class DuplicateActiveSubscriptionError(RuntimeError):
-    """Raised when a user resolves to more than one active billing subscription."""
+from tldw_Server_API.app.core.exceptions import DuplicateActiveSubscriptionError
 
 
 class _AuthNZMeteringRepositoryBase:
@@ -25,12 +23,13 @@ class _AuthNZMeteringRepositoryBase:
         self._db_pool = db_pool
 
     async def _get_db_pool(self) -> Any:
-        """Lazily resolve the shared AuthNZ DB pool on first use."""
-        if self._db_pool is None:
-            from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        """Resolve the injected pool or the current shared AuthNZ DB pool."""
+        if self._db_pool is not None:
+            return self._db_pool
 
-            self._db_pool = await get_db_pool()
-        return self._db_pool
+        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+        return await get_db_pool()
 
     @staticmethod
     def _is_postgres(conn: Any) -> bool:

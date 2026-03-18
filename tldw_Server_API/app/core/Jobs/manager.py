@@ -326,6 +326,39 @@ class JobManager:
         clamped_score = max(0, min(100, int(score)))
         return max(1, 10 - min(9, clamped_score // 10))
 
+    @staticmethod
+    def _select_existing_idempotent_job_postgres(
+        cur: Any,
+        *,
+        domain: str,
+        queue: str,
+        job_type: str,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        """Return a pre-existing PostgreSQL job row for an idempotent create."""
+        cur.execute(
+            "SELECT * FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s AND idempotency_key = %s",
+            (domain, queue, job_type, idempotency_key),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def _select_existing_idempotent_job_sqlite(
+        conn: sqlite3.Connection,
+        *,
+        domain: str,
+        queue: str,
+        job_type: str,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        """Return a pre-existing SQLite job row for an idempotent create."""
+        row = conn.execute(
+            "SELECT * FROM jobs WHERE domain = ? AND queue = ? AND job_type = ? AND idempotency_key = ?",
+            (domain, queue, job_type, idempotency_key),
+        ).fetchone()
+        return dict(row) if row else None
+
     def _get_allowed_queues(self, domain: str | None = None) -> list[str]:
         allowed = list(self.STANDARD_QUEUES)
         if domain:
@@ -1232,6 +1265,16 @@ class JobManager:
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
                     with self._pg_cursor(conn) as cur:
+                        if idempotency_key:
+                            existing = self._select_existing_idempotent_job_postgres(
+                                cur,
+                                domain=domain,
+                                queue=queue,
+                                job_type=job_type,
+                                idempotency_key=idempotency_key,
+                            )
+                            if existing:
+                                return existing
                         effective_priority = self._apply_fair_share_submission_policy(
                             owner_user_id,
                             priority,
@@ -1299,11 +1342,13 @@ class JobManager:
                             row = cur.fetchone()
                             was_insert = row is not None
                             if not row:
-                                cur.execute(
-                                    "SELECT * FROM jobs WHERE domain = %s AND queue = %s AND job_type = %s AND idempotency_key = %s",
-                                    (domain, queue, job_type, idempotency_key),
+                                row = self._select_existing_idempotent_job_postgres(
+                                    cur,
+                                    domain=domain,
+                                    queue=queue,
+                                    job_type=job_type,
+                                    idempotency_key=idempotency_key,
                                 )
-                                row = cur.fetchone()
                             d = (
                                 dict(row)
                                 if row
@@ -1502,6 +1547,16 @@ class JobManager:
                 for attempt in range(2):
                     try:
                         with conn:
+                            if idempotency_key:
+                                existing = self._select_existing_idempotent_job_sqlite(
+                                    conn,
+                                    domain=domain,
+                                    queue=queue,
+                                    job_type=job_type,
+                                    idempotency_key=idempotency_key,
+                                )
+                                if existing:
+                                    return existing
                             effective_priority = self._apply_fair_share_submission_policy(
                                 owner_user_id,
                                 priority,
@@ -1560,10 +1615,13 @@ class JobManager:
                                     ),
                                 )
                                 inserted = bool(getattr(conn, "total_changes", 0))
-                                row = conn.execute(
-                                    "SELECT * FROM jobs WHERE domain = ? AND queue = ? AND job_type = ? AND idempotency_key = ?",
-                                    (domain, queue, job_type, idempotency_key),
-                                ).fetchone()
+                                row = self._select_existing_idempotent_job_sqlite(
+                                    conn,
+                                    domain=domain,
+                                    queue=queue,
+                                    job_type=job_type,
+                                    idempotency_key=idempotency_key,
+                                )
                                 if row:
                                     d = dict(row)
                                     try:

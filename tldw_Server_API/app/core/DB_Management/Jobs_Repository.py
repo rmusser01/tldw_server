@@ -20,6 +20,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
+from tldw_Server_API.app.core.exceptions import BadRequestError
 
 try:
     import psycopg  # type: ignore
@@ -67,12 +68,20 @@ class JobsRepository:
         connection_pool: Any | None = None,
     ) -> None:
         """Build a repository bound to either a SQLite path or Postgres DSN."""
-        self.backend = backend
+        normalized_backend = backend.lower()
+        if normalized_backend not in {"sqlite", "postgres"}:
+            raise BadRequestError(f"Unsupported jobs repository backend: {backend}")
+
+        self.backend = normalized_backend
         self.db_path = Path(db_path) if db_path is not None else None
         self.db_url = db_url
         self.connection_pool = connection_pool
         if self.connection_pool is not None and not hasattr(self.connection_pool, "acquire"):
-            raise TypeError("JobsRepository connection_pool must define an acquire() context manager")
+            raise BadRequestError("JobsRepository connection_pool must define an acquire() context manager")
+        if self.backend == "sqlite" and self.connection_pool is None and self.db_path is None:
+            raise BadRequestError("SQLite jobs repository requires db_path when no connection pool is provided")
+        if self.backend == "postgres" and self.connection_pool is None and not self.db_url:
+            raise BadRequestError("Postgres jobs repository requires db_url when no connection pool is provided")
 
     @classmethod
     def for_sqlite(
@@ -109,11 +118,13 @@ class JobsRepository:
         if self.backend == "postgres":
             if psycopg is None:  # pragma: no cover - guarded by optional dependency
                 raise RuntimeError("psycopg is required for postgres jobs repositories")
+            if not self.db_url:
+                raise BadRequestError("Postgres jobs repository requires db_url when no connection pool is provided")
             conn = psycopg.connect(self.db_url)
             logger.debug("Opened direct postgres jobs repository connection")
             return conn
         if self.db_path is None:
-            raise ValueError("SQLite jobs repository requires db_path when no connection pool is provided")
+            raise BadRequestError("SQLite jobs repository requires db_path when no connection pool is provided")
         conn = sqlite3.connect(self.db_path)
         logger.debug("Opened direct sqlite jobs repository connection for {}", self.db_path)
         return self._prepare_sqlite_connection(conn)
