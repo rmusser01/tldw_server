@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import sqlite3
+import sys
 import time
 import uuid as _uuid
 from contextvars import ContextVar
@@ -1183,8 +1184,9 @@ class JobManager:
                 raise ValueError(f"Payload too large: {payload_bytes} bytes > limit {max_bytes}")  # noqa: TRY003
 
         # Note: completion_token enforcement applies to finalize paths (complete/fail), not creation.
-        conn = self._connect()
-        repo_session = JobsSession(self.backend, conn)
+        repo_session_context = self._jobs_repository.session()
+        repo_session = repo_session_context.__enter__()
+        conn = repo_session.conn
         try:
             try:
                 with job_span(
@@ -1683,7 +1685,7 @@ class JobManager:
                                 continue
                         raise
         finally:
-            conn.close()
+            repo_session_context.__exit__(*sys.exc_info())
 
     def _get_dependency_uuids(self, job_uuid: str) -> list[str]:
         if not job_uuid:

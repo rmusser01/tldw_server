@@ -370,6 +370,29 @@ class TestFairShareRepositoryIntegration:
         assert stored is not None
         assert stored["payload"] == {"test": True}
 
+    def test_create_job_uses_repository_session_context(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("JOBS_MAX_PER_USER", "10")
+        import tldw_Server_API.app.core.Jobs.manager as mgr_mod
+        mgr_mod._fair_share = None
+
+        db_path = tmp_path / "jobs_repo_session_context.db"
+        ensure_jobs_tables(db_path)
+        repo = TrackingJobsRepository(db_path)
+        job_manager = JobManager(db_path, jobs_repository=repo)
+
+        with patch.object(repo, "session", wraps=repo.session) as session_spy:
+            job = job_manager.create_job(
+                domain="chatbooks",
+                queue="default",
+                job_type="export",
+                payload={"test": True},
+                owner_user_id="42",
+                priority=5,
+            )
+
+        assert job is not None
+        session_spy.assert_called_once_with()
+
     def test_postgres_fair_share_count_runs_after_pg_cursor_setup(self, monkeypatch):
         monkeypatch.setenv("JOBS_MAX_PER_USER", "10")
         monkeypatch.setenv("JOBS_PG_SKIP_SCHEMA_INIT", "1")
@@ -388,7 +411,7 @@ class TestFairShareRepositoryIntegration:
             jobs_repository=repo,
         )
         fake_conn = _FakePostgresConnection(events)
-        monkeypatch.setattr(job_manager, "_connect", lambda: fake_conn)
+        monkeypatch.setattr(repo, "_connect", lambda: fake_conn)
         monkeypatch.setattr(job_manager, "_pg_cursor", lambda conn: _FakePostgresCursor(events))
 
         with patch.object(mgr_mod, "increment_created"), \
@@ -420,7 +443,7 @@ class TestFairShareRepositoryIntegration:
         repo = TrackingJobsRepository(db_path, events=events)
         job_manager = JobManager(db_path, jobs_repository=repo)
         fake_conn = _FakeSqliteConnection(events)
-        monkeypatch.setattr(job_manager, "_connect", lambda: fake_conn)
+        monkeypatch.setattr(repo, "_connect", lambda: fake_conn)
         monkeypatch.setattr(job_manager, "_update_gauges", lambda **kwargs: None)
 
         with patch.object(mgr_mod, "increment_created"), \
