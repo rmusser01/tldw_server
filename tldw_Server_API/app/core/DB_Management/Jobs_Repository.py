@@ -11,10 +11,13 @@ from __future__ import annotations
 import contextlib
 import sqlite3
 import uuid as _uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone as _tz
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
+
+from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 
@@ -61,48 +64,95 @@ class JobsRepository:
         backend: str,
         db_path: Path | None = None,
         db_url: str | None = None,
+        connection_pool: Any | None = None,
     ) -> None:
         """Build a repository bound to either a SQLite path or Postgres DSN."""
         self.backend = backend
         self.db_path = Path(db_path) if db_path is not None else None
         self.db_url = db_url
+        self.connection_pool = connection_pool
+        if self.connection_pool is not None and not hasattr(self.connection_pool, "acquire"):
+            raise TypeError("JobsRepository connection_pool must define an acquire() context manager")
 
     @classmethod
-    def for_sqlite(cls, db_path: Path) -> "JobsRepository":
+    def for_sqlite(
+        cls,
+        db_path: Path,
+        *,
+        connection_pool: Any | None = None,
+    ) -> JobsRepository:
         """Create a repository configured for the SQLite jobs database."""
-        return cls(backend="sqlite", db_path=db_path)
+        return cls(backend="sqlite", db_path=db_path, connection_pool=connection_pool)
 
     @classmethod
-    def for_postgres(cls, db_url: str) -> "JobsRepository":
+    def for_postgres(
+        cls,
+        db_url: str,
+        *,
+        connection_pool: Any | None = None,
+    ) -> JobsRepository:
         """Create a repository configured for the PostgreSQL jobs database."""
-        return cls(backend="postgres", db_url=db_url)
+        return cls(backend="postgres", db_url=db_url, connection_pool=connection_pool)
+
+    @staticmethod
+    def _prepare_sqlite_connection(conn: sqlite3.Connection) -> sqlite3.Connection:
+        """Apply local SQLite connection policy and row normalization."""
+        try:
+            configure_sqlite_connection(conn)
+        except sqlite3.Error as exc:
+            logger.debug("SQLite jobs repository policy configuration skipped: {}", exc)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     def _connect(self) -> Any:
         """Open a backend-specific connection with the expected local policy."""
         if self.backend == "postgres":
             if psycopg is None:  # pragma: no cover - guarded by optional dependency
                 raise RuntimeError("psycopg is required for postgres jobs repositories")
-            return psycopg.connect(self.db_url)
+            conn = psycopg.connect(self.db_url)
+            logger.debug("Opened direct postgres jobs repository connection")
+            return conn
+        if self.db_path is None:
+            raise ValueError("SQLite jobs repository requires db_path when no connection pool is provided")
         conn = sqlite3.connect(self.db_path)
-        with contextlib.suppress(sqlite3.Error):
-            configure_sqlite_connection(conn)
-        conn.row_factory = sqlite3.Row
-        return conn
+        logger.debug("Opened direct sqlite jobs repository connection for {}", self.db_path)
+        return self._prepare_sqlite_connection(conn)
+
+    @contextlib.contextmanager
+    def _acquire_connection(self) -> Iterator[Any]:
+        """Yield either a pooled connection or a directly opened backend connection."""
+        if self.connection_pool is None:
+            conn = self._connect()
+            try:
+                yield conn
+            finally:
+                conn.close()
+            return
+
+        with self.connection_pool.acquire() as conn:
+            if self.backend == "sqlite" and isinstance(conn, sqlite3.Connection):
+                self._prepare_sqlite_connection(conn)
+            logger.debug("Acquired {} jobs repository pooled connection", self.backend)
+            yield conn
 
     @contextlib.contextmanager
     def session(self) -> Iterator[JobsSession]:
         """Yield a managed session that commits on success and rolls back on failure."""
-        conn = self._connect()
-        session = JobsSession(backend=self.backend, conn=conn)
-        try:
-            yield session
-            conn.commit()
-        except Exception:
-            with contextlib.suppress(Exception):
-                conn.rollback()
-            raise
-        finally:
-            conn.close()
+        with self._acquire_connection() as conn:
+            session = JobsSession(backend=self.backend, conn=conn)
+            try:
+                yield session
+                conn.commit()
+            except Exception:
+                with contextlib.suppress(Exception):
+                    conn.rollback()
+                raise
+
+    def close_pool(self) -> None:
+        """Close an injected connection pool when the repository owns one."""
+        close_pool = getattr(self.connection_pool, "close", None)
+        if callable(close_pool):
+            close_pool()
 
     def count_active_jobs_for_user(
         self,
@@ -208,6 +258,42 @@ class JobsRepository:
 
         created_at_sqlite = _normalize_sqlite_datetime(created_at)
         available_at_sqlite = _normalize_sqlite_datetime(available_at)
+        params = (
+            uuid_val,
+            domain,
+            queue,
+            job_type,
+            owner_user_id,
+            project_id,
+            batch_group,
+            idempotency_key,
+            payload_json,
+            priority,
+            max_retries,
+            available_at_sqlite,
+            created_at_sqlite,
+            created_at_sqlite,
+            request_id,
+            trace_id,
+        )
+        try:
+            cur = session.conn.execute(
+                """
+                INSERT INTO jobs (
+                  uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
+                  idempotency_key, payload, result, status, priority, max_retries,
+                  retry_count, available_at, created_at, updated_at, request_id, trace_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?, ?, ?)
+                RETURNING *
+                """,
+                params,
+            )
+            row = cur.fetchone()
+            return dict(row) if row else {}
+        except sqlite3.OperationalError as exc:
+            if "returning" not in str(exc).lower():
+                raise
+
         session.conn.execute(
             """
             INSERT INTO jobs (
@@ -216,24 +302,7 @@ class JobsRepository:
               retry_count, available_at, created_at, updated_at, request_id, trace_id
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?, ?, ?)
             """,
-            (
-                uuid_val,
-                domain,
-                queue,
-                job_type,
-                owner_user_id,
-                project_id,
-                batch_group,
-                idempotency_key,
-                payload_json,
-                priority,
-                max_retries,
-                available_at_sqlite,
-                created_at_sqlite,
-                created_at_sqlite,
-                request_id,
-                trace_id,
-            ),
+            params,
         )
         job_id = session.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         row = session.conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()

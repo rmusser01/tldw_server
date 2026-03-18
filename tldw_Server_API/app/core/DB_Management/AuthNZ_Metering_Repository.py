@@ -8,8 +8,13 @@ shapes before returning dictionaries to the orchestration layer.
 
 from __future__ import annotations
 
+import inspect
 from datetime import date, datetime
 from typing import Any
+
+
+class DuplicateActiveSubscriptionError(RuntimeError):
+    """Raised when a user resolves to more than one active billing subscription."""
 
 
 class _AuthNZMeteringRepositoryBase:
@@ -38,6 +43,24 @@ class _AuthNZMeteringRepositoryBase:
         if isinstance(value, date):
             return value
         return datetime.strptime(str(value), "%Y-%m-%d").date()
+
+    @staticmethod
+    async def _sqlite_fetch_rows(cur: Any) -> list[Any]:
+        """Fetch SQLite cursor rows from adapters that expose fetchall or fetchone."""
+        fetchall = getattr(cur, "fetchall", None)
+        if callable(fetchall):
+            rows = fetchall()
+            if inspect.isawaitable(rows):
+                rows = await rows
+            return list(rows)
+
+        fetchone = getattr(cur, "fetchone", None)
+        if not callable(fetchone):
+            return []
+        row = fetchone()
+        if inspect.isawaitable(row):
+            row = await row
+        return [] if row is None else [row]
 
 
 class AuthNZUsageDailyRepository(_AuthNZMeteringRepositoryBase):
@@ -129,6 +152,33 @@ class AuthNZUsageDailyRepository(_AuthNZMeteringRepositoryBase):
 class AuthNZBillingSubscriptionRepository(_AuthNZMeteringRepositoryBase):
     """Resolve the active Stripe subscription that should receive metered usage."""
 
+    @staticmethod
+    def _raise_on_duplicate_matches(
+        rows: list[dict[str, Any]],
+        *,
+        user_id: int,
+        source: str,
+    ) -> None:
+        """Fail fast when a lookup branch returns more than one active subscription."""
+        if len(rows) > 1:
+            raise DuplicateActiveSubscriptionError(
+                f"Found multiple active subscriptions for user {user_id} via {source} lookup"
+            )
+
+    @staticmethod
+    def _coalesce_unique_match(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Collapse member/owner matches into a single unique subscription row."""
+        unique_rows: dict[tuple[Any, Any], dict[str, Any]] = {}
+        for row in rows:
+            unique_rows[(row.get("org_id"), row.get("stripe_subscription_id"))] = row
+        if not unique_rows:
+            return None
+        if len(unique_rows) > 1:
+            raise DuplicateActiveSubscriptionError(
+                "Found multiple active subscriptions for a single user across membership ownership lookups"
+            )
+        return next(iter(unique_rows.values()))
+
     async def get_active_subscription_for_user(
         self,
         user_id: int,
@@ -137,38 +187,44 @@ class AuthNZBillingSubscriptionRepository(_AuthNZMeteringRepositoryBase):
         pool = await self._get_db_pool()
         async with pool.acquire() as conn:
             if self._is_postgres(conn):
-                row = await conn.fetchrow(
-                    """
-                    SELECT os.stripe_customer_id,
-                           os.stripe_subscription_id,
-                           os.org_id
-                    FROM org_subscriptions os
-                    JOIN org_members om ON om.org_id = os.org_id
-                    WHERE om.user_id = $1
-                      AND om.status = 'active'
-                      AND os.status = 'active'
-                      AND os.stripe_subscription_id IS NOT NULL
-                    LIMIT 1
-                    """,
-                    user_id,
-                )
-                if row:
-                    return dict(row)
-                row = await conn.fetchrow(
-                    """
-                    SELECT os.stripe_customer_id,
-                           os.stripe_subscription_id,
-                           os.org_id
-                    FROM org_subscriptions os
-                    JOIN organizations o ON o.id = os.org_id
-                    WHERE o.owner_user_id = $1
-                      AND os.status = 'active'
-                      AND os.stripe_subscription_id IS NOT NULL
-                    LIMIT 1
-                    """,
-                    user_id,
-                )
-                return dict(row) if row else None
+                member_rows = [
+                    dict(row)
+                    for row in await conn.fetch(
+                        """
+                        SELECT os.stripe_customer_id,
+                               os.stripe_subscription_id,
+                               os.org_id
+                        FROM org_subscriptions os
+                        JOIN org_members om ON om.org_id = os.org_id
+                        WHERE om.user_id = $1
+                          AND om.status = 'active'
+                          AND os.status = 'active'
+                          AND os.stripe_subscription_id IS NOT NULL
+                        LIMIT 2
+                        """,
+                        user_id,
+                    )
+                ]
+                self._raise_on_duplicate_matches(member_rows, user_id=user_id, source="member")
+                owner_rows = [
+                    dict(row)
+                    for row in await conn.fetch(
+                        """
+                        SELECT os.stripe_customer_id,
+                               os.stripe_subscription_id,
+                               os.org_id
+                        FROM org_subscriptions os
+                        JOIN organizations o ON o.id = os.org_id
+                        WHERE o.owner_user_id = $1
+                          AND os.status = 'active'
+                          AND os.stripe_subscription_id IS NOT NULL
+                        LIMIT 2
+                        """,
+                        user_id,
+                    )
+                ]
+                self._raise_on_duplicate_matches(owner_rows, user_id=user_id, source="owner")
+                return self._coalesce_unique_match(member_rows + owner_rows)
 
             cur = await conn.execute(
                 """
@@ -181,14 +237,14 @@ class AuthNZBillingSubscriptionRepository(_AuthNZMeteringRepositoryBase):
                   AND om.status = 'active'
                   AND os.status = 'active'
                   AND os.stripe_subscription_id IS NOT NULL
-                LIMIT 1
+                LIMIT 2
                 """,
                 (user_id,),
             )
-            row = await cur.fetchone()
-            if row:
-                columns = [col[0] for col in cur.description]
-                return dict(zip(columns, row))
+            member_rows_raw = await self._sqlite_fetch_rows(cur)
+            member_columns = [col[0] for col in cur.description]
+            member_rows = [dict(zip(member_columns, row)) for row in member_rows_raw]
+            self._raise_on_duplicate_matches(member_rows, user_id=user_id, source="member")
 
             cur = await conn.execute(
                 """
@@ -200,15 +256,15 @@ class AuthNZBillingSubscriptionRepository(_AuthNZMeteringRepositoryBase):
                 WHERE o.owner_user_id = ?
                   AND os.status = 'active'
                   AND os.stripe_subscription_id IS NOT NULL
-                LIMIT 1
+                LIMIT 2
                 """,
                 (user_id,),
             )
-            row = await cur.fetchone()
-            if not row:
-                return None
-            columns = [col[0] for col in cur.description]
-            return dict(zip(columns, row))
+            owner_rows_raw = await self._sqlite_fetch_rows(cur)
+            owner_columns = [col[0] for col in cur.description]
+            owner_rows = [dict(zip(owner_columns, row)) for row in owner_rows_raw]
+            self._raise_on_duplicate_matches(owner_rows, user_id=user_id, source="owner")
+            return self._coalesce_unique_match(member_rows + owner_rows)
 
 
 class AuthNZMeteringSyncLogRepository(_AuthNZMeteringRepositoryBase):
@@ -232,6 +288,10 @@ class AuthNZMeteringSyncLogRepository(_AuthNZMeteringRepositoryBase):
                     )
                     """
                 )
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_metering_sync_log_day "
+                    "ON metering_sync_log (day)"
+                )
                 return
 
             await conn.execute(
@@ -246,6 +306,10 @@ class AuthNZMeteringSyncLogRepository(_AuthNZMeteringRepositoryBase):
                     PRIMARY KEY (user_id, day, stripe_subscription_id)
                 )
                 """
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_metering_sync_log_day "
+                "ON metering_sync_log (day)"
             )
             await conn.commit()
 

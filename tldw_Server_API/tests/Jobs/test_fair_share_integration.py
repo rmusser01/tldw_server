@@ -16,11 +16,12 @@ from unittest.mock import patch
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.Jobs_Repository import JobsRepository, JobsSession
-from tldw_Server_API.app.core.Jobs.manager import JobManager, _get_fair_share
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
+from tldw_Server_API.app.core.exceptions import BadRequestError
 
 
-@pytest.fixture()
+@pytest.fixture
 def job_manager(tmp_path, monkeypatch):
     """Create a JobManager backed by a temporary SQLite database."""
     monkeypatch.delenv("JOBS_DISABLE_LEASE_ENFORCEMENT", raising=False)
@@ -121,14 +122,15 @@ class TestFairSharePriorityAdjustment:
         assert stored is not None
         assert int(stored["priority"]) < 5
 
-    def test_warns_when_fair_share_check_is_skipped(self, job_manager, monkeypatch):
+    def test_fails_closed_when_fair_share_check_errors(self, job_manager, monkeypatch):
         monkeypatch.setenv("JOBS_MAX_PER_USER", "10")
         import tldw_Server_API.app.core.Jobs.manager as mgr_mod
         mgr_mod._fair_share = None
 
         with patch.object(JobManager, "_count_active_jobs_for_user", side_effect=RuntimeError("boom")), \
-             patch.object(mgr_mod.logger, "warning") as mock_warning:
-            job = job_manager.create_job(
+             patch.object(mgr_mod.logger, "warning") as mock_warning, \
+             pytest.raises(BadRequestError, match="Unable to evaluate fair-share policy; please retry"):
+            job_manager.create_job(
                 domain="chatbooks",
                 queue="default",
                 job_type="export",
@@ -137,7 +139,6 @@ class TestFairSharePriorityAdjustment:
                 priority=5,
             )
 
-        assert job is not None
         mock_warning.assert_called_once()
 
 
@@ -202,7 +203,9 @@ class TrackingJobsRepository(JobsRepository):
     ) -> int:
         self.count_sessions.append(session)
         self.events.append("count_active_jobs")
-        if session is not None and session.backend == "postgres":
+        if session is not None and (
+            session.backend == "postgres" or getattr(session.conn, "is_fake_sqlite", False)
+        ):
             return 0
         return super().count_active_jobs_for_user(user_id, session=session)
 
@@ -227,10 +230,12 @@ class TrackingJobsRepository(JobsRepository):
     ) -> dict[str, Any]:
         self.insert_sessions.append(session)
         self.events.append("insert_job")
-        if session is not None and session.backend == "postgres":
+        if session is not None and (
+            session.backend == "postgres" or getattr(session.conn, "is_fake_sqlite", False)
+        ):
             return {
                 "id": 1,
-                "uuid": "job-postgres-1",
+                "uuid": "job-tracked-1",
                 "domain": domain,
                 "queue": queue,
                 "job_type": job_type,
@@ -310,6 +315,33 @@ class _FakePostgresCursor:
         return {"c": 0}
 
 
+class _FakeSqliteConnection:
+    is_fake_sqlite = True
+
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def __enter__(self) -> "_FakeSqliteConnection":
+        self._events.append("conn_enter")
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self._events.append("conn_exit")
+        return False
+
+    def execute(self, query: str, params: tuple[Any, ...] | None = None) -> None:
+        self._events.append("sqlite_execute")
+
+    def commit(self) -> None:
+        self._events.append("conn_commit")
+
+    def rollback(self) -> None:
+        self._events.append("conn_rollback")
+
+    def close(self) -> None:
+        self._events.append("conn_close")
+
+
 class TestFairShareRepositoryIntegration:
     def test_create_job_reuses_repository_session_for_fair_share(self, tmp_path, monkeypatch):
         monkeypatch.setenv("JOBS_MAX_PER_USER", "10")
@@ -376,3 +408,55 @@ class TestFairShareRepositoryIntegration:
         assert repo.insert_sessions
         assert events.index("pg_cursor_enter") < events.index("count_active_jobs")
         assert repo.count_sessions[0] is repo.insert_sessions[0]
+
+    def test_sqlite_fair_share_count_runs_inside_write_transaction(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("JOBS_MAX_PER_USER", "10")
+        import tldw_Server_API.app.core.Jobs.manager as mgr_mod
+        mgr_mod._fair_share = None
+
+        db_path = tmp_path / "jobs_repo_sqlite_ordering.db"
+        ensure_jobs_tables(db_path)
+        events: list[str] = []
+        repo = TrackingJobsRepository(db_path, events=events)
+        job_manager = JobManager(db_path, jobs_repository=repo)
+        fake_conn = _FakeSqliteConnection(events)
+        monkeypatch.setattr(job_manager, "_connect", lambda: fake_conn)
+        monkeypatch.setattr(job_manager, "_update_gauges", lambda **kwargs: None)
+
+        with patch.object(mgr_mod, "increment_created"), \
+             patch.object(mgr_mod, "emit_job_event"), \
+             patch.object(mgr_mod, "submit_job_audit_event"):
+            job = job_manager.create_job(
+                domain="chatbooks",
+                queue="default",
+                job_type="export",
+                payload={"test": True},
+                owner_user_id="42",
+                priority=5,
+            )
+
+        assert job is not None
+        assert events.index("conn_enter") < events.index("count_active_jobs")
+        assert events.index("count_active_jobs") < events.index("insert_job")
+        assert repo.count_sessions[0] is repo.insert_sessions[0]
+
+    def test_constructor_rejects_backend_mismatch(self, tmp_path):
+        db_path = tmp_path / "jobs_repo_backend_mismatch.db"
+        ensure_jobs_tables(db_path)
+        repo = TrackingJobsRepository(
+            backend="postgres",
+            db_url="postgres://jobs.test/review_cleanup",
+        )
+
+        with pytest.raises(ValueError, match="does not match manager backend"):
+            JobManager(db_path, jobs_repository=repo)
+
+    def test_constructor_rejects_missing_repository_methods(self, tmp_path):
+        db_path = tmp_path / "jobs_repo_invalid_repo.db"
+        ensure_jobs_tables(db_path)
+
+        class InvalidJobsRepository:
+            backend = "sqlite"
+
+        with pytest.raises(TypeError, match="jobs_repository must expose"):
+            JobManager(db_path, jobs_repository=InvalidJobsRepository())

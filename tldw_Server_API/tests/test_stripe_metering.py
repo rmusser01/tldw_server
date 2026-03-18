@@ -481,7 +481,12 @@ class TestSyncDailyUsage:
     async def test_query_user_subscription_falls_back_to_org_owner(self, enabled_service, fake_pool, fake_sqlite_conn):
         svc = enabled_service
         miss_cursor = MagicMock()
-        miss_cursor.fetchone = AsyncMock(return_value=None)
+        miss_cursor.description = [
+            ("stripe_customer_id",),
+            ("stripe_subscription_id",),
+            ("org_id",),
+        ]
+        miss_cursor.fetchall = AsyncMock(return_value=[])
 
         owner_cursor = MagicMock()
         owner_cursor.description = [
@@ -489,7 +494,7 @@ class TestSyncDailyUsage:
             ("stripe_subscription_id",),
             ("org_id",),
         ]
-        owner_cursor.fetchone = AsyncMock(return_value=("cus_owner", "sub_owner", 9))
+        owner_cursor.fetchall = AsyncMock(return_value=[("cus_owner", "sub_owner", 9)])
 
         conn = fake_sqlite_conn([miss_cursor, owner_cursor])
 

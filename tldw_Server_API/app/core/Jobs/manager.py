@@ -150,6 +150,29 @@ class JobManager:
     def _is_truthy(val: str | None) -> bool:
         return _shared_is_truthy(val)
 
+    @staticmethod
+    def _validate_jobs_repository(
+        jobs_repository: Any,
+        *,
+        backend: str,
+    ) -> JobsRepository:
+        """Validate an injected repository before the manager starts using it."""
+        required_methods = ("session", "count_active_jobs_for_user", "insert_job")
+        missing = [name for name in required_methods if not callable(getattr(jobs_repository, name, None))]
+        if missing:
+            raise TypeError(
+                "jobs_repository must expose backend/session/count_active_jobs_for_user/insert_job; "
+                f"missing {missing}"
+            )
+
+        repo_backend = str(getattr(jobs_repository, "backend", "")).lower()
+        if repo_backend != backend:
+            raise ValueError(  # noqa: TRY003
+                f"Injected JobsRepository backend '{repo_backend or 'unknown'}' "
+                f"does not match manager backend '{backend}'"
+            )
+        return jobs_repository
+
     def __init__(
         self,
         db_path: Path | None = None,
@@ -208,10 +231,15 @@ class JobManager:
                 else:
                     self.db_path = ensure_jobs_tables(db_path)
         self._conn = None  # Lazily opened per operation
-        self._jobs_repository = jobs_repository or (
+        default_jobs_repository = (
             JobsRepository.for_postgres(self.db_url)
             if self.backend == "postgres"
             else JobsRepository.for_sqlite(self.db_path)
+        )
+        self._jobs_repository = (
+            self._validate_jobs_repository(jobs_repository, backend=self.backend)
+            if jobs_repository is not None
+            else default_jobs_repository
         )
 
         self._enforce_override = enforce_leases
@@ -253,8 +281,8 @@ class JobManager:
                 session=session,
             )
         except _JOB_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Failed to count active jobs for user {user_id}: {exc}")
-            return 0
+            logger.warning(f"Failed to count active jobs for user {user_id}: {exc}")
+            raise BadRequestError("Unable to evaluate fair-share policy; please retry") from exc
 
     def _apply_fair_share_submission_policy(
         self,
@@ -285,8 +313,8 @@ class JobManager:
         except BadRequestError:
             raise
         except _JOB_NONCRITICAL_EXCEPTIONS as _fs_exc:
-            logger.warning(f"Fair-share scheduling check skipped: {_fs_exc}")
-            return priority
+            logger.warning(f"Fair-share scheduling check failed: {_fs_exc}")
+            raise BadRequestError("Unable to evaluate fair-share policy; please retry") from _fs_exc
 
     @staticmethod
     def _map_fair_share_score_to_priority(score: int) -> int:
@@ -1158,14 +1186,6 @@ class JobManager:
         conn = self._connect()
         repo_session = JobsSession(self.backend, conn)
         try:
-            # Fair-share scheduling: enforce per-user concurrency limits and adjust priority
-            if owner_user_id and self.backend != "postgres":
-                priority = self._apply_fair_share_submission_policy(
-                    owner_user_id,
-                    priority,
-                    session=repo_session,
-                )
-
             try:
                 with job_span(
                     "job.create",
@@ -1210,7 +1230,7 @@ class JobManager:
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
                     with self._pg_cursor(conn) as cur:
-                        priority = self._apply_fair_share_submission_policy(
+                        effective_priority = self._apply_fair_share_submission_policy(
                             owner_user_id,
                             priority,
                             session=repo_session,
@@ -1267,7 +1287,7 @@ class JobManager:
                                     batch_group,
                                     idempotency_key,
                                     payload_json,
-                                    priority,
+                                    effective_priority,
                                     max_retries,
                                     avail_param if avail_param else None,
                                     request_id,
@@ -1377,7 +1397,7 @@ class JobManager:
                             project_id=project_id,
                             batch_group=batch_group,
                             idempotency_key=idempotency_key,
-                            priority=priority,
+                            priority=effective_priority,
                             max_retries=max_retries,
                             available_at=avail_param if avail_param else None,
                             request_id=request_id,
@@ -1480,6 +1500,11 @@ class JobManager:
                 for attempt in range(2):
                     try:
                         with conn:
+                            effective_priority = self._apply_fair_share_submission_policy(
+                                owner_user_id,
+                                priority,
+                                session=repo_session,
+                            )
                             # Domain/user quotas (SQLite)
                             try:
                                 max_q = self._quota_get("JOBS_QUOTA_MAX_QUEUED", domain, owner_user_id)
@@ -1521,7 +1546,7 @@ class JobManager:
                                         batch_group,
                                         idempotency_key,
                                         payload_json,
-                                        priority,
+                                        effective_priority,
                                         max_retries,
                                         (
                                             avail_param_sqlite.strftime("%Y-%m-%d %H:%M:%S")
@@ -1566,7 +1591,7 @@ class JobManager:
                                 project_id=project_id,
                                 batch_group=batch_group,
                                 idempotency_key=idempotency_key,
-                                priority=priority,
+                                priority=effective_priority,
                                 max_retries=max_retries,
                                 available_at=avail_param_sqlite,
                                 request_id=request_id,

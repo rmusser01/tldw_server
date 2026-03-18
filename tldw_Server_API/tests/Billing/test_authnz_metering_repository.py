@@ -1,32 +1,39 @@
 from __future__ import annotations
 
 import sqlite3
+from types import TracebackType
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 
 class _AcquireContext:
-    def __init__(self, conn):
+    def __init__(self, conn: Any) -> None:
         self._conn = conn
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Any:
         return self._conn
 
-    async def __aexit__(self, exc_type, exc, tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool:
         return False
 
 
 class _FakePool:
-    def __init__(self, conn):
+    def __init__(self, conn: Any) -> None:
         self._conn = conn
 
-    def acquire(self):
+    def acquire(self) -> _AcquireContext:
         return _AcquireContext(self._conn)
 
 
 class _FakeSqliteConn:
-    def __init__(self, execute_side_effect=None):
+    def __init__(self, execute_side_effect: Any | None = None) -> None:
         self.execute = AsyncMock(side_effect=execute_side_effect)
         self.commit = AsyncMock()
 
@@ -78,7 +85,12 @@ class TestAuthNZBillingSubscriptionRepository:
         )
 
         miss_cursor = MagicMock()
-        miss_cursor.fetchone = AsyncMock(return_value=None)
+        miss_cursor.description = [
+            ("stripe_customer_id",),
+            ("stripe_subscription_id",),
+            ("org_id",),
+        ]
+        miss_cursor.fetchall = AsyncMock(return_value=[])
 
         owner_cursor = MagicMock()
         owner_cursor.description = [
@@ -86,7 +98,7 @@ class TestAuthNZBillingSubscriptionRepository:
             ("stripe_subscription_id",),
             ("org_id",),
         ]
-        owner_cursor.fetchone = AsyncMock(return_value=("cus_owner", "sub_owner", 9))
+        owner_cursor.fetchall = AsyncMock(return_value=[("cus_owner", "sub_owner", 9)])
 
         conn = _FakeSqliteConn([miss_cursor, owner_cursor])
 
@@ -98,6 +110,36 @@ class TestAuthNZBillingSubscriptionRepository:
             "stripe_subscription_id": "sub_owner",
             "org_id": 9,
         }
+
+    @pytest.mark.asyncio
+    async def test_get_active_subscription_for_user_raises_on_duplicate_memberships(self):
+        from tldw_Server_API.app.core.DB_Management.AuthNZ_Metering_Repository import (
+            AuthNZBillingSubscriptionRepository,
+            DuplicateActiveSubscriptionError,
+        )
+
+        duplicate_cursor = MagicMock()
+        duplicate_cursor.description = [
+            ("stripe_customer_id",),
+            ("stripe_subscription_id",),
+            ("org_id",),
+        ]
+        duplicate_cursor.fetchall = AsyncMock(
+            return_value=[
+                ("cus_a", "sub_a", 1),
+                ("cus_b", "sub_b", 2),
+            ]
+        )
+
+        owner_cursor = MagicMock()
+        owner_cursor.description = duplicate_cursor.description
+        owner_cursor.fetchall = AsyncMock(return_value=[])
+
+        conn = _FakeSqliteConn([duplicate_cursor, owner_cursor])
+        repo = AuthNZBillingSubscriptionRepository(db_pool=_FakePool(conn))
+
+        with pytest.raises(DuplicateActiveSubscriptionError, match="multiple active subscriptions"):
+            await repo.get_active_subscription_for_user(42)
 
 
 class TestAuthNZMeteringSyncLogRepository:
@@ -112,8 +154,10 @@ class TestAuthNZMeteringSyncLogRepository:
 
         await repo.ensure_schema()
 
-        conn.execute.assert_awaited_once()
-        assert "CREATE TABLE IF NOT EXISTS metering_sync_log" in conn.execute.await_args.args[0]
+        assert conn.execute.await_count == 2
+        execute_calls = [call.args[0] for call in conn.execute.await_args_list]
+        assert "CREATE TABLE IF NOT EXISTS metering_sync_log" in execute_calls[0]
+        assert "CREATE INDEX IF NOT EXISTS idx_metering_sync_log_day" in execute_calls[1]
         conn.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
