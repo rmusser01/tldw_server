@@ -8,10 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from loguru import logger
+from tldw_Server_API.app.core.DB_Management.AuthNZ_Metering_Repository import (
+    AuthNZBillingSubscriptionRepository,
+    AuthNZMeteringSyncLogRepository,
+    AuthNZUsageDailyRepository,
+)
 
 # Stripe import is optional - mirrors stripe_client.py pattern
 try:
@@ -27,10 +32,29 @@ except ImportError:
 class StripeMeteringService:
     """Reconciles local usage tracking with Stripe metering."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        db_pool: Any | None = None,
+        usage_repo: AuthNZUsageDailyRepository | None = None,
+        subscription_repo: AuthNZBillingSubscriptionRepository | None = None,
+        sync_log_repo: AuthNZMeteringSyncLogRepository | None = None,
+    ) -> None:
         self._enabled = os.getenv("BILLING_ENABLED", "false").lower() in ("1", "true")
         self._stripe_key = os.getenv("STRIPE_API_KEY", "")
         self._meter_event_name = os.getenv("STRIPE_METER_EVENT_NAME", "api_requests")
+        self._db_pool = db_pool
+        self._usage_repo = usage_repo or AuthNZUsageDailyRepository(db_pool=db_pool)
+        self._subscription_repo = subscription_repo or AuthNZBillingSubscriptionRepository(
+            db_pool=db_pool
+        )
+        self._sync_log_repo = sync_log_repo or AuthNZMeteringSyncLogRepository(
+            db_pool=db_pool
+        )
+        self._use_repository_owned_pool = any(
+            dependency is not None
+            for dependency in (db_pool, usage_repo, subscription_repo, sync_log_repo)
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -38,9 +62,13 @@ class StripeMeteringService:
 
     async def _get_db_pool(self) -> Any:
         """Lazily acquire the AuthNZ database pool."""
+        if self._db_pool is not None:
+            return self._db_pool
+
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
-        return await get_db_pool()
+        self._db_pool = await get_db_pool()
+        return self._db_pool
 
     @staticmethod
     def _is_postgres(conn: Any) -> bool:
@@ -74,81 +102,44 @@ class StripeMeteringService:
         return rows
 
     @staticmethod
-    def _coerce_day(value: str | date) -> date:
-        """Return a real date object for PostgreSQL DATE bindings."""
-        if isinstance(value, date):
-            return value
-        return datetime.strptime(str(value), "%Y-%m-%d").date()
+    def _pool_bound_usage_repo(pool: Any | None) -> AuthNZUsageDailyRepository | None:
+        if pool is None:
+            return None
+        return AuthNZUsageDailyRepository(db_pool=pool)
 
     @staticmethod
-    def _is_missing_stripe_resource_error(exc: Exception) -> bool:
-        """Return True when Stripe reports a missing subscription/resource."""
-        code = str(getattr(exc, "code", "") or "").lower()
-        if code == "resource_missing":
-            return True
-        message = str(exc).lower()
-        return "no such subscription" in message or "resource missing" in message
+    def _pool_bound_subscription_repo(
+        pool: Any | None,
+    ) -> AuthNZBillingSubscriptionRepository | None:
+        if pool is None:
+            return None
+        return AuthNZBillingSubscriptionRepository(db_pool=pool)
 
-    async def _query_usage_for_date(self, pool: Any, target_date: str | date) -> list[dict[str, Any]]:
+    @staticmethod
+    def _pool_bound_sync_log_repo(
+        pool: Any | None,
+    ) -> AuthNZMeteringSyncLogRepository | None:
+        if pool is None:
+            return None
+        return AuthNZMeteringSyncLogRepository(db_pool=pool)
+
+    async def _query_usage_for_date(
+        self,
+        pool: Any | None,
+        target_date: str,
+    ) -> list[dict[str, Any]]:
         """Fetch usage_daily rows for *target_date*.
 
         Returns a list of dicts with keys: user_id, requests, errors,
         bytes_total, bytes_in_total, latency_avg_ms.
         """
-        async with pool.acquire() as conn:
-            if self._is_postgres(conn):
-                pg_day = self._coerce_day(target_date)
-                try:
-                    rows = await conn.fetch(
-                        "SELECT user_id, requests, errors, bytes_total, "
-                        "COALESCE(bytes_in_total, 0) AS bytes_in_total, latency_avg_ms "
-                        "FROM usage_daily WHERE day = $1",
-                        pg_day,
-                    )
-                    return [dict(r) for r in rows]
-                except Exception as exc:
-                    if not self._is_missing_usage_column_error(exc):
-                        raise
-                    rows = await conn.fetch(
-                        "SELECT user_id, requests, errors, bytes_total, latency_avg_ms "
-                        "FROM usage_daily WHERE day = $1",
-                        pg_day,
-                    )
-                    legacy_rows = [dict(r) for r in rows]
-                    for row in legacy_rows:
-                        row["bytes_in_total"] = 0
-                    return legacy_rows
-            else:
-                try:
-                    cur = await conn.execute(
-                        "SELECT user_id, requests, errors, bytes_total, "
-                        "COALESCE(bytes_in_total, 0) AS bytes_in_total, latency_avg_ms "
-                        "FROM usage_daily WHERE day = ?",
-                        (target_date,),
-                    )
-                    raw_rows = await cur.fetchall()
-                    return self._sqlite_rows_to_dicts(
-                        raw_rows,
-                        cur.description,
-                        include_bytes_in_total=True,
-                    )
-                except Exception as exc:
-                    if not self._is_missing_usage_column_error(exc):
-                        raise
-                    cur = await conn.execute(
-                        "SELECT user_id, requests, errors, bytes_total, latency_avg_ms "
-                        "FROM usage_daily WHERE day = ?",
-                        (target_date,),
-                    )
-                    raw_rows = await cur.fetchall()
-                    return self._sqlite_rows_to_dicts(
-                        raw_rows,
-                        cur.description,
-                        include_bytes_in_total=False,
-                    )
+        repo = self._pool_bound_usage_repo(pool) or self._usage_repo
+        return await repo.fetch_usage_for_date(target_date)
 
     async def _query_user_subscription(
-        self, pool: Any, user_id: int
+        self,
+        pool: Any | None,
+        user_id: int,
     ) -> dict[str, Any] | None:
         """Look up the active Stripe subscription for a user.
 
@@ -156,79 +147,8 @@ class StripeMeteringService:
         organisation subscription that has a Stripe subscription ID.
         Falls back to checking the ``organizations.owner_user_id`` path.
         """
-        async with pool.acquire() as conn:
-            if self._is_postgres(conn):
-                row = await conn.fetchrow(
-                    """
-                    SELECT os.stripe_customer_id,
-                           os.stripe_subscription_id,
-                           os.org_id
-                    FROM org_subscriptions os
-                    JOIN org_members om ON om.org_id = os.org_id
-                    WHERE om.user_id = $1
-                      AND om.status = 'active'
-                      AND os.status = 'active'
-                      AND os.stripe_subscription_id IS NOT NULL
-                    LIMIT 1
-                    """,
-                    user_id,
-                )
-                if row:
-                    return dict(row)
-                row = await conn.fetchrow(
-                    """
-                    SELECT os.stripe_customer_id,
-                           os.stripe_subscription_id,
-                           os.org_id
-                    FROM org_subscriptions os
-                    JOIN organizations o ON o.id = os.org_id
-                    WHERE o.owner_user_id = $1
-                      AND os.status = 'active'
-                      AND os.stripe_subscription_id IS NOT NULL
-                    LIMIT 1
-                    """,
-                    user_id,
-                )
-                return dict(row) if row else None
-            else:
-                cur = await conn.execute(
-                    """
-                    SELECT os.stripe_customer_id,
-                           os.stripe_subscription_id,
-                           os.org_id
-                    FROM org_subscriptions os
-                    JOIN org_members om ON om.org_id = os.org_id
-                    WHERE om.user_id = ?
-                      AND om.status = 'active'
-                      AND os.status = 'active'
-                      AND os.stripe_subscription_id IS NOT NULL
-                    LIMIT 1
-                    """,
-                    (user_id,),
-                )
-                row = await cur.fetchone()
-                if row:
-                    columns = [col[0] for col in cur.description]
-                    return dict(zip(columns, row))
-                cur = await conn.execute(
-                    """
-                    SELECT os.stripe_customer_id,
-                           os.stripe_subscription_id,
-                           os.org_id
-                    FROM org_subscriptions os
-                    JOIN organizations o ON o.id = os.org_id
-                    WHERE o.owner_user_id = ?
-                      AND os.status = 'active'
-                      AND os.stripe_subscription_id IS NOT NULL
-                    LIMIT 1
-                    """,
-                    (user_id,),
-                )
-                row = await cur.fetchone()
-                if not row:
-                    return None
-                columns = [col[0] for col in cur.description]
-                return dict(zip(columns, row))
+        repo = self._pool_bound_subscription_repo(pool) or self._subscription_repo
+        return await repo.get_active_subscription_for_user(user_id)
 
     async def _get_subscription_metered_item(
         self, subscription_id: str
@@ -254,110 +174,51 @@ class StripeMeteringService:
             # No metered item found — return None so caller can skip
             return None
         except Exception as exc:
-            if self._is_missing_stripe_resource_error(exc):
-                logger.warning(
-                    "Stripe subscription {} is missing; skipping metering sync",
-                    subscription_id,
-                )
-                return None
             logger.warning(
                 "Failed to retrieve subscription items for {}: {}",
                 subscription_id,
                 exc,
             )
-            raise
+            return None
 
-    async def _ensure_metering_sync_table(self, pool: Any) -> None:
+    async def _ensure_metering_sync_table(self, pool: Any | None) -> None:
         """Create the ``metering_sync_log`` tracking table if it does not exist."""
-        async with pool.acquire() as conn:
-            if self._is_postgres(conn):
-                await conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS metering_sync_log (
-                        user_id INTEGER NOT NULL,
-                        day DATE NOT NULL,
-                        stripe_subscription_id TEXT NOT NULL,
-                        requests_synced INTEGER DEFAULT 0,
-                        bytes_synced BIGINT DEFAULT 0,
-                        synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (user_id, day, stripe_subscription_id)
-                    )
-                    """
-                )
-            else:
-                await conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS metering_sync_log (
-                        user_id INTEGER NOT NULL,
-                        day DATE NOT NULL,
-                        stripe_subscription_id TEXT NOT NULL,
-                        requests_synced INTEGER DEFAULT 0,
-                        bytes_synced INTEGER DEFAULT 0,
-                        synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (user_id, day, stripe_subscription_id)
-                    )
-                    """
-                )
-                await conn.commit()
+        repo = self._pool_bound_sync_log_repo(pool) or self._sync_log_repo
+        await repo.ensure_schema()
 
     async def _already_synced(
-        self, pool: Any, user_id: int, day: str | date, subscription_id: str
+        self,
+        pool: Any | None,
+        user_id: int,
+        day: str,
+        subscription_id: str,
     ) -> bool:
         """Return True if usage for this user/day/subscription was already synced."""
-        async with pool.acquire() as conn:
-            if self._is_postgres(conn):
-                pg_day = self._coerce_day(day)
-                row = await conn.fetchval(
-                    "SELECT 1 FROM metering_sync_log "
-                    "WHERE user_id = $1 AND day = $2 AND stripe_subscription_id = $3",
-                    user_id,
-                    pg_day,
-                    subscription_id,
-                )
-                return row is not None
-            else:
-                cur = await conn.execute(
-                    "SELECT 1 FROM metering_sync_log "
-                    "WHERE user_id = ? AND day = ? AND stripe_subscription_id = ?",
-                    (user_id, day, subscription_id),
-                )
-                return (await cur.fetchone()) is not None
+        repo = self._pool_bound_sync_log_repo(pool) or self._sync_log_repo
+        return await repo.already_synced(
+            user_id=user_id,
+            day=day,
+            subscription_id=subscription_id,
+        )
 
     async def _record_sync(
         self,
-        pool: Any,
+        pool: Any | None,
         user_id: int,
-        day: str | date,
+        day: str,
         subscription_id: str,
         requests: int,
         bytes_total: int,
     ) -> None:
         """Record a successful sync in metering_sync_log."""
-        async with pool.acquire() as conn:
-            if self._is_postgres(conn):
-                pg_day = self._coerce_day(day)
-                await conn.execute(
-                    "INSERT INTO metering_sync_log "
-                    "(user_id, day, stripe_subscription_id, requests_synced, bytes_synced) "
-                    "VALUES ($1, $2, $3, $4, $5) "
-                    "ON CONFLICT (user_id, day, stripe_subscription_id) DO UPDATE "
-                    "SET requests_synced = EXCLUDED.requests_synced, "
-                    "    bytes_synced = EXCLUDED.bytes_synced, "
-                    "    synced_at = CURRENT_TIMESTAMP",
-                    user_id,
-                    pg_day,
-                    subscription_id,
-                    requests,
-                    bytes_total,
-                )
-            else:
-                await conn.execute(
-                    "INSERT OR REPLACE INTO metering_sync_log "
-                    "(user_id, day, stripe_subscription_id, requests_synced, bytes_synced) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (user_id, day, subscription_id, requests, bytes_total),
-                )
-                await conn.commit()
+        repo = self._pool_bound_sync_log_repo(pool) or self._sync_log_repo
+        await repo.record_sync(
+            user_id=user_id,
+            day=day,
+            subscription_id=subscription_id,
+            requests=requests,
+            bytes_total=bytes_total,
+        )
 
     async def _report_usage_to_stripe(
         self, subscription_item_id: str, quantity: int, timestamp: int
@@ -378,28 +239,14 @@ class StripeMeteringService:
             action="set",
         )
 
-    async def _query_sync_totals(self, pool: Any, target_date: str | date) -> list[dict[str, Any]]:
+    async def _query_sync_totals(
+        self,
+        pool: Any | None,
+        target_date: str,
+    ) -> list[dict[str, Any]]:
         """Fetch synced totals from metering_sync_log for *target_date*."""
-        async with pool.acquire() as conn:
-            if self._is_postgres(conn):
-                pg_day = self._coerce_day(target_date)
-                rows = await conn.fetch(
-                    "SELECT user_id, stripe_subscription_id, requests_synced, bytes_synced "
-                    "FROM metering_sync_log WHERE day = $1",
-                    pg_day,
-                )
-                return [dict(r) for r in rows]
-            else:
-                cur = await conn.execute(
-                    "SELECT user_id, stripe_subscription_id, requests_synced, bytes_synced "
-                    "FROM metering_sync_log WHERE day = ?",
-                    (target_date,),
-                )
-                raw = await cur.fetchall()
-                if not raw:
-                    return []
-                cols = [c[0] for c in cur.description]
-                return [dict(zip(cols, r)) for r in raw]
+        repo = self._pool_bound_sync_log_repo(pool) or self._sync_log_repo
+        return await repo.fetch_sync_totals(target_date)
 
     # ------------------------------------------------------------------
     # Public API
@@ -429,16 +276,17 @@ class StripeMeteringService:
         # Configure stripe key (stripe is guaranteed non-None since STRIPE_AVAILABLE is True)
         stripe.api_key = self._stripe_key  # type: ignore[union-attr]
 
-        # Acquire DB pool
-        try:
-            pool = await self._get_db_pool()
-        except Exception as exc:
-            logger.error("Stripe metering sync: failed to get DB pool: {}", exc)
-            return {
-                "status": "error",
-                "date": target_date,
-                "error": f"db_pool_unavailable: {exc}",
-            }
+        pool = None
+        if not self._use_repository_owned_pool:
+            try:
+                pool = await self._get_db_pool()
+            except Exception as exc:
+                logger.error("Stripe metering sync: failed to get DB pool: {}", exc)
+                return {
+                    "status": "error",
+                    "date": target_date,
+                    "error": f"db_pool_unavailable: {exc}",
+                }
 
         # Ensure tracking table exists
         try:
@@ -609,17 +457,18 @@ class StripeMeteringService:
             datetime.now(timezone.utc) - timedelta(days=1)
         ).strftime("%Y-%m-%d")
 
-        # Acquire DB pool
-        try:
-            pool = await self._get_db_pool()
-        except Exception as exc:
-            logger.error("Reconciliation check: failed to get DB pool: {}", exc)
-            return {
-                "status": "error",
-                "date": target_date,
-                "error": f"db_pool_unavailable: {exc}",
-                "discrepancies": [],
-            }
+        pool = None
+        if not self._use_repository_owned_pool:
+            try:
+                pool = await self._get_db_pool()
+            except Exception as exc:
+                logger.error("Reconciliation check: failed to get DB pool: {}", exc)
+                return {
+                    "status": "error",
+                    "date": target_date,
+                    "error": f"db_pool_unavailable: {exc}",
+                    "discrepancies": [],
+                }
 
         # Fetch local usage totals
         try:
@@ -702,4 +551,4 @@ class StripeMeteringService:
     @property
     def is_enabled(self) -> bool:
         """Whether Stripe metering is enabled."""
-        return self._enabled and bool(self._stripe_key) and STRIPE_AVAILABLE
+        return self._enabled and bool(self._stripe_key)

@@ -183,6 +183,59 @@ class TestSyncDailyUsage:
     """Tests for StripeMeteringService.sync_daily_usage."""
 
     @pytest.mark.asyncio
+    async def test_uses_injected_repositories_for_sync(self):
+        with patch.dict(
+            "os.environ",
+            {"BILLING_ENABLED": "true", "STRIPE_API_KEY": "sk_test_123"},
+        ):
+            svc = StripeMeteringService(
+                usage_repo=MagicMock(),
+                subscription_repo=MagicMock(),
+                sync_log_repo=MagicMock(),
+            )
+        svc._usage_repo.fetch_usage_for_date = AsyncMock(return_value=[
+            {
+                "user_id": 1,
+                "requests": 100,
+                "errors": 0,
+                "bytes_total": 5000,
+                "bytes_in_total": 3000,
+                "latency_avg_ms": 50.0,
+            },
+        ])
+        svc._subscription_repo.get_active_subscription_for_user = AsyncMock(return_value={
+            "stripe_customer_id": "cus_test1",
+            "stripe_subscription_id": "sub_test1",
+            "org_id": 10,
+        })
+        svc._sync_log_repo.ensure_schema = AsyncMock()
+        svc._sync_log_repo.already_synced = AsyncMock(return_value=False)
+        svc._sync_log_repo.record_sync = AsyncMock()
+        svc._get_subscription_metered_item = AsyncMock(return_value="si_item1")
+        svc._report_usage_to_stripe = AsyncMock()
+
+        with _stripe_ok():
+            result = await svc.sync_daily_usage(date="2026-03-13")
+
+        assert result["status"] == "completed"
+        assert result["synced_users"] == 1
+        svc._sync_log_repo.ensure_schema.assert_awaited_once()
+        svc._usage_repo.fetch_usage_for_date.assert_awaited_once_with("2026-03-13")
+        svc._subscription_repo.get_active_subscription_for_user.assert_awaited_once_with(1)
+        svc._sync_log_repo.already_synced.assert_awaited_once_with(
+            user_id=1,
+            day="2026-03-13",
+            subscription_id="sub_test1",
+        )
+        svc._sync_log_repo.record_sync.assert_awaited_once_with(
+            user_id=1,
+            day="2026-03-13",
+            subscription_id="sub_test1",
+            requests=100,
+            bytes_total=5000,
+        )
+
+    @pytest.mark.asyncio
     async def test_skips_when_disabled(self):
         """Returns skip status when billing is not enabled."""
         with patch.dict("os.environ", {}, clear=True):
