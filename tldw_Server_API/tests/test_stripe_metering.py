@@ -196,6 +196,15 @@ class _FakeSqliteConn:
 class TestSyncDailyUsage:
     """Tests for StripeMeteringService.sync_daily_usage."""
 
+    def test_rejects_partial_repository_injection_without_db_pool(self):
+        from tldw_Server_API.app.services.stripe_metering_service import StripeMeteringService
+
+        with pytest.raises(
+            ValueError,
+            match="Inject all metering repositories together or provide db_pool",
+        ):
+            StripeMeteringService(usage_repo=MagicMock())
+
     @pytest.mark.asyncio
     async def test_uses_injected_repositories_for_sync(self):
         with patch.dict(

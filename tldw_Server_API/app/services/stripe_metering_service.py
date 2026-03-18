@@ -44,6 +44,13 @@ class StripeMeteringService:
         self._stripe_key = os.getenv("STRIPE_API_KEY", "")
         self._meter_event_name = os.getenv("STRIPE_METER_EVENT_NAME", "api_requests")
         self._db_pool = db_pool
+        injected_repo_count = sum(
+            repo is not None for repo in (usage_repo, subscription_repo, sync_log_repo)
+        )
+        if db_pool is None and 0 < injected_repo_count < 3:
+            raise ValueError(  # noqa: TRY003
+                "Inject all metering repositories together or provide db_pool"
+            )
         self._usage_repo = usage_repo or AuthNZUsageDailyRepository(db_pool=db_pool)
         self._subscription_repo = subscription_repo or AuthNZBillingSubscriptionRepository(
             db_pool=db_pool
@@ -51,10 +58,7 @@ class StripeMeteringService:
         self._sync_log_repo = sync_log_repo or AuthNZMeteringSyncLogRepository(
             db_pool=db_pool
         )
-        self._use_repository_owned_pool = any(
-            dependency is not None
-            for dependency in (db_pool, usage_repo, subscription_repo, sync_log_repo)
-        )
+        self._use_repository_owned_pool = db_pool is not None or injected_repo_count == 3
 
     # ------------------------------------------------------------------
     # Internal helpers
