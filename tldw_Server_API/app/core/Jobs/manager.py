@@ -256,6 +256,38 @@ class JobManager:
             logger.debug(f"Failed to count active jobs for user {user_id}: {exc}")
             return 0
 
+    def _apply_fair_share_submission_policy(
+        self,
+        owner_user_id: str | None,
+        priority: int,
+        *,
+        session: JobsSession,
+    ) -> int:
+        """Enforce fair-share admission and priority mapping for a pending job.
+
+        The repository session is supplied by the caller so the active-job count
+        can run inside the same DB transaction/context as the eventual insert.
+        """
+        if not owner_user_id:
+            return priority
+
+        try:
+            scheduler = _get_fair_share()
+            active_count = self._count_active_jobs_for_user(owner_user_id, session=session)
+            if not scheduler.can_submit(owner_user_id, active_count):
+                raise BadRequestError(  # noqa: TRY003
+                    f"User {owner_user_id} has reached the maximum concurrent job limit "
+                    f"({scheduler.max_per_user})"
+                )
+            fair_priority = scheduler.calculate_priority(owner_user_id, active_count)
+            fair_priority_mapped = self._map_fair_share_score_to_priority(fair_priority)
+            return min(priority, fair_priority_mapped)
+        except BadRequestError:
+            raise
+        except _JOB_NONCRITICAL_EXCEPTIONS as _fs_exc:
+            logger.warning(f"Fair-share scheduling check skipped: {_fs_exc}")
+            return priority
+
     @staticmethod
     def _map_fair_share_score_to_priority(score: int) -> int:
         """Convert a higher fair-share score into a higher queue priority.
@@ -1127,22 +1159,12 @@ class JobManager:
         repo_session = JobsSession(self.backend, conn)
         try:
             # Fair-share scheduling: enforce per-user concurrency limits and adjust priority
-            if owner_user_id:
-                try:
-                    scheduler = _get_fair_share()
-                    active_count = self._count_active_jobs_for_user(owner_user_id, session=repo_session)
-                    if not scheduler.can_submit(int(owner_user_id), active_count):
-                        raise ValueError(  # noqa: TRY003
-                            f"User {owner_user_id} has reached the maximum concurrent job limit "
-                            f"({scheduler.max_per_user})"
-                        )
-                    fair_priority = scheduler.calculate_priority(int(owner_user_id), active_count)
-                    fair_priority_mapped = self._map_fair_share_score_to_priority(fair_priority)
-                    priority = min(priority, fair_priority_mapped)
-                except ValueError:
-                    raise
-                except _JOB_NONCRITICAL_EXCEPTIONS as _fs_exc:
-                    logger.warning(f"Fair-share scheduling check skipped: {_fs_exc}")
+            if owner_user_id and self.backend != "postgres":
+                priority = self._apply_fair_share_submission_policy(
+                    owner_user_id,
+                    priority,
+                    session=repo_session,
+                )
 
             try:
                 with job_span(
@@ -1188,6 +1210,11 @@ class JobManager:
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
                     with self._pg_cursor(conn) as cur:
+                        priority = self._apply_fair_share_submission_policy(
+                            owner_user_id,
+                            priority,
+                            session=repo_session,
+                        )
                         # Domain/user quotas
                         try:
                             # Max queued

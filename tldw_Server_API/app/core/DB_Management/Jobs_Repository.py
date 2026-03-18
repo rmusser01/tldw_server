@@ -1,3 +1,11 @@
+"""Repository boundary for Jobs persistence.
+
+This module keeps backend-specific SQL for create-time job operations in one
+place so `JobManager` can stay focused on policy and orchestration. The public
+API exposes a lightweight `JobsSession` wrapper plus repository methods that
+either manage their own transaction scope or reuse a caller-supplied session.
+"""
+
 from __future__ import annotations
 
 import contextlib
@@ -19,6 +27,7 @@ except ImportError:  # pragma: no cover - postgres is optional
 
 
 def _normalize_sqlite_datetime(value: datetime | None) -> str | None:
+    """Convert datetimes into the naive UTC string format stored in SQLite."""
     if value is None:
         return None
     if value.tzinfo is not None:
@@ -27,6 +36,7 @@ def _normalize_sqlite_datetime(value: datetime | None) -> str | None:
 
 
 def _normalize_postgres_datetime(value: datetime | None) -> datetime | None:
+    """Normalize datetimes into timezone-aware UTC values for PostgreSQL."""
     if value is None:
         return None
     if value.tzinfo is None:
@@ -36,11 +46,15 @@ def _normalize_postgres_datetime(value: datetime | None) -> datetime | None:
 
 @dataclass(slots=True)
 class JobsSession:
+    """Wrap a live Jobs DB connection for a single backend-specific session."""
+
     backend: str
     conn: Any
 
 
 class JobsRepository:
+    """Encapsulate Jobs create-time SQL for SQLite and PostgreSQL backends."""
+
     def __init__(
         self,
         *,
@@ -48,19 +62,23 @@ class JobsRepository:
         db_path: Path | None = None,
         db_url: str | None = None,
     ) -> None:
+        """Build a repository bound to either a SQLite path or Postgres DSN."""
         self.backend = backend
         self.db_path = Path(db_path) if db_path is not None else None
         self.db_url = db_url
 
     @classmethod
     def for_sqlite(cls, db_path: Path) -> "JobsRepository":
+        """Create a repository configured for the SQLite jobs database."""
         return cls(backend="sqlite", db_path=db_path)
 
     @classmethod
     def for_postgres(cls, db_url: str) -> "JobsRepository":
+        """Create a repository configured for the PostgreSQL jobs database."""
         return cls(backend="postgres", db_url=db_url)
 
     def _connect(self) -> Any:
+        """Open a backend-specific connection with the expected local policy."""
         if self.backend == "postgres":
             if psycopg is None:  # pragma: no cover - guarded by optional dependency
                 raise RuntimeError("psycopg is required for postgres jobs repositories")
@@ -73,6 +91,7 @@ class JobsRepository:
 
     @contextlib.contextmanager
     def session(self) -> Iterator[JobsSession]:
+        """Yield a managed session that commits on success and rolls back on failure."""
         conn = self._connect()
         session = JobsSession(backend=self.backend, conn=conn)
         try:
@@ -91,6 +110,7 @@ class JobsRepository:
         *,
         session: JobsSession | None = None,
     ) -> int:
+        """Count queued or processing jobs for a user within an optional session."""
         if session is None:
             with self.session() as managed_session:
                 return self.count_active_jobs_for_user(user_id, session=managed_session)
@@ -129,6 +149,7 @@ class JobsRepository:
         created_at: datetime,
         session: JobsSession | None = None,
     ) -> dict[str, Any]:
+        """Insert a queued job row and return the created record as a dict."""
         if session is None:
             with self.session() as managed_session:
                 return self.insert_job(

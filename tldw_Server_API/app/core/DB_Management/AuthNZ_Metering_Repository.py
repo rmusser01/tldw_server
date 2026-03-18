@@ -1,13 +1,25 @@
+"""Persistence boundary for AuthNZ metering reads and sync-log writes.
+
+The Stripe metering service delegates all database access in this module so the
+service layer only coordinates usage lookup, subscription resolution, Stripe
+calls, and reconciliation. Each repository normalizes backend-specific row
+shapes before returning dictionaries to the orchestration layer.
+"""
+
 from __future__ import annotations
 
 from typing import Any
 
 
 class _AuthNZMeteringRepositoryBase:
+    """Shared pool-loading helpers for AuthNZ metering repositories."""
+
     def __init__(self, *, db_pool: Any | None = None) -> None:
+        """Store an optional injected pool for tests or alternate composition."""
         self._db_pool = db_pool
 
     async def _get_db_pool(self) -> Any:
+        """Lazily resolve the shared AuthNZ DB pool on first use."""
         if self._db_pool is None:
             from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
@@ -16,12 +28,16 @@ class _AuthNZMeteringRepositoryBase:
 
     @staticmethod
     def _is_postgres(conn: Any) -> bool:
+        """Detect whether the acquired connection exposes asyncpg-style methods."""
         return hasattr(conn, "fetchrow")
 
 
 class AuthNZUsageDailyRepository(_AuthNZMeteringRepositoryBase):
+    """Read normalized daily usage rows from the AuthNZ billing database."""
+
     @staticmethod
     def _is_missing_usage_column_error(exc: Exception) -> bool:
+        """Identify legacy-schema errors where `bytes_in_total` is unavailable."""
         message = str(exc).lower()
         return "bytes_in_total" in message and (
             "no such column" in message
@@ -36,6 +52,7 @@ class AuthNZUsageDailyRepository(_AuthNZMeteringRepositoryBase):
         *,
         include_bytes_in_total: bool,
     ) -> list[dict[str, Any]]:
+        """Map SQLite cursor output to normalized usage dictionaries."""
         if not raw_rows:
             return []
         columns = [col[0] for col in (description or [])]
@@ -46,6 +63,7 @@ class AuthNZUsageDailyRepository(_AuthNZMeteringRepositoryBase):
         return rows
 
     async def fetch_usage_for_date(self, target_date: str) -> list[dict[str, Any]]:
+        """Return per-user usage rows for a billing date with legacy fallback."""
         pool = await self._get_db_pool()
         async with pool.acquire() as conn:
             if self._is_postgres(conn):
@@ -100,10 +118,13 @@ class AuthNZUsageDailyRepository(_AuthNZMeteringRepositoryBase):
 
 
 class AuthNZBillingSubscriptionRepository(_AuthNZMeteringRepositoryBase):
+    """Resolve the active Stripe subscription that should receive metered usage."""
+
     async def get_active_subscription_for_user(
         self,
         user_id: int,
     ) -> dict[str, Any] | None:
+        """Return the active subscription for a member or org owner, if any."""
         pool = await self._get_db_pool()
         async with pool.acquire() as conn:
             if self._is_postgres(conn):
@@ -182,7 +203,10 @@ class AuthNZBillingSubscriptionRepository(_AuthNZMeteringRepositoryBase):
 
 
 class AuthNZMeteringSyncLogRepository(_AuthNZMeteringRepositoryBase):
+    """Own metering sync-log schema management and sync-state persistence."""
+
     async def ensure_schema(self) -> None:
+        """Create the metering sync-log table if it does not already exist."""
         pool = await self._get_db_pool()
         async with pool.acquire() as conn:
             if self._is_postgres(conn):
@@ -223,6 +247,7 @@ class AuthNZMeteringSyncLogRepository(_AuthNZMeteringRepositoryBase):
         day: str,
         subscription_id: str,
     ) -> bool:
+        """Check whether a subscription/day pair has already been synced."""
         pool = await self._get_db_pool()
         async with pool.acquire() as conn:
             if self._is_postgres(conn):
@@ -251,6 +276,7 @@ class AuthNZMeteringSyncLogRepository(_AuthNZMeteringRepositoryBase):
         requests: int,
         bytes_total: int,
     ) -> None:
+        """Persist the latest synced totals for a user/subscription/day tuple."""
         pool = await self._get_db_pool()
         async with pool.acquire() as conn:
             if self._is_postgres(conn):
@@ -279,6 +305,7 @@ class AuthNZMeteringSyncLogRepository(_AuthNZMeteringRepositoryBase):
             await conn.commit()
 
     async def fetch_sync_totals(self, target_date: str) -> list[dict[str, Any]]:
+        """Return previously recorded sync totals for reconciliation output."""
         pool = await self._get_db_pool()
         async with pool.acquire() as conn:
             if self._is_postgres(conn):

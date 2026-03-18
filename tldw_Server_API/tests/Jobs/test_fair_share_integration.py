@@ -9,11 +9,13 @@ Verifies that:
 """
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.Jobs_Repository import JobsRepository
+from tldw_Server_API.app.core.DB_Management.Jobs_Repository import JobsRepository, JobsSession
 from tldw_Server_API.app.core.Jobs.manager import JobManager, _get_fair_share
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
@@ -175,18 +177,137 @@ class TestCountActiveJobs:
 
 
 class TrackingJobsRepository(JobsRepository):
-    def __init__(self, db_path):
-        super().__init__(backend="sqlite", db_path=db_path)
-        self.count_sessions = []
-        self.insert_sessions = []
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        *,
+        backend: str = "sqlite",
+        db_url: str | None = None,
+        events: list[str] | None = None,
+    ) -> None:
+        super().__init__(
+            backend=backend,
+            db_path=db_path,
+            db_url=db_url,
+        )
+        self.count_sessions: list[JobsSession | None] = []
+        self.insert_sessions: list[JobsSession | None] = []
+        self.events = events if events is not None else []
 
-    def count_active_jobs_for_user(self, user_id: str, *, session=None) -> int:
+    def count_active_jobs_for_user(
+        self,
+        user_id: str,
+        *,
+        session: JobsSession | None = None,
+    ) -> int:
         self.count_sessions.append(session)
+        self.events.append("count_active_jobs")
+        if session is not None and session.backend == "postgres":
+            return 0
         return super().count_active_jobs_for_user(user_id, session=session)
 
-    def insert_job(self, *, session=None, **kwargs):
+    def insert_job(
+        self,
+        *,
+        domain: str,
+        queue: str,
+        job_type: str,
+        payload_json: str,
+        owner_user_id: str | None,
+        project_id: int | None,
+        batch_group: str | None,
+        idempotency_key: str | None,
+        priority: int,
+        max_retries: int,
+        available_at: Any,
+        request_id: str | None,
+        trace_id: str | None,
+        created_at: Any,
+        session: JobsSession | None = None,
+    ) -> dict[str, Any]:
         self.insert_sessions.append(session)
-        return super().insert_job(session=session, **kwargs)
+        self.events.append("insert_job")
+        if session is not None and session.backend == "postgres":
+            return {
+                "id": 1,
+                "uuid": "job-postgres-1",
+                "domain": domain,
+                "queue": queue,
+                "job_type": job_type,
+                "owner_user_id": owner_user_id,
+                "project_id": project_id,
+                "batch_group": batch_group,
+                "idempotency_key": idempotency_key,
+                "payload": payload_json,
+                "status": "queued",
+                "priority": priority,
+                "max_retries": max_retries,
+                "retry_count": 0,
+                "available_at": available_at,
+                "created_at": created_at,
+                "updated_at": created_at,
+                "request_id": request_id,
+                "trace_id": trace_id,
+                "acquired_at": None,
+            }
+        return super().insert_job(
+            domain=domain,
+            queue=queue,
+            job_type=job_type,
+            payload_json=payload_json,
+            owner_user_id=owner_user_id,
+            project_id=project_id,
+            batch_group=batch_group,
+            idempotency_key=idempotency_key,
+            priority=priority,
+            max_retries=max_retries,
+            available_at=available_at,
+            request_id=request_id,
+            trace_id=trace_id,
+            created_at=created_at,
+            session=session,
+        )
+
+
+class _FakePostgresConnection:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def __enter__(self) -> "_FakePostgresConnection":
+        self._events.append("conn_enter")
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self._events.append("conn_exit")
+        return False
+
+    def commit(self) -> None:
+        self._events.append("conn_commit")
+
+    def rollback(self) -> None:
+        self._events.append("conn_rollback")
+
+    def close(self) -> None:
+        self._events.append("conn_close")
+
+
+class _FakePostgresCursor:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def __enter__(self) -> "_FakePostgresCursor":
+        self._events.append("pg_cursor_enter")
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self._events.append("pg_cursor_exit")
+        return False
+
+    def execute(self, query: str, params: tuple[Any, ...] | None = None) -> None:
+        self._events.append("pg_execute")
+
+    def fetchone(self) -> dict[str, int]:
+        return {"c": 0}
 
 
 class TestFairShareRepositoryIntegration:
@@ -216,3 +337,42 @@ class TestFairShareRepositoryIntegration:
         stored = job_manager.get_job(int(job["id"]))
         assert stored is not None
         assert stored["payload"] == {"test": True}
+
+    def test_postgres_fair_share_count_runs_after_pg_cursor_setup(self, monkeypatch):
+        monkeypatch.setenv("JOBS_MAX_PER_USER", "10")
+        monkeypatch.setenv("JOBS_PG_SKIP_SCHEMA_INIT", "1")
+        import tldw_Server_API.app.core.Jobs.manager as mgr_mod
+        mgr_mod._fair_share = None
+
+        events: list[str] = []
+        repo = TrackingJobsRepository(
+            backend="postgres",
+            db_url="postgres://jobs.test/review_cleanup",
+            events=events,
+        )
+        job_manager = JobManager(
+            backend="postgres",
+            db_url="postgres://jobs.test/review_cleanup",
+            jobs_repository=repo,
+        )
+        fake_conn = _FakePostgresConnection(events)
+        monkeypatch.setattr(job_manager, "_connect", lambda: fake_conn)
+        monkeypatch.setattr(job_manager, "_pg_cursor", lambda conn: _FakePostgresCursor(events))
+
+        with patch.object(mgr_mod, "increment_created"), \
+             patch.object(mgr_mod, "emit_job_event"), \
+             patch.object(mgr_mod, "submit_job_audit_event"):
+            job = job_manager.create_job(
+                domain="chatbooks",
+                queue="default",
+                job_type="export",
+                payload={"test": True},
+                owner_user_id="42",
+                priority=5,
+            )
+
+        assert job is not None
+        assert repo.count_sessions
+        assert repo.insert_sessions
+        assert events.index("pg_cursor_enter") < events.index("count_active_jobs")
+        assert repo.count_sessions[0] is repo.insert_sessions[0]
