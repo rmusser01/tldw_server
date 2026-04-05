@@ -30,7 +30,7 @@ Each instance record stores:
 - capabilities: `declared_capabilities`, `probed_capabilities`, `effective_capabilities`
 - runtime state: `desired_state`, `observed_state`, `last_known_base_url`, `last_error`, `executor_handle`
 
-The launch and transport specs are durable. Runtime fields are reconciled from lifecycle jobs and startup probing.
+The launch and transport specs are durable. Runtime fields are reconciled from lifecycle jobs plus startup and periodic probing.
 
 ## Admin API
 
@@ -173,14 +173,28 @@ Current behavior:
 - `chat` can route when it is declared and any present probe remains positive.
 - `embeddings`, `vision`, `audio`, and `multimodal` only become effective when they are both declared and positively probed.
 - Requests fail fast when the selected instance is missing the required effective capability.
+- Request routing only uses managed instances whose `observed_state` is `healthy`. Instances in `starting`, `stopped`, `stopping`, `failed`, or `unhealthy` are rejected before inference dispatch.
 
-Health probes also update `last_known_base_url`, `last_error`, and `observed_state`, and startup reconciliation re-probes persisted records when the server boots.
+Health probes also update `last_known_base_url`, `last_error`, and `observed_state`.
+
+Startup behavior:
+
+- A freshly started instance stays in `starting` if the first probe misses during cold boot.
+- `VLLM_MANAGEMENT_STARTUP_TIMEOUT_SECONDS` bounds how long `starting` can persist before later probes mark the instance `unhealthy`.
+- The managed vLLM reconciler loop probes persisted records on startup and then continues periodically, so slow boots can converge to `healthy` without a manual probe.
+
+Provider listing behavior:
+
+- Managed provider metadata only advertises a managed default when `default_instance_id` is explicitly configured.
+- If no managed default is configured, top-level `/llm/providers` data falls back to the legacy `vllm_model` / `vllm_api_IP` config when present.
+- If neither a managed default nor a legacy fallback is configured, `/llm/providers` leaves the vLLM default unset instead of inventing one from the first stored managed instance.
 
 ## Worker and Reconciler Flags
 
 - `VLLM_INSTANCES_DB_PATH`: override the registry database path.
 - `VLLM_MANAGEMENT_WORKER_ENABLED`: enable the managed `vLLM` Jobs worker.
-- `VLLM_MANAGEMENT_STARTUP_RECONCILE_ENABLED`: enable startup probing of stored instances.
+- `VLLM_MANAGEMENT_STARTUP_RECONCILE_ENABLED`: enable the managed `vLLM` reconciler loop that probes stored instances on startup and then periodically afterward.
+- `VLLM_MANAGEMENT_STARTUP_TIMEOUT_SECONDS`: maximum time an instance may remain in `starting` before later probes mark it `unhealthy`.
 - `VLLM_MANAGEMENT_JOBS_QUEUE`: override the queue name used for lifecycle jobs.
 - `VLLM_MANAGEMENT_WORKER_ID`: override the worker id string.
 
