@@ -334,10 +334,17 @@ def get_managed_vllm_provider_metadata(repository: Any | None = None) -> dict[st
     if default_route is not None:
         default_model = default_route.model
         default_base_url = default_route.base_url
-    elif ordered_records:
-        first = ordered_records[0]
-        default_model = first.launch_spec.get("served_model_name") or first.launch_spec.get("model")
-        default_base_url = first.last_known_base_url
+    elif default_instance_id:
+        default_record = next(
+            (record for record in ordered_records if record.instance_id == default_instance_id),
+            None,
+        )
+        if default_record is not None:
+            default_model = (
+                default_record.launch_spec.get("served_model_name")
+                or default_record.launch_spec.get("model")
+            )
+            default_base_url = default_record.last_known_base_url
 
     return {
         "count": len(records),

@@ -1631,6 +1631,7 @@ def get_configured_providers(
                 if env_model:
                     models = parse_model_string(env_model)
                     is_configured = True
+            legacy_default_model = models[0] if provider_name == "vllm" and models else None
             if provider_name == "vllm":
                 managed_models = [
                     str(model_name).strip()
@@ -1639,7 +1640,7 @@ def get_configured_providers(
                 ]
                 if managed_models:
                     models = _dedupe_preserve_order(managed_models + models)
-                if managed_vllm_metadata.get("default_base_url") and not endpoint_url:
+                if managed_vllm_metadata.get("default_base_url"):
                     endpoint_url = str(managed_vllm_metadata["default_base_url"])
                 if managed_vllm_metadata.get("count"):
                     is_configured = True
@@ -1746,6 +1747,12 @@ def get_configured_providers(
             }
 
             endpoint_only = provider_info['type'] == 'local' and is_configured and not models
+            provider_default_model = models[0] if models else None
+            if provider_name == "vllm":
+                provider_default_model = (
+                    managed_vllm_metadata.get("default_model")
+                    or legacy_default_model
+                )
 
             provider_data = {
                 'name': provider_name,
@@ -1754,11 +1761,7 @@ def get_configured_providers(
                 # New: detailed metadata per model
                 'models_info': models_info,
                 'type': provider_info['type'],
-                'default_model': (
-                    managed_vllm_metadata.get("default_model")
-                    if provider_name == "vllm" and managed_vllm_metadata.get("default_model")
-                    else (models[0] if models else None)
-                ),
+                'default_model': provider_default_model,
                 'is_configured': is_configured,  # Add configuration status
                 'endpoint_only': endpoint_only,
                 'extra_body_compat': _safe_provider_extra_body_compat(provider_name, runtime_context),
