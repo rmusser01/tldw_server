@@ -22,6 +22,7 @@ def fake_instance(
     *,
     capabilities: dict[str, bool] | None = None,
     model: str = "Qwen/Qwen2.5-VL-7B-Instruct",
+    observed_state: str = "healthy",
 ) -> VLLMInstanceRecord:
     return VLLMInstanceRecord(
         instance_id=instance_id,
@@ -32,7 +33,7 @@ def fake_instance(
         routing_policy={},
         declared_capabilities=capabilities or {"chat": True},
         desired_state="running",
-        observed_state="healthy",
+        observed_state=observed_state,
         created_at="2026-03-10T00:00:00+00:00",
         updated_at="2026-03-10T00:00:00+00:00",
         effective_capabilities=dict(capabilities or {"chat": True}),
@@ -118,5 +119,27 @@ def test_resolver_rejects_when_any_required_capability_is_missing():
             provider="vllm",
             provider_instance_id="chat-only-id",
             required_capability=("chat", "vision"),
+            repository=repo,
+        )
+
+
+@pytest.mark.parametrize("observed_state", ["starting", "stopped", "stopping", "failed", "unhealthy"])
+def test_resolver_rejects_instances_that_are_not_runtime_healthy(observed_state: str):
+    repo = InMemoryVLLMInstanceRepository(
+        instances={
+            "managed-id": fake_instance(
+                "managed-id",
+                "http://127.0.0.1:8013/v1",
+                capabilities={"chat": True},
+                observed_state=observed_state,
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match=f"Managed vLLM instance 'managed-id' is not healthy"):
+        resolve_vllm_instance_for_request(
+            provider="vllm",
+            provider_instance_id="managed-id",
+            required_capability="chat",
             repository=repo,
         )

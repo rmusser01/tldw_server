@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -12,6 +13,7 @@ from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced impo
     create_embeddings_batch_endpoint,
     EmbeddingProvider,
 )
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
 from tldw_Server_API.app.core.Chat.chat_service import build_call_params_from_request
 from tldw_Server_API.app.core.VLLM_Management.resolver import ResolvedVLLMRoute
 
@@ -99,6 +101,33 @@ def test_build_call_params_requires_vision_for_image_messages(monkeypatch):
     assert cleaned_args["base_url"] == "http://10.0.0.9:8000/v1"
 
 
+def test_build_call_params_surfaces_unhealthy_managed_vllm_route_as_bad_request(monkeypatch):
+    request_data = ChatCompletionRequest(
+        api_provider="vllm",
+        provider_instance_id="vision-id",
+        model="legacy-model",
+        messages=[{"role": "user", "content": "hello"}],
+    )
+
+    def fake_resolver(**_: object) -> ResolvedVLLMRoute:
+        raise ValueError("Managed vLLM instance 'vision-id' is not healthy (observed_state='starting')")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.resolve_vllm_instance_for_request",
+        fake_resolver,
+    )
+
+    with pytest.raises(ChatBadRequestError, match="Managed vLLM instance 'vision-id' is not healthy"):
+        build_call_params_from_request(
+            request_data=request_data,
+            target_api_provider="vllm",
+            provider_api_key=None,
+            templated_llm_payload=[{"role": "user", "content": "hello"}],
+            final_system_message=None,
+            app_config=None,
+        )
+
+
 def test_embeddings_helper_maps_managed_vllm_to_openai(monkeypatch):
     def fake_resolver(**_: object) -> ResolvedVLLMRoute:
         return ResolvedVLLMRoute(
@@ -124,6 +153,27 @@ def test_embeddings_helper_maps_managed_vllm_to_openai(monkeypatch):
     assert managed_route.base_url == "http://127.0.0.1:8010/v1"
     assert provider == "openai"
     assert model == "BAAI/bge-m3"
+
+
+def test_embeddings_helper_surfaces_unhealthy_managed_vllm_route_as_http_400(monkeypatch):
+    def fake_resolver(**_: object) -> ResolvedVLLMRoute:
+        raise ValueError("Managed vLLM instance 'embed-id' is not healthy (observed_state='failed')")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced.resolve_vllm_instance_for_request",
+        fake_resolver,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        _resolve_managed_vllm_embeddings_route(
+            provider="vllm",
+            provider_instance_id="embed-id",
+            model="legacy-model",
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 400
+    assert "Managed vLLM instance 'embed-id' is not healthy" in exc.detail
 
 
 def test_build_provider_config_preserves_openai_api_url_override():

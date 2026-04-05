@@ -99,6 +99,13 @@ def resolve_vllm_instance_for_request(
             raise ValueError(f"Managed vLLM instance '{selected_instance_id}' was not found")
         raise ValueError(f"Default managed vLLM instance '{selected_instance_id}' was not found")
 
+    observed_state = str(getattr(instance, "observed_state", "") or "").strip().lower()
+    if observed_state != "healthy":
+        raise ValueError(
+            f"Managed vLLM instance '{instance.instance_id}' is not healthy "
+            f"(observed_state='{instance.observed_state}')"
+        )
+
     effective_capabilities = instance.effective_capabilities or derive_effective_capabilities(
         declared_capabilities=instance.declared_capabilities,
         probed_capabilities=instance.probed_capabilities,
