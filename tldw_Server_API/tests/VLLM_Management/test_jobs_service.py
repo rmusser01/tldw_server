@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -10,7 +11,7 @@ from starlette.requests import Request
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import vllm_management as vm
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
-from tldw_Server_API.app.core.VLLM_Management.executors.base import ProbeResult
+from tldw_Server_API.app.core.VLLM_Management.executors.base import LifecycleResult, ProbeResult
 from tldw_Server_API.app.core.VLLM_Management.service import (
     VLLMManagementService,
     build_default_executor_map,
@@ -48,6 +49,34 @@ class _RecordingJobManager:
             "job_type": kwargs["job_type"],
             "payload": kwargs["payload"],
         }
+
+
+class _ScriptedExecutor:
+    def __init__(
+        self,
+        *,
+        start_result: LifecycleResult | Exception | None = None,
+        probe_results: list[ProbeResult] | None = None,
+    ) -> None:
+        self._start_result = start_result or LifecycleResult(
+            status="started",
+            base_url="http://127.0.0.1:8018/v1",
+            handle={"pid": 4321, "started_at": datetime.now(timezone.utc).isoformat()},
+        )
+        self._probe_results = list(probe_results or [])
+
+    def start(self, instance):  # noqa: ANN001
+        if isinstance(self._start_result, Exception):
+            raise self._start_result
+        return self._start_result
+
+    def stop(self, instance, handle):  # noqa: ANN001
+        raise AssertionError("stop should not be called in this test")
+
+    def probe(self, instance):  # noqa: ANN001
+        if not self._probe_results:
+            raise AssertionError("probe called more times than expected")
+        return self._probe_results.pop(0)
 
 
 def _make_app(repo: SqliteVLLMInstanceRepository, jm: _RecordingJobManager) -> FastAPI:
@@ -244,3 +273,205 @@ def test_default_probe_uses_configured_auth_headers(monkeypatch):
         "X-api-key": "Token managed-secret",
     }
     assert captured["timeout"] == 3
+
+
+@pytest.mark.unit
+def test_start_instance_keeps_starting_state_on_initial_probe_miss(tmp_path):
+    repo = SqliteVLLMInstanceRepository(db_path=tmp_path / "vllm_instances.db")
+    instance = repo.create_instance(
+        vm.VLLMInstanceCreateRequest(
+            name="cold-boot-box",
+            execution_mode="local",
+            launch_spec={"model": "Qwen/Qwen2.5-7B-Instruct", "port": 8018},
+        ).to_domain()
+    )
+    executor = _ScriptedExecutor(
+        probe_results=[
+            ProbeResult(
+                status="unhealthy",
+                reachable=False,
+                base_url="http://127.0.0.1:8018/v1",
+                detail="connection refused",
+            )
+        ]
+    )
+    service = VLLMManagementService(repository=repo, executors={"local": executor})
+
+    result = service.start_instance(instance.instance_id)
+    updated = repo.get_instance(instance.instance_id)
+
+    assert result == {  # nosec B101
+        "instance_id": instance.instance_id,
+        "action": "start",
+        "status": "starting",
+    }
+    assert updated is not None  # nosec B101
+    assert updated.observed_state == "starting"  # nosec B101
+    assert updated.desired_state == "running"  # nosec B101
+    assert updated.last_error == "connection refused"  # nosec B101
+    assert updated.executor_handle["pid"] == 4321  # nosec B101
+    assert updated.executor_handle["started_at"] is not None  # nosec B101
+
+
+@pytest.mark.unit
+def test_follow_up_probe_can_promote_starting_instance_to_healthy(tmp_path):
+    repo = SqliteVLLMInstanceRepository(db_path=tmp_path / "vllm_instances.db")
+    instance = repo.create_instance(
+        vm.VLLMInstanceCreateRequest(
+            name="warming-box",
+            execution_mode="local",
+            launch_spec={"model": "Qwen/Qwen2.5-7B-Instruct", "port": 8019},
+        ).to_domain()
+    )
+    executor = _ScriptedExecutor(
+        probe_results=[
+            ProbeResult(
+                status="unhealthy",
+                reachable=False,
+                base_url="http://127.0.0.1:8019/v1",
+                detail="connection refused",
+            ),
+            ProbeResult(
+                status="healthy",
+                reachable=True,
+                base_url="http://127.0.0.1:8019/v1",
+                capabilities={"chat": True},
+            ),
+        ]
+    )
+    service = VLLMManagementService(repository=repo, executors={"local": executor})
+
+    service.start_instance(instance.instance_id)
+    result = service.probe_instance(instance.instance_id)
+    updated = repo.get_instance(instance.instance_id)
+
+    assert result == {  # nosec B101
+        "instance_id": instance.instance_id,
+        "action": "probe",
+        "status": "healthy",
+    }
+    assert updated is not None  # nosec B101
+    assert updated.observed_state == "healthy"  # nosec B101
+    assert updated.last_error is None  # nosec B101
+    assert updated.probed_capabilities["chat"] is True  # nosec B101
+
+
+@pytest.mark.unit
+def test_startup_timeout_anchor_is_persisted_when_executor_omits_started_at(tmp_path, monkeypatch):
+    repo = SqliteVLLMInstanceRepository(db_path=tmp_path / "vllm_instances.db")
+    instance = repo.create_instance(
+        vm.VLLMInstanceCreateRequest(
+            name="anchor-box",
+            execution_mode="local",
+            launch_spec={"model": "Qwen/Qwen2.5-7B-Instruct", "port": 8020},
+        ).to_domain()
+    )
+    monkeypatch.setenv("VLLM_MANAGEMENT_STARTUP_TIMEOUT_SECONDS", "300")
+    executor = _ScriptedExecutor(
+        start_result=LifecycleResult(
+            status="started",
+            base_url="http://127.0.0.1:8020/v1",
+            handle={"pid": 7777},
+        ),
+        probe_results=[
+            ProbeResult(
+                status="unhealthy",
+                reachable=False,
+                base_url="http://127.0.0.1:8020/v1",
+                detail="warming up",
+            ),
+            ProbeResult(
+                status="unhealthy",
+                reachable=False,
+                base_url="http://127.0.0.1:8020/v1",
+                detail="still warming up",
+            ),
+        ],
+    )
+    service = VLLMManagementService(repository=repo, executors={"local": executor})
+
+    service.start_instance(instance.instance_id)
+    first_update = repo.get_instance(instance.instance_id)
+    assert first_update is not None  # nosec B101
+    started_at = first_update.executor_handle.get("started_at")
+
+    result = service.probe_instance(instance.instance_id)
+    second_update = repo.get_instance(instance.instance_id)
+
+    assert started_at is not None  # nosec B101
+    assert result == {  # nosec B101
+        "instance_id": instance.instance_id,
+        "action": "probe",
+        "status": "starting",
+    }
+    assert second_update is not None  # nosec B101
+    assert second_update.executor_handle["started_at"] == started_at  # nosec B101
+    assert second_update.observed_state == "starting"  # nosec B101
+
+
+@pytest.mark.unit
+def test_probe_instance_marks_starting_instance_unhealthy_after_startup_timeout(tmp_path, monkeypatch):
+    repo = SqliteVLLMInstanceRepository(db_path=tmp_path / "vllm_instances.db")
+    instance = repo.create_instance(
+        vm.VLLMInstanceCreateRequest(
+            name="stuck-box",
+            execution_mode="local",
+            launch_spec={"model": "Qwen/Qwen2.5-7B-Instruct", "port": 8021},
+        ).to_domain()
+    )
+    started_at = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
+    repo.update_instance_runtime(
+        instance.instance_id,
+        {
+            "desired_state": "running",
+            "observed_state": "starting",
+            "executor_handle": {"pid": 9999, "started_at": started_at},
+        },
+    )
+    monkeypatch.setenv("VLLM_MANAGEMENT_STARTUP_TIMEOUT_SECONDS", "30")
+    executor = _ScriptedExecutor(
+        probe_results=[
+            ProbeResult(
+                status="unhealthy",
+                reachable=False,
+                base_url="http://127.0.0.1:8021/v1",
+                detail="timed out waiting for server",
+            )
+        ]
+    )
+    service = VLLMManagementService(repository=repo, executors={"local": executor})
+
+    result = service.probe_instance(instance.instance_id)
+    updated = repo.get_instance(instance.instance_id)
+
+    assert result == {  # nosec B101
+        "instance_id": instance.instance_id,
+        "action": "probe",
+        "status": "unhealthy",
+    }
+    assert updated is not None  # nosec B101
+    assert updated.observed_state == "unhealthy"  # nosec B101
+    assert updated.last_error == "timed out waiting for server"  # nosec B101
+
+
+@pytest.mark.unit
+def test_start_instance_marks_failed_when_executor_start_raises(tmp_path):
+    repo = SqliteVLLMInstanceRepository(db_path=tmp_path / "vllm_instances.db")
+    instance = repo.create_instance(
+        vm.VLLMInstanceCreateRequest(
+            name="broken-box",
+            execution_mode="local",
+            launch_spec={"model": "Qwen/Qwen2.5-7B-Instruct", "port": 8021},
+        ).to_domain()
+    )
+    executor = _ScriptedExecutor(start_result=RuntimeError("spawn failed"))
+    service = VLLMManagementService(repository=repo, executors={"local": executor})
+
+    with pytest.raises(RuntimeError, match="spawn failed"):
+        service.start_instance(instance.instance_id)
+
+    updated = repo.get_instance(instance.instance_id)
+    assert updated is not None  # nosec B101
+    assert updated.observed_state == "failed"  # nosec B101
+    assert updated.desired_state == "running"  # nosec B101
+    assert updated.last_error == "spawn failed"  # nosec B101

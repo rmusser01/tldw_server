@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 import subprocess  # nosec B404 - required for explicit argv-based SSH launcher execution
+from datetime import datetime, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -31,6 +32,7 @@ VLLM_JOB_TYPE_BY_ACTION = {
     "restart": "vllm_instance_restart",
     "probe": "vllm_instance_probe",
 }
+DEFAULT_STARTUP_TIMEOUT_SECONDS = 300
 
 
 class ShellSSHRunner:
@@ -214,7 +216,7 @@ class VLLMManagementService:
     def start_instance(self, instance_id: str) -> dict[str, Any]:
         instance = self._get_instance(instance_id)
         executor = self._get_executor(instance.execution_mode)
-        self.repository.update_instance_runtime(
+        instance = self.repository.update_instance_runtime(
             instance_id,
             {
                 "desired_state": "running",
@@ -227,6 +229,7 @@ class VLLMManagementService:
             handle = dict(lifecycle.handle or {})
             if lifecycle.log_handle:
                 handle["log_handle"] = dict(lifecycle.log_handle)
+            handle = self._ensure_startup_started_at(instance=instance, handle=handle)
             probe = executor.probe(instance)
             updated = self._apply_probe_result(
                 instance_id=instance_id,
@@ -235,6 +238,7 @@ class VLLMManagementService:
                 probe=probe,
                 handle=handle,
                 fallback_base_url=lifecycle.base_url,
+                allow_starting=not probe.reachable,
             )
             return {
                 "instance_id": instance_id,
@@ -306,6 +310,7 @@ class VLLMManagementService:
         probe: ProbeResult,
         handle: dict[str, Any],
         fallback_base_url: str | None,
+        allow_starting: bool = False,
     ):
         if probe.capabilities:
             effective_capabilities = derive_effective_capabilities(
@@ -319,7 +324,14 @@ class VLLMManagementService:
             )
         else:
             effective_capabilities = {}
-        observed_state = "healthy" if probe.reachable else ("stopped" if desired_state == "stopped" else "unhealthy")
+        handle = self._ensure_startup_started_at(instance=instance, handle=handle)
+        observed_state = self._determine_observed_state(
+            instance=instance,
+            desired_state=desired_state,
+            probe=probe,
+            handle=handle,
+            allow_starting=allow_starting,
+        )
         return self.repository.update_instance_runtime(
             instance_id,
             {
@@ -332,6 +344,83 @@ class VLLMManagementService:
                 "executor_handle": handle,
             },
         )
+
+    def _determine_observed_state(
+        self,
+        *,
+        instance: Any,
+        desired_state: str,
+        probe: ProbeResult,
+        handle: dict[str, Any],
+        allow_starting: bool,
+    ) -> str:
+        if probe.reachable:
+            return "healthy"
+        if desired_state == "stopped":
+            return "stopped"
+        if (allow_starting or str(instance.observed_state) == "starting") and not self._startup_timed_out(
+            instance=instance,
+            handle=handle,
+        ):
+            return "starting"
+        return "unhealthy"
+
+    def _startup_timed_out(self, *, instance: Any, handle: dict[str, Any]) -> bool:
+        started_at = self._resolve_start_reference(instance=instance, handle=handle)
+        if started_at is None:
+            return False
+        return (datetime.now(timezone.utc) - started_at).total_seconds() >= self._startup_timeout_seconds()
+
+    def _ensure_startup_started_at(self, *, instance: Any, handle: dict[str, Any]) -> dict[str, Any]:
+        normalized_handle = dict(handle or {})
+        if normalized_handle.get("started_at"):
+            return normalized_handle
+        for candidate in (getattr(instance, "updated_at", None), getattr(instance, "created_at", None)):
+            if self._parse_timestamp(candidate) is not None:
+                normalized_handle["started_at"] = str(candidate)
+                return normalized_handle
+        normalized_handle["started_at"] = datetime.now(timezone.utc).isoformat()
+        return normalized_handle
+
+    def _resolve_start_reference(self, *, instance: Any, handle: dict[str, Any]) -> datetime | None:
+        handle_started_at = handle.get("started_at")
+        if handle_started_at:
+            parsed = self._parse_timestamp(handle_started_at)
+            if parsed is not None:
+                return parsed
+        created_at = getattr(instance, "created_at", None)
+        parsed = self._parse_timestamp(created_at)
+        if parsed is not None:
+            return parsed
+        return None
+
+    @staticmethod
+    def _parse_timestamp(value: Any) -> datetime | None:
+        if value is None:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    @staticmethod
+    def _startup_timeout_seconds() -> int:
+        raw_value = str(os.getenv("VLLM_MANAGEMENT_STARTUP_TIMEOUT_SECONDS") or "").strip()
+        if not raw_value:
+            return DEFAULT_STARTUP_TIMEOUT_SECONDS
+        try:
+            timeout_seconds = int(raw_value)
+        except ValueError:
+            logger.warning(
+                "Invalid VLLM_MANAGEMENT_STARTUP_TIMEOUT_SECONDS=%r; using default %s",
+                raw_value,
+                DEFAULT_STARTUP_TIMEOUT_SECONDS,
+            )
+            return DEFAULT_STARTUP_TIMEOUT_SECONDS
+        return max(timeout_seconds, 0)
 
     def _get_instance(self, instance_id: str):
         instance = self.repository.get_instance(instance_id)
