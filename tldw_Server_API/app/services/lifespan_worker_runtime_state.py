@@ -24,6 +24,8 @@ class LifespanWorkerRuntimeState:
     prompt_studio_jobs_task: Any | None = None
     vllm_management_stop_event: Any | None = None
     vllm_management_task: Any | None = None
+    vllm_management_reconciler_stop_event: Any | None = None
+    vllm_management_reconciler_task: Any | None = None
     study_pack_jobs_stop_event: Any | None = None
     study_pack_jobs_task: Any | None = None
     study_suggestions_jobs_stop_event: Any | None = None
