@@ -74,11 +74,20 @@ rg -n "async def unified_rag_pipeline|async def agentic_rag_pipeline|def _build_
   tldw_Server_API/app/api/v1/utils/rag_cache.py
 ```
 
+## Preserved Source Inventory
+
+The verbatim output of `rg --files ... | sort` is retained in [`2026-04-07-stage1-source-inventory.txt`](./2026-04-07-stage1-source-inventory.txt).
+
+## Preserved Test Inventory
+
+The verbatim output of `rg --files ... | rg 'rag|RAG|search' | sort` is retained in [`2026-04-07-stage1-test-inventory.txt`](./2026-04-07-stage1-test-inventory.txt).
+
 ## Findings
 
 - No confirmed defects at survey depth.
-- Hotspot baseline: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py` is the largest clear orchestrator at 6977 LOC, followed by `tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py` at 3590 LOC, `tldw_Server_API/app/api/v1/endpoints/rag_unified.py` at 2445 LOC, and `tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py` at 1704 LOC.
-- Churn baseline: the last 20 commits touching the scoped surface include rerank-debug snapshot gating, review-feedback cleanup, and RAG tuning/recipe work, which means the active surface is still moving and later stages should expect recent-commit context to matter.
+- Hotspot inventory by size: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py` is the dominant orchestrator at 6977 LOC; `tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py` is the next largest core retrieval module at 3590 LOC; `tldw_Server_API/app/api/v1/endpoints/rag_unified.py` is the main API boundary at 2445 LOC; and `tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py` is the post-retrieval ranking hotspot at 1704 LOC.
+- Hotspot inventory by churn: the last 20 commits touching the scoped surface include rerank-debug snapshot gating, review-feedback cleanup, recipe-run reuse work, retrieval tuning, and boundary hardening. That cluster indicates the pipeline, reranking, and API boundary surface are still active and should be treated as higher-change-risk than the surrounding helpers.
+- Hotspot inventory by centrality: `unified_pipeline.py` is the primary fan-in/fan-out orchestrator; `rag_unified.py` owns the request/response boundary; `profiles.py` and `types.py` define shared request and result contracts; `rag_cache.py` and `vector_stores/factory.py` mediate request-time adapter selection and invalidation; and `database_retrievers.py` sits on the retrieval composition seam. Those are the ownership points that later stages should treat as structurally significant.
 - Probable risk: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py` and `tldw_Server_API/app/api/v1/endpoints/rag_unified.py` are large enough to concentrate orchestration and boundary ownership, so later stages need explicit seam ownership to avoid drift.
 - Probable risk: retrieval-adjacent support files such as `query_expansion.py`, `semantic_cache.py`, `response_writer.py`, `post_generation_verifier.py`, `agentic_chunker.py`, and `research_agent.py` are part of the active path and should not remain implicit spillover areas.
 
