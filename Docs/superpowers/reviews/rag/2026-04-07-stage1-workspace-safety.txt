@@ -16,3 +16,5 @@ Docs-only Task 1 commit trail:
 - `89a476814` `docs: tighten rag stage1 safety notes`
 - `ef2f53d6c` `docs: align rag worktree review instructions`
 - `e656cf373` `docs: finalize rag stage1 safety artifact`
+- `5368ea209` `docs: mark rag stage1 baseline complete`
+- The commit that last updated this safety artifact is also part of the Task 1 docs-only trail and closes the final review-loop alignment fixes.
