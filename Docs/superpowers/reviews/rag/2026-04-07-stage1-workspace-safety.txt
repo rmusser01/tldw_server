@@ -15,3 +15,4 @@ Docs-only Task 1 commit trail:
 - `dcfd0ec6c` `docs: preserve rag stage1 safety evidence`
 - `89a476814` `docs: tighten rag stage1 safety notes`
 - `ef2f53d6c` `docs: align rag worktree review instructions`
+- `e656cf373` `docs: finalize rag stage1 safety artifact`
