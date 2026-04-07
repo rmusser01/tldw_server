@@ -40,9 +40,9 @@ The workspace safety check confirmed the isolated worktree path at `/Users/apple
 ## Validation Commands
 
 ```bash
-mkdir -p Docs/superpowers/reviews/rag
 git rev-parse --show-toplevel
 git status --short
+mkdir -p Docs/superpowers/reviews/rag
 source ../../.venv/bin/activate && rg --files \
   tldw_Server_API/app/core/RAG \
   tldw_Server_API/app/api/v1/endpoints/rag_unified.py \
@@ -74,6 +74,13 @@ rg -n "async def unified_rag_pipeline|async def agentic_rag_pipeline|def _build_
   tldw_Server_API/app/api/v1/utils/rag_cache.py
 ```
 
+## Workspace Safety Evidence
+
+- Worktree root: `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review`
+- Preserved safety artifact: [`2026-04-07-stage1-workspace-safety.txt`](./2026-04-07-stage1-workspace-safety.txt)
+- The pre-change `git status --short` snapshot was clean, so the preserved equivalent is an empty output section.
+- The post-change `git status --short` snapshot is preserved in the safety artifact and shows only docs files under `Docs/superpowers/reviews/rag/`.
+
 ## Preserved Source Inventory
 
 The verbatim output of `rg --files ... | sort` is retained in [`2026-04-07-stage1-source-inventory.txt`](./2026-04-07-stage1-source-inventory.txt).
@@ -81,6 +88,12 @@ The verbatim output of `rg --files ... | sort` is retained in [`2026-04-07-stage
 ## Preserved Test Inventory
 
 The verbatim output of `rg --files ... | rg 'rag|RAG|search' | sort` is retained in [`2026-04-07-stage1-test-inventory.txt`](./2026-04-07-stage1-test-inventory.txt).
+
+## Preserved Baselines
+
+- Hotspot size baseline: [`2026-04-07-stage1-hotspot-sizes.txt`](./2026-04-07-stage1-hotspot-sizes.txt)
+- Churn baseline: [`2026-04-07-stage1-churn-baseline.txt`](./2026-04-07-stage1-churn-baseline.txt)
+- Seed-set ownership map: [`2026-04-07-stage1-seed-set-ownership-map.txt`](./2026-04-07-stage1-seed-set-ownership-map.txt)
 
 ## Findings
 
@@ -98,6 +111,22 @@ The verbatim output of `rg --files ... | rg 'rag|RAG|search' | sort` is retained
 - Route retrieval, cache, and vector-store seams to Stage 4.
 - Route reranking, generation, response writing, verification, and agentic side paths to Stage 5.
 - Keep Stage 6 focused on test gaps and synthesis rather than re-litigating stage ownership.
+
+## Secondary Hotspot Routing
+
+| File | Stage | Why it belongs there |
+| --- | --- | --- |
+| `tldw_Server_API/app/core/RAG/rag_service/profiles.py` | Stage 3 | request-profile defaults and payload shaping |
+| `tldw_Server_API/app/core/RAG/rag_service/types.py` | Stage 3 | shared data contracts consumed by the API and pipeline |
+| `tldw_Server_API/app/api/v1/utils/rag_cache.py` | Stage 3 | request-time cache invalidation and adapter selection |
+| `tldw_Server_API/app/core/RAG/rag_service/query_expansion.py` | Stage 4 | retrieval-time query shaping and expansion |
+| `tldw_Server_API/app/core/RAG/rag_service/semantic_cache.py` | Stage 4 | retrieval cache behavior and scoping |
+| `tldw_Server_API/app/core/RAG/rag_service/vector_stores/factory.py` | Stage 4 | data-source adapter creation and selection |
+| `tldw_Server_API/app/core/RAG/rag_service/web_fallback.py` | Stage 4 | fallback retrieval path and source routing |
+| `tldw_Server_API/app/core/RAG/rag_service/response_writer.py` | Stage 5 | post-retrieval response composition |
+| `tldw_Server_API/app/core/RAG/rag_service/post_generation_verifier.py` | Stage 5 | generation verification and post-processing |
+| `tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py` | Stage 5 | agentic post-retrieval execution path |
+| `tldw_Server_API/app/core/RAG/rag_service/research_agent.py` | Stage 5 | research-side orchestration after retrieval |
 
 ## Coverage Gaps
 

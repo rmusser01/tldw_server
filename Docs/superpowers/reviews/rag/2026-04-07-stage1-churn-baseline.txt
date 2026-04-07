@@ -1,0 +1,20 @@
+18049f109 Gate rerank debug snapshots behind explicit opt-in
+5a693d625 Merge origin/dev into codex/evaluations-recipe-framework
+7139d61d7 ui
+29f79260b Address PR 936 review feedback
+5eadd58f4 fix: address remaining qodo review items
+eb92c1b06 fix: optimize recipe run reuse lookup
+ef55db88b feat: execute rag retrieval tuning recipe runs
+b0f8c1d61 merge: bring main into dev preferring dev conflicts
+95bc78798 fixes
+3a64ad034 Merge branch 'dev' of https://github.com/rmusser01/tldw_server into dev
+e69c5f53a Merge branch 'codex/knowledge-qa-layout-and-retrieval' into dev
+4923d39ec fix: add knowledge qa media retrieval fallback
+2393f2478 merge: sync media db de-monolith branch with dev
+c2ae70a98 test: harden media db v2 delete boundary
+21170a8b9 bugfixes
+b949b6b01 fixes
+14b0c2ab9 fix: close rag and quiz review threads
+91806e5c3 fix: address non-threaded pr review followups
+88e0d4c78 refactor: reduce shim references to intentional boundaries
+392e9dd93 fix: harden workspace live audit coverage
