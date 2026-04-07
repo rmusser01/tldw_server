@@ -6,19 +6,11 @@ Worktree root:
 Pre-scaffold observed `git status --short`:
 ?? Docs/superpowers/plans/2026-04-07-rag-module-review-execution-plan.md
 
-Post-scaffold equivalent docs-only footprint:
-This snapshot is reconstructed from scaffold commit `c1d4d9684`
-(`docs: scaffold rag review artifacts`) plus the pre-existing untracked plan file.
-It records the files Task 1 introduced before later review-loop fix commits:
-
-?? Docs/superpowers/plans/2026-04-07-rag-module-review-execution-plan.md
-A  Docs/superpowers/reviews/rag/README.md
-A  Docs/superpowers/reviews/rag/2026-04-07-stage1-architecture-survey-and-inventory.md
-A  Docs/superpowers/reviews/rag/2026-04-07-stage2-unified-pipeline-orchestration.md
-A  Docs/superpowers/reviews/rag/2026-04-07-stage3-api-schema-and-request-boundaries.md
-A  Docs/superpowers/reviews/rag/2026-04-07-stage4-retrieval-boundaries-and-data-sources.md
-A  Docs/superpowers/reviews/rag/2026-04-07-stage5-reranking-and-post-retrieval-composition.md
-A  Docs/superpowers/reviews/rag/2026-04-07-stage6-test-gaps-and-synthesis.md
-
 Current `git status --short` after Task 1 fix commits:
 (clean)
+
+Docs-only Task 1 commit trail:
+- `c1d4d9684` `docs: scaffold rag review artifacts`
+- `0fce4c31b` `docs: preserve rag stage1 inventories`
+- `dcfd0ec6c` `docs: preserve rag stage1 safety evidence`
+- `89a476814` `docs: tighten rag stage1 safety notes`

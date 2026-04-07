@@ -4,7 +4,7 @@
 
 **Goal:** Execute the approved RAG architecture and maintainability review and produce one evidence-backed stage report per slice plus a final synthesis for the `tldw_Server_API/app/core/RAG` surface and its direct API boundaries.
 
-**Architecture:** This is a read-first, staged audit plan. Execution starts with a broad architecture survey and fixed review scaffold, then moves through the unified pipeline, API/schema boundaries, retrieval seams, and reranking or post-retrieval seams in order. Each stage writes findings before suggested actions, uses only the smallest relevant test set to confirm or sharpen claims, and commits docs-only review artifacts that later remediation work can reference. Prefer executing the review in a dedicated git worktree; if that is not available, keep the run docs-only and never revert or disturb unrelated workspace changes.
+**Architecture:** This is a read-first, staged audit plan. Execution starts with a broad architecture survey and fixed review scaffold, then moves through the unified pipeline, API/schema boundaries, retrieval seams, and reranking or post-retrieval seams in order. Each stage writes findings before suggested actions, uses only the smallest relevant test set to confirm or sharpen claims, and commits docs-only review artifacts that later remediation work can reference. Prefer executing the review in a dedicated git worktree; if that is not available, keep the run docs-only and never revert or disturb unrelated workspace changes. In this isolated worktree, activate the shared project virtualenv with `source ../../.venv/bin/activate` from the worktree root before running Python or pytest commands.
 
 **Tech Stack:** Python 3, FastAPI, SQLite, ChromaDB/pgvector adapters, pytest, ripgrep, git, Markdown
 
@@ -197,7 +197,7 @@ Document:
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 rg --files \
   tldw_Server_API/app/core/RAG \
   tldw_Server_API/app/api/v1/endpoints/rag_unified.py \
@@ -213,7 +213,7 @@ Expected: a stable source list that captures the core RAG tree plus the direct A
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 rg --files \
   tldw_Server_API/tests/RAG \
   tldw_Server_API/tests/RAG_NEW \
@@ -331,7 +331,7 @@ For each listed test file, record:
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/RAG_NEW/test_unified_pipeline.py \
   tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline.py \
@@ -417,7 +417,7 @@ For each listed test file, record:
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py \
   tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_response_mapping.py \
@@ -514,7 +514,7 @@ For each listed test file, record:
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/RAG_NEW/unit/test_retrieval.py \
   tldw_Server_API/tests/RAG_NEW/unit/test_vector_store_parity.py \
@@ -617,7 +617,7 @@ For each listed test file, record:
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py \
   tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_two_tier_gate.py \
@@ -697,7 +697,7 @@ Record:
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_decomposition.py \
   tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py \

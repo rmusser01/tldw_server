@@ -4,7 +4,7 @@
 
 Create the review scaffold, capture the scoped RAG source and test inventory, record size and churn baselines for the main hotspots, and route any secondary seams into later stages before deeper review begins.
 
-The workspace safety check confirmed the isolated worktree path at `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review`. Before the review scaffold was created, `git status --short` showed only the copied execution plan as an untracked file. The scaffold itself remained docs-only, and the post-scaffold footprint is preserved in the workspace-safety artifact as a reconstructed equivalent from the first scaffold commit plus that pre-existing untracked plan file.
+The workspace safety check confirmed the isolated worktree path at `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review`. Before the review scaffold was created, `git status --short` showed only the copied execution plan as an untracked file. The scaffold itself remained docs-only, and the workspace-safety artifact now preserves only direct snapshots: the observed pre-scaffold state and the current clean post-Task-1 state after the review-loop fix commits.
 
 ## Code Paths Reviewed
 
@@ -82,8 +82,8 @@ rg -n "async def unified_rag_pipeline|async def agentic_rag_pipeline|def _build_
 - Worktree root: `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review`
 - Preserved safety artifact: [`2026-04-07-stage1-workspace-safety.txt`](./2026-04-07-stage1-workspace-safety.txt)
 - The pre-scaffold snapshot shows only the copied execution plan as untracked.
-- The post-scaffold snapshot is preserved as a reconstructed equivalent from scaffold commit `c1d4d9684` plus the pre-existing untracked plan file, so the artifact still shows the docs-only footprint Task 1 introduced.
-- The current worktree state after the Task 1 fix commits is also preserved and is clean.
+- The current worktree state after the Task 1 review-loop fix commits is also preserved and is clean.
+- The docs-only footprint of Task 1 is established by the Task 1 commit history rather than by a reconstructed `git status --short` snapshot.
 
 ## Preserved Source Inventory
 
@@ -92,6 +92,7 @@ The verbatim output of `rg --files ... | sort` is retained in [`2026-04-07-stage
 ## Preserved Test Inventory
 
 The verbatim output of `rg --files ... | rg 'rag|RAG|search' | sort` is retained in [`2026-04-07-stage1-test-inventory.txt`](./2026-04-07-stage1-test-inventory.txt).
+This is a raw grep capture, so it includes helper and support files such as `conftest.py`, `__init__.py`, and `TEST_STRATEGY.md` in addition to executable pytest modules.
 
 ## Preserved Baselines
 
