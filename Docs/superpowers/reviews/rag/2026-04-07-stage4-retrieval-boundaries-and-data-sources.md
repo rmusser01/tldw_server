@@ -8,6 +8,8 @@ Review retrieval composition across database retrievers, query expansion, caches
 
 - TBD: `tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py`
 - TBD: `tldw_Server_API/app/core/RAG/rag_service/query_expansion.py`
+- TBD: `tldw_Server_API/app/core/RAG/rag_service/hyde.py`
+- TBD: `tldw_Server_API/app/core/RAG/rag_service/query_classifier.py`
 - TBD: `tldw_Server_API/app/core/RAG/rag_service/semantic_cache.py`
 - TBD: `tldw_Server_API/app/core/RAG/rag_service/vector_stores/base.py`
 - TBD: `tldw_Server_API/app/core/RAG/rag_service/vector_stores/factory.py`

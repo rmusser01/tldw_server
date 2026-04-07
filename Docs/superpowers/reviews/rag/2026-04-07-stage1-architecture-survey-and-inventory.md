@@ -4,7 +4,7 @@
 
 Create the review scaffold, capture the scoped RAG source and test inventory, record size and churn baselines for the main hotspots, and route any secondary seams into later stages before deeper review begins.
 
-The workspace safety check confirmed the isolated worktree path at `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review`. Before the review scaffold was created, `git status --short` showed only the copied execution plan as an untracked file. The scaffold itself remained docs-only, and the workspace-safety artifact preserves the observed pre-scaffold state, the literal current `git status --short` clean observation at the latest Task 1 head, and the full docs-only Task 1 commit trail. To avoid a stale self-reference, the safety artifact records the fixed prior Task 1 hashes and explicitly treats the commit that last updated the artifact as the final Task 1 alignment commit.
+The workspace safety check confirmed the isolated worktree path at `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review`. Before the review scaffold was created, `git status --short` showed only the copied execution plan as an untracked file. The scaffold itself remained docs-only, and the workspace-safety artifact preserves the observed pre-scaffold state, the literal current `git status --short` clean observation at the latest Task 1 head, the fixed Task 1 commit trail through `9494d0fed`, and a path-limited `git log` reproduction rule anchored at `9494d0fed` for the final Task 1 evidence-alignment commit.
 
 ## Code Paths Reviewed
 
@@ -83,7 +83,7 @@ rg -n "async def unified_rag_pipeline|async def agentic_rag_pipeline|def _build_
 - Preserved safety artifact: [`2026-04-07-stage1-workspace-safety.txt`](./2026-04-07-stage1-workspace-safety.txt)
 - The pre-scaffold snapshot shows only the copied execution plan as untracked.
 - The current worktree state after the Task 1 review-loop fix commits is preserved as a literal `git status --short` observation with no output.
-- The docs-only footprint of Task 1 is established by the full Task 1 commit trail recorded in the safety artifact, including the commit that last updated the artifact itself.
+- The docs-only footprint of Task 1 is established by the fixed Task 1 commit trail recorded in the safety artifact plus the anchored reproduction rule for the final Task 1 evidence-alignment commit.
 
 ## Preserved Source Inventory
 
@@ -107,7 +107,7 @@ This is a raw grep capture, so it includes helper and support files such as `con
 - Hotspot inventory by churn: the preserved per-file recent-history baseline now attributes change activity to each named hotspot. `unified_pipeline.py` shows the densest recent orchestration churn, including rerank-debug gating, retrieval-tuning work, database-lifecycle refactors, and SQL-retriever integration; `rag_unified.py` shows a narrower API-boundary history centered on default-precedence and boundary cleanup; `database_retrievers.py` carries retrieval fallback and factory-routing changes; and `advanced_reranking.py` shows an older, more isolated reranking-focused change pattern. That is still lightweight churn evidence rather than a full ownership map, but it is now attributable to the exact hotspot files selected for deeper review.
 - Hotspot inventory by centrality: `unified_pipeline.py` is the primary fan-in/fan-out orchestrator; `rag_unified.py` owns the request/response boundary; `profiles.py` and `types.py` define shared request and result contracts; `rag_cache.py` and `vector_stores/factory.py` mediate request-time adapter selection and invalidation; and `database_retrievers.py` sits on the retrieval composition seam. Those are the ownership points that later stages should treat as structurally significant.
 - Probable risk: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py` and `tldw_Server_API/app/api/v1/endpoints/rag_unified.py` are large enough to concentrate orchestration and boundary ownership, so later stages need explicit seam ownership to avoid drift.
-- Probable risk: retrieval-adjacent support files such as `query_expansion.py`, `semantic_cache.py`, `response_writer.py`, `post_generation_verifier.py`, `agentic_chunker.py`, and `research_agent.py` are part of the active path and should not remain implicit spillover areas.
+- Probable risk: retrieval-adjacent support files such as `query_expansion.py`, `hyde.py`, `query_classifier.py`, `semantic_cache.py`, `response_writer.py`, `post_generation_verifier.py`, `agentic_chunker.py`, and `research_agent.py` are part of the active path and should not remain implicit spillover areas.
 
 ## Suggested Refactor/Actions
 
@@ -125,6 +125,8 @@ This is a raw grep capture, so it includes helper and support files such as `con
 | `tldw_Server_API/app/core/RAG/rag_service/types.py` | Stage 3 | shared data contracts consumed by the API and pipeline |
 | `tldw_Server_API/app/api/v1/utils/rag_cache.py` | Stage 3 | request-time cache invalidation and adapter selection |
 | `tldw_Server_API/app/core/RAG/rag_service/query_expansion.py` | Stage 4 | retrieval-time query shaping and expansion |
+| `tldw_Server_API/app/core/RAG/rag_service/hyde.py` | Stage 4 | HYDE retrieval expansion and merge behavior |
+| `tldw_Server_API/app/core/RAG/rag_service/query_classifier.py` | Stage 4 | retrieval-time routing and classification policy |
 | `tldw_Server_API/app/core/RAG/rag_service/semantic_cache.py` | Stage 4 | retrieval cache behavior and scoping |
 | `tldw_Server_API/app/core/RAG/rag_service/vector_stores/factory.py` | Stage 4 | data-source adapter creation and selection |
 | `tldw_Server_API/app/core/RAG/rag_service/web_fallback.py` | Stage 4 | fallback retrieval path and source routing |
@@ -137,7 +139,7 @@ This is a raw grep capture, so it includes helper and support files such as `con
 
 - No runtime checks or tests were run in this stage.
 - The legacy `tldw_Server_API/tests/RAG` suite and the newer `tldw_Server_API/tests/RAG_NEW` suite should both remain visible in later stages so coverage gaps do not get masked by one green path.
-- The inventory surfaced adjacent support seams beyond the initial seed set, especially `query_expansion.py`, `response_writer.py`, `post_generation_verifier.py`, `semantic_cache.py`, `agentic_chunker.py`, and `research_agent.py`.
+- The inventory surfaced adjacent support seams beyond the initial seed set, especially `query_expansion.py`, `hyde.py`, `query_classifier.py`, `response_writer.py`, `post_generation_verifier.py`, `semantic_cache.py`, `agentic_chunker.py`, and `research_agent.py`.
 
 ## Exit Note
 

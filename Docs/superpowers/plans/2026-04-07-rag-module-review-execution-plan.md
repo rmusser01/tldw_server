@@ -234,9 +234,13 @@ wc -l \
   tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py
 
 git log --oneline -n 20 -- \
-  tldw_Server_API/app/core/RAG \
-  tldw_Server_API/app/api/v1/endpoints/rag_unified.py \
-  tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py
+  tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py
+git log --oneline -n 20 -- \
+  tldw_Server_API/app/api/v1/endpoints/rag_unified.py
+git log --oneline -n 20 -- \
+  tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py
+git log --oneline -n 20 -- \
+  tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py
 ```
 
 Expected: a size map and churn baseline that justify which files deserve deeper review first.
@@ -456,6 +460,8 @@ Expected: one docs-only commit contains the Stage 3 report.
 - Modify: `Docs/superpowers/reviews/rag/2026-04-07-stage4-retrieval-boundaries-and-data-sources.md`
 - Inspect: `tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py`
 - Inspect: `tldw_Server_API/app/core/RAG/rag_service/query_expansion.py`
+- Inspect: `tldw_Server_API/app/core/RAG/rag_service/hyde.py`
+- Inspect: `tldw_Server_API/app/core/RAG/rag_service/query_classifier.py`
 - Inspect: `tldw_Server_API/app/core/RAG/rag_service/semantic_cache.py`
 - Inspect: `tldw_Server_API/app/core/RAG/rag_service/media_search.py`
 - Inspect: `tldw_Server_API/app/core/RAG/rag_service/web_fallback.py`
@@ -484,6 +490,8 @@ Run:
 rg -n "class (.*Retriever|.*Adapter)|def (retrieve|search|expand|initialize|create_|delete_by_filter|get_shared_cache|lookup|store|merge)|DataSource|index_namespace|vector_store_type" \
   tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py \
   tldw_Server_API/app/core/RAG/rag_service/query_expansion.py \
+  tldw_Server_API/app/core/RAG/rag_service/hyde.py \
+  tldw_Server_API/app/core/RAG/rag_service/query_classifier.py \
   tldw_Server_API/app/core/RAG/rag_service/semantic_cache.py \
   tldw_Server_API/app/core/RAG/rag_service/media_search.py \
   tldw_Server_API/app/core/RAG/rag_service/web_fallback.py \
@@ -499,7 +507,7 @@ Expected: a concise map of the retrieval seams, factory entry points, and cache 
 
 Confirm:
 - how database retrievers expose source-specific behavior
-- where query expansion or fallback logic leaks retrieval-policy knowledge
+- where query expansion, HYDE, query classification, or fallback logic leaks retrieval-policy knowledge
 - how vector-store factories and adapters couple settings, user namespaces, and collection names
 - whether semantic caching is owned cleanly or bleeds assumptions across the API and core layers
 
