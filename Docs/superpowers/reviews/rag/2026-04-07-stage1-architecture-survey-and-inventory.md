@@ -4,7 +4,7 @@
 
 Create the review scaffold, capture the scoped RAG source and test inventory, record size and churn baselines for the main hotspots, and route any secondary seams into later stages before deeper review begins.
 
-The workspace safety check confirmed the isolated worktree path at `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review`. Before the review scaffold was created, `git status --short` showed only the copied execution plan as an untracked file, so this run remained docs-only and did not touch source code.
+The workspace safety check confirmed the isolated worktree path at `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review`. Before the review scaffold was created, `git status --short` showed only the copied execution plan as an untracked file. The scaffold itself remained docs-only, and the post-scaffold footprint is preserved in the workspace-safety artifact as a reconstructed equivalent from the first scaffold commit plus that pre-existing untracked plan file.
 
 ## Code Paths Reviewed
 
@@ -38,6 +38,9 @@ The workspace safety check confirmed the isolated worktree path at `/Users/apple
 - Scoped inventory captured across `tldw_Server_API/tests/RAG`, `tldw_Server_API/tests/RAG_NEW`, `tldw_Server_API/tests/e2e`, and `tldw_Server_API/tests/server_e2e_tests`.
 
 ## Validation Commands
+
+All commands below were run from the worktree root:
+`/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review`
 
 ```bash
 git rev-parse --show-toplevel
@@ -78,8 +81,9 @@ rg -n "async def unified_rag_pipeline|async def agentic_rag_pipeline|def _build_
 
 - Worktree root: `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review`
 - Preserved safety artifact: [`2026-04-07-stage1-workspace-safety.txt`](./2026-04-07-stage1-workspace-safety.txt)
-- The pre-change `git status --short` snapshot was clean, so the preserved equivalent is an empty output section.
-- The post-change `git status --short` snapshot is preserved in the safety artifact and shows only docs files under `Docs/superpowers/reviews/rag/`.
+- The pre-scaffold snapshot shows only the copied execution plan as untracked.
+- The post-scaffold snapshot is preserved as a reconstructed equivalent from scaffold commit `c1d4d9684` plus the pre-existing untracked plan file, so the artifact still shows the docs-only footprint Task 1 introduced.
+- The current worktree state after the Task 1 fix commits is also preserved and is clean.
 
 ## Preserved Source Inventory
 
@@ -99,7 +103,7 @@ The verbatim output of `rg --files ... | rg 'rag|RAG|search' | sort` is retained
 
 - No confirmed defects at survey depth.
 - Hotspot inventory by size: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py` is the dominant orchestrator at 6977 LOC; `tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py` is the next largest core retrieval module at 3590 LOC; `tldw_Server_API/app/api/v1/endpoints/rag_unified.py` is the main API boundary at 2445 LOC; and `tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py` is the post-retrieval ranking hotspot at 1704 LOC.
-- Hotspot inventory by churn: the last 20 commits touching the scoped surface include rerank-debug snapshot gating, review-feedback cleanup, recipe-run reuse work, retrieval tuning, and boundary hardening. That cluster indicates the pipeline, reranking, and API boundary surface are still active and should be treated as higher-change-risk than the surrounding helpers.
+- Hotspot inventory by churn: the last 20 commits touching the scoped surface include rerank-debug snapshot gating, review-feedback cleanup, recipe-run reuse work, retrieval tuning, and boundary hardening. This is qualitative churn evidence rather than a per-file touch count, but it still suggests the pipeline, reranking, and API boundary surface deserve higher-change scrutiny than surrounding helpers.
 - Hotspot inventory by centrality: `unified_pipeline.py` is the primary fan-in/fan-out orchestrator; `rag_unified.py` owns the request/response boundary; `profiles.py` and `types.py` define shared request and result contracts; `rag_cache.py` and `vector_stores/factory.py` mediate request-time adapter selection and invalidation; and `database_retrievers.py` sits on the retrieval composition seam. Those are the ownership points that later stages should treat as structurally significant.
 - Probable risk: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py` and `tldw_Server_API/app/api/v1/endpoints/rag_unified.py` are large enough to concentrate orchestration and boundary ownership, so later stages need explicit seam ownership to avoid drift.
 - Probable risk: retrieval-adjacent support files such as `query_expansion.py`, `semantic_cache.py`, `response_writer.py`, `post_generation_verifier.py`, `agentic_chunker.py`, and `research_agent.py` are part of the active path and should not remain implicit spillover areas.
