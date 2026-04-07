@@ -7,10 +7,11 @@ Pre-scaffold observed `git status --short`:
 ?? Docs/superpowers/plans/2026-04-07-rag-module-review-execution-plan.md
 
 Current `git status --short` after Task 1 fix commits:
-(clean)
+[no output]
 
 Docs-only Task 1 commit trail:
 - `c1d4d9684` `docs: scaffold rag review artifacts`
 - `0fce4c31b` `docs: preserve rag stage1 inventories`
 - `dcfd0ec6c` `docs: preserve rag stage1 safety evidence`
 - `89a476814` `docs: tighten rag stage1 safety notes`
+- `ef2f53d6c` `docs: align rag worktree review instructions`
