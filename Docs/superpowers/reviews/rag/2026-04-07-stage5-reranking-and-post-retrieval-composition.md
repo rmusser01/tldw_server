@@ -112,15 +112,20 @@ Post-retrieval boundary map:
 
 - Seam inventory:
   - `rg -n "class |def (rerank|generate|stream|verify|gate|cite|write|agentic_|research_|invalidate_|quote_|check_)" tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py tldw_Server_API/app/core/RAG/rag_service/generation.py tldw_Server_API/app/core/RAG/rag_service/guardrails.py tldw_Server_API/app/core/RAG/rag_service/citations.py tldw_Server_API/app/core/RAG/rag_service/response_writer.py tldw_Server_API/app/core/RAG/rag_service/post_generation_verifier.py tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py tldw_Server_API/app/core/RAG/rag_service/research_agent.py`
+- Supporting post-retrieval control-point trace:
+  - `rg -n "reranking_calibration|enable_structured_response|build_hard_citations|build_quote_citations|check_numeric_fidelity|PostGenerationVerifier|verify_and_maybe_fix|response_writer|build_writer_system_prompt|generate_response|generate_streaming_response" tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/app/core/RAG/rag_service/response_writer.py tldw_Server_API/app/core/RAG/rag_service/guardrails.py tldw_Server_API/app/core/RAG/rag_service/generation.py tldw_Server_API/app/core/RAG/rag_service/post_generation_verifier.py`
+  - This supporting trace is the command used to back the `unified_pipeline.py` call-site claims and the specific writer/guardrail helper ownership referenced in the findings.
 - Targeted post-retrieval tests:
   - `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_two_tier_gate.py tldw_Server_API/tests/RAG_NEW/unit/test_reranker_metrics.py tldw_Server_API/tests/RAG_NEW/unit/test_response_writer.py tldw_Server_API/tests/RAG_NEW/unit/test_guardrails_quotes_and_numeric.py tldw_Server_API/tests/RAG_NEW/unit/test_guardrails_injection_numeric.py tldw_Server_API/tests/RAG_NEW/unit/test_guardrails_hard_citations_golden.py tldw_Server_API/tests/RAG_NEW/unit/test_post_verifier.py tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_failures_and_fallbacks.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_cache_invalidation.py tldw_Server_API/tests/RAG_NEW/unit/test_agentic_golden_citations.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_agentic_api.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_strict_extractive_nli_api.py tldw_Server_API/tests/RAG_NEW/integration/test_research_agent_loop.py tldw_Server_API/tests/e2e/test_rag_generation_grounding_smoke.py tldw_Server_API/tests/e2e/test_rag_post_verification_smoke.py -v`
   - Result in this worktree: `38 passed, 4 skipped, 456 warnings in 170.08s (0:02:50)`.
   - Concrete skips:
     - `tldw_Server_API/tests/RAG_NEW/integration/test_rag_agentic_api.py::test_rag_agentic_search_verification_flags`
-      - Rerun with `-rs` reported: `agentic verification flags skipped due to server error: 500`.
+      - Skip detail was confirmed with: `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/integration/test_rag_agentic_api.py -k verification_flags -rs -v`
+      - `-rs` reported: `agentic verification flags skipped due to server error: 500`.
     - `tldw_Server_API/tests/e2e/test_rag_generation_grounding_smoke.py::test_rag_generation_grounding_smoke`
     - `tldw_Server_API/tests/e2e/test_rag_generation_grounding_smoke.py::test_rag_pre_retrieval_clarification_smoke`
     - `tldw_Server_API/tests/e2e/test_rag_post_verification_smoke.py::test_rag_search_with_post_verification_smoke`
+      - These three skips share the same fixture-level live-server prerequisite in `tldw_Server_API/tests/e2e/fixtures.py:1012-1019`.
       - Skip reason observed in output: live API client could not connect to `localhost:8000`; pytest reported `Please ensure the server is running ... Last error: [Errno 1] Operation not permitted`.
 - Docs-scope security check:
   - `source ../../.venv/bin/activate && python -m bandit -r Docs/superpowers/reviews/rag -f json -o /tmp/bandit_stage5_rag.json`
@@ -141,7 +146,7 @@ Post-retrieval boundary map:
    - The agentic pipeline reuses the same heuristics as control flow, not decoration: hard citations gate the answer, numeric fidelity can retry local retrieval, and NLI low-confidence can append notes or decline (`agentic_chunker.py:1181-1303`).
    - So the modules are leaves, but the effective post-retrieval architecture is not. The real policy owners are the orchestration blocks that interpret heuristic output as abstention and retry decisions.
 
-3. Medium severity, high confidence: citation responsibilities are split across three incompatible systems.
+3. Medium severity, high confidence: citation responsibilities are split across three parallel, loosely coordinated systems with no single authoritative contract.
    - `CitationGenerator.generate_citations()` derives academic citations, chunk citations, and inline marker maps from documents alone (`citations.py:507-566`). `format_inline_citations()` still just appends markers to the end of text (`673-696`), so it does not own sentence-to-evidence grounding.
    - `response_writer.py` separately instructs the model to emit `[number]` citations and formats XML-tagged context (`response_writer.py:19-248`), but it has no runtime tie to `CitationGenerator` or `guardrails.py`.
    - Grounded enforcement lives in a third path: `build_hard_citations()` and `build_quote_citations()` in `guardrails.py`, which the main pipeline uses after generation (`unified_pipeline.py:5360-5403`) and the agentic path reuses against the synthetic chunk (`agentic_chunker.py:1181-1197`, `1319-1339`).
