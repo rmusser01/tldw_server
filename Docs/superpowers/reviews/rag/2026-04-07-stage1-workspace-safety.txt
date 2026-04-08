@@ -19,5 +19,5 @@ Docs-only Task 1 commit trail:
 - `5368ea209` `docs: mark rag stage1 baseline complete`
 - `9494d0fed` `docs: tighten rag stage1 review evidence`
 
-Final Task 1 evidence-alignment commit reproduction:
-`git log --reverse --oneline 9494d0fed..HEAD -- Docs/superpowers/reviews/rag/2026-04-07-stage1-workspace-safety.txt Docs/superpowers/reviews/rag/2026-04-07-stage1-churn-baseline.txt Docs/superpowers/reviews/rag/2026-04-07-stage1-architecture-survey-and-inventory.md`
+Task 1 stabilization tail after `9494d0fed` reproduction:
+`git log --reverse --oneline 9494d0fed..HEAD -- Docs/superpowers/reviews/rag/2026-04-07-stage1-workspace-safety.txt Docs/superpowers/reviews/rag/2026-04-07-stage1-architecture-survey-and-inventory.md Docs/superpowers/reviews/rag/2026-04-07-stage1-seed-set-ownership-map.txt`

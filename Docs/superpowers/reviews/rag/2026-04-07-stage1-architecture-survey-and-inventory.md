@@ -4,7 +4,7 @@
 
 Create the review scaffold, capture the scoped RAG source and test inventory, record size and churn baselines for the main hotspots, and route any secondary seams into later stages before deeper review begins.
 
-The workspace safety check confirmed the isolated worktree path at `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review`. Before the review scaffold was created, `git status --short` showed only the copied execution plan as an untracked file. The scaffold itself remained docs-only, and the workspace-safety artifact preserves the observed pre-scaffold state, the literal current `git status --short` clean observation at the latest Task 1 head, the fixed Task 1 commit trail through `9494d0fed`, and a path-limited `git log` reproduction rule anchored at `9494d0fed` for the final Task 1 evidence-alignment commit.
+The workspace safety check confirmed the isolated worktree path at `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review`. Before the review scaffold was created, `git status --short` showed only the copied execution plan as an untracked file. The scaffold itself remained docs-only, and the workspace-safety artifact preserves the observed pre-scaffold state, the literal current `git status --short` clean observation at the latest Task 1 head, the fixed Task 1 commit trail through `9494d0fed`, and a path-limited `git log` reproduction rule anchored at `9494d0fed` for the later Task 1 stabilization tail across the Stage 1 evidence files.
 
 ## Code Paths Reviewed
 
@@ -83,7 +83,7 @@ rg -n "async def unified_rag_pipeline|async def agentic_rag_pipeline|def _build_
 - Preserved safety artifact: [`2026-04-07-stage1-workspace-safety.txt`](./2026-04-07-stage1-workspace-safety.txt)
 - The pre-scaffold snapshot shows only the copied execution plan as untracked.
 - The current worktree state after the Task 1 review-loop fix commits is preserved as a literal `git status --short` observation with no output.
-- The docs-only footprint of Task 1 is established by the fixed Task 1 commit trail recorded in the safety artifact plus the anchored reproduction rule for the final Task 1 evidence-alignment commit.
+- The docs-only footprint of Task 1 is established by the fixed Task 1 commit trail recorded in the safety artifact plus the anchored reproduction rule for the later Task 1 stabilization tail across the Stage 1 evidence files.
 
 ## Preserved Source Inventory
 
