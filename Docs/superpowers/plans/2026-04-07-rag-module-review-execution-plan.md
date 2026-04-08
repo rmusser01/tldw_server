@@ -111,7 +111,7 @@
 **Goal:** Review `unified_pipeline.py` and its closest type contracts as the central orchestration layer.
 **Success Criteria:** Phase ordering, ownership boundaries, parameter sprawl, and metadata or response-shaping leakage are documented with evidence and tied to concrete tests where available.
 **Tests:** `test_unified_pipeline.py`, `unit/test_unified_pipeline.py`, `unit/test_unified_pipeline_decomposition.py`, `unit/test_unified_pipeline_focused.py`, `unit/test_unified_pipeline_profile_metadata.py`, `unit/test_pipeline_generation_controls.py`, `unit/test_pipeline_post_verification_metadata.py`, `unit/test_unified_pipeline_structured_writer.py`
-**Status:** Not Started
+**Status:** Complete
 
 ## Stage 3: API, Schema, and Request Boundaries
 **Goal:** Review endpoint, schema, profile-default, and request-mapping ownership around the RAG API surfaces.
@@ -305,7 +305,7 @@ Expected: one docs-only commit captures the review workspace and Stage 1 invento
 - Test: `tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_post_verification_metadata.py`
 - Test: `tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_structured_writer.py`
 
-- [ ] **Step 1: Map the orchestration entry points and phase toggles**
+- [x] **Step 1: Map the orchestration entry points and phase toggles**
 
 Run:
 ```bash
@@ -316,7 +316,7 @@ rg -n "async def unified_rag_pipeline|async def unified_batch_pipeline|def simpl
 
 Expected: a compact map of the public entry points, major flags, and response-shaping fields.
 
-- [ ] **Step 2: Trace phase ownership inside `unified_pipeline.py`**
+- [x] **Step 2: Trace phase ownership inside `unified_pipeline.py`**
 
 Confirm:
 - where query preparation ends and retrieval begins
@@ -324,14 +324,14 @@ Confirm:
 - where metadata and response-shaping logic are embedded instead of delegated
 - whether internal helper sections behave like hidden sub-pipelines
 
-- [ ] **Step 3: Review the focused pipeline tests and extract the protected invariants**
+- [x] **Step 3: Review the focused pipeline tests and extract the protected invariants**
 
 For each listed test file, record:
 - the main orchestration invariant it protects
 - whether it checks decomposition boundaries or only happy-path behavior
 - which probable risks can be upgraded or downgraded because of it
 
-- [ ] **Step 4: Run the targeted unified-pipeline tests**
+- [x] **Step 4: Run the targeted unified-pipeline tests**
 
 Run:
 ```bash
@@ -349,7 +349,7 @@ python -m pytest \
 
 Expected: tests collect and mostly pass; any failure either sharpens a pipeline finding or must be explained as environment-specific noise.
 
-- [ ] **Step 5: Write the Stage 2 report**
+- [x] **Step 5: Write the Stage 2 report**
 
 Record:
 - ranked findings with severity and confidence
@@ -357,7 +357,7 @@ Record:
 - suggested refactor directions that reduce coupling without turning into a rewrite plan
 - the exit note for what Stage 3 must verify at the endpoint boundary
 
-- [ ] **Step 6: Commit the Stage 2 report**
+- [x] **Step 6: Commit the Stage 2 report**
 
 Run:
 ```bash
