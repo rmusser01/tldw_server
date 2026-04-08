@@ -19,6 +19,7 @@ Consolidate cross-stage findings, compare the reviewed architecture against the 
 
 ## Tests Reviewed
 
+- Canonical test evidence inherited from the targeted test slices recorded in the Stage 2-5 reports. Stage 6 confidence ratings are based on that broader reviewed test base plus the representative sanity-pack rerun below.
 - `tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_decomposition.py`
 - `tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py`
 - `tldw_Server_API/tests/RAG_NEW/unit/test_retrieval.py`
@@ -27,8 +28,11 @@ Consolidate cross-stage findings, compare the reviewed architecture against the 
 ## Validation Commands
 
 - `rg -n "^## Findings|^## Suggested Refactor/Actions|^## Coverage Gaps|^## Exit Note" Docs/superpowers/reviews/rag/2026-04-07-stage1-architecture-survey-and-inventory.md Docs/superpowers/reviews/rag/2026-04-07-stage2-unified-pipeline-orchestration.md Docs/superpowers/reviews/rag/2026-04-07-stage3-api-schema-and-request-boundaries.md Docs/superpowers/reviews/rag/2026-04-07-stage4-retrieval-boundaries-and-data-sources.md Docs/superpowers/reviews/rag/2026-04-07-stage5-reranking-and-post-retrieval-composition.md`
+  - This command is an index into the canonical Stage 1-5 findings/actions/gaps/exit notes; the detailed evidence remains in those stage reports rather than in the heading scan itself.
 - `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_decomposition.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py tldw_Server_API/tests/RAG_NEW/unit/test_retrieval.py tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py -v`
   - Result in this environment: `38 passed, 96 warnings in 1.60s`
+- `source ../../.venv/bin/activate && python -m bandit -r Docs/superpowers/reviews/rag -f json -o /tmp/bandit_stage6_rag_synthesis.json`
+  - Result in this environment: Bandit completed successfully and the JSON report contained `0` errors and `0` results.
 
 ## Findings
 
