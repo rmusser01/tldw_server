@@ -39,6 +39,10 @@ Boundary map:
 
 - Mapping command:
   - `rg -n "@router\\.|def _|model_validator|field_validator|rag_profile|get_profile_kwargs|invalidate_rag_caches|delete_media_vectors|UnifiedRAGRequest|UnifiedRAGResponse|UnifiedBatchRequest|ImplicitFeedbackEvent" tldw_Server_API/app/api/v1/endpoints/rag_unified.py tldw_Server_API/app/api/v1/endpoints/rag_health.py tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py tldw_Server_API/app/api/v1/schemas/rag_schemas_simple.py tldw_Server_API/app/core/RAG/rag_service/profiles.py tldw_Server_API/app/api/v1/utils/rag_cache.py`
+- Supporting evidence command for findings 3 and 4:
+  - `rg -n "verification_report|result\\.metadata\\[\\\"verification_report\\\"\\]|from tldw_Server_API\\.app\\.api\\.v1\\.utils\\.rag_cache import invalidate_rag_caches|invalidate_rag_caches\\(" tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/app/core/Embeddings/services/jobs_worker.py`
+- Result:
+  - `unified_pipeline.py` matched the `generate_verification_report` gate and `result.metadata["verification_report"]` write path; `jobs_worker.py` matched the API-layer import plus the three invalidation call sites cited in finding 4.
 - Targeted tests:
   - `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_response_mapping.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_request_schema_profiles.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py tldw_Server_API/tests/RAG_NEW/unit/test_batch_round2_flags.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_health_endpoints.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_unified_features_endpoint.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_capabilities_styles.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py -v`
 - Result:
@@ -46,7 +50,7 @@ Boundary map:
 - Docs-scope Bandit:
   - `source ../../.venv/bin/activate && python -m bandit -r Docs/superpowers/reviews/rag -f json -o /tmp/bandit_rag_stage3.json`
 - Result:
-  - `exit 0; JSON output written to /tmp/bandit_rag_stage3.json`
+  - `JSON output written to /tmp/bandit_rag_stage3.json; jq confirmed results=0 and errors=0`
 
 ## Findings
 
