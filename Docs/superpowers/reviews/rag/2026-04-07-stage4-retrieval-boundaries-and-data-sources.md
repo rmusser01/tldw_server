@@ -16,6 +16,8 @@ Review retrieval composition across database retrievers, query expansion, caches
   - Routing seam: `classify_query()` (`246+`), `reformulate_query()` (`359+`), `classify_and_reformulate()` (`450+`).
 - Reviewed: `tldw_Server_API/app/core/RAG/rag_service/semantic_cache.py`
   - Cache ownership seam: `SemanticCache` core (`41+`), namespace and path normalization (`618+`), shared cache constructor `get_shared_cache()` (`803+`), shared invalidation `clear_shared_caches()` (`840+`).
+- Reviewed: `tldw_Server_API/app/api/v1/utils/rag_cache.py`
+  - API-side invalidation seam cited for namespace collection and hardcoded media collection naming in `delete_media_vectors()` and `invalidate_rag_caches()`.
 - Reviewed: `tldw_Server_API/app/core/RAG/rag_service/media_search.py`
   - Side-source retrieval seam: `search_images()` (`122+`), `search_videos()` (`194+`).
 - Reviewed: `tldw_Server_API/app/core/RAG/rag_service/web_fallback.py`
@@ -106,6 +108,7 @@ Boundary map:
     - `test_vector_store_parity.py::test_parity_boolean_and_multi_search[pgvector]`
     - `test_retriever_pgvector_multi_search.py::test_retriever_multi_search_with_jsonb_filter`
   - Skip reason observed in output: connection to `127.0.0.1:5432` failed with `Operation not permitted`, so the PGVector parity and integration seams were not exercised end-to-end in this environment.
+  - Fixture context: DSN resolution for those tests is owned by `tldw_Server_API/tests/helpers/pgvector.py`, which resolves an env-driven Postgres DSN (`PG_TEST_DSN`, `PGVECTOR_DSN`, `TEST_DATABASE_URL`, `DATABASE_URL`, container-style vars, etc.), performs a connectivity check, and skips PG-backed tests when no reachable DSN is available.
 - Docs-scope security check:
   - `source ../../.venv/bin/activate && python -m bandit -r Docs/superpowers/reviews/rag -f json -o /tmp/bandit_stage4_rag.json`
   - Result in this worktree: `jq '{errors: (.errors | length), results: (.results | length)}' /tmp/bandit_stage4_rag.json` returned `{"errors":0,"results":0}`.
@@ -132,7 +135,8 @@ Boundary map:
    - `classify_query()` and `classify_and_reformulate()` decide whether local DB, web, academic, or discussion retrieval should run (`246+`, `450+`), which makes classifier output part of retrieval-source policy rather than just query analysis.
    - `multi_strategy_expansion()` reuses `corpus` for synonym resolution and the pipeline passes `index_namespace` as that corpus key, so vector-store namespace semantics bleed into synonym expansion (`546+`; Stage 2 traced the `index_namespace` call site).
    - `QueryExpansionRetriever` exists as a wrapper contract (`679+`), but the main pipeline relies on compatibility helpers instead of this wrapper, so the wrapper is not the authoritative retrieval-expansion seam.
-   - `web_fallback.py` and `media_search.py` are cleaner utilities, but they are still retrieval-source branches whose activation depends on the classifier and pipeline policy rather than on an isolated source-routing layer.
+   - `web_fallback.py` is a cleaner utility, but it is still a retrieval-source branch whose activation depends on upstream retrieval policy rather than on an isolated source-routing layer.
+   - `media_search.py` stays reviewed in this stage only as a side-source utility surface. Its activation path is through the Stage 5 research-agent side path, not a claim this report proves through Stage 4 retrieval-policy evidence.
 
 5. Medium severity, medium confidence: semantic cache internals are relatively cohesive, but tenant identity and invalidation policy still bleed across core and API layers.
    - Inside `semantic_cache.py`, ownership is clear: namespace normalization, persist-path sanitization, shared-instance keys, and similarity lookup all live together (`618+`, `739+`, `803+`, `840+`).
