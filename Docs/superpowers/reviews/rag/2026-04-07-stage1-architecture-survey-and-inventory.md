@@ -74,7 +74,7 @@ rg -n "async def unified_rag_pipeline|async def agentic_rag_pipeline|def _build_
   tldw_Server_API/app/core/RAG/rag_service/types.py \
   tldw_Server_API/app/core/RAG/rag_service/vector_stores/factory.py \
   tldw_Server_API/app/api/v1/endpoints/rag_unified.py \
-  tldw_Server_API/app/api/v1/utils/rag_cache.py
+  tldw_Server_API/app/api/v1/utils/rag_cache.py | sort
 ```
 
 ## Workspace Safety Evidence
@@ -99,6 +99,7 @@ This is a raw grep capture, so it includes helper and support files such as `con
 - Hotspot size baseline: [`2026-04-07-stage1-hotspot-sizes.txt`](./2026-04-07-stage1-hotspot-sizes.txt)
 - Churn baseline by hotspot: [`2026-04-07-stage1-churn-baseline.txt`](./2026-04-07-stage1-churn-baseline.txt)
 - Seed-set ownership map: [`2026-04-07-stage1-seed-set-ownership-map.txt`](./2026-04-07-stage1-seed-set-ownership-map.txt)
+- The seed-set ownership artifact is the sorted output of the documented `rg -n ... | sort` command so the preserved evidence stays stable across ripgrep file-order variation.
 
 ## Findings
 
