@@ -51,7 +51,7 @@ Review `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py` as the cen
   - `rg -n "async def unified_rag_pipeline|async def unified_batch_pipeline|def simple_search|def advanced_search|enable_|search_mode|debug_mode|metadata|generated_answer|cache_hit" tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py tldw_Server_API/app/core/RAG/rag_service/types.py`
 - Targeted test run:
   - `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/test_unified_pipeline.py tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline.py tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_decomposition.py tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_focused.py tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_profile_metadata.py tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_generation_controls.py tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_post_verification_metadata.py tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_structured_writer.py -v`
-  - Result from rerun in this worktree: `71 passed, 508 warnings in 2.28s`.
+  - Result from rerun in this worktree: `71 passed, 508 warnings`.
   - The warning volume is non-trivial and the command output also included config/auth/test-environment warnings during startup and teardown; they did not fail the suite, but they are still part of the observed validation result.
 - Docs-scope security check:
   - `source ../../.venv/bin/activate && python -m bandit -r Docs/superpowers/reviews/rag -f json -o /tmp/bandit_stage2_rag_orchestration.json`
