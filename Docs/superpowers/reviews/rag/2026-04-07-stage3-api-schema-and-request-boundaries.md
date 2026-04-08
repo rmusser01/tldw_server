@@ -11,7 +11,9 @@ Review the RAG endpoint, schema, profile-default, and request-mapping boundary f
 - Reviewed: `tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py`
 - Reviewed: `tldw_Server_API/app/api/v1/schemas/rag_schemas_simple.py`
 - Reviewed: `tldw_Server_API/app/core/RAG/rag_service/profiles.py`
+- Reviewed: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py`
 - Reviewed: `tldw_Server_API/app/api/v1/utils/rag_cache.py`
+- Reviewed: `tldw_Server_API/app/core/Embeddings/services/jobs_worker.py`
 
 Boundary map:
 - `UnifiedRAGRequest` is the main request contract and owns schema-time aliasing and validation for `rag_profile`, `corpus` -> `index_namespace`, `min_relevance_score` -> `min_score`, source normalization, and chunk overlap validation.
@@ -41,6 +43,10 @@ Boundary map:
   - `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_response_mapping.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_request_schema_profiles.py tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py tldw_Server_API/tests/RAG_NEW/unit/test_batch_round2_flags.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_health_endpoints.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_unified_features_endpoint.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_capabilities_styles.py tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py -v`
 - Result:
   - `37 passed, 612 warnings in 133.84s (0:02:13)`
+- Docs-scope Bandit:
+  - `source ../../.venv/bin/activate && python -m bandit -r Docs/superpowers/reviews/rag -f json -o /tmp/bandit_rag_stage3.json`
+- Result:
+  - `exit 0; JSON output written to /tmp/bandit_rag_stage3.json`
 
 ## Findings
 
@@ -48,7 +54,7 @@ Boundary map:
    - In the standard path, precedence is explicit request fields > profile defaults > Search-Agent defaults > schema defaults via `_build_effective_request_payload()` and `_build_unified_pipeline_kwargs()` in `tldw_Server_API/app/api/v1/endpoints/rag_unified.py:153-289`.
    - In the agentic branch of `/api/v1/rag/search`, the endpoint builds `AgenticConfig` and `agentic_rag_pipeline(...)` directly from raw `request` attributes instead of the resolved payload, in `tldw_Server_API/app/api/v1/endpoints/rag_unified.py:1204-1277`.
    - That means `rag_profile` defaults from `tldw_Server_API/app/core/RAG/rag_service/profiles.py:196-255` and Search-Agent defaults from `tldw_Server_API/app/api/v1/endpoints/rag_unified.py:153-209` do not shape the non-streaming agentic request, even though they do shape standard `/search` and streaming retrieval.
-   - The targeted suite proves the precedence helper itself is correct (`tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py:266-312`) and that streaming agentic honors profile-resolved defaults (`tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py:472-538`), but there is no direct test of non-streaming agentic parity. This leaves two effective policies for the same public request schema.
+   - The targeted suite proves the precedence helper itself is correct (`tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py:266-312`) and, on the streaming agentic path, specifically proves that `rag_profile="fast"` propagates the profile-resolved `top_k=6` into the downstream `agentic_rag_pipeline` call (`tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py:472-538`). There is still no direct test of non-streaming agentic parity. This leaves two effective policies for the same public request schema.
 
 2. Medium: the batch request schema is a second source of truth for the API contract and has already drifted from the single-request contract and capability surface.
    - `UnifiedBatchRequest` repeats a large subset of `UnifiedRAGRequest` instead of reusing a shared request model in `tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py:1788-1935`.
