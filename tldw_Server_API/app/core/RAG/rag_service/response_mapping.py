@@ -9,6 +9,13 @@ from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGRes
 from .result_model import RAGResult
 
 
+def _result_field(result: Any, key: str, default: Any = None) -> Any:
+    """Read a top-level field from attr-based or dict-shaped result objects."""
+    if isinstance(result, dict):
+        return result.get(key, default)
+    return getattr(result, key, default)
+
+
 def _extract_field(obj: Any, key: str, default: Any = None) -> Any:
     """Read a field from direct attrs, wrapped `.document`, or dict shapes."""
     if hasattr(obj, key):
@@ -65,29 +72,29 @@ def _normalize_documents(documents: list[Any]) -> list[dict[str, Any]]:
 
 def rag_result_from_unified_search_result(result: Any) -> RAGResult:
     """Adapt unified pipeline results into the core result contract."""
-    metadata = getattr(result, "metadata", None) or {}
+    metadata = _result_field(result, "metadata", None) or {}
 
-    verification_report = getattr(result, "verification_report", None)
+    verification_report = _result_field(result, "verification_report", None)
     if verification_report is None and isinstance(metadata, dict):
         verification_report = metadata.get("verification_report")
 
     return RAGResult(
-        documents=list(getattr(result, "documents", None) or []),
-        query=str(getattr(result, "query", "")),
-        expanded_queries=list(getattr(result, "expanded_queries", None) or []),
+        documents=list(_result_field(result, "documents", None) or []),
+        query=str(_result_field(result, "query", "")),
+        expanded_queries=list(_result_field(result, "expanded_queries", None) or []),
         metadata=dict(metadata) if isinstance(metadata, dict) else {},
-        timings=dict(getattr(result, "timings", None) or {}),
-        citations=list(getattr(result, "citations", None) or []),
+        timings=dict(_result_field(result, "timings", None) or {}),
+        citations=list(_result_field(result, "citations", None) or []),
         academic_citations=list(metadata.get("academic_citations", []) or []),
         chunk_citations=list(metadata.get("chunk_citations", []) or []),
-        feedback_id=getattr(result, "feedback_id", None),
-        generated_answer=getattr(result, "generated_answer", None),
-        cache_hit=bool(getattr(result, "cache_hit", False)),
-        errors=list(getattr(result, "errors", None) or []),
-        security_report=getattr(result, "security_report", None),
-        total_time=float(getattr(result, "total_time", 0.0) or 0.0),
-        claims=getattr(result, "claims", None),
-        factuality=getattr(result, "factuality", None),
+        feedback_id=_result_field(result, "feedback_id", None),
+        generated_answer=_result_field(result, "generated_answer", None),
+        cache_hit=bool(_result_field(result, "cache_hit", False)),
+        errors=list(_result_field(result, "errors", None) or []),
+        security_report=_result_field(result, "security_report", None),
+        total_time=float(_result_field(result, "total_time", 0.0) or 0.0),
+        claims=_result_field(result, "claims", None),
+        factuality=_result_field(result, "factuality", None),
         verification_report=verification_report,
         retrieval_metrics=metadata.get("retrieval_metrics"),
         faithfulness=metadata.get("faithfulness"),

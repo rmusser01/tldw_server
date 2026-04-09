@@ -83,3 +83,39 @@ def test_convert_unified_result_sets_round2_fields_to_none_when_not_present():
     assert converted.suggestions is None
     assert converted.images is None
     assert converted.videos is None
+
+
+def test_convert_dict_shaped_result_preserves_declared_response_fields():
+    result = {
+        "documents": [
+            {
+                "id": "doc-1",
+                "content": "Dict-backed evidence",
+                "metadata": {"title": "Doc 1"},
+                "score": 0.61,
+            }
+        ],
+        "query": "dict fallback result",
+        "expanded_queries": ["dict fallback result"],
+        "metadata": {
+            "chunk_citations": [{"type": "chunk", "id": "chunk-1"}],
+            "verification_report": {"status": "verified"},
+        },
+        "timings": {"retrieval": 0.03},
+        "citations": [{"type": "web", "id": "cite-1"}],
+        "feedback_id": "fb-1",
+        "generated_answer": "Fallback answer",
+        "cache_hit": True,
+        "errors": ["soft warning"],
+        "security_report": {"status": "safe"},
+        "total_time": 0.42,
+    }
+
+    converted = rag_ep.convert_result_to_response(result)
+
+    assert converted.query == "dict fallback result"
+    assert converted.documents[0]["id"] == "doc-1"
+    assert converted.generated_answer == "Fallback answer"
+    assert converted.errors == ["soft warning"]
+    assert converted.verification_report == {"status": "verified"}
+    assert converted.chunk_citations == [{"type": "chunk", "id": "chunk-1"}]
