@@ -73,6 +73,7 @@ def test_standard_and_batch_shared_fields_resolve_to_the_same_effective_policy(
     assert batch_kwargs["user_id"] == "42"
     assert single_kwargs["feedback_user_id"] == "42"
     assert batch_kwargs["feedback_user_id"] == "42"
+    assert "query" not in batch_kwargs
 
     shared_fields = (
         "index_namespace",

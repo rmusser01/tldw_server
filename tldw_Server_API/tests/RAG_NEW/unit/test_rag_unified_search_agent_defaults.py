@@ -307,6 +307,7 @@ def test_build_batch_kwargs_uses_core_user_normalization_when_single_user_resolu
 
     assert kwargs["user_id"] is None
     assert kwargs["feedback_user_id"] is None
+    assert "query" not in kwargs
 
 def test_rag_profile_applies_defaults_when_fields_omitted():
     request = UnifiedRAGRequest(query="profile apply", rag_profile="fast")

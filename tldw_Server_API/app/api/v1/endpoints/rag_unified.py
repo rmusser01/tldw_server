@@ -228,6 +228,7 @@ def _build_batch_pipeline_kwargs(
     )
     payload = dict(resolved_request.payload)
     payload.pop("queries", None)
+    payload.pop("query", None)
     payload.pop("max_concurrent", None)
     payload.pop("enable_checkpoint", None)
     payload.update(db_paths)
