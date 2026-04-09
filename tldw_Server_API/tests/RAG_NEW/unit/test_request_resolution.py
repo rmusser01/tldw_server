@@ -57,3 +57,59 @@ def test_resolve_rag_request_explicit_fields_override_profile_defaults() -> None
     assert resolved.strategy == "standard"
     assert resolved.payload["max_generation_tokens"] == 700
     assert resolved.payload["top_k"] == 6
+
+
+def test_resolve_rag_request_applies_search_agent_defaults_when_fields_omitted() -> None:
+    request = SimpleNamespace(
+        query="apply core search agent defaults",
+        model_fields_set={"query"},
+    )
+
+    resolved = resolve_rag_request(
+        request,
+        get_profile_kwargs_fn=lambda profile: {},
+        search_agent_setting_fn=lambda env_key, cfg_key: {
+            ("SEARCH_QUERY_CLASSIFICATION", "search_query_classification"): "true",
+            ("SEARCH_DEFAULT_MODE", "search_default_mode"): "quality",
+            ("SEARCH_DISCUSSION_PLATFORMS", "search_discussion_platforms"): "reddit,stackoverflow",
+            ("SEARCH_CLASSIFIER_PROVIDER", "search_classifier_provider"): "openai",
+            ("SEARCH_CLASSIFIER_MODEL", "search_classifier_model"): "gpt-4o-mini",
+            ("SEARCH_MAX_ITERATIONS_BALANCED", "search_max_iterations_balanced"): "7",
+        }.get((env_key, cfg_key)),
+    )
+
+    assert resolved.payload["enable_query_classification"] is True
+    assert resolved.payload["search_depth_mode"] == "quality"
+    assert resolved.payload["discussion_platforms"] == ["reddit", "stackoverflow"]
+    assert resolved.payload["classifier_provider"] == "openai"
+    assert resolved.payload["classifier_model"] == "gpt-4o-mini"
+    assert resolved.payload["research_max_iterations_balanced"] == 7
+
+
+def test_resolve_rag_request_does_not_override_explicit_search_agent_fields() -> None:
+    request = SimpleNamespace(
+        query="explicit search agent values win",
+        enable_query_classification=False,
+        search_depth_mode="speed",
+        discussion_platforms=["quora"],
+        model_fields_set={
+            "query",
+            "enable_query_classification",
+            "search_depth_mode",
+            "discussion_platforms",
+        },
+    )
+
+    resolved = resolve_rag_request(
+        request,
+        get_profile_kwargs_fn=lambda profile: {},
+        search_agent_setting_fn=lambda env_key, cfg_key: {
+            ("SEARCH_QUERY_CLASSIFICATION", "search_query_classification"): "true",
+            ("SEARCH_DEFAULT_MODE", "search_default_mode"): "quality",
+            ("SEARCH_DISCUSSION_PLATFORMS", "search_discussion_platforms"): "reddit,stackoverflow",
+        }.get((env_key, cfg_key)),
+    )
+
+    assert resolved.payload["enable_query_classification"] is False
+    assert resolved.payload["search_depth_mode"] == "speed"
+    assert resolved.payload["discussion_platforms"] == ["quora"]

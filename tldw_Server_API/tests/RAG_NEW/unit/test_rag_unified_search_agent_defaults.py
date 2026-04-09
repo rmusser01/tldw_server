@@ -282,6 +282,32 @@ def test_batch_round2_defaults_apply_when_fields_omitted(monkeypatch):
     assert payload["enable_image_search"] is False
     assert payload["enable_video_search"] is True
 
+
+def test_build_batch_kwargs_uses_core_user_normalization_when_single_user_resolution_fails(
+    monkeypatch,
+):
+    def _raise_single_user_id():
+        raise RuntimeError("single-user id unavailable")
+
+    monkeypatch.setattr(
+        rag_ep.DatabasePaths,
+        "get_single_user_id",
+        staticmethod(_raise_single_user_id),
+    )
+
+    kwargs = rag_ep._build_batch_pipeline_kwargs(
+        request=UnifiedBatchRequest(
+            queries=["q1"],
+            user_id="single_user",
+            feedback_user_id="single_user",
+        ),
+        db_paths=_EMPTY_DB_PATHS,
+        current_user=None,
+    )
+
+    assert kwargs["user_id"] is None
+    assert kwargs["feedback_user_id"] is None
+
 def test_rag_profile_applies_defaults_when_fields_omitted():
     request = UnifiedRAGRequest(query="profile apply", rag_profile="fast")
     kwargs = rag_ep._build_unified_pipeline_kwargs(

@@ -55,6 +55,19 @@ from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
 )
 from tldw_Server_API.app.core.RAG.rag_service.generation import generate_streaming_response
 from tldw_Server_API.app.core.RAG.rag_service.profiles import get_profile_kwargs
+from tldw_Server_API.app.core.RAG.rag_service.post_retrieval_coordinator import (
+    PostRetrievalCoordinator,
+)
+from tldw_Server_API.app.core.RAG.rag_service.evidence_models import RetrievedEvidence
+from tldw_Server_API.app.core.RAG.rag_service.request_resolution import (
+    ResolvedRAGRequest,
+    apply_search_agent_defaults as apply_core_search_agent_defaults,
+    resolve_rag_request,
+)
+from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
+    rag_result_from_unified_search_result,
+    rag_result_to_response,
+)
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.config import get_config_value
 
@@ -67,26 +80,6 @@ from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     unified_rag_pipeline,
 )
 
-
-_SEARCH_AGENT_BOOL_DEFAULTS: tuple[tuple[str, str, str], ...] = (
-    ("enable_query_classification", "SEARCH_QUERY_CLASSIFICATION", "search_query_classification"),
-    ("enable_query_reformulation", "SEARCH_QUERY_REFORMULATION", "search_query_reformulation"),
-    ("enable_research_loop", "SEARCH_RESEARCH_LOOP", "search_research_loop"),
-    ("enable_discussion_search", "SEARCH_DISCUSSIONS_ENABLED", "search_discussions_enabled"),
-    ("enable_research_progress", "SEARCH_PROGRESS_STREAMING", "search_progress_streaming"),
-    ("search_url_scraping", "SEARCH_URL_SCRAPING", "search_url_scraping"),
-    ("enable_suggestions", "SEARCH_SUGGESTIONS", "search_suggestions"),
-    ("enable_structured_response", "SEARCH_STRUCTURED_RESPONSE", "search_structured_response"),
-    ("enable_image_search", "SEARCH_IMAGE_SEARCH", "search_image_search"),
-    ("enable_video_search", "SEARCH_VIDEO_SEARCH", "search_video_search"),
-)
-_SEARCH_AGENT_INT_DEFAULTS: tuple[tuple[str, str, str], ...] = (
-    ("research_max_iterations", "SEARCH_MAX_ITERATIONS", "search_max_iterations"),
-    ("research_max_iterations_speed", "SEARCH_MAX_ITERATIONS_SPEED", "search_max_iterations_speed"),
-    ("research_max_iterations_balanced", "SEARCH_MAX_ITERATIONS_BALANCED", "search_max_iterations_balanced"),
-    ("research_max_iterations_quality", "SEARCH_MAX_ITERATIONS_QUALITY", "search_max_iterations_quality"),
-)
-_SEARCH_AGENT_MODE_VALUES = {"speed", "balanced", "quality"}
 _BATCH_ROUND2_DEFAULT_FIELDS = {
     "enable_suggestions",
     "enable_structured_response",
@@ -108,10 +101,6 @@ def _request_fields_set(request: Any) -> set[str]:
         return set()
 
 
-def _is_truthy_value(raw: Any) -> bool:
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _search_agent_setting(env_key: str, config_key: str) -> Optional[str]:
     """Read Search-Agent setting with env-over-config precedence."""
     env_value = os.getenv(env_key)
@@ -123,33 +112,6 @@ def _search_agent_setting(env_key: str, config_key: str) -> Optional[str]:
         return None
 
 
-def _parse_csv_or_json_list(raw: Any) -> Optional[list[str]]:
-    if raw is None:
-        return None
-    text = str(raw).strip()
-    if not text:
-        return None
-    if text.startswith("["):
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, list):
-                values = [str(item).strip() for item in parsed if str(item).strip()]
-                return values or None
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-    values = [item.strip() for item in text.split(",") if item.strip()]
-    return values or None
-
-
-def _parse_int_or_none(raw: Any) -> Optional[int]:
-    if raw is None:
-        return None
-    try:
-        return int(str(raw).strip())
-    except (TypeError, ValueError):
-        return None
-
-
 def _apply_search_agent_defaults(
     request: Any,
     payload: dict[str, Any],
@@ -157,56 +119,12 @@ def _apply_search_agent_defaults(
     allowed_fields: Optional[set[str]] = None,
 ) -> None:
     """Apply Search-Agent defaults for fields omitted by the caller."""
-    explicit_fields = _request_fields_set(request)
-
-    for field_name, env_key, cfg_key in _SEARCH_AGENT_BOOL_DEFAULTS:
-        if allowed_fields is not None and field_name not in allowed_fields:
-            continue
-        if field_name in explicit_fields:
-            continue
-        raw_value = _search_agent_setting(env_key, cfg_key)
-        if raw_value is None:
-            continue
-        payload[field_name] = _is_truthy_value(raw_value)
-
-    if (allowed_fields is None or "search_depth_mode" in allowed_fields) and "search_depth_mode" not in explicit_fields:
-        raw_mode = _search_agent_setting("SEARCH_DEFAULT_MODE", "search_default_mode")
-        if raw_mode is not None:
-            mode = str(raw_mode).strip().lower()
-            if mode in _SEARCH_AGENT_MODE_VALUES:
-                payload["search_depth_mode"] = mode
-
-    if (allowed_fields is None or "discussion_platforms" in allowed_fields) and "discussion_platforms" not in explicit_fields:
-        raw_platforms = _search_agent_setting("SEARCH_DISCUSSION_PLATFORMS", "search_discussion_platforms")
-        parsed_platforms = _parse_csv_or_json_list(raw_platforms)
-        if parsed_platforms is not None:
-            payload["discussion_platforms"] = parsed_platforms
-
-    if (allowed_fields is None or "classifier_provider" in allowed_fields) and "classifier_provider" not in explicit_fields:
-        raw_provider = _search_agent_setting("SEARCH_CLASSIFIER_PROVIDER", "search_classifier_provider")
-        if raw_provider is not None and str(raw_provider).strip():
-            payload["classifier_provider"] = str(raw_provider).strip()
-
-    if (allowed_fields is None or "classifier_model" in allowed_fields) and "classifier_model" not in explicit_fields:
-        raw_model = _search_agent_setting("SEARCH_CLASSIFIER_MODEL", "search_classifier_model")
-        if raw_model is not None and str(raw_model).strip():
-            payload["classifier_model"] = str(raw_model).strip()
-
-    for field_name, env_key, cfg_key in _SEARCH_AGENT_INT_DEFAULTS:
-        if allowed_fields is not None and field_name not in allowed_fields:
-            continue
-        if field_name in explicit_fields:
-            continue
-        raw_value = _search_agent_setting(env_key, cfg_key)
-        parsed_value = _parse_int_or_none(raw_value)
-        if parsed_value is None:
-            continue
-        if field_name == "research_max_iterations":
-            if parsed_value > 0:
-                payload[field_name] = parsed_value
-            continue
-        if parsed_value >= 0:
-            payload[field_name] = parsed_value
+    apply_core_search_agent_defaults(
+        request,
+        payload,
+        search_agent_setting_fn=_search_agent_setting,
+        allowed_fields=allowed_fields,
+    )
 
 
 def _apply_rag_profile_defaults(
@@ -262,31 +180,61 @@ def _build_unified_pipeline_kwargs(
     media_db: Any,
     chacha_db: CharactersRAGDB,
     current_user: Optional[User],
+    resolved_request: Optional[ResolvedRAGRequest] = None,
 ) -> dict[str, Any]:
-    payload = _build_effective_request_payload(request)
+    if resolved_request is None:
+        resolved_request = _resolve_standard_request(request, current_user)
+    payload = dict(resolved_request.payload)
     payload["media_db_path"] = db_paths.get("media_db_path")
     payload["notes_db_path"] = db_paths.get("notes_db_path")
     payload["character_db_path"] = db_paths.get("character_db_path")
     payload["kanban_db_path"] = db_paths.get("kanban_db_path")
     payload["media_db"] = media_db
     payload["chacha_db"] = chacha_db
-    payload["index_namespace"] = request.index_namespace or request.corpus
-    resolved_storage_user_id = _resolve_implicit_feedback_user_id(None, current_user)
-    if resolved_storage_user_id is None:
-        resolved_storage_user_id = _resolve_implicit_feedback_user_id(
-            payload.get("user_id"), current_user
-        )
-    payload["user_id"] = resolved_storage_user_id
-    payload["feedback_user_id"] = (
-        _resolve_implicit_feedback_user_id(payload.get("feedback_user_id"), current_user)
-        or resolved_storage_user_id
-    )
+    payload["index_namespace"] = resolved_request.index_namespace
+    payload["user_id"] = resolved_request.user_id
+    payload["feedback_user_id"] = resolved_request.feedback_user_id
     signature = inspect.signature(unified_rag_pipeline)
     params = list(signature.parameters.values())
     if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params):
         return payload
     allowed = set(signature.parameters.keys())
     return {k: v for k, v in payload.items() if k in allowed}
+
+
+def _resolve_standard_request(
+    request: UnifiedRAGRequest,
+    current_user: Optional[User],
+) -> ResolvedRAGRequest:
+    return resolve_rag_request(
+        request,
+        current_user=current_user,
+        single_user_id_resolver=DatabasePaths.get_single_user_id,
+        search_agent_setting_fn=_search_agent_setting,
+    )
+
+
+def _build_batch_pipeline_kwargs(
+    request: UnifiedBatchRequest,
+    db_paths: dict[str, Optional[str]],
+    current_user: Optional[User],
+) -> dict[str, Any]:
+    resolved_request = resolve_rag_request(
+        request,
+        current_user=current_user,
+        single_user_id_resolver=DatabasePaths.get_single_user_id,
+        search_agent_setting_fn=_search_agent_setting,
+        search_agent_allowed_fields=_BATCH_ROUND2_DEFAULT_FIELDS,
+    )
+    payload = dict(resolved_request.payload)
+    payload.pop("queries", None)
+    payload.pop("max_concurrent", None)
+    payload.pop("enable_checkpoint", None)
+    payload.update(db_paths)
+    payload["index_namespace"] = resolved_request.index_namespace
+    payload["user_id"] = resolved_request.user_id
+    payload["feedback_user_id"] = resolved_request.feedback_user_id
+    return payload
 
 
 def _sync_retriever_overrides_to_pipeline() -> None:
@@ -495,96 +443,39 @@ async def _log_rag_queries_for_org(
 
 
 def convert_result_to_response(result: UnifiedSearchResult) -> UnifiedRAGResponse:
-    """Convert internal result to API response.
+    """Convert internal result to the declared API response via core mappers."""
+    return rag_result_to_response(rag_result_from_unified_search_result(result))
 
-    Be robust to different document shapes:
-    - dataclass-like objects with attributes (id, content, metadata, score)
-    - wrapper objects with a `.document` attribute that is an object or dict
-    - plain dictionaries (e.g., from caches or patched test doubles)
-    """
 
-    def _extract_field(obj, key, default=None):
-        """Safely extract a field from obj supporting attr, nested .document, or dict."""
-        # Direct attribute
-        if hasattr(obj, key):
-            try:
-                return getattr(obj, key)
-            except Exception as accessor_error:  # noqa: BLE001 - accessor may raise; ignore to continue fallbacks
-                logger.debug(f"RAG attribute access failed for key '{key}'; continuing fallback", exc_info=accessor_error)
-        # Nested `.document` attribute that may itself be an object
-        if hasattr(obj, 'document'):
-            doc_obj = obj.document
-            if isinstance(doc_obj, dict):
-                if key in doc_obj:
-                    return doc_obj.get(key, default)
-            else:
-                if hasattr(doc_obj, key):
-                    try:
-                        return getattr(doc_obj, key)
-                    except Exception as accessor_error:  # noqa: BLE001 - accessor may raise; ignore to continue fallbacks
-                        logger.debug(f"RAG nested attribute access failed for key '{key}'; continuing fallback", exc_info=accessor_error)
-        # Dict access (obj may be a dict)
-        if isinstance(obj, dict):
-            # Direct
-            if key in obj:
-                return obj.get(key, default)
-            # Nested under 'document'
-            doc_dict = obj.get('document') if isinstance(obj.get('document'), dict) else None
-            if doc_dict and key in doc_dict:
-                return doc_dict.get(key, default)
-        return default
-
-    documents = []
-    for doc in (result.documents or []):
-        doc_id = _extract_field(doc, 'id')
-        content = _extract_field(doc, 'content')
-        metadata = _extract_field(doc, 'metadata', {}) or {}
-        score = _extract_field(doc, 'score', 0.0)
-
-        # Ensure types are JSON-serializable
-        if not isinstance(metadata, dict):
-            try:
-                metadata = dict(metadata)  # best effort
-            except (TypeError, ValueError):
-                metadata = {"value": str(metadata)}
-
-        documents.append({
-            "id": doc_id if doc_id is not None else str(_extract_field(doc, 'chunk_id', 'unknown')),
-            "content": content if isinstance(content, str) else (str(content) if content is not None else ""),
-            "metadata": metadata,
-            "score": float(score) if isinstance(score, (int, float)) else 0.0,
-        })
-
-    _meta = result.metadata or {}
-    return UnifiedRAGResponse(
-        documents=documents,
-        query=result.query,
-        expanded_queries=result.expanded_queries,
-        metadata=_meta,
-        timings=result.timings,
-        citations=result.citations,
-        academic_citations=_meta.get("academic_citations", []),
-        chunk_citations=_meta.get("chunk_citations", []),
-        feedback_id=result.feedback_id,
-        generated_answer=result.generated_answer,
-        cache_hit=result.cache_hit,
-        errors=result.errors,
-        security_report=result.security_report,
-        total_time=result.total_time,
-        claims=getattr(result, 'claims', None),
-        factuality=getattr(result, 'factuality', None),
-        retrieval_metrics=_meta.get("retrieval_metrics"),
-        faithfulness=_meta.get("faithfulness"),
-        # Search agent / research fields
-        query_classification=_meta.get("query_classification"),
-        reformulated_query=_meta.get("reformulated_query"),
-        research_summary=_meta.get("research"),
-        # Follow-up suggestions
-        suggestions=_meta.get("suggestions"),
-        # Media search results
-        images=_meta.get("images"),
-        videos=_meta.get("videos"),
+def _coordinate_standard_result_evidence(
+    result: UnifiedSearchResult,
+    resolved_request: ResolvedRAGRequest,
+) -> UnifiedSearchResult:
+    """Route standard-path evidence through the coordinator without changing output shape."""
+    result_metadata = dict(result.metadata or {})
+    coordinated = PostRetrievalCoordinator().derive_evidence(
+        resolved_request,
+        RetrievedEvidence(
+            documents=list(result.documents or []),
+            metadata=result_metadata,
+        ),
+        enable_citations=bool(result_metadata.get("chunk_citations")),
+        enable_verification=bool(result_metadata.get("verification_report")),
+        derived_documents=None,
+        derived_from_document_ids=None,
     )
+    result.documents = list(coordinated.documents)
+    updated_metadata = dict(coordinated.metadata)
+    if coordinated.citations:
+        updated_metadata["chunk_citations"] = list(coordinated.citations)
+    if coordinated.verification_report is not None:
+        updated_metadata["verification_report"] = coordinated.verification_report
+    if coordinated.derived_from_document_ids:
+        updated_metadata["derived_from_document_ids"] = list(
+            coordinated.derived_from_document_ids
+        )
+    result.metadata = updated_metadata
+    return result
 
 
 # =============== Ablation helper ===============
@@ -1299,15 +1190,18 @@ async def unified_search_endpoint(
                 )
         else:
             # Execute unified pipeline with all parameters from request
+            resolved_request = _resolve_standard_request(request, current_user)
             kwargs = _build_unified_pipeline_kwargs(
                 request=request,
                 db_paths=db_paths,
                 media_db=media_db,
                 chacha_db=chacha_db,
                 current_user=current_user,
+                resolved_request=resolved_request,
             )
             _sync_retriever_overrides_to_pipeline()
             result = await unified_rag_pipeline(**kwargs)
+            result = _coordinate_standard_result_evidence(result, resolved_request)
 
         # Convert to response format
         response = convert_result_to_response(result)
@@ -1444,15 +1338,10 @@ async def unified_batch_endpoint(
             "kanban_db_path": _resolve_kanban_db_path(current_user, request.user_id),
         }
 
-        # Convert request to kwargs, excluding queries (Pydantic compat)
-        kwargs = model_dump_compat(
-            request,
-            exclude={"queries", "max_concurrent", "enable_checkpoint"},
-        )
-        _apply_search_agent_defaults(
-            request,
-            kwargs,
-            allowed_fields=_BATCH_ROUND2_DEFAULT_FIELDS,
+        kwargs = _build_batch_pipeline_kwargs(
+            request=request,
+            db_paths=db_paths,
+            current_user=current_user,
         )
         checkpoint_id: Optional[str] = None
         checkpoint_manager = None
@@ -1470,18 +1359,6 @@ async def unified_batch_endpoint(
                 config=checkpoint_config,
             )
             checkpoint_id = checkpoint_state.checkpoint_id
-        kwargs.update(db_paths)
-        resolved_storage_user_id = _resolve_implicit_feedback_user_id(None, current_user)
-        if resolved_storage_user_id is None:
-            resolved_storage_user_id = _resolve_implicit_feedback_user_id(
-                kwargs.get("user_id"), current_user
-            )
-        kwargs["user_id"] = resolved_storage_user_id
-        kwargs["feedback_user_id"] = (
-            _resolve_implicit_feedback_user_id(kwargs.get("feedback_user_id"), current_user)
-            or resolved_storage_user_id
-        )
-
         # Process batch
         on_query_done = None
         saved_indices: set[int] = set()
