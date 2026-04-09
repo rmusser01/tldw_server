@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedBatchRequest, UnifiedRAGRequest
+from tldw_Server_API.app.core.RAG.rag_service.request_resolution import resolve_rag_request
 
 
 pytestmark = pytest.mark.unit
@@ -227,6 +228,24 @@ def test_resolve_implicit_feedback_user_id_maps_single_user_alias_without_user(m
     resolved = rag_ep._resolve_implicit_feedback_user_id("single_user", None)
 
     assert resolved == "7"
+
+
+def test_core_request_resolution_matches_endpoint_single_user_alias(monkeypatch):
+    monkeypatch.setattr(
+        rag_ep.DatabasePaths,
+        "get_single_user_id",
+        staticmethod(lambda: 7),
+    )
+
+    endpoint_value = rag_ep._resolve_implicit_feedback_user_id("single_user", None)
+    core_resolved = resolve_rag_request(
+        {"query": "q", "user_id": "single_user"},
+        current_user=None,
+        get_profile_kwargs_fn=lambda _: {},
+        single_user_id_resolver=rag_ep.DatabasePaths.get_single_user_id,
+    )
+
+    assert endpoint_value == core_resolved.user_id
 
 def test_batch_round2_defaults_apply_when_fields_omitted(monkeypatch):
     for env_key in (

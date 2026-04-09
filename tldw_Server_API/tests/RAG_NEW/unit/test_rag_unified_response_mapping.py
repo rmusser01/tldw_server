@@ -1,6 +1,10 @@
 import pytest
 
 import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
+    rag_result_from_unified_search_result,
+    rag_result_to_response,
+)
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSearchResult
 
@@ -54,11 +58,16 @@ def test_convert_unified_result_maps_round2_search_agent_response_fields():
     )
 
     converted = rag_ep.convert_result_to_response(result)
+    core_converted = rag_result_to_response(rag_result_from_unified_search_result(result))
 
     assert converted.research_summary == research_summary
     assert converted.suggestions == suggestions
     assert converted.images == images
     assert converted.videos == videos
+    assert core_converted.research_summary == converted.research_summary
+    assert core_converted.suggestions == converted.suggestions
+    assert core_converted.images == converted.images
+    assert core_converted.videos == converted.videos
     assert converted.metadata.get("research") == research_summary
     assert converted.metadata.get("suggestions") == suggestions
     assert converted.metadata.get("images") == images
