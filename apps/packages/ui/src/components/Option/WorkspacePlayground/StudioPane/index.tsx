@@ -203,6 +203,9 @@ const OUTPUT_GROUPS: Array<{
   }
 ]
 
+// Primary output types shown by default; remaining are collapsed behind an expander
+const PRIMARY_OUTPUT_TYPES = new Set<ArtifactType>(["summary", "flashcards", "quiz", "report"])
+
 // Status icons for artifacts
 const STATUS_ICONS: Record<
   GeneratedArtifact["status"],
@@ -224,8 +227,6 @@ import {
   OUTPUT_VIRTUAL_ROW_HEIGHT,
   OUTPUT_VIRTUAL_OVERSCAN
 } from "./hooks/useStudioDerivedState"
-
-const RECENT_OUTPUT_TYPES_COUNT = 3
 
 const MindMapArtifactViewer = React.lazy(() =>
   import("./ArtifactModalContent").then((module) => ({
@@ -261,7 +262,7 @@ const renderArtifactModalContent = (node: React.ReactNode) => (
   <Suspense
     fallback={
       <div className="flex min-h-[200px] items-center justify-center text-sm text-text-muted">
-        Loading artifact viewer...
+        Loading output viewer...
       </div>
     }
   >
@@ -489,6 +490,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
   const [selectedFlashcardDeck, setSelectedFlashcardDeck] = useState<"auto" | number>("auto")
   const [activeOutputType, setActiveOutputType] = useState<ArtifactType | null>(null)
   const [moreOutputsExpanded, setMoreOutputsExpanded] = useState(false)
+  const [generationElapsedSeconds, setGenerationElapsedSeconds] = useState(0)
 
   // Collapsible sections
   const [studioOptionsExpanded, setStudioOptionsExpanded] = useState(false)
@@ -614,7 +616,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
     generationPhase,
     chatModels: _chatModels,
     loadingChatModels,
-    recentOutputTypes,
+    recentOutputTypes: _recentOutputTypes,
     slidesVisualStyles: _slidesVisualStyles,
     slidesVisualStylesLoading,
     slidesVisualStyleValueLocal: _slidesVisualStyleValueLocal,
@@ -639,14 +641,6 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
     }
   }, [slidesVisualStyleValue, _slidesVisualStyleValueLocal])
 
-  // Initialize moreOutputsExpanded based on recent output types
-  useEffect(() => {
-    if (recentOutputTypes.length === 0) {
-      setMoreOutputsExpanded(true)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   // Reset flashcard deck selection if the deck no longer exists
   useEffect(() => {
     if (
@@ -657,6 +651,19 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
       setSelectedFlashcardDeck("auto")
     }
   }, [availableDecks, selectedFlashcardDeck])
+
+  // Elapsed-time counter while generating an artifact
+  useEffect(() => {
+    if (!isGeneratingOutput) {
+      setGenerationElapsedSeconds(0)
+      return
+    }
+    setGenerationElapsedSeconds(0)
+    const id = setInterval(() => {
+      setGenerationElapsedSeconds((prev) => prev + 1)
+    }, 1000)
+    return () => clearInterval(id)
+  }, [isGeneratingOutput])
 
   const audioTts = useAudioTtsSettings({
     audioSettings,
@@ -1234,6 +1241,11 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                               )?.label || generatingOutputType || "output"
                           }
                         )}
+                {generationElapsedSeconds > 0 && (
+                  <span className="ml-1 text-text-muted">
+                    ({generationElapsedSeconds}s)
+                  </span>
+                )}
               </p>
             </div>
             {/* Phase progress bar */}
@@ -1259,17 +1271,25 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
               })}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[11px] text-text-muted">
-              {t(
-                "playground:studio.generatingWithEta",
-                "~{{seconds}}s for {{count}} source{{suffix}}",
-                {
-                  seconds: etaSeconds ?? 15,
-                  count: Math.max(1, selectedMediaCount),
-                  suffix: Math.max(1, selectedMediaCount) === 1 ? "" : "s"
-                }
-              )}
-            </p>
+            <div>
+              <p className="text-[11px] text-text-muted">
+                {t(
+                  "playground:studio.generatingWithEta",
+                  "~{{seconds}}s for {{count}} source{{suffix}}",
+                  {
+                    seconds: etaSeconds ?? 15,
+                    count: Math.max(1, selectedMediaCount),
+                    suffix: Math.max(1, selectedMediaCount) === 1 ? "" : "s"
+                  }
+                )}
+              </p>
+              <p className="text-[10px] text-text-muted/70 mt-0.5">
+                {t(
+                  "playground:studio.generatingUsualDuration",
+                  "Usually takes 10\u201330 seconds"
+                )}
+              </p>
+            </div>
             <Button
               size="small"
               danger
@@ -1282,10 +1302,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
           </div>
         )}
         {(() => {
-          const recentTypes = recentOutputTypes.slice(0, RECENT_OUTPUT_TYPES_COUNT)
-          const allTypes = OUTPUT_BUTTONS.map((b) => b.type)
-          const remainingTypes = allTypes.filter((t) => !recentTypes.includes(t))
-          const hasRecent = recentTypes.length > 0
+          const primaryButtons = OUTPUT_BUTTONS.filter((b) => PRIMARY_OUTPUT_TYPES.has(b.type))
+          const secondaryButtons = OUTPUT_BUTTONS.filter((b) => !PRIMARY_OUTPUT_TYPES.has(b.type))
 
           const artifactStatusForType = (type: ArtifactType): "completed" | "failed" | null => {
             const match = generatedArtifacts.find((a) => a.type === type)
@@ -1347,7 +1365,12 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                   ) : (
                     <Icon className="h-5 w-5" />
                   )}
-                  <span className="mt-1.5 text-xs font-medium">{label}</span>
+                  <span className="mt-1.5 flex flex-col items-center text-center">
+                    <span className="text-xs font-medium">{label}</span>
+                    <span className="text-[10px] leading-tight text-text-muted font-normal line-clamp-2 mt-0.5">
+                      {description}
+                    </span>
+                  </span>
                   {artifactStatus === "completed" && (
                     <CheckCircle className="absolute right-1.5 top-1.5 h-3.5 w-3.5 text-success" />
                   )}
@@ -1360,53 +1383,33 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
           }
 
           return (
-            <div className="space-y-4">
-              {hasRecent && (
-                <section aria-label={t("playground:studio.recentOutputs", "Recent")}>
-                  <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-                    {t("playground:studio.recentOutputs", "Recent")}
-                  </h4>
-                  <div className="grid grid-cols-3 gap-3">
-                    {recentTypes.map(renderOutputButton)}
-                  </div>
-                </section>
-              )}
-              {hasRecent && !moreOutputsExpanded && (
-                <button
-                  type="button"
-                  onClick={() => setMoreOutputsExpanded(true)}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border py-2 text-xs font-medium text-text-muted transition hover:border-primary/40 hover:text-text"
-                >
-                  <ChevronDown className="h-3.5 w-3.5" />
-                  {t("playground:studio.moreOutputs", "More outputs...")}
-                </button>
-              )}
-              {(moreOutputsExpanded || !hasRecent) &&
-                OUTPUT_GROUPS.map((group) => {
-                  const groupTypes = hasRecent
-                    ? group.types.filter((t) => remainingTypes.includes(t))
-                    : group.types
-                  if (groupTypes.length === 0) return null
-                  return (
-                    <section key={group.id} aria-label={group.label}>
-                      <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-                        {group.label}
-                      </h4>
-                      <div className="grid grid-cols-2 gap-3">
-                        {groupTypes.map(renderOutputButton)}
-                      </div>
-                    </section>
-                  )
-                })}
-              {hasRecent && moreOutputsExpanded && (
-                <button
-                  type="button"
-                  onClick={() => setMoreOutputsExpanded(false)}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border py-2 text-xs font-medium text-text-muted transition hover:border-primary/40 hover:text-text"
-                >
-                  <ChevronUp className="h-3.5 w-3.5" />
-                  {t("playground:studio.lessOutputs", "Show less")}
-                </button>
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                {primaryButtons.map((btn) => renderOutputButton(btn.type))}
+              </div>
+
+              {secondaryButtons.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setMoreOutputsExpanded((prev) => !prev)}
+                    className="mt-2 flex w-full items-center justify-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs text-text-muted hover:bg-surface2 transition-colors"
+                    aria-expanded={moreOutputsExpanded}
+                  >
+                    {moreOutputsExpanded
+                      ? t("playground:studio.lessOutputs", "Show fewer")
+                      : t("playground:studio.moreOutputs", { count: secondaryButtons.length, defaultValue: "More outputs ({{count}})" })}
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 transition-transform ${moreOutputsExpanded ? "rotate-180" : ""}`}
+                    />
+                  </button>
+
+                  {moreOutputsExpanded && (
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {secondaryButtons.map((btn) => renderOutputButton(btn.type))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )
@@ -1747,6 +1750,10 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                   "playground:studio.deleteFailedOutput",
                   "Delete failed output"
                 )
+                const failedRetryLabel = t(
+                  "playground:studio.retryFailedOutput",
+                  "Retry"
+                )
 
                 return (
                   <div
@@ -1764,22 +1771,44 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                             {artifact.title}
                           </p>
                           {artifact.status === "failed" ? (
-                            <Tooltip title={failedStatusDeleteLabel}>
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  handleDeleteArtifact(artifact)
-                                }}
-                                onKeyDown={handleIconButtonKeyDown}
-                                className="rounded p-0.5 hover:bg-error/10"
-                                aria-label={failedStatusDeleteLabel}
-                              >
-                                <StatusIcon
-                                  className={`h-4 w-4 shrink-0 ${StatusConfig.className}`}
-                                />
-                              </button>
-                            </Tooltip>
+                            <>
+                              <Tooltip title={failedRetryLabel}>
+                                <button
+                                  type="button"
+                                  disabled={!hasSelectedSources || isGeneratingOutput}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    if (!hasSelectedSources || isGeneratingOutput) return
+                                    void handleGenerateOutput(artifact.type, {
+                                      mode: "replace",
+                                      targetArtifactId: artifact.id
+                                    })
+                                  }}
+                                  onKeyDown={handleIconButtonKeyDown}
+                                  className="rounded p-0.5 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+                                  aria-label={failedRetryLabel}
+                                  data-testid={`studio-artifact-retry-${artifact.id}`}
+                                >
+                                  <RefreshCw className="h-3.5 w-3.5 shrink-0 text-text-muted hover:text-primary" />
+                                </button>
+                              </Tooltip>
+                              <Tooltip title={failedStatusDeleteLabel}>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    handleDeleteArtifact(artifact)
+                                  }}
+                                  onKeyDown={handleIconButtonKeyDown}
+                                  className="rounded p-0.5 hover:bg-error/10"
+                                  aria-label={failedStatusDeleteLabel}
+                                >
+                                  <StatusIcon
+                                    className={`h-4 w-4 shrink-0 ${StatusConfig.className}`}
+                                  />
+                                </button>
+                              </Tooltip>
+                            </>
                           ) : (
                             <StatusIcon
                               className={`h-4 w-4 shrink-0 ${StatusConfig.className}`}
@@ -1795,7 +1824,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                           artifact.estimatedCostUsd) && (
                           <p className="text-[11px] text-text-muted">
                             {t(
-                              "playground:studio.usagePerArtifact",
+                              "playground:studio.usagePerOutput",
                               "Tokens: {{tokens}} • Cost: ${{cost}}",
                               {
                                 tokens: Math.round(

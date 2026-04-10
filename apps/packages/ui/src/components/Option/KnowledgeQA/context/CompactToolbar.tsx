@@ -1,4 +1,5 @@
 import React from "react"
+import { Popover } from "antd"
 import { Layers, Globe, ChevronDown, Settings } from "lucide-react"
 import { cn } from "@/libs/utils"
 import type { RagPresetName, RagSource } from "@/services/rag/unified-rag"
@@ -16,17 +17,18 @@ type CompactToolbarProps = {
   onGenerationProviderChange: (provider: string | null) => void
   onGenerationModelChange: (model: string | null) => void
   contextChangedSinceLastRun: boolean
+  scopeChangeDetails?: string[]
   className?: string
 }
 
 const ALL_SOURCES_THRESHOLD = 5
 
 const SOURCE_LABELS: Record<RagSource, string> = {
-  media_db: "Docs & Media",
+  media_db: "Documents & Media",
   notes: "Notes",
-  characters: "Characters",
-  chats: "Chats",
-  kanban: "Kanban",
+  characters: "Story Characters",
+  chats: "Conversations",
+  kanban: "Task Boards",
 }
 
 function summarizeSources(sources: RagSource[]): string {
@@ -55,6 +57,7 @@ export function CompactToolbar({
   onGenerationProviderChange,
   onGenerationModelChange,
   contextChangedSinceLastRun,
+  scopeChangeDetails = [],
   className,
 }: CompactToolbarProps) {
   return (
@@ -118,9 +121,36 @@ export function CompactToolbar({
       </button>
 
       {contextChangedSinceLastRun && (
-        <span className="inline-flex items-center rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-          Scope changed
-        </span>
+        <Popover
+          trigger="click"
+          placement="bottomRight"
+          title="Scope changed since last search"
+          content={
+            <div className="max-w-xs space-y-1.5">
+              {scopeChangeDetails.length > 0 ? (
+                <ul className="list-disc pl-4 text-xs text-text-muted space-y-1">
+                  {scopeChangeDetails.map((detail, index) => (
+                    <li key={index}>{detail}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-text-muted">
+                  Search settings have changed since your last query.
+                </p>
+              )}
+              <p className="text-xs text-text-muted pt-1 border-t border-border/60">
+                Run a new search to apply the updated settings.
+              </p>
+            </div>
+          }
+        >
+          <button
+            type="button"
+            className="inline-flex items-center rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+          >
+            Scope changed
+          </button>
+        </Popover>
       )}
     </div>
   )

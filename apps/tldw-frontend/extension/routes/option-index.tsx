@@ -57,14 +57,16 @@ const ExtensionIntro: React.FC<{
 
 const showFtueNotification = () => {
   if (typeof browser?.notifications?.create === "function") {
-    browser.notifications.create("ftue-features", {
-      type: "basic",
-      iconUrl: browser.runtime.getURL("icon/128.png"),
-      title: browser.i18n.getMessage("ftueNotificationTitle") || "You're all set!",
-      message:
-        browser.i18n.getMessage("ftueNotificationMessage") ||
-        "Right-click on any page to use AI actions. Click the tldw icon to open the sidebar for chat."
-    })
+    void browser.notifications
+      .create("ftue-features", {
+        type: "basic",
+        iconUrl: browser.runtime.getURL("icon/128.png"),
+        title: browser.i18n.getMessage("ftueNotificationTitle") || "You're all set!",
+        message:
+          browser.i18n.getMessage("ftueNotificationMessage") ||
+          "Right-click on any page to use AI actions. Click the tldw icon to open the sidebar for chat."
+      })
+      .catch(() => undefined)
   }
 }
 

@@ -191,7 +191,7 @@ export const DocumentChat: React.FC = () => {
         <p className="text-sm text-text-muted">
           {t(
             "option:documentWorkspace.noDocumentForChat",
-            "Open a document to start chatting"
+            "Ask questions and get AI-powered answers about your document. Open a document to start."
           )}
         </p>
       </div>
@@ -212,7 +212,7 @@ export const DocumentChat: React.FC = () => {
         <p className="text-xs text-text-muted max-w-xs">
           {t(
             "option:documentWorkspace.serverRequiredHint",
-            "Start the tldw server and configure the connection in Settings. The server provides AI chat, RAG search, and document analysis."
+            "Start the server and configure the connection in Settings. The server provides AI chat, document search, and document analysis."
           )}
         </p>
       </div>
@@ -376,7 +376,7 @@ export const DocumentChat: React.FC = () => {
             <span>
               {t(
                 "option:documentWorkspace.enableRag",
-                "Use document sources (RAG)"
+                "Use document content"
               )}
             </span>
           </div>
@@ -384,7 +384,7 @@ export const DocumentChat: React.FC = () => {
             <span className="text-warning">
               {t(
                 "option:documentWorkspace.selectModelHint",
-                "Select a model in settings to chat"
+                "Set up AI chat in Settings"
               )}
             </span>
           )}
@@ -400,7 +400,7 @@ export const DocumentChat: React.FC = () => {
               "Ask about this document..."
             )}
             aria-label={t("option:documentWorkspace.chatPlaceholder", "Ask about this document...")}
-            disabled={!hasSelectedModel || (isProcessing && !streaming)}
+            disabled={!hasSelectedModel || !isServerAvailable || (isProcessing && !streaming)}
             rows={1}
             className="
               w-full resize-none rounded-lg border border-border bg-surface
@@ -454,7 +454,7 @@ export const DocumentChat: React.FC = () => {
               )
             : t(
                 "option:documentWorkspace.ragDisabled",
-                "RAG is off. Enable to ground answers in this document."
+                "Document content is not being used. Enable to get answers based on this document."
               )}
         </span>
       </div>

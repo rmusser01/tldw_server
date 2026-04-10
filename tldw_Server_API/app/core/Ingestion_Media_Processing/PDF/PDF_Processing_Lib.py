@@ -29,6 +29,9 @@ import pymupdf4llm
 # Import Local
 from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry import get_backend as _get_ocr_backend
+from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import (
+    effective_page_concurrency as _effective_ocr_page_concurrency,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
@@ -79,10 +82,33 @@ _INLINE_WHITESPACE_RE = re.compile(r"[ \t]+")
 _PUNCTUATION_RE = re.compile(r"[^\w\s]")
 _LIST_CONTINUATION_RE = re.compile(r"^\s{2,}\S")
 _CJK_CHAR_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]")
+_OCR_BACKEND_OUTPUT_DENYLIST = {"argv", "host", "port", "url", "prompt", "model"}
 #
 #######################################################################################################################
 # Function Definitions
 #
+
+
+def _ocr_min_text_threshold(value: int) -> int:
+    return max(value, 1)
+
+
+def _should_replace_ocr_content(
+    content_text_len: int,
+    ocr_mode: Optional[str],
+    ocr_min_page_text_chars: int,
+) -> bool:
+    return (ocr_mode or "fallback").lower() == "always" or content_text_len < _ocr_min_text_threshold(
+        ocr_min_page_text_chars
+    )
+
+
+def _sanitize_ocr_backend_details_for_output(details: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in details.items()
+        if key not in _OCR_BACKEND_OUTPUT_DENYLIST
+    }
 
 
 def _is_usable_torch_module_for_docling() -> bool:
@@ -661,7 +687,7 @@ def process_pdf(
                 should_ocr = False
                 if enable_ocr:
                     mode = (ocr_mode or "fallback").lower()
-                    if mode == "always" or content_text_len < max(ocr_min_page_text_chars, 1):
+                    if mode == "always" or content_text_len < _ocr_min_text_threshold(ocr_min_page_text_chars):
                         should_ocr = True
 
                 if should_ocr:
@@ -728,7 +754,28 @@ def process_pdf(
                                 "OCR requested but no backend available"
                             ]
                         else:
-                            # Determine small concurrency for OCR if configured
+                            backend_details: dict[str, Any] = {}
+                            backend_page_concurrency: Optional[int] = None
+                            try:
+                                if hasattr(backend, "describe") and callable(backend.describe):
+                                    extra = backend.describe() or {}
+                                    if isinstance(extra, dict):
+                                        backend_details = dict(extra)
+                                        raw_backend_page_concurrency = backend_details.get("backend_concurrency_cap")
+                                        if raw_backend_page_concurrency is None:
+                                            raw_backend_page_concurrency = backend_details.get("max_page_concurrency")
+                                        if raw_backend_page_concurrency is None:
+                                            raw_backend_page_concurrency = backend_details.get("page_concurrency")
+                                        if raw_backend_page_concurrency is not None:
+                                            try:
+                                                backend_page_concurrency = max(1, int(raw_backend_page_concurrency))
+                                            except (TypeError, ValueError):
+                                                backend_page_concurrency = None
+                            except _PDF_NONCRITICAL_EXCEPTIONS:
+                                backend_details = {}
+                                backend_page_concurrency = None
+
+                            # Determine OCR concurrency using the global cap and any backend-local cap.
                             try:
                                 import os as _os
                                 concurrency_env = _os.getenv("OCR_PAGE_CONCURRENCY")
@@ -740,6 +787,10 @@ def process_pdf(
                                     concurrency_env = int(cfg.get('page_concurrency_default', 1))
                             except _PDF_NONCRITICAL_EXCEPTIONS:
                                 concurrency_env = 1
+                            effective_page_concurrency = _effective_ocr_page_concurrency(
+                                concurrency_env,
+                                backend_page_concurrency,
+                            )
 
                             ocr_text, page_count, ocr_pages, structured_pages = _ocr_pdf_pages(
                                 pdf_path=path_for_processing,
@@ -748,7 +799,7 @@ def process_pdf(
                                 backend=backend,
                                 per_page_min_text=ocr_min_page_text_chars,
                                 per_page_check=True,
-                                concurrency=max(1, concurrency_env),
+                                concurrency=effective_page_concurrency,
                                 output_format=ocr_output_format,
                                 prompt_preset=ocr_prompt_preset,
                             )
@@ -760,18 +811,35 @@ def process_pdf(
                                 "lang": ocr_lang or "eng",
                                 "total_pages": page_count,
                                 "ocr_pages": ocr_pages,
-                                "page_concurrency": max(1, concurrency_env),
                                 "output_format": ocr_output_format,
                                 "prompt_preset": ocr_prompt_preset,
                             }
-                            # Attach backend-specific metadata if available
+                            refreshed_backend_details = backend_details
                             try:
                                 if hasattr(backend, "describe") and callable(backend.describe):
-                                    extra = backend.describe() or {}
-                                    if isinstance(extra, dict):
-                                        details.update(extra)
+                                    refreshed = backend.describe() or {}
+                                    if isinstance(refreshed, dict):
+                                        refreshed_backend_details = dict(refreshed)
                             except _PDF_NONCRITICAL_EXCEPTIONS:
-                                pass
+                                refreshed_backend_details = backend_details
+
+                            if refreshed_backend_details:
+                                refreshed_backend_details = _sanitize_ocr_backend_details_for_output(
+                                    dict(refreshed_backend_details)
+                                )
+                                if backend_page_concurrency is None:
+                                    refreshed_backend_details.pop("backend_concurrency_cap", None)
+                                    refreshed_backend_details.pop("max_page_concurrency", None)
+                                else:
+                                    refreshed_backend_details["backend_concurrency_cap"] = backend_page_concurrency
+
+                            # Attach backend-specific metadata if available.
+                            if refreshed_backend_details:
+                                details.update(refreshed_backend_details)
+                            details["page_concurrency"] = effective_page_concurrency
+                            details["effective_page_concurrency"] = effective_page_concurrency
+                            if backend_page_concurrency is not None:
+                                details.setdefault("backend_concurrency_cap", backend_page_concurrency)
                             if structured_pages is not None:
                                 try:
                                     from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.types import (
@@ -797,7 +865,11 @@ def process_pdf(
                             result["analysis_details"]["ocr"] = details
 
                             if ocr_text and ocr_text.strip():
-                                if (ocr_mode or "fallback").lower() == "always" or content_text_len < max(ocr_min_page_text_chars, 1):
+                                if _should_replace_ocr_content(
+                                    content_text_len,
+                                    ocr_mode,
+                                    ocr_min_page_text_chars,
+                                ):
                                     result["content"] = ocr_text
                                     result["parser_used"] = f"{result['parser_used']}+ocr"
                                 else:

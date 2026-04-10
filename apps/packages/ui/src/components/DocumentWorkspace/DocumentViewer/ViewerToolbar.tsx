@@ -1,6 +1,6 @@
-import React from "react"
+import React, { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Input, Select, Tooltip, Progress } from "antd"
+import { Dropdown, Input, Select, Tooltip, Progress } from "antd"
 import {
   ChevronLeft,
   ChevronRight,
@@ -9,7 +9,8 @@ import {
   RotateCcw,
   LayoutGrid,
   FileText,
-  List
+  List,
+  MoreHorizontal
 } from "lucide-react"
 import type { ViewMode, DocumentType, EpubScrollMode } from "../types"
 import {
@@ -18,6 +19,7 @@ import {
   MAX_ZOOM_LEVEL,
   ZOOM_STEP
 } from "../types"
+import { useMobile } from "@/hooks/useMediaQuery"
 import { EpubSettingsPanel } from "./EpubViewer/EpubSettingsPanel"
 import { TTSPanel } from "./TTSPanel"
 
@@ -121,19 +123,49 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
     }
   ]
 
+  const isMobile = useMobile()
+
+  // Build overflow menu items for secondary controls
+  const overflowItems: Array<{ key: string; label: React.ReactNode; onClick?: () => void }> = []
+  if (!isEpub) {
+    viewModeOptions.forEach((opt) => {
+      overflowItems.push({
+        key: `view-${opt.value}`,
+        label: (
+          <span className={`flex items-center gap-2 ${viewMode === opt.value ? "text-primary font-medium" : ""}`}>
+            {opt.label}
+          </span>
+        ),
+        onClick: () => onViewModeChange(opt.value)
+      })
+    })
+    overflowItems.push({ key: "divider-1", type: "divider" } as any)
+    overflowItems.push({
+      key: "reset-zoom",
+      label: (
+        <span className="flex items-center gap-2">
+          <RotateCcw className="h-4 w-4" />
+          {t("option:documentWorkspace.resetZoom", "Reset zoom")}
+        </span>
+      ),
+      onClick: handleResetZoom
+    })
+  }
+  // TODO: EPUB settings panel is a complex Popover component that can't be
+  // rendered as a simple dropdown item. On mobile, EPUB settings are not yet
+  // accessible via the overflow menu. Consider adding a state-driven approach
+  // to open EpubSettingsPanel programmatically.
+
   return (
     <div className="flex h-10 shrink-0 items-center justify-between border-b border-border bg-surface px-2">
-      {/* EPUB: Show chapter title on the left */}
-      {isEpub && (
+      {/* Left: EPUB chapter title or view mode (desktop only) */}
+      {isEpub ? (
         <div className="flex items-center min-w-0 max-w-[200px]">
           <span className="truncate text-sm text-text-muted" title={chapterTitle || undefined}>
             {chapterTitle || ""}
           </span>
         </div>
-      )}
-
-      {/* View mode - only for PDF */}
-      {!isEpub && (
+      ) : !isMobile ? (
         <div className="flex items-center">
           <Select
             value={viewMode}
@@ -143,9 +175,11 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
             options={viewModeOptions}
           />
         </div>
+      ) : (
+        <div />
       )}
 
-      {/* Zoom controls - only for PDF */}
+      {/* Center: Zoom controls (always visible for PDF) */}
       {!isEpub && (
         <div className="flex items-center gap-1">
           <Tooltip title={t("option:documentWorkspace.zoomOut", "Zoom out")}>
@@ -159,17 +193,19 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
             </button>
           </Tooltip>
 
-          <Select
-            value={zoomLevel}
-            onChange={onZoomChange}
-            size="small"
-            className="w-20"
-            options={ZOOM_PRESETS.map((z) => ({
-              value: z,
-              label: `${z}%`
-            }))}
-            showSearch={false}
-          />
+          {!isMobile && (
+            <Select
+              value={zoomLevel}
+              onChange={onZoomChange}
+              size="small"
+              className="w-20"
+              options={ZOOM_PRESETS.map((z) => ({
+                value: z,
+                label: `${z}%`
+              }))}
+              showSearch={false}
+            />
+          )}
 
           <Tooltip title={t("option:documentWorkspace.zoomIn", "Zoom in")}>
             <button
@@ -182,26 +218,26 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
             </button>
           </Tooltip>
 
-          <Tooltip title={t("option:documentWorkspace.resetZoom", "Reset zoom")}>
-            <button
-              onClick={handleResetZoom}
-              className={TOOLBAR_ICON_BUTTON_CLASS}
-              aria-label={t("option:documentWorkspace.resetZoom", "Reset zoom")}
-            >
-              <RotateCcw className="h-4 w-4" />
-            </button>
-          </Tooltip>
+          {/* Reset zoom: inline on desktop, overflow on mobile */}
+          {!isMobile && (
+            <Tooltip title={t("option:documentWorkspace.resetZoom", "Reset zoom")}>
+              <button
+                onClick={handleResetZoom}
+                className={TOOLBAR_ICON_BUTTON_CLASS}
+                aria-label={t("option:documentWorkspace.resetZoom", "Reset zoom")}
+              >
+                <RotateCcw className="h-4 w-4" />
+              </button>
+            </Tooltip>
+          )}
         </div>
       )}
 
-      {/* TTS and EPUB settings */}
+      {/* Right: Navigation + TTS + overflow */}
       <div className="flex items-center gap-1">
         <TTSPanel />
-        {isEpub && <EpubSettingsPanel />}
-      </div>
+        {isEpub && !isMobile && <EpubSettingsPanel />}
 
-      {/* Navigation section */}
-      <div className="flex items-center gap-1">
         <Tooltip title={t("option:documentWorkspace.previousPage", "Previous")}>
           <button
             onClick={onPreviousPage}
@@ -214,7 +250,6 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
         </Tooltip>
 
         {isEpub ? (
-          // EPUB: Show percentage progress
           <div className="flex items-center gap-2 min-w-[120px]">
             <Progress
               percent={Math.round(percentage)}
@@ -227,7 +262,6 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
             </span>
           </div>
         ) : (
-          // PDF: Show page numbers
           <div className="flex items-center gap-1 text-sm">
             <Input
               type="number"
@@ -256,6 +290,21 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
             <ChevronRight className="h-4 w-4" />
           </button>
         </Tooltip>
+
+        {/* Overflow menu on mobile for secondary controls */}
+        {isMobile && overflowItems.length > 0 && (
+          <Dropdown
+            menu={{ items: overflowItems }}
+            trigger={["click"]}
+          >
+            <button
+              className={TOOLBAR_ICON_BUTTON_CLASS}
+              aria-label={t("common:more", "More")}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+          </Dropdown>
+        )}
       </div>
     </div>
   )

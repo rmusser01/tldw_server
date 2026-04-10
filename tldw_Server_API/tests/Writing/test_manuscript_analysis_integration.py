@@ -227,6 +227,43 @@ def test_analyze_chapter(client: TestClient):
     assert data[0]["score"] == 0.8
 
 
+@pytest.mark.parametrize(
+    ("scope", "analysis_path"),
+    [("scene", "scenes/{target_id}/analyze"), ("chapter", "chapters/{target_id}/analyze")],
+)
+def test_analyze_endpoints_do_not_persist_partial_results_when_later_analysis_fails(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    scope: str,
+    analysis_path: str,
+):
+    """Scene/chapter analysis should remain atomic across multiple requested analysis types."""
+    project_id, chapter_id, scene_id = _create_project_chapter_scene(client)
+    target_id = scene_id if scope == "scene" else chapter_id
+
+    import tldw_Server_API.app.core.Writing.manuscript_analysis as analysis_module
+
+    async def fake_pacing(*_args, **_kwargs):
+        return {"pacing": 0.5}
+
+    async def failing_plot_holes(*_args, **_kwargs):
+        raise RuntimeError("plot hole analysis failed")
+
+    monkeypatch.setattr(analysis_module, "analyze_pacing", fake_pacing)
+    monkeypatch.setattr(analysis_module, "analyze_plot_holes", failing_plot_holes)
+
+    resp = client.post(
+        f"{PREFIX}/{analysis_path.format(target_id=target_id)}",
+        json={"analysis_types": ["pacing", "plot_holes"]},
+    )
+
+    assert resp.status_code == 500, resp.text
+
+    analyses_resp = client.get(f"{PREFIX}/projects/{project_id}/analyses")
+    assert analyses_resp.status_code == 200, analyses_resp.text
+    assert analyses_resp.json()["total"] == 0
+
+
 def test_analyze_scene_not_found(client: TestClient):
     """Analyze a non-existent scene returns 404."""
     resp = client.post(
@@ -444,7 +481,7 @@ def test_analyze_scene_rejects_unknown_model_override(client: TestClient, monkey
     monkeypatch.setattr(
         writing_endpoint,
         "is_model_known_for_provider",
-        lambda provider, model: False if provider == "openai" and model == "bad-model" else True,
+        lambda provider, model: not (provider == "openai" and model == "bad-model"),
     )
 
     resp = client.post(

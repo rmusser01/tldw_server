@@ -52,7 +52,7 @@ export const CitationPanel: React.FC = () => {
           image={<Quote className="h-12 w-12 text-muted mx-auto mb-2" />}
           description={t(
             "option:documentWorkspace.noDocumentForCitation",
-            "Open a document to generate citations"
+            "Generate formatted citations (APA, MLA, Chicago, and more) from your document's metadata."
           )}
         />
       </div>

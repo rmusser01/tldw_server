@@ -437,6 +437,18 @@ export function getVisibleAntdSelectDropdown(page: Page): Locator {
   return page.locator('.ant-select-dropdown:visible').last();
 }
 
+export function getVisibleAntdSelectOption(
+  page: Page,
+  options: {
+    text: string | RegExp;
+  }
+): Locator {
+  return page
+    .locator('.ant-select-dropdown:visible .ant-select-item-option-content')
+    .filter({ hasText: options.text })
+    .first();
+}
+
 /**
  * Dismiss any connection/server error modals (Ant Design modals).
  * Also removes the modal backdrop via DOM manipulation to prevent

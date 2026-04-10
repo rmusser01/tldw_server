@@ -22,6 +22,7 @@ export function ResearchTab({ isOnline }: ResearchTabProps) {
 
   useEffect(() => {
     lastSearchSnapshotRef.current = null
+    setSearching(false)
     setResults([])
     setCitedIds(new Set())
   }, [activeNodeId])

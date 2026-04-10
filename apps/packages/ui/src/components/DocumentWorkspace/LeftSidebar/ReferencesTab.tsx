@@ -311,7 +311,7 @@ const NoDocumentState: React.FC = () => {
         image={<BookOpen className="h-12 w-12 text-muted mx-auto mb-2" />}
         description={t(
           "option:documentWorkspace.noDocumentForReferences",
-          "Open a document to view references"
+          "Bibliography and citations extracted from your document. Open an academic paper to see references."
         )}
       />
     </div>
@@ -347,7 +347,7 @@ const ServerUnavailableState: React.FC = () => {
         image={<BookOpen className="h-10 w-10 text-muted mx-auto mb-2" />}
         description={t(
           "option:documentWorkspace.serverUnavailable",
-          "Server connection required"
+          "Connect to your server in Settings to use this feature"
         )}
       />
     </div>

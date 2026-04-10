@@ -32,7 +32,8 @@ import {
   MoreHorizontal,
   Settings,
   Star,
-  Share2
+  Share2,
+  CircleHelp
 } from "lucide-react"
 import type {
   SavedWorkspace,
@@ -163,6 +164,13 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const [editName, setEditName] = React.useState("")
   const [workspaceBrowserOpen, setWorkspaceBrowserOpen] = React.useState(false)
   const [shortcutsModalOpen, setShortcutsModalOpen] = React.useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false)
+  const [deleteConfirmInput, setDeleteConfirmInput] = React.useState("")
+  const [deleteTargetWorkspace, setDeleteTargetWorkspace] = React.useState<{
+    id: string
+    name: string
+    sourceCount: number
+  } | null>(null)
   const [telemetrySummaryOpen, setTelemetrySummaryOpen] = React.useState(false)
   const [telemetryLoading, setTelemetryLoading] = React.useState(false)
   const [telemetryResetting, setTelemetryResetting] = React.useState(false)
@@ -909,71 +917,74 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
   const handleDeleteWorkspace = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    Modal.confirm({
-      title: t("playground:workspace.deleteTitle", "Delete workspace?"),
-      content: t(
-        "playground:workspace.deleteMessage",
-        "This will permanently remove this workspace and its saved state."
-      ),
-      okText: t("common:delete", "Delete"),
-      okButtonProps: { danger: true },
-      cancelText: t("common:cancel", "Cancel"),
-      onOk: () => {
-        const undoSnapshot = captureUndoSnapshot()
-        const undoHandle = scheduleWorkspaceUndoAction({
-          apply: () => {
-            deleteWorkspace(id)
-          },
-          undo: () => {
-            restoreUndoSnapshot(undoSnapshot)
-          }
-        })
+    const target = savedWorkspaces.find((w) => w.id === id)
+    setDeleteTargetWorkspace(
+      target
+        ? { id: target.id, name: target.name, sourceCount: target.sourceCount }
+        : { id, name: workspaceName || "Untitled", sourceCount: sources.length }
+    )
+    setDeleteConfirmInput("")
+    setDeleteConfirmOpen(true)
+  }
 
-        const undoMessageKey = `workspace-delete-undo-${undoHandle.id}`
-        const maybeOpen = (messageApi as { open?: (config: unknown) => void })
-          .open
-        const messageConfig = {
-          key: undoMessageKey,
-          type: "warning",
-          duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-          content: t(
-            "playground:workspace.deleted",
-            "Workspace deleted."
-          ),
-          btn: (
-            <button
-              type="button"
-              className="rounded border border-border px-2 py-0.5 text-xs font-medium hover:bg-surface2"
-              onClick={() => {
-                if (undoWorkspaceAction(undoHandle.id)) {
-                  messageApi.success(
-                    t(
-                      "playground:workspace.restored",
-                      "Workspace restored"
-                    )
-                  )
-                }
-                messageApi.destroy(undoMessageKey)
-              }}
-            >
-              {t("common:undo", "Undo")}
-            </button>
-          )
-        }
-        if (typeof maybeOpen === "function") {
-          maybeOpen(messageConfig)
-        } else {
-          const maybeWarning = (
-            messageApi as { warning?: (content: string) => void }
-          ).warning
-          if (typeof maybeWarning === "function") {
-            maybeWarning(t("playground:workspace.deleted", "Workspace deleted."))
-          }
-        }
+  const executeDeleteWorkspace = () => {
+    if (!deleteTargetWorkspace) return
+    const { id } = deleteTargetWorkspace
+    setDeleteConfirmOpen(false)
+    setDeleteTargetWorkspace(null)
+    setDeleteConfirmInput("")
+
+    const undoSnapshot = captureUndoSnapshot()
+    const undoHandle = scheduleWorkspaceUndoAction({
+      apply: () => {
+        deleteWorkspace(id)
       },
-      centered: true,
-      maskClosable: false
+      undo: () => {
+        restoreUndoSnapshot(undoSnapshot)
+      }
     })
+
+    const undoMessageKey = `workspace-delete-undo-${undoHandle.id}`
+    const maybeOpen = (messageApi as { open?: (config: unknown) => void })
+      .open
+    const messageConfig = {
+      key: undoMessageKey,
+      type: "warning",
+      duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
+      content: t(
+        "playground:workspace.deleted",
+        "Workspace deleted."
+      ),
+      btn: (
+        <button
+          type="button"
+          className="rounded border border-border px-2 py-0.5 text-xs font-medium hover:bg-surface2"
+          onClick={() => {
+            if (undoWorkspaceAction(undoHandle.id)) {
+              messageApi.success(
+                t(
+                  "playground:workspace.restored",
+                  "Workspace restored"
+                )
+              )
+            }
+            messageApi.destroy(undoMessageKey)
+          }}
+        >
+          {t("common:undo", "Undo")}
+        </button>
+      )
+    }
+    if (typeof maybeOpen === "function") {
+      maybeOpen(messageConfig)
+    } else {
+      const maybeWarning = (
+        messageApi as { warning?: (content: string) => void }
+      ).warning
+      if (typeof maybeWarning === "function") {
+        maybeWarning(t("playground:workspace.deleted", "Workspace deleted."))
+      }
+    }
   }
 
   const handleDuplicateCurrentWorkspace = () => {
@@ -1668,6 +1679,19 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             onClick={() => setShareDialogOpen(true)}
           >
             <Share2 className="h-4 w-4" />
+          </button>
+        </Tooltip>
+
+        {/* Help / Tour Button */}
+        <Tooltip title={t("playground:workspace.takeTour", "Take a tour")}>
+          <button
+            type="button"
+            data-testid="workspace-help-tour-button"
+            onClick={() => startTutorial("workspace-playground-basics")}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+            aria-label={t("playground:workspace.takeTour", "Take a tour of the workspace")}
+          >
+            <CircleHelp className="h-4 w-4" />
           </button>
         </Tooltip>
 
@@ -2442,6 +2466,68 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           onClose={() => setShareDialogOpen(false)}
         />
       )}
+
+      {/* Delete workspace confirmation modal */}
+      <Modal
+        open={deleteConfirmOpen}
+        title={t("playground:workspace.deleteTitle", "Delete workspace?")}
+        okText={t("common:delete", "Delete")}
+        okButtonProps={{
+          danger: true,
+          disabled: deleteTargetWorkspace
+            ? deleteConfirmInput !== deleteTargetWorkspace.name
+            : true
+        }}
+        cancelText={t("common:cancel", "Cancel")}
+        onOk={executeDeleteWorkspace}
+        onCancel={() => {
+          setDeleteConfirmOpen(false)
+          setDeleteTargetWorkspace(null)
+          setDeleteConfirmInput("")
+        }}
+        centered
+        maskClosable={false}
+        destroyOnClose
+      >
+        {deleteTargetWorkspace && (
+          <div className="space-y-3">
+            <p className="text-sm text-text">
+              {t(
+                "playground:workspace.deleteConfirmMessage",
+                "This will permanently remove workspace {{name}} and all its data.",
+                { name: deleteTargetWorkspace.name }
+              )}
+            </p>
+            <p className="text-sm text-text-muted">
+              {t(
+                "playground:workspace.deleteConfirmStats",
+                "This workspace has {{sourceCount}} source(s). All associated chat sessions and notes will also be removed.",
+                { sourceCount: deleteTargetWorkspace.sourceCount }
+              )}
+            </p>
+            <div>
+              <p className="mb-1.5 text-sm text-text-muted">
+                {t(
+                  "playground:workspace.deleteConfirmTypeName",
+                  "Type {{name}} to confirm:",
+                  { name: deleteTargetWorkspace.name }
+                )}
+              </p>
+              <Input
+                value={deleteConfirmInput}
+                onChange={(e) => setDeleteConfirmInput(e.target.value)}
+                placeholder={deleteTargetWorkspace.name}
+                autoFocus
+                onPressEnter={() => {
+                  if (deleteConfirmInput === deleteTargetWorkspace.name) {
+                    executeDeleteWorkspace()
+                  }
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </Modal>
     </header>
   )
 }

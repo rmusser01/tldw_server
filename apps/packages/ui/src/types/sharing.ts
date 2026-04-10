@@ -12,9 +12,9 @@ export type AccessLevel = "view_chat" | "view_chat_add" | "full_edit"
 export type ShareResourceType = "chatbook" | "workspace"
 
 export const ACCESS_LEVEL_LABELS: Record<AccessLevel, string> = {
-  view_chat: "View & Chat",
-  view_chat_add: "View, Chat & Add Sources",
-  full_edit: "Full Edit",
+  view_chat: "Read-only",
+  view_chat_add: "Can add sources",
+  full_edit: "Full access",
 }
 
 export const ACCESS_LEVEL_COLORS: Record<AccessLevel, string> = {

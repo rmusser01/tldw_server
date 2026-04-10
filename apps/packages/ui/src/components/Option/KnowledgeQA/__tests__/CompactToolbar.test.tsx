@@ -52,9 +52,9 @@ describe("CompactToolbar", () => {
     expect(screen.getByText(/Sources:.*None/)).toBeDefined()
   })
 
-  it('renders single source label "Docs & Media" for media_db', () => {
+  it('renders single source label "Documents & Media" for media_db', () => {
     renderToolbar({ sources: ["media_db"] })
-    expect(screen.getByText(/Sources:.*Docs & Media/)).toBeDefined()
+    expect(screen.getByText(/Sources:.*Documents & Media/)).toBeDefined()
   })
 
   it('renders "N selected" for 2-4 sources', () => {

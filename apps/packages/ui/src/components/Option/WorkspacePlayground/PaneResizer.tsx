@@ -74,6 +74,7 @@ export const PaneResizer: React.FC<PaneResizerProps> = ({
       aria-orientation="vertical"
       aria-valuenow={width}
       aria-valuemin={minWidth}
+      title="Double-click to reset width"
       className={`hidden cursor-col-resize touch-none select-none items-center justify-center lg:flex ${
         hovering || isDragging.current ? "w-2" : "w-1"
       } transition-all`}

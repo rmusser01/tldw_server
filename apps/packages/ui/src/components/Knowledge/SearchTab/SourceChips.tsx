@@ -43,9 +43,9 @@ export const SourceChips: React.FC<SourceChipsProps> = ({
   const sourceLabels: Record<RagSource, string> = {
     media_db: t("sidepanel:rag.sources.media", "Media"),
     notes: t("sidepanel:rag.sources.notes", "Notes"),
-    characters: t("sidepanel:rag.sources.characters", "Characters"),
-    chats: t("sidepanel:rag.sources.chats", "Chats"),
-    kanban: t("sidepanel:rag.sources.kanban", "Kanban"),
+    characters: t("sidepanel:rag.sources.characters", "Story Characters"),
+    chats: t("sidepanel:rag.sources.chats", "Conversations"),
+    kanban: t("sidepanel:rag.sources.kanban", "Task Boards"),
   }
 
   const handleAllClick = () => {

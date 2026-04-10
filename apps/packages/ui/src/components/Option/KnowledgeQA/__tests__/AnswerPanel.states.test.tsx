@@ -43,6 +43,7 @@ const state = {
   messages: [] as Array<{ id: string; role: string }>,
   scrollToSource: vi.fn(),
   focusedSourceIndex: null as number | null,
+  expertMode: false,
 }
 
 vi.mock("@/services/feedback", () => ({
@@ -91,6 +92,7 @@ vi.mock("../KnowledgeQAProvider", () => ({
     rerunWithTokenLimit: state.rerunWithTokenLimit,
     scrollToSource: state.scrollToSource,
     focusedSourceIndex: state.focusedSourceIndex,
+    expertMode: state.expertMode,
   })
 }))
 
@@ -114,6 +116,7 @@ describe("AnswerPanel state guardrails", () => {
     state.currentThreadId = "thread-1"
     state.messages = []
     state.focusedSourceIndex = null
+    state.expertMode = false
     submitExplicitFeedbackMock.mockResolvedValue({ ok: true })
     trackMetricMock.mockResolvedValue(undefined)
   })
@@ -189,6 +192,7 @@ describe("AnswerPanel state guardrails", () => {
   })
 
   it("shows grounding coverage and highlights uncited paragraphs", () => {
+    state.expertMode = true
     state.answer = "This statement is grounded [1].\n\nThis sentence has no citation."
     state.citations = [{ index: 1 }]
     state.results = [{ id: "r1", metadata: { title: "Doc 1" } }]
@@ -202,6 +206,7 @@ describe("AnswerPanel state guardrails", () => {
   })
 
   it("renders trust badges from server verification metadata", () => {
+    state.expertMode = true
     state.answer = "Claim one [1]. Claim two [1]."
     state.citations = [{ index: 1 }]
     state.results = [{ id: "r1", metadata: { title: "Doc 1" } }]

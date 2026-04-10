@@ -44,6 +44,7 @@ import type {
 } from "@/services/flashcards"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
+import { useMilestoneStore } from "@/store/milestones"
 
 export interface UseQuizQueriesOptions {
   enabled?: boolean
@@ -673,12 +674,14 @@ export function useStartAttemptMutation() {
  */
 export function useSubmitAttemptMutation() {
   const qc = useQueryClient()
+  const markMilestone = useMilestoneStore((state) => state.markMilestone)
 
   return useMutation({
     mutationKey: ["quizzes:attempt:submit"],
     mutationFn: (params: { attemptId: number; answers: QuizAnswerInput[] }) =>
       submitAttempt(params.attemptId, params.answers),
     onSuccess: () => {
+      markMilestone("first_quiz_taken")
       qc.invalidateQueries({ queryKey: ["quizzes:attempts"] })
     }
   })

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react"
-import { BookOpen, ChevronDown, ChevronUp, Clock3, SlidersHorizontal } from "lucide-react"
+import { Link } from "react-router-dom"
+import { BookOpen, ChevronDown, ChevronUp, CircleHelp, Clock3, FolderPlus, HelpCircle, MessageSquare, SlidersHorizontal } from "lucide-react"
 import { cn } from "@/libs/utils"
 
 type KnowledgeReadyStateProps = {
@@ -9,6 +10,7 @@ type KnowledgeReadyStateProps = {
   onSelectSources: () => void
   hasSources: boolean
   hasRecentSession: boolean
+  webFallbackEnabled?: boolean
   className?: string
 }
 
@@ -19,6 +21,7 @@ export function KnowledgeReadyState({
   onSelectSources,
   hasSources,
   hasRecentSession,
+  webFallbackEnabled = false,
   className,
 }: KnowledgeReadyStateProps) {
   const isReturningUser = hasRecentSession
@@ -36,13 +39,24 @@ export function KnowledgeReadyState({
       <div className="mx-auto max-w-2xl">
         <BookOpen className="mx-auto mb-3 h-12 w-12 text-primary" />
         <h1 className="text-3xl font-bold">Ask Your Library</h1>
+        {!guideExpanded && (
+          <button
+            type="button"
+            onClick={() => setGuideExpanded(true)}
+            className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text transition-colors"
+            title="How it works"
+          >
+            <CircleHelp className="h-3.5 w-3.5" />
+            <span>How it works</span>
+          </button>
+        )}
         <p className="mt-1 text-base font-medium">Search your documents and get cited answers</p>
         <p className="mt-2 text-sm text-text-muted">
           Get grounded answers with citations from your selected sources.
         </p>
       </div>
 
-      {/* How it works - collapsible for returning users */}
+      {/* How it works - adapts to user state */}
       <div className="mx-auto max-w-2xl rounded-lg border border-border/80 bg-surface2/60 px-4 py-3 text-left">
         <button
           type="button"
@@ -58,17 +72,65 @@ export function KnowledgeReadyState({
           )}
         </button>
         {guideExpanded && (
-          <ol className="mt-2 grid gap-1 text-sm text-text-muted sm:grid-cols-3 sm:gap-3">
-            <li>
-              <span className="font-medium text-text">1.</span> Select sources
-            </li>
-            <li>
-              <span className="font-medium text-text">2.</span> Ask a question
-            </li>
-            <li>
-              <span className="font-medium text-text">3.</span> Review cited answer
-            </li>
-          </ol>
+          isReturningUser ? (
+            <p className="mt-2 text-sm text-text-muted">
+              Select sources, ask a question, review cited answers.
+            </p>
+          ) : !hasSources ? (
+            <ol className="mt-2 grid gap-1 text-sm text-text-muted sm:grid-cols-3 sm:gap-3">
+              <li className="flex items-start gap-2">
+                <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white">1</span>
+                <span>
+                  <FolderPlus className="mb-0.5 mr-1 inline h-3.5 w-3.5 text-primary" />
+                  <button
+                    type="button"
+                    onClick={onSelectSources}
+                    className="font-medium text-primary hover:underline"
+                  >
+                    Add documents first
+                  </button>
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-text/20 text-[10px] font-bold text-text">2</span>
+                <span>
+                  <MessageSquare className="mb-0.5 mr-1 inline h-3.5 w-3.5 text-text-muted" />
+                  Ask a question
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-text/20 text-[10px] font-bold text-text">3</span>
+                <span>
+                  <HelpCircle className="mb-0.5 mr-1 inline h-3.5 w-3.5 text-text-muted" />
+                  Review cited answer
+                </span>
+              </li>
+            </ol>
+          ) : (
+            <ol className="mt-2 grid gap-1 text-sm text-text-muted sm:grid-cols-3 sm:gap-3">
+              <li className="flex items-start gap-2">
+                <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white">1</span>
+                <span>
+                  <SlidersHorizontal className="mb-0.5 mr-1 inline h-3.5 w-3.5 text-primary" />
+                  Select sources
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-text/20 text-[10px] font-bold text-text">2</span>
+                <span>
+                  <MessageSquare className="mb-0.5 mr-1 inline h-3.5 w-3.5 text-text-muted" />
+                  Ask a question
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-text/20 text-[10px] font-bold text-text">3</span>
+                <span>
+                  <HelpCircle className="mb-0.5 mr-1 inline h-3.5 w-3.5 text-text-muted" />
+                  Review cited answer
+                </span>
+              </li>
+            </ol>
+          )
         )}
       </div>
 
@@ -86,15 +148,28 @@ export function KnowledgeReadyState({
       </div>
 
       {!hasSources ? (
-        <div className="mx-auto max-w-2xl rounded-lg border border-warn/30 bg-warn/10 px-4 py-3 text-left text-sm text-warn">
+        <div
+          className={cn(
+            "mx-auto max-w-2xl rounded-lg px-4 py-3 text-left text-sm",
+            webFallbackEnabled
+              ? "border border-info/30 bg-info/10 text-info"
+              : "border border-warn/30 bg-warn/10 text-warn"
+          )}
+        >
           <p>
-            No sources are selected. Start by choosing source categories, or use web
-            fallback for web-first searches.
+            {webFallbackEnabled
+              ? "No document sources are selected. Your search will use web results only."
+              : "No sources are selected. Select source categories to search, or enable web fallback."}
           </p>
           <button
             type="button"
             onClick={onSelectSources}
-            className="mt-2 inline-flex items-center rounded-md border border-warn/40 px-2.5 py-1 text-xs font-medium hover:bg-warn/20 transition-colors"
+            className={cn(
+              "mt-2 inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+              webFallbackEnabled
+                ? "border-info/40 hover:bg-info/20"
+                : "border-warn/40 hover:bg-warn/20"
+            )}
           >
             Open source settings
           </button>
@@ -130,6 +205,13 @@ export function KnowledgeReadyState({
           {hasSources ? "Select sources" : "No sources selected"}
         </button>
       </div>
+
+      <p className="text-[11px] text-text-subtle">
+        Need a full workspace?{" "}
+        <Link to="/workspace-playground" className="text-primary/70 hover:text-primary transition-colors">
+          Try Research Studio &rarr;
+        </Link>
+      </p>
     </div>
   )
 }

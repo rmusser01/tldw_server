@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.constants import (
 )
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, StorageUnavailableError
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.Utils.Utils import get_project_root
 
 UserId = Union[int, str]
@@ -163,23 +164,31 @@ def resolve_trusted_database_path(
             unique_roots.append(root)
 
     try:
-        candidate = Path(raw_path).expanduser()
+        expanded_path = os.path.expanduser(raw_path)
     except Exception as exc:
         raise InvalidStoragePathError("invalid_path") from exc
 
-    if candidate.is_absolute():
-        normalized = _resolve_candidate_for_containment(candidate)
-    else:
-        normalized = _resolve_candidate_for_containment(project_root / candidate)
+    if os.path.isabs(expanded_path):
+        normalized_absolute = os.path.normpath(expanded_path)
+        for root in unique_roots:
+            root_resolved = root.resolve(strict=False)
+            try:
+                relative_candidate = os.path.relpath(normalized_absolute, str(root_resolved))
+            except ValueError:
+                continue
 
-    for root in unique_roots:
-        try:
-            normalized.relative_to(root.resolve(strict=False))
-            return normalized
-        except ValueError:
-            continue
+            safe_candidate = safe_join(str(root_resolved), relative_candidate)
+            if safe_candidate is not None:
+                return Path(safe_candidate)
 
-    logger.warning("Rejected {} path outside trusted roots: {}", label, normalized)
+        logger.warning("Rejected {} path outside trusted roots: {}", label, normalized_absolute)
+        raise InvalidStoragePathError("invalid_path")
+
+    safe_candidate = safe_join(str(project_root), expanded_path)
+    if safe_candidate is not None:
+        return Path(safe_candidate)
+
+    logger.warning("Rejected {} path outside trusted roots: {}", label, expanded_path)
     raise InvalidStoragePathError("invalid_path")
 
 

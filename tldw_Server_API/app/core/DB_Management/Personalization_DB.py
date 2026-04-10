@@ -68,11 +68,14 @@ class PersonalizationDB:
             )
         except InvalidStoragePathError as exc:
             raise ValueError("PersonalizationDB path must stay within trusted database roots") from exc
-        if not resolved_path.parent.exists():
-            raise ValueError("PersonalizationDB parent directory must already exist")
         self.db_path = str(resolved_path)
         self._lock = threading.RLock()
-        self._ensure_schema()
+        try:
+            self._ensure_schema()
+        except sqlite3.OperationalError as exc:
+            if "unable to open database file" in str(exc).lower():
+                raise ValueError("PersonalizationDB parent directory must already exist") from exc
+            raise
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10, isolation_level=None)

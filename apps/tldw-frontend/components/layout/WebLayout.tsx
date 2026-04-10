@@ -27,6 +27,7 @@ import {
   BuddyShellRenderContextProvider
 } from "@/components/Common/PersonaBuddy"
 import { CurrentChatModelSettings } from "@/components/Common/Settings/CurrentChatModelSettings"
+import { StorageQuotaBanner } from "@/components/Common/StorageQuotaBanner"
 import { Sidebar } from "@/components/Option/Sidebar"
 import { Header } from "@/components/Layouts/Header"
 import { QuickIngestModalHost } from "@/components/Layouts/QuickIngestButton"
@@ -362,6 +363,12 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     </div>
   )
 
+  const storageQuotaBanner = !hideHeader && !demoEnabled ? (
+    <div className="relative z-10 px-4 pt-4 sm:px-6 lg:px-8">
+      <StorageQuotaBanner />
+    </div>
+  ) : null
+
   return (
     <BuddyShellRenderContextProvider>
       <div
@@ -404,6 +411,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                 onOpenNotifications={handleOpenNotifications}
               />
             </div>
+            {storageQuotaBanner}
             <div className="relative flex min-h-0 flex-1 flex-col">
               {children}
               {shortcutLoading && renderShortcutOverlay()}
@@ -423,6 +431,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                 onOpenNotifications={handleOpenNotifications}
               />
             </div>
+            {storageQuotaBanner}
             <div className="relative flex min-h-0 flex-1 flex-col">
               {children}
               {shortcutLoading && renderShortcutOverlay()}

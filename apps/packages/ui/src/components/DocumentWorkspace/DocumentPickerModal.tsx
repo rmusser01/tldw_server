@@ -334,11 +334,11 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
         />
       </div>
 
-      {/* Recently ingested from QuickIngest */}
+      {/* Recently added from QuickIngest */}
       {recentlyIngestedDocs.length > 0 && !searchQuery && (
         <div className="mb-3">
           <p className="mb-1.5 text-xs font-medium text-text-muted">
-            {t("option:documentWorkspace.recentlyIngested", "Recently ingested")}
+            {t("option:documentWorkspace.recentlyIngested", "Recently added")}
           </p>
           <div className="space-y-1">
             {recentlyIngestedDocs.slice(0, 3).map((doc) => (
@@ -355,7 +355,7 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
                 <FileText className="h-4 w-4 flex-shrink-0 text-primary" />
                 <span className="truncate">{doc.title || `Document #${doc.id}`}</span>
                 <span className="ml-auto text-xs text-text-muted">
-                  {t("option:documentWorkspace.justIngested", "Just ingested")}
+                  {t("option:documentWorkspace.justIngested", "Just added")}
                 </span>
               </button>
             ))}
@@ -392,10 +392,11 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
       ) : mediaItems.length === 0 ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={t(
-            "option:documentWorkspace.noMediaFound",
-            "No matching media found"
-          )}
+          description={
+            searchQuery
+              ? t("option:documentWorkspace.noMediaFound", "No documents match your search")
+              : t("option:documentWorkspace.libraryEmpty", "Your library is empty. Upload a document to get started.")
+          }
         />
       ) : (
         <div className="max-h-96 overflow-y-auto rounded border border-border">
@@ -507,7 +508,7 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
         <p className="text-xs text-text-muted">
           {t(
             "option:documentWorkspace.uploadNote",
-            "Files are ingested into your media library and kept for document review."
+            "Files are added to your library and kept for document review."
           )}
         </p>
         <div className="mt-4">

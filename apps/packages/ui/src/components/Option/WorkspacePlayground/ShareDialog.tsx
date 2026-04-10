@@ -143,9 +143,9 @@ const TeamShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
 
       <Form.Item name="access_level" label="Access Level">
         <Radio.Group>
-          <Radio.Button value="view_chat">View & Chat</Radio.Button>
-          <Radio.Button value="view_chat_add">+ Add Sources</Radio.Button>
-          <Radio.Button value="full_edit">Full Edit</Radio.Button>
+          <Radio.Button value="view_chat">{ACCESS_LEVEL_LABELS.view_chat}</Radio.Button>
+          <Radio.Button value="view_chat_add">{ACCESS_LEVEL_LABELS.view_chat_add}</Radio.Button>
+          <Radio.Button value="full_edit">{ACCESS_LEVEL_LABELS.full_edit}</Radio.Button>
         </Radio.Group>
       </Form.Item>
 
@@ -221,9 +221,9 @@ const LinkShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
       >
         <Form.Item name="access_level" label="Access Level">
           <Radio.Group>
-            <Radio.Button value="view_chat">View & Chat</Radio.Button>
-            <Radio.Button value="view_chat_add">+ Add Sources</Radio.Button>
-            <Radio.Button value="full_edit">Full Edit</Radio.Button>
+            <Radio.Button value="view_chat">{ACCESS_LEVEL_LABELS.view_chat}</Radio.Button>
+            <Radio.Button value="view_chat_add">{ACCESS_LEVEL_LABELS.view_chat_add}</Radio.Button>
+            <Radio.Button value="full_edit">{ACCESS_LEVEL_LABELS.full_edit}</Radio.Button>
           </Radio.Group>
         </Form.Item>
 

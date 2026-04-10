@@ -84,7 +84,7 @@ jobs:
 
       - name: Install Playwright Chromium
         working-directory: apps/extension
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install chromium
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg

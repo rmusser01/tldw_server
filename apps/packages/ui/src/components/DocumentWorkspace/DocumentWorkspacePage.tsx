@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, Suspense } from "react
 import { useTranslation } from "react-i18next"
 import { useSearchParams } from "react-router-dom"
 import { useStorage } from "@plasmohq/storage/hook"
-import { Alert, Drawer, Tabs, Tooltip } from "antd"
+import { Alert, Drawer, Dropdown, Modal, notification, Tabs, Tooltip } from "antd"
 import {
   FileText,
   MessageSquare,
@@ -19,7 +19,9 @@ import {
   Quote,
   HelpCircle,
   Keyboard,
-  Plus
+  Plus,
+  ChevronDown,
+  CircleHelp
 } from "lucide-react"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 import { useMobile, useTablet } from "@/hooks/useMediaQuery"
@@ -33,6 +35,7 @@ import { DocumentTabBar } from "./DocumentTabBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { getDocumentMimeType, inferDocumentTypeFromMedia } from "./document-utils"
 import { TabIconLabel } from "./TabIconLabel"
+import { WorkspaceTour, HighlightTip, MultiDocTip, resetTour, resetAllTips } from "./WorkspaceTips"
 import {
   useAnnotations,
   useAnnotationSync,
@@ -54,9 +57,9 @@ const QuickInsightsTab = React.lazy(() =>
     default: module.QuickInsightsTab
   }))
 )
-const FiguresTab = React.lazy(() =>
-  import("./LeftSidebar/FiguresTab").then((module) => ({
-    default: module.FiguresTab
+const PagesTab = React.lazy(() =>
+  import("./LeftSidebar/PagesTab").then((module) => ({
+    default: module.PagesTab
   }))
 )
 const TableOfContentsTab = React.lazy(() =>
@@ -123,13 +126,21 @@ const LeftSidebarContent: React.FC = () => {
   const setActiveSidebarTab = useDocumentWorkspaceStore(
     (s) => s.setActiveSidebarTab
   )
+  const activeDocumentType = useDocumentWorkspaceStore((s) => s.activeDocumentType)
+
+  // Adaptive: hide Pages tab for EPUB (thumbnails not supported)
+  const hiddenTabs: SidebarTab[] = activeDocumentType === "epub" ? ["pages"] : []
+  const primaryKeys: SidebarTab[] = ["toc", "insights", "info"]
+  const secondaryKeys: SidebarTab[] = (["pages", "references"] as SidebarTab[]).filter(
+    (k) => !hiddenTabs.includes(k)
+  )
 
   const renderSidebarTab = (tab: SidebarTab) => {
     switch (tab) {
       case "insights":
         return <QuickInsightsTab />
-      case "figures":
-        return <FiguresTab />
+      case "pages":
+        return <PagesTab />
       case "toc":
         return <TableOfContentsTab />
       case "info":
@@ -141,30 +152,30 @@ const LeftSidebarContent: React.FC = () => {
     }
   }
 
-  const sidebarTabs: Array<{
+  const allSidebarTabs: Array<{
     key: SidebarTab
     label: string
     icon: React.ReactNode
   }> = [
-    {
-      key: "insights",
-      label: t("option:documentWorkspace.insights", "Insights"),
-      icon: <Lightbulb className="h-4 w-4" />
-    },
-    {
-      key: "figures",
-      label: t("option:documentWorkspace.figures", "Figures"),
-      icon: <Image className="h-4 w-4" />
-    },
     {
       key: "toc",
       label: t("option:documentWorkspace.toc", "Contents"),
       icon: <List className="h-4 w-4" />
     },
     {
+      key: "insights",
+      label: t("option:documentWorkspace.insights", "Insights"),
+      icon: <Lightbulb className="h-4 w-4" />
+    },
+    {
       key: "info",
       label: t("option:documentWorkspace.info", "Info"),
       icon: <Info className="h-4 w-4" />
+    },
+    {
+      key: "pages",
+      label: t("option:documentWorkspace.pages", "Pages"),
+      icon: <Image className="h-4 w-4" />
     },
     {
       key: "references",
@@ -173,12 +184,46 @@ const LeftSidebarContent: React.FC = () => {
     }
   ]
 
+  // Filter out tabs not applicable to current document type
+  const availableTabs = allSidebarTabs.filter((tab) => !hiddenTabs.includes(tab.key))
+
+  // If the active tab is a secondary tab, include it in the visible set
+  const visibleTabs = availableTabs.filter(
+    (tab) => primaryKeys.includes(tab.key) || tab.key === activeSidebarTab
+  )
+  const overflowTabs = availableTabs.filter(
+    (tab) => secondaryKeys.includes(tab.key) && tab.key !== activeSidebarTab
+  )
+
+  const moreDropdown = overflowTabs.length > 0 ? (
+    <Dropdown
+      menu={{
+        items: overflowTabs.map((tab) => ({
+          key: tab.key,
+          label: (
+            <span className="flex items-center gap-2">
+              {tab.icon}
+              <span className="text-xs">{tab.label}</span>
+            </span>
+          ),
+          onClick: () => setActiveSidebarTab(tab.key)
+        }))
+      }}
+      trigger={["click"]}
+    >
+      <button className="flex items-center gap-0.5 px-1.5 py-1 text-xs text-text-muted hover:text-text rounded hover:bg-hover">
+        {t("common:more", "More")}
+        <ChevronDown className="h-3 w-3" />
+      </button>
+    </Dropdown>
+  ) : null
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Tabs
         activeKey={activeSidebarTab}
         onChange={(key) => setActiveSidebarTab(key as SidebarTab)}
-        items={sidebarTabs.map((tab) => ({
+        items={visibleTabs.map((tab) => ({
           key: tab.key,
           label: <TabIconLabel label={tab.label} icon={tab.icon} />,
           children: (
@@ -192,6 +237,7 @@ const LeftSidebarContent: React.FC = () => {
           )
         }))}
         size="small"
+        tabBarExtraContent={moreDropdown}
         className="flex-1 min-h-0 [&_.ant-tabs-content]:h-full [&_.ant-tabs-content]:min-h-0 [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-content-holder]:min-h-0 [&_.ant-tabs-tabpane]:h-full [&_.ant-tabs-tabpane]:min-h-0"
         tabBarStyle={{ marginBottom: 0, paddingLeft: 8, paddingRight: 8 }}
       />
@@ -202,6 +248,9 @@ const LeftSidebarContent: React.FC = () => {
 /**
  * Right panel tab content for chat, notes, citations, and quizzes.
  */
+const RIGHT_PRIMARY_KEYS: RightPanelTab[] = ["chat", "annotations"]
+const RIGHT_SECONDARY_KEYS: RightPanelTab[] = ["citations", "quiz"]
+
 const RightPanelContent: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   const activeRightTab = useDocumentWorkspaceStore((s) => s.activeRightTab)
@@ -224,7 +273,7 @@ const RightPanelContent: React.FC = () => {
     }
   }
 
-  const rightTabs: Array<{
+  const allRightTabs: Array<{
     key: RightPanelTab
     label: string
     icon: React.ReactNode
@@ -236,7 +285,7 @@ const RightPanelContent: React.FC = () => {
     },
     {
       key: "annotations",
-      label: t("option:documentWorkspace.annotations", "Notes"),
+      label: t("option:documentWorkspace.annotations", "Highlights & Notes"),
       icon: <Highlighter className="h-4 w-4" />
     },
     {
@@ -251,12 +300,43 @@ const RightPanelContent: React.FC = () => {
     }
   ]
 
+  // If the active tab is a secondary tab, include it in the visible set
+  const visibleRightTabs = allRightTabs.filter(
+    (tab) => RIGHT_PRIMARY_KEYS.includes(tab.key) || tab.key === activeRightTab
+  )
+  const overflowRightTabs = allRightTabs.filter(
+    (tab) => RIGHT_SECONDARY_KEYS.includes(tab.key) && tab.key !== activeRightTab
+  )
+
+  const moreDropdown = overflowRightTabs.length > 0 ? (
+    <Dropdown
+      menu={{
+        items: overflowRightTabs.map((tab) => ({
+          key: tab.key,
+          label: (
+            <span className="flex items-center gap-2">
+              {tab.icon}
+              <span className="text-xs">{tab.label}</span>
+            </span>
+          ),
+          onClick: () => setActiveRightTab(tab.key)
+        }))
+      }}
+      trigger={["click"]}
+    >
+      <button className="flex items-center gap-0.5 px-1.5 py-1 text-xs text-text-muted hover:text-text rounded hover:bg-hover">
+        {t("common:more", "More")}
+        <ChevronDown className="h-3 w-3" />
+      </button>
+    </Dropdown>
+  ) : null
+
   return (
     <div className="flex h-full flex-col">
       <Tabs
         activeKey={activeRightTab}
         onChange={(key) => setActiveRightTab(key as RightPanelTab)}
-        items={rightTabs.map((tab) => ({
+        items={visibleRightTabs.map((tab) => ({
           key: tab.key,
           label: <TabIconLabel label={tab.label} icon={tab.icon} />,
           children:
@@ -267,6 +347,7 @@ const RightPanelContent: React.FC = () => {
             ) : null
         }))}
         size="small"
+        tabBarExtraContent={moreDropdown}
         className="flex-1 [&_.ant-tabs-content]:h-full [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-tabpane]:h-full"
         tabBarStyle={{ marginBottom: 0, paddingLeft: 8, paddingRight: 8 }}
       />
@@ -351,15 +432,59 @@ const WorkspaceHeader: React.FC<{
           </button>
         </Tooltip>
 
-        <Tooltip title={t("option:documentWorkspace.shortcuts", "Keyboard shortcuts (?)")}>
+        <Dropdown
+          menu={{
+            items: [
+              {
+                key: "shortcuts",
+                label: (
+                  <span className="flex items-center gap-2">
+                    <Keyboard className="h-4 w-4" />
+                    {t("option:documentWorkspace.keyboardShortcuts", "Keyboard shortcuts")}
+                    <span className="ml-auto text-xs text-text-muted">?</span>
+                  </span>
+                ),
+                onClick: onShowShortcuts
+              },
+              {
+                key: "tips",
+                label: (
+                  <span className="flex items-center gap-2">
+                    <Lightbulb className="h-4 w-4" />
+                    {t("option:documentWorkspace.showFeatureTips", "Show feature tips")}
+                  </span>
+                ),
+                onClick: () => {
+                  resetAllTips()
+                  window.location.reload()
+                }
+              },
+              {
+                key: "tour",
+                label: (
+                  <span className="flex items-center gap-2">
+                    <CircleHelp className="h-4 w-4" />
+                    {t("option:documentWorkspace.takeTour", "Take the tour again")}
+                  </span>
+                ),
+                onClick: () => {
+                  resetTour()
+                  window.location.reload()
+                }
+              }
+            ]
+          }}
+          trigger={["click"]}
+        >
           <button
-            onClick={onShowShortcuts}
-            className="rounded p-1.5 hover:bg-hover text-text-subtle hover:text-text"
-            aria-label={t("option:documentWorkspace.shortcuts", "Keyboard shortcuts")}
+            className="flex items-center gap-1 rounded px-1.5 py-1 hover:bg-hover text-text-subtle hover:text-text"
+            aria-label={t("option:documentWorkspace.help", "Help")}
           >
-            <Keyboard className="h-5 w-5" />
+            <CircleHelp className="h-4 w-4" />
+            <span className="text-xs hidden sm:inline">{t("option:documentWorkspace.help", "Help")}</span>
+            <ChevronDown className="h-3 w-3" />
           </button>
-        </Tooltip>
+        </Dropdown>
         {!hideToggles && (
           <Tooltip title={rightPaneToggleLabel}>
             <button
@@ -462,6 +587,62 @@ export const DocumentWorkspacePage: React.FC = () => {
     setPickerOpen(false)
   }, [])
 
+  // Close document with confirmation when annotations are pending
+  const closeDocument = useDocumentWorkspaceStore((s) => s.closeDocument)
+  const undoCloseDocument = useDocumentWorkspaceStore((s) => s.undoCloseDocument)
+  const annotationSyncStatus = useDocumentWorkspaceStore((s) => s.annotationSyncStatus)
+
+  const doClose = useCallback((id: number) => {
+    const doc = openDocuments.find((d) => d.id === id)
+    closeDocument(id)
+    if (doc) {
+      const key = `undo-close-${id}`
+      notification.info({
+        key,
+        message: t("option:documentWorkspace.documentClosed", "Document closed"),
+        description: doc.title,
+        btn: (
+          <button
+            className="text-xs text-primary hover:underline font-medium"
+            onClick={() => {
+              undoCloseDocument()
+              notification.destroy(key)
+            }}
+          >
+            {t("option:documentWorkspace.undo", "Undo")}
+          </button>
+        ),
+        duration: 10,
+        placement: "bottomRight"
+      })
+    }
+  }, [closeDocument, undoCloseDocument, openDocuments, t])
+
+  const handleCloseDocument = useCallback((id: number) => {
+    if (annotationSyncStatus === "pending") {
+      Modal.confirm({
+        title: t("option:documentWorkspace.unsavedHighlights", "You have unsaved highlights"),
+        content: t(
+          "option:documentWorkspace.unsavedHighlightsDesc",
+          "Some highlights and notes haven't been saved yet. What would you like to do?"
+        ),
+        okText: t("option:documentWorkspace.saveAndClose", "Save & close"),
+        cancelText: t("option:documentWorkspace.closeWithoutSaving", "Close without saving"),
+        closable: false,
+        maskClosable: false,
+        onOk: async () => {
+          await forceSync()
+          doClose(id)
+        },
+        onCancel: () => {
+          doClose(id)
+        }
+      })
+    } else {
+      doClose(id)
+    }
+  }, [annotationSyncStatus, doClose, forceSync, t])
+
   // Workspace-level keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -543,17 +724,20 @@ export const DocumentWorkspacePage: React.FC = () => {
     blobUrlMapRef.current.set(mediaId, url)
   }, [])
 
+  const recentlyClosed = useDocumentWorkspaceStore((s) => s.recentlyClosed)
+
   const cleanupRemovedBlobUrls = useCallback(() => {
     const openIds = new Set(openDocuments.map((doc) => doc.id))
+    const closedIds = new Set(recentlyClosed.map((c) => c.doc.id))
     for (const [id, url] of blobUrlMapRef.current.entries()) {
-      if (!openIds.has(id)) {
+      if (!openIds.has(id) && !closedIds.has(id)) {
         if (url.startsWith("blob:")) {
           URL.revokeObjectURL(url)
         }
         blobUrlMapRef.current.delete(id)
       }
     }
-  }, [openDocuments])
+  }, [openDocuments, recentlyClosed])
 
   useEffect(() => {
     cleanupRemovedBlobUrls()
@@ -648,7 +832,7 @@ export const DocumentWorkspacePage: React.FC = () => {
             message.error(
               t(
                 "option:documentWorkspace.missingFile",
-                "This document's original file was not preserved during ingest. To view it in the workspace, re-upload it using the Upload tab above, or re-ingest it \u2014 newer ingests automatically preserve document files."
+                "This document's original file was not preserved when it was imported. To view it in the workspace, re-upload it using the Upload tab above, or re-import it \u2014 newer imports automatically preserve document files."
               )
             )
             return
@@ -816,7 +1000,7 @@ export const DocumentWorkspacePage: React.FC = () => {
               <div className="text-xs text-text-muted">
                 {t(
                   "option:documentWorkspace.healthWarningHint",
-                  "Restart the server or run the latest migrations to create the missing tables."
+                  "Some workspace features are temporarily unavailable. This usually resolves after restarting the server. If this persists, contact your administrator."
                 )}
               </div>
             </div>
@@ -877,9 +1061,11 @@ export const DocumentWorkspacePage: React.FC = () => {
           </Suspense>
           {loadingAlert}
           {healthAlert}
+          <WorkspaceTour />
 
           {/* Content area */}
-          <div className="flex-1 min-h-0 overflow-hidden">
+          <div className="relative flex-1 min-h-0 overflow-hidden">
+            <HighlightTip />
             {mobileContent[activeTab]}
           </div>
 
@@ -898,7 +1084,7 @@ export const DocumentWorkspacePage: React.FC = () => {
                 }`}
               >
                 {item.icon}
-                <span className="text-[10px] font-medium leading-none">{item.label}</span>
+                <span className="text-xs font-medium leading-none">{item.label}</span>
               </button>
             ))}
           </nav>
@@ -936,9 +1122,13 @@ export const DocumentWorkspacePage: React.FC = () => {
         </Suspense>
         {loadingAlert}
         {healthAlert}
+        <WorkspaceTour />
 
         {/* Document tabs - shown when multiple documents are open */}
-        <DocumentTabBar onOpenPicker={() => handleOpenPicker("library")} />
+        <div className="relative">
+          <DocumentTabBar onOpenPicker={() => handleOpenPicker("library")} onCloseDocument={handleCloseDocument} />
+          <MultiDocTip />
+        </div>
 
         <div className="flex min-h-0 flex-1">
           {/* Left pane - Sidebar (desktop) */}
@@ -976,7 +1166,8 @@ export const DocumentWorkspacePage: React.FC = () => {
           </Drawer>
 
           {/* Center pane - Document Viewer */}
-          <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
+          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
+            <HighlightTip />
             <Suspense fallback={viewerPanelFallback}>
               <DocumentViewer
                 loadingDocumentId={loadingDocumentId}

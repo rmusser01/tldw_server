@@ -197,10 +197,10 @@ export const useMilestoneStore = create<MilestoneState>()((set, get) => ({
             const key = localStorage.key(i)
             if (key && key.startsWith("quiz-attempt-")) {
               updates.first_quiz_taken = now
+              localStorage.setItem(QUIZ_ATTEMPT_SCAN_DONE_KEY, "1")
               break
             }
           }
-          localStorage.setItem(QUIZ_ATTEMPT_SCAN_DONE_KEY, "1")
         }
       } catch {
         // ignore

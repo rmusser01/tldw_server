@@ -82,7 +82,7 @@ const NoDocumentState: React.FC = () => {
         image={<Lightbulb className="h-12 w-12 text-muted mx-auto mb-2" />}
         description={t(
           "option:documentWorkspace.noDocumentForInsights",
-          "Open a document to generate insights"
+          "AI-generated summaries, key findings, and research analysis. Open a document to get started."
         )}
       />
     </div>
@@ -149,7 +149,7 @@ const GeneratePromptState: React.FC<{
         <p className="text-xs text-warning mt-2">
           {t(
             "option:documentWorkspace.serverUnavailable",
-            "Server connection required"
+            "Connect to your server in Settings to use this feature"
           )}
         </p>
       )}

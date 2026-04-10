@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkspacePlayground } from "../index"
 
@@ -143,34 +144,48 @@ describe("WorkspacePlayground stage 1 onboarding walkthrough", () => {
     testState.workspaceChatSessions = {}
   })
 
-  it("auto-starts the Joyride guided tour for first-time users", async () => {
+  it("shows an opt-in tour prompt for first-time users instead of auto-starting", async () => {
     render(<WorkspacePlayground />)
 
     await waitFor(() => {
-      expect(mockStartTutorial).toHaveBeenCalledWith(
-        "workspace-playground-basics"
-      )
+      expect(screen.getByText("Start tour")).toBeInTheDocument()
     })
-    // Overlay is no longer shown — tour uses Joyride tooltips instead
-    expect(
-      screen.queryByTestId("workspace-onboarding-overlay")
-    ).not.toBeInTheDocument()
+    // Tour should NOT auto-start — user must opt in
+    expect(mockStartTutorial).not.toHaveBeenCalled()
   })
 
-  it("persists dismissal so the tour does not auto-start again", async () => {
+  it("starts the tour and persists dismissal when user clicks Start tour", async () => {
+    const user = userEvent.setup()
     render(<WorkspacePlayground />)
 
-    await waitFor(() => {
-      expect(mockStartTutorial).toHaveBeenCalled()
-    })
+    const startButton = await screen.findByText("Start tour")
+    await user.click(startButton)
+
+    expect(mockStartTutorial).toHaveBeenCalledWith(
+      "workspace-playground-basics"
+    )
     expect(window.localStorage.getItem(ONBOARDING_KEY)).toBe("1")
+    expect(screen.queryByText("Start tour")).not.toBeInTheDocument()
   })
 
-  it("does not auto-start the tour when already dismissed", () => {
+  it("persists dismissal without starting tour when user clicks Dismiss", async () => {
+    const user = userEvent.setup()
+    render(<WorkspacePlayground />)
+
+    const dismissButton = await screen.findByText("Dismiss")
+    await user.click(dismissButton)
+
+    expect(mockStartTutorial).not.toHaveBeenCalled()
+    expect(window.localStorage.getItem(ONBOARDING_KEY)).toBe("1")
+    expect(screen.queryByText("Start tour")).not.toBeInTheDocument()
+  })
+
+  it("does not show tour prompt when already dismissed", () => {
     window.localStorage.setItem(ONBOARDING_KEY, "1")
 
     render(<WorkspacePlayground />)
 
+    expect(screen.queryByText("Start tour")).not.toBeInTheDocument()
     expect(mockStartTutorial).not.toHaveBeenCalled()
   })
 

@@ -190,6 +190,9 @@ export function ExpertSettings() {
 
   return (
     <div className="space-y-2">
+      <p className="text-xs text-text-muted pb-1">
+        Advanced settings for fine-tuning search behavior. Expand a section to adjust its options.
+      </p>
       {SECTIONS.map((section) => (
         <SettingsSection
           key={section.id}
@@ -762,6 +765,7 @@ function SearchSection({ settings, updateSetting }: SectionSettingsProps) {
     <div className="space-y-4">
       <SettingSelect
         label="Search Mode"
+        description="FTS: keyword matching. Vector: semantic similarity. Hybrid: combines both for best results."
         value={settings.search_mode}
         onChange={(v) => updateSetting("search_mode", v as typeof settings.search_mode)}
         options={[
@@ -772,6 +776,7 @@ function SearchSection({ settings, updateSetting }: SectionSettingsProps) {
       />
       <SettingSelect
         label="FTS Level"
+        description="Media-level searches full documents. Chunk-level searches individual text segments for finer matches."
         value={settings.fts_level}
         onChange={(v) => updateSetting("fts_level", v as typeof settings.fts_level)}
         options={[
@@ -834,7 +839,7 @@ function SearchSection({ settings, updateSetting }: SectionSettingsProps) {
       )}
       <SettingSlider
         label="Hybrid Alpha"
-        description="0 = FTS only, 1 = Vector only"
+        description="Balance between search modes. 0 = pure keyword (FTS), 1 = pure semantic (Vector). Start at 0.5 for balanced results."
         value={settings.hybrid_alpha}
         onChange={(v) => updateSetting("hybrid_alpha", v)}
         min={0}
@@ -843,7 +848,7 @@ function SearchSection({ settings, updateSetting }: SectionSettingsProps) {
       />
       <SettingSlider
         label="Top-K"
-        description="Number of documents to retrieve"
+        description="Number of documents to retrieve. Higher values provide more context but slower responses. 5-10 is a good default."
         value={settings.top_k}
         onChange={(v) => updateSetting("top_k", v)}
         min={1}
@@ -851,7 +856,7 @@ function SearchSection({ settings, updateSetting }: SectionSettingsProps) {
       />
       <SettingSlider
         label="Min Score"
-        description="Minimum relevance threshold"
+        description="Minimum relevance threshold. Documents below this score are excluded. Lower values include more results; 0.3-0.5 is typical."
         value={settings.min_score}
         onChange={(v) => updateSetting("min_score", v)}
         min={0}
@@ -973,7 +978,7 @@ function RetrievalSection({ settings, updateSetting }: SectionSettingsProps) {
     <div className="space-y-4">
       <SettingToggle
         label="Multi-Vector Passages"
-        description="ColBERT-style fine-grained matching"
+        description="ColBERT-style fine-grained matching. Splits documents into overlapping spans for more precise retrieval at higher compute cost."
         checked={settings.enable_multi_vector_passages}
         onChange={(v) => updateSetting("enable_multi_vector_passages", v)}
       />
@@ -981,6 +986,7 @@ function RetrievalSection({ settings, updateSetting }: SectionSettingsProps) {
         <div className="pl-4 border-l-2 border-primary/20 space-y-3">
           <SettingSlider
             label="Span Characters"
+            description="Character length of each passage span."
             value={settings.mv_span_chars}
             onChange={(v) => updateSetting("mv_span_chars", v)}
             min={100}
@@ -988,6 +994,7 @@ function RetrievalSection({ settings, updateSetting }: SectionSettingsProps) {
           />
           <SettingSlider
             label="Stride"
+            description="Step size between spans. Smaller values produce more overlapping spans."
             value={settings.mv_stride}
             onChange={(v) => updateSetting("mv_stride", v)}
             min={50}
@@ -995,6 +1002,7 @@ function RetrievalSection({ settings, updateSetting }: SectionSettingsProps) {
           />
           <SettingSlider
             label="Max Spans"
+            description="Maximum number of spans per document to consider."
             value={settings.mv_max_spans}
             onChange={(v) => updateSetting("mv_max_spans", v)}
             min={1}
@@ -1061,6 +1069,7 @@ function AgenticSection({ settings, updateSetting }: SectionSettingsProps) {
     <div className="space-y-4">
       <SettingSelect
         label="Strategy"
+        description="Standard uses pre-indexed chunks. Agentic dynamically plans retrieval at query time for complex questions."
         value={settings.strategy}
         onChange={(v) => updateSetting("strategy", v as typeof settings.strategy)}
         options={[
@@ -1072,6 +1081,7 @@ function AgenticSection({ settings, updateSetting }: SectionSettingsProps) {
         <>
           <SettingSlider
             label="Top-K Documents"
+            description="Number of top documents the agent considers per sub-query."
             value={settings.agentic_top_k_docs}
             onChange={(v) => updateSetting("agentic_top_k_docs", v)}
             min={1}
@@ -1079,6 +1089,7 @@ function AgenticSection({ settings, updateSetting }: SectionSettingsProps) {
           />
           <SettingSlider
             label="Window Characters"
+            description="Context window size in characters for each agentic retrieval step."
             value={settings.agentic_window_chars}
             onChange={(v) => updateSetting("agentic_window_chars", v)}
             min={200}
@@ -1114,7 +1125,7 @@ function RerankingSection({ settings, updateSetting }: SectionSettingsProps) {
     <div className="space-y-4">
       <SettingToggle
         label="Enable Reranking"
-        description="Re-score results for better relevance"
+        description="Re-scores retrieved results using a second model pass for better relevance ordering. Adds latency but significantly improves answer quality."
         checked={settings.enable_reranking}
         onChange={(v) => updateSetting("enable_reranking", v)}
       />
@@ -1122,6 +1133,7 @@ function RerankingSection({ settings, updateSetting }: SectionSettingsProps) {
         <>
           <SettingSelect
             label="Strategy"
+            description="FlashRank is fastest. Cross-Encoder is most accurate. LLM Scoring uses your LLM to judge relevance. Two-Tier combines fast pre-filter with accurate re-score."
             value={settings.reranking_strategy}
             onChange={(v) => updateSetting("reranking_strategy", v as typeof settings.reranking_strategy)}
             options={[
@@ -1134,6 +1146,7 @@ function RerankingSection({ settings, updateSetting }: SectionSettingsProps) {
           />
           <SettingSlider
             label="Rerank Top-K"
+            description="How many top results to keep after reranking. Lower values focus on the most relevant passages."
             value={settings.rerank_top_k}
             onChange={(v) => updateSetting("rerank_top_k", v)}
             min={1}
@@ -1141,6 +1154,7 @@ function RerankingSection({ settings, updateSetting }: SectionSettingsProps) {
           />
           <SettingSlider
             label="Min Relevance Probability"
+            description="Minimum reranker confidence to keep a result. Higher = stricter filtering, fewer but more relevant results."
             value={settings.rerank_min_relevance_prob}
             onChange={(v) => updateSetting("rerank_min_relevance_prob", v)}
             min={0}
@@ -1166,6 +1180,7 @@ function GenerationSection({ settings, updateSetting }: SectionSettingsProps) {
         <>
           <SettingSlider
             label="Max Tokens"
+            description="Maximum length of the generated answer. Longer answers use more tokens and cost more."
             value={settings.max_generation_tokens}
             onChange={(v) => updateSetting("max_generation_tokens", v)}
             min={50}
@@ -1221,6 +1236,7 @@ function CitationsSection({ settings, updateSetting }: SectionSettingsProps) {
         <>
           <SettingSelect
             label="Citation Style"
+            description="Formatting standard used for inline citations in the generated answer."
             value={settings.citation_style}
             onChange={(v) => updateSetting("citation_style", v as typeof settings.citation_style)}
             options={[
@@ -1262,6 +1278,7 @@ function VerificationSection({ settings, updateSetting }: SectionSettingsProps) 
         <>
           <SettingSelect
             label="Claim Extractor"
+            description="Method for identifying factual claims. Auto selects the best approach for your content."
             value={settings.claim_extractor}
             onChange={(v) => updateSetting("claim_extractor", v as typeof settings.claim_extractor)}
             options={[
@@ -1273,6 +1290,7 @@ function VerificationSection({ settings, updateSetting }: SectionSettingsProps) 
           />
           <SettingSelect
             label="Claim Verifier"
+            description="NLI uses natural language inference. LLM uses your model to judge claims. Hybrid combines both."
             value={settings.claim_verifier}
             onChange={(v) => updateSetting("claim_verifier", v as typeof settings.claim_verifier)}
             options={[
@@ -1283,6 +1301,7 @@ function VerificationSection({ settings, updateSetting }: SectionSettingsProps) 
           />
           <SettingSlider
             label="Confidence Threshold"
+            description="Minimum confidence to accept a claim as verified. Higher values reject more unverified claims."
             value={settings.claims_conf_threshold}
             onChange={(v) => updateSetting("claims_conf_threshold", v)}
             min={0}
@@ -1336,6 +1355,7 @@ function SecuritySection({ settings, updateSetting }: SectionSettingsProps) {
       />
       <SettingSelect
         label="Sensitivity Level"
+        description="Controls access classification. Public allows all content; Restricted limits to highest-clearance material only."
         value={settings.sensitivity_level}
         onChange={(v) => updateSetting("sensitivity_level", v as typeof settings.sensitivity_level)}
         options={[
@@ -1366,6 +1386,7 @@ function PerformanceSection({ settings, updateSetting }: SectionSettingsProps) {
     <div className="space-y-4">
       <SettingSlider
         label="Timeout (seconds)"
+        description="Maximum time to wait for the full RAG pipeline to complete before aborting."
         value={settings.timeout_seconds}
         onChange={(v) => updateSetting("timeout_seconds", v)}
         min={1}
@@ -1405,6 +1426,7 @@ function PerformanceSection({ settings, updateSetting }: SectionSettingsProps) {
       {settings.enable_resilience && (
         <SettingSlider
           label="Retry Attempts"
+          description="Number of retries on transient errors before giving up."
           value={settings.retry_attempts}
           onChange={(v) => updateSetting("retry_attempts", v)}
           min={1}
