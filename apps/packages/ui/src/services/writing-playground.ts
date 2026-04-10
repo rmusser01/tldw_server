@@ -387,33 +387,20 @@ export type WritingDefaultsResponse = {
   themes: WritingDefaultTheme[]
 }
 
-export type ManuscriptSceneResponse = {
-  id: string
-  chapter_id: string
-  project_id: string
-  title: string
-  content_json?: string | null
-  content_plain?: string | null
-  version: number
-}
-
-export type ManuscriptCharacter = {
-  id: string
-  project_id: string
-  name: string
-  role: string
-}
+export type ManuscriptCharacter = Pick<
+  ManuscriptCharacterResponse,
+  "id" | "project_id" | "name" | "role"
+>
 
 export type ManuscriptCharacterListResponse = {
   characters: ManuscriptCharacter[]
   total: number
 }
 
-export type ManuscriptRelationship = {
-  id: string
-  relationship_type: string
-  from_character_id?: string
-  to_character_id?: string
+export type ManuscriptRelationship = Pick<
+  ManuscriptRelationshipResponse,
+  "id" | "relationship_type" | "from_character_id" | "to_character_id"
+> & {
   character_a_id?: string
   character_b_id?: string
 }
@@ -423,52 +410,34 @@ export type ManuscriptRelationshipListResponse = {
   total: number
 }
 
-export type ManuscriptWorldInfoItem = {
-  id: string
-  project_id: string
-  name: string
-  kind: string
-}
+export type ManuscriptWorldInfoItem = Pick<
+  ManuscriptWorldInfoResponse,
+  "id" | "project_id" | "name" | "kind"
+>
 
 export type ManuscriptWorldInfoListResponse = {
   items: ManuscriptWorldInfoItem[]
   total: number
 }
 
-export type ManuscriptPlotLine = {
-  id: string
-  title: string
-  status: string
-}
+export type ManuscriptPlotLine = Pick<
+  ManuscriptPlotLineResponse,
+  "id" | "title" | "status"
+>
 
 export type ManuscriptPlotLineListResponse = {
   plot_lines: ManuscriptPlotLine[]
   total: number
 }
 
-export type ManuscriptPlotHole = {
-  id: string
-  title: string
-  severity: string
-}
+export type ManuscriptPlotHole = Pick<
+  ManuscriptPlotHoleResponse,
+  "id" | "title" | "severity"
+>
 
 export type ManuscriptPlotHoleListResponse = {
   plot_holes: ManuscriptPlotHole[]
   total: number
-}
-
-export type ManuscriptResearchResult = {
-  id?: string
-  title?: string
-  source_title?: string
-  source_type?: string
-  snippet?: string
-  excerpt?: string
-}
-
-export type ManuscriptResearchResponse = {
-  query: string
-  results: ManuscriptResearchResult[]
 }
 
 export type WritingSnapshotCounts = {

@@ -42,6 +42,13 @@ describe("Writing playground manuscript API shape guards", () => {
     expect(serviceSource).toContain("): Promise<ManuscriptResearchResponse>")
   })
 
+  it("exports manuscript scene and research response types only once", () => {
+    const serviceSource = readWritingPlaygroundRootSource("writing-playground.ts")
+
+    expect(serviceSource.match(/export type ManuscriptSceneResponse =/g)?.length ?? 0).toBe(1)
+    expect(serviceSource.match(/export type ManuscriptResearchResponse =/g)?.length ?? 0).toBe(1)
+  })
+
   it("reuses the shared mood color mapping in the status bar", () => {
     const indexSource = readWritingPlaygroundSource("index.tsx")
 
