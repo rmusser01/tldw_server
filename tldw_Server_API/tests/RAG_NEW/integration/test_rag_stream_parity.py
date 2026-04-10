@@ -197,7 +197,9 @@ def test_rag_streaming_generation_uses_shared_resolved_payload(
     client_with_stream_overrides: TestClient,
 ) -> None:
     import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.RAG.rag_service.request_bundle import ResolvedRequestBundle
     from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
+    from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import build_retrieval_plan
 
     captured = {"pipeline_kwargs": None, "generation_config": None}
 
@@ -238,9 +240,9 @@ def test_rag_streaming_generation_uses_shared_resolved_payload(
         context.metadata = {"streaming": True}
         return context
 
-    def fake_resolve_standard_request(request: Any, current_user: Any) -> ResolvedRAGRequest:  # noqa: ARG001
+    def _resolved_request_for_test(query: str) -> ResolvedRAGRequest:
         payload = {
-            "query": request.query,
+            "query": query,
             "strategy": "standard",
             "sources": ["media_db"],
             "search_mode": "hybrid",
@@ -256,7 +258,7 @@ def test_rag_streaming_generation_uses_shared_resolved_payload(
             "feedback_user_id": "1",
         }
         return ResolvedRAGRequest(
-            query=request.query,
+            query=query,
             strategy="standard",
             payload=payload,
             index_namespace="resolved-namespace",
@@ -265,7 +267,32 @@ def test_rag_streaming_generation_uses_shared_resolved_payload(
             feedback_user_id="1",
         )
 
-    monkeypatch.setattr(rag_ep, "_resolve_standard_request", fake_resolve_standard_request)
+    def fake_build_standard_request_bundle(
+        request: Any,
+        *,
+        current_user: Any,  # noqa: ARG001
+        db_paths: dict[str, Any],
+        media_db: Any,
+        chacha_db: Any,
+    ) -> ResolvedRequestBundle:
+        resolved_request = _resolved_request_for_test(request.query)
+        retrieval_plan = build_retrieval_plan(resolved_request)
+        pipeline_kwargs = rag_ep._build_unified_pipeline_kwargs(
+            request=request,
+            db_paths=db_paths,
+            media_db=media_db,
+            chacha_db=chacha_db,
+            current_user=current_user,
+            resolved_request=resolved_request,
+            retrieval_plan=retrieval_plan,
+        )
+        return ResolvedRequestBundle(
+            resolved_request=resolved_request,
+            retrieval_plan=retrieval_plan,
+            pipeline_kwargs=pipeline_kwargs,
+        )
+
+    monkeypatch.setattr(rag_ep, "_build_standard_request_bundle", fake_build_standard_request_bundle)
     monkeypatch.setattr(rag_ep, "unified_rag_pipeline", fake_unified_pipeline)
     monkeypatch.setattr(rag_ep, "generate_streaming_response", fake_generate_streaming_response)
 
@@ -283,6 +310,10 @@ def test_rag_streaming_generation_uses_shared_resolved_payload(
     assert pipeline_kwargs["index_namespace"] == "resolved-namespace"
     assert pipeline_kwargs["top_k"] == 4
     assert pipeline_kwargs["min_score"] == 0.25
+    assert pipeline_kwargs["resolved_request"].index_namespace == "resolved-namespace"
+    assert pipeline_kwargs["retrieval_plan"].index_namespace == "resolved-namespace"
+    assert pipeline_kwargs["retrieval_plan"].top_k == 4
+    assert pipeline_kwargs["retrieval_plan"].min_score == 0.25
 
     generation_config = captured["generation_config"]
     assert generation_config is not None

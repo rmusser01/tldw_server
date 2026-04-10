@@ -204,3 +204,11 @@ def test_rag_batch_resume_reuses_shared_batch_resolution(
     assert kwargs["queries"] == ["resume me"]
     assert kwargs["index_namespace"] == "resume-corpus"
     assert kwargs["sources"] == ["media_db", "notes", "characters"]
+    assert kwargs["resolved_request"].index_namespace == "resume-corpus"
+    assert kwargs["retrieval_plan"].index_namespace == "resume-corpus"
+    assert kwargs["retrieval_plan"].search_mode == kwargs["search_mode"]
+    assert kwargs["retrieval_plan"].top_k == kwargs["top_k"]
+    assert kwargs["retrieval_plan"].min_score == kwargs["min_score"]
+    assert list(kwargs["retrieval_plan"].sources) == kwargs["sources"]
+    assert kwargs["resolved_request"].user_id == kwargs["user_id"]
+    assert kwargs["resolved_request"].feedback_user_id == kwargs["feedback_user_id"]

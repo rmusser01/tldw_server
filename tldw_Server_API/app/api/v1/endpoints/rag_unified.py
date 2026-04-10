@@ -58,6 +58,10 @@ from tldw_Server_API.app.core.RAG.rag_service.post_retrieval_coordinator import 
     PostRetrievalCoordinator,
 )
 from tldw_Server_API.app.core.RAG.rag_service.evidence_models import RetrievedEvidence
+from tldw_Server_API.app.core.RAG.rag_service.request_bundle import (
+    ResolvedRequestBundle,
+    build_request_bundle,
+)
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import (
     ResolvedRAGRequest,
     apply_search_agent_defaults as apply_core_search_agent_defaults,
@@ -122,10 +126,12 @@ def _build_unified_pipeline_kwargs(
     chacha_db: CharactersRAGDB,
     current_user: Optional[User],
     resolved_request: Optional[ResolvedRAGRequest] = None,
+    retrieval_plan: Optional[RetrievalPlan] = None,
 ) -> dict[str, Any]:
     if resolved_request is None:
         resolved_request = _resolve_standard_request(request, current_user)
-    retrieval_plan = build_retrieval_plan(resolved_request)
+    if retrieval_plan is None:
+        retrieval_plan = build_retrieval_plan(resolved_request)
     payload = dict(resolved_request.payload)
     payload["sources"] = list(retrieval_plan.sources)
     payload["media_db_path"] = db_paths.get("media_db_path")
@@ -233,15 +239,19 @@ def _build_batch_pipeline_kwargs(
     request: UnifiedBatchRequest,
     db_paths: dict[str, Optional[str]],
     current_user: Optional[User],
+    resolved_request: Optional[ResolvedRAGRequest] = None,
+    retrieval_plan: Optional[RetrievalPlan] = None,
 ) -> dict[str, Any]:
-    resolved_request = resolve_rag_request(
-        request,
-        current_user=current_user,
-        single_user_id_resolver=DatabasePaths.get_single_user_id,
-        search_agent_setting_fn=_search_agent_setting,
-        search_agent_allowed_fields=_BATCH_ROUND2_DEFAULT_FIELDS,
-    )
-    retrieval_plan = build_retrieval_plan(resolved_request)
+    if resolved_request is None:
+        resolved_request = resolve_rag_request(
+            request,
+            current_user=current_user,
+            single_user_id_resolver=DatabasePaths.get_single_user_id,
+            search_agent_setting_fn=_search_agent_setting,
+            search_agent_allowed_fields=_BATCH_ROUND2_DEFAULT_FIELDS,
+        )
+    if retrieval_plan is None:
+        retrieval_plan = build_retrieval_plan(resolved_request)
     payload = dict(resolved_request.payload)
     payload.pop("queries", None)
     payload.pop("query", None)
@@ -254,6 +264,57 @@ def _build_batch_pipeline_kwargs(
     payload["user_id"] = resolved_request.user_id
     payload["feedback_user_id"] = resolved_request.feedback_user_id
     return payload
+
+
+def _build_standard_request_bundle(
+    request: UnifiedRAGRequest,
+    *,
+    current_user: Optional[User],
+    db_paths: dict[str, Optional[str]],
+    media_db: Any,
+    chacha_db: CharactersRAGDB,
+) -> ResolvedRequestBundle:
+    return build_request_bundle(
+        request=request,
+        current_user=current_user,
+        resolve_request_kwargs={
+            "single_user_id_resolver": DatabasePaths.get_single_user_id,
+            "search_agent_setting_fn": _search_agent_setting,
+        },
+        pipeline_kwargs_builder=lambda *, resolved_request, retrieval_plan: _build_unified_pipeline_kwargs(
+            request=request,
+            db_paths=db_paths,
+            media_db=media_db,
+            chacha_db=chacha_db,
+            current_user=current_user,
+            resolved_request=resolved_request,
+            retrieval_plan=retrieval_plan,
+        ),
+    )
+
+
+def _build_batch_request_bundle(
+    request: UnifiedBatchRequest,
+    *,
+    current_user: Optional[User],
+    db_paths: dict[str, Optional[str]],
+) -> ResolvedRequestBundle:
+    return build_request_bundle(
+        request=request,
+        current_user=current_user,
+        resolve_request_kwargs={
+            "single_user_id_resolver": DatabasePaths.get_single_user_id,
+            "search_agent_setting_fn": _search_agent_setting,
+            "search_agent_allowed_fields": _BATCH_ROUND2_DEFAULT_FIELDS,
+        },
+        pipeline_kwargs_builder=lambda *, resolved_request, retrieval_plan: _build_batch_pipeline_kwargs(
+            request=request,
+            db_paths=db_paths,
+            current_user=current_user,
+            resolved_request=resolved_request,
+            retrieval_plan=retrieval_plan,
+        ),
+    )
 
 
 def _build_resume_batch_request(
@@ -1347,11 +1408,12 @@ async def unified_batch_endpoint(
             "kanban_db_path": _resolve_kanban_db_path(current_user, request.user_id),
         }
 
-        kwargs = _build_batch_pipeline_kwargs(
+        batch_bundle = _build_batch_request_bundle(
             request=request,
             db_paths=db_paths,
             current_user=current_user,
         )
+        kwargs = dict(batch_bundle.pipeline_kwargs)
         checkpoint_id: Optional[str] = None
         checkpoint_manager = None
         checkpoint_state = None
@@ -1666,11 +1728,12 @@ async def resume_batch_endpoint(
             remaining_queries=remaining_queries,
             max_concurrent=max_concurrent,
         )
-        kwargs = _build_batch_pipeline_kwargs(
+        batch_bundle = _build_batch_request_bundle(
             request=resume_request,
             db_paths=db_paths,
             current_user=current_user,
         )
+        kwargs = dict(batch_bundle.pipeline_kwargs)
 
         start_time = time.time()
 
@@ -1799,15 +1862,27 @@ async def unified_search_stream_endpoint(
     # Streaming search counts as a single RAG query.
     await _log_rag_queries_for_org(request_raw, current_user, units=1)
 
-    resolved_request = _resolve_standard_request(request, current_user)
-    shared_payload = dict(resolved_request.payload)
-    kanban_db_path = _resolve_kanban_db_path(current_user, resolved_request.user_id)
     shared_db_paths = {
         "media_db_path": media_db.db_path if media_db else None,
         "notes_db_path": chacha_db.db_path if chacha_db else None,
         "character_db_path": chacha_db.db_path if chacha_db else None,
-        "kanban_db_path": kanban_db_path,
+        "kanban_db_path": None,
     }
+    stream_bundle = _build_standard_request_bundle(
+        request,
+        current_user=current_user,
+        db_paths=shared_db_paths,
+        media_db=media_db,
+        chacha_db=chacha_db,
+    )
+    resolved_request = stream_bundle.resolved_request
+    shared_payload = dict(resolved_request.payload)
+    kanban_db_path = _resolve_kanban_db_path(current_user, resolved_request.user_id)
+    shared_db_paths["kanban_db_path"] = kanban_db_path
+    stream_pipeline_kwargs = dict(stream_bundle.pipeline_kwargs)
+    stream_pipeline_kwargs["kanban_db_path"] = kanban_db_path
+    stream_pipeline_kwargs["resolved_request"] = resolved_request
+    stream_pipeline_kwargs["retrieval_plan"] = stream_bundle.retrieval_plan
 
     async def event_stream():
         try:
@@ -1832,14 +1907,7 @@ async def unified_search_stream_endpoint(
                 try:
                     if any(shared_db_paths.values()) or media_db is not None or chacha_db is not None:
                         _sync_retriever_overrides_to_pipeline()
-                        kwargs = _build_unified_pipeline_kwargs(
-                            request=request,
-                            db_paths=shared_db_paths,
-                            media_db=media_db,
-                            chacha_db=chacha_db,
-                            current_user=current_user,
-                            resolved_request=resolved_request,
-                        )
+                        kwargs = dict(stream_pipeline_kwargs)
                         kwargs["enable_generation"] = False
 
                         if (
