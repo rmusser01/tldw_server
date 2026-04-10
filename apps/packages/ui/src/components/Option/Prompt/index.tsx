@@ -87,10 +87,30 @@ function PromptBodyInner() {
   const selectedSegmentRef = useRef(selectedSegment)
   selectedSegmentRef.current = selectedSegment
 
-  // ---- Hooks for orchestrator-level concerns ----
-  // (Sync and editor are needed here for deep-link handling and modal wiring.
-  //  CustomSegment also instantiates its own sync/editor — this is intentional;
-  //  the orchestrator's instances are for deep-link + shared modal callbacks only.)
+  // ---- Hooks for orchestrator-level concerns (see #1051) ----
+  //
+  // WHY DUPLICATED: These hooks (usePromptSync, usePromptEditor, usePromptBulkActions)
+  // are also instantiated inside CustomSegment and TrashSegment. This is intentional:
+  //
+  //  - The orchestrator needs them for deep-link handling (?prompt=, ?edit=, ?new=)
+  //    and for wiring callbacks into PromptWorkspaceModals (drawer, conflict
+  //    resolution, project selector, bulk keyword modal, etc.).
+  //  - CustomSegment needs its own instances for table interactions, inline editing,
+  //    filter-dependent bulk actions, and import/export operations.
+  //  - TrashSegment needs its own instances for restore and permanent-delete ops.
+  //
+  // Lifting all hook state to the orchestrator would require passing 15+ additional
+  // callback props down to each segment, which is worse for readability and
+  // maintenance than the current duplication.
+  //
+  // CROSS-INSTANCE SYNC: The `customSegmentSelectionSyncRef` (aliased as
+  // `bulkSelectionSyncRef` inside CustomSegment) bridges the orchestrator's bulk
+  // actions with CustomSegment's selection state, ensuring the table updates after
+  // shared modal operations (e.g., bulk keyword add).
+  //
+  // FUTURE: If the prop-drilling cost decreases (e.g., via a segment-scoped context
+  // or a consolidated workspace reducer), these instances could be unified.
+  // Tracked in issue #1051.
 
   const sync = usePromptSync({ queryClient, isOnline, t })
   const editor = usePromptEditor({

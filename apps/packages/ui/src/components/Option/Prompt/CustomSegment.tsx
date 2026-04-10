@@ -193,6 +193,8 @@ export function CustomSegment({
   const shouldUseServerSearch = isOnline && normalizedSearchText.length > 0
 
   // ---- Segment-local hooks (DAG: sync -> editor -> bulk -> importExport -> collections) ----
+  // These hooks are also instantiated in the orchestrator (index.tsx) for deep-link/modal use.
+  // The duplication is intentional; see #1051 for rationale and future consolidation options.
   const sync = usePromptSync({ queryClient, isOnline, t })
 
   const editor = usePromptEditor({

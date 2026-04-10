@@ -46,6 +46,9 @@ export function TrashSegment({ tableDensity }: TrashSegmentProps) {
   } = utils
 
   // ---- Segment-local hooks ----
+  // These hooks are also instantiated in the orchestrator (index.tsx) for deep-link/modal use.
+  // The duplication is intentional; see #1051 for rationale and future consolidation options.
+  //
   // Initialization order matters: sync -> editor -> bulk (DAG dependency chain).
   // editor.onEmptyTrashSuccess forward-references bulk via closure — safe because
   // the callback is only invoked post-mount, after bulk is assigned.
