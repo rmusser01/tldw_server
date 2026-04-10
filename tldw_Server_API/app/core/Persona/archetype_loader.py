@@ -10,6 +10,7 @@ from pathlib import Path
 
 import yaml
 from loguru import logger
+from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.archetype_schemas import (
     ArchetypeSummary,
@@ -62,7 +63,7 @@ def load_archetypes_from_directory(
             template = ArchetypeTemplate(**data["archetype"])
             _CACHE[template.key] = template
             logger.debug("Loaded archetype '{}' from {}", template.key, yaml_file.name)
-        except Exception:
+        except (yaml.YAMLError, ValidationError, ValueError, OSError):
             logger.opt(exception=True).warning(
                 "Skipping malformed archetype file: {}", yaml_file.name
             )

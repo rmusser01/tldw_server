@@ -16,7 +16,7 @@ import {
   Settings,
   X
 } from "lucide-react"
-import React, { Suspense, useEffect, useState } from "react"
+import React, { Suspense, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -120,6 +120,7 @@ export const StudioTabContainer: React.FC = () => {
   const selectedProjectId = usePromptStudioStore((s) => s.selectedProjectId)
   const setSelectedProjectId = usePromptStudioStore((s) => s.setSelectedProjectId)
   const [wsConnected, setWsConnected] = useState(true)
+  const studioContainerRef = useRef<HTMLDivElement | null>(null)
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
     if (typeof window === "undefined") return false
     try {
@@ -241,17 +242,17 @@ export const StudioTabContainer: React.FC = () => {
     if (
       !selectedProjectId &&
       typeof settingsDefaults.defaultProjectId === "number" &&
-      settingsDefaults.defaultProjectId > 0
+      settingsDefaults.defaultProjectId > 0 &&
+      settingsProjects.some((project) => project.id === settingsDefaults.defaultProjectId)
     ) {
       setSelectedProjectId(settingsDefaults.defaultProjectId)
     }
-  }, [selectedProjectId, settingsDefaults.defaultProjectId, setSelectedProjectId])
-
-  useEffect(() => {
-    if (!selectedProjectId && activeSubTab !== "projects") {
-      setActiveSubTab("projects")
-    }
-  }, [selectedProjectId, activeSubTab, setActiveSubTab])
+  }, [
+    selectedProjectId,
+    settingsDefaults.defaultProjectId,
+    settingsProjects,
+    setSelectedProjectId
+  ])
 
   useEffect(() => {
     if (!isOnline || hasStudio !== true || typeof window === "undefined") {
@@ -301,6 +302,7 @@ export const StudioTabContainer: React.FC = () => {
           setWsConnected(false)
         }
       } catch {
+        setWsConnected(false)
         // Polling remains active as fallback when websocket setup fails.
       }
     }
@@ -318,6 +320,11 @@ export const StudioTabContainer: React.FC = () => {
 
   // Keyboard shortcuts: Cmd/Ctrl+1-5 for tab switching
   useEffect(() => {
+    const container = studioContainerRef.current
+    if (!container) {
+      return
+    }
+
     const handler = (e: KeyboardEvent) => {
       if (!e.metaKey && !e.ctrlKey) return
       const tabMap: Record<string, StudioSubTab> = {
@@ -335,8 +342,9 @@ export const StudioTabContainer: React.FC = () => {
         setActiveSubTab(tab)
       }
     }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
+
+    container.addEventListener("keydown", handler)
+    return () => container.removeEventListener("keydown", handler)
   }, [selectedProjectId, setActiveSubTab])
 
   const handleSubTabChange = (value: string | number) => {
@@ -602,7 +610,12 @@ export const StudioTabContainer: React.FC = () => {
   }
 
   return (
-    <div className="space-y-4" data-testid="studio-tab-container">
+    <div
+      ref={studioContainerRef}
+      className="space-y-4"
+      data-testid="studio-tab-container"
+      tabIndex={0}
+    >
       {/* Header with sub-tabs and status */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         {isMobile ? (
@@ -715,7 +728,7 @@ export const StudioTabContainer: React.FC = () => {
                 title: t("managePrompts.studio.onboarding.step1Title", { defaultValue: "Create a project" }),
                 description: t("managePrompts.studio.onboarding.step1Desc", { defaultValue: "Organize your prompts into projects for different use cases" }),
                 tab: "projects" as const,
-                enabled: true
+                highlighted: true
               },
               {
                 step: 2,
@@ -723,7 +736,7 @@ export const StudioTabContainer: React.FC = () => {
                 title: t("managePrompts.studio.onboarding.step2Title", { defaultValue: "Add prompts" }),
                 description: t("managePrompts.studio.onboarding.step2Desc", { defaultValue: "Write and version your prompt templates" }),
                 tab: "prompts" as const,
-                enabled: false
+                highlighted: false
               },
               {
                 step: 3,
@@ -731,7 +744,7 @@ export const StudioTabContainer: React.FC = () => {
                 title: t("managePrompts.studio.onboarding.step3Title", { defaultValue: "Write test cases" }),
                 description: t("managePrompts.studio.onboarding.step3Desc", { defaultValue: "Define expected inputs and outputs to measure quality" }),
                 tab: "testCases" as const,
-                enabled: false
+                highlighted: false
               },
               {
                 step: 4,
@@ -739,7 +752,7 @@ export const StudioTabContainer: React.FC = () => {
                 title: t("managePrompts.studio.onboarding.step4Title", { defaultValue: "Run evaluations" }),
                 description: t("managePrompts.studio.onboarding.step4Desc", { defaultValue: "Test your prompts against your test cases automatically" }),
                 tab: "evaluations" as const,
-                enabled: false
+                highlighted: false
               },
               {
                 step: 5,
@@ -747,30 +760,31 @@ export const StudioTabContainer: React.FC = () => {
                 title: t("managePrompts.studio.onboarding.step5Title", { defaultValue: "Optimize" }),
                 description: t("managePrompts.studio.onboarding.step5Desc", { defaultValue: "Let the system improve your prompts based on evaluation results" }),
                 tab: "optimizations" as const,
-                enabled: false
+                highlighted: false
               }
             ]).map((item) => (
               <button
                 key={item.key}
                 type="button"
-                disabled={!item.enabled}
-                onClick={() => { if (item.enabled) setActiveSubTab(item.tab) }}
+                onClick={() => {
+                  setActiveSubTab(item.tab)
+                }}
                 className={`flex items-start gap-3 rounded-md border p-3 text-left transition ${
-                  item.enabled
+                  item.highlighted
                     ? "border-primary/30 bg-primary/5 hover:bg-primary/10 cursor-pointer"
-                    : "border-border bg-bg opacity-60 cursor-default"
+                    : "border-border bg-bg hover:border-primary/20 hover:bg-surface2 cursor-pointer"
                 }`}
                 data-testid={`studio-onboarding-step-${item.step}`}
               >
                 <span className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                  item.enabled ? "bg-primary text-white" : "bg-border text-text-muted"
+                  item.highlighted ? "bg-primary text-white" : "bg-border text-text-muted"
                 }`}>
                   {item.step}
                 </span>
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-text">{item.title}</p>
                   <p className="mt-0.5 text-xs text-text-muted">{item.description}</p>
-                  {!item.enabled && (
+                  {!item.highlighted && (
                     <p className="mt-1 text-xs italic text-text-muted">
                       {t("managePrompts.studio.onboarding.needsProject", {
                         defaultValue: "Requires a project"

@@ -23,17 +23,21 @@ const SEARCH_FIELDS: PromptSearchField[] = [
  * - Query >= 2 chars: searches local + server prompts in parallel, returns
  *   unified deduplicated results with source labels
  */
-export function usePromptPaletteCommands(query = ""): CommandItem[] {
+export function usePromptPaletteCommands(
+  query = "",
+  enabled = true
+): CommandItem[] {
   const navigate = useNavigate()
   const isOnline = useServerOnline()
   const trimmedQuery = query.trim()
-  const isSearching = trimmedQuery.length >= 2
+  const isSearching = enabled && trimmedQuery.length >= 2
 
   // Local prompts — always loaded (used for both static list and local search)
   const { data: prompts } = useQuery({
     queryKey: ["promptPaletteAll"],
     queryFn: getAllPrompts,
-    staleTime: 30_000
+    staleTime: 30_000,
+    enabled
   })
 
   // Server search — only when query is long enough and online
@@ -47,11 +51,14 @@ export function usePromptPaletteCommands(query = ""): CommandItem[] {
         resultsPerPage: 15,
         includeDeleted: false
       }),
-    enabled: isSearching && isOnline,
+    enabled: enabled && isSearching && isOnline,
     staleTime: 300
   })
 
   return useMemo(() => {
+    if (!enabled) {
+      return []
+    }
     const active = (prompts || []).filter((p) => !p.deletedAt)
 
     // --- Static mode: no query → favorites + recent ---
@@ -164,5 +171,5 @@ export function usePromptPaletteCommands(query = ""): CommandItem[] {
     }
 
     return results
-  }, [prompts, isSearching, trimmedQuery, serverResults, navigate])
+  }, [enabled, prompts, isSearching, trimmedQuery, serverResults, navigate])
 }

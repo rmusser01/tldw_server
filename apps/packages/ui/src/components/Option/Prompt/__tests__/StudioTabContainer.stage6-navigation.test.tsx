@@ -367,6 +367,9 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
         "Select a project in the Projects tab to unlock Prompts, Test Cases, Evaluations, and Optimizations."
       )
     ).toBeInTheDocument()
+    expect(
+      window.localStorage.getItem("tldw-studio-onboarding-dismissed")
+    ).toBe("true")
 
     try { window.localStorage.removeItem("tldw-studio-onboarding-dismissed") } catch {}
   })
@@ -384,17 +387,26 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
     expect(usePromptStudioStore.getState().activeSubTab).toBe("projects")
   })
 
-  it("disables steps 2-5 in onboarding when no project is selected", () => {
+  it("lets onboarding steps deep-link into gated tabs when no project is selected", () => {
     render(
       <MemoryRouter>
         <StudioTabContainer />
       </MemoryRouter>
     )
 
-    expect(screen.getByTestId("studio-onboarding-step-2")).toBeDisabled()
-    expect(screen.getByTestId("studio-onboarding-step-3")).toBeDisabled()
-    expect(screen.getByTestId("studio-onboarding-step-4")).toBeDisabled()
-    expect(screen.getByTestId("studio-onboarding-step-5")).toBeDisabled()
+    const steps: Array<[number, string]> = [
+      [2, "prompts"],
+      [3, "testCases"],
+      [4, "evaluations"],
+      [5, "optimizations"]
+    ]
+
+    for (const [step, tab] of steps) {
+      const stepButton = screen.getByTestId(`studio-onboarding-step-${step}`)
+      expect(stepButton).not.toBeDisabled()
+      fireEvent.click(stepButton)
+      expect(usePromptStudioStore.getState().activeSubTab).toBe(tab)
+    }
   })
 
   it("guards against non-array studio project settings payloads", () => {
@@ -499,6 +511,78 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
         defaultProjectId: 12
       })
     })
+  })
+
+  it("does not auto-select an unavailable default project", async () => {
+    const baseImpl = useQueryMock.getMockImplementation()
+    useQueryMock.mockImplementation((options: any) => {
+      const key = String(options?.queryKey?.[1] || "")
+      if (key === "settings-defaults") {
+        return {
+          data: {
+            defaultProjectId: 99,
+            autoSyncWorkspacePrompts: true
+          },
+          isLoading: false
+        }
+      }
+      if (key === "settings-projects") {
+        settingsProjectsQueryOptions = options
+        return {
+          data: {
+            data: [{ id: 11, name: "Project Eleven" }]
+          },
+          isLoading: false
+        }
+      }
+      return baseImpl?.(options)
+    })
+
+    render(
+      <MemoryRouter>
+        <StudioTabContainer />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(usePromptStudioStore.getState().selectedProjectId).toBeNull()
+    })
+  })
+
+  it("marks realtime as disconnected when websocket setup fails", async () => {
+    getConfigMock.mockRejectedValueOnce(new Error("config failed"))
+
+    render(
+      <MemoryRouter>
+        <StudioTabContainer />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("studio-ws-disconnected-banner")
+      ).toBeInTheDocument()
+    })
+  })
+
+  it("scopes Cmd/Ctrl+number tab shortcuts to the studio container", () => {
+    usePromptStudioStore.setState({
+      activeSubTab: "projects",
+      selectedProjectId: 11
+    })
+
+    render(
+      <MemoryRouter>
+        <StudioTabContainer />
+      </MemoryRouter>
+    )
+
+    fireEvent.keyDown(document, { key: "2", metaKey: true })
+    expect(usePromptStudioStore.getState().activeSubTab).toBe("projects")
+
+    const container = screen.getByTestId("studio-tab-container")
+    fireEvent.keyDown(container, { key: "2", metaKey: true })
+    expect(usePromptStudioStore.getState().activeSubTab).toBe("prompts")
   })
 
   it("persists auto-sync toggle from studio settings", async () => {

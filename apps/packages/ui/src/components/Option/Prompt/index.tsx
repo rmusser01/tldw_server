@@ -78,7 +78,7 @@ function PromptBodyInner() {
 
   const urlState = usePromptUrlState()
   const searchInputRef = useRef<InputRef | null>(null)
-  const deepLinkProcessedRef = useRef(false)
+  const lastProcessedPromptIdRef = useRef<string | null>(null)
   // Holds the selected IDs from CustomSegment when bulk keyword modal opens
   const bulkKeywordTargetIdsRef = useRef<string[]>([])
   // Ref to CustomSegment's bulk selection setter for syncing after shared bulk ops
@@ -186,10 +186,14 @@ function PromptBodyInner() {
   // ---- Deep-link: ?prompt= ----
   useEffect(() => {
     const promptId = urlState.prompt
-    if (!promptId || deepLinkProcessedRef.current) return
+    if (!promptId) {
+      lastProcessedPromptIdRef.current = null
+      return
+    }
+    if (lastProcessedPromptIdRef.current === promptId) return
     if (status !== "success" || !Array.isArray(data)) return
 
-    deepLinkProcessedRef.current = true
+    lastProcessedPromptIdRef.current = promptId
     const openPromptDrawer = (promptRecord: any) => {
       urlState.clearPromptParam()
       editor.setEditId(promptRecord.id)
@@ -240,9 +244,18 @@ function PromptBodyInner() {
       })
     }
 
+    const notifyImportedButUnavailable = (description: string) => {
+      notification.warning({
+        message: t("managePrompts.notification.sharedPromptImportedUnavailable", {
+          defaultValue: "Prompt imported but couldn't be opened"
+        }),
+        description
+      })
+    }
+
     if (isOnline && isServerLink) {
       urlState.clearPromptParam()
-      const segmentAtStart = selectedSegment
+      const segmentAtStart = selectedSegmentRef.current
       void (async () => {
         const syncResult = await pullFromStudio(parsedServerPromptId)
         if (!syncResult.success) {
@@ -255,20 +268,36 @@ function PromptBodyInner() {
           const imported = (Array.isArray(refreshed) ? refreshed : []).find(
             (item: any) => item?.id === syncResult.localId || item?.serverId === parsedServerPromptId
           )
-          if (imported) {
-            if (selectedSegmentRef.current !== segmentAtStart) {
-              notification.info({
-                message: t("managePrompts.notification.sharedPromptImported", { defaultValue: "Shared prompt imported" }),
-                description: t("managePrompts.notification.sharedPromptSegmentChanged", {
-                  defaultValue: "The prompt was imported but you navigated away. Switch back to the Custom tab to view it."
-                })
+          if (!imported) {
+            notifyImportedButUnavailable(
+              t("managePrompts.notification.sharedPromptImportedMissingLocalDesc", {
+                defaultValue:
+                  "The shared prompt was imported, but it could not be located in local prompts yet. Refresh and try again."
               })
-              return
-            }
-            notification.success({ message: t("managePrompts.notification.sharedPromptImported", { defaultValue: "Shared prompt imported" }) })
-            openPromptDrawer(imported)
+            )
+            return
           }
-        } catch { /* handled below */ }
+
+          if (selectedSegmentRef.current !== segmentAtStart) {
+            notification.info({
+              message: t("managePrompts.notification.sharedPromptImported", { defaultValue: "Shared prompt imported" }),
+              description: t("managePrompts.notification.sharedPromptSegmentChanged", {
+                defaultValue: "The prompt was imported but you navigated away. Switch back to the Custom tab to view it."
+              })
+            })
+            return
+          }
+
+          notification.success({ message: t("managePrompts.notification.sharedPromptImported", { defaultValue: "Shared prompt imported" }) })
+          openPromptDrawer(imported)
+        } catch {
+          notifyImportedButUnavailable(
+            t("managePrompts.notification.sharedPromptImportedRefreshFailedDesc", {
+              defaultValue:
+                "The shared prompt was imported, but local prompts could not be refreshed. Refresh the page and try again."
+            })
+          )
+        }
       })()
       return
     }
@@ -481,6 +510,7 @@ function PromptBodyInner() {
                 projectFilter={urlState.project}
                 clearProjectFilter={urlState.clearProjectFilter}
                 onOpenShortcutsHelp={() => setShortcutsHelpOpen(true)}
+                onCopyPromptShareLink={copyPromptShareLink}
                 onQuickTest={handleQuickTest}
                 onUsePromptInChat={handleUsePromptInChat}
                 onOpenInspector={openPromptInspector}

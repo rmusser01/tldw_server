@@ -1,5 +1,4 @@
-import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import {
   Alert,
   Input,
@@ -49,6 +48,7 @@ import { usePromptBulkActions } from "./hooks/usePromptBulkActions"
 import { usePromptImportExport } from "./hooks/usePromptImportExport"
 import { usePromptCollections } from "./hooks/usePromptCollections"
 import { usePromptFilteredData } from "./hooks/usePromptFilteredData"
+import { VersionHistoryDrawer } from "./Studio/Prompts/VersionHistoryDrawer"
 
 const PromptGalleryCard = React.lazy(() =>
   import("./PromptGalleryCard").then((module) => ({
@@ -114,6 +114,7 @@ export interface CustomSegmentProps {
   clearProjectFilter: () => void
   /** Callbacks to open shared modals */
   onOpenShortcutsHelp: () => void
+  onCopyPromptShareLink: (prompt: any) => Promise<void>
   onQuickTest: (prompt: any) => void
   onUsePromptInChat: (prompt: any) => Promise<void>
   onOpenInspector: (promptId: string) => void
@@ -134,6 +135,7 @@ export function CustomSegment({
   projectFilter,
   clearProjectFilter,
   onOpenShortcutsHelp,
+  onCopyPromptShareLink,
   onQuickTest,
   onUsePromptInChat,
   onOpenInspector,
@@ -142,7 +144,6 @@ export function CustomSegment({
   bulkSelectionSyncRef,
   searchInputRef,
 }: CustomSegmentProps) {
-  const navigate = useNavigate()
   const {
     queryClient,
     isOnline,
@@ -183,7 +184,12 @@ export function CustomSegment({
   const [promptSort, setPromptSort] = useState<PromptSortState>(readSort)
   const [savedView, setSavedView] = useState<PromptSavedView>("all")
   const [mobileFiltersExpanded, setMobileFiltersExpanded] = useState(false)
-  const filterChangeCountRef = useRef(0)
+  const [filterChangeCount, setFilterChangeCount] = useState(0)
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false)
+  const [historyTarget, setHistoryTarget] = useState<{
+    localId: string
+    serverId: number
+  } | null>(null)
 
   const { presets: filterPresets, savePreset: saveFilterPreset, deletePreset: deleteFilterPreset } = useFilterPresets()
   const { shouldShow: shouldShowHint, dismiss: dismissHint, markShown: markHintShown } = useContextualHints()
@@ -289,7 +295,19 @@ export function CustomSegment({
   } = filteredDataHook
 
   // ---- Effects: persist UI settings ----
-  useEffect(() => { setCurrentPage(1) }, [normalizedSearchText, projectFilter, typeFilter, collections.collectionFilter, tagFilter, tagMatchMode])
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [
+    normalizedSearchText,
+    projectFilter,
+    typeFilter,
+    collections.collectionFilter,
+    tagFilter,
+    tagMatchMode,
+    usageFilter,
+    syncFilter,
+    savedView
+  ])
 
   useEffect(() => { try { window.sessionStorage.setItem(SORT_KEY, JSON.stringify(promptSort)) } catch {} }, [promptSort])
   useEffect(() => { try { window.localStorage.setItem(TABLE_DENSITY_KEY, tableDensity) } catch {} }, [tableDensity])
@@ -298,7 +316,7 @@ export function CustomSegment({
 
   // Track filter changes for the "save filters" hint
   useEffect(() => {
-    filterChangeCountRef.current += 1
+    setFilterChangeCount((count) => count + 1)
   }, [typeFilter, tagFilter, syncFilter, usageFilter, savedView])
 
   useEffect(() => {
@@ -328,6 +346,7 @@ export function CustomSegment({
   const handleLoadFilterPreset = useCallback((preset: FilterPreset) => {
     setTypeFilter(preset.typeFilter as any)
     setSyncFilter(preset.syncFilter as any)
+    setUsageFilter(preset.usageFilter)
     setTagFilter(preset.tagFilter)
     setTagMatchMode(preset.tagMatchMode)
     setSavedView(preset.savedView)
@@ -335,9 +354,24 @@ export function CustomSegment({
 
   const handleSaveFilterPreset = useCallback(
     (name: string) => {
-      saveFilterPreset(name, { typeFilter, syncFilter, tagFilter, tagMatchMode, savedView })
+      saveFilterPreset(name, {
+        typeFilter,
+        syncFilter,
+        usageFilter,
+        tagFilter,
+        tagMatchMode,
+        savedView
+      })
     },
-    [typeFilter, syncFilter, tagFilter, tagMatchMode, savedView, saveFilterPreset]
+    [
+      typeFilter,
+      syncFilter,
+      usageFilter,
+      tagFilter,
+      tagMatchMode,
+      savedView,
+      saveFilterPreset
+    ]
   )
 
   const handleCustomPromptTableQueryChange = useCallback(
@@ -392,6 +426,8 @@ export function CustomSegment({
     (row: PromptRowVM) => {
       const promptRecord = getPromptRecordById(row.id)
       const actionDisabled = isFireFoxPrivateMode || !promptRecord
+      const serverPromptId =
+        typeof row.serverId === "number" && row.serverId > 0 ? row.serverId : null
       return (
         <PromptActionsMenu
           promptId={row.id}
@@ -405,8 +441,8 @@ export function CustomSegment({
           onQuickTest={() => { if (promptRecord) void onQuickTest(promptRecord) }}
           onDelete={() => { if (promptRecord) void editor.handleDeletePrompt(promptRecord) }}
           onShareLink={
-            row.serverId && promptRecord
-              ? () => { /* TODO: wire copyPromptShareLink */ }
+            serverPromptId && promptRecord
+              ? () => { void onCopyPromptShareLink(promptRecord) }
               : undefined
           }
           onRetrySync={
@@ -420,12 +456,12 @@ export function CustomSegment({
               : undefined
           }
           onPullFromServer={
-            isOnline && row.serverId && promptRecord
-              ? () => { sync.pullFromStudioMutation({ serverId: row.serverId as number, localId: promptRecord.id }) }
+            isOnline && serverPromptId && promptRecord
+              ? () => { sync.pullFromStudioMutation({ serverId: serverPromptId, localId: promptRecord.id }) }
               : undefined
           }
           onUnlink={
-            isOnline && row.serverId && promptRecord
+            isOnline && serverPromptId && promptRecord
               ? () => { sync.unlinkPromptMutation(promptRecord.id) }
               : undefined
           }
@@ -435,14 +471,29 @@ export function CustomSegment({
               : undefined
           }
           onViewHistory={
-            isOnline && row.serverId && promptRecord
-              ? () => { navigate(`/prompts?tab=studio&subtab=prompts&prompt=${row.serverId}`) }
+            isOnline && serverPromptId && promptRecord
+              ? () => {
+                  setHistoryTarget({
+                    localId: promptRecord.id,
+                    serverId: serverPromptId
+                  })
+                  setHistoryDrawerOpen(true)
+                }
               : undefined
           }
         />
       )
     },
-    [getPromptRecordById, editor, onUsePromptInChat, onQuickTest, isFireFoxPrivateMode, isOnline, sync, navigate]
+    [
+      getPromptRecordById,
+      editor,
+      onCopyPromptShareLink,
+      onUsePromptInChat,
+      onQuickTest,
+      isFireFoxPrivateMode,
+      isOnline,
+      sync
+    ]
   )
 
   const customPromptsLoading = status === "pending" || (shouldUseServerSearch && serverSearchStatus === "pending")
@@ -788,7 +839,7 @@ export function CustomSegment({
         </PromptListToolbar>
 
         {/* Contextual hint: suggest saving filter presets after 3+ filter changes */}
-        {filterChangeCountRef.current >= 3 && shouldShowHint("filter-presets") && (
+        {filterChangeCount >= 3 && shouldShowHint("filter-presets") && (
           <Suspense fallback={null}>
             <ContextualHint
               id="filter-presets"
@@ -908,6 +959,22 @@ export function CustomSegment({
           )}
         </div>
       )}
+
+      <VersionHistoryDrawer
+        open={historyDrawerOpen}
+        promptId={historyTarget?.serverId ?? null}
+        onClose={() => {
+          setHistoryDrawerOpen(false)
+          setHistoryTarget(null)
+        }}
+        onRevertSuccess={() => {
+          if (!historyTarget) return
+          sync.pullFromStudioMutation({
+            serverId: historyTarget.serverId,
+            localId: historyTarget.localId
+          })
+        }}
+      />
     </div>
   )
 }

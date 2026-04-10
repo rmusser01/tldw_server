@@ -199,7 +199,13 @@ export function CopilotSegment({
                   key: "key",
                   render: (content) => (
                     <span className="line-clamp-1">
-                      <Tag color={tagColors[content || "default"]}>
+                      <Tag
+                        color={
+                          tagColors[content ?? "default"] ??
+                          tagColors.default ??
+                          "default"
+                        }
+                      >
                         {t(`common:copilot.${content}`)}
                       </Tag>
                     </span>
@@ -267,6 +273,7 @@ export function CopilotSegment({
               ]}
               dataSource={filteredCopilotData}
               rowKey={(record) => record.key}
+              pagination={{ pageSize: 20, showSizeChanger: true }}
             />
           )}
         </>

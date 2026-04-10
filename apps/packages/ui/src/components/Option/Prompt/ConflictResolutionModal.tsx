@@ -45,9 +45,11 @@ const getServerUserPrompt = (info: ConflictInfo) =>
   info.serverPrompt.user_prompt || ""
 
 /**
- * Simple word-level diff: splits both strings into words and highlights
- * words present in `value` but not in `other` (additions from this side's
- * perspective). Returns JSX spans with highlight classes.
+ * `highlightDiffWords` is a lightweight presence-based highlighter, not a true
+ * positional diff. It only checks whether a token exists anywhere in the other
+ * string, so reordered or repeated words can be missed or highlighted
+ * imprecisely. TODO: replace `highlightDiffWords` with a proper diff library if
+ * precise context-aware highlighting is required here.
  */
 const highlightDiffWords = (
   value: string,

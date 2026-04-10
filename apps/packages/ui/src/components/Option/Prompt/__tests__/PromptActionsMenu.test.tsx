@@ -21,7 +21,13 @@ vi.mock("antd", () => ({
           .map((item: any) => (
             <button
               key={item.key}
-              data-testid={`menu-item-${item.key}`}
+              data-testid={
+                React.isValidElement(item.label) &&
+                item.label.props &&
+                typeof item.label.props["data-testid"] === "string"
+                  ? undefined
+                  : `menu-item-${item.key}`
+              }
               onClick={item.onClick}
             >
               {item.label}

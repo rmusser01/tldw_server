@@ -76,7 +76,14 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
     // Retry sync option (for pending prompts)
     ...(onRetrySync ? [{
       key: "retrySync",
-      label: t("managePrompts.sync.retrySync", { defaultValue: "Retry sync" }),
+      label: (
+        <span
+          data-testid="menu-item-retrySync"
+          className="inline-flex items-center gap-1.5"
+        >
+          {t("managePrompts.sync.retrySync", { defaultValue: "Retry sync" })}
+        </span>
+      ),
       icon: <RefreshCw className="size-4" />,
       onClick: onRetrySync
     }] : []),

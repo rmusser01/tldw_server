@@ -3,6 +3,52 @@ import { useTranslation } from "react-i18next"
 import { Modal, Input, Form, Tag } from "antd"
 import type { FormInstance } from "antd"
 import { Computer, Zap, Layers, Play } from "lucide-react"
+import type {
+  FewShotExample,
+  PromptFormat,
+  PromptSourceSystem,
+  PromptSyncStatus,
+  StructuredPromptDefinition
+} from "@/db/dexie/types"
+import type { ConflictInfo, ConflictResolution } from "@/services/prompt-sync"
+import type { PromptRowVM } from "./prompt-workspace-types"
+
+type PromptEditorInitialValues = {
+  id?: string
+  name?: string
+  title?: string
+  author?: string
+  details?: string
+  content?: string
+  system_prompt?: string
+  user_prompt?: string
+  promptFormat?: PromptFormat
+  promptSchemaVersion?: number | null
+  structuredPromptDefinition?: StructuredPromptDefinition | null
+  keywords?: string[]
+  tags?: string[]
+  is_system?: boolean
+  serverId?: number | null
+  syncStatus?: PromptSyncStatus
+  sourceSystem?: PromptSourceSystem
+  studioProjectId?: number | null
+  lastSyncedAt?: number | null
+  fewShotExamples?:
+    | Array<
+        | {
+            input?: string
+            output?: string
+            explanation?: string | null
+            inputs?: Record<string, unknown>
+            outputs?: Record<string, unknown>
+          }
+        | FewShotExample
+      >
+    | null
+  modulesConfig?: Array<{ name: string; enabled: boolean }> | null
+  changeDescription?: string | null
+  versionNumber?: number | null
+}
 
 // ---------------------------------------------------------------------------
 // Lazy-loaded heavy sub-surfaces (mirrors index.tsx pattern)
@@ -82,22 +128,22 @@ export interface PromptWorkspaceModalsProps {
   // Project selector
   projectSelectorOpen: boolean
   onProjectSelectorClose: () => void
-  onProjectSelect: (projectId: string) => void
+  onProjectSelect: (projectId: number) => void
   isPushing: boolean
 
   // Conflict resolution
   conflictModalOpen: boolean
   conflictLoading: boolean
-  conflictInfo: any
+  conflictInfo: ConflictInfo | null
   onConflictClose: () => void
-  onConflictResolve: (resolution: any) => void
+  onConflictResolve: (resolution: ConflictResolution) => void
 
   // Drawer
   drawerOpen: boolean
   onDrawerClose: () => void
   drawerMode: "create" | "edit"
-  drawerInitialValues: any
-  onDrawerSubmit: (values: any) => void
+  drawerInitialValues: PromptEditorInitialValues | null
+  onDrawerSubmit: (values: PromptEditorInitialValues) => void
   drawerLoading: boolean
   allTags: string[]
 
@@ -105,13 +151,13 @@ export interface PromptWorkspaceModalsProps {
   fullEditorOpen: boolean
   onFullEditorClose: () => void
   fullEditorMode: "create" | "edit"
-  fullEditorInitialValues: any
-  onFullEditorSubmit: (values: any) => void
+  fullEditorInitialValues: PromptEditorInitialValues | null
+  onFullEditorSubmit: (values: PromptEditorInitialValues) => void
   fullEditorLoading: boolean
 
   // Inspector panel
   inspectorOpen: boolean
-  inspectorPrompt: any
+  inspectorPrompt: PromptRowVM | null
   onInspectorClose: () => void
   onInspectorEdit: (promptId: string) => void
   onInspectorUseInChat: (promptId: string) => void

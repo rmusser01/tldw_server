@@ -113,6 +113,9 @@ export function TrashSegment({ tableDensity }: TrashSegmentProps) {
 
   const trashCount = Array.isArray(trashData) ? trashData.length : 0
   const filteredTrashCount = filteredTrashData.length
+  const reloadTrash = () => {
+    void queryClient.invalidateQueries({ queryKey: ["fetchDeletedPrompts"] })
+  }
 
   return (
     <div data-testid="prompts-trash">
@@ -230,6 +233,30 @@ export function TrashSegment({ tableDensity }: TrashSegmentProps) {
       </div>
 
       {trashStatus === "pending" && <Skeleton paragraph={{ rows: 8 }} />}
+
+      {trashStatus === "error" && (
+        <div className="rounded-md border border-danger/30 bg-danger/5 p-4">
+          <p className="text-sm font-medium text-danger">
+            {t("managePrompts.trash.loadErrorTitle", {
+              defaultValue: "Could not load trash"
+            })}
+          </p>
+          <p className="mt-1 text-sm text-text-muted">
+            {t("managePrompts.trash.loadErrorDescription", {
+              defaultValue:
+                "Refresh the trash list to try again. Deleted prompts remain untouched until the list reloads."
+            })}
+          </p>
+          <button
+            type="button"
+            onClick={reloadTrash}
+            className="mt-3 inline-flex items-center gap-1 rounded border border-border px-3 py-1.5 text-sm text-text-muted hover:bg-surface2 hover:text-text"
+            data-testid="prompts-trash-retry-load"
+          >
+            {t("common:retry", { defaultValue: "Retry" })}
+          </button>
+        </div>
+      )}
 
       {trashStatus === "success" && trashCount === 0 && (
         <FeatureEmptyState
@@ -372,6 +399,9 @@ export function TrashSegment({ tableDensity }: TrashSegmentProps) {
                       <Tooltip title={t("managePrompts.trash.deletePermanently", { defaultValue: "Delete permanently" })}>
                         <button
                           type="button"
+                          aria-label={t("managePrompts.trash.deletePermanently", {
+                            defaultValue: "Delete permanently"
+                          })}
                           onClick={async () => {
                             const ok = await confirmDanger({
                               title: t("managePrompts.trash.permanentDeleteTitle", { defaultValue: "Delete permanently?" }),

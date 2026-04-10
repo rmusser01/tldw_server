@@ -958,8 +958,13 @@ export const PromptDrawer: React.FC<PromptDrawerProps> = ({
               <Alert
                 type="info"
                 showIcon
-                title="Multi-section prompt mode"
-                description="This prompt uses a block-based structure with separate sections for instructions, context, and examples. The text fields above are read-only summaries. Use the block editor below to make changes."
+                title={t("managePrompts.drawer.multiSectionTitle", {
+                  defaultValue: "Multi-section prompt mode"
+                })}
+                description={t("managePrompts.drawer.multiSectionDescription", {
+                  defaultValue:
+                    "This prompt uses a block-based structure with separate sections for instructions, context, and examples. The text fields above are read-only summaries. Use the block editor below to make changes."
+                })}
               />
             )}
             <Form.Item
