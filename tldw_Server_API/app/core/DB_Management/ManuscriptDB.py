@@ -570,7 +570,7 @@ class ManuscriptDBHelper:
         next_version = expected_version + 1
 
         with self.db.transaction() as conn:
-            self._require_active_project_owned_row(
+            part_row = self._require_active_project_owned_row(
                 conn,
                 "manuscript_parts",
                 part_id,
@@ -613,6 +613,11 @@ class ManuscriptDBHelper:
                         f"WHERE chapter_id IN ({placeholders}) AND deleted = 0",  # nosec B608
                         (now, self._client_id, *batch),
                     )
+                for chapter_id in chapter_ids:
+                    self._mark_analyses_stale_in_txn(conn, "chapter", chapter_id)
+
+            if part_row is not None:
+                self._mark_analyses_stale_in_txn(conn, "project", part_row["project_id"])
 
     # ------------------------------------------------------------------
     # Chapters
@@ -753,7 +758,7 @@ class ManuscriptDBHelper:
         next_version = expected_version + 1
 
         with self.db.transaction() as conn:
-            self._require_active_project_owned_row(
+            chapter_row = self._require_active_project_owned_row(
                 conn,
                 "manuscript_chapters",
                 chapter_id,
@@ -779,6 +784,10 @@ class ManuscriptDBHelper:
                 "WHERE chapter_id = ? AND deleted = 0",
                 (now, self._client_id, chapter_id),
             )
+
+            self._mark_analyses_stale_in_txn(conn, "chapter", chapter_id)
+            if chapter_row is not None:
+                self._mark_analyses_stale_in_txn(conn, "project", chapter_row["project_id"])
 
     # ------------------------------------------------------------------
     # Scenes
@@ -1201,48 +1210,24 @@ class ManuscriptDBHelper:
         with self.db.transaction() as conn:
             if project_id is not None:
                 self._assert_active_project(conn, project_id)
-            # Validate project_id boundary when provided
-            if project_id is not None:
-                for item in items:
-                    row = conn.execute(
-                        f"SELECT project_id FROM {table} WHERE id = ? AND deleted = 0",  # nosec B608
-                        (item["id"],),
-                    ).fetchone()
-                    if row is None:
-                        raise ValueError(f"{entity_type} {item['id']!r} not found")
-                    if row["project_id"] != project_id:
-                        raise ValueError(
-                            f"{entity_type} {item['id']!r} does not belong to project {project_id!r}"
-                        )
-                    if (
-                        entity_type == "chapter"
-                        and "part_id" in item
-                        and item["part_id"] is not None
-                    ):
-                        self._assert_same_project(
-                            conn,
-                            "manuscript_parts",
-                            item["part_id"],
-                            project_id,
-                            "part",
-                        )
-
-            # Always enforce same-project part reparenting for chapters.
-            if entity_type == "chapter":
-                for item in items:
-                    if "part_id" not in item or item["part_id"] is None:
-                        continue
-
-                    effective_project_id = project_id
-                    if effective_project_id is None:
-                        chapter_row = conn.execute(
-                            "SELECT project_id FROM manuscript_chapters WHERE id = ? AND deleted = 0",
-                            (item["id"],),
-                        ).fetchone()
-                        if chapter_row is None:
-                            raise ValueError(f"chapter {item['id']!r} not found")
-                        effective_project_id = chapter_row["project_id"]
-
+            current_rows: list[dict[str, Any]] = []
+            for item in items:
+                row = conn.execute(
+                    f"SELECT * FROM {table} WHERE id = ? AND deleted = 0",  # nosec B608
+                    (item["id"],),
+                ).fetchone()
+                if row is None:
+                    raise ValueError(f"{entity_type} {item['id']!r} not found")
+                if project_id is not None and row["project_id"] != project_id:
+                    raise ValueError(
+                        f"{entity_type} {item['id']!r} does not belong to project {project_id!r}"
+                    )
+                if (
+                    entity_type == "chapter"
+                    and "part_id" in item
+                    and item["part_id"] is not None
+                ):
+                    effective_project_id = project_id or row["project_id"]
                     self._assert_same_project(
                         conn,
                         "manuscript_parts",
@@ -1250,13 +1235,28 @@ class ManuscriptDBHelper:
                         effective_project_id,
                         "part",
                     )
+                current_rows.append(dict(row))
 
-            for item in items:
+            if entity_type == "chapter":
+                for item, row in zip(items, current_rows, strict=True):
+                    if "part_id" not in item or item["part_id"] is None:
+                        continue
+                    self._assert_same_project(
+                        conn,
+                        "manuscript_parts",
+                        item["part_id"],
+                        row["project_id"],
+                        "part",
+                    )
+
+            stale_project_ids: set[str] = set()
+            stale_chapter_ids: set[str] = set()
+
+            for item, row in zip(items, current_rows, strict=True):
                 item_id = item["id"]
                 sort_order = item["sort_order"]
                 expected_version = item.get("version")
 
-                # Build version clause when expected_version is provided
                 version_clause = " AND version = ?" if expected_version is not None else ""
                 version_params = (expected_version,) if expected_version is not None else ()
 
@@ -1282,6 +1282,17 @@ class ManuscriptDBHelper:
                         entity=table,
                         entity_id=item_id,
                     )
+
+                if entity_type == "scene":
+                    stale_chapter_ids.add(row["chapter_id"])
+                    stale_project_ids.add(row["project_id"])
+                else:
+                    stale_project_ids.add(row["project_id"])
+
+            for chapter_id in stale_chapter_ids:
+                self._mark_analyses_stale_in_txn(conn, "chapter", chapter_id)
+            for project_id in stale_project_ids:
+                self._mark_analyses_stale_in_txn(conn, "project", project_id)
 
     # ==================================================================
     # Characters
@@ -1330,6 +1341,7 @@ class ManuscriptDBHelper:
                     now, now, self._client_id,
                 ),
             )
+            self._mark_analyses_stale_in_txn(conn, "project", project_id)
         logger.debug("Created manuscript character {} in project {}", cid, project_id)
         return cid
 
@@ -1397,6 +1409,7 @@ class ManuscriptDBHelper:
 
         now = self._now()
         next_version = expected_version + 1
+        should_stale = "name" in updates or "role" in updates
 
         if "custom_fields" in updates:
             updates["custom_fields_json"] = json.dumps(updates.pop("custom_fields"))
@@ -1462,6 +1475,8 @@ class ManuscriptDBHelper:
                     entity="manuscript_characters",
                     entity_id=character_id,
                 )
+            if should_stale:
+                self._mark_analyses_stale_in_txn(conn, "project", current_row["project_id"])
 
     def soft_delete_character(self, character_id: str, expected_version: int) -> None:
         """Soft-delete a character with optimistic locking."""
@@ -1469,7 +1484,7 @@ class ManuscriptDBHelper:
         next_version = expected_version + 1
 
         with self.db.transaction() as conn:
-            self._require_active_project_owned_row(
+            row = self._require_active_project_owned_row(
                 conn,
                 "manuscript_characters",
                 character_id,
@@ -1488,6 +1503,8 @@ class ManuscriptDBHelper:
                     entity="manuscript_characters",
                     entity_id=character_id,
                 )
+            if row is not None:
+                self._mark_analyses_stale_in_txn(conn, "project", row["project_id"])
 
     # ==================================================================
     # Character Relationships
@@ -1690,6 +1707,7 @@ class ManuscriptDBHelper:
                     now, now, self._client_id,
                 ),
             )
+            self._mark_analyses_stale_in_txn(conn, "project", project_id)
         logger.debug("Created world info {} in project {}", wid, project_id)
         return wid
 
@@ -1751,6 +1769,7 @@ class ManuscriptDBHelper:
 
         now = self._now()
         next_version = expected_version + 1
+        should_stale = "name" in updates or "kind" in updates
 
         if "properties" in updates:
             updates["properties_json"] = json.dumps(updates.pop("properties"))
@@ -1794,6 +1813,8 @@ class ManuscriptDBHelper:
                     entity="manuscript_world_info",
                     entity_id=world_info_id,
                 )
+            if should_stale:
+                self._mark_analyses_stale_in_txn(conn, "project", current_row["project_id"])
 
     def soft_delete_world_info(self, world_info_id: str, expected_version: int) -> None:
         """Soft-delete a world-info entry with optimistic locking."""
@@ -1801,7 +1822,7 @@ class ManuscriptDBHelper:
         next_version = expected_version + 1
 
         with self.db.transaction() as conn:
-            self._require_active_project_owned_row(
+            row = self._require_active_project_owned_row(
                 conn,
                 "manuscript_world_info",
                 world_info_id,
@@ -1820,6 +1841,8 @@ class ManuscriptDBHelper:
                     entity="manuscript_world_info",
                     entity_id=world_info_id,
                 )
+            if row is not None:
+                self._mark_analyses_stale_in_txn(conn, "project", row["project_id"])
 
     # ==================================================================
     # Scene-World Info Linking
@@ -2533,6 +2556,8 @@ class ManuscriptDBHelper:
                 "SELECT * FROM manuscript_ai_analyses WHERE id = ? AND deleted = 0",
                 (analysis_id,),
             ).fetchone()
+            if not self._analysis_row_is_visible(conn, row):
+                return None
         if row is None:
             return None
         d = dict(row)
@@ -2553,6 +2578,8 @@ class ManuscriptDBHelper:
         By default stale analyses are excluded unless *include_stale* is True.
         """
         with self.db.transaction() as conn:
+            if not self._project_is_active(conn, project_id):
+                return []
             rows = conn.execute(
                 """
                 SELECT *
@@ -2563,6 +2590,43 @@ class ManuscriptDBHelper:
                    AND (? IS NULL OR scope_type = ?)
                    AND (? IS NULL OR scope_id = ?)
                    AND (? IS NULL OR analysis_type = ?)
+                   AND (
+                        scope_type = 'project'
+                        OR (
+                            scope_type = 'part'
+                            AND EXISTS (
+                                SELECT 1
+                                  FROM manuscript_parts p
+                                 WHERE p.id = manuscript_ai_analyses.scope_id
+                                   AND p.project_id = manuscript_ai_analyses.project_id
+                                   AND p.deleted = 0
+                            )
+                        )
+                        OR (
+                            scope_type = 'chapter'
+                            AND EXISTS (
+                                SELECT 1
+                                  FROM manuscript_chapters c
+                                 WHERE c.id = manuscript_ai_analyses.scope_id
+                                   AND c.project_id = manuscript_ai_analyses.project_id
+                                   AND c.deleted = 0
+                            )
+                        )
+                        OR (
+                            scope_type = 'scene'
+                            AND EXISTS (
+                                SELECT 1
+                                  FROM manuscript_scenes s
+                                  JOIN manuscript_chapters c
+                                    ON c.id = s.chapter_id
+                                   AND c.project_id = s.project_id
+                                   AND c.deleted = 0
+                                 WHERE s.id = manuscript_ai_analyses.scope_id
+                                   AND s.project_id = manuscript_ai_analyses.project_id
+                                   AND s.deleted = 0
+                            )
+                        )
+                   )
                  ORDER BY created_at DESC
                 """,
                 (
@@ -2576,13 +2640,12 @@ class ManuscriptDBHelper:
                     analysis_type,
                 ),
             ).fetchall()
-
-        results: list[dict[str, Any]] = []
-        for row in rows:
-            d = dict(row)
-            d["result"] = json.loads(d.pop("result_json", "{}"))
-            results.append(d)
-        return results
+            results: list[dict[str, Any]] = []
+            for row in rows:
+                d = dict(row)
+                d["result"] = json.loads(d.pop("result_json", "{}"))
+                results.append(d)
+            return results
 
     def mark_analyses_stale(self, scope_type: str, scope_id: str) -> int:
         """Mark all non-deleted analyses for a scope as stale.
@@ -2631,6 +2694,56 @@ class ManuscriptDBHelper:
         if project_id is not None:
             total += self._mark_analyses_stale_in_txn(conn, "project", project_id)
         return total
+
+    def _analysis_scope_is_active(
+        self,
+        conn: Any,
+        *,
+        scope_type: str,
+        scope_id: str,
+        project_id: str,
+    ) -> bool:
+        """Return ``True`` when the analysis scope is still readable."""
+        if not self._project_is_active(conn, project_id):
+            return False
+        if scope_type == "project":
+            return True
+        if scope_type == "part":
+            row = conn.execute(
+                "SELECT 1 FROM manuscript_parts "
+                "WHERE id = ? AND project_id = ? AND deleted = 0",
+                (scope_id, project_id),
+            ).fetchone()
+            return row is not None
+        if scope_type == "chapter":
+            row = conn.execute(
+                "SELECT 1 FROM manuscript_chapters "
+                "WHERE id = ? AND project_id = ? AND deleted = 0",
+                (scope_id, project_id),
+            ).fetchone()
+            return row is not None
+        if scope_type == "scene":
+            row = conn.execute(
+                "SELECT 1 "
+                "FROM manuscript_scenes s "
+                "JOIN manuscript_chapters c "
+                "ON c.id = s.chapter_id AND c.project_id = s.project_id AND c.deleted = 0 "
+                "WHERE s.id = ? AND s.project_id = ? AND s.deleted = 0",
+                (scope_id, project_id),
+            ).fetchone()
+            return row is not None
+        return False
+
+    def _analysis_row_is_visible(self, conn: Any, row: Any) -> bool:
+        """Return ``True`` when a cached analysis should be exposed to callers."""
+        if row is None or row["deleted"] != 0:
+            return False
+        return self._analysis_scope_is_active(
+            conn,
+            scope_type=row["scope_type"],
+            scope_id=row["scope_id"],
+            project_id=row["project_id"],
+        )
 
     def soft_delete_analysis(self, analysis_id: str, expected_version: int) -> None:
         """Soft-delete an analysis with optimistic locking."""
