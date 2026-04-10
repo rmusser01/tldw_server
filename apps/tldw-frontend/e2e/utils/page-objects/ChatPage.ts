@@ -264,6 +264,64 @@ export class ChatPage {
     }
   }
 
+  async selectCharacter(name: string): Promise<void> {
+    const triggerCandidates = [
+      this.page.getByTestId("character-selector").first(),
+      this.page.getByRole("button", { name: /character/i }).first(),
+      this.page.locator(".character-select").first(),
+    ]
+
+    let trigger: Locator | null = null
+    await expect
+      .poll(
+        async () => {
+          for (const candidate of triggerCandidates) {
+            if (await candidate.isVisible().catch(() => false)) {
+              trigger = candidate
+              return true
+            }
+          }
+          return false
+        },
+        { timeout: 10_000, message: "Timed out waiting for character selector trigger" }
+      )
+      .toBe(true)
+
+    if (!trigger) {
+      throw new Error("Character selector trigger not found")
+    }
+
+    await trigger.click()
+
+    const optionCandidates = [
+      this.page.getByRole("option", { name }).first(),
+      this.page.getByRole("menuitem", { name }).first(),
+      this.page.getByText(name, { exact: true }).first(),
+    ]
+
+    let option: Locator | null = null
+    await expect
+      .poll(
+        async () => {
+          for (const candidate of optionCandidates) {
+            if (await candidate.isVisible().catch(() => false)) {
+              option = candidate
+              return true
+            }
+          }
+          return false
+        },
+        { timeout: 10_000, message: `Timed out waiting for character option ${name}` }
+      )
+      .toBe(true)
+
+    if (!option) {
+      throw new Error(`Character option not found: ${name}`)
+    }
+
+    await option.click()
+  }
+
   /**
    * Wait for a response to appear
    */

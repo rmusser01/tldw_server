@@ -35,6 +35,7 @@ import {
 import {
   discardAbortedTurnIfRequested,
 } from "@/hooks/chat/abort-turn-cleanup";
+import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome";
 import type { Character } from "@/types/character";
 import type { ChatScope } from "@/types/chat-scope";
 import type { ChatHistory, Message } from "@/store/option";
@@ -803,6 +804,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
 
           const persistPayload: Record<string, unknown> = {
             assistant_content: finalPersistedContent,
+            assistant_message_id: generateMessageId,
             speaker_character_id: speakerCharacterId,
             speaker_character_name: characterName,
           };
@@ -818,6 +820,13 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
           if (persistedUserServerMessageId) {
             persistPayload.user_message_id = persistedUserServerMessageId;
           }
+          const metadataExtra = {
+            speaker_character_id: speakerCharacterId ?? null,
+            speaker_character_name: characterName,
+            mood_label: resolvedMoodLabel,
+            mood_confidence: resolvedMoodConfidence ?? null,
+            mood_topic: resolvedMoodTopic ?? null,
+          };
 
           const persisted = (await tldwClient.persistCharacterCompletion(
             chatId,
@@ -835,13 +844,6 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
             persisted?.id;
           const createdAsstVersion = persisted?.version;
           assistantPersistedToServer = createdAsstServerId != null;
-          const metadataExtra = {
-            speaker_character_id: speakerCharacterId ?? null,
-            speaker_character_name: characterName,
-            mood_label: resolvedMoodLabel,
-            mood_confidence: resolvedMoodConfidence ?? null,
-            mood_topic: resolvedMoodTopic ?? null,
-          };
           setMessages(
             (prev) =>
               (prev as any[]).map((m) => {
@@ -867,35 +869,61 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
             "Failed to persist assistant message via completions/persist:",
             e,
           );
-          try {
-            const createdAsst = (await tldwClient.addChatMessage(
-              chatId,
-              {
-                role: "assistant",
-                content: finalPersistedContent,
-              },
-              scope ? { scope } : undefined,
-            )) as { id?: string | number; version?: number } | null;
-            assistantPersistedToServer = createdAsst?.id != null;
+          const savedOutcome = resolveSavedDegradedCharacterPersist(e);
+          if (savedOutcome?.saved) {
+            assistantPersistedToServer =
+              savedOutcome.assistantMessageId != null;
             setMessages(
               (prev) =>
                 (prev as any[]).map((m) => {
                   if (m.id !== generateMessageId) return m;
                   const serverMessageId =
-                    createdAsst?.id != null
-                      ? String(createdAsst.id)
+                    savedOutcome.assistantMessageId != null
+                      ? String(savedOutcome.assistantMessageId)
                       : undefined;
                   return updateActiveVariant(m, {
                     serverMessageId,
-                    serverMessageVersion: createdAsst?.version,
+                    serverMessageVersion: savedOutcome.version,
+                    metadataExtra,
+                    speakerCharacterId: speakerCharacterId ?? null,
+                    speakerCharacterName: characterName,
+                    moodLabel: resolvedMoodLabel,
+                    moodConfidence: resolvedMoodConfidence ?? null,
+                    moodTopic: resolvedMoodTopic ?? null,
                   });
                 }) as Message[],
             );
-          } catch (fallbackError) {
-            console.error(
-              "Failed fallback assistant persistence with addChatMessage:",
-              fallbackError,
-            );
+          } else {
+            try {
+              const createdAsst = (await tldwClient.addChatMessage(
+                chatId,
+                {
+                  role: "assistant",
+                  content: finalPersistedContent,
+                },
+                scope ? { scope } : undefined,
+              )) as { id?: string | number; version?: number } | null;
+              assistantPersistedToServer = createdAsst?.id != null;
+              setMessages(
+                (prev) =>
+                  (prev as any[]).map((m) => {
+                    if (m.id !== generateMessageId) return m;
+                    const serverMessageId =
+                      createdAsst?.id != null
+                        ? String(createdAsst.id)
+                        : undefined;
+                    return updateActiveVariant(m, {
+                      serverMessageId,
+                      serverMessageVersion: createdAsst?.version,
+                    });
+                  }) as Message[],
+              );
+            } catch (fallbackError) {
+              console.error(
+                "Failed fallback assistant persistence with addChatMessage:",
+                fallbackError,
+              );
+            }
           }
         }
       } else {

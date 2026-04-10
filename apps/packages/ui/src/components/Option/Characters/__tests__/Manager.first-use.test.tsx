@@ -32,6 +32,7 @@ const {
   setSelectedCharacterMock,
   focusComposerMock,
   notificationMock,
+  storeSetters,
   tldwClientMock,
   templateData
 } = vi.hoisted(() => ({
@@ -58,6 +59,21 @@ const {
   navigateMock: vi.fn(),
   setSelectedCharacterMock: vi.fn(),
   focusComposerMock: vi.fn(),
+  storeSetters: {
+    setHistory: vi.fn(),
+    setMessages: vi.fn(),
+    setHistoryId: vi.fn(),
+    setServerChatId: vi.fn(),
+    setServerChatState: vi.fn(),
+    setServerChatTopic: vi.fn(),
+    setServerChatClusterId: vi.fn(),
+    setServerChatSource: vi.fn(),
+    setServerChatExternalRef: vi.fn(),
+    setServerChatCharacterId: vi.fn(),
+    setServerChatAssistantKind: vi.fn(),
+    setServerChatAssistantId: vi.fn(),
+    setServerChatMetaLoaded: vi.fn()
+  },
   notificationMock: {
     success: vi.fn(),
     info: vi.fn(),
@@ -229,17 +245,7 @@ vi.mock("@/hooks/useComposerFocus", () => ({
 
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: (selector: any) =>
-    selector({
-      setHistory: vi.fn(),
-      setMessages: vi.fn(),
-      setHistoryId: vi.fn(),
-      setServerChatId: vi.fn(),
-      setServerChatState: vi.fn(),
-      setServerChatTopic: vi.fn(),
-      setServerChatClusterId: vi.fn(),
-      setServerChatSource: vi.fn(),
-      setServerChatExternalRef: vi.fn()
-    })
+    selector(storeSetters)
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -309,10 +315,80 @@ const findEditSubmitButton = async (timeout = 15000) =>
     return candidate as HTMLElement
   }, { timeout })
 
+const ensureLocalStorageApi = () => {
+  const existing = window.localStorage as {
+    getItem?: (key: string) => string | null
+    setItem?: (key: string, value: string) => void
+    removeItem?: (key: string) => void
+    clear?: () => void
+    key?: (index: number) => string | null
+    length?: number
+  }
+  if (
+    typeof existing?.getItem === "function" &&
+    typeof existing?.setItem === "function" &&
+    typeof existing?.removeItem === "function" &&
+    typeof existing?.clear === "function" &&
+    typeof existing?.key === "function"
+  ) {
+    return existing
+  }
+
+  const storage = new Map<string, string>()
+  const shim = {
+    getItem: vi.fn((key: string) => storage.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      storage.set(key, String(value))
+    }),
+    removeItem: vi.fn((key: string) => {
+      storage.delete(key)
+    }),
+    clear: vi.fn(() => {
+      storage.clear()
+    }),
+    key: vi.fn((index: number) => Array.from(storage.keys())[index] ?? null),
+    get length() {
+      return storage.size
+    }
+  }
+
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: shim
+  })
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: shim
+  })
+
+  return shim
+}
+
 describe("CharactersManager first-use onboarding", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    window.localStorage.clear()
+    const storage = ensureLocalStorageApi() as {
+      clear?: () => void
+      key?: (index: number) => string | null
+      length?: number
+      removeItem?: (key: string) => void
+    }
+    if (typeof storage.clear === "function") {
+      storage.clear()
+    } else if (
+      typeof storage.key === "function" &&
+      typeof storage.length === "number" &&
+      typeof storage.removeItem === "function"
+    ) {
+      const keys: string[] = []
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index)
+        if (typeof key === "string" && key.length > 0) {
+          keys.push(key)
+        }
+      }
+      keys.forEach((key) => storage.removeItem?.(key))
+    }
     window.history.replaceState({}, "", "/")
     useNavigateMock.mockReturnValue(navigateMock)
     confirmDangerMock.mockResolvedValue(true)
@@ -3733,6 +3809,8 @@ describe("CharactersManager first-use onboarding", () => {
       system_prompt: "Promotion prompt",
       greeting: "Promotion greeting",
       description: "Promotion test",
+      alternate_greetings: ["Backup greeting"],
+      extensions: { tone: "steady" },
       version: 1
     }
 
@@ -3791,9 +3869,15 @@ describe("CharactersManager first-use onboarding", () => {
     expect(setSelectedCharacterMock).toHaveBeenCalled()
     expect(setSelectedCharacterMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        name: "Promote Quick Chat Character"
+        name: "Promote Quick Chat Character",
+        alternate_greetings: expect.any(Array),
+        extensions: expect.anything()
       })
     )
+    expect(storeSetters.setServerChatCharacterId).toHaveBeenCalledWith("303")
+    expect(storeSetters.setServerChatAssistantKind).toHaveBeenCalledWith("character")
+    expect(storeSetters.setServerChatAssistantId).toHaveBeenCalledWith("303")
+    expect(storeSetters.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
     expect(tldwClientMock.deleteChat).not.toHaveBeenCalled()
   }, 30000)
 

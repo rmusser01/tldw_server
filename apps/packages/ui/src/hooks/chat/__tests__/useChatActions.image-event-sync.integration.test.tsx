@@ -577,4 +577,59 @@ describe("useChatActions character stream throttling integration", () => {
       .at(-1)
     expect(finalAssistant?.message).toBe("x".repeat(180))
   })
+
+  it("does not fall back to addChatMessage when persistCharacterCompletion reports saved degraded state", async () => {
+    persistCharacterCompletionMock.mockRejectedValueOnce(
+      Object.assign(new Error("degraded"), {
+        status: 503,
+        details: {
+          detail: {
+            code: "persist_validation_degraded",
+            saved: true,
+            assistant_message_id: "assistant-server-99"
+          }
+        }
+      })
+    )
+    streamCharacterChatCompletionMock.mockImplementation(async function* () {
+      yield {
+        choices: [
+          {
+            delta: {
+              content: "saved degraded reply"
+            }
+          }
+        ]
+      }
+    })
+
+    const { options } = createHookOptions([])
+    options.serverChatId = "server-chat-1"
+    options.selectedCharacter = {
+      id: 101,
+      name: "Stream Character",
+      avatar_url: ""
+    }
+
+    const { result } = renderHook(() => useChatActions(options))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "persist but degrade",
+        image: ""
+      })
+    })
+
+    expect(persistCharacterCompletionMock).toHaveBeenCalledTimes(1)
+    expect(persistCharacterCompletionMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        assistant_message_id: expect.any(String)
+      })
+    )
+    expect(addChatMessageMock).not.toHaveBeenCalledWith(
+      "server-chat-1",
+      expect.objectContaining({ role: "assistant" })
+    )
+  })
 })

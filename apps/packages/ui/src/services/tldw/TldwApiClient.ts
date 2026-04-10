@@ -59,6 +59,15 @@ const CHAT_COMPLETION_ERROR_MESSAGE = "Chat completion failed."
 const CHAT_COMPLETION_ERRORS_MESSAGE =
   "One or more internal errors were suppressed."
 
+const isSavedDegradedCharacterPersistError = (error: unknown): boolean => {
+  const detail = (
+    error as {
+      details?: { detail?: { code?: unknown; saved?: unknown } }
+    } | null
+  )?.details?.detail
+  return detail?.code === "persist_validation_degraded" && detail?.saved === true
+}
+
 const isSuspiciousChatCompletionString = (value: string): boolean =>
   /traceback|stack(?:\s*trace)?|exception|error|\/Users\/|[A-Za-z]:\\|\.py:\d+/i.test(
     value
@@ -5025,14 +5034,21 @@ export class TldwApiClient {
     payload: Record<string, any>
   ): Promise<any> {
     const cid = String(chat_id)
-    const res = await bgRequest<any>({
-      path: `/api/v1/chats/${cid}/completions/persist`,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
-    this.invalidateChatMessagesCache(cid)
-    return res
+    try {
+      const res = await bgRequest<any>({
+        path: `/api/v1/chats/${cid}/completions/persist`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      })
+      this.invalidateChatMessagesCache(cid)
+      return res
+    } catch (error) {
+      if (isSavedDegradedCharacterPersistError(error)) {
+        this.invalidateChatMessagesCache(cid)
+      }
+      throw error
+    }
   }
 
   async *streamCharacterChatCompletion(

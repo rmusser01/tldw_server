@@ -231,8 +231,17 @@ async def extract_character_memories_endpoint(
     conversation = db.get_conversation_by_id(body.chat_id)
     if not conversation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
-    if str(conversation.get("user_id")) != user_id:
+    stored_client_id = str(conversation.get("client_id") or "").strip()
+    request_user_id = str(current_user.id).strip()
+    if stored_client_id != request_user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your chat session")
+    conversation_character_id = str(conversation.get("character_id") or "").strip()
+    requested_character_id = str(card.get("id") or character_id).strip()
+    if conversation_character_id != requested_character_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chat session must belong to the requested character",
+        )
 
     user_name = conversation.get("user_name", "User")
     persona_id = get_or_create_character_persona_profile(db, character_id, char_name, user_id)

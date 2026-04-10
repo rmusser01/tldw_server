@@ -775,10 +775,25 @@ export const buildCharacterSelectionPayload = (record: any) => {
       record.first_message ||
       record.greet ||
       "",
+    alternate_greetings: Array.isArray(record.alternate_greetings)
+      ? record.alternate_greetings
+      : [],
+    extensions:
+      record.extensions &&
+      typeof record.extensions === "object" &&
+      !Array.isArray(record.extensions)
+        ? record.extensions
+        : null,
+    image_base64:
+      typeof record.image_base64 === "string" ? record.image_base64 : null,
+    image_mime:
+      typeof record.image_mime === "string" ? record.image_mime : null,
     avatar_url:
       record.avatar_url ||
       validateAndCreateImageDataUrl(record.image_base64) ||
-      ""
+      "",
+    description: record.description || "",
+    version: typeof record.version === "number" ? record.version : undefined
   }
 }
 

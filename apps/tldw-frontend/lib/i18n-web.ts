@@ -77,8 +77,17 @@ const LANGUAGE_ALIASES: Record<string, string> = {
 const RTL_LANGUAGES = ["ar", "fa", "he"]
 
 const getStoredLanguage = (): string => {
-  if (typeof localStorage === "undefined") return "en"
-  return localStorage.getItem("i18nextLng") || "en"
+  if (
+    typeof localStorage === "undefined"
+    || typeof localStorage?.getItem !== "function"
+  ) {
+    return "en"
+  }
+  try {
+    return localStorage.getItem("i18nextLng") || "en"
+  } catch {
+    return "en"
+  }
 }
 
 const normalizeLanguage = (lng: string): string => {

@@ -169,10 +169,59 @@ const makeUseQueryResult = (value: Record<string, unknown>) => ({
   ...value
 })
 
+const ensureLocalStorageApi = () => {
+  const existing = window.localStorage as {
+    getItem?: (key: string) => string | null
+    setItem?: (key: string, value: string) => void
+    removeItem?: (key: string) => void
+    clear?: () => void
+    key?: (index: number) => string | null
+    length?: number
+  }
+  if (
+    typeof existing?.getItem === "function" &&
+    typeof existing?.setItem === "function" &&
+    typeof existing?.removeItem === "function" &&
+    typeof existing?.clear === "function" &&
+    typeof existing?.key === "function"
+  ) {
+    return existing
+  }
+
+  const storage = new Map<string, string>()
+  const shim = {
+    getItem: vi.fn((key: string) => storage.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      storage.set(key, String(value))
+    }),
+    removeItem: vi.fn((key: string) => {
+      storage.delete(key)
+    }),
+    clear: vi.fn(() => {
+      storage.clear()
+    }),
+    key: vi.fn((index: number) => Array.from(storage.keys())[index] ?? null),
+    get length() {
+      return storage.size
+    }
+  }
+
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: shim
+  })
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: shim
+  })
+
+  return shim
+}
+
 describe("CharactersManager cross-feature integration stage-1", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    window.localStorage.clear()
+    ensureLocalStorageApi().clear()
     window.history.replaceState(
       {},
       "",

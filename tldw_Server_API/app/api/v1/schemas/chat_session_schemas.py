@@ -538,6 +538,12 @@ class CharacterChatStreamPersistRequest(BaseModel):
     Use after a streamed completion where the assistant content was not persisted.
     """
     assistant_content: str = Field(..., min_length=1, max_length=1_000_000, description="Assistant text to persist (max 1MB)")
+    assistant_message_id: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=255,
+        description="Optional stable assistant message ID used for idempotent persist retries.",
+    )
     user_message_id: Optional[str] = Field(None, description="Optional parent user message id to link threading")
     speaker_character_id: Optional[int] = Field(
         None,
