@@ -1,11 +1,59 @@
-import React from "react"
+import React, { useState } from "react"
 import { Input, Select, Skeleton, Table, Tag, Tooltip } from "antd"
-import { Clipboard, Copy, Pen } from "lucide-react"
+import { Clipboard, Copy, Pen, X } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import ConnectFeatureBanner from "@/components/Common/ConnectFeatureBanner"
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import { tagColors } from "@/utils/color"
 import { usePromptWorkspace } from "./PromptWorkspaceProvider"
+
+// ---------------------------------------------------------------------------
+// Contextual help banner (dismissed via localStorage)
+// ---------------------------------------------------------------------------
+
+const COPILOT_HELP_KEY = "tldw-copilot-help-dismissed"
+
+function CopilotHelpBanner({ t }: { t: (key: string, opts?: any) => string }) {
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(COPILOT_HELP_KEY) === "1"
+    } catch {
+      return false
+    }
+  })
+
+  if (dismissed) return null
+
+  return (
+    <div
+      data-testid="copilot-help-banner"
+      className="relative mb-4 rounded-md border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-text-secondary"
+    >
+      <button
+        type="button"
+        aria-label={t("managePrompts.copilot.help.dismiss", { defaultValue: "Dismiss" })}
+        data-testid="copilot-help-dismiss"
+        onClick={() => {
+          setDismissed(true)
+          try {
+            localStorage.setItem(COPILOT_HELP_KEY, "1")
+          } catch {
+            // localStorage may be unavailable
+          }
+        }}
+        className="absolute right-2 top-2 inline-flex items-center justify-center rounded p-1 text-text-muted hover:bg-bg-muted/70 focus:outline-none focus:ring-2 focus:ring-primary"
+      >
+        <X className="size-4" />
+      </button>
+      <p className="pr-6">
+        {t("managePrompts.copilot.help.description", {
+          defaultValue:
+            "Copilot prompts are pre-built templates provided by your server administrator. They help with common tasks like summarizing, translating, or formatting. You can customize them or copy them to your Custom prompts."
+        })}
+      </p>
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -74,6 +122,8 @@ export function CopilotSegment({
 
   return (
     <div>
+      <CopilotHelpBanner t={t} />
+
       {copilotStatus === "pending" && <Skeleton paragraph={{ rows: 8 }} />}
 
       {copilotStatus === "success" && Array.isArray(copilotData) && copilotData.length === 0 && (

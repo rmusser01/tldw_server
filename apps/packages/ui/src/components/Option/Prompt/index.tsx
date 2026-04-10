@@ -83,6 +83,9 @@ function PromptBodyInner() {
   const bulkKeywordTargetIdsRef = useRef<string[]>([])
   // Ref to CustomSegment's bulk selection setter for syncing after shared bulk ops
   const customSegmentSelectionSyncRef = useRef<((ids: React.Key[]) => void) | null>(null)
+  // Track latest selectedSegment for async deep-link race guard (#1050)
+  const selectedSegmentRef = useRef(selectedSegment)
+  selectedSegmentRef.current = selectedSegment
 
   // ---- Hooks for orchestrator-level concerns ----
   // (Sync and editor are needed here for deep-link handling and modal wiring.
@@ -219,6 +222,7 @@ function PromptBodyInner() {
 
     if (isOnline && isServerLink) {
       urlState.clearPromptParam()
+      const segmentAtStart = selectedSegment
       void (async () => {
         const syncResult = await pullFromStudio(parsedServerPromptId)
         if (!syncResult.success) {
@@ -232,6 +236,15 @@ function PromptBodyInner() {
             (item: any) => item?.id === syncResult.localId || item?.serverId === parsedServerPromptId
           )
           if (imported) {
+            if (selectedSegmentRef.current !== segmentAtStart) {
+              notification.info({
+                message: t("managePrompts.notification.sharedPromptImported", { defaultValue: "Shared prompt imported" }),
+                description: t("managePrompts.notification.sharedPromptSegmentChanged", {
+                  defaultValue: "The prompt was imported but you navigated away. Switch back to the Custom tab to view it."
+                })
+              })
+              return
+            }
             notification.success({ message: t("managePrompts.notification.sharedPromptImported", { defaultValue: "Shared prompt imported" }) })
             openPromptDrawer(imported)
           }
