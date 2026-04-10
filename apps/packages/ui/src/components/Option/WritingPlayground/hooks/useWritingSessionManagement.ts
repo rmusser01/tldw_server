@@ -331,9 +331,6 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       lastSavedChatModeRef.current[session.id] = getChatModeFromPayload(
         session.payload
       )
-      if (activeSessionId === session.id) {
-        editorPromptRichRef.current = getPromptRichFromPayload(session.payload)
-      }
       queryClient.setQueryData(
         ["writing-session", session.id],
         session
@@ -362,6 +359,9 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
         delete pendingSaveMapRef.current[session.id]
       }
       if (activeSessionId === session.id) {
+        if (!pendingPayload || pendingPayload === payload.payload) {
+          editorPromptRichRef.current = getPromptRichFromPayload(session.payload)
+        }
         setLastSavedAt(Date.now())
         if (!pendingSaveMapRef.current[session.id]) {
           setIsDirty(false)
