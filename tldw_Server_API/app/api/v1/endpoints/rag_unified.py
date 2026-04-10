@@ -153,31 +153,31 @@ def _build_unified_pipeline_kwargs(
 
 
 def _build_agentic_request_context(
-    request: UnifiedRAGRequest,
-    current_user: Optional[User],
+    *,
+    resolved_request: ResolvedRAGRequest,
+    retrieval_plan: RetrievalPlan,
+    payload: Optional[dict[str, Any]] = None,
 ) -> tuple[ResolvedRAGRequest, RetrievalPlan, AgenticConfig, dict[str, Any]]:
-    """Resolve the shared agentic request context and retrieval policy."""
-    resolved_request = _resolve_standard_request(request, current_user)
-    retrieval_plan = build_retrieval_plan(resolved_request)
-    payload = dict(resolved_request.payload)
-    payload["sources"] = list(retrieval_plan.sources)
-    payload["search_mode"] = retrieval_plan.search_mode
-    payload["top_k"] = retrieval_plan.top_k
-    payload["min_score"] = retrieval_plan.min_score
-    payload["index_namespace"] = retrieval_plan.index_namespace
+    """Build agentic execution config from canonical resolved request contracts."""
+    effective_payload = dict(payload or resolved_request.payload)
+    effective_payload["sources"] = list(retrieval_plan.sources)
+    effective_payload["search_mode"] = retrieval_plan.search_mode
+    effective_payload["top_k"] = retrieval_plan.top_k
+    effective_payload["min_score"] = retrieval_plan.min_score
+    effective_payload["index_namespace"] = retrieval_plan.index_namespace
 
     def _payload_bool(name: str, fallback: bool = False) -> bool:
-        return bool(payload.get(name, fallback))
+        return bool(effective_payload.get(name, fallback))
 
     def _payload_int(name: str, fallback: int) -> int:
-        raw = payload.get(name, fallback)
+        raw = effective_payload.get(name, fallback)
         try:
             return int(raw)
         except (TypeError, ValueError):
             return fallback
 
     def _payload_float(name: str, fallback: float) -> float:
-        raw = payload.get(name, fallback)
+        raw = effective_payload.get(name, fallback)
         try:
             return float(raw)
         except (TypeError, ValueError):
@@ -192,7 +192,7 @@ def _build_agentic_request_context(
         quote_spans=_payload_bool("agentic_quote_spans", True),
         enable_tools=_payload_bool("agentic_enable_tools", False),
         use_llm_planner=_payload_bool("agentic_use_llm_planner", False),
-        time_budget_sec=payload.get("agentic_time_budget_sec", None),
+        time_budget_sec=effective_payload.get("agentic_time_budget_sec", None),
         cache_ttl_sec=max(1, _payload_int("agentic_cache_ttl_sec", 600)),
         debug_trace=_payload_bool("agentic_debug_trace", False)
         or _payload_bool("debug_mode", False),
@@ -203,14 +203,14 @@ def _build_agentic_request_context(
         prefer_structural_anchors=_payload_bool("agentic_prefer_structural_anchors", True),
         enable_table_support=_payload_bool("agentic_enable_table_support", True),
         agentic_enable_vlm_late_chunking=_payload_bool("agentic_enable_vlm_late_chunking", False),
-        agentic_vlm_backend=payload.get("agentic_vlm_backend", None),
+        agentic_vlm_backend=effective_payload.get("agentic_vlm_backend", None),
         agentic_vlm_detect_tables_only=_payload_bool("agentic_vlm_detect_tables_only", True),
-        agentic_vlm_max_pages=payload.get("agentic_vlm_max_pages", None),
+        agentic_vlm_max_pages=effective_payload.get("agentic_vlm_max_pages", None),
         agentic_vlm_late_chunk_top_k_docs=max(1, _payload_int("agentic_vlm_late_chunk_top_k_docs", 2)),
         agentic_use_provider_embeddings_within=_payload_bool(
             "agentic_use_provider_embeddings_within", False
         ),
-        agentic_provider_embedding_model_id=payload.get(
+        agentic_provider_embedding_model_id=effective_payload.get(
             "agentic_provider_embedding_model_id",
             None,
         ),
@@ -220,7 +220,7 @@ def _build_agentic_request_context(
         max_redundancy=_payload_float("agentic_max_redundancy", 0.9),
         enable_metrics=_payload_bool("agentic_enable_metrics", True),
     )
-    return resolved_request, retrieval_plan, agentic_cfg, payload
+    return resolved_request, retrieval_plan, agentic_cfg, effective_payload
 
 
 def _resolve_standard_request(
@@ -1183,12 +1183,21 @@ async def unified_search_endpoint(
             "character_db_path": chacha_db.db_path if chacha_db else None,
             "kanban_db_path": _resolve_kanban_db_path(current_user, request.user_id),
         }
+        standard_bundle = _build_standard_request_bundle(
+            request,
+            current_user=current_user,
+            db_paths=db_paths,
+            media_db=media_db,
+            chacha_db=chacha_db,
+        )
+        strategy_value = str(standard_bundle.resolved_request.strategy).strip().lower()
 
         # Branch: agentic strategy builds a synthetic chunk at query time
-        if getattr(request, 'strategy', 'standard') == 'agentic':
+        if strategy_value == 'agentic':
             resolved_request, retrieval_plan, agentic_cfg, effective_payload = _build_agentic_request_context(
-                request,
-                current_user,
+                resolved_request=standard_bundle.resolved_request,
+                retrieval_plan=standard_bundle.retrieval_plan,
+                payload=standard_bundle.resolved_request.payload,
             )
 
             try:
@@ -1260,15 +1269,8 @@ async def unified_search_endpoint(
                 )
         else:
             # Execute unified pipeline with all parameters from request
-            resolved_request = _resolve_standard_request(request, current_user)
-            kwargs = _build_unified_pipeline_kwargs(
-                request=request,
-                db_paths=db_paths,
-                media_db=media_db,
-                chacha_db=chacha_db,
-                current_user=current_user,
-                resolved_request=resolved_request,
-            )
+            resolved_request = standard_bundle.resolved_request
+            kwargs = dict(standard_bundle.pipeline_kwargs)
             _sync_retriever_overrides_to_pipeline()
             result = await unified_rag_pipeline(**kwargs)
             result = _coordinate_standard_result_evidence(result, resolved_request)
@@ -1971,8 +1973,9 @@ async def unified_search_stream_endpoint(
                         a_cfg,
                         agentic_payload,
                     ) = _build_agentic_request_context(
-                        request,
-                        current_user,
+                        resolved_request=stream_bundle.resolved_request,
+                        retrieval_plan=stream_bundle.retrieval_plan,
+                        payload=shared_payload,
                     )
                     ares = await agentic_rag_pipeline(
                         query=agentic_resolved_request.query,

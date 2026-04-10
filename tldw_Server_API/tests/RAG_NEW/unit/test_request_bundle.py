@@ -80,3 +80,56 @@ def test_build_request_bundle_injects_core_contracts_into_pipeline_kwargs() -> N
     assert bundle.pipeline_kwargs["query"] == "bundle seam"
     assert bundle.pipeline_kwargs["resolved_request"] is resolved
     assert bundle.pipeline_kwargs["retrieval_plan"] is plan
+
+
+def test_build_request_bundle_overwrites_builder_mismatched_core_contracts() -> None:
+    canonical_resolved = ResolvedRAGRequest(
+        query="canonical",
+        strategy="standard",
+        payload={"query": "canonical", "sources": ["notes"]},
+        index_namespace="tenant-canonical",
+        rag_profile=None,
+        user_id="21",
+        feedback_user_id="21",
+    )
+    canonical_plan = RetrievalPlan(
+        query="canonical",
+        sources=("notes",),
+        search_mode="vector",
+        top_k=4,
+        min_score=0.2,
+        index_namespace="tenant-canonical",
+    )
+    mismatched_resolved = ResolvedRAGRequest(
+        query="mismatched",
+        strategy="standard",
+        payload={"query": "mismatched", "sources": ["media_db"]},
+        index_namespace="tenant-wrong",
+        rag_profile=None,
+        user_id="999",
+        feedback_user_id="999",
+    )
+    mismatched_plan = RetrievalPlan(
+        query="mismatched",
+        sources=("media_db",),
+        search_mode="fts",
+        top_k=99,
+        min_score=0.0,
+        index_namespace="tenant-wrong",
+    )
+
+    bundle = build_request_bundle(
+        request={"query": "canonical"},
+        current_user=None,
+        resolve_request_fn=lambda *args, **kwargs: canonical_resolved,  # noqa: ARG005
+        build_retrieval_plan_fn=lambda _resolved: canonical_plan,
+        pipeline_kwargs_builder=lambda **kwargs: {
+            "query": kwargs["resolved_request"].query,
+            "resolved_request": mismatched_resolved,
+            "retrieval_plan": mismatched_plan,
+        },
+    )
+
+    assert bundle.pipeline_kwargs["query"] == "canonical"
+    assert bundle.pipeline_kwargs["resolved_request"] is canonical_resolved
+    assert bundle.pipeline_kwargs["retrieval_plan"] is canonical_plan

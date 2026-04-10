@@ -667,3 +667,164 @@ def test_rag_streaming_agentic_path_uses_profile_resolved_defaults(
     agentic_kwargs = captured["agentic_kwargs"]
     assert agentic_kwargs is not None
     assert agentic_kwargs["top_k"] == 6
+
+
+def test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+) -> None:
+    from types import SimpleNamespace
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.RAG.rag_service.request_bundle import ResolvedRequestBundle
+    from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
+    from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+
+    canonical_resolved = ResolvedRAGRequest(
+        query="bundle agentic query",
+        strategy="agentic",
+        payload={
+            "query": "bundle agentic query",
+            "strategy": "agentic",
+            "sources": ["notes"],
+            "search_mode": "vector",
+            "top_k": 5,
+            "min_score": 0.17,
+            "debug_mode": True,
+            "index_namespace": "bundle-tenant",
+            "user_id": "1",
+            "feedback_user_id": "1",
+        },
+        index_namespace="bundle-tenant",
+        rag_profile="balanced",
+        user_id="1",
+        feedback_user_id="1",
+    )
+    canonical_plan = RetrievalPlan(
+        query="bundle agentic query",
+        sources=("notes",),
+        search_mode="vector",
+        top_k=5,
+        min_score=0.17,
+        index_namespace="bundle-tenant",
+    )
+    bundle = ResolvedRequestBundle(
+        resolved_request=canonical_resolved,
+        retrieval_plan=canonical_plan,
+        pipeline_kwargs={
+            "query": canonical_resolved.query,
+            "sources": list(canonical_plan.sources),
+            "search_mode": canonical_plan.search_mode,
+            "top_k": canonical_plan.top_k,
+            "min_score": canonical_plan.min_score,
+            "index_namespace": canonical_plan.index_namespace,
+            "media_db_path": "stub_media.db",
+            "notes_db_path": "stub_chacha.db",
+            "character_db_path": "stub_chacha.db",
+            "kanban_db_path": None,
+            "enable_generation": True,
+            "resolved_request": canonical_resolved,
+            "retrieval_plan": canonical_plan,
+            "user_id": "1",
+            "feedback_user_id": "1",
+        },
+    )
+
+    captured: dict[str, Any] = {
+        "agentic_kwargs": None,
+        "helper_called": False,
+        "helper_resolved_request": None,
+        "helper_retrieval_plan": None,
+    }
+
+    def fake_build_standard_request_bundle(*args: Any, **kwargs: Any) -> ResolvedRequestBundle:  # noqa: ARG001
+        return bundle
+
+    def fake_build_agentic_request_context(*args: Any, **kwargs: Any) -> tuple[Any, ...]:  # noqa: ARG001
+        captured["helper_called"] = True
+        captured["helper_resolved_request"] = kwargs["resolved_request"]
+        captured["helper_retrieval_plan"] = kwargs["retrieval_plan"]
+        return (
+            kwargs["resolved_request"],
+            kwargs["retrieval_plan"],
+            rag_ep.AgenticConfig(),
+            dict(kwargs["payload"]),
+        )
+
+    async def fake_unified_rag_pipeline(**kwargs: Any) -> Any:  # noqa: ARG001
+        return rag_ep.UnifiedSearchResult(
+            documents=[
+                Document(
+                    id="doc-prefetch-1",
+                    content="prefetched",
+                    metadata={"title": "Prefetch"},
+                    source=DataSource.NOTES,
+                    score=0.9,
+                )
+            ],
+            query=canonical_resolved.query,
+            expanded_queries=[],
+            metadata={},
+            timings={},
+            citations=[],
+            feedback_id=None,
+            generated_answer=None,
+            cache_hit=False,
+            errors=[],
+            security_report=None,
+            total_time=0.0,
+        )
+
+    async def fake_agentic_rag_pipeline(**kwargs: Any) -> Any:
+        captured["agentic_kwargs"] = kwargs
+        return SimpleNamespace(
+            documents=[
+                Document(
+                    id="agentic-doc",
+                    content="agentic",
+                    metadata={"title": "Agentic"},
+                    source=DataSource.NOTES,
+                    score=0.95,
+                )
+            ],
+            metadata={"agentic_metrics": {"steps": 1}, "provenance": []},
+        )
+
+    async def fake_generate_streaming_response(context: Any, **kwargs: Any) -> Any:  # noqa: ARG001
+        async def _gen():
+            yield "chunk"
+
+        context.stream_generator = _gen()
+        context.metadata = {"streaming": True}
+        return context
+
+    monkeypatch.setattr(rag_ep, "_build_standard_request_bundle", fake_build_standard_request_bundle)
+    monkeypatch.setattr(rag_ep, "_build_agentic_request_context", fake_build_agentic_request_context)
+    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", fake_unified_rag_pipeline)
+    monkeypatch.setattr(rag_ep, "agentic_rag_pipeline", fake_agentic_rag_pipeline)
+    monkeypatch.setattr(rag_ep, "generate_streaming_response", fake_generate_streaming_response)
+
+    payload = {
+        "query": "stream via bundle",
+        "strategy": "agentic",
+        "enable_generation": True,
+    }
+
+    with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
+        assert resp.status_code == 200
+        next(resp.iter_lines(), None)
+
+    assert captured["helper_called"] is True
+    assert captured["helper_resolved_request"] is canonical_resolved
+    assert captured["helper_retrieval_plan"] is canonical_plan
+    agentic_kwargs = captured["agentic_kwargs"]
+    assert agentic_kwargs is not None
+    assert agentic_kwargs["resolved_request"] is canonical_resolved
+    assert agentic_kwargs["retrieval_plan"] is canonical_plan
+    assert agentic_kwargs["query"] == "bundle agentic query"
+    assert agentic_kwargs["sources"] == ["notes"]
+    assert agentic_kwargs["search_mode"] == "vector"
+    assert agentic_kwargs["top_k"] == 5
+    assert agentic_kwargs["min_score"] == 0.17
+    assert agentic_kwargs["index_namespace"] == "bundle-tenant"

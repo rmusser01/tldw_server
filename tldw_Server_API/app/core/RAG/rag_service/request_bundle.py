@@ -50,8 +50,8 @@ def build_request_bundle(
             retrieval_plan=retrieval_plan,
         )
     )
-    pipeline_kwargs.setdefault("resolved_request", resolved_request)
-    pipeline_kwargs.setdefault("retrieval_plan", retrieval_plan)
+    pipeline_kwargs["resolved_request"] = resolved_request
+    pipeline_kwargs["retrieval_plan"] = retrieval_plan
     return ResolvedRequestBundle(
         resolved_request=resolved_request,
         retrieval_plan=retrieval_plan,
