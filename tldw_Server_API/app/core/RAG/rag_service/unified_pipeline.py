@@ -44,6 +44,8 @@ from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 
+from .retrieval_plan import RetrievalPlan
+
 _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS = 500
 
 
@@ -1337,6 +1339,7 @@ async def unified_rag_pipeline(
 
     # ========== INDEXING / NAMESPACE ==========
     index_namespace: Optional[str] = None,
+    retrieval_plan: Optional[RetrievalPlan] = None,
 
     # ========== QUICK WINS ==========
     highlight_results: bool = False,
@@ -1527,6 +1530,57 @@ async def unified_rag_pipeline(
         )
     """
 
+    retrieval_query = query
+    retrieval_sources = sources
+    retrieval_search_mode = search_mode
+    retrieval_top_k = top_k
+    retrieval_min_score = min_score
+    retrieval_index_namespace = index_namespace
+
+    def _planned_index_namespace(plan: RetrievalPlan) -> Optional[str]:
+        if plan.index_namespace is not None:
+            return plan.index_namespace
+        normalized_sources = {
+            getattr(source, "value", str(source)).strip()
+            for source in plan.sources
+        }
+        if "media_db" in normalized_sources:
+            return plan.collection_names.get("media_db")
+        return None
+
+    if retrieval_plan is not None:
+        planned_query = str(retrieval_plan.query or "").strip()
+        if planned_query:
+            retrieval_query = planned_query
+        planned_sources = [
+            str(getattr(source, "value", source)).strip()
+            for source in retrieval_plan.sources
+            if str(getattr(source, "value", source)).strip()
+        ]
+        if planned_sources:
+            retrieval_sources = planned_sources
+        planned_search_mode = str(retrieval_plan.search_mode or "").strip().lower()
+        if planned_search_mode in {"fts", "vector", "hybrid"}:
+            retrieval_search_mode = cast(
+                Literal["fts", "vector", "hybrid"],
+                planned_search_mode,
+            )
+        with contextlib.suppress(TypeError, ValueError):
+            retrieval_top_k = max(1, int(retrieval_plan.top_k))
+        with contextlib.suppress(TypeError, ValueError):
+            retrieval_min_score = float(retrieval_plan.min_score)
+        retrieval_index_namespace = _planned_index_namespace(retrieval_plan)
+
+    def _retrieval_plan_for(query_text: str) -> Optional[RetrievalPlan]:
+        if retrieval_plan is None:
+            return None
+        if query_text == retrieval_plan.query:
+            return retrieval_plan
+        try:
+            return replace(retrieval_plan, query=query_text)
+        except TypeError:
+            return retrieval_plan
+
     # Basic input validation (short-circuit before heavier setup)
     if not isinstance(query, str) or not query.strip():
         msg = "Invalid query"
@@ -1691,7 +1745,7 @@ async def unified_rag_pipeline(
         cache_max_size = int((cfg.get("cache") or {}).get("max_cache_size", cache_max_size))
     except (ImportError, TypeError, ValueError):
         pass
-    cache_namespace = index_namespace or (user_id or None)
+    cache_namespace = retrieval_index_namespace or (user_id or None)
     if cache_namespace is None:
         try:
             parts = [media_db_path, notes_db_path, character_db_path, kanban_db_path]
@@ -1802,9 +1856,9 @@ async def unified_rag_pipeline(
 
     try:
         try:
-            sources = _normalize_pipeline_sources(sources)
-            resolved_data_sources = _sources_to_data_sources(sources)
-            result.metadata["sources_requested"] = list(sources)
+            retrieval_sources = _normalize_pipeline_sources(retrieval_sources)
+            resolved_data_sources = _sources_to_data_sources(retrieval_sources)
+            result.metadata["sources_requested"] = list(retrieval_sources)
         except ValueError as exc:
             result.errors.append(f"invalid_source: {exc}")
             result.metadata["source_validation_error"] = str(exc)
@@ -1952,7 +2006,7 @@ async def unified_rag_pipeline(
         ) -> list["Document"]:
             """Best-effort external prefetch when classification disables local DB search."""
             prefetched_docs: list[Document] = []
-            max_results = max(1, min(int(top_k or 10), 25))
+            max_results = max(1, min(int(retrieval_top_k or 10), 25))
             seen_ids: set[str] = set()
 
             def _append_doc(doc: Document) -> None:
@@ -2332,10 +2386,10 @@ async def unified_rag_pipeline(
         analysis_intent_val = None
         analysis_complexity_val = None
         analysis_domain = None
-        if QueryAnalyzer and query:
+        if QueryAnalyzer and retrieval_query:
             try:
                 qa = QueryAnalyzer()
-                analysis = qa.analyze_query(query)
+                analysis = qa.analyze_query(retrieval_query)
                 analysis_intent = getattr(analysis, "intent", None)
                 analysis_complexity = getattr(analysis, "complexity", None)
                 analysis_intent_val = getattr(analysis_intent, "value", str(analysis_intent)) if analysis_intent is not None else None
@@ -2348,7 +2402,7 @@ async def unified_rag_pipeline(
                 analysis_domain = None
 
         # ========== QUERY EXPANSION ==========
-        expanded_queries = [query]
+        expanded_queries = [retrieval_query]
         if expand_query:
             expansion_start = time.time()
             try:
@@ -2358,7 +2412,11 @@ async def unified_rag_pipeline(
                 if RewriteCache and user_id:
                     try:
                         rc = RewriteCache(user_id=user_id)
-                        cached = rc.get(query, intent=intent_label, corpus=index_namespace)
+                        cached = rc.get(
+                            retrieval_query,
+                            intent=intent_label,
+                            corpus=retrieval_index_namespace,
+                        )
                         if cached:
                             cached_rewrites = [c for c in cached if isinstance(c, str) and c.strip()]
                     except ValueError as exc:
@@ -2368,11 +2426,18 @@ async def unified_rag_pipeline(
                 strategies = (expansion_strategies or ["acronym", "synonym"]).copy()
                 expanded_variants: list[str] = []
                 if multi_strategy_expansion:
-                    if index_namespace:
-                        expanded = await multi_strategy_expansion(query, strategies=strategies, corpus=index_namespace)
+                    if retrieval_index_namespace:
+                        expanded = await multi_strategy_expansion(
+                            retrieval_query,
+                            strategies=strategies,
+                            corpus=retrieval_index_namespace,
+                        )
                     else:
                         # Avoid passing None to preserve expected call signature in tests
-                        expanded = await multi_strategy_expansion(query, strategies=strategies)
+                        expanded = await multi_strategy_expansion(
+                            retrieval_query,
+                            strategies=strategies,
+                        )
                     if isinstance(expanded, list):
                         expanded_variants.extend([q for q in expanded if isinstance(q, str)])
                     elif isinstance(expanded, str) and expanded.strip():
@@ -2422,7 +2487,12 @@ async def unified_rag_pipeline(
                         rew = [q for q in expanded_queries if q != query][:5]
                         if rew:
                             rc = RewriteCache(user_id=user_id)
-                            rc.put(query, rewrites=rew, intent=intent_label, corpus=index_namespace)
+                        rc.put(
+                            retrieval_query,
+                            rewrites=rew,
+                            intent=intent_label,
+                            corpus=retrieval_index_namespace,
+                        )
                 except ValueError as exc:
                     logger.debug(f"Rewrite cache write disabled for user_id={user_id}: {exc}")
                 except (AttributeError, TypeError):
@@ -2766,9 +2836,9 @@ async def unified_rag_pipeline(
                         _tr = _tm.get_tracer("tldw.rag")
                         _attrs = {
                             "rag.phase": "retrieval",
-                            "rag.search_mode": str(search_mode),
-                            "rag.top_k": int(top_k or 0),
-                            "rag.index_namespace": str(index_namespace or "")
+                            "rag.search_mode": str(retrieval_search_mode),
+                            "rag.top_k": int(retrieval_top_k or 0),
+                            "rag.index_namespace": str(retrieval_index_namespace or "")
                         }
                         _otel_cm = _tr.start_as_current_span("rag.retrieval")
                         _otel_span = _otel_cm.__enter__()
@@ -2796,10 +2866,10 @@ async def unified_rag_pipeline(
 
                     # Configure retrieval
                     config = RetrievalConfig(
-                        max_results=top_k,
-                        min_score=min_score,
-                        use_fts=(search_mode in ["fts", "hybrid"]),
-                        use_vector=(search_mode in ["vector", "hybrid"]),
+                        max_results=retrieval_top_k,
+                        min_score=retrieval_min_score,
+                        use_fts=(retrieval_search_mode in ["fts", "hybrid"]),
+                        use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
                         include_metadata=True,
                         fts_level=fts_level,
                         enable_text_late_chunking=enable_text_late_chunking,
@@ -2834,23 +2904,24 @@ async def unified_rag_pipeline(
                     # Retrieve documents
                     rh = getattr(retriever, 'retrieve_hybrid', None)
                     hybrid_supported = rh is not None and asyncio.iscoroutinefunction(rh)
-                    if search_mode == "hybrid" and hybrid_supported:
+                    if retrieval_search_mode == "hybrid" and hybrid_supported:
                         documents = await _resilient_call(
                             "retrieval",
                             rh,
-                            query=query,
+                            query=retrieval_query,
                             alpha=hybrid_alpha,
-                            index_namespace=index_namespace,
+                            index_namespace=retrieval_index_namespace,
                             allowed_media_ids=include_media_ids,
                         )
                     else:
                         documents = await _resilient_call(
                             "retrieval",
                             retriever.retrieve,
-                            query=query,
+                            query=retrieval_query,
                             sources=data_sources,
                             config=config,
-                            index_namespace=index_namespace,
+                            index_namespace=retrieval_index_namespace,
+                            retrieval_plan=_retrieval_plan_for(retrieval_query),
                             allowed_media_ids=include_media_ids,
                             allowed_note_ids=include_note_ids,
                         )
@@ -2859,13 +2930,13 @@ async def unified_rag_pipeline(
                     # perform a direct Media DB FTS-only search. This guards against
                     # configuration or adapter issues that can cause hybrid retrieval
                     # to silently return an empty set even when media is present.
-                    if (not documents) and (media_db_path or media_db is not None) and search_mode in ("fts", "hybrid"):
+                    if (not documents) and (media_db_path or media_db is not None) and retrieval_search_mode in ("fts", "hybrid"):
                         try:
                             from .database_retrievers import MediaDBRetriever as _MDBR
                             from .database_retrievers import RetrievalConfig as _RCfg
                             fb_cfg = _RCfg(
-                                max_results=top_k,
-                                min_score=min_score,
+                                max_results=retrieval_top_k,
+                                min_score=retrieval_min_score,
                                 use_fts=True,
                                 use_vector=False,
                                 include_metadata=True,
@@ -2878,7 +2949,7 @@ async def unified_rag_pipeline(
                                 media_db=media_db,
                             )
                             fallback_docs = await fb_retriever.retrieve(
-                                query=query,
+                                query=retrieval_query,
                                 media_type=None,
                                 allowed_media_ids=include_media_ids,
                             )
@@ -2900,14 +2971,14 @@ async def unified_rag_pipeline(
                             result.errors.append(f"Media DB fallback retrieval failed: {str(_fb_err)}")
 
                     # Optionally run HyDE-enhanced media retrieval and merge
-                    if enable_hyde and hyde_vector and search_mode == "hybrid":
+                    if enable_hyde and hyde_vector and retrieval_search_mode == "hybrid":
                         try:
                             media_retr = retriever.retrievers.get(DataSource.MEDIA_DB)
                             if media_retr and hasattr(media_retr, "retrieve_hybrid"):
                                 hyde_docs = await media_retr.retrieve_hybrid(
-                                    query=query,
+                                    query=retrieval_query,
                                     alpha=hybrid_alpha,
-                                    index_namespace=index_namespace,
+                                    index_namespace=retrieval_index_namespace,
                                     query_vector=hyde_vector,
                                 )
                                 by_id: dict[str, Document] = {d.id: d for d in documents}
@@ -2932,22 +3003,25 @@ async def unified_rag_pipeline(
                     if expand_query and expanded_queries and len(expanded_queries) > 1:
                         exp_start = time.time()
                         try:
-                            extra_queries = [q for q in expanded_queries if q != query]
+                            extra_queries = [q for q in expanded_queries if q != retrieval_query]
                             exp_docs: list[Document] = []
                             for eq in extra_queries:
                                 try:
-                                    if search_mode == "hybrid" and hybrid_supported and rh is not None:
+                                    if retrieval_search_mode == "hybrid" and hybrid_supported and rh is not None:
                                         eq_docs = await _resilient_call(
                                             "retrieval_expansion",
                                             rh,
                                             query=eq,
                                             alpha=hybrid_alpha,
-                                            index_namespace=index_namespace,
+                                            index_namespace=retrieval_index_namespace,
                                             allowed_media_ids=include_media_ids,
                                         )
                                     else:
                                         try:
-                                            exp_cfg = replace(config, max_results=max(1, int(top_k or 1)))
+                                            exp_cfg = replace(
+                                                config,
+                                                max_results=max(1, int(retrieval_top_k or 1)),
+                                            )
                                         except TypeError:
                                             exp_cfg = config
                                         eq_docs = await _resilient_call(
@@ -2956,7 +3030,8 @@ async def unified_rag_pipeline(
                                             query=eq,
                                             sources=data_sources,
                                             config=exp_cfg,
-                                            index_namespace=index_namespace,
+                                            index_namespace=retrieval_index_namespace,
+                                            retrieval_plan=_retrieval_plan_for(eq),
                                             allowed_media_ids=include_media_ids,
                                             allowed_note_ids=include_note_ids,
                                         )
@@ -3010,7 +3085,7 @@ async def unified_rag_pipeline(
                         and apply_prf
                         and PRFConfig
                         and result.documents
-                        and len(result.documents) < top_k
+                        and len(result.documents) < retrieval_top_k
                     ):
                         try:
                             prf_cfg = PRFConfig(
@@ -3019,22 +3094,26 @@ async def unified_rag_pipeline(
                                 alpha=float(prf_alpha or 0.0),
                                 top_n=int(prf_top_n or 0),
                             )
-                            prf_query, prf_meta = await apply_prf(query, result.documents, prf_cfg)
+                            prf_query, prf_meta = await apply_prf(
+                                retrieval_query,
+                                result.documents,
+                                prf_cfg,
+                            )
                             result.metadata.setdefault("prf", {})
                             result.metadata["prf"].update(prf_meta)
 
                             # Only perform a second pass when PRF is enabled and query changed
-                            if prf_meta.get("enabled") and prf_query and prf_query != query:
-                                remaining_slots = max(0, top_k - len(result.documents))
+                            if prf_meta.get("enabled") and prf_query and prf_query != retrieval_query:
+                                remaining_slots = max(0, retrieval_top_k - len(result.documents))
                                 if remaining_slots > 0:
                                     # Use the same retrieval path as the primary call
-                                    if search_mode == "hybrid" and hybrid_supported and rh is not None:
+                                    if retrieval_search_mode == "hybrid" and hybrid_supported and rh is not None:
                                         prf_docs = await _resilient_call(
                                             "retrieval_prf",
                                             rh,
                                             query=prf_query,
                                             alpha=hybrid_alpha,
-                                            index_namespace=index_namespace,
+                                            index_namespace=retrieval_index_namespace,
                                             allowed_media_ids=include_media_ids,
                                         )
                                     else:
@@ -3044,7 +3123,8 @@ async def unified_rag_pipeline(
                                             query=prf_query,
                                             sources=data_sources,
                                             config=config,
-                                            index_namespace=index_namespace,
+                                            index_namespace=retrieval_index_namespace,
+                                            retrieval_plan=_retrieval_plan_for(prf_query),
                                             allowed_media_ids=include_media_ids,
                                             allowed_note_ids=include_note_ids,
                                         )
@@ -3056,7 +3136,7 @@ async def unified_rag_pipeline(
                                             result.documents.append(d)
                                             existing_ids.add(d.id)
                                             added += 1
-                                            if len(result.documents) >= top_k:
+                                            if len(result.documents) >= retrieval_top_k:
                                                 break
                                     result.metadata["prf"]["second_pass_performed"] = True
                                     result.metadata["prf"]["second_pass_added"] = int(added)
@@ -3155,11 +3235,11 @@ async def unified_rag_pipeline(
                             # Only run additional retrievals for secondary subqueries
                             if len(subqueries) > 1:
                                 try:
-                                    subquery_max_results = max(1, int(top_k or 1))
+                                    subquery_max_results = max(1, int(retrieval_top_k or 1))
                                     if doc_budget is not None:
                                         subquery_max_results = max(1, min(subquery_max_results, int(doc_budget)))
                                 except (TypeError, ValueError):
-                                    subquery_max_results = max(1, int(top_k or 1))
+                                    subquery_max_results = max(1, int(retrieval_top_k or 1))
 
                                 async def _fetch_subquery(sq: str) -> list[Document]:
                                     try:
@@ -3172,7 +3252,8 @@ async def unified_rag_pipeline(
                                         query=sq,
                                         sources=data_sources,
                                         config=sq_cfg,
-                                        index_namespace=index_namespace,
+                                        index_namespace=retrieval_index_namespace,
+                                        retrieval_plan=_retrieval_plan_for(sq),
                                         allowed_media_ids=include_media_ids,
                                         allowed_note_ids=include_note_ids,
                                     )
@@ -3244,7 +3325,7 @@ async def unified_rag_pipeline(
                                         result.documents,
                                         key=lambda d: getattr(d, "score", 0.0),
                                         reverse=True,
-                                    )[: top_k]
+                                    )[: retrieval_top_k]
                                 except (TypeError, ValueError):
                                     # Fallback: leave documents in current order
                                     pass
@@ -4043,10 +4124,10 @@ async def unified_rag_pipeline(
 
                         retriever = _build_multi_retriever(db_paths)
                         config = RetrievalConfig(
-                            max_results=top_k,
-                            min_score=min_score,
-                            use_fts=(search_mode in ["fts", "hybrid"]),
-                            use_vector=(search_mode in ["vector", "hybrid"]),
+                            max_results=retrieval_top_k,
+                            min_score=retrieval_min_score,
+                            use_fts=(retrieval_search_mode in ["fts", "hybrid"]),
+                            use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
                             include_metadata=True,
                             fts_level=fts_level,
                             enable_text_late_chunking=enable_text_late_chunking,
@@ -4062,7 +4143,8 @@ async def unified_rag_pipeline(
                             query=gap_query,
                             sources=data_sources,
                             config=config,
-                            index_namespace=index_namespace,
+                            index_namespace=retrieval_index_namespace,
+                            retrieval_plan=_retrieval_plan_for(gap_query),
                             allowed_media_ids=include_media_ids,
                             allowed_note_ids=include_note_ids,
                         )
@@ -4257,10 +4339,10 @@ async def unified_rag_pipeline(
 
                             retriever = _build_multi_retriever(db_paths)
                             retrieval_config = RetrievalConfig(
-                                max_results=top_k,
-                                min_score=min_score,
-                                use_fts=(search_mode in ["fts", "hybrid"]),
-                                use_vector=(search_mode in ["vector", "hybrid"]),
+                                max_results=retrieval_top_k,
+                                min_score=retrieval_min_score,
+                                use_fts=(retrieval_search_mode in ["fts", "hybrid"]),
+                                use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
                                 include_metadata=True,
                                 fts_level=fts_level,
                                 enable_text_late_chunking=enable_text_late_chunking,
@@ -4275,7 +4357,8 @@ async def unified_rag_pipeline(
                                 query=rewritten_query,
                                 sources=data_sources,
                                 config=retrieval_config,
-                                index_namespace=index_namespace,
+                                index_namespace=retrieval_index_namespace,
+                                retrieval_plan=_retrieval_plan_for(rewritten_query),
                             )
 
                             if new_docs:
@@ -6676,6 +6759,16 @@ async def unified_batch_pipeline(
     # Map cluster head index -> representative query text
     heads = list(clusters.keys())
     head_queries = [rep_texts[h] for h in heads]
+    base_retrieval_plan = kwargs.get("retrieval_plan")
+
+    def _pipeline_kwargs_for_query(query_text: str) -> dict[str, Any]:
+        effective_kwargs = dict(kwargs)
+        if isinstance(base_retrieval_plan, RetrievalPlan):
+            effective_kwargs["retrieval_plan"] = replace(
+                base_retrieval_plan,
+                query=query_text,
+            )
+        return effective_kwargs
 
     # Run head queries via batch_utils for concurrency control and fail-fast
     head_results: list[Any] = []
@@ -6690,7 +6783,10 @@ async def unified_batch_pipeline(
 
         async def _process_head(index: int, query: str) -> UnifiedPipelineResult:
             async with semaphore:
-                return await unified_rag_pipeline(query=query, **kwargs)
+                return await unified_rag_pipeline(
+                    query=query,
+                    **_pipeline_kwargs_for_query(query),
+                )
 
         head_results = [RuntimeError("Missing result")] * len(head_queries)
         tasks: dict[asyncio.Task[UnifiedPipelineResult], int] = {}
@@ -6758,7 +6854,10 @@ async def unified_batch_pipeline(
             from .batch_utils import run_batch as _run_batch
 
             async def _process_head(query: str) -> UnifiedPipelineResult:
-                return await unified_rag_pipeline(query=query, **kwargs)
+                return await unified_rag_pipeline(
+                    query=query,
+                    **_pipeline_kwargs_for_query(query),
+                )
 
             _batch_result = await _run_batch(
                 items=head_queries,
@@ -6774,7 +6873,10 @@ async def unified_batch_pipeline(
             # Fallback to inline semaphore if batch_utils unavailable
             async def process_with_semaphore(query: str) -> UnifiedPipelineResult:
                 async with semaphore:
-                    return await unified_rag_pipeline(query=query, **kwargs)
+                    return await unified_rag_pipeline(
+                        query=query,
+                        **_pipeline_kwargs_for_query(query),
+                    )
 
             tasks = [process_with_semaphore(q) for q in head_queries]
             head_results = await asyncio.gather(*tasks, return_exceptions=True)

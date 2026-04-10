@@ -64,6 +64,7 @@ from tldw_Server_API.app.core.RAG.rag_service.request_resolution import (
     apply_search_agent_defaults as apply_core_search_agent_defaults,
     resolve_rag_request,
 )
+from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import build_retrieval_plan
 from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
     rag_result_from_unified_search_result,
     rag_result_to_response,
@@ -184,14 +185,17 @@ def _build_unified_pipeline_kwargs(
 ) -> dict[str, Any]:
     if resolved_request is None:
         resolved_request = _resolve_standard_request(request, current_user)
+    retrieval_plan = build_retrieval_plan(resolved_request)
     payload = dict(resolved_request.payload)
+    payload["sources"] = list(retrieval_plan.sources)
     payload["media_db_path"] = db_paths.get("media_db_path")
     payload["notes_db_path"] = db_paths.get("notes_db_path")
     payload["character_db_path"] = db_paths.get("character_db_path")
     payload["kanban_db_path"] = db_paths.get("kanban_db_path")
     payload["media_db"] = media_db
     payload["chacha_db"] = chacha_db
-    payload["index_namespace"] = resolved_request.index_namespace
+    payload["index_namespace"] = retrieval_plan.index_namespace
+    payload["retrieval_plan"] = retrieval_plan
     payload["user_id"] = resolved_request.user_id
     payload["feedback_user_id"] = resolved_request.feedback_user_id
     signature = inspect.signature(unified_rag_pipeline)
@@ -226,13 +230,16 @@ def _build_batch_pipeline_kwargs(
         search_agent_setting_fn=_search_agent_setting,
         search_agent_allowed_fields=_BATCH_ROUND2_DEFAULT_FIELDS,
     )
+    retrieval_plan = build_retrieval_plan(resolved_request)
     payload = dict(resolved_request.payload)
     payload.pop("queries", None)
     payload.pop("query", None)
     payload.pop("max_concurrent", None)
     payload.pop("enable_checkpoint", None)
+    payload["sources"] = list(retrieval_plan.sources)
     payload.update(db_paths)
-    payload["index_namespace"] = resolved_request.index_namespace
+    payload["index_namespace"] = retrieval_plan.index_namespace
+    payload["retrieval_plan"] = retrieval_plan
     payload["user_id"] = resolved_request.user_id
     payload["feedback_user_id"] = resolved_request.feedback_user_id
     return payload
