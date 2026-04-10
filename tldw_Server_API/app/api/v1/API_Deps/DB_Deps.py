@@ -345,6 +345,14 @@ def get_media_db_path_for_rag(media_db: Any) -> str | None:
 
 def reset_media_db_cache() -> None:
     """Clear cached Media DB factories and any legacy cached instances."""
+    def _warn(step: str, exc: Exception) -> None:
+        logger.warning(
+            "Failed {} during media DB cache reset: {}",
+            step,
+            exc,
+            exc_info=True,
+        )
+
     managed_backends = []
     with _user_db_lock:
         try:
@@ -356,47 +364,50 @@ def reset_media_db_cache() -> None:
             )
             for db in list(values_iter):  # type: ignore[arg-type]
                 try:
-                    backend = getattr(db, "backend", None)
-                    if backend is not None:
-                        managed_backends.append(backend)
-                except (AttributeError, RuntimeError, TypeError, ValueError):
-                    pass
+                    backend = db.backend
+                except AttributeError:
+                    backend = None
+                except RuntimeError as exc:
+                    _warn("legacy DB backend", exc)
+                    backend = None
+                if backend is not None:
+                    managed_backends.append(backend)
                 try:
                     if hasattr(db, "release_context_connection"):
                         db.release_context_connection()
                     if hasattr(db, "close_connection"):
                         db.close_connection()
-                except (DatabaseError, OSError, RuntimeError, TypeError, ValueError):
-                    pass
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            pass
+                except (DatabaseError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                    _warn("legacy DB connection cleanup", exc)
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            _warn("legacy DB cache iteration", exc)
         try:
             _user_db_instances.clear()  # type: ignore[attr-defined]
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            pass
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            _warn("legacy DB cache clear", exc)
         try:
             for factory in list(_media_db_factories.values()):  # type: ignore[attr-defined]
                 try:
-                    backend = getattr(factory, "backend", None)
-                    if backend is not None:
-                        managed_backends.append(backend)
-                except (AttributeError, RuntimeError, TypeError, ValueError):
-                    pass
+                    backend = factory.backend
+                except AttributeError:
+                    backend = None
+                except RuntimeError as exc:
+                    _warn("factory backend", exc)
+                    backend = None
+                if backend is not None:
+                    managed_backends.append(backend)
                 try:
                     if hasattr(factory, "close"):
                         factory.close()
-                except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-                    pass
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            pass
+                except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                    _warn("factory close", exc)
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            _warn("factory cache iteration", exc)
         try:
             _media_db_factories.clear()  # type: ignore[attr-defined]
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            pass
-        try:
-            reset_managed_sqlite_backends(mode="hard", backends=managed_backends)
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            pass
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            _warn("factory cache clear", exc)
+        reset_managed_sqlite_backends(mode="hard", backends=managed_backends)
 
 
 async def try_get_media_db_for_user(

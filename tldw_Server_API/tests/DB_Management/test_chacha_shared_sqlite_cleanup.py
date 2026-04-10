@@ -72,6 +72,8 @@ def test_collections_close_does_not_break_direct_chacha_wrapper_for_same_sqlite_
     previous_base_dir = settings.get("USER_DB_BASE_DIR")
     settings.USER_DB_BASE_DIR = str(tmp_path)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    collections_db: CollectionsDatabase | None = None
+    direct_helper: CharactersRAGDB | None = None
 
     try:
         media_db_path = tmp_path / "42" / "Media_DB_v2.db"
@@ -84,6 +86,16 @@ def test_collections_close_does_not_break_direct_chacha_wrapper_for_same_sqlite_
 
         _select_one(direct_helper)
     finally:
+        if direct_helper is not None:
+            try:
+                direct_helper.close_all_connections()
+            except Exception:
+                pass
+        if collections_db is not None:
+            try:
+                collections_db.close()
+            except Exception:
+                pass
         if previous_base_dir is not None:
             settings.USER_DB_BASE_DIR = previous_base_dir
         else:

@@ -444,6 +444,7 @@ class CollectionsDatabase:
         """Release backend connections if this instance owns the backend."""
         if not self._owns_backend:
             return
+        self._owns_backend = False
         if (
             getattr(self.backend, "backend_type", None) == BackendType.SQLITE
             and is_factory_managed_backend(self.backend)

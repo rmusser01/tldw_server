@@ -1,5 +1,4 @@
 import os
-import time
 from configparser import ConfigParser
 
 import pytest
@@ -132,7 +131,19 @@ def test_reset_content_backend_keeps_unrelated_userdatabase_shared_sqlite_backen
     tmp_path,
 ):
     monkeypatch.delenv("TLDW_CONTENT_DB_BACKEND", raising=False)
-    monkeypatch.setattr(backend_factory, "_SQLITE_EVICTION_GRACE_SECONDS", 0.05, raising=False)
+
+    class _ImmediateThread:
+        def __init__(self, *, target=None, args=(), kwargs=None, daemon=None):
+            self._target = target
+            self._args = args
+            self._kwargs = kwargs or {}
+
+        def start(self) -> None:
+            if self._target is not None:
+                self._target(*self._args, **self._kwargs)
+
+    monkeypatch.setattr(backend_factory.time, "sleep", lambda _seconds: None, raising=True)
+    monkeypatch.setattr(backend_factory, "Thread", _ImmediateThread, raising=True)
 
     media_db_path = tmp_path / "managed-media.db"
     users_db_path = tmp_path / "managed-users.db"
@@ -164,7 +175,6 @@ def test_reset_content_backend_keeps_unrelated_userdatabase_shared_sqlite_backen
     assert backend_factory.is_factory_managed_backend(users_backend) is True
 
     DB_Manager.reset_content_backend(config=_cfg_with("postgres"), reload=False)
-    time.sleep(0.2)
 
     assert backend_factory.is_factory_managed_backend(media_backend) is False
     assert backend_factory.is_factory_managed_backend(users_backend) is True

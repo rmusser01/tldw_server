@@ -8,6 +8,7 @@ import {
 } from "./smoke.setup"
 import {
   dismissConnectionModals,
+  getVisibleAntdSelectDropdown,
   getAntdSelectTrigger,
   waitForAppShell
 } from "../utils/helpers"
@@ -65,6 +66,9 @@ async function openSpeechInputSourcePicker(page: Page) {
   }
   await expect(inputSourcePicker).toBeVisible({ timeout: LOAD_TIMEOUT })
   await inputSourcePicker.click({ force: true })
+  const dropdown = getVisibleAntdSelectDropdown(page)
+  await expect(dropdown).toBeVisible({ timeout: LOAD_TIMEOUT })
+  return dropdown
 }
 
 test.describe("Stage 7 audio regression gate", () => {
@@ -287,10 +291,11 @@ test.describe("Stage 7 audio regression gate", () => {
     await waitForAppShell(page, LOAD_TIMEOUT)
     await dismissConnectionModals(page)
 
-    await openSpeechInputSourcePicker(page)
-    await expect(page.getByRole("option", { name: /Default microphone/i })).toBeVisible()
-    await expect(page.getByRole("option", { name: /Tab audio/i })).toHaveCount(0)
-    await expect(page.getByRole("option", { name: /System audio/i })).toHaveCount(0)
+    const dropdown = await openSpeechInputSourcePicker(page)
+    const options = dropdown.locator(".ant-select-item-option-content")
+    await expect(options.filter({ hasText: /Default microphone/i })).toBeVisible()
+    await expect(options.filter({ hasText: /Tab audio/i })).toHaveCount(0)
+    await expect(options.filter({ hasText: /System audio/i })).toHaveCount(0)
   })
 
   test("stt transcription-model timeout state shows retry and recovers", async ({

@@ -147,6 +147,7 @@ class MediaDbFactory:
         backend = self.backend
         if backend is None:
             return
+        self.backend = None
         if (
             getattr(backend, "backend_type", None) == BackendType.SQLITE
             and is_factory_managed_backend(backend)

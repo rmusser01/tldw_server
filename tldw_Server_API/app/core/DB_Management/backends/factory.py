@@ -58,11 +58,16 @@ def _snapshot_sqlite_config(config: DatabaseConfig) -> DatabaseConfig:
     return replace(config)
 
 
-def _sqlite_uri_to_file_path(raw_uri: str) -> Optional[Path]:
-    try:
-        parsed = _url.urlparse(raw_uri)
-    except (TypeError, ValueError):
-        return None
+def _sqlite_uri_to_file_path(
+    raw_uri: str,
+    *,
+    parsed: _url.ParseResult | None = None,
+) -> Optional[Path]:
+    if parsed is None:
+        try:
+            parsed = _url.urlparse(raw_uri)
+        except (TypeError, ValueError):
+            return None
     if parsed.scheme != "file":
         return None
     path = _url.unquote(parsed.path or "")
@@ -112,19 +117,38 @@ def _is_named_shared_cache_memory_uri(raw_path: str) -> bool:
     return bool((parsed.path or "").strip("/"))
 
 
+def _canonicalize_named_shared_cache_memory_uri(raw_uri: str) -> str:
+    try:
+        parsed = _url.urlparse(raw_uri)
+    except (TypeError, ValueError):
+        return raw_uri
+
+    raw_name = _url.unquote(parsed.path or "")
+    if not raw_name:
+        return raw_uri
+
+    extra_pairs = [
+        (key, value)
+        for key, value in _url.parse_qsl(parsed.query or "", keep_blank_values=True)
+        if key.lower() not in {"cache", "mode"}
+    ]
+    extra_pairs.sort(key=lambda item: (item[0], item[1]))
+    query_pairs = [("cache", "shared"), ("mode", "memory"), *extra_pairs]
+    return f"file:{raw_name}?{_url.urlencode(query_pairs, doseq=True)}"
+
+
 def _normalize_sqlite_target(raw_path: str) -> str:
     cleaned = (raw_path or "").strip()
     if cleaned.lower().startswith("file:"):
         if _is_anonymous_memory_uri(cleaned):
             return cleaned
         if _is_named_shared_cache_memory_uri(cleaned):
-            # Preserve exact identity for named shared-cache memory URIs only.
-            return cleaned
+            return _canonicalize_named_shared_cache_memory_uri(cleaned)
         try:
             parsed = _url.urlparse(cleaned)
         except (TypeError, ValueError):
             parsed = None
-        maybe_file = _sqlite_uri_to_file_path(cleaned)
+        maybe_file = _sqlite_uri_to_file_path(cleaned, parsed=parsed)
         if maybe_file is not None:
             if parsed and parsed.query:
                 # Keep behavior-affecting URI options distinct in canonical identity.
@@ -164,10 +188,36 @@ def _sqlite_signature(config: DatabaseConfig) -> tuple | None:
     )
 
 
+def _retire_backend_instance(backend: DatabaseBackend) -> None:
+    if getattr(backend, "backend_type", None) != BackendType.SQLITE:
+        return
+
+    pool_lock = getattr(backend, "_pool_lock", None)
+    if pool_lock is not None:
+        with pool_lock:
+            setattr(backend, "_retired", True)
+        return
+
+    if hasattr(backend, "_retired"):
+        setattr(backend, "_retired", True)
+
+
 def _close_backend_instance(name: str, backend: DatabaseBackend) -> None:
     try:
-        if hasattr(backend, "_pool") and backend._pool:
-            backend._pool.close_all()
+        _retire_backend_instance(backend)
+        pool_lock = getattr(backend, "_pool_lock", None)
+        if pool_lock is not None:
+            with pool_lock:
+                pool = getattr(backend, "_pool", None)
+                if pool is not None:
+                    pool.close_all()
+                    backend._pool = None
+        else:
+            pool = getattr(backend, "_pool", None)
+            if pool is not None:
+                pool.close_all()
+                if hasattr(backend, "_pool"):
+                    backend._pool = None
         logger.info(f"Closed backend: {name}")
     except Exception as e:
         logger.error(f"Error closing backend {name}: {e}")
@@ -180,6 +230,15 @@ def _close_backends_deduplicated(backends: list[tuple[str, DatabaseBackend]]) ->
             continue
         seen.add(id(backend))
         _close_backend_instance(name, backend)
+
+
+def _retire_backends_deduplicated(backends: list[tuple[str, DatabaseBackend]]) -> None:
+    seen: set[int] = set()
+    for _, backend in backends:
+        if id(backend) in seen:
+            continue
+        seen.add(id(backend))
+        _retire_backend_instance(backend)
 
 
 def _evict_backend_references() -> list[tuple[str, DatabaseBackend]]:
@@ -214,7 +273,7 @@ def _evict_selected_sqlite_backend_references(
     sqlite_managed: list[tuple[str, DatabaseBackend]] = []
     with _sqlite_registry_lock:
         for signature, backend in list(_sqlite_backend_registry.items()):
-            signature_target = signature[1] if len(signature) > 1 else ""
+            signature_target = signature[1]
             if (
                 id(backend) in selected_backend_ids
                 or signature_target in normalized_targets
@@ -239,6 +298,7 @@ def _evict_selected_sqlite_backend_references(
 def _close_evicted_backends(evicted: list[tuple[str, DatabaseBackend]], mode: str) -> None:
     if not evicted:
         return
+    _retire_backends_deduplicated(evicted)
     if mode == "hard":
         _close_backends_deduplicated(evicted)
         return
@@ -491,21 +551,28 @@ def get_backend(
     """
     with _backend_instances_lock:
         existing = _backend_instances.get(name)
-    if existing is not None:
-        return existing
+        if existing is not None:
+            return existing
 
     if not create_if_missing:
         return None
 
-    if config is None:
-        # Build config from environment variables
-        config = DatabaseConfig.from_env()
-        backend = DatabaseBackendFactory.create_backend(config)
-    else:
-        backend = DatabaseBackendFactory.create_backend(config)
+    resolved_config = config if config is not None else DatabaseConfig.from_env()
+    backend = DatabaseBackendFactory.create_backend(resolved_config)
 
+    duplicate: DatabaseBackend | None = None
     with _backend_instances_lock:
-        _backend_instances[name] = backend
+        existing = _backend_instances.get(name)
+        if existing is not None:
+            if existing is not backend:
+                duplicate = backend
+            backend = existing
+        else:
+            _backend_instances[name] = backend
+
+    if duplicate is not None:
+        _close_backend_instance(name, duplicate)
+
     return backend
 
 

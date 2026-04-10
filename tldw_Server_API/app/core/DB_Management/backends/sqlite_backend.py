@@ -244,6 +244,7 @@ class SQLiteBackend(DatabaseBackend):
     def __init__(self, config: DatabaseConfig):
         super().__init__(config)
         self._pool_lock = threading.Lock()
+        self._retired = False
 
     @property
     def backend_type(self) -> BackendType:
@@ -336,8 +337,12 @@ class SQLiteBackend(DatabaseBackend):
 
     def get_pool(self) -> ConnectionPool:
         """Get or create the connection pool."""
+        if self._retired:
+            raise DatabaseError("SQLite backend has been retired")
         if self._pool is None:
             with self._pool_lock:
+                if self._retired:
+                    raise DatabaseError("SQLite backend has been retired")
                 if self._pool is None:
                     if not self.config.sqlite_path:
                         raise DatabaseError("SQLite path not configured")

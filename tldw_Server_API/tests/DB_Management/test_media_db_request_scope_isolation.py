@@ -323,6 +323,57 @@ def test_reset_media_db_cache_closes_cached_factories(monkeypatch) -> None:
     assert deps._media_db_factories == {}
 
 
+def test_reset_media_db_cache_logs_cleanup_failures(monkeypatch) -> None:
+    recorder = _RecordingLogger()
+
+    class _BrokenDb:
+        @property
+        def backend(self):
+            raise RuntimeError("db backend unavailable")
+
+        def close_connection(self) -> None:
+            raise RuntimeError("db close failed")
+
+    class _BrokenFactory:
+        @property
+        def backend(self):
+            raise RuntimeError("factory backend unavailable")
+
+        def close(self) -> None:
+            raise RuntimeError("factory close failed")
+
+    monkeypatch.setattr(deps, "logger", recorder, raising=True)
+    monkeypatch.setattr(deps, "_user_db_instances", {1: _BrokenDb()}, raising=True)
+    monkeypatch.setattr(deps, "_media_db_factories", {2: _BrokenFactory()}, raising=True)
+    monkeypatch.setattr(deps, "reset_managed_sqlite_backends", lambda **kwargs: None, raising=True)
+
+    deps.reset_media_db_cache()
+
+    assert deps._user_db_instances == {}
+    assert deps._media_db_factories == {}
+    assert any("legacy DB backend during media DB cache reset" in call for call in recorder.warning_calls)
+    assert any("legacy DB connection cleanup during media DB cache reset" in call for call in recorder.warning_calls)
+    assert any("factory backend during media DB cache reset" in call for call in recorder.warning_calls)
+    assert any("factory close during media DB cache reset" in call for call in recorder.warning_calls)
+
+
+def test_reset_media_db_cache_propagates_managed_backend_reset_failures(monkeypatch) -> None:
+    monkeypatch.setattr(deps, "_user_db_instances", {}, raising=True)
+    monkeypatch.setattr(deps, "_media_db_factories", {}, raising=True)
+    monkeypatch.setattr(
+        deps,
+        "reset_managed_sqlite_backends",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("reset failed")),
+        raising=True,
+    )
+
+    with pytest.raises(RuntimeError, match="reset failed"):
+        deps.reset_media_db_cache()
+
+    assert deps._user_db_instances == {}
+    assert deps._media_db_factories == {}
+
+
 def test_reset_media_db_cache_only_evicts_cached_media_managed_sqlite_backends(
     monkeypatch,
     tmp_path,
@@ -494,6 +545,44 @@ def test_media_db_factory_close_does_not_close_factory_managed_shared_pool(monke
 
     assert released == [backend]
     assert closed == []
+
+
+def test_media_db_factory_close_releases_managed_backend_at_most_once(
+    monkeypatch,
+) -> None:
+    released: list[object] = []
+
+    class _Backend:
+        backend_type = BackendType.SQLITE
+
+        def get_pool(self):
+            raise AssertionError("managed backend close should not touch the pool")
+
+    backend = _Backend()
+    factory = media_db_session.MediaDbFactory(
+        db_path="/tmp/shared.db",
+        client_id="1",
+        backend=backend,
+    )
+
+    monkeypatch.setattr(
+        media_db_session,
+        "is_factory_managed_backend",
+        lambda candidate: candidate is backend,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        media_db_session,
+        "release_managed_backend",
+        lambda candidate: released.append(candidate),
+        raising=False,
+    )
+
+    factory.close()
+    factory.close()
+
+    assert factory.backend is None
+    assert released == [backend]
 
 
 def test_media_db_factory_close_with_real_managed_sqlite_backend_avoids_pool_shutdown(tmp_path) -> None:

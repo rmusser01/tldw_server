@@ -5,6 +5,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.UserDatabase_v2 import UserDatabase
 from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import WorkflowsSchedulerDB
+from tldw_Server_API.app.core.DB_Management.backends import factory as factory_mod
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
@@ -31,6 +32,13 @@ class _RecordingLogger:
 
     def exception(self, message, *args, **kwargs) -> None:
         self.exception_calls.append(message.format(*args))
+
+
+@pytest.fixture(autouse=True)
+def _reset_backend_caches() -> None:
+    factory_mod.close_all_backends()
+    yield
+    factory_mod.close_all_backends()
 
 
 def _close_scheduler_backend(db: WorkflowsSchedulerDB) -> None:
