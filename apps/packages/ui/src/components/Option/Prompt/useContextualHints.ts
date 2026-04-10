@@ -6,6 +6,7 @@ export type HintId =
   | "gallery-view"
   | "bulk-actions"
   | "command-palette"
+  | "filter-presets"
 
 const STORAGE_PREFIX = "tldw-prompt-hint-dismissed-"
 const MAX_SHOWS = 3
@@ -54,6 +55,7 @@ export function useContextualHints() {
       "gallery-view",
       "bulk-actions",
       "command-palette",
+      "filter-presets",
     ]
     const set = new Set<HintId>()
     for (const id of allIds) {

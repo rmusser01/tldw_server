@@ -11,7 +11,8 @@ import {
   Unlink,
   AlertTriangle,
   Link,
-  Play
+  Play,
+  History
 } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -34,6 +35,7 @@ interface PromptActionsMenuProps {
   onPullFromServer?: () => void
   onUnlink?: () => void
   onResolveConflict?: () => void
+  onViewHistory?: () => void
 }
 
 export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
@@ -52,7 +54,8 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
   onPushToServer,
   onPullFromServer,
   onUnlink,
-  onResolveConflict
+  onResolveConflict,
+  onViewHistory
 }) => {
   const { t } = useTranslation(["settings", "common", "option"])
 
@@ -158,6 +161,17 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
       disabled,
       onClick: onDuplicate
     },
+    ...(onViewHistory
+      ? [
+          {
+            key: "viewHistory",
+            label: t("managePrompts.versionHistory", { defaultValue: "Version history" }),
+            icon: <History className="size-4" />,
+            disabled,
+            onClick: onViewHistory
+          }
+        ]
+      : []),
     {
       type: "divider"
     },

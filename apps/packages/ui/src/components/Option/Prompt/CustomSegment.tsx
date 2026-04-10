@@ -1,4 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import {
   Alert,
   Input,
@@ -11,6 +12,7 @@ import {
   type InputRef
 } from "antd"
 import {
+  Bookmark,
   ChevronDown,
   ChevronUp,
   Cloud,
@@ -140,6 +142,7 @@ export function CustomSegment({
   bulkSelectionSyncRef,
   searchInputRef,
 }: CustomSegmentProps) {
+  const navigate = useNavigate()
   const {
     queryClient,
     isOnline,
@@ -180,6 +183,7 @@ export function CustomSegment({
   const [promptSort, setPromptSort] = useState<PromptSortState>(readSort)
   const [savedView, setSavedView] = useState<PromptSavedView>("all")
   const [mobileFiltersExpanded, setMobileFiltersExpanded] = useState(false)
+  const filterChangeCountRef = useRef(0)
 
   const { presets: filterPresets, savePreset: saveFilterPreset, deletePreset: deleteFilterPreset } = useFilterPresets()
   const { shouldShow: shouldShowHint, dismiss: dismissHint, markShown: markHintShown } = useContextualHints()
@@ -289,6 +293,11 @@ export function CustomSegment({
   useEffect(() => { try { window.localStorage.setItem(TABLE_DENSITY_KEY, tableDensity) } catch {} }, [tableDensity])
   useEffect(() => { try { window.localStorage.setItem(VIEW_MODE_KEY, viewMode) } catch {} }, [viewMode])
   useEffect(() => { try { window.localStorage.setItem(GALLERY_DENSITY_KEY, galleryDensity) } catch {} }, [galleryDensity])
+
+  // Track filter changes for the "save filters" hint
+  useEffect(() => {
+    filterChangeCountRef.current += 1
+  }, [typeFilter, tagFilter, syncFilter, usageFilter, savedView])
 
   useEffect(() => {
     if (!shouldUseServerSearch || serverSearchStatus !== "error") return
@@ -423,10 +432,15 @@ export function CustomSegment({
               ? () => { sync.openConflictResolution(row.id) }
               : undefined
           }
+          onViewHistory={
+            isOnline && row.serverId && promptRecord
+              ? () => { navigate(`/prompts?tab=studio&subtab=prompts&prompt=${row.serverId}`) }
+              : undefined
+          }
         />
       )
     },
-    [getPromptRecordById, editor, onUsePromptInChat, onQuickTest, isFireFoxPrivateMode, isOnline, sync]
+    [getPromptRecordById, editor, onUsePromptInChat, onQuickTest, isFireFoxPrivateMode, isOnline, sync, navigate]
   )
 
   const customPromptsLoading = status === "pending" || (shouldUseServerSearch && serverSearchStatus === "pending")
@@ -748,9 +762,43 @@ export function CustomSegment({
                 />
               </div>
             )}
+            {/* Save filters button — visible when any filter is active */}
+            {(typeFilter !== "all" || tagFilter.length > 0 || syncFilter !== "all" || usageFilter !== "all" || savedView !== "all") && (
+              <div className="w-full sm:w-auto">
+                <Tooltip title={t("managePrompts.filter.savePresetHint", { defaultValue: "Save current filters as a preset" })}>
+                  <button
+                    type="button"
+                    data-testid="prompts-save-filter-preset"
+                    onClick={() => {
+                      const name = window.prompt(t("managePrompts.filter.presetNamePrompt", { defaultValue: "Name for this filter preset:" }))
+                      if (name?.trim()) handleSaveFilterPreset(name.trim())
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-sm text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-1"
+                  >
+                    <Bookmark className="size-3.5" />
+                    {t("managePrompts.filter.savePreset", { defaultValue: "Save filters" })}
+                  </button>
+                </Tooltip>
+              </div>
+            )}
             </div>{/* end secondary filters wrapper */}
           </div>
         </PromptListToolbar>
+
+        {/* Contextual hint: suggest saving filter presets after 3+ filter changes */}
+        {filterChangeCountRef.current >= 3 && shouldShowHint("filter-presets") && (
+          <Suspense fallback={null}>
+            <ContextualHint
+              id="filter-presets"
+              message={t("managePrompts.filter.presetHint", {
+                defaultValue: "Tip: Save your current filter combination as a preset for quick access later."
+              })}
+              visible={true}
+              onDismiss={dismissHint}
+              onShown={markHintShown}
+            />
+          </Suspense>
+        )}
       </div>
 
       {customPromptsLoading && <Skeleton paragraph={{ rows: 8 }} />}
