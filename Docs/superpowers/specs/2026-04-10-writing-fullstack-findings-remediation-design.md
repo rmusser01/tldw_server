@@ -136,6 +136,7 @@ The implementation will add narrow helper-level checks that answer two questions
 These checks will then be used by the reviewed high-risk paths:
 
 - child-by-id reads and writes for parts, chapters, scenes, characters, relationships, world info, plot lines, plot events, plot holes, and linked-scene metadata where those routes are exposed through the Writing module
+- parent-scoped child collection routes keyed by project-owned parents, such as scenes-by-chapter, scene-characters-by-scene, scene-world-info-by-scene, and other equivalent collection reads
 - create flows that accept `project_id`, `chapter_id`, `part_id`, or other project-owned parent references
 - link and unlink flows that currently trust only the immediate child row
 - project-scoped search and cached-analysis listing
@@ -144,6 +145,7 @@ These checks will then be used by the reviewed high-risk paths:
 Approved route-contract behavior:
 
 - project-scoped list and search routes keep their current collection-style contract and return empty results when the project is deleted
+- parent-scoped child collection routes keep their current collection-style contract and return empty results when the parent or owning project is deleted
 - child-by-id read, update, delete, analyze, and link flows should behave as missing or deleted resources through the existing route error mapping
 - create, reorder, and link flows under deleted projects or deleted parents should fail at the helper boundary before mutation
 
@@ -327,6 +329,7 @@ New frontend helper files are acceptable only if they keep the editor adapter or
 Add or update focused tests for:
 
 - deleted-project descendant by-id reads returning no readable resource
+- deleted-project or deleted-parent child collection routes returning empty results instead of leaking descendants
 - deleted-project create, link, reorder, and search rejection or suppression behavior
 - cached-analysis suppression for deleted projects and deleted scopes
 - project-analysis invalidation after part, chapter, and scene reorder or reparent
@@ -357,9 +360,11 @@ Add or update focused tests for:
 Use repo-local package scripts instead of global binaries:
 
 ```bash
-cd apps/packages/ui && bun run test -- src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx src/components/Option/WritingPlayground/__tests__/WritingPlayground.tiptap-session-sync.test.tsx src/components/Option/WritingPlayground/__tests__/WritingPlayground.tiptap-split-view.test.tsx src/components/Option/WritingPlayground/__tests__/WritingPlayground.tiptap-editor-actions.test.tsx src/components/Option/WritingPlayground/__tests__/useWritingImportExport.snapshot-refresh.test.tsx --maxWorkers=1
+cd apps/packages/ui && bun run test -- src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx src/components/Option/WritingPlayground/__tests__/writing-editor-actions-utils.test.ts src/components/Option/WritingPlayground/__tests__/writing-snapshot-import-utils.test.ts --maxWorkers=1
 cd apps/tldw-frontend && bun run test:run -- extension/__tests__/writing-playground-route-parity.guard.test.ts
 ```
+
+The implementation plan will append the exact new TipTap and snapshot-refresh test files introduced in this tranche to the same package-local UI command, using the concrete filenames chosen during implementation.
 
 If the package-local runner still cannot start because workspace dependencies are unavailable, that remains an explicit verification blocker and frontend completion cannot be claimed.
 
