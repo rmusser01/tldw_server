@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 
+from .retrieval_executor import execute_retrieval_phase
 from .retrieval_plan import RetrievalPlan
 
 _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS = 500
@@ -2899,32 +2900,54 @@ async def unified_rag_pipeline(
                             except (TypeError, ValueError):
                                 pass
 
-                    data_sources = list(resolved_data_sources)
+                    def _execution_collection_names() -> dict[str, str]:
+                        user_key = str(user_id or feedback_user_id or "0").strip() or "0"
+                        source_names = {
+                            str(getattr(source, "value", source)).strip().lower()
+                            for source in retrieval_sources
+                            if str(getattr(source, "value", source)).strip()
+                        }
+                        collection_names: dict[str, str] = {
+                            "media_db": f"user_{user_key}_media_embeddings",
+                            "notes": f"user_{user_key}_notes_embeddings",
+                        }
+                        if {"character_cards", "characters", "chats"} & source_names:
+                            collection_names["character_cards"] = f"user_{user_key}_character_embeddings"
+                        if {"kanban", "kanban_db"} & source_names:
+                            collection_names["kanban"] = f"user_{user_key}_kanban_embeddings"
+                        return collection_names
 
-                    # Retrieve documents
-                    rh = getattr(retriever, 'retrieve_hybrid', None)
-                    hybrid_supported = rh is not None and asyncio.iscoroutinefunction(rh)
-                    if retrieval_search_mode == "hybrid" and hybrid_supported:
-                        documents = await _resilient_call(
-                            "retrieval",
-                            rh,
+                    effective_retrieval_plan = _retrieval_plan_for(retrieval_query)
+                    if effective_retrieval_plan is None:
+                        effective_retrieval_plan = RetrievalPlan(
                             query=retrieval_query,
-                            alpha=hybrid_alpha,
+                            sources=tuple(str(source) for source in retrieval_sources),
+                            search_mode=str(retrieval_search_mode),
+                            top_k=int(retrieval_top_k),
+                            min_score=float(retrieval_min_score),
                             index_namespace=retrieval_index_namespace,
-                            allowed_media_ids=include_media_ids,
+                            collection_names=_execution_collection_names(),
                         )
-                    else:
-                        documents = await _resilient_call(
-                            "retrieval",
-                            retriever.retrieve,
-                            query=retrieval_query,
-                            sources=data_sources,
-                            config=config,
+                    elif (
+                        retrieval_index_namespace is not None
+                        and effective_retrieval_plan.index_namespace != retrieval_index_namespace
+                    ):
+                        effective_retrieval_plan = replace(
+                            effective_retrieval_plan,
                             index_namespace=retrieval_index_namespace,
-                            retrieval_plan=_retrieval_plan_for(retrieval_query),
-                            allowed_media_ids=include_media_ids,
-                            allowed_note_ids=include_note_ids,
                         )
+
+                    retrieved_evidence = await _resilient_call(
+                        "retrieval",
+                        execute_retrieval_phase,
+                        resolved_request=SimpleNamespace(query=retrieval_query, user_id=user_id),
+                        retrieval_plan=effective_retrieval_plan,
+                        retriever=retriever,
+                        retrieval_config=config,
+                        allowed_media_ids=include_media_ids,
+                        allowed_note_ids=include_note_ids,
+                    )
+                    documents = list(retrieved_evidence.documents)
 
                     # Fallback: if no documents were retrieved via MultiDatabaseRetriever,
                     # perform a direct Media DB FTS-only search. This guards against

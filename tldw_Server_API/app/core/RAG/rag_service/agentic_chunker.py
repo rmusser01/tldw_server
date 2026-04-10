@@ -45,6 +45,7 @@ from .database_retrievers import MultiDatabaseRetriever, RetrievalConfig
 from .evidence_models import RetrievedEvidence
 from .post_retrieval_coordinator import PostRetrievalCoordinator
 from .request_resolution import ResolvedRAGRequest
+from .retrieval_executor import execute_retrieval_phase
 from .retrieval_plan import RetrievalPlan, build_retrieval_plan
 from .types import DataSource, Document
 from .unified_pipeline import UnifiedSearchResult
@@ -944,24 +945,14 @@ async def agentic_rag_pipeline(
         fts_level=_normalize_fts_level(fts_level),
     )
 
-    # Map source strings to DataSource for retriever
-    src_map = {
-        "media_db": DataSource.MEDIA_DB,
-        "notes": DataSource.NOTES,
-        "characters": DataSource.CHARACTER_CARDS,
-        "chats": DataSource.CHARACTER_CARDS,
-        "kanban": DataSource.KANBAN,
-        "kanban_db": DataSource.KANBAN,
-    }
-    wanted_sources = [src_map.get(s, DataSource.MEDIA_DB) for s in effective_sources]
-
     try:
-        docs = await retriever.retrieve(
-            query=effective_query,
-            sources=wanted_sources,
-            config=config,
-            index_namespace=effective_index_namespace,
+        retrieved_evidence = await execute_retrieval_phase(
+            resolved_request=resolved_request,
+            retrieval_plan=effective_retrieval_plan,
+            retriever=retriever,
+            retrieval_config=config,
         )
+        docs = list(retrieved_evidence.documents)
     except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError) as e:
         logger.warning(f"Agentic coarse retrieval failed: {e}")
         docs = []
