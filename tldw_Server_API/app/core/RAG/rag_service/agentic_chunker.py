@@ -263,6 +263,23 @@ def _resolve_agentic_request_contract(
     return resolved_request, retrieval_plan
 
 
+def _document_ids_from_provenance(
+    provenance: list[dict[str, Any]] | None,
+) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in provenance or []:
+        if not isinstance(item, dict):
+            continue
+        raw_document_id = item.get("document_id")
+        document_id = str(raw_document_id).strip() if raw_document_id is not None else ""
+        if not document_id or document_id in seen:
+            continue
+        seen.add(document_id)
+        ordered.append(document_id)
+    return ordered
+
+
 def _split_headings_and_paragraphs(text: str) -> tuple[list[tuple[str, int, int]], list[tuple[int, int]]]:
     """Return (sections, paragraphs).
 
@@ -521,7 +538,7 @@ class AgenticToolbox:
             except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
                 pass
         # Fallback keyword window search
-        terms = _keyword_terms(query)
+        terms = _keyword_terms(effective_query)
         return _find_spans(doc.content or "", terms, max_spans=max_hits, window=window)
 
     def open_section(self, doc: Document, heading: str) -> tuple[int, int] | None:
@@ -886,6 +903,10 @@ async def agentic_rag_pipeline(
     effective_top_k = max(1, int(effective_retrieval_plan.top_k or top_k or 10))
     effective_min_score = float(effective_retrieval_plan.min_score if effective_retrieval_plan.min_score is not None else min_score or 0.0)
     effective_index_namespace = effective_retrieval_plan.index_namespace
+    effective_hybrid_alpha = _coerce_float(
+        (resolved_request.payload or {}).get("hybrid_alpha", hybrid_alpha),
+        default=_coerce_float(hybrid_alpha, 0.7),
+    )
 
     # Config-driven default: require_hard_citations toggle
     try:
@@ -1110,7 +1131,7 @@ async def agentic_rag_pipeline(
     # Represent the ephemeral chunk as a Document so the existing
     # generation and response formatting utilities can handle it.
     synthetic = Document(
-        id=f"agentic:{hash((query, len(chunk_text))) & 0xFFFFFFFF:x}",
+        id=f"agentic:{hash((effective_query, len(chunk_text))) & 0xFFFFFFFF:x}",
         content=chunk_text,
         metadata={
             "title": "Agentic Ephemeral Chunk",
@@ -1122,10 +1143,15 @@ async def agentic_rag_pipeline(
         source=DataSource.MEDIA_DB,
     )
 
-    coarse_docs = list(docs[:effective_top_k])
-    lineage_docs = list(docs[: max(1, cfg.top_k_docs)])
+    retrieved_docs = list(docs[:effective_top_k])
+    coarse_docs = list(docs[: max(1, cfg.top_k_docs)])
+    derived_from_document_ids = _document_ids_from_provenance(prov)
+    if not derived_from_document_ids:
+        derived_from_document_ids = [
+            str(d.id) for d in coarse_docs if getattr(d, "id", None)
+        ]
     retrieved_evidence = RetrievedEvidence(
-        documents=coarse_docs,
+        documents=retrieved_docs,
         metadata={
             "strategy": "agentic",
             "coarse_docs": [
@@ -1147,9 +1173,7 @@ async def agentic_rag_pipeline(
         enable_citations=bool(enable_citations),
         enable_verification=bool(enable_numeric_fidelity or enable_claims or require_hard_citations),
         derived_documents=[synthetic],
-        derived_from_document_ids=[
-            str(d.id) for d in lineage_docs if getattr(d, "id", None)
-        ],
+        derived_from_document_ids=derived_from_document_ids,
     )
 
     result = UnifiedSearchResult(
@@ -1235,7 +1259,7 @@ async def agentic_rag_pipeline(
             )
             ctx = chunk_text
             gen_out = await gen.generate(
-                query=query,
+                query=effective_query,
                 context=ctx,
                 prompt_template=generation_prompt or "default",
                 max_tokens=max_generation_tokens,
@@ -1264,7 +1288,7 @@ async def agentic_rag_pipeline(
                     return [synthetic]
                 claims_run = await engine.run(
                     answer=result.generated_answer,
-                    query=query,
+                    query=effective_query,
                     documents=[synthetic],
                     claim_extractor="auto",
                     claim_verifier=claim_verifier,
@@ -1321,10 +1345,15 @@ async def agentic_rag_pipeline(
                         elif numeric_fidelity_behavior == "retry":
                             try:
                                 if media_db_path:
-                                    mdr = MultiDatabaseRetriever({"media_db": media_db_path}, user_id="rag_agentic", media_db=media_db, chacha_db=chacha_db)
+                                    mdr = MultiDatabaseRetriever(
+                                        {"media_db": media_db_path},
+                                        user_id=str(resolved_request.user_id or "rag_agentic"),
+                                        media_db=media_db,
+                                        chacha_db=chacha_db,
+                                    )
                                     conf = RetrievalConfig(
-                                        max_results=min(10, top_k),
-                                        min_score=min_score,
+                                        max_results=min(10, effective_top_k),
+                                        min_score=effective_min_score,
                                         use_fts=True,
                                         use_vector=True,
                                         include_metadata=True,
@@ -1333,7 +1362,14 @@ async def agentic_rag_pipeline(
                                     added = []
                                     for tok in list(nf.missing)[:3]:
                                         try:
-                                            added.extend(await mdr.retrieve(query=f"{query} {tok}", sources=[DataSource.MEDIA_DB], config=conf, index_namespace=index_namespace))
+                                            added.extend(
+                                                await mdr.retrieve(
+                                                    query=f"{effective_query} {tok}",
+                                                    sources=[DataSource.MEDIA_DB],
+                                                    config=conf,
+                                                    index_namespace=effective_index_namespace,
+                                                )
+                                            )
                                         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
                                             continue
                                     if added:
@@ -1354,20 +1390,20 @@ async def agentic_rag_pipeline(
                 from .post_generation_verifier import PostGenerationVerifier as _PGV
                 verifier = _PGV(max_retries=0, unsupported_threshold=float(adaptive_unsupported_threshold or 0.15), max_claims=min(10, int(claims_max or 25)))
                 vres = await verifier.verify_and_maybe_fix(
-                    query=query,
+                    query=effective_query,
                     answer=result.generated_answer,
                     base_documents=result.documents or [],
                     media_db_path=media_db_path,
                     notes_db_path=notes_db_path,
                     character_db_path=character_db_path,
-                    user_id="rag_agentic",
+                    user_id=str(resolved_request.user_id or "rag_agentic"),
                     generation_model=generation_model,
                     generation_provider=generation_provider,
                     existing_claims=None,
                     existing_summary=None,
-                    search_mode=search_mode,
-                    hybrid_alpha=hybrid_alpha,
-                    top_k=top_k,
+                    search_mode=effective_search_mode,
+                    hybrid_alpha=effective_hybrid_alpha,
+                    top_k=effective_top_k,
                 )
                 result.metadata.setdefault("post_verification", {})
                 result.metadata["post_verification"].update({

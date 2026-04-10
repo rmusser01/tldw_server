@@ -319,6 +319,61 @@ def test_rag_agentic_search_uses_shared_request_resolution_and_retrieval_plan(
     assert retrieval_plan.index_namespace == "tenant-x"
 
 
+def test_rag_agentic_search_preserves_legacy_coarse_docs_metadata_window(
+    client_with_agentic_overrides,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+
+    class FakeRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def retrieve(self, *args, **kwargs):
+            return [
+                Document(
+                    id="m1",
+                    content="Primary evidence",
+                    metadata={"title": "Doc 1", "source": "media_db", "ingestion_date": "2024-01-01"},
+                    source=DataSource.MEDIA_DB,
+                    score=0.95,
+                ),
+                Document(
+                    id="m2",
+                    content="Secondary evidence",
+                    metadata={"title": "Doc 2", "source": "media_db", "ingestion_date": "2024-01-01"},
+                    source=DataSource.MEDIA_DB,
+                    score=0.9,
+                ),
+                Document(
+                    id="m3",
+                    content="Tertiary evidence",
+                    metadata={"title": "Doc 3", "source": "media_db", "ingestion_date": "2024-01-01"},
+                    source=DataSource.MEDIA_DB,
+                    score=0.85,
+                ),
+            ]
+
+    import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as ac
+
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", FakeRetriever)
+
+    payload = {
+        "query": "coarse docs compatibility",
+        "strategy": "agentic",
+        "search_mode": "fts",
+        "top_k": 5,
+        "agentic_top_k_docs": 2,
+        "enable_generation": False,
+    }
+
+    resp = client_with_agentic_overrides.post("/api/v1/rag/search", json=payload)
+    assert resp.status_code == 200, resp.text
+    out = resp.json()
+
+    assert [entry["id"] for entry in out["metadata"]["coarse_docs"]] == ["m1", "m2"]
+
+
 def test_rag_agentic_search_verification_flags(client_with_agentic_overrides, monkeypatch):
 
 

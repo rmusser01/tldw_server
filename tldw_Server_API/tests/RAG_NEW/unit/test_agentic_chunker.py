@@ -311,6 +311,207 @@ async def test_agentic_pipeline_lineage_only_tracks_docs_used_for_synthetic_chun
     assert res.metadata["derived_from_document_ids"] == ["d1"]
 
 
+@pytest.mark.asyncio
+async def test_agentic_pipeline_preserves_legacy_coarse_docs_window_and_actual_lineage(monkeypatch):
+    query = "legacy coarse docs compatibility"
+    docs = [
+        make_doc("d1", "Primary evidence " * 40, title="Doc 1"),
+        make_doc("d2", "Secondary evidence", title="Doc 2"),
+        make_doc("d3", "Tertiary evidence", title="Doc 3"),
+    ]
+
+    class FakeRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def retrieve(self, *args, **kwargs):
+            return docs
+
+    import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as ac
+
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", FakeRetriever)
+
+    resolved_request = ResolvedRAGRequest(
+        query=query,
+        strategy="agentic",
+        payload={
+            "query": query,
+            "sources": ["media_db"],
+            "search_mode": "fts",
+            "top_k": 5,
+            "min_score": 0.0,
+            "index_namespace": "tenant-legacy",
+        },
+        index_namespace="tenant-legacy",
+        rag_profile="fast",
+        user_id="17",
+        feedback_user_id="17",
+    )
+
+    res = await agentic_rag_pipeline(
+        query=query,
+        sources=["media_db"],
+        search_mode="fts",
+        top_k=5,
+        min_score=0.0,
+        agentic=AgenticConfig(top_k_docs=3, max_tokens_read=4, cache_ttl_sec=5),
+        enable_generation=False,
+        enable_citations=False,
+        resolved_request=resolved_request,
+        retrieval_plan=RetrievalPlan(
+            query=query,
+            sources=("media_db",),
+            search_mode="fts",
+            top_k=5,
+            min_score=0.0,
+            index_namespace="tenant-legacy",
+            collection_names={"media_db": "tenant-legacy_media_db"},
+        ),
+    )
+
+    assert [entry["id"] for entry in res.metadata["coarse_docs"]] == ["d1", "d2", "d3"]
+    assert res.metadata["derived_from_document_ids"] == ["d1"]
+
+
+@pytest.mark.asyncio
+async def test_agentic_pipeline_uses_resolved_scope_for_post_generation_steps(monkeypatch):
+    query = "raw query"
+    docs = [
+        make_doc("d1", "Tenant-scoped evidence says the answer is 42.", title="Doc 1"),
+    ]
+    captured: dict[str, object] = {
+        "retriever_inits": [],
+        "retriever_calls": [],
+    }
+
+    class FakeRetriever:
+        def __init__(self, *args, user_id=None, **kwargs):
+            captured["retriever_inits"].append(user_id)
+
+        async def retrieve(self, query, **kwargs):
+            captured["retriever_calls"].append({"query": query, **kwargs})
+            if len(captured["retriever_calls"]) == 1:
+                return docs
+            return []
+
+    class FakeAnswerGenerator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def generate(self, *, query: str, context: str, prompt_template=None, max_tokens=None, temperature=None):  # noqa: ARG002
+            captured["generation_query"] = query
+            return {"answer": "The answer is 42."}
+
+    class FakeClaimsEngine:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def run(self, **kwargs):
+            captured["claims_query"] = kwargs["query"]
+            return {"claims": [], "summary": {}}
+
+    class FakeNumericFidelity:
+        present = {"42"}
+        missing = {"99"}
+        union_source_numbers = {"42", "99"}
+
+    class FakeVerifier:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def verify_and_maybe_fix(self, **kwargs):
+            captured["post_verify_kwargs"] = kwargs
+
+            class Outcome:
+                unsupported_ratio = 0.0
+                total_claims = 0
+                unsupported_count = 0
+                fixed = False
+                reason = ""
+
+            return Outcome()
+
+    import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as ac
+    import tldw_Server_API.app.core.RAG.rag_service.claims as claims_mod
+    import tldw_Server_API.app.core.RAG.rag_service.generation as generation_mod
+    import tldw_Server_API.app.core.RAG.rag_service.guardrails as guardrails_mod
+    import tldw_Server_API.app.core.RAG.rag_service.post_generation_verifier as verifier_mod
+
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(generation_mod, "AnswerGenerator", FakeAnswerGenerator, raising=False)
+    monkeypatch.setattr(claims_mod, "ClaimsEngine", FakeClaimsEngine, raising=False)
+    monkeypatch.setattr(
+        guardrails_mod,
+        "build_hard_citations",
+        lambda *args, **kwargs: {"coverage": 1.0, "sentences": []},
+    )
+    monkeypatch.setattr(
+        guardrails_mod,
+        "check_numeric_fidelity",
+        lambda *args, **kwargs: FakeNumericFidelity(),
+    )
+    monkeypatch.setattr(verifier_mod, "PostGenerationVerifier", FakeVerifier, raising=False)
+
+    resolved_request = ResolvedRAGRequest(
+        query="resolved query",
+        strategy="agentic",
+        payload={
+            "query": "resolved query",
+            "sources": ["media_db"],
+            "search_mode": "hybrid",
+            "top_k": 2,
+            "min_score": 0.25,
+            "hybrid_alpha": 0.33,
+            "index_namespace": "tenant-z",
+        },
+        index_namespace="tenant-z",
+        rag_profile="fast",
+        user_id="17",
+        feedback_user_id="17",
+    )
+
+    await agentic_rag_pipeline(
+        query=query,
+        sources=["media_db"],
+        media_db_path="tenant-z.db",
+        search_mode="vector",
+        hybrid_alpha=0.9,
+        top_k=9,
+        min_score=0.9,
+        index_namespace="wrong",
+        agentic=AgenticConfig(top_k_docs=1, cache_ttl_sec=5),
+        enable_generation=True,
+        enable_citations=False,
+        enable_claims=True,
+        enable_numeric_fidelity=True,
+        numeric_fidelity_behavior="retry",
+        resolved_request=resolved_request,
+        retrieval_plan=RetrievalPlan(
+            query="resolved query",
+            sources=("media_db",),
+            search_mode="hybrid",
+            top_k=2,
+            min_score=0.25,
+            index_namespace="tenant-z",
+            collection_names={"media_db": "tenant-z_media_db"},
+        ),
+    )
+
+    assert captured["generation_query"] == "resolved query"
+    assert captured["claims_query"] == "resolved query"
+    assert captured["retriever_inits"] == ["17", "17"]
+    assert captured["retriever_calls"][0]["query"] == "resolved query"
+    assert captured["retriever_calls"][1]["query"] == "resolved query 99"
+    assert captured["retriever_calls"][1]["config"].max_results == 2
+    assert captured["retriever_calls"][1]["config"].min_score == 0.25
+    assert captured["retriever_calls"][1]["index_namespace"] == "tenant-z"
+    assert captured["post_verify_kwargs"]["query"] == "resolved query"
+    assert captured["post_verify_kwargs"]["user_id"] == "17"
+    assert captured["post_verify_kwargs"]["search_mode"] == "hybrid"
+    assert captured["post_verify_kwargs"]["hybrid_alpha"] == 0.33
+    assert captured["post_verify_kwargs"]["top_k"] == 2
+
+
 def test_open_section_anchor_and_table_heuristic():
 
 
