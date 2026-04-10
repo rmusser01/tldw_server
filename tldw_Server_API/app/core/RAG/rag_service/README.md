@@ -4,7 +4,7 @@
 
 ## Internal Flow
 
-`HTTP request -> request_bundle.build_request_bundle -> retrieval_executor.execute_retrieval_phase -> PostRetrievalCoordinator -> generation_executor.execute_generation_phase -> response_mapping.rag_result_to_response`
+`HTTP request -> request_bundle.build_request_bundle -> unified_rag_pipeline (retrieval + generation) -> post_retrieval_coordinator.coordinate_standard_result_evidence -> response_mapping.rag_result_to_response`
 
 ## Active Entrypoints
 
