@@ -3,6 +3,12 @@ import time
 
 import pytest
 
+from tldw_Server_API.app.core.RAG.rag_service.evidence_models import DerivedEvidence
+from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
+from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import (
+    RetrievalPlan,
+    build_retrieval_plan,
+)
 from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     _assemble_ephemeral_chunk,
@@ -155,6 +161,154 @@ async def test_agentic_query_decomposition_merge(monkeypatch):
     text = (res.documents[0]["content"] if isinstance(res.documents[0], dict) else res.documents[0].content)
     assert "Residual".lower()[:7] in text.lower()
     assert "Dropout".lower()[:7] in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_agentic_pipeline_uses_shared_retrieval_plan_and_derived_evidence_boundary(monkeypatch):
+    query = "shared request resolution"
+    docs = [
+        make_doc("d1", "The first coarse document explains the primary evidence.", title="Doc 1"),
+        make_doc("d2", "The second coarse document provides corroboration.", title="Doc 2"),
+    ]
+    captured: dict[str, object] = {}
+
+    class FakeRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def retrieve(self, *args, **kwargs):
+            captured["retrieve_kwargs"] = kwargs
+            return docs
+
+    class StubCoordinator:
+        def derive_evidence(self, resolved_request, retrieved_evidence, **kwargs):
+            captured["resolved_request"] = resolved_request
+            captured["retrieved_evidence"] = retrieved_evidence
+            captured["coordinator_kwargs"] = kwargs
+            return DerivedEvidence(
+                retrieved=retrieved_evidence,
+                documents=[{"id": "synthetic-agentic", "content": "synthetic chunk"}],
+                metadata=dict(retrieved_evidence.metadata),
+                citations=[],
+                verification_report=None,
+                derived_from_document_ids=("d1", "d2"),
+            )
+
+    import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as ac
+
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(ac, "PostRetrievalCoordinator", StubCoordinator)
+
+    resolved_request = ResolvedRAGRequest(
+        query=query,
+        strategy="agentic",
+        payload={
+            "query": query,
+            "sources": ["notes", "media_db"],
+            "search_mode": "hybrid",
+            "top_k": 2,
+            "min_score": 0.25,
+            "index_namespace": "tenant-x",
+        },
+        index_namespace="tenant-x",
+        rag_profile="fast",
+        user_id="17",
+        feedback_user_id="17",
+    )
+    retrieval_plan = build_retrieval_plan(resolved_request)
+
+    res = await agentic_rag_pipeline(
+        query=query,
+        sources=["characters"],
+        media_db_path=None,
+        notes_db_path=None,
+        character_db_path=None,
+        search_mode="vector",
+        top_k=9,
+        min_score=0.9,
+        index_namespace="wrong",
+        agentic=AgenticConfig(top_k_docs=2, cache_ttl_sec=5),
+        enable_generation=False,
+        enable_citations=True,
+        resolved_request=resolved_request,
+        retrieval_plan=retrieval_plan,
+    )
+
+    retrieve_kwargs = captured["retrieve_kwargs"]
+    assert isinstance(retrieve_kwargs, dict)
+    assert retrieve_kwargs["config"].max_results == 2
+    assert retrieve_kwargs["config"].min_score == 0.25
+    assert retrieve_kwargs["config"].use_fts is True
+    assert retrieve_kwargs["config"].use_vector is True
+    assert retrieve_kwargs["sources"] == [DataSource.NOTES, DataSource.MEDIA_DB]
+    assert retrieve_kwargs["index_namespace"] == "tenant-x"
+    assert captured["resolved_request"] is resolved_request
+    assert captured["retrieved_evidence"].metadata["retrieval_plan"]["top_k"] == 2
+    assert captured["coordinator_kwargs"]["derived_from_document_ids"] == ["d1", "d2"]
+    assert res.documents and res.documents[0].content
+    assert res.metadata["derived_from_document_ids"] == ["d1", "d2"]
+    assert res.metadata["strategy"] == "agentic"
+
+
+@pytest.mark.asyncio
+async def test_agentic_pipeline_lineage_only_tracks_docs_used_for_synthetic_chunk(monkeypatch):
+    query = "lineage should match assembled docs"
+    docs = [
+        make_doc("d1", "Primary evidence for the assembled synthetic chunk.", title="Doc 1"),
+        make_doc("d2", "Secondary corroboration that should stay outside the lineage.", title="Doc 2"),
+        make_doc("d3", "Tertiary context that should not appear in derived lineage.", title="Doc 3"),
+    ]
+
+    class FakeRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def retrieve(self, *args, **kwargs):
+            return docs
+
+    import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as ac
+
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", FakeRetriever)
+
+    resolved_request = ResolvedRAGRequest(
+        query=query,
+        strategy="agentic",
+        payload={
+            "query": query,
+            "sources": ["media_db"],
+            "search_mode": "fts",
+            "top_k": 3,
+            "min_score": 0.0,
+            "index_namespace": "tenant-y",
+        },
+        index_namespace="tenant-y",
+        rag_profile="fast",
+        user_id="17",
+        feedback_user_id="17",
+    )
+
+    res = await agentic_rag_pipeline(
+        query=query,
+        sources=["media_db"],
+        search_mode="fts",
+        top_k=3,
+        min_score=0.0,
+        agentic=AgenticConfig(top_k_docs=1, cache_ttl_sec=5),
+        enable_generation=False,
+        enable_citations=False,
+        resolved_request=resolved_request,
+        retrieval_plan=RetrievalPlan(
+            query=query,
+            sources=("media_db",),
+            search_mode="fts",
+            top_k=3,
+            min_score=0.0,
+            index_namespace="tenant-y",
+            collection_names={"media_db": "tenant-y_media_db"},
+        ),
+    )
+
+    assert res.metadata["derived_from_document_ids"] == ["d1"]
 
 
 def test_open_section_anchor_and_table_heuristic():

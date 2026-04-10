@@ -42,6 +42,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 from .advanced_cache import AGENTIC_CACHE
 from .agentic_tools import make_default_registry
 from .database_retrievers import MultiDatabaseRetriever, RetrievalConfig
+from .evidence_models import RetrievedEvidence
+from .post_retrieval_coordinator import PostRetrievalCoordinator
+from .request_resolution import ResolvedRAGRequest
+from .retrieval_plan import RetrievalPlan, build_retrieval_plan
 from .types import DataSource, Document
 from .unified_pipeline import UnifiedSearchResult
 
@@ -210,6 +214,53 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _serialize_retrieval_plan(retrieval_plan: RetrievalPlan | None) -> dict[str, Any] | None:
+    if retrieval_plan is None:
+        return None
+    return {
+        "query": retrieval_plan.query,
+        "sources": list(retrieval_plan.sources),
+        "search_mode": retrieval_plan.search_mode,
+        "top_k": retrieval_plan.top_k,
+        "min_score": retrieval_plan.min_score,
+        "index_namespace": retrieval_plan.index_namespace,
+        "collection_names": dict(retrieval_plan.collection_names),
+    }
+
+
+def _resolve_agentic_request_contract(
+    *,
+    query: str,
+    sources: list[str] | None,
+    search_mode: str,
+    top_k: int,
+    min_score: float,
+    index_namespace: str | None,
+    resolved_request: ResolvedRAGRequest | None,
+    retrieval_plan: RetrievalPlan | None,
+) -> tuple[ResolvedRAGRequest, RetrievalPlan]:
+    if resolved_request is None:
+        resolved_request = ResolvedRAGRequest(
+            query=query,
+            strategy="agentic",
+            payload={
+                "query": query,
+                "sources": list(sources or ["media_db"]),
+                "search_mode": search_mode,
+                "top_k": top_k,
+                "min_score": min_score,
+                "index_namespace": index_namespace,
+            },
+            index_namespace=index_namespace,
+            rag_profile=None,
+            user_id=None,
+            feedback_user_id=None,
+        )
+    if retrieval_plan is None:
+        retrieval_plan = build_retrieval_plan(resolved_request)
+    return resolved_request, retrieval_plan
 
 
 def _split_headings_and_paragraphs(text: str) -> tuple[list[tuple[str, int, int]], list[tuple[int, int]]]:
@@ -810,6 +861,8 @@ async def agentic_rag_pipeline(
     # NLI/low-confidence gate
     adaptive_unsupported_threshold: float = 0.15,
     low_confidence_behavior: str = "continue",
+    resolved_request: ResolvedRAGRequest | None = None,
+    retrieval_plan: RetrievalPlan | None = None,
 ) -> UnifiedSearchResult:
     """Agentic RAG: coarse retrieve, assemble ephemeral chunk, optional answer.
 
@@ -817,6 +870,22 @@ async def agentic_rag_pipeline(
     """
     t0 = time.time()
     cfg = agentic or AgenticConfig()
+    resolved_request, effective_retrieval_plan = _resolve_agentic_request_contract(
+        query=query,
+        sources=sources,
+        search_mode=search_mode,
+        top_k=top_k,
+        min_score=min_score,
+        index_namespace=index_namespace,
+        resolved_request=resolved_request,
+        retrieval_plan=retrieval_plan,
+    )
+    effective_query = str(resolved_request.query or query)
+    effective_sources = list(effective_retrieval_plan.sources or ("media_db",))
+    effective_search_mode = effective_retrieval_plan.search_mode
+    effective_top_k = max(1, int(effective_retrieval_plan.top_k or top_k or 10))
+    effective_min_score = float(effective_retrieval_plan.min_score if effective_retrieval_plan.min_score is not None else min_score or 0.0)
+    effective_index_namespace = effective_retrieval_plan.index_namespace
 
     # Config-driven default: require_hard_citations toggle
     try:
@@ -839,17 +908,17 @@ async def agentic_rag_pipeline(
 
     retriever = MultiDatabaseRetriever(
         db_paths,
-        user_id="rag_agentic",
+        user_id=str(resolved_request.user_id or "rag_agentic"),
         media_db=media_db,
         chacha_db=chacha_db,
     )
 
     # 2) Coarse retrieval (prefer media-level)
     config = RetrievalConfig(
-        max_results=max(1, int(top_k or 10)),
-        min_score=float(min_score or 0.0),
-        use_fts=(search_mode in ("fts", "hybrid")),
-        use_vector=(search_mode in ("vector", "hybrid")),
+        max_results=effective_top_k,
+        min_score=effective_min_score,
+        use_fts=(effective_search_mode in ("fts", "hybrid")),
+        use_vector=(effective_search_mode in ("vector", "hybrid")),
         include_metadata=True,
         fts_level=_normalize_fts_level(fts_level),
     )
@@ -863,10 +932,15 @@ async def agentic_rag_pipeline(
         "kanban": DataSource.KANBAN,
         "kanban_db": DataSource.KANBAN,
     }
-    wanted_sources = [src_map.get(s, DataSource.MEDIA_DB) for s in (sources or ["media_db"]) ]
+    wanted_sources = [src_map.get(s, DataSource.MEDIA_DB) for s in effective_sources]
 
     try:
-        docs = await retriever.retrieve(query=query, sources=wanted_sources, config=config, index_namespace=index_namespace)
+        docs = await retriever.retrieve(
+            query=effective_query,
+            sources=wanted_sources,
+            config=config,
+            index_namespace=effective_index_namespace,
+        )
     except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError) as e:
         logger.warning(f"Agentic coarse retrieval failed: {e}")
         docs = []
@@ -875,13 +949,13 @@ async def agentic_rag_pipeline(
     # have a media DB path, run a direct Media DB FTS-only search to seed the
     # agentic ephemeral chunk. This mirrors the standard pipeline fallback and
     # ensures quality-gate tests have at least one document when media exists.
-    if (not docs) and media_db_path and search_mode in ("fts", "hybrid"):
+    if (not docs) and media_db_path and effective_search_mode in ("fts", "hybrid"):
         try:
             from .database_retrievers import MediaDBRetriever as _MDBR
             from .database_retrievers import RetrievalConfig as _RCfg
             fb_cfg = _RCfg(
-                max_results=max(1, int(top_k or 10)),
-                min_score=float(min_score or 0.0),
+                max_results=effective_top_k,
+                min_score=effective_min_score,
                 use_fts=True,
                 use_vector=False,
                 include_metadata=True,
@@ -890,11 +964,11 @@ async def agentic_rag_pipeline(
             fb_retriever = _MDBR(
                 db_path=media_db_path,
                 config=fb_cfg,
-                user_id="rag_agentic",
+                user_id=str(resolved_request.user_id or "rag_agentic"),
                 media_db=media_db,
             )
             fallback_docs = await fb_retriever.retrieve(
-                query=query,
+                query=effective_query,
                 media_type=None,
             )
             if fallback_docs:
@@ -1009,7 +1083,7 @@ async def agentic_rag_pipeline(
         length = str(len(d.content or ""))
         return f"{d.id}|{created}|{length}"
 
-    key_raw = "|".join([query.strip().lower()] + sorted(_hashable_doc(d) for d in docs[: cfg.top_k_docs]))
+    key_raw = "|".join([effective_query.strip().lower()] + sorted(_hashable_doc(d) for d in docs[: cfg.top_k_docs]))
     cache_key = hashlib.sha256(key_raw.encode("utf-8")).hexdigest()
     cached = _cache_get(cache_key)
     if cached:
@@ -1027,9 +1101,9 @@ async def agentic_rag_pipeline(
         # 4) Assemble ephemeral chunk (either tools or heuristics)
         tool_trace: list[dict[str, Any]] = []
         if cfg.enable_tools:
-            chunk_text, prov, tool_trace = await _tool_loop(docs, query, cfg)
+            chunk_text, prov, tool_trace = await _tool_loop(docs, effective_query, cfg)
         else:
-            chunk_text, prov = _assemble_ephemeral_chunk(docs, query, cfg)
+            chunk_text, prov = _assemble_ephemeral_chunk(docs, effective_query, cfg)
             tool_trace = []
         _cache_set(cache_key, {"chunk_text": chunk_text, "provenance": prov}, cfg.cache_ttl_sec)
 
@@ -1048,10 +1122,10 @@ async def agentic_rag_pipeline(
         source=DataSource.MEDIA_DB,
     )
 
-    result = UnifiedSearchResult(
-        documents=[synthetic],
-        query=query,
-        expanded_queries=[],
+    coarse_docs = list(docs[:effective_top_k])
+    lineage_docs = list(docs[: max(1, cfg.top_k_docs)])
+    retrieved_evidence = RetrievedEvidence(
+        documents=coarse_docs,
         metadata={
             "strategy": "agentic",
             "coarse_docs": [
@@ -1060,10 +1134,29 @@ async def agentic_rag_pipeline(
                     "title": (d.metadata or {}).get("title"),
                     "score": float(getattr(d, "score", 0.0) or 0.0),
                 }
-                for d in docs[: cfg.top_k_docs]
+                for d in coarse_docs
             ],
             "provenance": prov,
+            "retrieval_plan": _serialize_retrieval_plan(effective_retrieval_plan),
         },
+    )
+    coordinator = PostRetrievalCoordinator()
+    coordinated = coordinator.derive_evidence(
+        resolved_request,
+        retrieved_evidence,
+        enable_citations=bool(enable_citations),
+        enable_verification=bool(enable_numeric_fidelity or enable_claims or require_hard_citations),
+        derived_documents=[synthetic],
+        derived_from_document_ids=[
+            str(d.id) for d in lineage_docs if getattr(d, "id", None)
+        ],
+    )
+
+    result = UnifiedSearchResult(
+        documents=[synthetic],
+        query=effective_query,
+        expanded_queries=[],
+        metadata=dict(coordinated.metadata),
         timings={},
         citations=[],
         cache_hit=bool(cached_hit),
@@ -1106,6 +1199,13 @@ async def agentic_rag_pipeline(
         })
     except (AttributeError, KeyError, TypeError, ValueError):
         pass
+
+    if coordinated.derived_from_document_ids:
+        result.metadata["derived_from_document_ids"] = list(coordinated.derived_from_document_ids)
+    if coordinated.citations:
+        result.metadata.setdefault("chunk_citations", list(coordinated.citations))
+    if coordinated.verification_report is not None:
+        result.metadata.setdefault("verification_report", coordinated.verification_report)
 
     # Explain-only dry run: return plan/provenance without answer or chunk body
     if explain_only and not enable_generation:

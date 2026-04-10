@@ -64,7 +64,10 @@ from tldw_Server_API.app.core.RAG.rag_service.request_resolution import (
     apply_search_agent_defaults as apply_core_search_agent_defaults,
     resolve_rag_request,
 )
-from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import build_retrieval_plan
+from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import (
+    RetrievalPlan,
+    build_retrieval_plan,
+)
 from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
     rag_result_from_unified_search_result,
     rag_result_to_response,
@@ -204,6 +207,77 @@ def _build_unified_pipeline_kwargs(
         return payload
     allowed = set(signature.parameters.keys())
     return {k: v for k, v in payload.items() if k in allowed}
+
+
+def _build_agentic_request_context(
+    request: UnifiedRAGRequest,
+    current_user: Optional[User],
+) -> tuple[ResolvedRAGRequest, RetrievalPlan, AgenticConfig, dict[str, Any]]:
+    """Resolve the shared agentic request context and retrieval policy."""
+    resolved_request = _resolve_standard_request(request, current_user)
+    retrieval_plan = build_retrieval_plan(resolved_request)
+    payload = dict(resolved_request.payload)
+    payload["sources"] = list(retrieval_plan.sources)
+    payload["search_mode"] = retrieval_plan.search_mode
+    payload["top_k"] = retrieval_plan.top_k
+    payload["min_score"] = retrieval_plan.min_score
+    payload["index_namespace"] = retrieval_plan.index_namespace
+
+    def _payload_bool(name: str, fallback: bool = False) -> bool:
+        return bool(payload.get(name, fallback))
+
+    def _payload_int(name: str, fallback: int) -> int:
+        raw = payload.get(name, fallback)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return fallback
+
+    def _payload_float(name: str, fallback: float) -> float:
+        raw = payload.get(name, fallback)
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return fallback
+
+    agentic_cfg = AgenticConfig(
+        top_k_docs=max(1, _payload_int("agentic_top_k_docs", 3)),
+        window_chars=max(200, _payload_int("agentic_window_chars", 1200)),
+        max_tokens_read=max(500, _payload_int("agentic_max_tokens_read", 6000)),
+        max_tool_calls=max(1, _payload_int("agentic_max_tool_calls", 8)),
+        extractive_only=_payload_bool("agentic_extractive_only", True),
+        quote_spans=_payload_bool("agentic_quote_spans", True),
+        enable_tools=_payload_bool("agentic_enable_tools", False),
+        use_llm_planner=_payload_bool("agentic_use_llm_planner", False),
+        time_budget_sec=payload.get("agentic_time_budget_sec", None),
+        cache_ttl_sec=max(1, _payload_int("agentic_cache_ttl_sec", 600)),
+        debug_trace=_payload_bool("agentic_debug_trace", False)
+        or _payload_bool("debug_mode", False),
+        enable_query_decomposition=_payload_bool("agentic_enable_query_decomposition", False),
+        subgoal_max=max(1, _payload_int("agentic_subgoal_max", 3)),
+        enable_semantic_within=_payload_bool("agentic_enable_semantic_within", True),
+        enable_section_index=_payload_bool("agentic_enable_section_index", True),
+        prefer_structural_anchors=_payload_bool("agentic_prefer_structural_anchors", True),
+        enable_table_support=_payload_bool("agentic_enable_table_support", True),
+        agentic_enable_vlm_late_chunking=_payload_bool("agentic_enable_vlm_late_chunking", False),
+        agentic_vlm_backend=payload.get("agentic_vlm_backend", None),
+        agentic_vlm_detect_tables_only=_payload_bool("agentic_vlm_detect_tables_only", True),
+        agentic_vlm_max_pages=payload.get("agentic_vlm_max_pages", None),
+        agentic_vlm_late_chunk_top_k_docs=max(1, _payload_int("agentic_vlm_late_chunk_top_k_docs", 2)),
+        agentic_use_provider_embeddings_within=_payload_bool(
+            "agentic_use_provider_embeddings_within", False
+        ),
+        agentic_provider_embedding_model_id=payload.get(
+            "agentic_provider_embedding_model_id",
+            None,
+        ),
+        adaptive_budgets=_payload_bool("agentic_adaptive_budgets", True),
+        coverage_target=_payload_float("agentic_coverage_target", 0.8),
+        min_corroborating_docs=max(1, _payload_int("agentic_min_corroborating_docs", 2)),
+        max_redundancy=_payload_float("agentic_max_redundancy", 0.9),
+        enable_metrics=_payload_bool("agentic_enable_metrics", True),
+    )
+    return resolved_request, retrieval_plan, agentic_cfg, payload
 
 
 def _resolve_standard_request(
@@ -1102,77 +1176,55 @@ async def unified_search_endpoint(
 
         # Branch: agentic strategy builds a synthetic chunk at query time
         if getattr(request, 'strategy', 'standard') == 'agentic':
-            agentic_cfg = AgenticConfig(
-                top_k_docs=int(getattr(request, 'agentic_top_k_docs', 3) or 3),
-                window_chars=int(getattr(request, 'agentic_window_chars', 1200) or 1200),
-                max_tokens_read=int(getattr(request, 'agentic_max_tokens_read', 6000) or 6000),
-                max_tool_calls=int(getattr(request, 'agentic_max_tool_calls', 8) or 8),
-                extractive_only=bool(getattr(request, 'agentic_extractive_only', True)),
-                quote_spans=bool(getattr(request, 'agentic_quote_spans', True)),
-                enable_tools=bool(getattr(request, 'agentic_enable_tools', False)),
-                use_llm_planner=bool(getattr(request, 'agentic_use_llm_planner', False)),
-                time_budget_sec=(getattr(request, 'agentic_time_budget_sec', None)),
-                cache_ttl_sec=int(getattr(request, 'agentic_cache_ttl_sec', 600) or 600),
-                debug_trace=bool(getattr(request, 'agentic_debug_trace', False) or request.debug_mode),
-                enable_query_decomposition=bool(getattr(request, 'agentic_enable_query_decomposition', False)),
-                subgoal_max=int(getattr(request, 'agentic_subgoal_max', 3) or 3),
-                enable_semantic_within=bool(getattr(request, 'agentic_enable_semantic_within', True)),
-                enable_section_index=bool(getattr(request, 'agentic_enable_section_index', True)),
-                prefer_structural_anchors=bool(getattr(request, 'agentic_prefer_structural_anchors', True)),
-                enable_table_support=bool(getattr(request, 'agentic_enable_table_support', True)),
-                agentic_enable_vlm_late_chunking=bool(getattr(request, 'agentic_enable_vlm_late_chunking', False)),
-                agentic_vlm_backend=getattr(request, 'agentic_vlm_backend', None),
-                agentic_vlm_detect_tables_only=bool(getattr(request, 'agentic_vlm_detect_tables_only', True)),
-                agentic_vlm_max_pages=getattr(request, 'agentic_vlm_max_pages', None),
-                agentic_vlm_late_chunk_top_k_docs=int(getattr(request, 'agentic_vlm_late_chunk_top_k_docs', 2) or 2),
-                agentic_use_provider_embeddings_within=bool(getattr(request, 'agentic_use_provider_embeddings_within', False)),
-                agentic_provider_embedding_model_id=getattr(request, 'agentic_provider_embedding_model_id', None),
-                # new adaptive/metrics knobs
-                adaptive_budgets=bool(getattr(request, 'agentic_adaptive_budgets', True)),
-                coverage_target=float(getattr(request, 'agentic_coverage_target', 0.8) or 0.8),
-                min_corroborating_docs=int(getattr(request, 'agentic_min_corroborating_docs', 2) or 2),
-                max_redundancy=float(getattr(request, 'agentic_max_redundancy', 0.9) or 0.9),
-                enable_metrics=bool(getattr(request, 'agentic_enable_metrics', True)),
+            resolved_request, retrieval_plan, agentic_cfg, effective_payload = _build_agentic_request_context(
+                request,
+                current_user,
             )
 
             try:
                 result = await agentic_rag_pipeline(
-                    query=request.query,
-                    sources=request.sources,
+                    query=resolved_request.query,
+                    sources=list(retrieval_plan.sources),
                     media_db=media_db,
                     chacha_db=chacha_db,
                     media_db_path=db_paths.get("media_db_path"),
                     notes_db_path=db_paths.get("notes_db_path"),
                     character_db_path=db_paths.get("character_db_path"),
                     kanban_db_path=db_paths.get("kanban_db_path"),
-                    search_mode=request.search_mode,
-                    fts_level=request.fts_level,
-                    hybrid_alpha=request.hybrid_alpha,
-                    top_k=request.top_k,
-                    min_score=request.min_score,
-                    index_namespace=(request.index_namespace or request.corpus),
+                    search_mode=retrieval_plan.search_mode,
+                    fts_level=effective_payload.get("fts_level", request.fts_level),
+                    hybrid_alpha=effective_payload.get("hybrid_alpha", request.hybrid_alpha),
+                    top_k=retrieval_plan.top_k,
+                    min_score=retrieval_plan.min_score,
+                    index_namespace=retrieval_plan.index_namespace,
                     agentic=agentic_cfg,
-                    enable_generation=request.enable_generation,
-                    generation_model=request.generation_model,
-                    generation_provider=request.generation_provider,
-                    generation_prompt=request.generation_prompt,
-                    max_generation_tokens=request.max_generation_tokens,
-                    enable_citations=request.enable_citations,
-                    include_chunk_citations=request.enable_chunk_citations,
-                    debug_mode=request.debug_mode,
+                    enable_generation=bool(effective_payload.get("enable_generation", request.enable_generation)),
+                    generation_model=effective_payload.get("generation_model", request.generation_model),
+                    generation_provider=effective_payload.get("generation_provider", request.generation_provider),
+                    generation_prompt=effective_payload.get("generation_prompt", request.generation_prompt),
+                    max_generation_tokens=int(effective_payload.get("max_generation_tokens", request.max_generation_tokens)),
+                    enable_citations=bool(effective_payload.get("enable_citations", request.enable_citations)),
+                    include_chunk_citations=bool(
+                        effective_payload.get("enable_chunk_citations", request.enable_chunk_citations)
+                    ),
+                    debug_mode=bool(effective_payload.get("debug_mode", request.debug_mode)),
                     # expose verification flags on agentic path
-                    require_hard_citations=bool(getattr(request, 'require_hard_citations', False)),
-                    enable_numeric_fidelity=bool(getattr(request, 'enable_numeric_fidelity', False)),
-                    numeric_fidelity_behavior=str(getattr(request, 'numeric_fidelity_behavior', 'continue')),
-                    enable_claims=bool(getattr(request, 'enable_claims', False)),
-                    claim_verifier=str(getattr(request, 'claim_verifier', 'hybrid')),
-                    claims_top_k=int(getattr(request, 'claims_top_k', 5) or 5),
-                    claims_conf_threshold=float(getattr(request, 'claims_conf_threshold', 0.7) or 0.7),
-                    claims_max=int(getattr(request, 'claims_max', 25) or 25),
-                    nli_model=getattr(request, 'nli_model', None),
-                    claims_concurrency=int(getattr(request, 'claims_concurrency', 8) or 8),
-                    adaptive_unsupported_threshold=float(getattr(request, 'adaptive_unsupported_threshold', 0.15) or 0.15),
-                    low_confidence_behavior=str(getattr(request, 'low_confidence_behavior', 'continue')),
+                    require_hard_citations=bool(effective_payload.get("require_hard_citations", False)),
+                    enable_numeric_fidelity=bool(effective_payload.get("enable_numeric_fidelity", False)),
+                    numeric_fidelity_behavior=str(effective_payload.get("numeric_fidelity_behavior", "continue")),
+                    enable_claims=bool(effective_payload.get("enable_claims", False)),
+                    claim_verifier=str(effective_payload.get("claim_verifier", "hybrid")),
+                    claims_top_k=int(effective_payload.get("claims_top_k", 5) or 5),
+                    claims_conf_threshold=float(effective_payload.get("claims_conf_threshold", 0.7) or 0.7),
+                    claims_max=int(effective_payload.get("claims_max", 25) or 25),
+                    nli_model=effective_payload.get("nli_model", None),
+                    claims_concurrency=int(effective_payload.get("claims_concurrency", 8) or 8),
+                    adaptive_unsupported_threshold=float(
+                        effective_payload.get("adaptive_unsupported_threshold", 0.15) or 0.15
+                    ),
+                    low_confidence_behavior=str(effective_payload.get("low_confidence_behavior", "continue")),
+                    resolved_request=resolved_request,
+                    retrieval_plan=retrieval_plan,
                 )
             except Exception as exc:  # noqa: BLE001 - agentic pipeline fallback must be resilient
                 logger.exception("Agentic RAG pipeline failed: {}", exc)
@@ -1804,10 +1856,6 @@ async def unified_search_stream_endpoint(
         try:
             # Prepare retrieval like the unified pipeline (simplified)
             effective_payload = _build_effective_request_payload(request)
-            index_namespace = (
-                effective_payload.get("index_namespace")
-                or effective_payload.get("corpus")
-            )
             db_paths = {}
             if media_db:
                 db_paths["media_db"] = media_db.db_path
@@ -1908,88 +1956,33 @@ async def unified_search_stream_endpoint(
             ).strip().lower()
             if strategy_value == "agentic":
                 try:
-                    def _payload_bool(name: str, fallback: bool = False) -> bool:
-                        return bool(effective_payload.get(name, getattr(request, name, fallback)))
-
-                    def _payload_int(name: str, fallback: int) -> int:
-                        raw = effective_payload.get(name, getattr(request, name, fallback))
-                        try:
-                            return int(raw)
-                        except (TypeError, ValueError):
-                            return fallback
-
-                    def _payload_float(name: str, fallback: float) -> float:
-                        raw = effective_payload.get(name, getattr(request, name, fallback))
-                        try:
-                            return float(raw)
-                        except (TypeError, ValueError):
-                            return fallback
-
-                    # Run agentic assembly without generation
-                    a_cfg = AgenticConfig(
-                        top_k_docs=max(1, _payload_int("agentic_top_k_docs", 3)),
-                        window_chars=max(200, _payload_int("agentic_window_chars", 1200)),
-                        max_tokens_read=max(500, _payload_int("agentic_max_tokens_read", 6000)),
-                        max_tool_calls=max(1, _payload_int("agentic_max_tool_calls", 8)),
-                        extractive_only=True,
-                        quote_spans=True,
-                        enable_tools=_payload_bool("agentic_enable_tools", False),
-                        use_llm_planner=_payload_bool("agentic_use_llm_planner", False),
-                        time_budget_sec=effective_payload.get(
-                            "agentic_time_budget_sec",
-                            getattr(request, "agentic_time_budget_sec", None),
-                        ),
-                        cache_ttl_sec=max(1, _payload_int("agentic_cache_ttl_sec", 600)),
-                        debug_trace=_payload_bool("agentic_debug_trace", False)
-                        or _payload_bool("debug_mode", getattr(request, "debug_mode", False)),
-                        enable_query_decomposition=_payload_bool("agentic_enable_query_decomposition", False),
-                        subgoal_max=max(1, _payload_int("agentic_subgoal_max", 3)),
-                        enable_semantic_within=_payload_bool("agentic_enable_semantic_within", True),
-                        enable_section_index=_payload_bool("agentic_enable_section_index", True),
-                        prefer_structural_anchors=_payload_bool("agentic_prefer_structural_anchors", True),
-                        enable_table_support=_payload_bool("agentic_enable_table_support", True),
-                        agentic_enable_vlm_late_chunking=_payload_bool("agentic_enable_vlm_late_chunking", False),
-                        agentic_vlm_backend=effective_payload.get(
-                            "agentic_vlm_backend",
-                            getattr(request, "agentic_vlm_backend", None),
-                        ),
-                        agentic_vlm_detect_tables_only=_payload_bool("agentic_vlm_detect_tables_only", True),
-                        agentic_vlm_max_pages=effective_payload.get(
-                            "agentic_vlm_max_pages",
-                            getattr(request, "agentic_vlm_max_pages", None),
-                        ),
-                        agentic_vlm_late_chunk_top_k_docs=max(
-                            1, _payload_int("agentic_vlm_late_chunk_top_k_docs", 2)
-                        ),
-                        agentic_use_provider_embeddings_within=_payload_bool(
-                            "agentic_use_provider_embeddings_within", False
-                        ),
-                        agentic_provider_embedding_model_id=effective_payload.get(
-                            "agentic_provider_embedding_model_id",
-                            getattr(request, "agentic_provider_embedding_model_id", None),
-                        ),
+                    resolved_request, retrieval_plan, a_cfg, effective_payload = _build_agentic_request_context(
+                        request,
+                        current_user,
                     )
                     ares = await agentic_rag_pipeline(
-                        query=request.query,
-                        sources=effective_payload.get("sources", request.sources),
+                        query=resolved_request.query,
+                        sources=list(retrieval_plan.sources),
                         media_db=media_db,
                         chacha_db=chacha_db,
                         media_db_path=(media_db.db_path if media_db else None),
                         notes_db_path=(chacha_db.db_path if chacha_db else None),
                         character_db_path=(chacha_db.db_path if chacha_db else None),
                         kanban_db_path=kanban_db_path,
-                        search_mode=effective_payload.get("search_mode", request.search_mode),
+                        search_mode=retrieval_plan.search_mode,
                         fts_level=effective_payload.get("fts_level", request.fts_level),
-                        hybrid_alpha=_payload_float("hybrid_alpha", request.hybrid_alpha),
-                        top_k=max(1, _payload_int("top_k", request.top_k or 10)),
-                        min_score=_payload_float("min_score", request.min_score or 0.0),
-                        index_namespace=index_namespace,
+                        hybrid_alpha=effective_payload.get("hybrid_alpha", request.hybrid_alpha),
+                        top_k=retrieval_plan.top_k,
+                        min_score=retrieval_plan.min_score,
+                        index_namespace=retrieval_plan.index_namespace,
                         agentic=a_cfg,
                         enable_generation=False,
                         enable_citations=False,
                         include_chunk_citations=False,
-                        debug_mode=_payload_bool("debug_mode", request.debug_mode),
-                        explain_only=_payload_bool("explain_only", getattr(request, "explain_only", False)),
+                        debug_mode=bool(effective_payload.get("debug_mode", request.debug_mode)),
+                        explain_only=bool(effective_payload.get("explain_only", getattr(request, "explain_only", False))),
+                        resolved_request=resolved_request,
+                        retrieval_plan=retrieval_plan,
                     )
                     # Emit plan + spans
                     plan = ares.metadata.get('agentic_metrics', {}) if isinstance(ares.metadata, dict) else {}

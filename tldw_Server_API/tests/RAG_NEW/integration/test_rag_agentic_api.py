@@ -253,6 +253,72 @@ def test_rag_agentic_search_smoke_api(client_with_agentic_overrides, monkeypatch
     assert out.get("metadata", {}).get("strategy") == "agentic"
 
 
+def test_rag_agentic_search_uses_shared_request_resolution_and_retrieval_plan(
+    client_with_agentic_overrides,
+    monkeypatch,
+):
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+
+    captured: dict[str, object] = {}
+
+    async def fake_agentic_rag_pipeline(**kwargs):  # noqa: ANN001
+        captured["kwargs"] = kwargs
+        return rag_ep.UnifiedSearchResult(
+            documents=[
+                Document(
+                    id="synthetic-agentic",
+                    content="Synthetic agentic chunk",
+                    metadata={"title": "Synthetic", "source": "agentic"},
+                    source=DataSource.MEDIA_DB,
+                    score=1.0,
+                )
+            ],
+            query=str(kwargs.get("query", "")),
+            expanded_queries=[],
+            metadata={"strategy": "agentic"},
+            timings={},
+            citations=[],
+            feedback_id=None,
+            generated_answer=None,
+            cache_hit=False,
+            errors=[],
+            security_report=None,
+            total_time=0.0,
+        )
+
+    monkeypatch.setattr(rag_ep, "agentic_rag_pipeline", fake_agentic_rag_pipeline)
+
+    payload = {
+        "query": "shared contract parity",
+        "strategy": "agentic",
+        "rag_profile": "fast",
+        "sources": ["notes", "media_db", "notes"],
+        "corpus": "tenant-x",
+        "agentic_top_k_docs": 4,
+        "enable_generation": False,
+    }
+
+    resp = client_with_agentic_overrides.post("/api/v1/rag/search", json=payload)
+    assert resp.status_code == 200, resp.text
+
+    kwargs = captured["kwargs"]
+    assert kwargs["query"] == "shared contract parity"
+    assert kwargs["top_k"] == 6
+    assert kwargs["index_namespace"] == "tenant-x"
+    assert kwargs["sources"] == ["notes", "media_db"]
+    assert kwargs["agentic"].top_k_docs == 4
+
+    resolved_request = kwargs["resolved_request"]
+    retrieval_plan = kwargs["retrieval_plan"]
+    assert resolved_request.payload["generation_prompt"] == "instruction_tuned"
+    assert resolved_request.payload["top_k"] == 6
+    assert retrieval_plan.top_k == 6
+    assert retrieval_plan.sources == ("notes", "media_db")
+    assert retrieval_plan.index_namespace == "tenant-x"
+
+
 def test_rag_agentic_search_verification_flags(client_with_agentic_overrides, monkeypatch):
 
 
