@@ -165,3 +165,42 @@ def test_rag_batch_resume_records_errors(client_with_overrides, monkeypatch, tmp
     assert bad_entry is not None
     assert bad_entry.get("status") == "error"
     assert any("boom" in str(err) for err in bad_entry.get("errors", []))
+
+
+def test_rag_batch_resume_reuses_shared_batch_resolution(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    manager = cp_mod.CheckpointManager()
+
+    checkpoint = manager.create(
+        "rag_batch",
+        total_items=1,
+        config={
+            "queries": ["resume me"],
+            "max_concurrent": 2,
+            "corpus": "resume-corpus",
+        },
+    )
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
+
+    captured = {"kwargs": None}
+
+    async def fake_batch_pipeline(queries, **kwargs):  # noqa: ANN001
+        captured["kwargs"] = {"queries": queries, **kwargs}
+        return [up.UnifiedSearchResult(documents=[], query=queries[0], errors=[])]
+
+    monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fake_batch_pipeline)
+
+    resp = client_with_overrides.post(f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}")
+    assert resp.status_code == 200, resp.text
+
+    kwargs = captured["kwargs"]
+    assert kwargs is not None
+    assert kwargs["queries"] == ["resume me"]
+    assert kwargs["index_namespace"] == "resume-corpus"
+    assert kwargs["sources"] == ["media_db", "notes", "characters"]

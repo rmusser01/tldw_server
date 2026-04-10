@@ -192,6 +192,106 @@ def test_rag_streaming_generation_provider_override(
     assert generation_config["model"] == "llama-3.3-70b-versatile"
 
 
+def test_rag_streaming_generation_uses_shared_resolved_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+) -> None:
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
+
+    captured = {"pipeline_kwargs": None, "generation_config": None}
+
+    async def fake_unified_pipeline(**kwargs: Any) -> Any:
+        from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+
+        captured["pipeline_kwargs"] = kwargs
+        return rag_ep.UnifiedSearchResult(
+            documents=[
+                Document(
+                    id="doc-1",
+                    content="Resolved defaults context",
+                    metadata={"title": "Doc"},
+                    source=DataSource.MEDIA_DB,
+                    score=0.8,
+                )
+            ],
+            query=str(kwargs.get("query", "")),
+            expanded_queries=[],
+            metadata={},
+            timings={},
+            citations=[],
+            feedback_id=None,
+            generated_answer=None,
+            cache_hit=False,
+            errors=[],
+            security_report=None,
+            total_time=0.0,
+        )
+
+    async def fake_generate_streaming_response(context: Any, **kwargs: Any) -> Any:  # noqa: ARG001
+        captured["generation_config"] = context.config.get("generation")
+
+        async def _gen():
+            yield "chunk"
+
+        context.stream_generator = _gen()
+        context.metadata = {"streaming": True}
+        return context
+
+    def fake_resolve_standard_request(request: Any, current_user: Any) -> ResolvedRAGRequest:  # noqa: ARG001
+        payload = {
+            "query": request.query,
+            "strategy": "standard",
+            "sources": ["media_db"],
+            "search_mode": "hybrid",
+            "top_k": 4,
+            "min_score": 0.25,
+            "generation_prompt": "resolved-prompt",
+            "max_generation_tokens": 777,
+            "generation_model": "resolved-model",
+            "generation_provider": "resolved-provider",
+            "enable_generation": True,
+            "index_namespace": "resolved-namespace",
+            "user_id": "1",
+            "feedback_user_id": "1",
+        }
+        return ResolvedRAGRequest(
+            query=request.query,
+            strategy="standard",
+            payload=payload,
+            index_namespace="resolved-namespace",
+            rag_profile="fast",
+            user_id="1",
+            feedback_user_id="1",
+        )
+
+    monkeypatch.setattr(rag_ep, "_resolve_standard_request", fake_resolve_standard_request)
+    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", fake_unified_pipeline)
+    monkeypatch.setattr(rag_ep, "generate_streaming_response", fake_generate_streaming_response)
+
+    payload = {
+        "query": "Shared contract generation defaults",
+        "enable_generation": True,
+    }
+
+    with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
+        assert resp.status_code == 200
+        next(resp.iter_lines(), None)
+
+    pipeline_kwargs = captured["pipeline_kwargs"]
+    assert pipeline_kwargs is not None
+    assert pipeline_kwargs["index_namespace"] == "resolved-namespace"
+    assert pipeline_kwargs["top_k"] == 4
+    assert pipeline_kwargs["min_score"] == 0.25
+
+    generation_config = captured["generation_config"]
+    assert generation_config is not None
+    assert generation_config["provider"] == "resolved-provider"
+    assert generation_config["model"] == "resolved-model"
+    assert generation_config["max_tokens"] == 777
+    assert generation_config["prompt_template"] == "resolved-prompt"
+
+
 def test_rag_streaming_emits_research_progress_before_generation(
     monkeypatch: pytest.MonkeyPatch,
     client_with_stream_overrides: TestClient,
