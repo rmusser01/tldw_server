@@ -17,6 +17,7 @@ from typing import Any, Sequence
 import numpy as np
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     parse_structured_output,
@@ -163,6 +164,51 @@ def _resolve_answer_generator() -> Any:
     return AnswerGenerator
 
 
+def _resolve_chunker_module() -> Any:
+    return sys.modules.get("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker")
+
+
+def _should_use_structure_index(default: bool = True) -> bool:
+    try:
+        from tldw_Server_API.app.core.config import rag_enable_structure_index
+
+        return bool(rag_enable_structure_index(default=default))
+    except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
+        return default
+
+
+def _lookup_section_from_structure_index(doc: Document, heading: str) -> tuple[int, int] | None:
+    if not heading or not _should_use_structure_index():
+        return None
+
+    metadata = doc.metadata if isinstance(doc.metadata, dict) else {}
+    media_id = metadata.get("media_id")
+    if media_id is None:
+        return None
+
+    chunker_module = _resolve_chunker_module()
+    getter = getattr(chunker_module, "_get_media_db_for_structure", None) if chunker_module is not None else None
+    if not callable(getter):
+        return None
+
+    try:
+        db = getter()
+        if db is None:
+            return None
+        result = db.lookup_section_by_heading(int(str(media_id)), heading)
+    except (AttributeError, DatabaseError, OSError, RuntimeError, TypeError, ValueError):
+        return None
+
+    if not isinstance(result, tuple) or len(result) < 2:
+        return None
+
+    start = int(result[0])
+    end = int(result[1])
+    if 0 <= start < end:
+        return (start, end)
+    return None
+
+
 def build_agentic_derived_evidence(
     *,
     retrieved_evidence: RetrievedEvidence,
@@ -304,6 +350,10 @@ class AgenticToolbox:
         return _find_spans(doc.content or "", _keyword_terms(query), max_spans=max_hits, window=window)
 
     def open_section(self, doc: Document, heading: str) -> tuple[int, int] | None:
+        structure_span = _lookup_section_from_structure_index(doc, heading)
+        if structure_span is not None:
+            return structure_span
+
         if getattr(self.cfg, "enable_section_index", True) and doc.id in self._sections:
             for title, start, end in self._sections.get(doc.id) or []:
                 if heading.lower() in (title or "").lower():

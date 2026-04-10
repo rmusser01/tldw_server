@@ -113,6 +113,7 @@ class AgenticConfig:
 
 # Simple in-process caches (namespaced via adapter)
 _EPHEMERAL_CACHE: dict[str, Any] = {}
+_INTRA_DOC_VEC_CACHE = _agentic_execution._INTRA_DOC_VEC_CACHE
 
 # Lazy DB handle for structure index lookups
 _STRUCT_DB: Any = None

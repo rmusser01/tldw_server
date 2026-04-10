@@ -53,6 +53,7 @@ def test_agentic_chunker_reexports_execution_helpers():
     assert ac.AgenticToolbox is agentic_execution.AgenticToolbox
     assert ac._decompose_query is agentic_execution.decompose_query
     assert ac._tool_loop is agentic_execution.tool_loop
+    assert ac._INTRA_DOC_VEC_CACHE is agentic_execution._INTRA_DOC_VEC_CACHE
 
 
 @pytest.mark.asyncio
