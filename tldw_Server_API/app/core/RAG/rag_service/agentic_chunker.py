@@ -27,24 +27,20 @@ import time
 from dataclasses import dataclass
 from typing import Any, Literal
 
-import numpy as np
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
-from tldw_Server_API.app.core.LLM_Calls.structured_output import (
-    StructuredOutputOptions,
-    parse_structured_output,
-)
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     create_media_database,
 )
 
+from . import agentic_execution as _agentic_execution
 from .advanced_cache import AGENTIC_CACHE
-from .agentic_tools import make_default_registry
 from .agentic_execution import (
-    assemble_ephemeral_chunk as _agentic_assemble_ephemeral_chunk,
+    AgenticToolbox,
+    assemble_ephemeral_chunk as _assemble_ephemeral_chunk,
     build_agentic_derived_evidence,
-    tool_loop as _agentic_tool_loop,
+    decompose_query as _decompose_query,
+    tool_loop as _tool_loop,
 )
 from .database_retrievers import MultiDatabaseRetriever, RetrievalConfig
 from .evidence_models import RetrievedEvidence
@@ -116,8 +112,6 @@ class AgenticConfig:
 
 
 # Simple in-process caches (namespaced via adapter)
-_INTRA_DOC_VEC_CACHE: dict[str, Any] = {}
-# Back-compat ephemeral cache dict used by older tests
 _EPHEMERAL_CACHE: dict[str, Any] = {}
 
 # Lazy DB handle for structure index lookups
@@ -147,12 +141,6 @@ def _get_media_db_for_structure() -> Any:
     except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return None
     return _STRUCT_DB
-
-
-def _now() -> float:
-    return time.time()
-
-
 def _cache_get(key: str) -> dict[str, Any] | None:
     v = AGENTIC_CACHE.get("ephemeral_chunk", key)
     if isinstance(v, dict):
@@ -175,11 +163,12 @@ def invalidate_intra_doc_vectors(media_id: str) -> int:
     """
     if not media_id:
         return 0
-    to_delete = [k for k in list(_INTRA_DOC_VEC_CACHE.keys()) if str(k).startswith(f"{media_id}|")]
+    cache = _agentic_execution._INTRA_DOC_VEC_CACHE
+    to_delete = [k for k in list(cache.keys()) if str(k).startswith(f"{media_id}|")]
     removed = 0
     for k in to_delete:
         try:
-            _INTRA_DOC_VEC_CACHE.pop(k, None)
+            cache.pop(k, None)
             removed += 1
         except (KeyError, TypeError):
             pass
@@ -191,14 +180,9 @@ def clear_agentic_caches() -> None:
     with contextlib.suppress(AttributeError, RuntimeError, TypeError, ValueError):
         AGENTIC_CACHE.invalidate_prefix("ephemeral_chunk", "")
     with contextlib.suppress(AttributeError, TypeError, ValueError):
-        _INTRA_DOC_VEC_CACHE.clear()
+        _agentic_execution._INTRA_DOC_VEC_CACHE.clear()
     with contextlib.suppress(AttributeError, TypeError, ValueError):
         _EPHEMERAL_CACHE.clear()
-
-
-def _token_estimate(text: str) -> int:
-    # Roughly 4 chars/token heuristic; safe for budgets
-    return max(1, int(len(text) / 4))
 
 
 def _keyword_terms(query: str) -> list[str]:
@@ -285,557 +269,12 @@ def _document_ids_from_provenance(
     return ordered
 
 
-def _split_headings_and_paragraphs(text: str) -> tuple[list[tuple[str, int, int]], list[tuple[int, int]]]:
-    """Return (sections, paragraphs).
-
-    sections: list of (heading_text, start_offset, end_offset)
-    paragraphs: list of (start_offset, end_offset)
-    """
-    if not text:
-        return [], []
-    # Identify headings (markdown '#' or underlined or short uppercase lines)
-    lines = text.splitlines()
-    offsets: list[int] = []
-    pos = 0
-    for ln in lines:
-        offsets.append(pos)
-        pos += len(ln) + 1
-    section_indices: list[int] = []
-    section_titles: list[str] = []
-    for i, ln in enumerate(lines):
-        if re.match(r"^\s*#{1,6}\s+", ln):
-            section_indices.append(i)
-            section_titles.append(re.sub(r"^\s*#+\s+", "", ln).strip())
-        elif i + 1 < len(lines) and (set(lines[i + 1].strip()) <= set("=-") and len(lines[i + 1].strip()) >= min(3, len(ln))):
-            # underlined heading style
-            section_indices.append(i)
-            section_titles.append(ln.strip())
-        elif len(ln) <= 80 and len(ln) >= 3 and ln.strip().isupper():
-            section_indices.append(i)
-            section_titles.append(ln.strip())
-
-    sections: list[tuple[str, int, int]] = []
-    for idx, title in zip(section_indices, section_titles):
-        start = offsets[idx]
-        # next section or end
-        j = None
-        for nxt in section_indices:
-            if nxt > idx:
-                j = nxt
-                break
-        end = len(text) if j is None else offsets[j]
-        sections.append((title, start, end))
-
-    # Paragraph detection: split on blank lines or long gaps
-    paragraphs: list[tuple[int, int]] = []
-    start = 0
-    for m in re.finditer(r"\n\s*\n", text):
-        end = m.start()
-        if end > start:
-            paragraphs.append((start, end))
-        start = m.end()
-    if start < len(text):
-        paragraphs.append((start, len(text)))
-    return sections, paragraphs
-
-
-def _hash_embed(text: str, dim: int = 2048) -> np.ndarray:
-    import numpy as _np
-    v = _np.zeros(dim, dtype=_np.float32)
-    if not text:
-        return v
-    for tok in re.findall(r"[A-Za-z0-9_-]{2,}", text.lower()):
-        h = int(hashlib.md5(tok.encode('utf-8'), usedforsecurity=False).hexdigest(), 16)
-        idx = h % dim
-        v[idx] += 1.0
-    # L2 normalize
-    n = _np.linalg.norm(v)
-    if n > 0:
-        v /= n
-    return v
-
-
 def _normalize_fts_level(level: str | None) -> Literal["media", "chunk"]:
     return "chunk" if str(level).lower() == "chunk" else "media"
 
 
-def _find_spans(text: str, terms: list[str], max_spans: int = 6, window: int = 300) -> list[tuple[int, int]]:
-    """Find up to `max_spans` promising spans around keyword hits.
-
-    This is a deterministic, cheap heuristic: locate case-insensitive matches
-    of any query term, then expand a window around the match. Merge small
-    overlaps to keep the chunk compact.
-    """
-    if not text:
-        return []
-    lowered = text.lower()
-    hits: list[tuple[int, int]] = []
-    for term in terms:
-        start = 0
-        while True:
-            idx = lowered.find(term, start)
-            if idx == -1:
-                break
-            left = max(0, idx - window)
-            right = min(len(text), idx + len(term) + window)
-            hits.append((left, right))
-            start = idx + len(term)
-            if len(hits) >= max_spans * 3:  # cap raw hits before merging
-                break
-        if len(hits) >= max_spans * 3:
-            break
-
-    if not hits:
-        # fallback: take beginning of the doc
-        return [(0, min(len(text), window * 2))]
-
-    # Merge overlapping/adjacent ranges
-    hits.sort(key=lambda x: x[0])
-    merged: list[tuple[int, int]] = []
-    for s, e in hits:
-        if not merged or s > merged[-1][1] + 20:
-            merged.append((s, e))
-        else:
-            prev_s, prev_e = merged[-1]
-            merged[-1] = (prev_s, max(prev_e, e))
-
-    # Keep top spans (by length proxy) up to max_spans
-    merged.sort(key=lambda x: (x[1] - x[0]), reverse=True)
-    return sorted(merged[:max_spans], key=lambda x: x[0])
-
-
-def _assemble_ephemeral_chunk(
-    docs: list[Document],
-    query: str,
-    cfg: AgenticConfig,
-) -> tuple[str, list[dict[str, Any]]]:
-    """Build a synthetic chunk and provenance from top documents.
-
-    Returns:
-        (chunk_text, provenance) where provenance is list of dicts with
-        doc_id, title, start, end, snippet.
-    """
-    terms = _keyword_terms(query)
-    remaining_tokens = int(cfg.max_tokens_read)
-    parts: list[str] = []
-    provenance: list[dict[str, Any]] = []
-
-    for d in docs[: max(1, cfg.top_k_docs)]:
-        if remaining_tokens <= 0:
-            break
-        text = d.content or ""
-        spans = _find_spans(text, terms, max_spans=4, window=int(cfg.window_chars / 4))
-        for (s, e) in spans:
-            snippet = text[s:e]
-            toks = _token_estimate(snippet)
-            if toks > remaining_tokens:
-                # Trim to budget (approximate by chars)
-                allowed_chars = max(50, remaining_tokens * 4)
-                snippet = snippet[:allowed_chars]
-                toks = _token_estimate(snippet)
-            if toks <= 0:
-                continue
-            # Add simple guard for extractive-only: we only quote snippets
-            parts.append(snippet.strip())
-            provenance.append({
-                "document_id": d.id,
-                "title": (d.metadata or {}).get("title"),
-                "start": int(s),
-                "end": int(s + len(snippet)),
-                "snippet_preview": snippet[:120]
-            })
-            if cfg.enable_metrics:
-                try:
-                    from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter, observe_histogram
-                    observe_histogram("agentic_span_length_chars", float(len(snippet)), labels={"phase": "assemble"})
-                    increment_counter("span_bytes_read_total", float(len(snippet.encode('utf-8'))), labels={"tool": "heuristic"})
-                except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
-                    pass
-            remaining_tokens -= toks
-            if remaining_tokens <= 0:
-                break
-
-    # Minimal glue with delimiters
-    glue = "\n\n---\n\n"
-    chunk_text = glue.join(parts) if parts else (docs[0].content[: cfg.window_chars] if docs else "")
-    return chunk_text, provenance
-
-
-class AgenticToolbox:
-    """Deterministic tool primitives used by the tool loop.
-
-    These avoid external dependencies and work over the provided Document objects.
-    """
-
-    def __init__(self, docs: list[Document], cfg: AgenticConfig):
-        self.docs = docs
-        self.cfg = cfg
-        self._sections: dict[str, list[tuple[str, int, int]]] = {}
-        self._paragraphs: dict[str, list[tuple[int, int]]] = {}
-        self._para_vecs: dict[str, list[Any]] = {}
-        if cfg.enable_section_index or cfg.enable_semantic_within:
-            self._build_indexes()
-
-    def _build_indexes(self) -> None:
-        try:
-            import numpy as _np  # noqa: F401
-        except ImportError:
-            pass
-        for d in self.docs:
-            text = d.content or ""
-            sections, paragraphs = _split_headings_and_paragraphs(text)
-            self._sections[d.id] = sections
-            self._paragraphs[d.id] = paragraphs
-            if self.cfg.enable_semantic_within:
-                # Try provider embeddings first if enabled; cache per doc-version
-                if self.cfg.agentic_use_provider_embeddings_within:
-                    try:
-                        key = f"{d.id}|{len(text)}|{hash(text)}|{self.cfg.agentic_provider_embedding_model_id or ''}|prov"
-                        cached = _INTRA_DOC_VEC_CACHE.get(key)
-                        if cached is not None:
-                            self._para_vecs[d.id] = cached
-                            if self.cfg.enable_metrics:
-                                try:
-                                    from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
-                                    increment_counter("agentic_cache_hits_total", 1, labels={"cache_type": "intra_doc"})
-                                except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
-                                    pass
-                        else:
-                            from tldw_Server_API.app.core.config import load_comprehensive_config
-                            from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import (
-                                create_embeddings_batch,
-                            )
-                            app_cfg = load_comprehensive_config() or {}
-                            embedding_settings = app_cfg.get("EMBEDDING_CONFIG", {})
-                            app_config = {"embedding_config": embedding_settings}
-                            texts = [text[s:e] for (s, e) in paragraphs]
-                            vecs_list = create_embeddings_batch(texts, app_config, self.cfg.agentic_provider_embedding_model_id)
-                            import numpy as _np
-                            vecs_np = [_np.array(v, dtype=_np.float32) for v in vecs_list]
-                            for i, v in enumerate(vecs_np):
-                                n = float((v ** 2).sum()) ** 0.5
-                                if n > 0:
-                                    vecs_np[i] = v / n
-                            self._para_vecs[d.id] = vecs_np
-                            _INTRA_DOC_VEC_CACHE[key] = vecs_np
-                            continue
-                    except (ImportError, AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
-                        # Fallback to hashed embeddings
-                        pass
-                vecs = []
-                for (s, e) in paragraphs:
-                    vecs.append(_hash_embed(text[s:e], self.cfg.semantic_dim))
-                self._para_vecs[d.id] = vecs
-
-    def search_within(self, doc: Document, query: str, max_hits: int = 8, window: int = 300) -> list[tuple[int, int]]:
-        if self.cfg.enable_semantic_within and doc.id in self._para_vecs:
-            try:
-                import numpy as _np
-                qv = _hash_embed(query, self.cfg.semantic_dim)
-                vecs = self._para_vecs.get(doc.id) or []
-                if not vecs:
-                    return []
-                sims = [float(_np.dot(qv, v)) for v in vecs]
-                # pick top indices
-                idxs = sorted(range(len(sims)), key=lambda i: sims[i], reverse=True)[:max_hits]
-                paras = self._paragraphs.get(doc.id) or []
-                return [paras[i] for i in idxs]
-            except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
-                pass
-        # Fallback keyword window search
-        terms = _keyword_terms(effective_query)
-        return _find_spans(doc.content or "", terms, max_spans=max_hits, window=window)
-
-    def open_section(self, doc: Document, heading: str) -> tuple[int, int] | None:
-        """Find a section by heuristic heading match; returns [start,end) char range."""
-        # Prefer DB-backed structure index when available
-        try:
-            from tldw_Server_API.app.core.config import rag_enable_structure_index
-            _enable_si = rag_enable_structure_index()
-        except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
-            _enable_si = True
-        if _enable_si:
-            try:
-                mid_raw = (doc.metadata or {}).get('media_id') if isinstance(doc.metadata, dict) else None
-                if mid_raw is not None:
-                    db = _get_media_db_for_structure()
-                    if db is not None:
-                        res = db.lookup_section_by_heading(int(str(mid_raw)), heading)
-                        if isinstance(res, tuple):
-                            return (int(res[0]), int(res[1]))
-            except DatabaseError:
-                pass
-            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-                pass
-        if self.cfg.enable_section_index and doc.id in self._sections:
-            secs = self._sections.get(doc.id) or []
-            for title, s, e in secs:
-                if heading.lower() in (title or "").lower():
-                    return (s, e)
-        # fallback heuristic if no index
-        text = doc.content or ""
-        if not text:
-            return None
-        lines = text.splitlines()
-        offsets = []
-        pos = 0
-        for ln in lines:
-            offsets.append(pos)
-            pos += len(ln) + 1
-        for i, ln in enumerate(lines):
-            if re.match(r"^\s*(#+|\d+[\)\.]\s+)\s+", ln) and heading.lower() in ln.lower():
-                start = offsets[i]
-                # end at next heading
-                j = i + 1
-                while j < len(lines) and not re.match(r"^\s*(#+|\d+[\)\.]\s+)\s+", lines[j]):
-                    j += 1
-                end = len(text) if j >= len(lines) else offsets[j]
-                return (start, end)
-        return None
-
-    def expand_window(self, doc: Document, start: int, end: int, delta: int = 200) -> tuple[int, int]:
-        text = doc.content or ""
-        left = max(0, start - delta)
-        right = min(len(text), end + delta)
-        return (left, right)
-
-    def quote_spans(self, doc: Document, spans: list[tuple[int, int]]) -> list[str]:
-        text = doc.content or ""
-        return [text[s:e] for s, e in spans]
-
-    def section_title_for(self, doc: Document, start: int) -> str | None:
-        secs = self._sections.get(doc.id) or []
-        for title, s, e in secs:
-            if s <= start < e:
-                return title
-        return None
-
-    def looks_table(self, text: str) -> bool:
-        if not text:
-            return False
-        bars = text.count('|')
-        tabs = text.count('\t')
-        nums = len(re.findall(r"\d", text))
-        return bars >= self.cfg.table_min_bar_count or tabs >= 2 or (nums >= 10 and ('|' in text or '\t' in text))
-
-
-def _decompose_query(query: str, cfg: AgenticConfig) -> list[str]:
-    # Heuristic split on ' and ', ' then ', ',', and question separators
-    q = (query or '').strip()
-    if not q:
-        return []
-    parts = re.split(r"\b(?:and then|then|and|,|;|\?)\b", q, flags=re.IGNORECASE)
-    sub = [p.strip() for p in parts if p and len(p.strip()) >= 3]
-    if cfg.subgoal_max and len(sub) > cfg.subgoal_max:
-        sub = sub[: cfg.subgoal_max]
-    # Fall back to single if no clear split
-    return sub or [q]
-
-
-async def _tool_loop(docs: list[Document], query: str, cfg: AgenticConfig) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
-    """Simple bounded tool loop. If cfg.use_llm_planner is True, we try a light
-    planning prompt; otherwise use a deterministic heuristic policy. Network
-    failures automatically fall back to heuristics.
-    """
-    tb = AgenticToolbox(docs, cfg)
-    registry = make_default_registry(tb)
-    remaining_tokens = int(cfg.max_tokens_read)
-    max_steps = max(1, int(cfg.max_tool_calls))
-    deadline = (_now() + cfg.time_budget_sec) if cfg.time_budget_sec else None
-
-    assembled: list[tuple[Document, int, int]] = []
-    steps = 0
-    tool_trace: list[dict[str, Any]] = []
-
-    def time_left() -> bool:
-        return (deadline is None) or (_now() < deadline)
-
-    # Optional: LLM planning for headings/keywords (best-effort)
-    planned_headings: list[str] = []
-    planned_terms: list[str] = []
-    if cfg.use_llm_planner:
-        try:
-            from .generation import AnswerGenerator
-            planner = AnswerGenerator(model=None)
-            gen = await planner.generate(query=query, context="", prompt_template="default", max_tokens=200)
-            # Handle sync result returned by adapter
-            text = gen.get("answer", "") if isinstance(gen, dict) else str(gen)
-            payload = parse_structured_output(
-                text,
-                options=StructuredOutputOptions(parse_mode="lenient", strip_think_tags=True),
-            )
-            obj: dict[str, Any] | None = None
-            if isinstance(payload, dict):
-                obj = payload
-            elif isinstance(payload, list):
-                for item in payload:
-                    if isinstance(item, dict):
-                        obj = item
-                        break
-            if obj is not None:
-                if isinstance(obj.get("headings"), list):
-                    planned_headings = [str(x)[:80] for x in obj["headings"]][:5]
-                if isinstance(obj.get("keywords"), list):
-                    planned_terms = [str(x)[:40] for x in obj["keywords"]][:8]
-        except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError):
-            planned_headings = []
-            planned_terms = []
-
-    # Query decomposition (multi-hop support)
-    subgoals = _decompose_query(query, cfg) if cfg.enable_query_decomposition else [query]
-
-    # Helper to compute coverage/corroboration + redundancy
-    def _compute_progress_metrics() -> dict[str, Any]:
-        coverage = 0.0
-        uniq_docs = 0
-        redundancy = 0.0
-        try:
-            terms = _keyword_terms(query)
-            assembled_text = "\n".join([(d.content or "")[s:e] for d, s, e in assembled])
-            term_hits = 0
-            for t in terms:
-                if t.lower() in (assembled_text or "").lower():
-                    term_hits += 1
-            coverage = (term_hits / max(1, len(terms)))
-            uniq_docs = len({getattr(d, 'id', '') for d, _, _ in assembled})
-            raw = 0
-            merged = 0
-            per_doc: dict[str, list[tuple[int, int]]] = {}
-            for d, s, e in assembled:
-                per_doc.setdefault(getattr(d, 'id', ''), []).append((int(s), int(e)))
-            for _doc_id, ranges in per_doc.items():
-                ranges = sorted(ranges, key=lambda x: x[0])
-                raw += sum(e - s for s, e in ranges)
-                merged_ranges: list[tuple[int, int]] = []
-                for s, e in ranges:
-                    if not merged_ranges or s > merged_ranges[-1][1]:
-                        merged_ranges.append((s, e))
-                    else:
-                        ps, pe = merged_ranges[-1]
-                        merged_ranges[-1] = (ps, max(pe, e))
-                merged += sum(e - s for s, e in merged_ranges)
-            redundancy = 1.0 - (merged / max(1, raw))
-        except (TypeError, ValueError, AttributeError):
-            pass
-        return {"coverage": coverage, "unique_docs": uniq_docs, "redundancy": redundancy}
-
-    # Heuristic policy per subgoal: scan top docs, pick best spans by semantic/keyword hits, consider headings
-    for goal in subgoals:
-        for d in docs[: max(1, cfg.top_k_docs)]:
-            if steps >= max_steps or not time_left():
-                break
-            # Use planned terms if available
-            local_query = " ".join([goal] + planned_terms) if planned_terms else goal
-
-            # Table-aware routing: if goal mentions table-like concepts, prefer table-like paragraphs
-            _t0 = time.time()
-            search = registry.get("search_within")
-            hits = search(d, local_query, max_hits=4, window=int(cfg.window_chars / 4)) if search else tb.search_within(d, local_query, max_hits=4, window=int(cfg.window_chars / 4))
-            _t1 = time.time()
-            if cfg.enable_metrics:
-                try:
-                    from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter, observe_histogram
-                    increment_counter("agentic_tool_calls_total", 1, labels={"tool": "search_within"})
-                    observe_histogram("agentic_tool_duration_seconds", (_t1 - _t0), labels={"tool": "search_within"})
-                except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
-                    pass
-            if cfg.enable_table_support and any(kw in local_query.lower() for kw in cfg.table_trigger_keywords):
-                # Reorder to prefer table-like spans
-                hits = sorted(hits, key=lambda rng: int(not tb.looks_table((d.content or "")[rng[0]:rng[1]])))
-
-            # Try planned headings if no hits
-            if not hits and planned_headings:
-                for h in planned_headings[:3]:
-                    _s0 = time.time()
-                    open_sec = registry.get("open_section")
-                    sec = open_sec(d, h) if open_sec else tb.open_section(d, h)
-                    _s1 = time.time()
-                    if cfg.enable_metrics:
-                        try:
-                            from tldw_Server_API.app.core.Metrics.metrics_manager import (
-                                increment_counter,
-                                observe_histogram,
-                            )
-                            increment_counter("agentic_tool_calls_total", 1, labels={"tool": "open_section"})
-                            observe_histogram("agentic_tool_duration_seconds", (_s1 - _s0), labels={"tool": "open_section"})
-                        except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
-                            pass
-                    if sec:
-                        hits = [sec]
-                        break
-            for (s, e) in hits:
-                if steps >= max_steps or not time_left():
-                    break
-                _e0 = time.time()
-                expand = registry.get("expand_window")
-                s2, e2 = (expand(d, s, e, delta=100) if expand else tb.expand_window(d, s, e, delta=100))
-                _e1 = time.time()
-                if cfg.enable_metrics:
-                    try:
-                        from tldw_Server_API.app.core.Metrics.metrics_manager import (
-                            increment_counter,
-                            observe_histogram,
-                        )
-                        increment_counter("agentic_tool_calls_total", 1, labels={"tool": "expand_window"})
-                        observe_histogram("agentic_tool_duration_seconds", (_e1 - _e0), labels={"tool": "expand_window"})
-                    except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
-                        pass
-                assembled.append((d, s2, e2))
-                steps += 1
-                snippet = (d.content or "")[s2:e2]
-                remaining_tokens -= _token_estimate(snippet)
-                if cfg.enable_metrics:
-                    try:
-                        from tldw_Server_API.app.core.Metrics.metrics_manager import (
-                            increment_counter,
-                            observe_histogram,
-                        )
-                        observe_histogram("agentic_span_length_chars", float(len(snippet)), labels={"phase": "tool"})
-                        increment_counter("span_bytes_read_total", float(len(snippet.encode('utf-8'))), labels={"tool": "expand_window"})
-                    except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
-                        pass
-                if cfg.debug_trace:
-                    tool_trace.append({
-                        "tool": "expand_window",
-                        "doc_id": getattr(d, 'id', ''),
-                        "start": int(s2),
-                        "end": int(e2),
-                        "duration_ms": int((_e1 - _e0) * 1000.0),
-                        "bytes": int(len(snippet.encode('utf-8'))),
-                        "reason": "around-hit",
-                    })
-                if remaining_tokens <= 0:
-                    break
-
-                # Adaptive stop if coverage + corroboration achieved
-                if cfg.adaptive_budgets:
-                    prog = _compute_progress_metrics()
-                    if (prog.get("coverage", 0.0) >= float(cfg.coverage_target or 1.0)) and (prog.get("unique_docs", 0) >= int(cfg.min_corroborating_docs or 1)):
-                        steps = max_steps
-                        break
-
-    # Fallback if nothing assembled
-    if not assembled and docs:
-        d0 = docs[0]
-        assembled = [(d0, 0, min(len(d0.content or ''), cfg.window_chars))]
-
-    # Compose chunk and provenance
-    parts: list[str] = []
-    provenance: list[dict[str, Any]] = []
-    for d, s, e in assembled:
-        snippet = (d.content or "")[s:e]
-        parts.append(snippet.strip())
-        provenance.append({
-            "document_id": d.id,
-            "title": (d.metadata or {}).get("title"),
-            "start": int(s),
-            "end": int(e),
-            "section_title": tb.section_title_for(d, s),
-            "snippet_preview": snippet[:120]
-        })
-
-    glue = "\n\n---\n\n"
-    return glue.join(parts), provenance, tool_trace
+# Compatibility re-exports for callers and tests that still import the old names
+# from agentic_chunker.py while execution now lives in agentic_execution.py.
 
 
 async def agentic_rag_pipeline(
@@ -1117,9 +556,9 @@ async def agentic_rag_pipeline(
         # 4) Assemble ephemeral chunk (either tools or heuristics)
         tool_trace: list[dict[str, Any]] = []
         if cfg.enable_tools:
-            chunk_text, prov, tool_trace = await _agentic_tool_loop(docs, effective_query, cfg)
+            chunk_text, prov, tool_trace = await _tool_loop(docs, effective_query, cfg)
         else:
-            chunk_text, prov = _agentic_assemble_ephemeral_chunk(docs, effective_query, cfg)
+            chunk_text, prov = _assemble_ephemeral_chunk(docs, effective_query, cfg)
             tool_trace = []
         _cache_set(cache_key, {"chunk_text": chunk_text, "provenance": prov}, cfg.cache_ttl_sec)
 

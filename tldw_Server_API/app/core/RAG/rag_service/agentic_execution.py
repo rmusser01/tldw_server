@@ -35,6 +35,9 @@ except ImportError:
     AnswerGenerator = None
 
 
+_INTRA_DOC_VEC_CACHE: dict[str, Any] = {}
+
+
 def _now() -> float:
     return time.time()
 

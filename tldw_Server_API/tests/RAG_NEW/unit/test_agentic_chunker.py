@@ -3,6 +3,7 @@ import time
 
 import pytest
 
+import tldw_Server_API.app.core.RAG.rag_service.agentic_execution as agentic_execution
 from tldw_Server_API.app.core.RAG.rag_service.evidence_models import DerivedEvidence
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import (
@@ -43,6 +44,15 @@ def test_assemble_ephemeral_chunk_basic():
     assert "dropout" in chunk.lower()
     assert prov and prov[0]["document_id"] == "d1"
     assert prov[0]["start"] >= 0 and prov[0]["end"] > prov[0]["start"]
+
+
+def test_agentic_chunker_reexports_execution_helpers():
+    import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as ac
+
+    assert ac._assemble_ephemeral_chunk is agentic_execution.assemble_ephemeral_chunk
+    assert ac.AgenticToolbox is agentic_execution.AgenticToolbox
+    assert ac._decompose_query is agentic_execution.decompose_query
+    assert ac._tool_loop is agentic_execution.tool_loop
 
 
 @pytest.mark.asyncio
