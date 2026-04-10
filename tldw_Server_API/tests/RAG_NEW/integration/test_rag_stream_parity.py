@@ -733,24 +733,10 @@ def test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving(
 
     captured: dict[str, Any] = {
         "agentic_kwargs": None,
-        "helper_called": False,
-        "helper_resolved_request": None,
-        "helper_retrieval_plan": None,
     }
 
     def fake_build_standard_request_bundle(*args: Any, **kwargs: Any) -> ResolvedRequestBundle:  # noqa: ARG001
         return bundle
-
-    def fake_build_agentic_request_context(*args: Any, **kwargs: Any) -> tuple[Any, ...]:  # noqa: ARG001
-        captured["helper_called"] = True
-        captured["helper_resolved_request"] = kwargs["resolved_request"]
-        captured["helper_retrieval_plan"] = kwargs["retrieval_plan"]
-        return (
-            kwargs["resolved_request"],
-            kwargs["retrieval_plan"],
-            rag_ep.AgenticConfig(),
-            dict(kwargs["payload"]),
-        )
 
     async def fake_unified_rag_pipeline(**kwargs: Any) -> Any:  # noqa: ARG001
         return rag_ep.UnifiedSearchResult(
@@ -800,7 +786,6 @@ def test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving(
         return context
 
     monkeypatch.setattr(rag_ep, "_build_standard_request_bundle", fake_build_standard_request_bundle)
-    monkeypatch.setattr(rag_ep, "_build_agentic_request_context", fake_build_agentic_request_context)
     monkeypatch.setattr(rag_ep, "unified_rag_pipeline", fake_unified_rag_pipeline)
     monkeypatch.setattr(rag_ep, "agentic_rag_pipeline", fake_agentic_rag_pipeline)
     monkeypatch.setattr(rag_ep, "generate_streaming_response", fake_generate_streaming_response)
@@ -815,9 +800,6 @@ def test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving(
         assert resp.status_code == 200
         next(resp.iter_lines(), None)
 
-    assert captured["helper_called"] is True
-    assert captured["helper_resolved_request"] is canonical_resolved
-    assert captured["helper_retrieval_plan"] is canonical_plan
     agentic_kwargs = captured["agentic_kwargs"]
     assert agentic_kwargs is not None
     assert agentic_kwargs["resolved_request"] is canonical_resolved

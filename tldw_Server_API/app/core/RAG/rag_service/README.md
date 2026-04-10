@@ -2,6 +2,10 @@
 
 `rag_service/` contains internal modules that support `unified_pipeline.py`. Prefer the public API routes for application clients. Backend code that must call RAG directly should use the active entrypoints in `unified_pipeline.py`.
 
+## Internal Flow
+
+`HTTP request -> request_bundle.build_request_bundle -> retrieval_executor.execute_retrieval_phase -> PostRetrievalCoordinator -> generation_executor.execute_generation_phase -> response_mapping.rag_result_to_response`
+
 ## Active Entrypoints
 
 - `unified_pipeline.py` - `unified_rag_pipeline(...)`

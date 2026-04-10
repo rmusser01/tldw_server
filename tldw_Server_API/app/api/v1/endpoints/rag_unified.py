@@ -64,7 +64,6 @@ from tldw_Server_API.app.core.RAG.rag_service.request_bundle import (
 )
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import (
     ResolvedRAGRequest,
-    apply_search_agent_defaults as apply_core_search_agent_defaults,
     resolve_rag_request,
 )
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import (
@@ -104,21 +103,6 @@ def _search_agent_setting(env_key: str, config_key: str) -> Optional[str]:
         return None
 
 
-def _apply_search_agent_defaults(
-    request: Any,
-    payload: dict[str, Any],
-    *,
-    allowed_fields: Optional[set[str]] = None,
-) -> None:
-    """Compatibility shim over the shared core Search-Agent default resolver."""
-    apply_core_search_agent_defaults(
-        request,
-        payload,
-        search_agent_setting_fn=_search_agent_setting,
-        allowed_fields=allowed_fields,
-    )
-
-
 def _build_unified_pipeline_kwargs(
     request: UnifiedRAGRequest,
     db_paths: dict[str, Optional[str]],
@@ -129,7 +113,12 @@ def _build_unified_pipeline_kwargs(
     retrieval_plan: Optional[RetrievalPlan] = None,
 ) -> dict[str, Any]:
     if resolved_request is None:
-        resolved_request = _resolve_standard_request(request, current_user)
+        resolved_request = resolve_rag_request(
+            request,
+            current_user=current_user,
+            single_user_id_resolver=DatabasePaths.get_single_user_id,
+            search_agent_setting_fn=_search_agent_setting,
+        )
     if retrieval_plan is None:
         retrieval_plan = build_retrieval_plan(resolved_request)
     payload = dict(resolved_request.payload)
@@ -152,20 +141,23 @@ def _build_unified_pipeline_kwargs(
     return {k: v for k, v in payload.items() if k in allowed}
 
 
-def _build_agentic_request_context(
+def _build_agentic_execution_payload(
     *,
     resolved_request: ResolvedRAGRequest,
     retrieval_plan: RetrievalPlan,
     payload: Optional[dict[str, Any]] = None,
-) -> tuple[ResolvedRAGRequest, RetrievalPlan, AgenticConfig, dict[str, Any]]:
-    """Build agentic execution config from canonical resolved request contracts."""
+) -> dict[str, Any]:
+    """Build transport payload used for agentic execution."""
     effective_payload = dict(payload or resolved_request.payload)
     effective_payload["sources"] = list(retrieval_plan.sources)
     effective_payload["search_mode"] = retrieval_plan.search_mode
     effective_payload["top_k"] = retrieval_plan.top_k
     effective_payload["min_score"] = retrieval_plan.min_score
     effective_payload["index_namespace"] = retrieval_plan.index_namespace
+    return effective_payload
 
+
+def _build_agentic_config(effective_payload: dict[str, Any]) -> AgenticConfig:
     def _payload_bool(name: str, fallback: bool = False) -> bool:
         return bool(effective_payload.get(name, fallback))
 
@@ -220,19 +212,7 @@ def _build_agentic_request_context(
         max_redundancy=_payload_float("agentic_max_redundancy", 0.9),
         enable_metrics=_payload_bool("agentic_enable_metrics", True),
     )
-    return resolved_request, retrieval_plan, agentic_cfg, effective_payload
-
-
-def _resolve_standard_request(
-    request: UnifiedRAGRequest,
-    current_user: Optional[User],
-) -> ResolvedRAGRequest:
-    return resolve_rag_request(
-        request,
-        current_user=current_user,
-        single_user_id_resolver=DatabasePaths.get_single_user_id,
-        search_agent_setting_fn=_search_agent_setting,
-    )
+    return agentic_cfg
 
 
 def _build_batch_pipeline_kwargs(
@@ -1194,11 +1174,14 @@ async def unified_search_endpoint(
 
         # Branch: agentic strategy builds a synthetic chunk at query time
         if strategy_value == 'agentic':
-            resolved_request, retrieval_plan, agentic_cfg, effective_payload = _build_agentic_request_context(
-                resolved_request=standard_bundle.resolved_request,
-                retrieval_plan=standard_bundle.retrieval_plan,
+            resolved_request = standard_bundle.resolved_request
+            retrieval_plan = standard_bundle.retrieval_plan
+            effective_payload = _build_agentic_execution_payload(
+                resolved_request=resolved_request,
+                retrieval_plan=retrieval_plan,
                 payload=standard_bundle.resolved_request.payload,
             )
+            agentic_cfg = _build_agentic_config(effective_payload)
 
             try:
                 result = await agentic_rag_pipeline(
@@ -1967,16 +1950,14 @@ async def unified_search_stream_endpoint(
             strategy_value = str(resolved_request.strategy).strip().lower()
             if strategy_value == "agentic":
                 try:
-                    (
-                        agentic_resolved_request,
-                        retrieval_plan,
-                        a_cfg,
-                        agentic_payload,
-                    ) = _build_agentic_request_context(
-                        resolved_request=stream_bundle.resolved_request,
-                        retrieval_plan=stream_bundle.retrieval_plan,
+                    agentic_resolved_request = stream_bundle.resolved_request
+                    retrieval_plan = stream_bundle.retrieval_plan
+                    agentic_payload = _build_agentic_execution_payload(
+                        resolved_request=agentic_resolved_request,
+                        retrieval_plan=retrieval_plan,
                         payload=shared_payload,
                     )
+                    a_cfg = _build_agentic_config(agentic_payload)
                     ares = await agentic_rag_pipeline(
                         query=agentic_resolved_request.query,
                         sources=list(retrieval_plan.sources),

@@ -270,17 +270,16 @@ def test_batch_round2_defaults_apply_when_fields_omitted(monkeypatch):
     )
 
     request = UnifiedBatchRequest(queries=["q1"])
-    payload = {}
-    rag_ep._apply_search_agent_defaults(
+    kwargs = rag_ep._build_batch_pipeline_kwargs(
         request,
-        payload,
-        allowed_fields=rag_ep._BATCH_ROUND2_DEFAULT_FIELDS,
+        db_paths=_EMPTY_DB_PATHS,
+        current_user=None,
     )
 
-    assert payload["enable_suggestions"] is True
-    assert payload["enable_structured_response"] is True
-    assert payload["enable_image_search"] is False
-    assert payload["enable_video_search"] is True
+    assert kwargs["enable_suggestions"] is True
+    assert kwargs["enable_structured_response"] is True
+    assert kwargs["enable_image_search"] is False
+    assert kwargs["enable_video_search"] is True
 
 
 def test_build_batch_kwargs_uses_core_user_normalization_when_single_user_resolution_fails(
