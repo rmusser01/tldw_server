@@ -15,7 +15,7 @@ import {
   Sparkles,
   Settings
 } from "lucide-react"
-import React, { Suspense, useEffect } from "react"
+import React, { Suspense, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -118,6 +118,7 @@ export const StudioTabContainer: React.FC = () => {
   const setActiveSubTab = usePromptStudioStore((s) => s.setActiveSubTab)
   const selectedProjectId = usePromptStudioStore((s) => s.selectedProjectId)
   const setSelectedProjectId = usePromptStudioStore((s) => s.setSelectedProjectId)
+  const [wsConnected, setWsConnected] = useState(true)
 
   // Capability check
   const { data: hasStudio, isLoading: isCheckingCapability } = useQuery({
@@ -261,6 +262,7 @@ export const StudioTabContainer: React.FC = () => {
 
         ws.onopen = () => {
           if (!ws || ws.readyState !== WebSocket.OPEN) return
+          setWsConnected(true)
           const subscribePayload = selectedProjectId
             ? { type: "subscribe", project_id: selectedProjectId }
             : { type: "subscribe" }
@@ -282,7 +284,12 @@ export const StudioTabContainer: React.FC = () => {
         }
 
         ws.onerror = () => {
+          setWsConnected(false)
           // Polling remains active as fallback when websocket errors.
+        }
+
+        ws.onclose = () => {
+          setWsConnected(false)
         }
       } catch {
         // Polling remains active as fallback when websocket setup fails.
@@ -296,6 +303,7 @@ export const StudioTabContainer: React.FC = () => {
       if (ws && ws.readyState < WebSocket.CLOSING) {
         ws.close()
       }
+      setWsConnected(true)
     }
   }, [isOnline, hasStudio, selectedProjectId, queryClient])
 
@@ -677,6 +685,18 @@ export const StudioTabContainer: React.FC = () => {
                 "Select a project in the Projects tab to unlock Prompts, Test Cases, Evaluations, and Optimizations."
             })}
           </p>
+        </div>
+      )}
+
+      {/* WebSocket disconnected banner */}
+      {!wsConnected && isOnline && (
+        <div
+          className="bg-warn/10 border border-warn/20 text-warn text-xs p-2 rounded"
+          data-testid="studio-ws-disconnected-banner"
+        >
+          {t("managePrompts.studio.wsDisconnected", {
+            defaultValue: "Real-time updates unavailable. Status refreshes automatically."
+          })}
         </div>
       )}
 

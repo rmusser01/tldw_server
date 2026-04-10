@@ -82,6 +82,8 @@ export function TrashSegment({ tableDensity }: TrashSegmentProps) {
   // ---- Local state ----
 
   const [trashSearchText, setTrashSearchText] = useState("")
+  const [emptyTrashConfirmOpen, setEmptyTrashConfirmOpen] = useState(false)
+  const [emptyTrashConfirmText, setEmptyTrashConfirmText] = useState("")
 
   // ---- Derived data ----
 
@@ -124,25 +126,64 @@ export function TrashSegment({ tableDensity }: TrashSegmentProps) {
                 </span>
               </div>
               <button
-                onClick={async () => {
-                  const ok = await confirmDanger({
-                    title: t("managePrompts.trash.emptyConfirmTitle", { defaultValue: "Empty Trash?" }),
-                    content: t("managePrompts.trash.emptyConfirmContent", {
-                      defaultValue: "This will permanently delete {{count}} prompts. This action cannot be undone.",
-                      count: trashCount
-                    }),
-                    okText: t("managePrompts.trash.emptyTrash", { defaultValue: "Empty Trash" }),
-                    cancelText: t("common:cancel", { defaultValue: "Cancel" })
-                  })
-                  if (!ok) return
-                  editor.emptyTrashMutation()
-                }}
+                onClick={() => setEmptyTrashConfirmOpen((prev) => !prev)}
                 disabled={editor.isEmptyingTrash}
-                className="inline-flex items-center gap-1 px-2 py-1 text-sm rounded border border-danger/30 text-danger hover:bg-danger/10 disabled:opacity-50">
+                className="inline-flex items-center gap-1 px-2 py-1 text-sm rounded border border-danger/30 text-danger hover:bg-danger/10 disabled:opacity-50"
+                data-testid="prompts-trash-empty-button">
                 <Trash2 className="size-3" />
                 {t("managePrompts.trash.emptyTrash", { defaultValue: "Empty Trash" })}
               </button>
             </div>
+
+            {emptyTrashConfirmOpen && (
+              <div
+                className="p-3 rounded-md border border-danger/30 bg-danger/5 space-y-2"
+                data-testid="prompts-trash-empty-confirm"
+              >
+                <p className="text-sm text-danger">
+                  {t("managePrompts.trash.emptyConfirmInline", {
+                    defaultValue: "This will permanently delete {{count}} prompts. This cannot be undone.",
+                    count: trashCount
+                  })}
+                </p>
+                <input
+                  type="text"
+                  value={emptyTrashConfirmText}
+                  onChange={(e) => setEmptyTrashConfirmText(e.target.value)}
+                  placeholder={t("managePrompts.trash.typeDeletePlaceholder", {
+                    defaultValue: "Type DELETE to confirm"
+                  })}
+                  className="w-full rounded border border-border bg-bg px-2 py-1 text-sm"
+                  data-testid="prompts-trash-empty-confirm-input"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={emptyTrashConfirmText !== "DELETE"}
+                    onClick={() => {
+                      editor.emptyTrashMutation()
+                      setEmptyTrashConfirmOpen(false)
+                      setEmptyTrashConfirmText("")
+                    }}
+                    className="inline-flex items-center gap-1 px-3 py-1 text-sm rounded border border-danger/30 text-danger hover:bg-danger/10 disabled:opacity-50"
+                    data-testid="prompts-trash-empty-confirm-submit"
+                  >
+                    {t("common:confirm", { defaultValue: "Confirm" })}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmptyTrashConfirmOpen(false)
+                      setEmptyTrashConfirmText("")
+                    }}
+                    className="inline-flex items-center gap-1 px-3 py-1 text-sm rounded border border-border text-text-muted hover:bg-surface2"
+                    data-testid="prompts-trash-empty-confirm-cancel"
+                  >
+                    {t("common:cancel", { defaultValue: "Cancel" })}
+                  </button>
+                </div>
+              </div>
+            )}
 
             <Input
               value={trashSearchText}
