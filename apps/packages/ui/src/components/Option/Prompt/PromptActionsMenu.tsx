@@ -7,6 +7,7 @@ import {
   Trash2,
   CloudUpload,
   CloudDownload,
+  RefreshCw,
   Unlink,
   AlertTriangle,
   Link,
@@ -28,6 +29,7 @@ interface PromptActionsMenuProps {
   onQuickTest?: () => void
   onDelete: () => void
   onShareLink?: () => void
+  onRetrySync?: () => void
   onPushToServer?: () => void
   onPullFromServer?: () => void
   onUnlink?: () => void
@@ -46,6 +48,7 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
   onQuickTest,
   onDelete,
   onShareLink,
+  onRetrySync,
   onPushToServer,
   onPullFromServer,
   onUnlink,
@@ -67,6 +70,13 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
       onClick: onResolveConflict
     }] : []),
     ...(onResolveConflict && isConflict ? [{ type: "divider" as const }] : []),
+    // Retry sync option (for pending prompts)
+    ...(onRetrySync ? [{
+      key: "retrySync",
+      label: t("managePrompts.sync.retrySync", { defaultValue: "Retry sync" }),
+      icon: <RefreshCw className="size-4" />,
+      onClick: onRetrySync
+    }] : []),
     // Push to server option (for local or pending prompts)
     ...(onPushToServer && !isSynced ? [{
       key: "push",

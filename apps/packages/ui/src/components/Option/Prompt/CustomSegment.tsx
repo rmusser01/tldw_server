@@ -398,6 +398,11 @@ export function CustomSegment({
               ? () => { /* TODO: wire copyPromptShareLink */ }
               : undefined
           }
+          onRetrySync={
+            isOnline && promptRecord && row.syncStatus === "pending"
+              ? () => { void sync.syncPromptAfterLocalSave(promptRecord.id) }
+              : undefined
+          }
           onPushToServer={
             isOnline && promptRecord
               ? () => { sync.setPromptToSync(promptRecord.id); sync.setProjectSelectorOpen(true) }

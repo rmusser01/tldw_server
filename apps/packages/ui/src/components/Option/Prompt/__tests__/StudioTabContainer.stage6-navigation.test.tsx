@@ -250,6 +250,7 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
     promptStudioServiceMocks.listProjects.mockResolvedValue({
       data: [{ id: 11, name: "Project Eleven" }]
     })
+    try { window.localStorage.removeItem("tldw-studio-onboarding-dismissed") } catch {}
     usePromptStudioStore.setState({
       activeSubTab: "projects",
       selectedProjectId: null
@@ -314,18 +315,15 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
     })
   })
 
-  it("shows project-first guidance and keeps project-required tabs disabled", () => {
+  it("shows onboarding card and keeps project-required tabs disabled", () => {
     render(
       <MemoryRouter>
         <StudioTabContainer />
       </MemoryRouter>
     )
 
-    expect(
-      screen.getByText(
-        "Select a project in the Projects tab to unlock Prompts, Test Cases, Evaluations, and Optimizations."
-      )
-    ).toBeInTheDocument()
+    expect(screen.getByTestId("studio-onboarding-card")).toBeInTheDocument()
+    expect(screen.getByText("Getting started with Prompt Studio")).toBeInTheDocument()
     expect(screen.getByTestId("seg-option-prompts")).toBeDisabled()
     expect(screen.getByTestId("seg-option-testCases")).toBeDisabled()
     expect(screen.getByTestId("seg-option-evaluations")).toBeDisabled()
@@ -333,6 +331,70 @@ describe("StudioTabContainer stage 6 navigation and polling", () => {
     expect(
       screen.getByLabelText("Prompts (Select a project first)")
     ).toBeInTheDocument()
+  })
+
+  it("shows warning banner after onboarding is dismissed", () => {
+    try { window.localStorage.setItem("tldw-studio-onboarding-dismissed", "true") } catch {}
+
+    render(
+      <MemoryRouter>
+        <StudioTabContainer />
+      </MemoryRouter>
+    )
+
+    expect(screen.queryByTestId("studio-onboarding-card")).not.toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Select a project in the Projects tab to unlock Prompts, Test Cases, Evaluations, and Optimizations."
+      )
+    ).toBeInTheDocument()
+
+    try { window.localStorage.removeItem("tldw-studio-onboarding-dismissed") } catch {}
+  })
+
+  it("dismisses onboarding card on dismiss button click", () => {
+    render(
+      <MemoryRouter>
+        <StudioTabContainer />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByTestId("studio-onboarding-card")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("studio-onboarding-dismiss"))
+    expect(screen.queryByTestId("studio-onboarding-card")).not.toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Select a project in the Projects tab to unlock Prompts, Test Cases, Evaluations, and Optimizations."
+      )
+    ).toBeInTheDocument()
+
+    try { window.localStorage.removeItem("tldw-studio-onboarding-dismissed") } catch {}
+  })
+
+  it("navigates to projects tab when step 1 is clicked in onboarding", () => {
+    render(
+      <MemoryRouter>
+        <StudioTabContainer />
+      </MemoryRouter>
+    )
+
+    const step1 = screen.getByTestId("studio-onboarding-step-1")
+    expect(step1).not.toBeDisabled()
+    fireEvent.click(step1)
+    expect(usePromptStudioStore.getState().activeSubTab).toBe("projects")
+  })
+
+  it("disables steps 2-5 in onboarding when no project is selected", () => {
+    render(
+      <MemoryRouter>
+        <StudioTabContainer />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByTestId("studio-onboarding-step-2")).toBeDisabled()
+    expect(screen.getByTestId("studio-onboarding-step-3")).toBeDisabled()
+    expect(screen.getByTestId("studio-onboarding-step-4")).toBeDisabled()
+    expect(screen.getByTestId("studio-onboarding-step-5")).toBeDisabled()
   })
 
   it("guards against non-array studio project settings payloads", () => {

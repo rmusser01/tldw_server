@@ -13,7 +13,8 @@ import {
   TestTube,
   BarChart3,
   Sparkles,
-  Settings
+  Settings,
+  X
 } from "lucide-react"
 import React, { Suspense, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -119,6 +120,14 @@ export const StudioTabContainer: React.FC = () => {
   const selectedProjectId = usePromptStudioStore((s) => s.selectedProjectId)
   const setSelectedProjectId = usePromptStudioStore((s) => s.setSelectedProjectId)
   const [wsConnected, setWsConnected] = useState(true)
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+    if (typeof window === "undefined") return false
+    try {
+      return window.localStorage.getItem("tldw-studio-onboarding-dismissed") === "true"
+    } catch {
+      return false
+    }
+  })
 
   // Capability check
   const { data: hasStudio, isLoading: isCheckingCapability } = useQuery({
@@ -676,8 +685,105 @@ export const StudioTabContainer: React.FC = () => {
         </div>
       </div>
 
-      {/* Project context reminder */}
-      {!selectedProjectId && (
+      {/* Getting-started onboarding or project context reminder */}
+      {!selectedProjectId && !onboardingDismissed && (
+        <div className="rounded-lg border border-border bg-surface p-6" data-testid="studio-onboarding-card">
+          <div className="mb-4 flex items-start justify-between">
+            <h3 className="text-base font-semibold text-text">
+              {t("managePrompts.studio.onboarding.title", {
+                defaultValue: "Getting started with Prompt Studio"
+              })}
+            </h3>
+            <button
+              type="button"
+              onClick={() => {
+                setOnboardingDismissed(true)
+                try { window.localStorage.setItem("tldw-studio-onboarding-dismissed", "true") } catch {}
+              }}
+              className="text-text-muted hover:text-text"
+              aria-label={t("common:dismiss", { defaultValue: "Dismiss" })}
+              data-testid="studio-onboarding-dismiss"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {([
+              {
+                step: 1,
+                key: "createProject" as const,
+                title: t("managePrompts.studio.onboarding.step1Title", { defaultValue: "Create a project" }),
+                description: t("managePrompts.studio.onboarding.step1Desc", { defaultValue: "Organize your prompts into projects for different use cases" }),
+                tab: "projects" as const,
+                enabled: true
+              },
+              {
+                step: 2,
+                key: "addPrompts" as const,
+                title: t("managePrompts.studio.onboarding.step2Title", { defaultValue: "Add prompts" }),
+                description: t("managePrompts.studio.onboarding.step2Desc", { defaultValue: "Write and version your prompt templates" }),
+                tab: "prompts" as const,
+                enabled: false
+              },
+              {
+                step: 3,
+                key: "writeTests" as const,
+                title: t("managePrompts.studio.onboarding.step3Title", { defaultValue: "Write test cases" }),
+                description: t("managePrompts.studio.onboarding.step3Desc", { defaultValue: "Define expected inputs and outputs to measure quality" }),
+                tab: "testCases" as const,
+                enabled: false
+              },
+              {
+                step: 4,
+                key: "runEvals" as const,
+                title: t("managePrompts.studio.onboarding.step4Title", { defaultValue: "Run evaluations" }),
+                description: t("managePrompts.studio.onboarding.step4Desc", { defaultValue: "Test your prompts against your test cases automatically" }),
+                tab: "evaluations" as const,
+                enabled: false
+              },
+              {
+                step: 5,
+                key: "optimize" as const,
+                title: t("managePrompts.studio.onboarding.step5Title", { defaultValue: "Optimize" }),
+                description: t("managePrompts.studio.onboarding.step5Desc", { defaultValue: "Let the system improve your prompts based on evaluation results" }),
+                tab: "optimizations" as const,
+                enabled: false
+              }
+            ]).map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                disabled={!item.enabled}
+                onClick={() => { if (item.enabled) setActiveSubTab(item.tab) }}
+                className={`flex items-start gap-3 rounded-md border p-3 text-left transition ${
+                  item.enabled
+                    ? "border-primary/30 bg-primary/5 hover:bg-primary/10 cursor-pointer"
+                    : "border-border bg-bg opacity-60 cursor-default"
+                }`}
+                data-testid={`studio-onboarding-step-${item.step}`}
+              >
+                <span className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                  item.enabled ? "bg-primary text-white" : "bg-border text-text-muted"
+                }`}>
+                  {item.step}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-text">{item.title}</p>
+                  <p className="mt-0.5 text-xs text-text-muted">{item.description}</p>
+                  {!item.enabled && (
+                    <p className="mt-1 text-xs italic text-text-muted">
+                      {t("managePrompts.studio.onboarding.needsProject", {
+                        defaultValue: "Requires a project"
+                      })}
+                    </p>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {!selectedProjectId && onboardingDismissed && (
         <div className="p-4 bg-warn/10 border border-warn/30 rounded-md">
           <p className="text-sm text-warn">
             {t("managePrompts.studio.selectProjectFirstDetails", {
