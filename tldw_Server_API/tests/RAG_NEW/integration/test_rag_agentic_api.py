@@ -251,6 +251,7 @@ def test_rag_agentic_search_smoke_api(client_with_agentic_overrides, monkeypatch
     assert meta.get("source") == "agentic"
     # Top-level metadata should advertise agentic strategy
     assert out.get("metadata", {}).get("strategy") == "agentic"
+    assert out.get("metadata", {}).get("derived_from_document_ids") == ["m1"]
 
 
 def test_rag_agentic_search_uses_shared_request_resolution_and_retrieval_plan(

@@ -41,9 +41,13 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 
 from .advanced_cache import AGENTIC_CACHE
 from .agentic_tools import make_default_registry
+from .agentic_execution import (
+    assemble_ephemeral_chunk as _agentic_assemble_ephemeral_chunk,
+    build_agentic_derived_evidence,
+    tool_loop as _agentic_tool_loop,
+)
 from .database_retrievers import MultiDatabaseRetriever, RetrievalConfig
 from .evidence_models import RetrievedEvidence
-from .post_retrieval_coordinator import PostRetrievalCoordinator
 from .request_resolution import ResolvedRAGRequest
 from .retrieval_executor import execute_retrieval_phase
 from .retrieval_plan import RetrievalPlan, build_retrieval_plan
@@ -1113,9 +1117,9 @@ async def agentic_rag_pipeline(
         # 4) Assemble ephemeral chunk (either tools or heuristics)
         tool_trace: list[dict[str, Any]] = []
         if cfg.enable_tools:
-            chunk_text, prov, tool_trace = await _tool_loop(docs, effective_query, cfg)
+            chunk_text, prov, tool_trace = await _agentic_tool_loop(docs, effective_query, cfg)
         else:
-            chunk_text, prov = _assemble_ephemeral_chunk(docs, effective_query, cfg)
+            chunk_text, prov = _agentic_assemble_ephemeral_chunk(docs, effective_query, cfg)
             tool_trace = []
         _cache_set(cache_key, {"chunk_text": chunk_text, "provenance": prov}, cfg.cache_ttl_sec)
 
@@ -1157,14 +1161,18 @@ async def agentic_rag_pipeline(
             "retrieval_plan": _serialize_retrieval_plan(effective_retrieval_plan),
         },
     )
-    coordinator = PostRetrievalCoordinator()
-    coordinated = coordinator.derive_evidence(
-        resolved_request,
-        retrieved_evidence,
-        enable_citations=bool(enable_citations),
-        enable_verification=bool(enable_numeric_fidelity or enable_claims or require_hard_citations),
-        derived_documents=[synthetic],
+    coordinated = build_agentic_derived_evidence(
+        retrieved_evidence=retrieved_evidence,
+        synthetic_chunk=synthetic,
         derived_from_document_ids=derived_from_document_ids,
+        coarse_docs_window=[
+            {
+                "id": d.id,
+                "title": (d.metadata or {}).get("title"),
+                "score": float(getattr(d, "score", 0.0) or 0.0),
+            }
+            for d in coarse_docs
+        ],
     )
 
     result = UnifiedSearchResult(

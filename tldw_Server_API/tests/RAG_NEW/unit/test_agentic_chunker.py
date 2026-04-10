@@ -180,24 +180,26 @@ async def test_agentic_pipeline_uses_shared_retrieval_plan_and_derived_evidence_
             captured["retrieve_kwargs"] = kwargs
             return docs
 
-    class StubCoordinator:
-        def derive_evidence(self, resolved_request, retrieved_evidence, **kwargs):
-            captured["resolved_request"] = resolved_request
-            captured["retrieved_evidence"] = retrieved_evidence
-            captured["coordinator_kwargs"] = kwargs
-            return DerivedEvidence(
-                retrieved=retrieved_evidence,
-                documents=[{"id": "synthetic-agentic", "content": "synthetic chunk"}],
-                metadata=dict(retrieved_evidence.metadata),
-                citations=[],
-                verification_report=None,
-                derived_from_document_ids=("d1", "d2"),
-            )
+    def fake_build_agentic_derived_evidence(*, retrieved_evidence, synthetic_chunk, derived_from_document_ids, coarse_docs_window):
+        captured["retrieved_evidence"] = retrieved_evidence
+        captured["build_kwargs"] = {
+            "synthetic_chunk": synthetic_chunk,
+            "derived_from_document_ids": tuple(derived_from_document_ids),
+            "coarse_docs_window": list(coarse_docs_window),
+        }
+        return DerivedEvidence(
+            retrieved=retrieved_evidence,
+            documents=[*retrieved_evidence.documents, synthetic_chunk],
+            metadata=dict(retrieved_evidence.metadata),
+            citations=[],
+            verification_report=None,
+            derived_from_document_ids=tuple(derived_from_document_ids),
+        )
 
     import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as ac
 
     monkeypatch.setattr(ac, "MultiDatabaseRetriever", FakeRetriever)
-    monkeypatch.setattr(ac, "PostRetrievalCoordinator", StubCoordinator)
+    monkeypatch.setattr(ac, "build_agentic_derived_evidence", fake_build_agentic_derived_evidence)
 
     resolved_request = ResolvedRAGRequest(
         query=query,
@@ -242,9 +244,12 @@ async def test_agentic_pipeline_uses_shared_retrieval_plan_and_derived_evidence_
     assert retrieve_kwargs["config"].use_vector is True
     assert retrieve_kwargs["sources"] == [DataSource.NOTES, DataSource.MEDIA_DB]
     assert retrieve_kwargs["index_namespace"] == "tenant-x"
-    assert captured["resolved_request"] is resolved_request
     assert captured["retrieved_evidence"].metadata["retrieval_plan"]["top_k"] == 2
-    assert captured["coordinator_kwargs"]["derived_from_document_ids"] == ["d1", "d2"]
+    assert captured["build_kwargs"]["derived_from_document_ids"] == ("d1", "d2")
+    assert captured["build_kwargs"]["coarse_docs_window"] == [
+        {"id": "d1", "title": "Doc 1", "score": 0.9},
+        {"id": "d2", "title": "Doc 2", "score": 0.9},
+    ]
     assert res.documents and res.documents[0].content
     assert res.metadata["derived_from_document_ids"] == ["d1", "d2"]
     assert res.metadata["strategy"] == "agentic"
