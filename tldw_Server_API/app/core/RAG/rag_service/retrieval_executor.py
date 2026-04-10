@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 from .evidence_models import RetrievedEvidence
+from .types import DataSource
 
 
 async def execute_retrieval_phase(
@@ -15,27 +17,40 @@ async def execute_retrieval_phase(
     allowed_note_ids: list[str] | None = None,
 ) -> RetrievedEvidence:
     """Execute a normalized retrieval phase and package canonical evidence."""
-    try:
-        from .database_retrievers import MultiDatabaseRetriever as _MultiDatabaseRetriever
-    except ImportError:
-        _MultiDatabaseRetriever = None
+    def _legacy_sources() -> list[DataSource]:
+        sources: list[DataSource] = []
+        for source in getattr(retrieval_plan, "sources", ()) or ():
+            if isinstance(source, DataSource):
+                sources.append(source)
+                continue
+            try:
+                sources.append(DataSource(str(source)))
+            except (TypeError, ValueError):
+                continue
+        return sources
 
-    if _MultiDatabaseRetriever is not None and isinstance(retriever, _MultiDatabaseRetriever):
+    retrieval_kwargs: dict[str, Any] = {
+        "config": retrieval_config,
+        "allowed_media_ids": allowed_media_ids,
+        "allowed_note_ids": allowed_note_ids,
+    }
+    retrieve_from_plan = getattr(retriever, "retrieve_from_plan", None)
+    if callable(retrieve_from_plan) and inspect.iscoroutinefunction(retrieve_from_plan):
         documents = await retriever.retrieve_from_plan(
             retrieval_plan,
-            config=retrieval_config,
-            allowed_media_ids=allowed_media_ids,
-            allowed_note_ids=allowed_note_ids,
+            **retrieval_kwargs,
         )
     else:
         documents = await retriever.retrieve(
             query=retrieval_plan.query,
-            sources=list(retrieval_plan.sources),
+            sources=_legacy_sources(),
             search_mode=retrieval_plan.search_mode,
             top_k=retrieval_plan.top_k,
             min_score=retrieval_plan.min_score,
             index_namespace=retrieval_plan.index_namespace,
             collection_names=dict(retrieval_plan.collection_names),
+            retrieval_plan=retrieval_plan,
+            **retrieval_kwargs,
         )
 
     return RetrievedEvidence(

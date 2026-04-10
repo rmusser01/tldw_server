@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tldw_Server_API.app.core.RAG.rag_service.evidence_models import RetrievedEvidence
 from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
     MediaDBRetriever,
     MultiDatabaseRetriever,
@@ -75,6 +74,29 @@ class _FakeMediaRetriever(MediaDBRetriever):
         ]
 
 
+class _LegacyCaptureRetriever:
+    instances: list["_LegacyCaptureRetriever"] = []
+
+    def __init__(self, *args, **kwargs) -> None:
+        self.init_args = args
+        self.init_kwargs = kwargs
+        self.calls: list[dict[str, object]] = []
+        self.config = RetrievalConfig()
+        self.__class__.instances.append(self)
+
+    async def retrieve(self, *args, **kwargs) -> list[Document]:
+        self.calls.append({"args": args, "kwargs": kwargs})
+        return [
+            Document(
+                id="doc:planned query",
+                content="retrieved",
+                metadata={},
+                source=DataSource.NOTES,
+                score=0.8,
+            )
+        ]
+
+
 @pytest.mark.asyncio
 async def test_multi_database_retriever_derives_effective_config_from_retrieval_plan() -> None:
     retriever = MultiDatabaseRetriever({})
@@ -137,22 +159,9 @@ async def test_unified_pipeline_retrieval_uses_plan_owned_policy() -> None:
     )
 
     with patch(
-        "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.execute_retrieval_phase",
-        AsyncMock(
-            return_value=RetrievedEvidence(
-                documents=[
-                    Document(
-                        id="note_1",
-                        content="retrieved",
-                        metadata={},
-                        source=DataSource.NOTES,
-                        score=0.9,
-                    )
-                ],
-                metadata={},
-            )
-        ),
-    ) as mock_executor:
+        "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever",
+        _LegacyCaptureRetriever,
+    ):
         result = await unified_rag_pipeline(
             query="outer query should not drive retrieval",
             sources=["media_db"],
@@ -166,10 +175,15 @@ async def test_unified_pipeline_retrieval_uses_plan_owned_policy() -> None:
         )
 
     assert result.documents
-    executor_call = mock_executor.await_args
-    assert executor_call.kwargs["retrieval_plan"].query == "planned query"
-    assert executor_call.kwargs["retrieval_plan"].sources == ("notes",)
-    assert executor_call.kwargs["retrieval_plan"].index_namespace == "tenant-a"
+    retriever = _LegacyCaptureRetriever.instances[-1]
+    assert retriever.calls[0]["kwargs"]["query"] == "planned query"
+    assert retriever.calls[0]["kwargs"]["sources"] == [DataSource.NOTES]
+    assert retriever.calls[0]["kwargs"]["index_namespace"] == "tenant-a"
+    assert retriever.calls[0]["kwargs"]["config"].max_results == 4
+    assert retriever.calls[0]["kwargs"]["config"].min_score == 0.33
+    assert retriever.calls[0]["kwargs"]["config"].use_fts is False
+    assert retriever.calls[0]["kwargs"]["config"].use_vector is True
+    assert retriever.calls[0]["kwargs"]["retrieval_plan"].query == "planned query"
 
 
 @pytest.mark.asyncio
@@ -185,22 +199,9 @@ async def test_unified_pipeline_plan_overrides_conflicting_legacy_namespace() ->
     )
 
     with patch(
-        "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.execute_retrieval_phase",
-        AsyncMock(
-            return_value=RetrievedEvidence(
-                documents=[
-                    Document(
-                        id="media_1",
-                        content="retrieved",
-                        metadata={},
-                        source=DataSource.MEDIA_DB,
-                        score=0.9,
-                    )
-                ],
-                metadata={},
-            )
-        ),
-    ) as mock_executor:
+        "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever",
+        _LegacyCaptureRetriever,
+    ):
         result = await unified_rag_pipeline(
             query="outer query",
             index_namespace="legacy-namespace",
@@ -210,8 +211,9 @@ async def test_unified_pipeline_plan_overrides_conflicting_legacy_namespace() ->
             enable_generation=False,
         )
 
-    executor_call = mock_executor.await_args
-    assert executor_call.kwargs["retrieval_plan"].index_namespace == "user_5_media_embeddings"
+    retriever = _LegacyCaptureRetriever.instances[-1]
+    assert retriever.calls[0]["kwargs"]["index_namespace"] == "user_5_media_embeddings"
+    assert retriever.calls[0]["kwargs"]["retrieval_plan"].index_namespace == "user_5_media_embeddings"
     assert result.query == "outer query"
 
 
