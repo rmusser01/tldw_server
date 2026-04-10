@@ -249,22 +249,22 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     const featureCards = [
       {
         icon: <Highlighter className="h-5 w-5 text-yellow-500" />,
-        title: t("option:documentWorkspace.featureHighlight", "Highlight & Annotate"),
+        title: t("option:documentWorkspace.featureHighlight", "Highlight and take notes"),
         description: t("option:documentWorkspace.featureHighlightDesc", "Select text to highlight in multiple colors and add notes.")
       },
       {
         icon: <MessageSquare className="h-5 w-5 text-blue-500" />,
-        title: t("option:documentWorkspace.featureChat", "Chat with Documents"),
-        description: t("option:documentWorkspace.featureChatDesc", "Ask AI questions about your document with RAG-powered answers.")
+        title: t("option:documentWorkspace.featureChat", "Ask questions about your document"),
+        description: t("option:documentWorkspace.featureChatDesc", "Ask AI questions and get answers based on your document's content.")
       },
       {
         icon: <Lightbulb className="h-5 w-5 text-amber-500" />,
-        title: t("option:documentWorkspace.featureInsights", "AI Insights"),
+        title: t("option:documentWorkspace.featureInsights", "Get AI summaries and key findings"),
         description: t("option:documentWorkspace.featureInsightsDesc", "Get AI-generated summaries, key findings, and analysis.")
       },
       {
         icon: <HelpCircle className="h-5 w-5 text-green-500" />,
-        title: t("option:documentWorkspace.featureQuiz", "Quiz Yourself"),
+        title: t("option:documentWorkspace.featureQuiz", "Test your understanding with quizzes"),
         description: t("option:documentWorkspace.featureQuizDesc", "Generate quizzes from document content to test your understanding.")
       }
     ]
@@ -298,6 +298,19 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               </Button>
             )}
           </div>
+        )}
+
+        {/* Show tips link when cards are dismissed */}
+        {onboardingDismissed && (
+          <button
+            onClick={() => {
+              try { localStorage.removeItem(ONBOARDING_KEY) } catch { /* noop */ }
+              setOnboardingDismissed(false)
+            }}
+            className="text-xs text-primary hover:underline"
+          >
+            {t("option:documentWorkspace.showTips", "Show tips")}
+          </button>
         )}
 
         {/* Feature discovery cards */}

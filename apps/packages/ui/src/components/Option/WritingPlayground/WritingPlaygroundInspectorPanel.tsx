@@ -15,9 +15,9 @@ type WritingPlaygroundInspectorPanelProps = {
   context: ReactNode
   setup: ReactNode
   inspect: ReactNode
-  characters?: ReactNode
-  research?: ReactNode
-  agent?: ReactNode
+  characters: ReactNode
+  research: ReactNode
+  agent: ReactNode
   feedback?: ReactNode
   tabLabels?: Partial<Record<InspectorTabKey, string>>
   tabBadges?: Partial<Record<InspectorTabKey, ReactNode>>
@@ -100,9 +100,9 @@ export const WritingPlaygroundInspectorPanel: FC<
     context,
     setup,
     inspect,
-    characters: characters ?? null,
-    research: research ?? null,
-    agent: agent ?? null,
+    characters,
+    research,
+    agent,
     feedback: feedback ?? null
   }
 

@@ -144,6 +144,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     preset,
     settings,
     rerunWithTokenLimit,
+    expertMode = false,
   } = useKnowledgeQA()
   const [isExpanded, setIsExpanded] = useState(false)
   const [answerFeedback, setAnswerFeedback] = useState<"up" | "down" | null>(null)
@@ -602,7 +603,8 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
               {citations.length} citation{citations.length !== 1 ? "s" : ""}
             </span>
           )}
-          {groundingCoverage && !showLowConfidenceRecovery ? (
+          {/* Grounding coverage badge: expert mode only */}
+          {expertMode && groundingCoverage && !showLowConfidenceRecovery ? (
             groundingCoverage.percent > 0 ? (
               <span
                 className="inline-flex items-center rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-text-muted"
@@ -612,7 +614,9 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
               </span>
             ) : null
           ) : null}
-          {faithfulnessDescriptor ? (
+          {/* Faithfulness badge: always in expert mode, non-expert only when below Strong */}
+          {faithfulnessDescriptor &&
+          (expertMode || faithfulnessDescriptor.label !== "Strong") ? (
             <span
               className={cn(
                 "inline-flex items-center rounded-md border px-2 py-0.5 text-xs",
@@ -904,16 +908,17 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
           <button
             type="button"
             onClick={() => {
+              if (answerFeedback === "up") return
               void handleSubmitAnswerFeedback("up")
             }}
-            disabled={answerFeedbackSubmitting}
+            disabled={answerFeedbackSubmitting || answerFeedback === "up"}
             aria-pressed={answerFeedback === "up"}
             className={cn(
               "inline-flex items-center gap-1 rounded-md border px-2 py-1 transition-colors",
               answerFeedback === "up"
                 ? "border-primary bg-primary/10 text-primary"
                 : "border-border bg-surface text-text-subtle hover:text-text hover:bg-hover",
-              answerFeedbackSubmitting && "opacity-60 cursor-not-allowed"
+              (answerFeedbackSubmitting || answerFeedback === "up") && "opacity-60 cursor-not-allowed"
             )}
           >
             <ThumbsUp className="w-3.5 h-3.5" />
@@ -922,16 +927,17 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
           <button
             type="button"
             onClick={() => {
+              if (answerFeedback === "down") return
               void handleSubmitAnswerFeedback("down")
             }}
-            disabled={answerFeedbackSubmitting}
+            disabled={answerFeedbackSubmitting || answerFeedback === "down"}
             aria-pressed={answerFeedback === "down"}
             className={cn(
               "inline-flex items-center gap-1 rounded-md border px-2 py-1 transition-colors",
               answerFeedback === "down"
                 ? "border-primary bg-primary/10 text-primary"
                 : "border-border bg-surface text-text-subtle hover:text-text hover:bg-hover",
-              answerFeedbackSubmitting && "opacity-60 cursor-not-allowed"
+              (answerFeedbackSubmitting || answerFeedback === "down") && "opacity-60 cursor-not-allowed"
             )}
           >
             <ThumbsDown className="w-3.5 h-3.5" />

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { RagPresetName, RagSource } from "@/services/rag/unified-rag"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { cn } from "@/libs/utils"
+import { Popover, Tooltip } from "antd"
 import {
   ChevronDown,
   Layers,
@@ -9,11 +10,78 @@ import {
   Globe,
   Check,
   CircleHelp,
+  Info,
   Search,
   LoaderCircle,
   Filter,
+  Bookmark,
+  Trash2,
 } from "lucide-react"
 import { AnswerModelMenu } from "./AnswerModelMenu"
+
+// ---------------------------------------------------------------------------
+// Saved search profiles
+// ---------------------------------------------------------------------------
+
+const PROFILES_STORAGE_KEY = "tldw:knowledge-qa:saved-profiles"
+const MAX_SAVED_PROFILES = 5
+
+type SearchProfile = {
+  name: string
+  sources: RagSource[]
+  preset: RagPresetName
+  enableWebFallback: boolean
+}
+
+const VALID_PRESET_KEYS: ReadonlySet<string> = new Set<RagPresetName>([
+  "fast",
+  "balanced",
+  "thorough",
+  "custom",
+])
+const VALID_SOURCE_KEYS: ReadonlySet<string> = new Set<RagSource>([
+  "media_db",
+  "notes",
+  "characters",
+  "chats",
+  "kanban",
+])
+
+function loadSavedProfiles(): SearchProfile[] {
+  try {
+    const raw = localStorage.getItem(PROFILES_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter(
+        (item: unknown): item is SearchProfile =>
+          typeof item === "object" &&
+          item !== null &&
+          typeof (item as SearchProfile).name === "string" &&
+          (item as SearchProfile).name.trim().length > 0 &&
+          Array.isArray((item as SearchProfile).sources) &&
+          (item as SearchProfile).sources.every(
+            (source): source is RagSource =>
+              typeof source === "string" && VALID_SOURCE_KEYS.has(source)
+          ) &&
+          typeof (item as SearchProfile).preset === "string" &&
+          VALID_PRESET_KEYS.has((item as SearchProfile).preset) &&
+          typeof (item as SearchProfile).enableWebFallback === "boolean"
+      )
+      .slice(0, MAX_SAVED_PROFILES)
+  } catch {
+    return []
+  }
+}
+
+function persistProfiles(profiles: SearchProfile[]): void {
+  try {
+    localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(profiles.slice(0, MAX_SAVED_PROFILES)))
+  } catch {
+    // localStorage full or unavailable -- silently ignore
+  }
+}
 
 type KnowledgeContextBarProps = {
   preset: RagPresetName
@@ -31,6 +99,7 @@ type KnowledgeContextBarProps = {
   onGenerationProviderChange: (provider: string | null) => void
   onGenerationModelChange: (model: string | null) => void
   contextChangedSinceLastRun: boolean
+  scopeChangeDetails?: string[]
   onOpenSettings: () => void
 }
 
@@ -39,8 +108,8 @@ type PresetKey = Exclude<RagPresetName, "custom">
 type PresetDetails = {
   label: string
   summary: string
-  speed: string
-  coverage: string
+  responseTime: string
+  sourcesChecked: string
   bestFor: string
 }
 
@@ -60,40 +129,55 @@ const PRESET_DETAILS: Record<PresetKey, PresetDetails> = {
   fast: {
     label: "Fast",
     summary: "Quick lookup with minimal retrieval and rerank depth.",
-    speed: "Fastest",
-    coverage: "Lower",
+    responseTime: "Fastest",
+    sourcesChecked: "Fewer",
     bestFor: "Fact checks and quick lookups",
   },
   balanced: {
     label: "Balanced",
     summary: "Balanced retrieval depth for quality and speed.",
-    speed: "Medium",
-    coverage: "Medium",
+    responseTime: "Moderate",
+    sourcesChecked: "Moderate",
     bestFor: "Default day-to-day research",
   },
   thorough: {
     label: "Deep",
     summary: "Exhaustive retrieval plus extra verification steps.",
-    speed: "Slowest",
-    coverage: "Highest",
+    responseTime: "Slower",
+    sourcesChecked: "Most thorough",
     bestFor: "High-confidence synthesis",
   },
 }
 
+/** Short comparison tooltips shown on hover for each preset button. */
+const PRESET_COMPARISON_TOOLTIPS: Record<PresetKey, string> = {
+  fast: "Checks fewer sources, fastest response (~2-5s)",
+  balanced: "Moderate depth, good for most queries (~5-15s)",
+  thorough: "Checks most sources, slowest but most thorough (~15-30s)",
+}
+
 const SOURCE_LABELS: Record<RagSource, string> = {
-  media_db: "Docs & Media",
+  media_db: "Documents & Media",
   notes: "Notes",
-  characters: "Characters",
-  chats: "Chats",
-  kanban: "Kanban",
+  characters: "Story Characters",
+  chats: "Conversations",
+  kanban: "Task Boards",
+}
+
+const SOURCE_DESCRIPTIONS: Record<RagSource, string> = {
+  media_db: "Uploaded files, transcripts, and web pages",
+  notes: "Your personal notes and clips",
+  characters: "Character cards and persona definitions",
+  chats: "Previous chat conversations",
+  kanban: "Kanban board items and tasks",
 }
 
 const SOURCE_OPTIONS = [
-  { key: "media_db", label: "Docs & Media" },
+  { key: "media_db", label: "Documents & Media" },
   { key: "notes", label: "Notes" },
-  { key: "characters", label: "Characters" },
-  { key: "chats", label: "Chats" },
-  { key: "kanban", label: "Kanban" },
+  { key: "characters", label: "Story Characters" },
+  { key: "chats", label: "Conversations" },
+  { key: "kanban", label: "Task Boards" },
 ] as const
 
 const MAX_VISIBLE_GRANULAR_RESULTS = 80
@@ -232,6 +316,7 @@ export function KnowledgeContextBar({
   onGenerationProviderChange,
   onGenerationModelChange,
   contextChangedSinceLastRun,
+  scopeChangeDetails = [],
   onOpenSettings,
 }: KnowledgeContextBarProps) {
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false)
@@ -243,6 +328,12 @@ export function KnowledgeContextBar({
   const [granularLoaded, setGranularLoaded] = useState(false)
   const [mediaOptions, setMediaOptions] = useState<GranularSourceOption<number>[]>([])
   const [noteOptions, setNoteOptions] = useState<GranularSourceOption<string>[]>([])
+
+  // Saved search profiles state
+  const [savedProfiles, setSavedProfiles] = useState<SearchProfile[]>(loadSavedProfiles)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const [profileSaveMode, setProfileSaveMode] = useState(false)
+  const [profileNameInput, setProfileNameInput] = useState("")
 
   const sourceMenuRef = useRef<HTMLDivElement | null>(null)
   const granularMenuRef = useRef<HTMLDivElement | null>(null)
@@ -297,6 +388,12 @@ export function KnowledgeContextBar({
     preset === "custom"
       ? "Custom: Using your manually configured retrieval and generation settings."
       : presetDetail.summary
+  const countableScopeTotal =
+    (normalizedSources.includes("media_db") ? mediaOptions.length : 0) +
+    (normalizedSources.includes("notes") ? noteOptions.length : 0)
+  const hasOnlyCountableSources = normalizedSources.every(
+    (source) => source === "media_db" || source === "notes"
+  )
 
   const filteredMediaOptions = useMemo(() => {
     const query = granularQuery.trim().toLowerCase()
@@ -437,6 +534,50 @@ export function KnowledgeContextBar({
     onIncludeNoteIdsChange([])
   }
 
+  // ---- Saved search profile handlers ----
+
+  const saveCurrentProfile = useCallback(() => {
+    const trimmed = profileNameInput.trim()
+    if (!trimmed) return
+    const newProfile: SearchProfile = {
+      name: trimmed,
+      sources: [...normalizedSources],
+      preset,
+      enableWebFallback: webEnabled,
+    }
+    const updated = [newProfile, ...savedProfiles.filter((p) => p.name !== trimmed)].slice(
+      0,
+      MAX_SAVED_PROFILES
+    )
+    setSavedProfiles(updated)
+    persistProfiles(updated)
+    setProfileSaveMode(false)
+    setProfileNameInput("")
+  }, [profileNameInput, normalizedSources, preset, webEnabled, savedProfiles])
+
+  const loadProfile = useCallback(
+    (profile: SearchProfile) => {
+      onSourcesChange(profile.sources)
+      onPresetChange(profile.preset)
+      // Only toggle web fallback if the profile value differs from current state.
+      // Note: only a toggle callback is available (no direct setter).
+      if (profile.enableWebFallback !== webEnabled) {
+        onToggleWeb()
+      }
+      setProfileMenuOpen(false)
+    },
+    [onSourcesChange, onPresetChange, onToggleWeb, webEnabled]
+  )
+
+  const deleteProfile = useCallback(
+    (name: string) => {
+      const updated = savedProfiles.filter((p) => p.name !== name)
+      setSavedProfiles(updated)
+      persistProfiles(updated)
+    },
+    [savedProfiles]
+  )
+
   const activeGranularOptions = granularTab === "media" ? filteredMediaOptions : filteredNoteOptions
 
   return (
@@ -448,6 +589,9 @@ export function KnowledgeContextBar({
             <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
               Source Scope
             </h3>
+            <Tooltip title="Choose which types of content to include in your search. Select categories, then optionally pick specific items within each.">
+              <Info className="h-3.5 w-3.5 text-text-subtle cursor-help" />
+            </Tooltip>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -505,8 +649,13 @@ export function KnowledgeContextBar({
                             selected ? "bg-primary/10 text-primaryStrong" : "hover:bg-surface2 text-text"
                           )}
                         >
-                          <span>{option.label}</span>
-                          <span className="h-4 w-4">
+                          <span className="flex flex-col">
+                            <span>{option.label}</span>
+                            <span className="text-[10px] text-text-muted font-normal leading-tight">
+                              {SOURCE_DESCRIPTIONS[option.key]}
+                            </span>
+                          </span>
+                          <span className="h-4 w-4 shrink-0">
                             {selected ? <Check className="h-4 w-4" /> : null}
                           </span>
                         </button>
@@ -575,7 +724,7 @@ export function KnowledgeContextBar({
                           : "text-text hover:bg-surface2"
                       )}
                     >
-                      Docs & Media ({mediaOptions.length})
+                      Documents & Media ({mediaOptions.length})
                     </button>
                     <button
                       type="button"
@@ -682,7 +831,7 @@ export function KnowledgeContextBar({
               onClick={onOpenSettings}
               className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-text-muted hover:bg-surface2 hover:text-text transition-colors"
               aria-label="Explain source categories"
-              title="Docs & Media (files/transcripts), Notes, Characters, Chats, and Kanban items can all be included in retrieval scope."
+              title="Documents & Media (files, transcripts, web pages), Notes, Story Characters, Conversations, and Task Boards can all be included in search."
             >
               <CircleHelp className="h-3.5 w-3.5" />
             </button>
@@ -691,6 +840,19 @@ export function KnowledgeContextBar({
           <p className="mt-2 text-[11px] text-text-muted">
             Scope: {summarizeSources(normalizedSources)} • Specific filters:{" "}
             {summarizeSpecificSources(normalizedMediaIds, normalizedNoteIds)}
+            {normalizedSources.length > 0 && (
+              <>
+                {" "}
+                &mdash;{" "}
+                {normalizedMediaIds.length > 0 || normalizedNoteIds.length > 0
+                  ? `Searching ${normalizedMediaIds.length + normalizedNoteIds.length} item${
+                      normalizedMediaIds.length + normalizedNoteIds.length === 1 ? "" : "s"
+                    }`
+                  : granularLoaded && hasOnlyCountableSources
+                    ? `${countableScopeTotal} items in scope`
+                    : `${normalizedSources.length} of ${SOURCE_OPTIONS.length} categories selected`}
+              </>
+            )}
           </p>
         </section>
 
@@ -700,6 +862,9 @@ export function KnowledgeContextBar({
             <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
               Search Profile
             </h3>
+            <Tooltip title="Controls how thorough the search is. Fast returns quickly with fewer sources checked. Deep searches more thoroughly but takes longer.">
+              <Info className="h-3.5 w-3.5 text-text-subtle cursor-help" />
+            </Tooltip>
           </div>
 
           <div
@@ -709,24 +874,29 @@ export function KnowledgeContextBar({
             className="grid grid-cols-3 gap-2"
           >
             {PRESET_OPTIONS.map((option) => (
-              <button
+              <Tooltip
                 key={option.value}
-                type="button"
-                onClick={() => onPresetChange(option.value)}
-                className={cn(
-                  "rounded-md border px-2 py-2 text-left text-[11px] transition-colors",
-                  preset === option.value
-                    ? "border-primary bg-primary text-white"
-                    : "border-border bg-surface2/70 text-text hover:bg-surface2"
-                )}
-                aria-pressed={preset === option.value}
-                title={`${PRESET_DETAILS[option.value].label}: ${PRESET_DETAILS[option.value].summary}`}
+                title={PRESET_COMPARISON_TOOLTIPS[option.value]}
+                placement="bottom"
+                mouseEnterDelay={0.3}
               >
-                <span className="block text-[11px] font-semibold">{option.label}</span>
-                <span className="block text-[10px] opacity-80">
-                  {PRESET_DETAILS[option.value].speed}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => onPresetChange(option.value)}
+                  className={cn(
+                    "rounded-md border px-2 py-2 text-left text-[11px] transition-colors",
+                    preset === option.value
+                      ? "border-primary bg-primary text-white"
+                      : "border-border bg-surface2/70 text-text hover:bg-surface2"
+                  )}
+                  aria-pressed={preset === option.value}
+                >
+                  <span className="block text-[11px] font-semibold">{option.label}</span>
+                  <span className="block text-[10px] opacity-80">
+                    {PRESET_DETAILS[option.value].responseTime}
+                  </span>
+                </button>
+              </Tooltip>
             ))}
           </div>
 
@@ -744,28 +914,30 @@ export function KnowledgeContextBar({
           <p id="knowledge-preset-description" className="mt-2 text-[11px] text-text-muted">
             {presetDescription}
             {presetDetail
-              ? ` Speed: ${presetDetail.speed}. Coverage: ${presetDetail.coverage}. Best for: ${presetDetail.bestFor}.`
+              ? ` Response time: ${presetDetail.responseTime}. Sources checked: ${presetDetail.sourcesChecked}. Best for: ${presetDetail.bestFor}.`
               : ""}
           </p>
         </section>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={onToggleWeb}
-          className={cn(
-            "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition-colors",
-            webEnabled
-              ? "border-primary/40 bg-primary/10 text-primaryStrong"
-              : "border-border text-text-muted hover:bg-surface2 hover:text-text"
-          )}
-          aria-pressed={webEnabled}
-          aria-label={`Web fallback is currently ${webEnabled ? "enabled" : "disabled"}. Click to toggle.`}
-        >
-          <Globe className={cn("h-3.5 w-3.5", webEnabled ? "fill-current" : "")} />
-          Web
-        </button>
+        <Tooltip title="When enabled, includes web search results alongside your documents. Useful when your documents don't cover the topic.">
+          <button
+            type="button"
+            onClick={onToggleWeb}
+            className={cn(
+              "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition-colors",
+              webEnabled
+                ? "border-primary/40 bg-primary/10 text-primaryStrong"
+                : "border-border text-text-muted hover:bg-surface2 hover:text-text"
+            )}
+            aria-pressed={webEnabled}
+            aria-label={`Web fallback is currently ${webEnabled ? "enabled" : "disabled"}. Click to toggle.`}
+          >
+            <Globe className={cn("h-3.5 w-3.5", webEnabled ? "fill-current" : "")} />
+            Web
+          </button>
+        </Tooltip>
 
         <AnswerModelMenu
           generationProvider={generationProvider}
@@ -774,6 +946,131 @@ export function KnowledgeContextBar({
           onGenerationModelChange={onGenerationModelChange}
           menuAlign="right"
         />
+
+        <Popover
+          trigger="click"
+          open={profileMenuOpen}
+          onOpenChange={(open) => {
+            setProfileMenuOpen(open)
+            if (!open) {
+              setProfileSaveMode(false)
+              setProfileNameInput("")
+            }
+          }}
+          placement="topLeft"
+          content={
+            <div
+              id="knowledge-profile-menu"
+              role="menu"
+              aria-label="Saved search profiles"
+              className="w-60"
+            >
+              <div className="mb-1.5 px-1 text-xs font-semibold text-text-muted">
+                Saved Profiles
+              </div>
+              {savedProfiles.length === 0 && !profileSaveMode ? (
+                <p className="px-2 py-3 text-center text-[11px] text-text-muted">
+                  No saved profiles yet.
+                </p>
+              ) : null}
+              {savedProfiles.map((profile) => (
+                <div
+                  key={profile.name}
+                  className="group flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-surface2 transition-colors"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => loadProfile(profile)}
+                    className="flex min-w-0 flex-1 flex-col text-left text-xs text-text"
+                  >
+                    <span className="truncate font-medium">{profile.name}</span>
+                    <span className="text-[10px] text-text-muted">
+                      {profile.preset} &middot;{" "}
+                      {profile.sources.length === 0
+                        ? "no sources"
+                        : profile.sources.length >= 5
+                          ? "all sources"
+                          : `${profile.sources.length} source${profile.sources.length === 1 ? "" : "s"}`}
+                      {profile.enableWebFallback ? " &middot; web" : ""}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteProfile(profile.name)}
+                    className="invisible group-hover:visible group-focus-within:visible focus:visible focus-visible:visible shrink-0 rounded p-0.5 text-text-muted hover:bg-danger/10 hover:text-danger transition-colors"
+                    aria-label={`Delete profile ${profile.name}`}
+                    title="Delete profile"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+              <div className="mt-1 border-t border-border/60 pt-1.5">
+                {profileSaveMode ? (
+                  <div className="flex items-center gap-1.5 px-1">
+                    <input
+                      type="text"
+                      value={profileNameInput}
+                      onChange={(e) => setProfileNameInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveCurrentProfile()
+                        if (e.key === "Escape") {
+                          setProfileSaveMode(false)
+                          setProfileNameInput("")
+                        }
+                      }}
+                      placeholder="Profile name"
+                      maxLength={40}
+                      autoFocus
+                      className="h-7 flex-1 rounded-md border border-border bg-surface2/70 px-2 text-[11px] text-text outline-none placeholder:text-text-muted focus:border-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={saveCurrentProfile}
+                      disabled={!profileNameInput.trim()}
+                      className="inline-flex h-7 items-center rounded-md bg-primary px-2 text-[11px] font-medium text-white disabled:opacity-50 hover:bg-primary/90 transition-colors"
+                    >
+                      Save
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (savedProfiles.length >= MAX_SAVED_PROFILES) return
+                      setProfileSaveMode(true)
+                    }}
+                    disabled={savedProfiles.length >= MAX_SAVED_PROFILES}
+                    className="w-full rounded-md px-2 py-1.5 text-left text-xs text-primary hover:bg-primary/10 disabled:text-text-muted disabled:hover:bg-transparent transition-colors"
+                  >
+                    {savedProfiles.length >= MAX_SAVED_PROFILES
+                      ? `Limit reached (${MAX_SAVED_PROFILES})`
+                      : "Save current settings..."}
+                  </button>
+                )}
+              </div>
+            </div>
+          }
+        >
+          <Tooltip title="Save or load search profiles to quickly switch between common configurations">
+            <button
+              type="button"
+              className={cn(
+                "inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors",
+                profileMenuOpen
+                  ? "border-primary/40 bg-primary/10 text-primaryStrong"
+                  : "border-border text-text-muted hover:bg-surface2 hover:text-text"
+              )}
+              aria-expanded={profileMenuOpen}
+              aria-controls={profileMenuOpen ? "knowledge-profile-menu" : undefined}
+            >
+              <Bookmark className="h-3.5 w-3.5" />
+              Profiles
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          </Tooltip>
+        </Popover>
 
         <button
           type="button"
@@ -785,9 +1082,36 @@ export function KnowledgeContextBar({
         </button>
 
         {contextChangedSinceLastRun ? (
-          <span className="inline-flex items-center rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">
-            Scope changed
-          </span>
+          <Popover
+            trigger="click"
+            placement="bottomRight"
+            title="Scope changed since last search"
+            content={
+              <div className="max-w-xs space-y-1.5">
+                {scopeChangeDetails.length > 0 ? (
+                  <ul className="list-disc pl-4 text-xs text-text-muted space-y-1">
+                    {scopeChangeDetails.map((detail, index) => (
+                      <li key={index}>{detail}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-text-muted">
+                    Search settings have changed since your last query.
+                  </p>
+                )}
+                <p className="text-xs text-text-muted pt-1 border-t border-border/60">
+                  Run a new search to apply the updated settings.
+                </p>
+              </div>
+            }
+          >
+            <button
+              type="button"
+              className="inline-flex items-center rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+            >
+              Scope changed
+            </button>
+          </Popover>
         ) : null}
       </div>
     </div>

@@ -93,7 +93,7 @@ if [[ "$VERSION" == "latest" ]]; then
         echo ""
         echo "Alternative: Build from source (requires Go 1.22+):"
         echo "  git clone https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}.git ../tldw-agent"
-        echo "  cd ../tldw-agent && go build -o ../tldw_server2/bin/tldw-agent-acp ./cmd/tldw-agent-acp"
+        echo "  cd ../tldw-agent && go build -o ${INSTALL_DIR}/${BINARY_NAME} ./cmd/tldw-agent-acp"
         exit 1
     fi
     echo "==> Latest version: ${VERSION}"

@@ -7,7 +7,7 @@
 
 services:
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.11.1
     container_name: tldw_prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -43,11 +43,11 @@ services:
       retries: 3
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:12.4.0
     container_name: tldw_grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:?Set GRAFANA_ADMIN_USER before starting Grafana}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD before starting Grafana}
     ports:
       - '${GRAFANA_PORT:-3002}:3000'
     depends_on:

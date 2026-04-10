@@ -8,6 +8,7 @@ import {
 } from "./smoke.setup"
 import {
   dismissConnectionModals,
+  getVisibleAntdSelectOption,
   getAntdSelectTrigger,
   waitForAppShell
 } from "../utils/helpers"
@@ -288,9 +289,9 @@ test.describe("Stage 7 audio regression gate", () => {
     await dismissConnectionModals(page)
 
     await openSpeechInputSourcePicker(page)
-    await expect(page.getByRole("option", { name: /Default microphone/i })).toBeVisible()
-    await expect(page.getByRole("option", { name: /Tab audio/i })).toHaveCount(0)
-    await expect(page.getByRole("option", { name: /System audio/i })).toHaveCount(0)
+    await expect(getVisibleAntdSelectOption(page, { text: /Default microphone/i })).toBeVisible()
+    await expect(getVisibleAntdSelectOption(page, { text: /Tab audio/i })).toHaveCount(0)
+    await expect(getVisibleAntdSelectOption(page, { text: /System audio/i })).toHaveCount(0)
   })
 
   test("stt transcription-model timeout state shows retry and recovers", async ({

@@ -56,12 +56,12 @@ export const SyncStatusIndicator: React.FC<SyncStatusIndicatorProps> = ({
           bgColor: "bg-warning/10",
           tooltip: t(
             "option:documentWorkspace.syncStatus.pending",
-            "Saving changes ({{count}} pending)",
+            "Saving... ({{count}} pending)",
             { count: pendingCount }
           ),
           ariaLabel: t(
             "option:documentWorkspace.syncStatus.pending",
-            "Saving changes"
+            "Saving"
           )
         }
       case "error":
@@ -71,9 +71,9 @@ export const SyncStatusIndicator: React.FC<SyncStatusIndicatorProps> = ({
           bgColor: "bg-error/10",
           tooltip: t(
             "option:documentWorkspace.syncStatus.error",
-            "Failed to save changes. Click to retry."
+            "Failed to save highlights. Click to retry."
           ),
-          ariaLabel: t("option:documentWorkspace.syncStatus.error", "Sync failed")
+          ariaLabel: t("option:documentWorkspace.syncStatus.error", "Save failed")
         }
     }
   }
@@ -97,7 +97,7 @@ export const SyncStatusIndicator: React.FC<SyncStatusIndicatorProps> = ({
         >
           <AlertCircle className="h-4 w-4" />
           <span className="text-xs font-medium">
-            {t("option:documentWorkspace.syncStatus.retryLabel", "Sync failed")}
+            {t("option:documentWorkspace.syncStatus.retryLabel", "Save failed")}
           </span>
           <RefreshCw className="h-3 w-3 ml-1" />
         </button>

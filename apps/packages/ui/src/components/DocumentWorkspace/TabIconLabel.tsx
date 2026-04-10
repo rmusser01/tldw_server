@@ -13,7 +13,7 @@ export const TabIconLabel: React.FC<TabIconLabelProps> = ({ label, icon }) => (
       aria-label={label}
     >
       <span aria-hidden="true">{icon}</span>
-      <span className="text-[11px] font-medium leading-none text-text-muted">
+      <span className="text-xs font-medium leading-none text-text-muted">
         {label}
       </span>
     </span>

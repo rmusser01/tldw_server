@@ -74,20 +74,14 @@ export function PlotTrackerModal({ open, onClose }: PlotTrackerModalProps) {
         <Tag color={STATUS_COLORS[status] || "default"}>{status}</Tag>
       ),
     },
-    {
-      title: "Description",
-      dataIndex: "description",
-      key: "description",
-      ellipsis: true,
-    },
   ]
 
   const plotHoleColumns = [
     {
-      title: "Description",
-      dataIndex: "description",
-      key: "description",
-      ellipsis: true,
+      title: "Title",
+      dataIndex: "title",
+      key: "title",
+      render: (text: string) => <Typography.Text strong>{text}</Typography.Text>,
     },
     {
       title: "Severity",
@@ -97,13 +91,6 @@ export function PlotTrackerModal({ open, onClose }: PlotTrackerModalProps) {
       render: (severity: string) => (
         <Tag color={SEVERITY_COLORS[severity] || "default"}>{severity}</Tag>
       ),
-    },
-    {
-      title: "Location",
-      dataIndex: "location",
-      key: "location",
-      width: 150,
-      ellipsis: true,
     },
   ]
 

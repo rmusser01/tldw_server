@@ -149,6 +149,14 @@ def test_guardian_runtime_connection_uses_standard_sqlite_pragmas(tmp_path):
 
 
 @pytest.mark.unit
+def test_guardian_db_requires_existing_parent_directory(tmp_path):
+    missing_parent_path = tmp_path / "missing" / "guardian.db"
+
+    with pytest.raises(ValueError, match="parent directory must already exist"):
+        GuardianDB(str(missing_parent_path))
+
+
+@pytest.mark.unit
 def test_personalization_runtime_connection_uses_standard_sqlite_pragmas(tmp_path):
     db = PersonalizationDB(str(tmp_path / "personalization.db"))
     conn = db._connect()

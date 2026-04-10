@@ -10,7 +10,7 @@ import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { cn } from "@/libs/utils"
 
 export function BasicSettings() {
-  const { settings, updateSetting } = useKnowledgeQA()
+  const { settings, updateSetting, preset } = useKnowledgeQA()
   const { capabilities, loading: capsLoading } = useServerCapabilities()
   const webFallbackHelpId = React.useId()
   const webFallbackHelpText =
@@ -52,6 +52,11 @@ export function BasicSettings() {
         <p className="text-xs text-text-muted">
           How many documents to retrieve (5-10 for quick, 20+ for thorough)
         </p>
+        {settings.top_k > 30 && preset === "thorough" && (
+          <p className="text-xs text-warn">
+            High source count with Deep preset may cause slow responses.
+          </p>
+        )}
       </div>
 
       {/* Source Types */}

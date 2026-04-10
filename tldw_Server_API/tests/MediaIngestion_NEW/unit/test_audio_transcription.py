@@ -885,6 +885,15 @@ def test_get_whisper_model_respects_compute_type_override(monkeypatch):
 
 
 @pytest.mark.unit
+def test_resolve_processing_choice_prefers_env_override(monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    monkeypatch.setenv("PROCESSING_CHOICE", "cpu")
+
+    assert atlib._resolve_processing_choice({"processing_choice": "cuda"}) == "cpu"
+
+
+@pytest.mark.unit
 def test_speech_to_text_return_language_consistent_for_parakeet(monkeypatch, tmp_path):
     """When return_language=True, Parakeet branch should return (segments, lang_or_none)."""
     audio_file = tmp_path / "sample.wav"

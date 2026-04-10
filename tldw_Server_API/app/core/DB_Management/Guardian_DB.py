@@ -18,7 +18,6 @@ Thread-safe with RLock + WAL mode. Foreign keys enabled.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import threading
 from dataclasses import dataclass, field
@@ -27,6 +26,7 @@ from typing import Any
 from uuid import uuid4
 
 from loguru import logger
+from tldw_Server_API.app.core.DB_Management.db_path_utils import resolve_trusted_database_path
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     begin_immediate_if_needed,
     configure_sqlite_connection,
@@ -309,11 +309,15 @@ class ActivationRun:
 
 class GuardianDB:
     def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
+        self.db_path = str(resolve_trusted_database_path(db_path, label="guardian database"))
         self._lock = threading.RLock()
-        os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
-        self._ensure_schema()
-        self._migrate_schema()
+        try:
+            self._ensure_schema()
+            self._migrate_schema()
+        except sqlite3.OperationalError as exc:
+            if "unable to open database file" in str(exc).lower():
+                raise ValueError("GuardianDB parent directory must already exist") from exc
+            raise
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10, isolation_level=None)

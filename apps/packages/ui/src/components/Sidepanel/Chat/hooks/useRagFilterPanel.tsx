@@ -11,8 +11,8 @@ import type { RagSettings } from "@/services/rag/unified-rag"
 export const SOURCE_OPTIONS = [
   { label: "Media DB", value: "media_db" },
   { label: "Notes", value: "notes" },
-  { label: "Characters", value: "characters" },
-  { label: "Chats", value: "chats" }
+  { label: "Story Characters", value: "characters" },
+  { label: "Conversations", value: "chats" }
 ]
 
 export const STRATEGY_OPTIONS = [

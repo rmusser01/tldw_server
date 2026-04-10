@@ -178,8 +178,18 @@ describe("milestone store", () => {
     expect(useMilestoneStore.getState().isMilestoneCompleted("content_rules_reviewed")).toBe(true)
   })
 
-  it("caches the quiz-attempt bootstrap scan after the first run", () => {
+  it("does not cache a negative quiz-attempt bootstrap scan", () => {
     const keySpy = vi.spyOn(Storage.prototype, "key")
+
+    useMilestoneStore.getState().bootstrapFromExistingUsage()
+
+    expect(localStorage.getItem("tldw:milestones:quiz-attempt-scan-done")).toBeNull()
+    expect(keySpy).toHaveBeenCalled()
+  })
+
+  it("caches the quiz-attempt bootstrap scan after finding an attempt", () => {
+    const keySpy = vi.spyOn(Storage.prototype, "key")
+    localStorage.setItem("quiz-attempt-abc123", JSON.stringify({ score: 8 }))
 
     useMilestoneStore.getState().bootstrapFromExistingUsage()
     expect(localStorage.getItem("tldw:milestones:quiz-attempt-scan-done")).toBe("1")

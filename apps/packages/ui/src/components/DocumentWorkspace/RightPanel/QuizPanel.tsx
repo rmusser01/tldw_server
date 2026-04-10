@@ -324,7 +324,7 @@ export const QuizPanel: React.FC = () => {
           image={<HelpCircle className="h-12 w-12 text-muted mx-auto mb-2" />}
           description={t(
             "option:documentWorkspace.noDocumentForQuiz",
-            "Open a document to generate a quiz"
+            "Test your understanding with AI-generated questions from your document."
           )}
         />
       </div>

@@ -17,6 +17,7 @@ const state = {
   searchHistory: [] as Array<{ query: string }>,
   isLocalOnlyThread: false,
   settings: {
+    sources: ["documents", "notes"] as string[],
     enable_web_fallback: true,
   },
   updateSetting: vi.fn(),
@@ -55,6 +56,7 @@ describe("SearchBar behavior", () => {
     state.queryWarning = null
     state.searchHistory = []
     state.isLocalOnlyThread = false
+    state.settings.sources = ["documents", "notes"]
     state.settings.enable_web_fallback = true
   })
 
@@ -314,6 +316,46 @@ describe("SearchBar behavior", () => {
       type: "suggestion_accept",
       source: "history",
     })
+  })
+
+  it("disables submit when no sources selected and web fallback is off", async () => {
+    state.query = "test query"
+    state.settings.sources = []
+    state.settings.enable_web_fallback = false
+
+    render(<SearchBar autoFocus={false} />)
+
+    const submit = screen.getByRole("button", { name: "Ask" })
+    expect(submit).toBeDisabled()
+    expect(submit).not.toHaveAttribute("title")
+
+    fireEvent.mouseEnter(submit.parentElement!)
+    expect(
+      await screen.findByText("Select source categories or enable web fallback to search")
+    ).toBeInTheDocument()
+  })
+
+  it("allows submit when no sources selected but web fallback is on", () => {
+    state.query = "test query"
+    state.settings.sources = []
+    state.settings.enable_web_fallback = true
+
+    render(<SearchBar autoFocus={false} />)
+
+    const submit = screen.getByRole("button", { name: "Ask" })
+    expect(submit).not.toBeDisabled()
+  })
+
+  it("prevents search submission when no sources and no web fallback", () => {
+    state.query = "test query"
+    state.settings.sources = []
+    state.settings.enable_web_fallback = false
+
+    render(<SearchBar autoFocus={false} />)
+
+    fireEvent.submit(screen.getByRole("textbox", { name: "Search your knowledge base" }).closest("form")!)
+
+    expect(state.search).not.toHaveBeenCalled()
   })
 
   it("clamps the active suggestion index when the suggestion list shrinks", () => {

@@ -10,6 +10,7 @@ import {
   Search,
   FileText,
   AlertCircle,
+  Check,
   ChevronUp,
   Eye,
   PencilLine,
@@ -292,6 +293,8 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
   // Local state
   const [isSaving, setIsSaving] = useState(false)
+  const [showSavedIndicator, setShowSavedIndicator] = useState(false)
+  const savedIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
@@ -304,6 +307,19 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
   const [keywordSuggestions, setKeywordSuggestions] = useState<string[]>([])
   const titleInputRef = useRef<InputRef | null>(null)
   const contentInputRef = useRef<TextAreaRef | null>(null)
+
+  const showSavedIndicatorBriefly = useCallback(() => {
+    if (savedIndicatorTimerRef.current) clearTimeout(savedIndicatorTimerRef.current)
+    setShowSavedIndicator(true)
+    savedIndicatorTimerRef.current = setTimeout(() => setShowSavedIndicator(false), 2000)
+  }, [])
+
+  // Clean up saved indicator timer on unmount
+  useEffect(() => {
+    return () => {
+      if (savedIndicatorTimerRef.current) clearTimeout(savedIndicatorTimerRef.current)
+    }
+  }, [])
 
   // Parse keywords from input
   const parseKeywords = (input: string): string[] =>
@@ -659,6 +675,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         messageApi.success(
           t("playground:studio.noteUpdated", "Note updated")
         )
+        showSavedIndicatorBriefly()
       } else {
         // Create new note
         const created = await bgRequest<NoteListItem>({
@@ -678,6 +695,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         messageApi.success(
           t("playground:studio.noteSaved", "Note saved")
         )
+        showSavedIndicatorBriefly()
       }
     } catch (error: any) {
       // Handle version conflict
@@ -1038,9 +1056,15 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         <div className="mt-2 flex shrink-0 items-center justify-between">
           <div className="flex items-center gap-2">
             {currentNote.isDirty && (
-              <span className="flex items-center gap-1 text-xs text-warning">
+              <span className="flex items-center gap-1 text-xs text-warn">
                 <AlertCircle className="h-3 w-3" />
                 {t("playground:studio.unsaved", "Unsaved")}
+              </span>
+            )}
+            {showSavedIndicator && !currentNote.isDirty && (
+              <span className="flex items-center gap-1 text-xs text-success" data-testid="quick-notes-saved-indicator">
+                <Check className="h-3 w-3" />
+                {t("playground:studio.saved", "Saved")}
               </span>
             )}
           </div>

@@ -21,6 +21,24 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
 
 router = APIRouter(prefix="/acp/triggers", tags=["acp-triggers"])
 
+_WEBHOOK_ERROR_STATUS = {
+    "trigger_not_found": 404,
+    "verification_failed": 403,
+    "signature_invalid": 403,
+    "rate_limit_exceeded": 429,
+}
+
+_WEBHOOK_CLIENT_ERROR_CODES = frozenset(
+    {
+        "trigger_not_found",
+        "trigger_disabled",
+        "verification_failed",
+        "signature_invalid",
+        "rate_limit_exceeded",
+        "secret_decryption_failed",
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # Request / Response models
@@ -118,6 +136,21 @@ def _get_trigger_manager():
     return ACPTriggerManager(db=db, secret_manager=secret_mgr)
 
 
+def _sanitize_webhook_error_detail(result: dict[str, Any]) -> tuple[int, dict[str, str]]:
+    status_value = str(result.get("status") or "error")
+    raw_error = str(result.get("error") or "").strip()
+    error_code = raw_error if raw_error in _WEBHOOK_CLIENT_ERROR_CODES else "internal_error"
+    status_code = _WEBHOOK_ERROR_STATUS.get(error_code, 400 if status_value == "rejected" else 503)
+    return status_code, {"status": status_value, "error": error_code}
+
+
+def _sanitize_webhook_success_result(result: dict[str, Any]) -> dict[str, str]:
+    return {
+        "status": "accepted",
+        "task_id": str(result.get("task_id") or ""),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Inbound webhook endpoint (NO AUTH -- uses HMAC)
 # ---------------------------------------------------------------------------
@@ -138,23 +171,11 @@ async def receive_webhook(trigger_id: str, request: Request) -> dict[str, Any]:
     mgr = _get_trigger_manager()
     result = await mgr.handle_webhook(trigger_id, payload_body, headers)
 
-    status_code = 200
-    if result.get("status") == "rejected":
-        error = result.get("error", "")
-        if error == "trigger_not_found":
-            status_code = 404
-        elif error == "signature_invalid":
-            status_code = 403
-        elif error == "rate_limit_exceeded":
-            status_code = 429
-        else:
-            status_code = 400
-
-    if status_code != 200:
-        safe_detail = {"status": result.get("status"), "error": result.get("error")}
+    if result.get("status") != "accepted":
+        status_code, safe_detail = _sanitize_webhook_error_detail(result)
         raise HTTPException(status_code=status_code, detail=safe_detail)
 
-    return result
+    return _sanitize_webhook_success_result(result)
 
 
 # ---------------------------------------------------------------------------

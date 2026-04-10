@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
-import { ColorPicker, Slider, Select, Segmented, Modal, Button, message } from "antd"
+import { ColorPicker, Slider, Select, Segmented, Modal, Button, Input } from "antd"
 import type { Color } from "antd/es/color-picker"
 import { Palette, Type, Maximize2, Layers } from "lucide-react"
 import type { ThemeDefinition, ThemeColorTokens } from "@/themes/types"
@@ -323,6 +323,7 @@ export function ThemeQuickEditor({
   }, [open])
 
   const [presetId, setPresetId] = useState(initialLevers.presetId)
+  const [themeName, setThemeName] = useState(editingTheme?.name ?? "Quick Theme")
   const [primaryHex, setPrimaryHex] = useState(initialLevers.primaryHex)
   const [accentHex, setAccentHex] = useState(initialLevers.accentHex)
   const [bgTintHex, setBgTintHex] = useState(initialLevers.bgTintHex)
@@ -338,6 +339,7 @@ export function ThemeQuickEditor({
     if (open) {
       originalThemeRef.current = activeTheme
       setPresetId(initialLevers.presetId)
+      setThemeName(editingTheme?.name ?? "Quick Theme")
       setPrimaryHex(initialLevers.primaryHex)
       setAccentHex(initialLevers.accentHex)
       setBgTintHex(initialLevers.bgTintHex)
@@ -383,12 +385,21 @@ export function ThemeQuickEditor({
     ],
   )
 
+  const previewTheme = useMemo(
+    (): ThemeDefinition => ({
+      ...derivedTheme,
+      id: editingTheme?.id ?? "",
+      name: themeName.trim() || "Quick Theme",
+    }),
+    [derivedTheme, editingTheme?.id, themeName]
+  )
+
   // Live-preview: apply tokens on every derivedTheme change
   useEffect(() => {
     if (!open) return
-    const tokens = isDark ? derivedTheme.palette.dark : derivedTheme.palette.light
-    applyThemeTokens(tokens, derivedTheme)
-  }, [derivedTheme, isDark, open])
+    const tokens = isDark ? previewTheme.palette.dark : previewTheme.palette.light
+    applyThemeTokens(tokens, previewTheme)
+  }, [isDark, open, previewTheme])
 
   // Check text contrast for warnings
   const contrastWarning = useMemo(() => {
@@ -436,14 +447,19 @@ export function ThemeQuickEditor({
 
   // --- Apply (save) ---
   const handleApply = useCallback(() => {
+    const fallbackId = generateThemeId("Quick Theme")
+    const resolvedName =
+      themeName.trim()
+      || editingTheme?.name
+      || fallbackId.replace(/^quick-theme-/, "Quick Theme ")
     const theme: ThemeDefinition = {
-      ...derivedTheme,
-      id: editingTheme?.id ?? generateThemeId("Quick Theme"),
-      name: editingTheme?.name ?? "Quick Theme",
+      ...previewTheme,
+      id: editingTheme?.id ?? generateThemeId(resolvedName),
+      name: resolvedName,
     }
     onSave(theme)
     onClose()
-  }, [derivedTheme, editingTheme, onSave, onClose])
+  }, [editingTheme?.id, editingTheme?.name, onClose, onSave, previewTheme, themeName])
 
   // --- Cancel (revert) ---
   const handleCancel = useCallback(() => {
@@ -462,7 +478,10 @@ export function ThemeQuickEditor({
   const handleAdvanced = useCallback(() => {
     if (onOpenAdvanced) {
       // Hand off the current preview state to the advanced editor
-      onOpenAdvanced(derivedTheme)
+      onOpenAdvanced({
+        ...previewTheme,
+        id: editingTheme?.id ?? "",
+      })
       onClose()
     } else {
       // No advanced editor callback — revert preview and close
@@ -476,7 +495,7 @@ export function ThemeQuickEditor({
       }
       onClose()
     }
-  }, [onOpenAdvanced, derivedTheme, isDark, activeTheme, onClose])
+  }, [activeTheme, editingTheme?.id, isDark, onClose, onOpenAdvanced, previewTheme])
 
   const presetOptions = useMemo(
     () => getBuiltinPresets().map((p) => ({ value: p.id, label: p.name })),
@@ -503,6 +522,14 @@ export function ThemeQuickEditor({
       }
     >
       <div className="space-y-5 max-h-[65vh] overflow-y-auto pr-1">
+        <div>
+          <label className="text-xs text-text-muted block mb-1">Theme name</label>
+          <Input
+            value={themeName}
+            onChange={(event) => setThemeName(event.target.value)}
+            placeholder="Quick Theme"
+          />
+        </div>
         {/* ---- Section: Colors ---- */}
         <div>
           <div className="flex items-center gap-1.5 mb-3">

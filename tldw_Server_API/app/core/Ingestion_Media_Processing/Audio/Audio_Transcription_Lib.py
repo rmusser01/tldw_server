@@ -2096,7 +2096,18 @@ def transcribe_with_qwen2audio(audio: np.ndarray, sample_rate: int = 16000) -> s
 # Faster Whisper related functions
 whisper_model_instance = None
 config = load_and_log_configs() or {}
-processing_choice = config.get("processing_choice", "cpu")
+
+
+def _resolve_processing_choice(config_data: dict[str, Any] | None) -> str:
+    """Resolve the STT processing device, allowing a runtime env override."""
+    env_override = str(os.getenv("PROCESSING_CHOICE", "")).strip().lower()
+    if env_override:
+        return env_override
+    configured = str((config_data or {}).get("processing_choice", "cpu")).strip().lower()
+    return configured or "cpu"
+
+
+processing_choice = _resolve_processing_choice(config)
 total_thread_count = multiprocessing.cpu_count()
 
 # Model download status tracking

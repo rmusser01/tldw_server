@@ -921,7 +921,12 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     } catch (err) {
       console.debug("[OnboardingConnectForm] setUserPersona failed", err)
     }
-    // Explorer persona sees all features — no shortcut filtering needed
+    try {
+      const explorerShortcuts = getDefaultShortcutsForPersona("explorer")
+      await setSetting(HEADER_SHORTCUT_SELECTION_SETTING, explorerShortcuts)
+    } catch (err) {
+      console.debug("[OnboardingConnectForm] Failed to persist explorer shortcuts", err)
+    }
     await handleGoToChat()
   }, [actions, handleGoToChat])
 

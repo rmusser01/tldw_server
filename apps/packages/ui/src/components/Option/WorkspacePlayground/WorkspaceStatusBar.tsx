@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { Tooltip, Modal, Button } from "antd"
 import { Loader2, Trash2 } from "lucide-react"
 import { useConnectionStore } from "@/store/connection"
-import { deriveConnectionUxState } from "@/types/connection"
+import { deriveConnectionUxState, type ConnectionUxState } from "@/types/connection"
 import { WORKSPACE_STORAGE_KEY } from "@/store/workspace-events"
 
 type ConnectionTone = {
@@ -70,6 +70,7 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
   const { t } = useTranslation(["playground", "common"])
   const connectionState = useConnectionStore((s) => s.state)
   const connection = deriveConnectionTone(connectionState)
+  const connectionUxState: ConnectionUxState = deriveConnectionUxState(connectionState)
   const [storageModalOpen, setStorageModalOpen] = React.useState(false)
 
   const storageItems = React.useMemo(() => {
@@ -143,6 +144,18 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
             {connection.label}
           </span>
         </Tooltip>
+        {(connectionUxState === "error_unreachable" || connectionUxState === "error_auth") && (
+          <button
+            type="button"
+            data-testid="workspace-statusbar-retry"
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-error hover:bg-error/10 hover:text-error"
+            onClick={() => {
+              void useConnectionStore.getState().checkOnce()
+            }}
+          >
+            {t("playground:statusBar.retry", "Retry")}
+          </button>
+        )}
 
         {/* Storage mini progress — click to manage */}
         {storageBar && (
@@ -166,24 +179,34 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
       </div>
 
       {/* Active operations */}
-      {activeOperations.length > 0 && (
-        <div
-          data-testid="workspace-statusbar-activity"
-          role="status"
-          aria-live="polite"
-          className="flex items-center gap-3"
+      <div className="flex items-center gap-3">
+        {activeOperations.length > 0 && (
+          <div
+            data-testid="workspace-statusbar-activity"
+            role="status"
+            aria-live="polite"
+            className="flex items-center gap-3"
+          >
+            <Loader2 className="h-3 w-3 animate-spin text-primary" />
+            {activeOperations.map((op, i) => (
+              <span key={i} className="inline-flex items-center gap-1">
+                <span className="truncate">{op}</span>
+                {i < activeOperations.length - 1 && (
+                  <span className="text-text-subtle">&bull;</span>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+        <a
+          href="https://github.com/rmusser01/tldw_server2#readme"
+          target="_blank"
+          rel="noreferrer"
+          className="text-[10px] text-text-muted hover:text-primary transition-colors"
         >
-          <Loader2 className="h-3 w-3 animate-spin text-primary" />
-          {activeOperations.map((op, i) => (
-            <span key={i} className="inline-flex items-center gap-1">
-              <span className="truncate">{op}</span>
-              {i < activeOperations.length - 1 && (
-                <span className="text-text-subtle">&bull;</span>
-              )}
-            </span>
-          ))}
-        </div>
-      )}
+          Help
+        </a>
+      </div>
       <Modal
         title={t("playground:statusBar.storageTitle", "Workspace Storage")}
         open={storageModalOpen}

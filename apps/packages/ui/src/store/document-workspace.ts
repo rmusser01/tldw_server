@@ -2,6 +2,7 @@ import { create } from "zustand"
 import type {
   DocumentWorkspaceStore,
   OpenDocument,
+  ClosedDocument,
   DocumentViewerState,
   SidebarTab,
   RightPanelTab,
@@ -63,6 +64,7 @@ export const useDocumentWorkspaceStore = create<DocumentWorkspaceStore>(
     activeDocumentId: null,
     activeDocumentType: null,
     openDocuments: [],
+    recentlyClosed: [],
     leftSidebarCollapsed: false,
     rightPanelCollapsed: false,
     activeSidebarTab: "toc",
@@ -157,11 +159,17 @@ export const useDocumentWorkspaceStore = create<DocumentWorkspaceStore>(
 
     closeDocument: (id: number) => {
       set((state) => {
+        const closedDoc = state.openDocuments.find((d) => d.id === id)
         const newOpenDocs = state.openDocuments.filter((d) => d.id !== id)
         const wasActive = state.activeDocumentId === id
 
+        // Save the closed document for potential undo (keep max 3, drop oldest)
+        const updatedClosed = closedDoc
+          ? [...state.recentlyClosed, { doc: { ...closedDoc, viewerState: closedDoc.id === state.activeDocumentId ? captureViewerState(state) : closedDoc.viewerState }, closedAt: Date.now() }].slice(-3)
+          : state.recentlyClosed
+
         if (!wasActive) {
-          return { openDocuments: newOpenDocs }
+          return { openDocuments: newOpenDocs, recentlyClosed: updatedClosed }
         }
 
         // If closing active document, activate the next available and restore its state
@@ -170,6 +178,7 @@ export const useDocumentWorkspaceStore = create<DocumentWorkspaceStore>(
           const defaultState = createDefaultViewerState()
           return {
             openDocuments: newOpenDocs,
+            recentlyClosed: updatedClosed,
             activeDocumentId: null,
             activeDocumentType: null,
             currentPage: defaultState.currentPage,
@@ -189,6 +198,7 @@ export const useDocumentWorkspaceStore = create<DocumentWorkspaceStore>(
         const viewerState = newActive.viewerState ?? createDefaultViewerState()
         return {
           openDocuments: newOpenDocs,
+          recentlyClosed: updatedClosed,
           activeDocumentId: newActive.id,
           activeDocumentType: newActive.type,
           currentPage: viewerState.currentPage,
@@ -203,6 +213,17 @@ export const useDocumentWorkspaceStore = create<DocumentWorkspaceStore>(
           activeSearchIndex: viewerState.activeSearchIndex
         }
       })
+    },
+
+    undoCloseDocument: () => {
+      const state = get()
+      const last = state.recentlyClosed[state.recentlyClosed.length - 1]
+      if (!last) return null
+      // Remove from recentlyClosed and re-open
+      set({ recentlyClosed: state.recentlyClosed.slice(0, -1) })
+      // Re-open the document (openDocument handles restoring viewer state)
+      get().openDocument(last.doc)
+      return last.doc
     },
 
     setActiveDocument: (id: number | null) => {
@@ -482,6 +503,7 @@ export const useDocumentWorkspaceStore = create<DocumentWorkspaceStore>(
         activeDocumentId: null,
         activeDocumentType: null,
         openDocuments: [],
+        recentlyClosed: [],
         leftSidebarCollapsed: false,
         rightPanelCollapsed: false,
         activeSidebarTab: "toc",

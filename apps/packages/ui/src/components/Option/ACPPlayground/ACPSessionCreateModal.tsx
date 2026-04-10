@@ -326,9 +326,9 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
       setCreationStep("error")
 
       // Read structured ACP errors from top level first, then fall back to error.data
-      const errorCode = error.code ?? error.data?.code
-      const errorMessage = error.message ?? error.data?.message
-      const errorSuggestions = error.suggestions ?? error.data?.suggestions
+      const errorCode = error.data?.code ?? error.code
+      const errorMessage = error.data?.message ?? error.message
+      const errorSuggestions = error.data?.suggestions ?? error.suggestions
 
       // Prefer structured error from backend if available
       if (errorCode && errorMessage) {
@@ -395,7 +395,7 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
 
       notification.error({
         message: t("common:error", "Error"),
-        description: error.message,
+        description: errorMessage,
       })
     },
   })

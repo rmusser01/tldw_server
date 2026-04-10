@@ -191,15 +191,13 @@ def test_extract_content_dict_message_content_block():
     assert _extract_content(response) == '{"pacing": 0.9}'
 
 
-@pytest.mark.asyncio
-async def test_strip_markdown_fences_no_fences():
+def test_strip_markdown_fences_no_fences():
     from tldw_Server_API.app.core.Writing.manuscript_analysis import _strip_markdown_fences
 
     assert _strip_markdown_fences('{"a": 1}') == '{"a": 1}'
 
 
-@pytest.mark.asyncio
-async def test_strip_markdown_fences_json_prefix():
+def test_strip_markdown_fences_json_prefix():
     from tldw_Server_API.app.core.Writing.manuscript_analysis import _strip_markdown_fences
 
     assert json.loads(_strip_markdown_fences('```json\n{"a": 1}\n```')) == {"a": 1}

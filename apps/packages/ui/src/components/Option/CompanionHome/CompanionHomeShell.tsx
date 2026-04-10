@@ -6,7 +6,6 @@ import { browser } from "wxt/browser"
 import { useIsConnected } from "@/hooks/useConnectionState"
 import { useSafeDemoMode } from "@/context/demo-mode"
 import { fetchChatModels } from "@/services/tldw-server"
-import { StorageQuotaBanner } from "@/components/Common/StorageQuotaBanner"
 import { CompanionHomePage } from "./CompanionHomePage"
 
 type QuickAction = {
@@ -140,9 +139,6 @@ export function CompanionHomeShell({
           </div>
         </div>
       )}
-
-      {!demoEnabled && <StorageQuotaBanner />}
-
       <CompanionHomePage
         onPersonalizationEnabled={onPersonalizationEnabled}
         surface={surface}

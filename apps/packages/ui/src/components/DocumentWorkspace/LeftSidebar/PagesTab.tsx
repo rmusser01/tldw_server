@@ -8,7 +8,7 @@ import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 const MAX_THUMBNAILS = 24
 
 /**
- * FiguresTab - Displays page thumbnails for the current PDF document.
+ * PagesTab - Displays page thumbnails for the current PDF document.
  *
  * Features:
  * - Grid display of page thumbnails
@@ -16,7 +16,7 @@ const MAX_THUMBNAILS = 24
  * - Highlights current page
  * - Loading and empty states
  */
-export const FiguresTab: React.FC = () => {
+export const PagesTab: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
   const activeDocumentType = useDocumentWorkspaceStore((s) => s.activeDocumentType)
@@ -70,8 +70,8 @@ export const FiguresTab: React.FC = () => {
         <Empty
           image={<ImageIcon className="mx-auto h-12 w-12 text-muted" />}
           description={t(
-            "option:documentWorkspace.figuresNoDocument",
-            "Open a document to view figures"
+            "option:documentWorkspace.pagesNoDocument",
+            "Visual page previews for quick navigation. Open a PDF to browse pages."
           )}
         />
       </div>
@@ -84,8 +84,8 @@ export const FiguresTab: React.FC = () => {
         <Empty
           image={<ImageIcon className="mx-auto h-12 w-12 text-muted" />}
           description={t(
-            "option:documentWorkspace.thumbnailsPdfOnly",
-            "Thumbnails are available for PDF documents."
+            "option:documentWorkspace.pagesPdfOnly",
+            "Page previews are available for PDF documents."
           )}
         />
       </div>
@@ -112,7 +112,7 @@ export const FiguresTab: React.FC = () => {
         <Alert
           className="mb-3"
           type="error"
-          title={t("option:documentWorkspace.figuresError", "Failed to load document")}
+          title={t("option:documentWorkspace.pagesError", "Failed to load document")}
           description={loadError || t("common:unknownError", "An unknown error occurred")}
           showIcon
         />
@@ -208,4 +208,4 @@ export const FiguresTab: React.FC = () => {
   )
 }
 
-export default FiguresTab
+export default PagesTab

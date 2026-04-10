@@ -43,7 +43,27 @@ Operational notes:
 - If `CIRCUIT_BREAKER_HALF_OPEN_LEASE_TTL_SECONDS` is too high, abandoned probe slots take longer to self-heal; if too low, long-running probes can lose their lease before completion.
 
 ## OCR (PDF pipeline)
-- `OCR_PAGE_CONCURRENCY`: Per-page OCR concurrency (default `1`).
+- `OCR_PAGE_CONCURRENCY`: Global per-page OCR concurrency cap (default `1`). The PDF pipeline applies `min(OCR_PAGE_CONCURRENCY, backend profile max_page_concurrency)` before dispatching page OCR work.
+
+### Llama.cpp OCR
+- `LLAMACPP_OCR_MODE`: `auto|remote|managed|cli`.
+- `LLAMACPP_OCR_ALLOW_MANAGED_START`: `true|false`. Managed mode is single-process only in v1.
+- `LLAMACPP_OCR_AUTO_ELIGIBLE`: Enables participation in `auto` when the backend is configured and locally available.
+- `LLAMACPP_OCR_AUTO_HIGH_QUALITY_ELIGIBLE`: Enables participation in `auto_high_quality` when the backend is configured and locally available.
+- `LLAMACPP_OCR_MAX_PAGE_CONCURRENCY`: Backend-local per-page cap; defaults to `1` unless you raise it explicitly.
+- Remote: `LLAMACPP_OCR_HOST`, `LLAMACPP_OCR_PORT`, `LLAMACPP_OCR_MODEL_PATH`, `LLAMACPP_OCR_USE_DATA_URL`.
+- Managed: `LLAMACPP_OCR_ARGV`, `LLAMACPP_OCR_MODEL_PATH`, optional `LLAMACPP_OCR_HOST`, `LLAMACPP_OCR_PORT`, `LLAMACPP_OCR_STARTUP_TIMEOUT_SEC`. Managed startup in `auto` is preferred over `remote` when `LLAMACPP_OCR_ALLOW_MANAGED_START=true` and the managed profile is configured.
+- CLI: `LLAMACPP_OCR_ARGV`, `LLAMACPP_OCR_MODEL_PATH`.
+
+### ChatLLM OCR
+- `CHATLLM_OCR_MODE`: `auto|remote|managed|cli`.
+- `CHATLLM_OCR_ALLOW_MANAGED_START`: `true|false`. Managed mode is single-process only in v1.
+- `CHATLLM_OCR_AUTO_ELIGIBLE`: Enables participation in `auto` when the backend is configured and locally available.
+- `CHATLLM_OCR_AUTO_HIGH_QUALITY_ELIGIBLE`: Enables participation in `auto_high_quality` when the backend is configured and locally available.
+- `CHATLLM_OCR_MAX_PAGE_CONCURRENCY`: Backend-local per-page cap; defaults to `1` unless you raise it explicitly.
+- Remote: `CHATLLM_OCR_URL`, `CHATLLM_OCR_MODEL`, `CHATLLM_OCR_API_KEY`.
+- Managed: `CHATLLM_OCR_SERVER_BINARY`, `CHATLLM_OCR_MODEL_PATH`, `CHATLLM_OCR_HOST`, `CHATLLM_OCR_PORT`, `CHATLLM_OCR_STARTUP_TIMEOUT_SEC`, `CHATLLM_OCR_SERVER_ARGS_JSON`, `CHATLLM_OCR_HEALTHCHECK_URL`.
+- CLI: `CHATLLM_OCR_CLI_BINARY`, `CHATLLM_OCR_MODEL_PATH`, `CHATLLM_OCR_CLI_ARGS_JSON`.
 
 ### MinerU OCR
 - `MINERU_CMD`: Command used to launch MinerU for document-level PDF OCR. Defaults to `mineru`. The command is tokenized safely and executed without a shell.
@@ -596,7 +616,7 @@ Policy precedence:
 
 Operator notes:
 - Retention TTL is only meaningful when retained artifacts are indexed; otherwise `delete_audio_after_success=true` remains the safe default.
-- Org admins manage per-org policy with `GET/PATCH /api/v1/admin/orgs/{org_id}/stt/settings`.
+- Org admins manage per-org policy with `GET / PATCH /api/v1/admin/orgs/{org_id}/stt/settings`.
 
 ## TTS Placeholder Handling (2026-03-02)
 - Legacy placeholder literals in `[TTS-Settings]` are now treated as unset during config load: empty string, `FIXME`, `TODO`, `TBD`, `CHANGE_ME`, `PLACEHOLDER`, `NONE`, `NULL`, `N/A`, `NA`.
