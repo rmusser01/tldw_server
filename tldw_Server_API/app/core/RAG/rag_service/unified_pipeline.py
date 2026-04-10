@@ -5320,18 +5320,15 @@ async def unified_rag_pipeline(
                         async def _generate_standard_answer(
                             *,
                             query: str,
-                            documents: list[Any],
+                            context: str,
                             generation_prompt: Optional[str] = None,
                             max_generation_tokens: Optional[int] = None,
                         ) -> Any:
-                            standard_context = "\n\n".join(
-                                [getattr(doc, "content", str(doc)) for doc in list(documents or [])[:5]]
-                            )
                             return await _resilient_call(
                                 "generation",
                                 generator.generate,
                                 query=query,
-                                context=standard_context,
+                                context=context,
                                 prompt_template=generation_prompt,
                                 max_tokens=max_generation_tokens,
                             )
@@ -5351,8 +5348,8 @@ async def unified_rag_pipeline(
                                 verification_report=(result.metadata or {}).get("verification_report"),
                             ),
                             generate_answer_fn=_generate_standard_answer,
+                            generation_context=context,
                         )
-                        result.documents = list(generation_result.documents)
                         result.generated_answer = generation_result.generated_answer
                         result.metadata.update(dict(generation_result.metadata or {}))
                         result.metadata["chunk_citations"] = list(generation_result.chunk_citations or [])

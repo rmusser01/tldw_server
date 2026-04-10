@@ -29,15 +29,29 @@ async def test_execute_generation_phase_builds_rag_result_from_derived_evidence(
     )
 
     async def fake_generate_answer(**kwargs):
-        return {"answer": "short answer", "metadata": {"model": "stub"}}
+        assert kwargs["context"] == "writer context"
+        return {
+            "answer": "short answer",
+            "provider": "stub-provider",
+            "model": "stub-model",
+            "tokens_used": 17,
+            "generation_time": 0.25,
+            "metadata": {"nested": "value"},
+        }
 
     result = await execute_generation_phase(
         resolved_request=resolved,
         derived_evidence=derived,
         generate_answer_fn=fake_generate_answer,
+        generation_context="writer context",
     )
 
     assert isinstance(result, RAGResult)
     assert result.generated_answer == "short answer"
     assert result.chunk_citations == [{"id": "doc-1"}]
     assert result.verification_report == {"ok": True}
+    assert result.metadata["provider"] == "stub-provider"
+    assert result.metadata["model"] == "stub-model"
+    assert result.metadata["tokens_used"] == 17
+    assert result.metadata["generation_time"] == 0.25
+    assert result.metadata["nested"] == "value"
