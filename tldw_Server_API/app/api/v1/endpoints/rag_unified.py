@@ -60,6 +60,7 @@ from tldw_Server_API.app.core.RAG.rag_service.post_retrieval_coordinator import 
 from tldw_Server_API.app.core.RAG.rag_service.evidence_models import RetrievedEvidence
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import (
     ResolvedRAGRequest,
+    apply_search_agent_defaults as apply_core_search_agent_defaults,
     resolve_rag_request,
 )
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import (
@@ -97,6 +98,21 @@ def _search_agent_setting(env_key: str, config_key: str) -> Optional[str]:
         return get_config_value("Search-Agent", config_key, default=None)
     except (TypeError, ValueError):
         return None
+
+
+def _apply_search_agent_defaults(
+    request: Any,
+    payload: dict[str, Any],
+    *,
+    allowed_fields: Optional[set[str]] = None,
+) -> None:
+    """Compatibility shim over the shared core Search-Agent default resolver."""
+    apply_core_search_agent_defaults(
+        request,
+        payload,
+        search_agent_setting_fn=_search_agent_setting,
+        allowed_fields=allowed_fields,
+    )
 
 
 def _build_unified_pipeline_kwargs(
