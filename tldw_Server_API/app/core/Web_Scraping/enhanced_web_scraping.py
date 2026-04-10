@@ -1214,26 +1214,19 @@ class EnhancedWebScraper:
         impersonate: Optional[str],
         proxies: Optional[dict[str, str]],
     ) -> str:
-        try:
-            from curl_cffi.requests import Session as CurlCffiSession
-        except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError("curl_cffi is not installed") from exc
+        from tldw_Server_API.app.core import http_client as _http_client
 
-        if proxies:
-            from tldw_Server_API.app.core import http_client as _http_client
-            _http_client._validate_proxies_or_raise(proxies)  # type: ignore[attr-defined]
-
-        req_kwargs: dict[str, Any] = {
-            "headers": headers,
-            "cookies": cookies,
-            "timeout": timeout,
-        }
-        if proxies:
-            req_kwargs["proxies"] = proxies
-
-        with CurlCffiSession(impersonate=impersonate) as session:
-            resp = session.get(url, **req_kwargs)
-            return resp.text
+        resp = _http_client.fetch(
+            url,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            proxies=proxies,
+            backend="curl",
+            impersonate=impersonate,
+            follow_redirects=True,
+        )
+        return resp["text"]
 
     @staticmethod
     async def _close_response(resp: Any) -> None:
@@ -1377,7 +1370,8 @@ class EnhancedWebScraper:
                     result.setdefault("preflight_analysis", preflight_payload)
                 return result
 
-            # robots.txt enforcement (fail open if error)
+            # robots.txt enforcement is best-effort: explicit disallow blocks
+            # the scrape, but transient robots retrieval errors do not.
             if getattr(plan, "respect_robots", True):
                 try:
                     from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
