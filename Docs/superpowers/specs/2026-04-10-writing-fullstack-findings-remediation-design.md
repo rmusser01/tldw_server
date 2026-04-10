@@ -254,15 +254,25 @@ TipTap edits will update two pieces of parent state together:
 - authoritative rich JSON for TipTap rendering
 - plain-text prompt content through the same session dirty-state and autosave path used by textarea edits
 
-That means TipTap `onContentChange` will no longer call raw `setEditorText()` directly. It will feed the session save path while keeping rich JSON synchronized in parent state.
+The remediation will also persist the rich editor document as a companion session-payload field:
+
+- plain `prompt` remains the canonical text used by generation, search, and existing payload consumers
+- rich TipTap-compatible JSON is stored under `prompt_rich`
+- readers must tolerate `prompt_rich` being absent and fall back to deriving a minimal rich document from plain `prompt`
+
+That means TipTap `onContentChange` will no longer call raw `setEditorText()` directly. It will feed the session save path while keeping rich JSON synchronized in parent state and inside the session payload.
 
 The parent sync path will continue to distinguish editor-originated changes from external plain-text changes so a local TipTap edit is not immediately replaced by lossy `plainTextToTipTapJson(editorText)` conversion.
+
+Plain-text-only edits remain allowed. When the user edits through the plain-text editor path, the saved payload should clear `prompt_rich` so the plain prompt and rich prompt cannot silently diverge.
 
 #### 4.3 External rehydrate behavior
 
 `WritingTipTapEditor` will accept external content updates whenever the parent has authoritative content that differs from the editor’s current document.
 
 The current focus gate will be removed from the editor component itself. Protection against clobbering unsaved local work stays at the existing parent session-management boundary, where external session rehydrate is already guarded by dirty-state rules.
+
+When a session payload includes `prompt_rich`, rehydrate should prefer that stored rich document over reconstructing from plain text. Reconstruction from plain `prompt` remains the fallback only for legacy or plain-text sessions.
 
 #### 4.4 Split-view parity
 
@@ -351,6 +361,8 @@ python -m pytest tldw_Server_API/tests/Writing/test_manuscript_db.py tldw_Server
 Add or update focused tests for:
 
 - TipTap edits marking the session dirty and scheduling save through the shared session path
+- TipTap saves persisting `prompt_rich` while keeping plain `prompt` aligned
+- TipTap reload or session-switch rehydrate preferring stored `prompt_rich` over lossy plain-text reconstruction
 - TipTap split-view rendering instead of textarea fallback
 - selection-based editor helpers working through the shared editor adapter
 - merge-mode snapshot import invalidating the active session detail query
