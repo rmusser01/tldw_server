@@ -4,6 +4,7 @@ Integration tests for Writing Playground endpoints using a real ChaChaNotes DB.
 
 import configparser
 import importlib
+from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
@@ -46,6 +47,7 @@ def client_with_writing_db(tmp_path, monkeypatch):
 
     importlib.reload(app_main)
     fastapi_app = app_main.app
+    fastapi_app.state.writing_test_db = db
 
     fastapi_app.dependency_overrides[get_request_user] = override_user
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_db_dep
@@ -352,18 +354,116 @@ def test_writing_snapshot_import_merge_preserves_existing(client_with_writing_db
     assert "Merged Theme" in theme_names
 
 
-def test_writing_snapshot_import_replace_rolls_back_on_restore_failure(
+@pytest.mark.parametrize("mode", ["merge", "replace"])
+def test_snapshot_import_restores_soft_deleted_template_and_theme_names(
+    client_with_writing_db: TestClient,
+    mode: str,
+):
+    client = client_with_writing_db
+    db = client.app.state.writing_test_db
+
+    template_create = client.post(
+        "/api/v1/writing/templates",
+        json={"name": "Soft Deleted Template", "payload": {"inst_pre": "[S]"}},
+    )
+    assert template_create.status_code == 201, template_create.text
+    template_created = template_create.json()
+
+    theme_create = client.post(
+        "/api/v1/writing/themes",
+        json={
+            "name": "Soft Deleted Theme",
+            "class_name": "soft-deleted-theme",
+            "css": ".soft-deleted-theme { color: #246; }",
+            "order": 3,
+        },
+    )
+    assert theme_create.status_code == 201, theme_create.text
+    theme_created = theme_create.json()
+
+    template_delete = client.delete(
+        "/api/v1/writing/templates/Soft Deleted Template",
+        headers={"expected-version": str(template_created["version"])},
+    )
+    assert template_delete.status_code in (200, 204), template_delete.text
+    theme_delete = client.delete(
+        "/api/v1/writing/themes/Soft Deleted Theme",
+        headers={"expected-version": str(theme_created["version"])},
+    )
+    assert theme_delete.status_code in (200, 204), theme_delete.text
+
+    template_deleted_row = db.execute_query(
+        "SELECT id, version, deleted FROM writing_templates WHERE name = ?",
+        ("Soft Deleted Template",),
+    ).fetchone()
+    theme_deleted_row = db.execute_query(
+        "SELECT id, version, deleted FROM writing_themes WHERE name = ?",
+        ("Soft Deleted Theme",),
+    ).fetchone()
+    assert template_deleted_row["deleted"] == 1
+    assert theme_deleted_row["deleted"] == 1
+
+    import_resp = client.post(
+        "/api/v1/writing/snapshot/import",
+        json={
+            "mode": mode,
+            "snapshot": {
+                "sessions": [],
+                "templates": [
+                    {
+                        "name": "Soft Deleted Template",
+                        "payload": {"inst_pre": "[R]"},
+                        "schema_version": 1,
+                        "is_default": True,
+                    }
+                ],
+                "themes": [
+                    {
+                        "name": "Soft Deleted Theme",
+                        "class_name": "restored-theme",
+                        "css": ".restored-theme { color: #579; }",
+                        "schema_version": 1,
+                        "is_default": False,
+                        "order": 5,
+                    }
+                ],
+            },
+        },
+    )
+    assert import_resp.status_code == 200, import_resp.text
+
+    template_row = db.execute_query(
+        "SELECT id, version, deleted, payload_json, is_default FROM writing_templates WHERE name = ?",
+        ("Soft Deleted Template",),
+    ).fetchone()
+    theme_row = db.execute_query(
+        "SELECT id, version, deleted, class_name, css, is_default, order_index FROM writing_themes WHERE name = ?",
+        ("Soft Deleted Theme",),
+    ).fetchone()
+
+    assert template_row["id"] == template_deleted_row["id"]
+    assert theme_row["id"] == theme_deleted_row["id"]
+    assert template_row["deleted"] == 0
+    assert theme_row["deleted"] == 0
+    assert template_row["version"] == template_deleted_row["version"] + 1
+    assert theme_row["version"] == theme_deleted_row["version"] + 1
+    assert template_row["is_default"] == 1
+    assert theme_row["order_index"] == 5
+    assert "restored-theme" in theme_row["class_name"]
+
+
+def test_snapshot_import_replace_rolls_back_when_db_import_fails_after_soft_delete(
     client_with_writing_db: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
     client = client_with_writing_db
+    db = client.app.state.writing_test_db
 
     keep_session_resp = client.post(
         "/api/v1/writing/sessions",
         json={"name": "Keep Session", "payload": {"text": "keep"}},
     )
     assert keep_session_resp.status_code == 201, keep_session_resp.text
-    keep_session_id = keep_session_resp.json()["id"]
     assert client.post(
         "/api/v1/writing/templates",
         json={"name": "Keep Template", "payload": {"inst_pre": "[K]"}},
@@ -373,34 +473,30 @@ def test_writing_snapshot_import_replace_rolls_back_on_restore_failure(
         json={"name": "Keep Theme", "class_name": "keep-theme", "css": ".keep-theme{}", "order": 1},
     ).status_code == 201
 
-    from tldw_Server_API.app.api.v1.endpoints import writing as writing_endpoints
+    original_transaction = db.transaction
 
-    original_add = writing_endpoints.CharactersRAGDB.add_writing_session
-    original_restore = writing_endpoints._restore_soft_deleted_writing_session
-    add_called_for_existing_id = False
-    restore_called = False
+    class FailingConnectionProxy:
+        def __init__(self, conn):
+            self._conn = conn
+            self._triggered = False
 
-    def track_add(self, name, payload, *, schema_version=1, session_id=None, version_parent_id=None):
-        nonlocal add_called_for_existing_id
-        if session_id == keep_session_id:
-            add_called_for_existing_id = True
-        return original_add(
-            self,
-            name,
-            payload,
-            schema_version=schema_version,
-            session_id=session_id,
-            version_parent_id=version_parent_id,
-        )
+        def execute(self, sql, params=()):
+            cursor = self._conn.execute(sql, params)
+            normalized_sql = " ".join(str(sql).split())
+            if (not self._triggered) and "UPDATE writing_sessions SET deleted = 1" in normalized_sql:
+                self._triggered = True
+                raise RuntimeError("inject failure after replace soft-delete begins")
+            return cursor
 
-    def fail_restore(*args, **kwargs):
-        nonlocal restore_called
-        restore_called = True
-        original_restore(*args, **kwargs)
-        raise RuntimeError("restore failed after mutation")
+        def __getattr__(self, item):
+            return getattr(self._conn, item)
 
-    monkeypatch.setattr(writing_endpoints.CharactersRAGDB, "add_writing_session", track_add)
-    monkeypatch.setattr(writing_endpoints, "_restore_soft_deleted_writing_session", fail_restore)
+    @contextmanager
+    def failing_transaction():
+        with original_transaction() as conn:
+            yield FailingConnectionProxy(conn)
+
+    monkeypatch.setattr(db, "transaction", failing_transaction)
 
     resp = client.post(
         "/api/v1/writing/snapshot/import",
@@ -409,14 +505,30 @@ def test_writing_snapshot_import_replace_rolls_back_on_restore_failure(
             "snapshot": {
                 "sessions": [
                     {
-                        "id": keep_session_id,
+                        "id": "replace-rollback-session",
                         "name": "Restored Session",
                         "payload": {"text": "new"},
                         "schema_version": 1,
                     }
                 ],
-                "templates": [],
-                "themes": [],
+                "templates": [
+                    {
+                        "name": "Restored Template",
+                        "payload": {"inst_pre": "[R]"},
+                        "schema_version": 1,
+                        "is_default": False,
+                    }
+                ],
+                "themes": [
+                    {
+                        "name": "Restored Theme",
+                        "class_name": "restored-theme",
+                        "css": ".restored-theme { color: #579; }",
+                        "schema_version": 1,
+                        "is_default": False,
+                        "order": 2,
+                    }
+                ],
             },
         },
     )
@@ -425,8 +537,6 @@ def test_writing_snapshot_import_replace_rolls_back_on_restore_failure(
     sessions = client.get("/api/v1/writing/sessions").json()["sessions"]
     templates = client.get("/api/v1/writing/templates").json()["templates"]
     themes = client.get("/api/v1/writing/themes").json()["themes"]
-    assert restore_called is True
-    assert add_called_for_existing_id is False
     assert {item["name"] for item in sessions} == {"Keep Session"}
     assert {item["name"] for item in templates} == {"Keep Template"}
     assert {item["name"] for item in themes} == {"Keep Theme"}
