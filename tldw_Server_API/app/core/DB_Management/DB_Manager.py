@@ -280,6 +280,7 @@ def reset_content_backend(
         _CONTENT_DB_BACKEND = media_db_runtime_defaults.reset_media_runtime_defaults(
             config=cfg,
             reload=reload,
+            reset_mode="graceful",
         )
         _sync_media_runtime_defaults()
         _sync_db_manager_path_defaults(cfg)

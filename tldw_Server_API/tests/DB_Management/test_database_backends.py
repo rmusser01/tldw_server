@@ -8,6 +8,8 @@ and that both SQLite and PostgreSQL backends implement the interface properly.
 import pytest
 import tempfile
 import os
+import threading
+import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -127,6 +129,66 @@ class TestDatabaseBackends:
                 "cache_size": -2000,
             }
         ]
+
+    def test_sqlite_backend_get_pool_is_singleton_under_concurrent_first_use(self, sqlite_config, monkeypatch):
+        class _BlockingPool:
+            init_calls = 0
+            first_started = threading.Event()
+            release = threading.Event()
+
+            def __init__(self, db_path, config):
+                type(self).init_calls += 1
+                type(self).first_started.set()
+                type(self).release.wait(timeout=2)
+                self.db_path = db_path
+                self.config = config
+
+            def get_connection(self):
+                raise NotImplementedError
+
+            def return_connection(self, connection):
+                raise NotImplementedError
+
+            def connection(self):
+                raise NotImplementedError
+
+            def close_all(self):
+                pass
+
+            def get_stats(self):
+                return {}
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.DB_Management.backends.sqlite_backend.SQLiteConnectionPool",
+            _BlockingPool,
+            raising=True,
+        )
+
+        backend = SQLiteBackend(sqlite_config)
+        results = [None, None]
+        errors: list[BaseException] = []
+
+        def _get_pool(slot: int) -> None:
+            try:
+                results[slot] = backend.get_pool()
+            except BaseException as exc:  # pragma: no cover - defensive
+                errors.append(exc)
+
+        t1 = threading.Thread(target=_get_pool, args=(0,))
+        t1.start()
+        assert _BlockingPool.first_started.wait(timeout=1.0)
+
+        t2 = threading.Thread(target=_get_pool, args=(1,))
+        t2.start()
+        time.sleep(0.05)
+        _BlockingPool.release.set()
+
+        t1.join(timeout=2.0)
+        t2.join(timeout=2.0)
+
+        assert not errors
+        assert _BlockingPool.init_calls == 1
+        assert results[0] is results[1]
 
     def test_sqlite_backend_schema_creation(self, sqlite_config):
         """Test that SQLite backend can create schema via create_tables."""

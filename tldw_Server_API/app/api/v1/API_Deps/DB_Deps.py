@@ -26,6 +26,9 @@ except ImportError:
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.backends.factory import (
+    reset_managed_sqlite_backends,
+)
 from tldw_Server_API.app.core.DB_Management.DB_Manager import get_content_backend_instance
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import MediaDbFactory, MediaDbSession
@@ -342,6 +345,7 @@ def get_media_db_path_for_rag(media_db: Any) -> str | None:
 
 def reset_media_db_cache() -> None:
     """Clear cached Media DB factories and any legacy cached instances."""
+    managed_backends = []
     with _user_db_lock:
         try:
             # Attempt to close outstanding connections for cache entries
@@ -351,6 +355,12 @@ def reset_media_db_cache() -> None:
                 else []  # type: ignore[assignment]
             )
             for db in list(values_iter):  # type: ignore[arg-type]
+                try:
+                    backend = getattr(db, "backend", None)
+                    if backend is not None:
+                        managed_backends.append(backend)
+                except (AttributeError, RuntimeError, TypeError, ValueError):
+                    pass
                 try:
                     if hasattr(db, "release_context_connection"):
                         db.release_context_connection()
@@ -367,6 +377,12 @@ def reset_media_db_cache() -> None:
         try:
             for factory in list(_media_db_factories.values()):  # type: ignore[attr-defined]
                 try:
+                    backend = getattr(factory, "backend", None)
+                    if backend is not None:
+                        managed_backends.append(backend)
+                except (AttributeError, RuntimeError, TypeError, ValueError):
+                    pass
+                try:
                     if hasattr(factory, "close"):
                         factory.close()
                 except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
@@ -375,6 +391,10 @@ def reset_media_db_cache() -> None:
             pass
         try:
             _media_db_factories.clear()  # type: ignore[attr-defined]
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
+        try:
+            reset_managed_sqlite_backends(mode="hard", backends=managed_backends)
         except (AttributeError, RuntimeError, TypeError, ValueError):
             pass
 

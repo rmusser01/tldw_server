@@ -44,7 +44,11 @@ from tldw_Server_API.app.core.exceptions import (
 )
 
 from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError
-from .backends.factory import DatabaseBackendFactory
+from .backends.factory import (
+    DatabaseBackendFactory,
+    is_factory_managed_backend,
+    release_managed_backend,
+)
 from .backends.query_utils import prepare_backend_statement
 from .db_path_utils import DatabasePaths, normalize_output_storage_filename
 
@@ -439,6 +443,12 @@ class CollectionsDatabase:
     def close(self) -> None:
         """Release backend connections if this instance owns the backend."""
         if not self._owns_backend:
+            return
+        if (
+            getattr(self.backend, "backend_type", None) == BackendType.SQLITE
+            and is_factory_managed_backend(self.backend)
+        ):
+            release_managed_backend(self.backend)
             return
         try:
             self.backend.get_pool().close_all()
