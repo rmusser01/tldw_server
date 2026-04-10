@@ -2,13 +2,13 @@ from types import SimpleNamespace
 
 import pytest
 
-import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
 from tldw_Server_API.app.core.RAG.rag_service.evidence_models import (
     DerivedEvidence,
     RetrievedEvidence,
 )
 from tldw_Server_API.app.core.RAG.rag_service.post_retrieval_coordinator import (
     PostRetrievalCoordinator,
+    coordinate_standard_result_evidence,
 )
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSearchResult
 
@@ -86,8 +86,6 @@ def test_coordinate_standard_result_evidence_routes_through_post_retrieval_coord
                 derived_from_document_ids=("retrieved-1",),
             )
 
-    monkeypatch.setattr(rag_ep, "PostRetrievalCoordinator", StubCoordinator)
-
     result = UnifiedSearchResult(
         documents=[retrieved_document],
         query="standard evidence coordination",
@@ -97,7 +95,11 @@ def test_coordinate_standard_result_evidence_routes_through_post_retrieval_coord
         },
     )
 
-    coordinated = rag_ep._coordinate_standard_result_evidence(result, resolved_request)
+    coordinated = coordinate_standard_result_evidence(
+        result,
+        resolved_request,
+        coordinator=StubCoordinator(),
+    )
 
     assert coordinated.documents == [retrieved_document, derived_document]
     assert coordinated.metadata["chunk_citations"] == [{"type": "chunk", "id": "chunk-1"}]

@@ -49,15 +49,17 @@ from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     AgenticConfig,
     agentic_rag_pipeline,
 )
+from tldw_Server_API.app.core.RAG.rag_service.agentic_execution import (
+    build_agentic_execution_context,
+)
 from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
     MultiDatabaseRetriever,
     RetrievalConfig,
 )
 from tldw_Server_API.app.core.RAG.rag_service.generation import generate_streaming_response
 from tldw_Server_API.app.core.RAG.rag_service.post_retrieval_coordinator import (
-    PostRetrievalCoordinator,
+    coordinate_standard_result_evidence,
 )
-from tldw_Server_API.app.core.RAG.rag_service.evidence_models import RetrievedEvidence
 from tldw_Server_API.app.core.RAG.rag_service.request_bundle import (
     ResolvedRequestBundle,
     build_request_bundle,
@@ -139,80 +141,6 @@ def _build_unified_pipeline_kwargs(
         return payload
     allowed = set(signature.parameters.keys())
     return {k: v for k, v in payload.items() if k in allowed}
-
-
-def _build_agentic_execution_payload(
-    *,
-    resolved_request: ResolvedRAGRequest,
-    retrieval_plan: RetrievalPlan,
-    payload: Optional[dict[str, Any]] = None,
-) -> dict[str, Any]:
-    """Build transport payload used for agentic execution."""
-    effective_payload = dict(payload or resolved_request.payload)
-    effective_payload["sources"] = list(retrieval_plan.sources)
-    effective_payload["search_mode"] = retrieval_plan.search_mode
-    effective_payload["top_k"] = retrieval_plan.top_k
-    effective_payload["min_score"] = retrieval_plan.min_score
-    effective_payload["index_namespace"] = retrieval_plan.index_namespace
-    return effective_payload
-
-
-def _build_agentic_config(effective_payload: dict[str, Any]) -> AgenticConfig:
-    def _payload_bool(name: str, fallback: bool = False) -> bool:
-        return bool(effective_payload.get(name, fallback))
-
-    def _payload_int(name: str, fallback: int) -> int:
-        raw = effective_payload.get(name, fallback)
-        try:
-            return int(raw)
-        except (TypeError, ValueError):
-            return fallback
-
-    def _payload_float(name: str, fallback: float) -> float:
-        raw = effective_payload.get(name, fallback)
-        try:
-            return float(raw)
-        except (TypeError, ValueError):
-            return fallback
-
-    agentic_cfg = AgenticConfig(
-        top_k_docs=max(1, _payload_int("agentic_top_k_docs", 3)),
-        window_chars=max(200, _payload_int("agentic_window_chars", 1200)),
-        max_tokens_read=max(500, _payload_int("agentic_max_tokens_read", 6000)),
-        max_tool_calls=max(1, _payload_int("agentic_max_tool_calls", 8)),
-        extractive_only=_payload_bool("agentic_extractive_only", True),
-        quote_spans=_payload_bool("agentic_quote_spans", True),
-        enable_tools=_payload_bool("agentic_enable_tools", False),
-        use_llm_planner=_payload_bool("agentic_use_llm_planner", False),
-        time_budget_sec=effective_payload.get("agentic_time_budget_sec", None),
-        cache_ttl_sec=max(1, _payload_int("agentic_cache_ttl_sec", 600)),
-        debug_trace=_payload_bool("agentic_debug_trace", False)
-        or _payload_bool("debug_mode", False),
-        enable_query_decomposition=_payload_bool("agentic_enable_query_decomposition", False),
-        subgoal_max=max(1, _payload_int("agentic_subgoal_max", 3)),
-        enable_semantic_within=_payload_bool("agentic_enable_semantic_within", True),
-        enable_section_index=_payload_bool("agentic_enable_section_index", True),
-        prefer_structural_anchors=_payload_bool("agentic_prefer_structural_anchors", True),
-        enable_table_support=_payload_bool("agentic_enable_table_support", True),
-        agentic_enable_vlm_late_chunking=_payload_bool("agentic_enable_vlm_late_chunking", False),
-        agentic_vlm_backend=effective_payload.get("agentic_vlm_backend", None),
-        agentic_vlm_detect_tables_only=_payload_bool("agentic_vlm_detect_tables_only", True),
-        agentic_vlm_max_pages=effective_payload.get("agentic_vlm_max_pages", None),
-        agentic_vlm_late_chunk_top_k_docs=max(1, _payload_int("agentic_vlm_late_chunk_top_k_docs", 2)),
-        agentic_use_provider_embeddings_within=_payload_bool(
-            "agentic_use_provider_embeddings_within", False
-        ),
-        agentic_provider_embedding_model_id=effective_payload.get(
-            "agentic_provider_embedding_model_id",
-            None,
-        ),
-        adaptive_budgets=_payload_bool("agentic_adaptive_budgets", True),
-        coverage_target=_payload_float("agentic_coverage_target", 0.8),
-        min_corroborating_docs=max(1, _payload_int("agentic_min_corroborating_docs", 2)),
-        max_redundancy=_payload_float("agentic_max_redundancy", 0.9),
-        enable_metrics=_payload_bool("agentic_enable_metrics", True),
-    )
-    return agentic_cfg
 
 
 def _build_batch_pipeline_kwargs(
@@ -514,42 +442,6 @@ async def _log_rag_queries_for_org(
         logger.debug("RAG query logging failed; continuing without usage record", exc_info=True)
 
 
-def convert_result_to_response(result: UnifiedSearchResult) -> UnifiedRAGResponse:
-    """Convert internal result to the declared API response via core mappers."""
-    return rag_result_to_response(rag_result_from_unified_search_result(result))
-
-
-def _coordinate_standard_result_evidence(
-    result: UnifiedSearchResult,
-    resolved_request: ResolvedRAGRequest,
-) -> UnifiedSearchResult:
-    """Route standard-path evidence through the coordinator without changing output shape."""
-    result_metadata = dict(result.metadata or {})
-    coordinated = PostRetrievalCoordinator().derive_evidence(
-        resolved_request,
-        RetrievedEvidence(
-            documents=list(result.documents or []),
-            metadata=result_metadata,
-        ),
-        enable_citations=bool(result_metadata.get("chunk_citations")),
-        enable_verification=bool(result_metadata.get("verification_report")),
-        derived_documents=None,
-        derived_from_document_ids=None,
-    )
-    result.documents = list(coordinated.documents)
-    updated_metadata = dict(coordinated.metadata)
-    if coordinated.citations:
-        updated_metadata["chunk_citations"] = list(coordinated.citations)
-    if coordinated.verification_report is not None:
-        updated_metadata["verification_report"] = coordinated.verification_report
-    if coordinated.derived_from_document_ids:
-        updated_metadata["derived_from_document_ids"] = list(
-            coordinated.derived_from_document_ids
-        )
-    result.metadata = updated_metadata
-    return result
-
-
 # =============== Ablation helper ===============
 try:
     from pydantic import BaseModel, Field
@@ -616,7 +508,7 @@ async def rag_ablate(
     )
     runs.append({
         "label": "baseline",
-        "result": convert_result_to_response(r1)
+        "result": rag_result_to_response(rag_result_from_unified_search_result(r1))
     })
 
     # 2) +rerank
@@ -627,7 +519,7 @@ async def rag_ablate(
     )
     runs.append({
         "label": "+rerank",
-        "result": convert_result_to_response(r2)
+        "result": rag_result_to_response(rag_result_from_unified_search_result(r2))
     })
 
     # 3) agentic
@@ -648,7 +540,7 @@ async def rag_ablate(
     )
     runs.append({
         "label": "agentic",
-        "result": convert_result_to_response(r3)
+        "result": rag_result_to_response(rag_result_from_unified_search_result(r3))
     })
 
     # 4) agentic (strict): tools on, extractive only, small budget
@@ -670,7 +562,7 @@ async def rag_ablate(
     )
     runs.append({
         "label": "agentic_strict",
-        "result": convert_result_to_response(r4)
+        "result": rag_result_to_response(rag_result_from_unified_search_result(r4))
     })
 
     # Compact output for quick comparison
@@ -1176,12 +1068,11 @@ async def unified_search_endpoint(
         if strategy_value == 'agentic':
             resolved_request = standard_bundle.resolved_request
             retrieval_plan = standard_bundle.retrieval_plan
-            effective_payload = _build_agentic_execution_payload(
+            effective_payload, agentic_cfg = build_agentic_execution_context(
                 resolved_request=resolved_request,
                 retrieval_plan=retrieval_plan,
-                payload=standard_bundle.resolved_request.payload,
+                payload_override=standard_bundle.resolved_request.payload,
             )
-            agentic_cfg = _build_agentic_config(effective_payload)
 
             try:
                 result = await agentic_rag_pipeline(
@@ -1256,10 +1147,10 @@ async def unified_search_endpoint(
             kwargs = dict(standard_bundle.pipeline_kwargs)
             _sync_retriever_overrides_to_pipeline()
             result = await unified_rag_pipeline(**kwargs)
-            result = _coordinate_standard_result_evidence(result, resolved_request)
+            result = coordinate_standard_result_evidence(result, resolved_request)
 
         # Convert to response format
-        response = convert_result_to_response(result)
+        response = rag_result_to_response(rag_result_from_unified_search_result(result))
 
         # Best-effort RAG query usage logging for billing/analytics.
         await _log_rag_queries_for_org(request_raw, current_user, units=1)
@@ -1469,7 +1360,7 @@ async def unified_batch_endpoint(
         )
 
         # Convert results
-        responses = [convert_result_to_response(r) for r in results]
+        responses = [rag_result_to_response(rag_result_from_unified_search_result(r)) for r in results]
 
         # Count successes and failures
         successful = sum(1 for r in results if not r.errors)
@@ -1770,7 +1661,7 @@ async def resume_batch_endpoint(
             **kwargs,
         )
 
-        responses = [convert_result_to_response(r) for r in results]
+        responses = [rag_result_to_response(rag_result_from_unified_search_result(r)) for r in results]
         successful = sum(1 for r in results if not r.errors)
         failed = len(results) - successful
         total_time = time.time() - start_time
@@ -1952,12 +1843,11 @@ async def unified_search_stream_endpoint(
                 try:
                     agentic_resolved_request = stream_bundle.resolved_request
                     retrieval_plan = stream_bundle.retrieval_plan
-                    agentic_payload = _build_agentic_execution_payload(
+                    agentic_payload, a_cfg = build_agentic_execution_context(
                         resolved_request=agentic_resolved_request,
                         retrieval_plan=retrieval_plan,
-                        payload=shared_payload,
+                        payload_override=shared_payload,
                     )
-                    a_cfg = _build_agentic_config(agentic_payload)
                     ares = await agentic_rag_pipeline(
                         query=agentic_resolved_request.query,
                         sources=list(retrieval_plan.sources),
@@ -2186,7 +2076,7 @@ async def advanced_search_endpoint(
             **db_paths
         )
 
-        return convert_result_to_response(result)
+        return rag_result_to_response(rag_result_from_unified_search_result(result))
 
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
         logger.error(f"Advanced search error: {e}")

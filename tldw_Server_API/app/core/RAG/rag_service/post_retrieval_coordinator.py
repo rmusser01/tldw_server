@@ -40,3 +40,37 @@ class PostRetrievalCoordinator:
             verification_report=metadata.get("verification_report") if enable_verification else None,
             derived_from_document_ids=lineage,
         )
+
+
+def coordinate_standard_result_evidence(
+    result: Any,
+    resolved_request: Any,
+    *,
+    coordinator: PostRetrievalCoordinator | None = None,
+) -> Any:
+    """Coordinate standard-path evidence without changing API result shape."""
+    result_metadata = dict(getattr(result, "metadata", None) or {})
+    coordinator_instance = coordinator or PostRetrievalCoordinator()
+    coordinated = coordinator_instance.derive_evidence(
+        resolved_request,
+        RetrievedEvidence(
+            documents=list(getattr(result, "documents", None) or []),
+            metadata=result_metadata,
+        ),
+        enable_citations=bool(result_metadata.get("chunk_citations")),
+        enable_verification=bool(result_metadata.get("verification_report")),
+        derived_documents=None,
+        derived_from_document_ids=None,
+    )
+    result.documents = list(coordinated.documents)
+    updated_metadata = dict(coordinated.metadata)
+    if coordinated.citations:
+        updated_metadata["chunk_citations"] = list(coordinated.citations)
+    if coordinated.verification_report is not None:
+        updated_metadata["verification_report"] = coordinated.verification_report
+    if coordinated.derived_from_document_ids:
+        updated_metadata["derived_from_document_ids"] = list(
+            coordinated.derived_from_document_ids
+        )
+    result.metadata = updated_metadata
+    return result

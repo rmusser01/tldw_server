@@ -733,10 +733,29 @@ def test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving(
 
     captured: dict[str, Any] = {
         "agentic_kwargs": None,
+        "context_builder_calls": 0,
     }
 
     def fake_build_standard_request_bundle(*args: Any, **kwargs: Any) -> ResolvedRequestBundle:  # noqa: ARG001
         return bundle
+
+    def fake_build_agentic_execution_context(*, resolved_request, retrieval_plan, payload_override=None):  # noqa: ANN001
+        captured["context_builder_calls"] = int(captured["context_builder_calls"]) + 1
+        captured["context_builder_resolved_request"] = resolved_request
+        captured["context_builder_retrieval_plan"] = retrieval_plan
+        payload = dict(payload_override or resolved_request.payload)
+        payload["agentic_enable_tools"] = True
+        payload["agentic_max_tool_calls"] = 9
+        payload["agentic_coverage_target"] = 0.88
+        return (
+            payload,
+            rag_ep.AgenticConfig(
+                top_k_docs=3,
+                enable_tools=True,
+                max_tool_calls=9,
+                coverage_target=0.88,
+            ),
+        )
 
     async def fake_unified_rag_pipeline(**kwargs: Any) -> Any:  # noqa: ARG001
         return rag_ep.UnifiedSearchResult(
@@ -786,6 +805,7 @@ def test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving(
         return context
 
     monkeypatch.setattr(rag_ep, "_build_standard_request_bundle", fake_build_standard_request_bundle)
+    monkeypatch.setattr(rag_ep, "build_agentic_execution_context", fake_build_agentic_execution_context)
     monkeypatch.setattr(rag_ep, "unified_rag_pipeline", fake_unified_rag_pipeline)
     monkeypatch.setattr(rag_ep, "agentic_rag_pipeline", fake_agentic_rag_pipeline)
     monkeypatch.setattr(rag_ep, "generate_streaming_response", fake_generate_streaming_response)
@@ -800,8 +820,11 @@ def test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving(
         assert resp.status_code == 200
         next(resp.iter_lines(), None)
 
+    assert captured["context_builder_calls"] == 1
     agentic_kwargs = captured["agentic_kwargs"]
     assert agentic_kwargs is not None
+    assert captured["context_builder_resolved_request"] is canonical_resolved
+    assert captured["context_builder_retrieval_plan"] is canonical_plan
     assert agentic_kwargs["resolved_request"] is canonical_resolved
     assert agentic_kwargs["retrieval_plan"] is canonical_plan
     assert agentic_kwargs["query"] == "bundle agentic query"
@@ -810,3 +833,6 @@ def test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving(
     assert agentic_kwargs["top_k"] == 5
     assert agentic_kwargs["min_score"] == 0.17
     assert agentic_kwargs["index_namespace"] == "bundle-tenant"
+    assert agentic_kwargs["agentic"].enable_tools is True
+    assert agentic_kwargs["agentic"].max_tool_calls == 9
+    assert agentic_kwargs["agentic"].coverage_target == 0.88

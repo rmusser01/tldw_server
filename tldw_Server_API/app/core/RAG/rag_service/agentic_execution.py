@@ -39,6 +39,80 @@ except ImportError:
 _INTRA_DOC_VEC_CACHE: dict[str, Any] = {}
 
 
+def build_agentic_execution_context(
+    *,
+    resolved_request: Any,
+    retrieval_plan: Any,
+    payload_override: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], Any]:
+    """Build effective agentic payload/config from canonical request contracts."""
+    from .agentic_chunker import AgenticConfig
+
+    effective_payload = dict(payload_override or getattr(resolved_request, "payload", {}) or {})
+    effective_payload["sources"] = list(getattr(retrieval_plan, "sources", ()) or ())
+    effective_payload["search_mode"] = getattr(retrieval_plan, "search_mode", "hybrid")
+    effective_payload["top_k"] = getattr(retrieval_plan, "top_k", 10)
+    effective_payload["min_score"] = getattr(retrieval_plan, "min_score", 0.0)
+    effective_payload["index_namespace"] = getattr(retrieval_plan, "index_namespace", None)
+
+    def _payload_bool(name: str, fallback: bool = False) -> bool:
+        return bool(effective_payload.get(name, fallback))
+
+    def _payload_int(name: str, fallback: int) -> int:
+        raw = effective_payload.get(name, fallback)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return fallback
+
+    def _payload_float(name: str, fallback: float) -> float:
+        raw = effective_payload.get(name, fallback)
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return fallback
+
+    agentic_cfg = AgenticConfig(
+        top_k_docs=max(1, _payload_int("agentic_top_k_docs", 3)),
+        window_chars=max(200, _payload_int("agentic_window_chars", 1200)),
+        max_tokens_read=max(500, _payload_int("agentic_max_tokens_read", 6000)),
+        max_tool_calls=max(1, _payload_int("agentic_max_tool_calls", 8)),
+        extractive_only=_payload_bool("agentic_extractive_only", True),
+        quote_spans=_payload_bool("agentic_quote_spans", True),
+        enable_tools=_payload_bool("agentic_enable_tools", False),
+        use_llm_planner=_payload_bool("agentic_use_llm_planner", False),
+        time_budget_sec=effective_payload.get("agentic_time_budget_sec", None),
+        cache_ttl_sec=max(1, _payload_int("agentic_cache_ttl_sec", 600)),
+        debug_trace=_payload_bool("agentic_debug_trace", False)
+        or _payload_bool("debug_mode", False),
+        enable_query_decomposition=_payload_bool("agentic_enable_query_decomposition", False),
+        subgoal_max=max(1, _payload_int("agentic_subgoal_max", 3)),
+        enable_semantic_within=_payload_bool("agentic_enable_semantic_within", True),
+        enable_section_index=_payload_bool("agentic_enable_section_index", True),
+        prefer_structural_anchors=_payload_bool("agentic_prefer_structural_anchors", True),
+        enable_table_support=_payload_bool("agentic_enable_table_support", True),
+        agentic_enable_vlm_late_chunking=_payload_bool("agentic_enable_vlm_late_chunking", False),
+        agentic_vlm_backend=effective_payload.get("agentic_vlm_backend", None),
+        agentic_vlm_detect_tables_only=_payload_bool("agentic_vlm_detect_tables_only", True),
+        agentic_vlm_max_pages=effective_payload.get("agentic_vlm_max_pages", None),
+        agentic_vlm_late_chunk_top_k_docs=max(1, _payload_int("agentic_vlm_late_chunk_top_k_docs", 2)),
+        agentic_use_provider_embeddings_within=_payload_bool(
+            "agentic_use_provider_embeddings_within", False
+        ),
+        agentic_provider_embedding_model_id=effective_payload.get(
+            "agentic_provider_embedding_model_id",
+            None,
+        ),
+        adaptive_budgets=_payload_bool("agentic_adaptive_budgets", True),
+        coverage_target=_payload_float("agentic_coverage_target", 0.8),
+        min_corroborating_docs=max(1, _payload_int("agentic_min_corroborating_docs", 2)),
+        max_redundancy=_payload_float("agentic_max_redundancy", 0.9),
+        enable_metrics=_payload_bool("agentic_enable_metrics", True),
+    )
+
+    return effective_payload, agentic_cfg
+
+
 def _now() -> float:
     return time.time()
 
