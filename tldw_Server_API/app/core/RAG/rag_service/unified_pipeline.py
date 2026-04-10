@@ -45,6 +45,7 @@ from tldw_Server_API.app.core.testing import (
 )
 
 from .retrieval_executor import execute_retrieval_phase
+from .generation_executor import execute_generation_phase
 from .retrieval_plan import RetrievalPlan
 
 _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS = 500
@@ -5316,21 +5317,47 @@ async def unified_rag_pipeline(
                             result.metadata.setdefault("synthesis", {})
                             result.metadata["synthesis"].update({"enabled": True, "aborted": False, "durations": {"draft": d_dt, "critique": c_dt, "refine": r_dt}})
                     else:
-                        # Single-pass generation
-                        answer = await _resilient_call(
-                            "generation",
-                            generator.generate,
-                            query=query,
-                            context=context,
-                            prompt_template=generation_prompt,
-                            max_tokens=max_generation_tokens
+                        async def _generate_standard_answer(
+                            *,
+                            query: str,
+                            documents: list[Any],
+                            generation_prompt: Optional[str] = None,
+                            max_generation_tokens: Optional[int] = None,
+                        ) -> Any:
+                            standard_context = "\n\n".join(
+                                [getattr(doc, "content", str(doc)) for doc in list(documents or [])[:5]]
+                            )
+                            return await _resilient_call(
+                                "generation",
+                                generator.generate,
+                                query=query,
+                                context=standard_context,
+                                prompt_template=generation_prompt,
+                                max_tokens=max_generation_tokens,
+                            )
+
+                        generation_result = await execute_generation_phase(
+                            resolved_request=SimpleNamespace(
+                                query=query,
+                                payload={
+                                    "generation_prompt": generation_prompt,
+                                    "max_generation_tokens": max_generation_tokens,
+                                },
+                            ),
+                            derived_evidence=SimpleNamespace(
+                                documents=list(context_docs),
+                                metadata=dict(result.metadata),
+                                citations=list((result.metadata or {}).get("chunk_citations", []) or []),
+                                verification_report=(result.metadata or {}).get("verification_report"),
+                            ),
+                            generate_answer_fn=_generate_standard_answer,
                         )
-                        # Normalize
-                        if isinstance(answer, dict) and "answer" in answer:
-                            result.generated_answer = answer.get("answer")
-                            result.metadata.update({k: v for k, v in answer.items() if k != "answer"})
-                        else:
-                            result.generated_answer = answer
+                        result.documents = list(generation_result.documents)
+                        result.generated_answer = generation_result.generated_answer
+                        result.metadata.update(dict(generation_result.metadata or {}))
+                        result.metadata["chunk_citations"] = list(generation_result.chunk_citations or [])
+                        if generation_result.verification_report is not None:
+                            result.metadata["verification_report"] = generation_result.verification_report
                     result.timings["answer_generation"] = time.time() - generation_start
                     try:
                         from tldw_Server_API.app.core.Metrics.metrics_manager import observe_histogram

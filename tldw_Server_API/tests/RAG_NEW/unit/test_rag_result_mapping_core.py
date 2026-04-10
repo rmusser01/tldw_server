@@ -4,6 +4,7 @@ from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
     rag_result_from_unified_search_result,
     rag_result_to_response,
 )
+from tldw_Server_API.app.core.RAG.rag_service.result_model import RAGResult
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSearchResult
 
@@ -78,3 +79,30 @@ def test_rag_result_mapping_sets_optional_response_fields_to_none_when_metadata_
     assert response.suggestions is None
     assert response.images is None
     assert response.videos is None
+
+
+def test_rag_result_mapping_preserves_top_level_generation_fields() -> None:
+    result = RAGResult(
+        documents=[
+            Document(
+                id="doc-1",
+                content="evidence",
+                metadata={"title": "Doc 1"},
+                source=DataSource.WEB_CONTENT,
+                score=0.91,
+            )
+        ],
+        query="executor output",
+        metadata={"model": "stub"},
+        chunk_citations=[{"id": "doc-1"}],
+        verification_report={"ok": True},
+        generated_answer="Generated answer",
+    )
+
+    mapped = rag_result_from_unified_search_result(result)
+    response = rag_result_to_response(mapped)
+
+    assert mapped.chunk_citations == [{"id": "doc-1"}]
+    assert mapped.verification_report == {"ok": True}
+    assert response.chunk_citations == [{"id": "doc-1"}]
+    assert response.verification_report == {"ok": True}

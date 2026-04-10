@@ -2,6 +2,7 @@ import asyncio
 import types
 import pytest
 
+from tldw_Server_API.app.core.RAG.rag_service.result_model import RAGResult
 from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
 import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
 
@@ -122,3 +123,52 @@ async def test_generation_uses_explicit_provider_and_model(monkeypatch):
     assert init_kwargs.get("model") == "claude-3-5-haiku-latest"
     ga = getattr(res, "generated_answer", None) or (res.get("generated_answer") if isinstance(res, dict) else None)
     assert ga == "provider-model-ok"
+
+
+@pytest.mark.asyncio
+async def test_standard_generation_routes_through_generation_executor(monkeypatch):
+    monkeypatch.setattr(up, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(up, "AnswerGenerator", FakeAnswerGenerator)
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute_generation_phase(*, resolved_request, derived_evidence, generate_answer_fn):
+        captured["resolved_request"] = resolved_request
+        captured["derived_evidence"] = derived_evidence
+        captured["generate_answer_fn"] = generate_answer_fn
+        return RAGResult(
+            documents=list(derived_evidence.documents),
+            query=resolved_request.query,
+            metadata={"model": "stub"},
+            chunk_citations=[{"id": "doc-1"}],
+            verification_report={"ok": True},
+            generated_answer="executor answer",
+        )
+
+    monkeypatch.setattr(up, "execute_generation_phase", fake_execute_generation_phase)
+
+    res = await up.unified_rag_pipeline(
+        query="Use executor path",
+        sources=["media_db"],
+        enable_cache=False,
+        enable_reranking=False,
+        enable_generation=True,
+        generation_prompt="concise",
+        max_generation_tokens=64,
+        top_k=2,
+    )
+
+    resolved_request = captured.get("resolved_request")
+    derived_evidence = captured.get("derived_evidence")
+
+    assert resolved_request is not None
+    assert getattr(resolved_request, "query", None) == "Use executor path"
+    assert getattr(resolved_request, "payload", {}).get("generation_prompt") == "concise"
+    assert getattr(resolved_request, "payload", {}).get("max_generation_tokens") == 64
+    assert derived_evidence is not None
+    assert len(getattr(derived_evidence, "documents", [])) == 2
+
+    ga = getattr(res, "generated_answer", None) or (res.get("generated_answer") if isinstance(res, dict) else None)
+    md = getattr(res, "metadata", None) or (res.get("metadata") if isinstance(res, dict) else {})
+    assert ga == "executor answer"
+    assert md.get("chunk_citations") == [{"id": "doc-1"}]
