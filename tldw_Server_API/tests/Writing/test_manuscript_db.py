@@ -281,7 +281,7 @@ class TestChapterCRUD:
         right = mdb.create_project("Right")
         foreign_part = mdb.create_part(right, "Foreign")
 
-        with pytest.raises(ValueError, match="different project"):
+        with pytest.raises(ConflictError, match="different project"):
             mdb.create_chapter(left, "Intruder", part_id=foreign_part)
 
     def test_list_chapters(self, mdb):
@@ -334,7 +334,7 @@ class TestChapterCRUD:
         foreign_part = mdb.create_part(right, "Foreign")
         chapter_id = mdb.create_chapter(left, "Movable", part_id=local_part)
 
-        with pytest.raises(ValueError, match="different project"):
+        with pytest.raises(ConflictError, match="different project"):
             mdb.update_chapter(chapter_id, {"part_id": foreign_part}, expected_version=1)
 
     def test_update_chapter_version_conflict(self, mdb):
@@ -682,7 +682,7 @@ class TestReorder:
         foreign_part = mdb.create_part(right, "Foreign")
         chapter_id = mdb.create_chapter(left, "Movable", part_id=local_part)
 
-        with pytest.raises(ValueError, match="different project"):
+        with pytest.raises(ConflictError, match="different project"):
             mdb.reorder_items(
                 "chapter",
                 [{"id": chapter_id, "sort_order": 0, "part_id": foreign_part}],
@@ -696,7 +696,7 @@ class TestReorder:
         foreign_part = mdb.create_part(right, "Foreign")
         chapter_id = mdb.create_chapter(left, "Movable", part_id=local_part)
 
-        with pytest.raises(ValueError, match="different project"):
+        with pytest.raises(ConflictError, match="different project"):
             mdb.reorder_items(
                 "chapter",
                 [{"id": chapter_id, "sort_order": 0, "part_id": foreign_part}],
