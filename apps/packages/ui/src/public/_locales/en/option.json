@@ -1472,6 +1472,9 @@
   "dictionariesEmpty_offlineDescription": {
     "message": "Connect to your tldw server from the main settings page to view and edit Chat dictionaries."
   },
+  "dictionariesEmpty_learnMore": {
+    "message": "Learn more about dictionaries"
+  },
   "charactersEmpty_demoTitle": {
     "message": "Explore Characters in demo mode"
   },
@@ -2507,8 +2510,14 @@
   "dictionariesTools_tokenBudgetLabel": {
     "message": "Token budget"
   },
+  "dictionariesTools_tokenBudgetHelp": {
+    "message": "Maximum amount of text processed. Leave empty for no limit."
+  },
   "dictionariesTools_maxIterationsLabel": {
     "message": "Max iterations"
+  },
+  "dictionariesTools_maxIterationsHelp": {
+    "message": "Number of passes over the text. Usually 1 is enough. Increase if rules can trigger other rules."
   },
   "dictionariesTools_previewButton": {
     "message": "Run preview"
@@ -2533,6 +2542,99 @@
   },
   "dictionariesTools_tokenBudgetExceeded": {
     "message": "Token budget exceeded"
+  },
+  "dictionariesTools_tipLabel": {
+    "message": "Tip"
+  },
+  "dictionariesList_howItWorksTitle": {
+    "message": "How it works"
+  },
+  "dictionariesList_stepCreateTitle": {
+    "message": "Create a dictionary"
+  },
+  "dictionariesList_stepCreateBody": {
+    "message": "— a set of find-and-replace rules (or start from a template)."
+  },
+  "dictionariesList_stepEntriesTitle": {
+    "message": "Add entries"
+  },
+  "dictionariesList_stepEntriesBody": {
+    "message": "— each entry has a pattern to find and text to replace it with."
+  },
+  "dictionariesList_stepPreviewTitle": {
+    "message": "Test with preview"
+  },
+  "dictionariesList_stepPreviewBody": {
+    "message": "— paste sample text to see the rules in action before going live."
+  },
+  "dictionariesList_stepAssignTitle": {
+    "message": "Assign to chats"
+  },
+  "dictionariesList_stepAssignBody": {
+    "message": "— link the dictionary to chat sessions so rules apply automatically."
+  },
+  "dictionariesList_searchPlaceholder": {
+    "message": "Search dictionaries by name, description, category, or tags"
+  },
+  "dictionariesList_searchAria": {
+    "message": "Search dictionaries"
+  },
+  "dictionariesList_allCategories": {
+    "message": "All categories"
+  },
+  "dictionariesList_categoryFilterAria": {
+    "message": "Filter dictionaries by category"
+  },
+  "dictionariesList_tagsPlaceholder": {
+    "message": "Filter by tags"
+  },
+  "dictionariesList_tagsFilterAria": {
+    "message": "Filter dictionaries by tags"
+  },
+  "dictionariesList_importButton": {
+    "message": "Import"
+  },
+  "dictionariesList_newDictionary": {
+    "message": "New Dictionary"
+  },
+  "dictionariesList_processingOrderHint": {
+    "message": "Processing order for active dictionaries uses Priority (alphabetical by dictionary name), then each dictionary's entry order."
+  },
+  "dictionariesList_emptyTitle": {
+    "message": "No dictionaries yet"
+  },
+  "dictionariesList_emptyDescription": {
+    "message": "Create your first dictionary to transform text consistently across chats."
+  },
+  "dictionariesList_emptyExampleMedical": {
+    "message": "Medical abbreviations (e.g., BP -> blood pressure)"
+  },
+  "dictionariesList_emptyExampleTerminology": {
+    "message": "Custom terminology (e.g., internal product names)"
+  },
+  "dictionariesList_emptyExampleRoleplay": {
+    "message": "Roleplay language style mappings"
+  },
+  "dictionariesList_emptyPrimaryAction": {
+    "message": "Create your first dictionary"
+  },
+  "dictionariesList_emptySecondaryAction": {
+    "message": "Import dictionary"
+  },
+  "dictionariesList_ofTotal": {
+    "message": "of"
+  },
+  "dictionariesList_errorTitle": {
+    "message": "Unable to load dictionaries"
+  },
+  "dictionariesList_errorDescriptionWithMessage": {
+    "message": "Could not load dictionaries: {{message}}"
+  },
+  "dictionariesList_errorDescription": {
+    "message": "Could not load dictionaries right now. Check your server connection and try again."
+  },
+  "dictionariesList_retry": {
+    "message": "Retry"
   },
   "characters_createNewCharacter": {
     "message": "Create a New Character+"

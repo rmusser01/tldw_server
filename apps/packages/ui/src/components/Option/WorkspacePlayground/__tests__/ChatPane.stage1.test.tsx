@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
+import { MemoryRouter } from "react-router-dom"
 import { ConnectionPhase } from "@/types/connection"
 import { CHAT_PATH, LOREBOOK_DEBUG_FOCUS } from "@/routes/route-paths"
 import { ChatPane } from "../ChatPane"
@@ -224,6 +225,14 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+function renderChatPane() {
+  return render(
+    <MemoryRouter>
+      <ChatPane />
+    </MemoryRouter>
+  )
+}
+
 describe("ChatPane Stage 1 reliability and controls", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -272,7 +281,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
   it("shows stop button while streaming and triggers stopStreamingRequest", () => {
     messageOptionState.streaming = true
 
-    render(<ChatPane />)
+    renderChatPane()
 
     const stopButton = screen.getByRole("button", { name: "Stop" })
     fireEvent.click(stopButton)
@@ -281,7 +290,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
   })
 
   it("submits the composer with Cmd/Ctrl+Enter", async () => {
-    render(<ChatPane />)
+    renderChatPane()
 
     const textarea = screen.getByPlaceholderText("Type a message...")
     fireEvent.change(textarea, { target: { value: "Shortcut submission" } })
@@ -296,7 +305,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
   })
 
   it("passes workspace scope into the shared chat hook", () => {
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(mockUseMessageOption).toHaveBeenCalledWith({
       scope: { type: "workspace", workspaceId: "workspace-a" }
@@ -304,7 +313,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
   })
 
   it("keeps transcript as a scrollable flex region anchored above the composer", () => {
-    render(<ChatPane />)
+    renderChatPane()
 
     const transcript = screen.getByRole("log", { name: "Chat messages" })
     expect((transcript as HTMLElement).className).toContain("overflow-y-auto")
@@ -336,7 +345,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
         } as any
       })
 
-    render(<ChatPane />)
+    renderChatPane()
     fireEvent.click(screen.getByRole("button", { name: "Clear chat" }))
 
     expect(confirmSpy).toHaveBeenCalled()
@@ -379,7 +388,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
         } as any
       })
 
-    render(<ChatPane />)
+    renderChatPane()
     fireEvent.click(screen.getByRole("button", { name: "Clear chat" }))
 
     expect(confirmSpy).toHaveBeenCalled()
@@ -447,7 +456,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     messageOptionState.serverChatId = "server-chat-a"
     mockDeleteMessage.mockResolvedValue(undefined)
 
-    render(<ChatPane />)
+    renderChatPane()
     fireEvent.click(screen.getByRole("button", { name: "delete-message-0" }))
 
     await waitFor(() => {
@@ -505,11 +514,29 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     connectionStoreState.state.phase = ConnectionPhase.ERROR
     connectionStoreState.state.lastError = "server-unreachable"
 
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(screen.getByText(/Unable to reach server/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(mockCheckConnectionOnce).toHaveBeenCalledTimes(1)
+  })
+
+  it("disables the composer after a submit failure surfaces the retry banner", async () => {
+    mockOnSubmit.mockRejectedValueOnce(new Error("offline"))
+
+    renderChatPane()
+
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Check the latest notes" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Unable to reach server/)).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole("textbox")).toBeDisabled()
+    expect(screen.getByRole("button", { name: /Server disconnected/i })).toBeDisabled()
   })
 
   it("saves previous workspace chat and restores next workspace chat on switch", () => {
@@ -547,11 +574,15 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       serverChatId: "server-chat-b"
     })
 
-    const { rerender } = render(<ChatPane />)
+    const { rerender } = renderChatPane()
 
     workspaceStoreState.workspaceId = "workspace-b"
     workspaceStoreState.workspaceChatReferenceId = "session-b"
-    rerender(<ChatPane />)
+    rerender(
+      <MemoryRouter>
+        <ChatPane />
+      </MemoryRouter>
+    )
 
     expect(mockSaveWorkspaceChatSession).toHaveBeenCalledWith("workspace-a::session-a", {
       messages: [
@@ -595,7 +626,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     const link = screen.getByRole("link", {
       name: "Open full lorebook diagnostics"

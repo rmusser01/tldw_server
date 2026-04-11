@@ -221,22 +221,53 @@ describe("DictionariesManager statistics stage-1 coverage", () => {
 
     render(<DictionariesManager />)
 
-    await user.click(
-      screen.getByRole("button", { name: "View statistics for Medical Terms" })
-    )
+    {
+      const overflowButton = screen.getByRole("button", {
+        name: "More actions for Medical Terms"
+      })
+      overflowButton.focus()
+      await user.keyboard("{Enter}")
+      await waitFor(() => {
+        expect(screen.getByRole("menuitem", { name: "View statistics" })).toBeInTheDocument()
+      })
+      await user.click(screen.getByRole("menuitem", { name: "View statistics" }))
+    }
 
     expect(
       await screen.findByText("Dictionary Statistics", {}, { timeout: 15000 })
     ).toBeInTheDocument()
+
+    // Summary sentence at top (use getAllByText since "4 entries" also appears in list)
+    const summaryEl = screen.getByText(/used 12 times/)
+    expect(summaryEl).toBeInTheDocument()
+    expect(summaryEl.textContent).toMatch(/4\s+entries/)
+    expect(summaryEl.textContent).toMatch(/1 conflicts/)
+    expect(summaryEl.textContent).toMatch(/1 unused/)
+
+    // Overview section (open by default)
+    expect(screen.getByText("Overview")).toBeInTheDocument()
+    expect(screen.getByText("Total Entries")).toBeInTheDocument()
+
+    // Usage section (open by default)
+    expect(screen.getByText("Usage")).toBeInTheDocument()
     expect(screen.getByText("Enabled Entries")).toBeInTheDocument()
     expect(screen.getByText("Disabled Entries")).toBeInTheDocument()
+    expect(screen.getByText("12")).toBeInTheDocument()
+
+    // Expand Health section (collapsed by default)
+    await user.click(screen.getByText("Health"))
+    expect(screen.getByText("Unused Entries")).toBeInTheDocument()
+    // Note: "Pattern Conflicts" appears both as a Descriptions label
+    // and as a section heading below
+    expect(screen.getByText("Clinical, Abbrev")).toBeInTheDocument()
+
+    // Expand Advanced section (collapsed by default)
+    await user.click(screen.getByText("Advanced"))
     expect(screen.getByText("Probabilistic Entries")).toBeInTheDocument()
     expect(screen.getByText("Timed Effect Entries")).toBeInTheDocument()
-    expect(screen.getByText("Unused Entries")).toBeInTheDocument()
-    expect(screen.getByText("Pattern Conflicts")).toBeInTheDocument()
-    expect(screen.getByText("Clinical, Abbrev")).toBeInTheDocument()
     expect(screen.getByText("0.65")).toBeInTheDocument()
-    expect(screen.getByText("12")).toBeInTheDocument()
+
+    // Sections below the Collapse remain unchanged
     expect(screen.getByText("Entry usage snapshot")).toBeInTheDocument()
     expect(screen.getByText(/7 uses/)).toBeInTheDocument()
     expect(screen.getByText("Pattern conflicts")).toBeInTheDocument()
@@ -270,17 +301,36 @@ describe("DictionariesManager statistics stage-1 coverage", () => {
 
     render(<DictionariesManager />)
 
-    await user.click(
-      screen.getByRole("button", { name: "View statistics for Medical Terms" })
-    )
+    {
+      const overflowButton = screen.getByRole("button", {
+        name: "More actions for Medical Terms"
+      })
+      overflowButton.focus()
+      await user.keyboard("{Enter}")
+      await waitFor(() => {
+        expect(screen.getByRole("menuitem", { name: "View statistics" })).toBeInTheDocument()
+      })
+      await user.click(screen.getByRole("menuitem", { name: "View statistics" }))
+    }
 
     await screen.findByText("Dictionary Statistics")
 
+    // Summary sentence shows 0 entries with no conflict/unused/usage extras
+    expect(screen.getByText(/0 entries/)).toBeInTheDocument()
+
+    // Overview and Usage sections are open by default
     await waitFor(() => {
-      expect(screen.getAllByText("0").length).toBeGreaterThanOrEqual(4)
+      expect(screen.getAllByText("0").length).toBeGreaterThanOrEqual(3)
     })
+
+    // Expand Health section for null-safe "—" values
+    await user.click(screen.getByText("Health"))
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1)
+
+    // Expand Advanced section for 0.00 probability fallback
+    await user.click(screen.getByText("Advanced"))
     expect(screen.getByText("0.00")).toBeInTheDocument()
-    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3)
+
     expect(screen.getByText("No potential conflicts detected.")).toBeInTheDocument()
   }, 60000)
 })

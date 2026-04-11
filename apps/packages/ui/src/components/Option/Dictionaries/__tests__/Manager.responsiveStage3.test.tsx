@@ -286,7 +286,7 @@ describe("DictionariesManager responsive stage-3", () => {
     await screen.findByText("Manage Entries: Mobile Preview")
 
     await user.click(screen.getByRole("button", { name: "Run preview" }))
-    await screen.findByText("Token budget")
+    await screen.findByText("Processing limit")
 
     const previewCaseControls = screen.getByTestId("dictionary-preview-case-controls")
     expect(previewCaseControls).toHaveClass("flex-col")

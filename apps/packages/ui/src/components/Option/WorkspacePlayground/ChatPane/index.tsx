@@ -957,7 +957,7 @@ const SimpleChatInput: React.FC<{
   onStop: () => void
   isLoading: boolean
   isPreparingContext?: boolean
-  isServerDisconnected?: boolean
+  isChatUnavailable?: boolean
   placeholder?: string
   seededValue?: string | null
   onSeedConsumed?: () => void
@@ -967,7 +967,7 @@ const SimpleChatInput: React.FC<{
   onStop,
   isLoading,
   isPreparingContext = false,
-  isServerDisconnected = false,
+  isChatUnavailable = false,
   placeholder,
   seededValue,
   onSeedConsumed,
@@ -1006,7 +1006,7 @@ const SimpleChatInput: React.FC<{
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault()
     const trimmed = value.trim()
-    if (!trimmed || isLoading || isPreparingContext || isServerDisconnected) return
+    if (!trimmed || isLoading || isPreparingContext || isChatUnavailable) return
     onSubmit(trimmed)
     setValue("")
     setShowSlashMenu(false)
@@ -1051,8 +1051,8 @@ const SimpleChatInput: React.FC<{
 
   return (
     <div className="rounded-lg border border-border/70 bg-surface/90 p-1.5 shadow-sm">
-      {isServerDisconnected && (
-        <div className="px-3 py-2 text-xs text-warn bg-warn/10 border-b border-warn/20 flex items-center gap-2 rounded-t-md">
+      {isChatUnavailable && (
+        <div className="px-3 py-2 text-xs text-warning bg-warning/10 border-b border-warning/20 flex items-center gap-2 rounded-t-md">
           <WifiOff className="h-3.5 w-3.5 shrink-0" />
           <span>
             {t(
@@ -1098,12 +1098,12 @@ const SimpleChatInput: React.FC<{
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-              isServerDisconnected
+              isChatUnavailable
                 ? t("playground:chat.inputPlaceholderDisconnected", "Server disconnected...")
                 : placeholder || t("playground:chat.inputPlaceholder", "Type / for commands or a message...")
             }
             autoSize={{ minRows: 1, maxRows: 6 }}
-            disabled={isLoading || isPreparingContext || isServerDisconnected}
+            disabled={isLoading || isPreparingContext}
             className="pr-10 text-sm"
           />
         </div>
@@ -1120,10 +1120,10 @@ const SimpleChatInput: React.FC<{
         ) : (
           <button
             type="submit"
-            disabled={!value.trim() || isPreparingContext || isServerDisconnected}
+            disabled={!value.trim() || isPreparingContext || isChatUnavailable}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-white transition hover:bg-primaryStrong disabled:cursor-not-allowed disabled:opacity-50"
             aria-label={
-              isServerDisconnected
+              isChatUnavailable
                 ? t("playground:chat.serverDisconnected", "Server disconnected")
                 : isPreparingContext
                 ? t(
@@ -2473,11 +2473,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   // Conversation instance ID (use workspace ID or fallback)
   const conversationInstanceId = workspaceSessionId
-  const showConnectionBanner =
+  const hasConnectionFailure =
+    connectionState.phase === ConnectionPhase.ERROR &&
+    !connectionState.isChecking
+  const isChatUnavailable =
     statusGuardrailsEnabled &&
-    (submitError !== null ||
-      (connectionState.phase === ConnectionPhase.ERROR &&
-        !connectionState.isChecking))
+    (submitError !== null || hasConnectionFailure)
+  const showConnectionBanner = isChatUnavailable
   const connectionDescription =
     submitError ||
     connectionState.lastError ||
@@ -3050,10 +3052,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             onStop={handleStopStreaming}
             isLoading={streaming}
             isPreparingContext={preparingSourceContext}
-            isServerDisconnected={
-              connectionState.phase === ConnectionPhase.ERROR &&
-              !connectionState.isChecking
-            }
+            isChatUnavailable={isChatUnavailable}
             seededValue={seededPrompt}
             onSeedConsumed={() => setSeededPrompt(null)}
             slashCommands={slashCommands}

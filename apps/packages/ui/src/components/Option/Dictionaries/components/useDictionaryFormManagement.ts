@@ -19,6 +19,7 @@ type UseDictionaryFormManagementParams = {
   notification: {
     error: (config: { message: string; description?: string }) => void
     info: (config: { message: string; description?: string }) => void
+    success: (config: { message: string; description?: string }) => void
   }
   confirmDanger: (config: {
     title: string
@@ -70,6 +71,7 @@ export function useDictionaryFormManagement({
       editId != null ? tldwClient.updateDictionary(editId, values) : Promise.resolve(null),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["tldw:listDictionaries"] })
+      notification.success({ message: "Dictionary updated" })
       setOpenEdit(false)
       editForm.resetFields()
       setEditId(null)
@@ -109,6 +111,8 @@ export function useDictionaryFormManagement({
       const starterTemplate = getDictionaryStarterTemplate(values?.starter_template)
       try {
         const createdDictionary = await createDict(normalizeCreateDictionaryPayload(values))
+        let starterEntriesApplied = 0
+        const starterEntriesTotal = starterTemplate?.entries.length ?? 0
 
         if (starterTemplate) {
           const dictionaryId = Number(
@@ -124,15 +128,37 @@ export function useDictionaryFormManagement({
                 "Dictionary was created, but starter entries could not be added automatically.",
             })
           } else {
-            await Promise.all(
+            const starterEntryResults = await Promise.allSettled(
               starterTemplate.entries.map((entry) =>
                 tldwClient.addDictionaryEntry(dictionaryId, entry)
               )
             )
+            starterEntriesApplied = starterEntryResults.filter(
+              (result) => result.status === "fulfilled"
+            ).length
+
+            if (starterEntriesApplied < starterEntriesTotal) {
+              notification.error({
+                message: "Template only partially applied",
+                description:
+                  starterEntriesApplied > 0
+                    ? `Dictionary was created, but only ${starterEntriesApplied} of ${starterEntriesTotal} starter entries were added automatically.`
+                    : "Dictionary was created, but starter entries could not be added automatically.",
+              })
+            }
           }
         }
 
         await queryClient.invalidateQueries({ queryKey: ["tldw:listDictionaries"] })
+        notification.success({
+          message: "Dictionary created",
+          description:
+            starterEntriesApplied > 0 && starterEntriesApplied === starterEntriesTotal
+              ? `"${values?.name || "Dictionary"}" created with ${starterEntriesApplied} starter entr${starterEntriesApplied === 1 ? "y" : "ies"}.`
+              : starterEntriesApplied > 0
+                ? `"${values?.name || "Dictionary"}" created with ${starterEntriesApplied} of ${starterEntriesTotal} starter entries.`
+                : `"${values?.name || "Dictionary"}" created.`,
+        })
         setOpenCreate(false)
         createForm.resetFields()
       } catch (error: any) {

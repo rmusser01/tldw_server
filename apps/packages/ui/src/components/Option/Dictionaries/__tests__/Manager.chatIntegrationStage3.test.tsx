@@ -327,7 +327,7 @@ describe("DictionariesManager chat integration stage-3", () => {
     await user.click(screen.getByRole("button", { name: "New Dictionary" }))
     await user.type(screen.getByRole("textbox", { name: "Name" }), "Clinical Terms")
     await user.type(
-      screen.getByRole("spinbutton", { name: "Default Token Budget" }),
+      screen.getByRole("spinbutton", { name: "Processing limit" }),
       "450"
     )
     await user.click(screen.getByRole("button", { name: "Create" }))
@@ -427,11 +427,15 @@ describe("DictionariesManager chat integration stage-3", () => {
     const user = userEvent.setup()
     render(<DictionariesManager />)
 
-    await user.click(
-      screen.getByRole("button", {
-        name: "View statistics for Activity Dictionary"
-      })
-    )
+    const overflowButton = screen.getByRole("button", {
+      name: "More actions for Activity Dictionary"
+    })
+    overflowButton.focus()
+    await user.keyboard("{Enter}")
+    await waitFor(() => {
+      expect(screen.getByRole("menuitem", { name: "View statistics" })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole("menuitem", { name: "View statistics" }))
 
     await waitFor(() => {
       expect(tldwClientMock.dictionaryStatistics).toHaveBeenCalledWith(7)
@@ -455,6 +459,9 @@ describe("DictionariesManager chat integration stage-3", () => {
     expect(
       await screen.findByText("Entries: 11, 12", undefined, { timeout: 20000 })
     ).toBeInTheDocument()
+
+    // Processing limit is inside the collapsed "Advanced" section
+    await user.click(screen.getByText("Advanced"))
     expect(
       await screen.findByText("320 tokens", undefined, { timeout: 20000 })
     ).toBeInTheDocument()
@@ -506,11 +513,17 @@ describe("DictionariesManager chat integration stage-3", () => {
 
     render(<DictionariesManager />)
 
-    await user.click(
-      screen.getByRole("button", {
-        name: "View statistics for Activity Dictionary",
+    {
+      const overflowBtn = screen.getByRole("button", {
+        name: "More actions for Activity Dictionary",
       })
-    )
+      overflowBtn.focus()
+      await user.keyboard("{Enter}")
+      await waitFor(() => {
+        expect(screen.getByRole("menuitem", { name: "View statistics" })).toBeInTheDocument()
+      })
+      await user.click(screen.getByRole("menuitem", { name: "View statistics" }))
+    }
 
     expect(
       await screen.findByText("Page 1 of 2", undefined, { timeout: 20000 })
@@ -603,11 +616,17 @@ describe("DictionariesManager chat integration stage-3", () => {
     const user = userEvent.setup()
     render(<DictionariesManager />)
 
-    await user.click(
-      screen.getByRole("button", {
-        name: "Version history for Activity Dictionary"
+    {
+      const overflowBtn = screen.getByRole("button", {
+        name: "More actions for Activity Dictionary"
       })
-    )
+      overflowBtn.focus()
+      await user.keyboard("{Enter}")
+      await waitFor(() => {
+        expect(screen.getByRole("menuitem", { name: "Version history" })).toBeInTheDocument()
+      })
+      await user.click(screen.getByRole("menuitem", { name: "Version history" }))
+    }
 
     expect(
       await screen.findByText("Dictionary Version History - Activity Dictionary")

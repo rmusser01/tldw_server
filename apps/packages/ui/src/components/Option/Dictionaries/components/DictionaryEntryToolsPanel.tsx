@@ -1,6 +1,7 @@
 import React from "react"
-import { Button, Collapse, Switch } from "antd"
+import { Button, Collapse, Switch, Tooltip } from "antd"
 import { useTranslation } from "react-i18next"
+import { LabelWithHelp } from "@/components/Common/LabelWithHelp"
 import { DictionaryValidationPanel } from "./DictionaryValidationPanel"
 import { DictionaryPreviewPanel } from "./DictionaryPreviewPanel"
 
@@ -108,23 +109,23 @@ export const DictionaryEntryToolsPanel: React.FC<DictionaryEntryToolsPanelProps>
                   "Strict validation"
                 )}
               />
-              <span className="text-xs text-text">
-                {t(
-                  "option:dictionariesTools.strictLabel",
-                  "Strict validation"
-                )}
-              </span>
+              <LabelWithHelp
+                label={t("option:dictionariesTools.strictLabel", "Strict validation")}
+                help="When on, checks additional rules like regex safety and pattern conflicts. When off, only checks basic format."
+              />
             </div>
-            <Button
-              size="small"
-              onClick={() => {
-                openToolsPanel("validate")
-                onRunValidation()
-              }}
-              loading={validating}
-              disabled={entriesCount === 0}>
-              {t("option:dictionariesTools.validateButton", "Run validation")}
-            </Button>
+            <Tooltip title="Ctrl+Shift+V">
+              <Button
+                size="small"
+                onClick={() => {
+                  openToolsPanel("validate")
+                  onRunValidation()
+                }}
+                loading={validating}
+                disabled={entriesCount === 0}>
+                {t("option:dictionariesTools.validateButton", "Run validation")}
+              </Button>
+            </Tooltip>
             <Button
               size="small"
               type="primary"

@@ -1952,6 +1952,33 @@
   "workspace_addModel": {
     "message": "Add model"
   },
+  "workspace_keyboardShortcuts": {
+    "message": "Keyboard Shortcuts"
+  },
+  "workspace_shortcutSearch": {
+    "message": "Search workspace"
+  },
+  "workspace_shortcutFocusSources": {
+    "message": "Focus sources pane"
+  },
+  "workspace_shortcutFocusChat": {
+    "message": "Focus chat pane"
+  },
+  "workspace_shortcutFocusStudio": {
+    "message": "Focus studio pane"
+  },
+  "workspace_shortcutNewNote": {
+    "message": "New note"
+  },
+  "workspace_shortcutNewWorkspace": {
+    "message": "New workspace"
+  },
+  "workspace_shortcutUndo": {
+    "message": "Undo"
+  },
+  "workspace_shortcutShowShortcuts": {
+    "message": "Show shortcuts"
+  },
   "workspace_clearChat": {
     "message": "Clear chat"
   },
@@ -1960,6 +1987,9 @@
   },
   "workspace_messagePlaceholderCompare": {
     "message": "Send to {{count}} models..."
+  },
+  "studio_loadingOutputViewer": {
+    "message": "Loading output viewer..."
   },
   "debug_title": {
     "message": "Debug Panel"
