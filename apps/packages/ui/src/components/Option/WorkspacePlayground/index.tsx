@@ -2,7 +2,6 @@ import React, { Suspense, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { Drawer, Tabs, Modal, Input, Empty, Skeleton, Button, message } from "antd"
 import type { InputRef } from "antd"
-import { browser } from "wxt/browser"
 import {
   AlertTriangle,
   FileText,
@@ -1231,11 +1230,14 @@ const WorkspacePlaygroundBody: React.FC = () => {
     setTransferSourcesRequest(null)
   }, [])
 
-  const dismissOnboardingOverlay = React.useCallback(async () => {
+  const dismissOnboardingOverlay = React.useCallback(() => {
+    if (typeof window === "undefined") return
+
     try {
-      await browser.storage.local.set({
-        [WORKSPACE_ONBOARDING_DISMISSED_STORAGE_KEY]: "1"
-      })
+      window.localStorage.setItem(
+        WORKSPACE_ONBOARDING_DISMISSED_STORAGE_KEY,
+        "1"
+      )
     } catch {
       // Ignore storage errors.
     }
@@ -1694,26 +1696,16 @@ const WorkspacePlaygroundBody: React.FC = () => {
 
     onboardingInitializedRef.current = true
 
-    let cancelled = false
-
-    void (async () => {
-      try {
-        const stored = await browser.storage.local.get(
-          WORKSPACE_ONBOARDING_DISMISSED_STORAGE_KEY
-        )
-        if (
-          !cancelled &&
-          stored[WORKSPACE_ONBOARDING_DISMISSED_STORAGE_KEY] !== "1"
-        ) {
-          setShowTutorialPrompt(true)
-        }
-      } catch {
-        // Ignore storage errors
+    if (typeof window === "undefined") return
+    try {
+      const dismissed = window.localStorage.getItem(
+        WORKSPACE_ONBOARDING_DISMISSED_STORAGE_KEY
+      )
+      if (dismissed !== "1") {
+        setShowTutorialPrompt(true)
       }
-    })()
-
-    return () => {
-      cancelled = true
+    } catch {
+      // Ignore storage errors
     }
   }, [isStoreHydrated, workspaceId])
 
@@ -1794,7 +1786,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
         return
       }
 
-      if (event.key === "Escape" && globalSearchOpen) {
+      if (event.key === "Escape") {
         event.preventDefault()
         closeGlobalSearch()
         return
@@ -1835,7 +1827,6 @@ const WorkspacePlaygroundBody: React.FC = () => {
     focusNewNoteTitle,
     focusWorkspaceNote,
     focusWorkspacePane,
-    globalSearchOpen,
     startNewNoteWithUndo,
     t
   ])
@@ -2377,6 +2368,8 @@ const WorkspacePlaygroundBody: React.FC = () => {
           )}
         </div>
       )}
+
+
       {/* Mobile vs desktop layout */}
       {isMobile ? (
         <>

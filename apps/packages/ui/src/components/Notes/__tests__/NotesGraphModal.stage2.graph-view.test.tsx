@@ -233,15 +233,4 @@ describe('NotesGraphModal stage 2 graph view', () => {
       'Failed to load graph view.'
     )
   })
-
-  it('documents all rendered edge types in the legend', async () => {
-    renderModal()
-
-    const legend = await screen.findByTestId('notes-graph-legend')
-    expect(legend).toHaveTextContent('Manual = linked by you')
-    expect(legend).toHaveTextContent('Note link = [[ ]] syntax')
-    expect(legend).toHaveTextContent('Backlink = linked from another note')
-    expect(legend).toHaveTextContent('Tag membership')
-    expect(legend).toHaveTextContent('Source membership')
-  })
 })

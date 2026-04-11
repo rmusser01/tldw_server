@@ -85,7 +85,6 @@ export interface NotesEditorPaneProps {
   noteRelations: NoteRelationsShape
   noteNeighborsLoading: boolean
   noteNeighborsError: boolean
-  onRetryNeighbors?: () => void
 
   // Pinning
   selectedNotePinned: boolean
@@ -235,7 +234,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   noteRelations,
   noteNeighborsLoading,
   noteNeighborsError,
-  onRetryNeighbors,
   selectedNotePinned,
   editorMode,
   editorInputMode,
@@ -631,7 +629,8 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               <span>
                 {t('option:notesSearch.staleVersionWarning', {
                   defaultValue:
-                    'This note was updated elsewhere. Reload to see the latest version.'
+                    'A newer version is available on the server (v{{version}}).',
+                  version: remoteVersionInfo.version
                 })}
               </span>
               <Button
@@ -790,26 +789,15 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   })}
                 </Typography.Text>
               ) : noteNeighborsError ? (
-                <div className="mt-2" data-testid="notes-related-error">
-                  <Typography.Text type="danger" className="text-[12px]">
-                    {t('option:notesSearch.relatedNotesError', {
-                      defaultValue: 'Could not load related notes.'
-                    })}
-                  </Typography.Text>
-                  {onRetryNeighbors && (
-                    <Button
-                      size="small"
-                      type="link"
-                      className="ml-1 !px-0 text-[12px]"
-                      onClick={onRetryNeighbors}
-                      data-testid="notes-related-retry"
-                    >
-                      {t('option:notesSearch.relatedNotesRetry', {
-                        defaultValue: 'Retry'
-                      })}
-                    </Button>
-                  )}
-                </div>
+                <Typography.Text
+                  type="danger"
+                  className="block mt-2 text-[12px]"
+                  data-testid="notes-related-error"
+                >
+                  {t('option:notesSearch.relatedNotesError', {
+                    defaultValue: 'Could not load related notes.'
+                  })}
+                </Typography.Text>
               ) : noteRelations.related.length === 0 ? (
                 <Typography.Text
                   type="secondary"

@@ -1091,11 +1091,7 @@
       "updatedSuccess": "Prompt Updated",
       "updatedSuccessDesc": "Prompt has been updated successfully",
       "deletedSuccess": "Prompt Deleted",
-      "deletedSuccessDesc": "Prompt has been deleted successfully",
-      "exportFailed": "Export failed",
-      "exportFailedDesc": "Could not export prompts. Try again or check your server connection for CSV/Markdown exports.",
-      "importFailed": "Import failed",
-      "importFailedDesc": "The file could not be imported. Make sure it is valid JSON containing an array of prompt objects."
+      "deletedSuccessDesc": "Prompt has been deleted successfully"
     },
     "partialLoad": "Some prompt data isn’t available",
     "loadErrorHelp": "Check your server connection and refresh to try again.",

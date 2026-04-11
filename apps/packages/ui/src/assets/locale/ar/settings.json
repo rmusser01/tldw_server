@@ -561,11 +561,7 @@
       "updatedSuccess": "تم تحديث الإرشاد",
       "updatedSuccessDesc": "تم تحديث الإرشاد بنجاح",
       "deletedSuccess": "تم حذف الإرشاد",
-      "deletedSuccessDesc": "تم حذف الإرشاد بنجاح",
-      "exportFailed": "فشل التصدير",
-      "exportFailedDesc": "تعذر تصدير المطالبات. حاول مرة أخرى أو تحقق من اتصال الخادم لتصديرات CSV/Markdown.",
-      "importFailed": "فشل الاستيراد",
-      "importFailedDesc": "تعذر استيراد الملف. تأكد من أنه JSON صالح يحتوي على مصفوفة من كائنات المطالبات."
+      "deletedSuccessDesc": "تم حذف الإرشاد بنجاح"
     },
     "workspaceTitle": "مساحة عمل الإرشادات",
     "workspaceDescription": "تُدار الإرشادات القابلة لإعادة الاستخدام من مساحة عمل الإرشادات. استخدم الزر أدناه لفتحها.",

@@ -1557,9 +1557,6 @@ async function generateSlidesFromApi(
   try {
     // Use the Slides API to generate a real presentation
     const presentation = await tldwClient.generateSlidesFromMedia(mediaId, {
-      provider: fallbackOptions.apiProvider,
-      model: fallbackOptions.model,
-      temperature: fallbackOptions.temperature,
       signal: options?.abortSignal,
       visualStyleId: options?.visualStyleId ?? undefined,
       visualStyleScope: options?.visualStyleScope ?? undefined

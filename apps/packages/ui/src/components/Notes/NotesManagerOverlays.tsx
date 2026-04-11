@@ -1,5 +1,5 @@
 import React from "react"
-import { Button, Checkbox, Input, Modal, Select, Typography } from "antd"
+import { Button, Checkbox, Input, Modal, Typography } from "antd"
 
 import KeywordPickerModal from "@/components/Notes/KeywordPickerModal"
 import NotesGraphModal from "@/components/Notes/NotesGraphModal"
@@ -392,7 +392,6 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
         })}
         cancelText={t("common:cancel", { defaultValue: "Cancel" })}
         confirmLoading={kw.keywordManagerActionLoading}
-        okButtonProps={{ danger: true }}
         destroyOnHidden
         title={t("option:notesSearch.keywordManagerMergeTitle", {
           defaultValue: "Merge keyword",
@@ -408,16 +407,6 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
                 "Move all links from the source keyword to the selected target keyword.",
             })}
           </Typography.Text>
-          <Typography.Text
-            type="danger"
-            className="block text-xs"
-            data-testid="notes-keyword-merge-warning"
-          >
-            {t("option:notesSearch.keywordManagerMergeWarning", {
-              defaultValue:
-                "This will permanently combine these keywords. The source keyword will be deleted. This cannot be undone.",
-            })}
-          </Typography.Text>
           <div className="text-xs text-text-muted">
             {t("option:notesSearch.keywordManagerMergeSourceLabel", {
               defaultValue: "Source",
@@ -427,32 +416,34 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
               {kw.keywordMergeDraft?.source.keyword ?? ""}
             </span>
           </div>
-          <Select
-            className="w-full"
-            showSearch
-            allowClear
-            optionFilterProp="label"
-            placeholder={t("option:notesSearch.keywordManagerMergeTargetPlaceholder", {
-              defaultValue: "Select target keyword",
-            })}
-            value={kw.keywordMergeDraft?.targetKeywordId ?? undefined}
-            onChange={(value: number | undefined) => {
+          <select
+            className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-text"
+            value={kw.keywordMergeDraft?.targetKeywordId ?? ""}
+            onChange={(event) => {
+              const parsed = Number(event.target.value)
               kw.setKeywordMergeDraft((current) =>
                 current
                   ? {
                       ...current,
                       targetKeywordId:
-                        value != null && Number.isFinite(value) && value > 0 ? value : null,
+                        Number.isFinite(parsed) && parsed > 0 ? parsed : null,
                     }
                   : current,
               )
             }}
-            options={kw.keywordMergeTargetOptions.map((item) => ({
-              value: item.id,
-              label: `${item.keyword} (${item.noteCount})`,
-            }))}
             data-testid="notes-keyword-manager-merge-target"
-          />
+          >
+            <option value="">
+              {t("option:notesSearch.keywordManagerMergeTargetPlaceholder", {
+                defaultValue: "Select target keyword",
+              })}
+            </option>
+            {kw.keywordMergeTargetOptions.map((item) => (
+              <option key={`keyword-merge-target-${item.id}`} value={item.id}>
+                {item.keyword} ({item.noteCount})
+              </option>
+            ))}
+          </select>
         </div>
       </Modal>
 
@@ -518,17 +509,6 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
                 })}
               </option>
             </select>
-            {imp.importDuplicateStrategy === 'overwrite' && (
-              <Typography.Text
-                type="danger"
-                className="block mt-1 text-xs"
-                data-testid="notes-import-overwrite-warning"
-              >
-                {t("option:notesSearch.importOverwriteWarning", {
-                  defaultValue: "Warning: Existing notes with matching IDs will be permanently replaced. This cannot be undone.",
-                })}
-              </Typography.Text>
-            )}
           </div>
           <div
             className="rounded border border-border bg-surface2 px-2 py-2 text-xs text-text-muted"
@@ -548,14 +528,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
                   {`${file.format.toUpperCase()} · ${file.detectedNotes} note${file.detectedNotes === 1 ? "" : "s"} detected`}
                 </div>
                 {file.parseError && (
-                  <div className="mt-1 text-[11px] text-warn">
-                    {file.parseError}
-                    <span className="block mt-0.5 text-text-muted">
-                      {t("option:notesSearch.importParseErrorHint", {
-                        defaultValue: "Check that JSON files match the tldw export format, or use plain Markdown (.md) files.",
-                      })}
-                    </span>
-                  </div>
+                  <div className="mt-1 text-[11px] text-warn">{file.parseError}</div>
                 )}
               </div>
             ))}
@@ -582,35 +555,24 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
         })}
         destroyOnHidden
       >
-        <div className="space-y-4 text-sm text-text" data-testid="notes-shortcuts-modal">
+        <div className="space-y-2 text-sm text-text" data-testid="notes-shortcuts-modal">
           <div>
-            <div className="text-[11px] uppercase tracking-[0.08em] text-text-muted mb-1">
-              {t("option:notesSearch.shortcutGroupGeneral", { defaultValue: "General" })}
-            </div>
-            <div className="space-y-1">
-              <div><strong>Ctrl/Cmd + S</strong>: {t("option:notesSearch.shortcutSaveDescription", { defaultValue: "Save the current note." })}</div>
-              <div><strong>?</strong>: {t("option:notesSearch.shortcutOpenHelpDescription", { defaultValue: "Open keyboard shortcut help." })}</div>
-              <div><strong>Esc</strong>: {t("option:notesSearch.shortcutCloseDialogDescription", { defaultValue: "Close the current dialog." })}</div>
-            </div>
+            <strong>Ctrl/Cmd + S</strong>:{" "}
+            {t("option:notesSearch.shortcutSaveDescription", {
+              defaultValue: "Save the current note.",
+            })}
           </div>
           <div>
-            <div className="text-[11px] uppercase tracking-[0.08em] text-text-muted mb-1">
-              {t("option:notesSearch.shortcutGroupEditing", { defaultValue: "Editing" })}
-            </div>
-            <div className="space-y-1">
-              <div><strong>[[</strong>: {t("option:notesSearch.shortcutWikilinkDescription", { defaultValue: "Start a note link — type a note title to search, then select." })}</div>
-              <div><strong>Ctrl/Cmd + B</strong>: {t("option:notesSearch.shortcutBoldDescription", { defaultValue: "Bold text (Markdown mode)." })}</div>
-              <div><strong>Ctrl/Cmd + I</strong>: {t("option:notesSearch.shortcutItalicDescription", { defaultValue: "Italic text (Markdown mode)." })}</div>
-            </div>
+            <strong>?</strong>:{" "}
+            {t("option:notesSearch.shortcutOpenHelpDescription", {
+              defaultValue: "Open keyboard shortcut help.",
+            })}
           </div>
           <div>
-            <div className="text-[11px] uppercase tracking-[0.08em] text-text-muted mb-1">
-              {t("option:notesSearch.shortcutGroupSearch", { defaultValue: "Search" })}
-            </div>
-            <div className="space-y-1">
-              <div><strong>Ctrl/Cmd + F</strong>: {t("option:notesSearch.shortcutBrowserFindDescription", { defaultValue: "Find text in the current note (browser find)." })}</div>
-              <div><strong>{'"exact phrase"'}</strong>: {t("option:notesSearch.shortcutExactMatchDescription", { defaultValue: "Search for an exact phrase in the notes search box." })}</div>
-            </div>
+            <strong>Esc</strong>:{" "}
+            {t("option:notesSearch.shortcutCloseDialogDescription", {
+              defaultValue: "Close the current dialog.",
+            })}
           </div>
         </div>
       </Modal>

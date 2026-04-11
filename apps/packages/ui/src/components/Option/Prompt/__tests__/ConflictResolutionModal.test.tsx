@@ -91,42 +91,4 @@ describe("ConflictResolutionModal", () => {
     expect(screen.getByRole("button", { name: "Keep server" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Keep both" })).toBeDisabled()
   })
-
-  it("highlights only unmatched repeated tokens in the changed side", () => {
-    const { container } = render(
-      <ConflictResolutionModal
-        open
-        conflictInfo={{
-          localPrompt: {
-            id: "local-repeat",
-            title: "Repeat",
-            name: "Repeat",
-            content: "",
-            is_system: false,
-            system_prompt: "repeat repeat",
-            user_prompt: "",
-            createdAt: 1,
-            updatedAt: 10
-          },
-          serverPrompt: {
-            id: 1,
-            project_id: 7,
-            name: "Repeat",
-            system_prompt: "repeat",
-            user_prompt: "",
-            version_number: 2,
-            updated_at: "2026-02-17T10:00:00Z"
-          },
-          localUpdatedAt: 10,
-          serverUpdatedAt: "2026-02-17T10:00:00Z"
-        }}
-        onClose={vi.fn()}
-        onResolve={vi.fn()}
-      />
-    )
-
-    expect(
-      container.querySelectorAll('span[class*="bg-primary/20"]')
-    ).toHaveLength(1)
-  })
 })

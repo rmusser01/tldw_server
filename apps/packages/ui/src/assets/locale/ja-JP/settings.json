@@ -564,11 +564,7 @@
       "updatedSuccess": "プロンプトが更新されました",
       "updatedSuccessDesc": "プロンプトが正常に更新されました",
       "deletedSuccess": "プロンプトが削除されました",
-      "deletedSuccessDesc": "プロンプトが正常に削除されました",
-      "exportFailed": "エクスポートに失敗しました",
-      "exportFailedDesc": "プロンプトをエクスポートできませんでした。再試行するか、CSV/Markdown エクスポート用のサーバー接続を確認してください。",
-      "importFailed": "インポートに失敗しました",
-      "importFailedDesc": "ファイルをインポートできませんでした。プロンプトオブジェクトの配列を含む有効な JSON であることを確認してください。"
+      "deletedSuccessDesc": "プロンプトが正常に削除されました"
     },
     "workspaceTitle": "プロンプトのワークスペース",
     "workspaceDescription": "再利用可能なプロンプトはプロンプトのワークスペースで管理されます。下のボタンで開いてください。",

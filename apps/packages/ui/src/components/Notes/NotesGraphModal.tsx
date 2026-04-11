@@ -318,35 +318,6 @@ const NotesGraphModal: React.FC<NotesGraphModalProps> = ({
           data-testid="notes-graph-canvas"
         />
       )}
-
-      <div
-        className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3 text-[11px] text-text-muted"
-        data-testid="notes-graph-legend"
-      >
-        <span className="font-medium uppercase tracking-[0.08em]">
-          {t('option:notesSearch.graphLegendTitle', { defaultValue: 'Legend' })}
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#2563eb]" />
-          {t('option:notesSearch.graphLegendNote', { defaultValue: 'Note' })}
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="inline-block h-2.5 w-2.5 rounded bg-[#0f766e]" />
-          {t('option:notesSearch.graphLegendTag', { defaultValue: 'Tag' })}
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="inline-block h-2.5 w-2.5 rotate-45 bg-[#7c3aed]" />
-          {t('option:notesSearch.graphLegendSource', { defaultValue: 'Source' })}
-        </span>
-        <span className="ml-2 border-l border-border pl-2 font-medium uppercase tracking-[0.08em]">
-          {t('option:notesSearch.graphLegendEdges', { defaultValue: 'Connections' })}
-        </span>
-        <span>{t('option:notesSearch.graphLegendManual', { defaultValue: 'Manual = linked by you' })}</span>
-        <span>{t('option:notesSearch.graphLegendWikilink', { defaultValue: 'Note link = [[ ]] syntax' })}</span>
-        <span>{t('option:notesSearch.graphLegendBacklink', { defaultValue: 'Backlink = linked from another note' })}</span>
-        <span>{t('option:notesSearch.graphLegendTagMembership', { defaultValue: 'Tag membership' })}</span>
-        <span>{t('option:notesSearch.graphLegendSourceMembership', { defaultValue: 'Source membership' })}</span>
-      </div>
     </Modal>
   )
 }

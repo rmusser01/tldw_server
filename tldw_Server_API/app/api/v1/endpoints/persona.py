@@ -1475,7 +1475,6 @@ def _persona_profile_to_response(
     return PersonaProfileResponse(
         id=str(profile.get("id") or ""),
         name=str(profile.get("name") or ""),
-        archetype_key=profile.get("archetype_key"),
         character_card_id=profile.get("character_card_id"),
         origin_character_id=profile.get("origin_character_id"),
         origin_character_name=profile.get("origin_character_name"),

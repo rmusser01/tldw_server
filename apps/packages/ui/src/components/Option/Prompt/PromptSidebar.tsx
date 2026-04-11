@@ -101,7 +101,6 @@ export const PromptSidebar: React.FC<PromptSidebarProps> = ({
           onClick={onToggleCollapsed}
           className="rounded p-1.5 text-text-muted hover:bg-surface2 hover:text-text"
           aria-label="Expand sidebar"
-          aria-expanded={false}
           data-testid="prompt-sidebar-expand"
         >
           <PanelLeftOpen className="size-4" />
@@ -147,7 +146,6 @@ export const PromptSidebar: React.FC<PromptSidebarProps> = ({
           onClick={onToggleCollapsed}
           className="rounded p-1 text-text-muted hover:bg-surface2 hover:text-text"
           aria-label="Collapse sidebar"
-          aria-expanded={true}
           data-testid="prompt-sidebar-collapse"
         >
           <PanelLeftClose className="size-4" />

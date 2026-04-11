@@ -33,7 +33,6 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     encrypt_byok_payload,
     key_hint_for_api_key,
 )
-from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.services.mcp_hub_external_legacy_inventory import (
     McpHubExternalLegacyInventoryService,
 )
@@ -270,19 +269,10 @@ class McpHubService:
         raw_value = str(absolute_root or "").strip()
         if not raw_value:
             raise BadRequestError("absolute_root is required")
-        normalized_value = os.path.normpath(os.path.expanduser(raw_value))
-        if not os.path.isabs(normalized_value):
+        candidate = Path(raw_value).expanduser()
+        if not candidate.is_absolute():
             raise BadRequestError("absolute_root must be an absolute path")
-        parent_dir = os.path.dirname(normalized_value) or os.path.sep
-        leaf_name = os.path.basename(normalized_value)
-        if not leaf_name:
-            raise BadRequestError("absolute_root must not be the filesystem root")
-
-        safe_candidate = safe_join(parent_dir, leaf_name)
-        if safe_candidate is None:
-            raise BadRequestError("absolute_root is invalid")
-
-        normalized = Path(safe_candidate)
+        normalized = Path(os.path.normpath(str(candidate)))
         if str(normalized) in {normalized.anchor, "/"}:
             raise BadRequestError("absolute_root must not be the filesystem root")
         allowed_roots = _allowed_shared_workspace_roots()

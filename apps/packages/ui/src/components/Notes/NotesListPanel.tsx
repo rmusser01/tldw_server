@@ -293,12 +293,9 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                 defaultValue: 'Exporting {{format}}'
               })
                 .replace('{{format}}', exportProgress.format.toUpperCase())}
-              {' '}
-              {t('option:notesSearch.exportProgressCount', {
-                defaultValue: '{{count}} notes exported so far...',
-                count: exportProgress.fetchedNotes
-              })
-                .replace('{{count}}', String(exportProgress.fetchedNotes))}
+              {`: ${exportProgress.fetchedNotes} notes across ${exportProgress.fetchedPages} batch${
+                exportProgress.fetchedPages === 1 ? '' : 'es'
+              }`}
             </span>
             {exportProgress.failedBatches > 0 && (
               <span>

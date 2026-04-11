@@ -59,6 +59,30 @@ const CHAT_COMPLETION_ERROR_MESSAGE = "Chat completion failed."
 const CHAT_COMPLETION_ERRORS_MESSAGE =
   "One or more internal errors were suppressed."
 
+const isSavedDegradedCharacterPersistError = (error: unknown): boolean => {
+  const candidate = error as
+    | {
+        detail?: unknown
+        details?: { detail?: unknown; code?: unknown; saved?: unknown }
+      }
+    | null
+  const detail =
+    candidate?.detail &&
+    typeof candidate.detail === "object" &&
+    !Array.isArray(candidate.detail)
+      ? candidate.detail
+      : candidate?.details?.detail &&
+            typeof candidate.details.detail === "object" &&
+            !Array.isArray(candidate.details.detail)
+        ? candidate.details.detail
+        : candidate?.details &&
+              typeof candidate.details === "object" &&
+              !Array.isArray(candidate.details)
+          ? candidate.details
+          : null
+  return detail?.code === "persist_validation_degraded" && detail?.saved === true
+}
+
 const isSuspiciousChatCompletionString = (value: string): boolean =>
   /traceback|stack(?:\s*trace)?|exception|error|\/Users\/|[A-Za-z]:\\|\.py:\d+/i.test(
     value
@@ -5025,14 +5049,21 @@ export class TldwApiClient {
     payload: Record<string, any>
   ): Promise<any> {
     const cid = String(chat_id)
-    const res = await bgRequest<any>({
-      path: `/api/v1/chats/${cid}/completions/persist`,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
-    this.invalidateChatMessagesCache(cid)
-    return res
+    try {
+      const res = await bgRequest<any>({
+        path: `/api/v1/chats/${cid}/completions/persist`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      })
+      this.invalidateChatMessagesCache(cid)
+      return res
+    } catch (error) {
+      if (isSavedDegradedCharacterPersistError(error)) {
+        this.invalidateChatMessagesCache(cid)
+      }
+      throw error
+    }
   }
 
   async *streamCharacterChatCompletion(
@@ -7317,8 +7348,6 @@ export class TldwApiClient {
     options?: {
       titleHint?: string
       theme?: string
-      visualStyleId?: string
-      visualStyleScope?: string
       provider?: string
       model?: string
       temperature?: number
@@ -7342,8 +7371,6 @@ export class TldwApiClient {
     const body: Record<string, unknown> = { media_id: mediaId }
     if (options?.titleHint) body.title_hint = options.titleHint
     if (options?.theme) body.theme = options.theme
-    if (options?.visualStyleId) body.visual_style_id = options.visualStyleId
-    if (options?.visualStyleScope) body.visual_style_scope = options.visualStyleScope
     if (options?.provider) body.provider = options.provider
     if (options?.model) body.model = options.model
     if (options?.temperature != null) body.temperature = options.temperature

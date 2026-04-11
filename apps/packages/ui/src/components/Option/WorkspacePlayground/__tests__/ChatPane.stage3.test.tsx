@@ -196,22 +196,6 @@ vi.mock("@/components/Common/FeatureEmptyState", () => ({
   )
 }))
 
-vi.mock("react-router-dom", () => ({
-  Link: ({
-    children,
-    to,
-    ...props
-  }: {
-    children?: ReactNode
-    to?: unknown
-    [key: string]: unknown
-  }) => (
-    <a href={typeof to === "string" ? to : ""} {...(props as any)}>
-      {children}
-    </a>
-  )
-}))
-
 vi.mock("../source-location-copy", () => ({
   getWorkspaceChatNoSourcesHint: () =>
     "Select sources from the Sources pane, then ask questions."
@@ -392,27 +376,6 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     expect(toolbar).toContainElement(
       screen.getByRole("button", { name: "Advanced RAG settings" })
     )
-  })
-
-  it("keeps the composer editable while disconnected but blocks sending", () => {
-    connectionStoreState.state.phase = ConnectionPhase.ERROR
-    connectionStoreState.state.isChecking = false
-    connectionStoreState.state.lastError = "offline"
-
-    render(<ChatPane />)
-
-    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement
-    expect(textarea).not.toBeDisabled()
-    expect(textarea).toHaveAttribute("placeholder", "Server disconnected...")
-
-    fireEvent.change(textarea, { target: { value: "Draft while offline" } })
-    expect(textarea.value).toBe("Draft while offline")
-
-    const sendButton = screen.getByRole("button", { name: "Server disconnected" })
-    expect(sendButton).toBeDisabled()
-
-    fireEvent.click(sendButton)
-    expect(mockOnSubmit).not.toHaveBeenCalled()
   })
 
   it("allows explicit general mode override even when sources are selected", async () => {

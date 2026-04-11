@@ -1160,9 +1160,6 @@
   "notesSearch_exportSuccess": {
     "message": "Exported {{count}} notes ({{size}})"
   },
-  "notesSearch_exportProgressCount": {
-    "message": "{{count}} notes exported so far..."
-  },
   "notesSearch_exportCsvSuccess": {
     "message": "Exported {{count}} notes as CSV ({{size}})"
   },
@@ -1183,48 +1180,6 @@
   },
   "notesSearch_toolbarSave": {
     "message": "Save"
-  },
-  "notesSearch_moodboardMembershipBoth": {
-    "message": "Pinned + Rule-matched"
-  },
-  "notesSearch_moodboardMembershipSmart": {
-    "message": "Rule-matched"
-  },
-  "notesSearch_moodboardMembershipManual": {
-    "message": "Pinned"
-  },
-  "notesSearch_graphLegendTitle": {
-    "message": "Legend"
-  },
-  "notesSearch_graphLegendNote": {
-    "message": "Note"
-  },
-  "notesSearch_graphLegendTag": {
-    "message": "Tag"
-  },
-  "notesSearch_graphLegendSource": {
-    "message": "Source"
-  },
-  "notesSearch_graphLegendEdges": {
-    "message": "Connections"
-  },
-  "notesSearch_graphLegendManual": {
-    "message": "Manual = linked by you"
-  },
-  "notesSearch_graphLegendWikilink": {
-    "message": "Note link = [[ ]] syntax"
-  },
-  "notesSearch_graphLegendBacklink": {
-    "message": "Backlink = linked from another note"
-  },
-  "notesSearch_graphLegendTagMembership": {
-    "message": "Tag membership"
-  },
-  "notesSearch_graphLegendSourceMembership": {
-    "message": "Source membership"
-  },
-  "notesSearch_relatedNotesRetry": {
-    "message": "Retry"
   },
   "notesSearch_linkedConversation": {
     "message": "Linked to conversation"

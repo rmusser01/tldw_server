@@ -631,7 +631,7 @@ export const PromptDrawer: React.FC<PromptDrawerProps> = ({
                   <div>
                     <div className="text-xs font-medium text-text-muted">
                       {t("managePrompts.drawer.fewShotExamples", {
-                        defaultValue: "Example input/output pairs"
+                        defaultValue: "Few-shot examples"
                       })}
                     </div>
                     <p className="text-xs text-text-muted mt-1">
@@ -958,13 +958,8 @@ export const PromptDrawer: React.FC<PromptDrawerProps> = ({
               <Alert
                 type="info"
                 showIcon
-                title={t("managePrompts.drawer.structuredMode.title", {
-                  defaultValue: "Multi-section prompt mode"
-                })}
-                description={t("managePrompts.drawer.structuredMode.description", {
-                  defaultValue:
-                    "This prompt uses a block-based structure with separate sections for instructions, context, and examples. The text fields above are read-only summaries. Use the block editor below to make changes."
-                })}
+                title="Structured prompt"
+                description="Raw text fields are now locked for compatibility. Edit the block builder below; save and preview use the structured definition."
               />
             )}
             <Form.Item
@@ -1141,13 +1136,13 @@ export const PromptDrawer: React.FC<PromptDrawerProps> = ({
           <div className="space-y-4">
             <Form.Item
               name="keywords"
-              label={t("managePrompts.tags.label", { defaultValue: "Tags" })}
+              label={t("managePrompts.tags.label", { defaultValue: "Keywords" })}
             >
               <Select
                 mode="tags"
                 allowClear
                 placeholder={t("managePrompts.tags.placeholder", {
-                  defaultValue: "Add tags"
+                  defaultValue: "Add keywords"
                 })}
                 options={allTags.map((tag) => ({ label: tag, value: tag }))}
                 data-testid="prompt-drawer-keywords"

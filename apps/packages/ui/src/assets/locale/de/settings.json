@@ -561,11 +561,7 @@
       "updatedSuccess": "Prompt aktualisiert",
       "updatedSuccessDesc": "Prompt wurde erfolgreich aktualisiert",
       "deletedSuccess": "Prompt gelöscht",
-      "deletedSuccessDesc": "Prompt wurde erfolgreich gelöscht",
-      "exportFailed": "Export fehlgeschlagen",
-      "exportFailedDesc": "Konnte Prompts nicht exportieren. Versuchen Sie es erneut oder prüfen Sie Ihre Serververbindung für CSV-/Markdown-Exporte.",
-      "importFailed": "Import fehlgeschlagen",
-      "importFailedDesc": "Die Datei konnte nicht importiert werden. Stellen Sie sicher, dass es sich um gültiges JSON mit einem Array von Prompt-Objekten handelt."
+      "deletedSuccessDesc": "Prompt wurde erfolgreich gelöscht"
     },
     "workspaceTitle": "Prompts-Arbeitsbereich",
     "workspaceDescription": "Wiederverwendbare Prompts werden im Prompts-Arbeitsbereich verwaltet. Verwenden Sie die Schaltfläche unten, um ihn zu öffnen.",

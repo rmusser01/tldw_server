@@ -1,48 +1,6 @@
-import React from 'react'
-import { Modal, Input } from 'antd'
 import type { NotesTitleSuggestStrategy, NotesNotebookSetting } from '@/services/settings/ui-settings'
 import type { NotesStudioHandwritingMode, NotesStudioTemplateType } from './notes-studio-types'
 import type { NoteListItem } from './types'
-
-/**
- * Replacement for window.prompt() using Ant Design modal.
- * Returns the entered string, or null if cancelled.
- */
-export function promptModal(options: {
-  title: string
-  label?: string
-  defaultValue?: string
-  placeholder?: string
-  okText?: string
-  cancelText?: string
-}): Promise<string | null> {
-  return new Promise((resolve) => {
-    let currentValue = options.defaultValue ?? ''
-    const modal = Modal.confirm({
-      title: options.title,
-      icon: null,
-      content: React.createElement('div', { className: 'mt-2' },
-        options.label
-          ? React.createElement('div', { className: 'mb-1 text-xs text-text-muted' }, options.label)
-          : null,
-        React.createElement(Input, {
-          autoFocus: true,
-          defaultValue: currentValue,
-          placeholder: options.placeholder,
-          onChange: (e: React.ChangeEvent<HTMLInputElement>) => { currentValue = e.target.value },
-          onPressEnter: () => {
-            modal.destroy()
-            resolve(currentValue.trim() || null)
-          },
-        }),
-      ),
-      okText: options.okText ?? 'OK',
-      cancelText: options.cancelText ?? 'Cancel',
-      onOk: () => resolve(currentValue.trim() || null),
-      onCancel: () => resolve(null),
-    })
-  })
-}
 
 export type NoteWithKeywords = {
   metadata?: { keywords?: any[] }

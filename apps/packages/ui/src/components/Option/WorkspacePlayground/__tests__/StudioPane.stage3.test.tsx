@@ -1067,30 +1067,6 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     })
   })
 
-  it("disables failed artifact retry buttons while another output is generating", () => {
-    workspaceStoreState.isGeneratingOutput = true
-    workspaceStoreState.generatedArtifacts = [
-      {
-        id: "artifact-failed-retry",
-        type: "summary",
-        title: "Failed Summary",
-        status: "failed",
-        error: "generation failed",
-        content: "",
-        createdAt: new Date("2026-02-18T08:00:00.000Z")
-      }
-    ]
-
-    renderExpandedStudioPane()
-
-    const retryButton = screen.getByTestId("studio-artifact-retry-artifact-failed-retry")
-    expect(retryButton).toBeDisabled()
-    expect(retryButton).toHaveAttribute("aria-disabled", "true")
-
-    fireEvent.click(retryButton)
-    expect(mockRagSearch).not.toHaveBeenCalled()
-  })
-
   it("keeps grouped artifact actions discoverable and keyboard-operable", async () => {
     workspaceStoreState.generatedArtifacts = [
       {

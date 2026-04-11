@@ -561,11 +561,7 @@
       "updatedSuccess": "Prompt Atualizado",
       "updatedSuccessDesc": "O prompt foi atualizado com sucesso",
       "deletedSuccess": "Prompt Excluído",
-      "deletedSuccessDesc": "O prompt foi excluído com sucesso",
-      "exportFailed": "Falha na exportação",
-      "exportFailedDesc": "Não foi possível exportar os prompts. Tente novamente ou verifique a conexão com o servidor para exportações em CSV/Markdown.",
-      "importFailed": "Falha na importação",
-      "importFailedDesc": "Não foi possível importar o arquivo. Verifique se é um JSON válido contendo um array de objetos de prompt."
+      "deletedSuccessDesc": "O prompt foi excluído com sucesso"
     },
     "workspaceTitle": "Workspace de prompts",
     "workspaceDescription": "Os prompts reutilizáveis são gerenciados no workspace de prompts. Use o botão abaixo para abri-lo.",

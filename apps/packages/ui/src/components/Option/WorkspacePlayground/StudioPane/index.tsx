@@ -203,11 +203,8 @@ const OUTPUT_GROUPS: Array<{
   }
 ]
 
-// Keep current outputs directly accessible; the expander only appears if future
-// output types fall outside this visible set.
-const PRIMARY_OUTPUT_TYPES = new Set<ArtifactType>(
-  OUTPUT_BUTTONS.map(({ type }) => type)
-)
+// Primary output types shown by default; remaining are collapsed behind an expander
+const PRIMARY_OUTPUT_TYPES = new Set<ArtifactType>(["summary", "flashcards", "quiz", "report"])
 
 // Status icons for artifacts
 const STATUS_ICONS: Record<
@@ -1347,7 +1344,6 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
               >
                 <button
                   type="button"
-                  aria-label={label}
                   disabled={isDisabled}
                   onFocus={() => setActiveOutputType(type)}
                   onMouseEnter={() => setActiveOutputType(type)}
@@ -1388,23 +1384,9 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
 
           return (
             <div className="space-y-2">
-              {OUTPUT_GROUPS.map((group) => {
-                const visibleButtons = group.types.filter((type) =>
-                  primaryButtons.some((button) => button.type === type)
-                )
-                if (visibleButtons.length === 0) return null
-
-                return (
-                  <div key={group.id} className="space-y-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-                      {group.label}
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {visibleButtons.map((type) => renderOutputButton(type))}
-                    </div>
-                  </div>
-                )
-              })}
+              <div className="grid grid-cols-2 gap-2">
+                {primaryButtons.map((btn) => renderOutputButton(btn.type))}
+              </div>
 
               {secondaryButtons.length > 0 && (
                 <>
@@ -1416,7 +1398,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                   >
                     {moreOutputsExpanded
                       ? t("playground:studio.lessOutputs", "Show fewer")
-                      : t("playground:studio.moreOutputs", `More outputs (${secondaryButtons.length})`)}
+                      : t("playground:studio.moreOutputs", { count: secondaryButtons.length, defaultValue: "More outputs ({{count}})" })}
                     <ChevronDown
                       className={`h-3.5 w-3.5 transition-transform ${moreOutputsExpanded ? "rotate-180" : ""}`}
                     />
@@ -1803,7 +1785,6 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                                     })
                                   }}
                                   onKeyDown={handleIconButtonKeyDown}
-                                  aria-disabled={!hasSelectedSources || isGeneratingOutput}
                                   className="rounded p-0.5 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                                   aria-label={failedRetryLabel}
                                   data-testid={`studio-artifact-retry-${artifact.id}`}

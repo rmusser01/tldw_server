@@ -82,8 +82,8 @@ export const ProjectSelector: React.FC<ProjectSelectorProps> = ({
         }),
         description:
           error?.message ||
-          t("settings:managePrompts.notification.projectCreateError", {
-            defaultValue: "Could not create the project. Check your server connection and try again."
+          t("settings:managePrompts.notification.someError", {
+            defaultValue: "Something went wrong."
           })
       })
     }

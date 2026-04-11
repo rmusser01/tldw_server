@@ -242,49 +242,4 @@ describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
     expect(merged.content).toContain("## Local Draft (Unsaved)")
     expect(merged.content).toContain("Local unsaved paragraph")
   })
-
-  it("clears the transient saved badge as soon as the draft changes again", async () => {
-    workspaceStoreState.currentNote = {
-      id: undefined,
-      title: "Draft note",
-      content: "Initial content",
-      keywords: [],
-      version: undefined,
-      isDirty: true
-    }
-
-    mockBgRequest.mockImplementation(async (request: { path: string; method?: string }) => {
-      const path = String(request.path)
-      if (path.includes("/api/v1/notes/search/") && path.includes("limit=8")) {
-        return []
-      }
-      if (path === "/api/v1/notes/" && String(request.method || "POST").toUpperCase() === "POST") {
-        return {
-          id: 99,
-          title: "Draft note",
-          content: "Initial content",
-          keywords: [],
-          version: 1
-        }
-      }
-      if (path.includes("/api/v1/notes/?")) {
-        return { notes: [] }
-      }
-      return { notes: [] }
-    })
-
-    render(<QuickNotesSection />)
-
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    expect(await screen.findByTestId("quick-notes-saved-indicator")).toBeInTheDocument()
-
-    fireEvent.change(screen.getByPlaceholderText("Note title..."), {
-      target: { value: "Draft note updated" }
-    })
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("quick-notes-saved-indicator")).not.toBeInTheDocument()
-    })
-  })
 })

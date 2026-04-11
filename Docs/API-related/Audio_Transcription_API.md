@@ -408,7 +408,7 @@ failopen_cap_minutes = 5.0
     - legacy reset acknowledgement: `{ "type": "status", "state": "reset" }`
     - `{ "type": "partial", "text": "...", "timestamp": ..., "is_final": false, "segment_id": 3, "segment_start": 12.5, "segment_end": 15.0 }`
     - `{ "type": "final", "text": "...", "timestamp": ..., "is_final": true, "segment_id": 3, "segment_start": 12.5, "segment_end": 14.0, "overlap": 0.5, "speaker_id": 1, "speaker_label": "SPEAKER_1" }` (speaker fields appear when diarization is enabled)
-    - `{ "type": "full_transcript", "text": "...", "auto_commit": false, "vad_status": "enabled|disabled|fail_open", "diarization_status": "enabled|disabled|unavailable", "diarization_details": { "code": "...", "summary": "..." } }` (`diarization_details` is omitted when there are no extra details to report)
+    - `{ "type": "full_transcript", "text": "...", "auto_commit": false, "vad_status": "enabled|disabled|fail_open", "diarization_status": "enabled|disabled|unavailable", "diarization_details": { "code": "...", "summary": "..." }? }`
     - `{ "type": "insight", "stage": "live|final", "summary": [...], "action_items": [...], ... }` when live meeting notes are enabled
     - `{ "type": "diarization_summary", "speaker_map": [...], "audio_path": "...", "speakers": [...] }` after `commit` when diarization is enabled
     - `{ "type": "error", "message": "..." }`

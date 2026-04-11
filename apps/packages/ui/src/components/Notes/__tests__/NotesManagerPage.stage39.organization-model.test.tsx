@@ -14,8 +14,7 @@ const {
   mockConfirmDanger,
   mockGetSetting,
   mockSetSetting,
-  mockClearSetting,
-  mockPromptModal
+  mockClearSetting
 } = vi.hoisted(() => ({
   mockBgRequest: vi.fn(),
   mockMessageSuccess: vi.fn(),
@@ -26,14 +25,8 @@ const {
   mockConfirmDanger: vi.fn(),
   mockGetSetting: vi.fn(),
   mockSetSetting: vi.fn(),
-  mockClearSetting: vi.fn(),
-  mockPromptModal: vi.fn()
+  mockClearSetting: vi.fn()
 }))
-
-vi.mock("@/components/Notes/notes-manager-utils", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/components/Notes/notes-manager-utils")>()
-  return { ...actual, promptModal: mockPromptModal }
-})
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -324,7 +317,7 @@ describe("NotesManagerPage stage 39 organization model", () => {
   })
 
   it("saves current keyword filters as a notebook and persists it", async () => {
-    mockPromptModal.mockResolvedValue("Research Notebook")
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Research Notebook")
     renderPage()
 
     fireEvent.click(screen.getByRole("button", { name: "Browse keywords" }))
@@ -363,6 +356,7 @@ describe("NotesManagerPage stage 39 organization model", () => {
       "Smart collection: Research Notebook"
     )
 
+    promptSpy.mockRestore()
   }, 10000)
 
   it("renders timeline view groups for date-based browsing", async () => {

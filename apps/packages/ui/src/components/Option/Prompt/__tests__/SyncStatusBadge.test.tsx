@@ -21,11 +21,7 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("antd", () => ({
   Tag: ({ children }: any) => <span>{children}</span>,
-  Tooltip: ({ children, title }: any) => (
-    <span data-tooltip={title}>
-      {children}
-    </span>
-  )
+  Tooltip: ({ children }: any) => <>{children}</>
 }))
 
 describe("SyncStatusBadge", () => {
@@ -49,32 +45,12 @@ describe("SyncStatusBadge", () => {
   it("renders non-interactive compact badge when onClick is not provided", () => {
     render(
       <SyncStatusBadge
-        syncStatus="conflict"
+        syncStatus="pending"
         sourceSystem="workspace"
         compact
       />
     )
 
     expect(screen.queryByRole("button")).not.toBeInTheDocument()
-    expect(document.querySelector("[data-tooltip]")).toHaveAttribute(
-      "data-tooltip",
-      "Local and server versions differ. | Created in Prompts Workspace"
-    )
-  })
-
-  it("includes resolve guidance only when the badge is interactive", () => {
-    render(
-      <SyncStatusBadge
-        syncStatus="conflict"
-        sourceSystem="workspace"
-        compact
-        onClick={vi.fn()}
-      />
-    )
-
-    expect(screen.getByRole("button").closest("[data-tooltip]")).toHaveAttribute(
-      "data-tooltip",
-      "Local and server versions differ. Click to resolve. | Created in Prompts Workspace"
-    )
   })
 })

@@ -123,21 +123,6 @@ describe("SearchBar behavior", () => {
     ).toBeInTheDocument()
   })
 
-  it("renders a visible blocked-search explanation with aria-describedby when no sources are available", () => {
-    state.query = "find something"
-    state.settings.sources = []
-    state.settings.enable_web_fallback = false
-
-    render(<SearchBar autoFocus={false} />)
-
-    const submitButton = screen.getByRole("button", { name: "Ask" })
-    expect(submitButton).toBeDisabled()
-    expect(submitButton).toHaveAttribute("aria-describedby", "search-block-reason")
-    expect(
-      screen.getByText("Select source categories or enable web fallback to search")
-    ).toHaveAttribute("id", "search-block-reason")
-  })
-
   it("uses descriptive web fallback tooltip text", () => {
     render(<SearchBar autoFocus={false} />)
 

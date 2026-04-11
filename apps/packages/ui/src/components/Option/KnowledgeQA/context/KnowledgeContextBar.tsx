@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useStorage } from "@plasmohq/storage/hook"
 import type { RagPresetName, RagSource } from "@/services/rag/unified-rag"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { cn } from "@/libs/utils"
@@ -48,40 +47,40 @@ const VALID_SOURCE_KEYS: ReadonlySet<string> = new Set<RagSource>([
   "kanban",
 ])
 
-function isSearchProfile(value: unknown): value is SearchProfile {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as SearchProfile).name === "string" &&
-    (value as SearchProfile).name.trim().length > 0 &&
-    Array.isArray((value as SearchProfile).sources) &&
-    (value as SearchProfile).sources.every(
-      (source): source is RagSource =>
-        typeof source === "string" && VALID_SOURCE_KEYS.has(source)
-    ) &&
-    typeof (value as SearchProfile).preset === "string" &&
-    VALID_PRESET_KEYS.has((value as SearchProfile).preset) &&
-    typeof (value as SearchProfile).enableWebFallback === "boolean"
-  )
+function loadSavedProfiles(): SearchProfile[] {
+  try {
+    const raw = localStorage.getItem(PROFILES_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter(
+        (item: unknown): item is SearchProfile =>
+          typeof item === "object" &&
+          item !== null &&
+          typeof (item as SearchProfile).name === "string" &&
+          (item as SearchProfile).name.trim().length > 0 &&
+          Array.isArray((item as SearchProfile).sources) &&
+          (item as SearchProfile).sources.every(
+            (source): source is RagSource =>
+              typeof source === "string" && VALID_SOURCE_KEYS.has(source)
+          ) &&
+          typeof (item as SearchProfile).preset === "string" &&
+          VALID_PRESET_KEYS.has((item as SearchProfile).preset) &&
+          typeof (item as SearchProfile).enableWebFallback === "boolean"
+      )
+      .slice(0, MAX_SAVED_PROFILES)
+  } catch {
+    return []
+  }
 }
 
-function sanitizeSavedProfiles(value: unknown): SearchProfile[] {
-  if (!Array.isArray(value)) return []
-  return value.filter(isSearchProfile).slice(0, MAX_SAVED_PROFILES)
-}
-
-function areProfilesEqual(left: SearchProfile[], right: SearchProfile[]): boolean {
-  if (left.length !== right.length) return false
-  return left.every((profile, index) => {
-    const other = right[index]
-    return (
-      other?.name === profile.name &&
-      other?.preset === profile.preset &&
-      other?.enableWebFallback === profile.enableWebFallback &&
-      profile.sources.length === other.sources.length &&
-      profile.sources.every((source, sourceIndex) => other.sources[sourceIndex] === source)
-    )
-  })
+function persistProfiles(profiles: SearchProfile[]): void {
+  try {
+    localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(profiles.slice(0, MAX_SAVED_PROFILES)))
+  } catch {
+    // localStorage full or unavailable -- silently ignore
+  }
 }
 
 type KnowledgeContextBarProps = {
@@ -331,8 +330,7 @@ export function KnowledgeContextBar({
   const [noteOptions, setNoteOptions] = useState<GranularSourceOption<string>[]>([])
 
   // Saved search profiles state
-  const [storedProfiles, setStoredProfiles] = useStorage<unknown>(PROFILES_STORAGE_KEY, [])
-  const [savedProfiles, setSavedProfiles] = useState<SearchProfile[]>([])
+  const [savedProfiles, setSavedProfiles] = useState<SearchProfile[]>(loadSavedProfiles)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [profileSaveMode, setProfileSaveMode] = useState(false)
   const [profileNameInput, setProfileNameInput] = useState("")
@@ -478,33 +476,6 @@ export function KnowledgeContextBar({
     void loadGranularOptions()
   }, [granularMenuOpen, granularLoaded, granularLoading, loadGranularOptions])
 
-  useEffect(() => {
-    const sanitizedProfiles = sanitizeSavedProfiles(storedProfiles)
-    setSavedProfiles((current) =>
-      areProfilesEqual(current, sanitizedProfiles) ? current : sanitizedProfiles
-    )
-
-    let shouldNormalizeStorage = true
-    try {
-      shouldNormalizeStorage = JSON.stringify(storedProfiles) !== JSON.stringify(sanitizedProfiles)
-    } catch {
-      shouldNormalizeStorage = true
-    }
-
-    if (shouldNormalizeStorage) {
-      void setStoredProfiles(sanitizedProfiles)
-    }
-  }, [setStoredProfiles, storedProfiles])
-
-  const updateSavedProfiles = useCallback(
-    (profiles: SearchProfile[]) => {
-      const sanitizedProfiles = sanitizeSavedProfiles(profiles)
-      setSavedProfiles(sanitizedProfiles)
-      void setStoredProfiles(sanitizedProfiles)
-    },
-    [setStoredProfiles]
-  )
-
   const toggleSource = (sourceKey: RagSource) => {
     const exists = normalizedSources.includes(sourceKey)
     const nextSources = exists
@@ -578,10 +549,11 @@ export function KnowledgeContextBar({
       0,
       MAX_SAVED_PROFILES
     )
-    updateSavedProfiles(updated)
+    setSavedProfiles(updated)
+    persistProfiles(updated)
     setProfileSaveMode(false)
     setProfileNameInput("")
-  }, [profileNameInput, normalizedSources, preset, savedProfiles, updateSavedProfiles, webEnabled])
+  }, [profileNameInput, normalizedSources, preset, webEnabled, savedProfiles])
 
   const loadProfile = useCallback(
     (profile: SearchProfile) => {
@@ -600,9 +572,10 @@ export function KnowledgeContextBar({
   const deleteProfile = useCallback(
     (name: string) => {
       const updated = savedProfiles.filter((p) => p.name !== name)
-      updateSavedProfiles(updated)
+      setSavedProfiles(updated)
+      persistProfiles(updated)
     },
-    [savedProfiles, updateSavedProfiles]
+    [savedProfiles]
   )
 
   const activeGranularOptions = granularTab === "media" ? filteredMediaOptions : filteredNoteOptions

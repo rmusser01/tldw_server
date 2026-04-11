@@ -95,7 +95,7 @@ export const PromptInspectorPanel: React.FC<PromptInspectorPanelProps> = ({
           {prompt.previewSystem ? (
             <div className="space-y-1">
               <Text strong className="text-xs uppercase tracking-wide text-text-muted">
-                AI Instructions
+                System prompt
               </Text>
               <Paragraph className="!mb-0 whitespace-pre-wrap rounded border border-border bg-surface2 p-3 text-sm">
                 {prompt.previewSystem}
@@ -106,7 +106,7 @@ export const PromptInspectorPanel: React.FC<PromptInspectorPanelProps> = ({
           {prompt.previewUser ? (
             <div className="space-y-1">
               <Text strong className="text-xs uppercase tracking-wide text-text-muted">
-                Message Template
+                User prompt
               </Text>
               <Paragraph className="!mb-0 whitespace-pre-wrap rounded border border-border bg-surface2 p-3 text-sm">
                 {prompt.previewUser}

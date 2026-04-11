@@ -131,6 +131,13 @@ body {
   font-family: "Arimo", "Inter", system-ui, -apple-system, sans-serif;
 }
 
+.citation-mark {
+  background: rgba(59, 130, 246, 0.1);
+  border-bottom: 1px dashed #3b82f6;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
 /* Simple fade-in animation for filter chips */
 @keyframes chip-in {
   from { opacity: 0; transform: scale(0.98); }

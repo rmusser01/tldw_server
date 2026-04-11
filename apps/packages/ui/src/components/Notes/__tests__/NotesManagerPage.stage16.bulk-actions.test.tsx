@@ -14,8 +14,7 @@ const {
   mockConfirmDanger,
   mockGetSetting,
   mockSetSetting,
-  mockClearSetting,
-  mockPromptModal
+  mockClearSetting
 } = vi.hoisted(() => {
   return {
     mockBgRequest: vi.fn(),
@@ -27,14 +26,8 @@ const {
     mockConfirmDanger: vi.fn(),
     mockGetSetting: vi.fn(),
     mockSetSetting: vi.fn(),
-    mockClearSetting: vi.fn(),
-    mockPromptModal: vi.fn()
+    mockClearSetting: vi.fn()
   }
-})
-
-vi.mock("@/components/Notes/notes-manager-utils", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/components/Notes/notes-manager-utils")>()
-  return { ...actual, promptModal: mockPromptModal }
 })
 
 vi.mock("react-i18next", () => ({
@@ -279,7 +272,7 @@ describe("NotesManagerPage stage 16 bulk actions", () => {
   })
 
   it("confirms and dispatches bulk keyword assignment patches", async () => {
-    mockPromptModal.mockResolvedValue("research, summary")
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("research, summary")
     renderPage()
     fireEvent.click(await screen.findByTestId("mock-select-n1"))
 
@@ -304,5 +297,6 @@ describe("NotesManagerPage stage 16 bulk actions", () => {
     expect(mockConfirmDanger).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Apply keywords to selected notes?" })
     )
+    promptSpy.mockRestore()
   })
 })

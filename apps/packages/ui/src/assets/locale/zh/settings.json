@@ -565,11 +565,7 @@
       "updatedSuccess": "提示词已更新",
       "updatedSuccessDesc": "提示词已成功更新",
       "deletedSuccess": "提示词已删除",
-      "deletedSuccessDesc": "提示词已成功删除",
-      "exportFailed": "导出失败",
-      "exportFailedDesc": "无法导出提示词。请重试，或检查服务器连接以进行 CSV/Markdown 导出。",
-      "importFailed": "导入失败",
-      "importFailedDesc": "无法导入文件。请确认它是包含提示词对象数组的有效 JSON。"
+      "deletedSuccessDesc": "提示词已成功删除"
     },
     "workspaceTitle": "提示词工作区",
     "workspaceDescription": "可复用提示词在提示词工作区中管理。使用下面的按钮打开。",

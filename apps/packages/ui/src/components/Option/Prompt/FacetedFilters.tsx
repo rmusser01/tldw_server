@@ -1,5 +1,4 @@
 import React, { useState } from "react"
-import { useTranslation } from "react-i18next"
 import type { TagMatchMode } from "./custom-prompts-utils"
 
 type Props = {
@@ -17,10 +16,10 @@ type Props = {
 }
 
 const TYPE_OPTIONS = [
-  { value: "all", label: "All", tooltip: "" },
-  { value: "system", label: "System", tooltip: "Sets AI behavior, persona, and instructions for the conversation" },
-  { value: "quick", label: "Quick", tooltip: "Reusable message template you can insert into chat" },
-  { value: "mixed", label: "Mixed", tooltip: "Has both AI instructions and a message template" },
+  { value: "all", label: "All" },
+  { value: "system", label: "System" },
+  { value: "quick", label: "Quick" },
+  { value: "mixed", label: "Mixed" },
 ]
 
 const SYNC_OPTIONS = [
@@ -46,7 +45,6 @@ export const FacetedFilters: React.FC<Props> = ({
   onTagMatchModeChange,
   tagCounts,
 }) => {
-  const { t } = useTranslation(["settings", "common"])
   const [showAllTags, setShowAllTags] = useState(false)
   const sortedTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1])
   const visibleTags = showAllTags
@@ -67,7 +65,7 @@ export const FacetedFilters: React.FC<Props> = ({
       {/* Type filter */}
       <div>
         <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-text-muted">
-          {t("managePrompts.facets.type", { defaultValue: "Type" })}
+          Type
         </h4>
         <div className="space-y-0.5">
           {TYPE_OPTIONS.map((opt) => (
@@ -76,41 +74,13 @@ export const FacetedFilters: React.FC<Props> = ({
               type="button"
               data-testid={`facet-type-${opt.value}`}
               onClick={() => onTypeFilterChange(opt.value)}
-              title={
-                opt.value === "system"
-                  ? t("managePrompts.facets.typeSystemTooltip", {
-                      defaultValue:
-                        "Sets AI behavior, persona, and instructions for the conversation"
-                    })
-                  : opt.value === "quick"
-                    ? t("managePrompts.facets.typeQuickTooltip", {
-                        defaultValue:
-                          "Reusable message template you can insert into chat"
-                      })
-                    : opt.value === "mixed"
-                      ? t("managePrompts.facets.typeMixedTooltip", {
-                          defaultValue:
-                            "Has both AI instructions and a message template"
-                        })
-                      : undefined
-              }
               className={`flex w-full items-center justify-between rounded px-2 py-1 text-sm transition-colors ${
                 typeFilter === opt.value
                   ? "bg-primary/10 text-primary font-medium"
                   : "text-text-muted hover:bg-surface2 hover:text-text"
               }`}
             >
-              <span>
-                {opt.value === "all"
-                  ? t("common:all", { defaultValue: "All" })
-                  : opt.value === "system"
-                    ? t("managePrompts.filter.system", { defaultValue: "System" })
-                    : opt.value === "quick"
-                      ? t("managePrompts.filter.quick", { defaultValue: "Quick" })
-                      : t("managePrompts.facets.typeMixed", {
-                          defaultValue: "Mixed"
-                        })}
-              </span>
+              <span>{opt.label}</span>
               {typeCounts[opt.value] != null && (
                 <span className="text-xs tabular-nums">
                   {typeCounts[opt.value]}
@@ -124,9 +94,7 @@ export const FacetedFilters: React.FC<Props> = ({
       {/* Sync filter */}
       <div>
         <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-text-muted">
-          {t("managePrompts.facets.syncStatus", {
-            defaultValue: "Sync Status"
-          })}
+          Sync Status
         </h4>
         <div className="space-y-0.5">
           {SYNC_OPTIONS.map((opt) => (
@@ -141,25 +109,7 @@ export const FacetedFilters: React.FC<Props> = ({
                   : "text-text-muted hover:bg-surface2 hover:text-text"
               }`}
             >
-              <span>
-                {opt.value === "all"
-                  ? t("common:all", { defaultValue: "All" })
-                  : opt.value === "local"
-                    ? t("managePrompts.sync.status.local", {
-                        defaultValue: "Local"
-                      })
-                    : opt.value === "synced"
-                      ? t("managePrompts.sync.status.synced", {
-                          defaultValue: "Synced"
-                        })
-                      : opt.value === "pending"
-                        ? t("managePrompts.sync.status.pending", {
-                            defaultValue: "Pending"
-                          })
-                        : t("managePrompts.sync.status.conflict", {
-                            defaultValue: "Conflict"
-                          })}
-              </span>
+              <span>{opt.label}</span>
               {syncCounts[opt.value] != null && (
                 <span className="text-xs tabular-nums">
                   {syncCounts[opt.value]}
@@ -175,7 +125,7 @@ export const FacetedFilters: React.FC<Props> = ({
         <div>
           <div className="mb-1.5 flex items-center justify-between">
             <h4 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-              {t("managePrompts.tags.label", { defaultValue: "Tags" })}
+              Tags
             </h4>
             {tagFilter.length > 0 && (
               <button
@@ -188,13 +138,7 @@ export const FacetedFilters: React.FC<Props> = ({
                 className="text-xs text-primary hover:underline"
                 data-testid="facet-tag-match-toggle"
               >
-                {tagMatchMode === "any"
-                  ? t("managePrompts.facets.tagMatchAny", {
-                      defaultValue: "Any"
-                    })
-                  : t("managePrompts.facets.tagMatchAll", {
-                      defaultValue: "All"
-                    })}
+                {tagMatchMode === "any" ? "Any" : "All"}
               </button>
             )}
           </div>
@@ -222,10 +166,7 @@ export const FacetedFilters: React.FC<Props> = ({
                 className="w-full px-2 py-1 text-xs text-primary hover:underline text-left"
                 data-testid="facet-tags-show-more"
               >
-                {t("managePrompts.facets.showMoreTags", {
-                  defaultValue: "Show {{count}} more...",
-                  count: hiddenCount
-                })}
+                Show {hiddenCount} more...
               </button>
             )}
           </div>

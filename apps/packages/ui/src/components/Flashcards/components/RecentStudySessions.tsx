@@ -21,7 +21,8 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
   onOpenSession,
   isActive
 }) => {
-  const recentSessionsQuery = useRecentFlashcardReviewSessionsQuery(
+  const recentSessionsQuery =
+    useRecentFlashcardReviewSessionsQuery(
     {
       deckId,
       status: "completed",
@@ -30,25 +31,14 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
     {
       enabled: isActive
     }
-  )
+    )
 
   const sessions = recentSessionsQuery.data ?? []
-  const errorMessage =
-    recentSessionsQuery.error instanceof Error
-      ? recentSessionsQuery.error.message
-      : "Failed to load recent sessions."
 
   return (
     <Card size="small" title="Recent study sessions">
       {recentSessionsQuery.isLoading ? (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Loading recent study sessions..." />
-      ) : recentSessionsQuery.isError ? (
-        <div className="flex flex-col gap-3 py-2">
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={errorMessage} />
-          <div className="flex justify-center">
-            <Button onClick={() => void recentSessionsQuery.refetch()}>Retry</Button>
-          </div>
-        </div>
       ) : sessions.length === 0 ? (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No completed study sessions yet." />
       ) : (

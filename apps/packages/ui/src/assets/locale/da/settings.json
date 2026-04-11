@@ -561,11 +561,7 @@
       "updatedSuccess": "Prompt Opdateret",
       "updatedSuccessDesc": "Prompt blev opdateret med succes",
       "deletedSuccess": "Prompt Slettet",
-      "deletedSuccessDesc": "Prompt blev slettet med succes",
-      "exportFailed": "Eksport mislykkedes",
-      "exportFailedDesc": "Kunne ikke eksportere prompts. Prøv igen, eller kontrollér serverforbindelsen for CSV/Markdown-eksport.",
-      "importFailed": "Import mislykkedes",
-      "importFailedDesc": "Filen kunne ikke importeres. Sørg for, at den er gyldig JSON med en matrix af prompt-objekter."
+      "deletedSuccessDesc": "Prompt blev slettet med succes"
     },
     "workspaceTitle": "Prompts-arbejdsområde",
     "workspaceDescription": "Genanvendelige prompter administreres i Prompts-arbejdsområdet. Brug knappen nedenfor til at åbne det.",

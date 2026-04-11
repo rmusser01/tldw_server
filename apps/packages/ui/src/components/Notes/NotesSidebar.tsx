@@ -373,7 +373,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   >
                     {t('option:notesSearch.largeListPaginationHint', {
                       defaultValue:
-                        'Showing notes in pages for faster loading.'
+                        'Large collection detected. Using paginated list mode; virtualization is deferred for now.'
                     })}
                   </Typography.Text>
                 )}
@@ -619,7 +619,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       <Input
                         allowClear
                         placeholder={t('option:notesSearch.placeholder', {
-                          defaultValue: 'Search notes... (use quotes for exact match)'
+                          defaultValue: 'Search titles & content...'
                         })}
                         prefix={(<SearchIcon className="w-4 h-4 text-text-subtle" />)}
                         value={queryInput}
@@ -953,10 +953,10 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                         const membership = String(note.membership_source || 'manual')
                         const membershipLabel =
                           membership === 'both'
-                            ? t('option:notesSearch.moodboardMembershipBoth', { defaultValue: 'Pinned + Rule-matched' })
+                            ? t('option:notesSearch.moodboardMembershipBoth', { defaultValue: 'Manual + Smart' })
                             : membership === 'smart'
-                              ? t('option:notesSearch.moodboardMembershipSmart', { defaultValue: 'Rule-matched' })
-                              : t('option:notesSearch.moodboardMembershipManual', { defaultValue: 'Pinned' })
+                              ? t('option:notesSearch.moodboardMembershipSmart', { defaultValue: 'Smart' })
+                              : t('option:notesSearch.moodboardMembershipManual', { defaultValue: 'Manual' })
                         return (
                           <button
                             key={noteId}

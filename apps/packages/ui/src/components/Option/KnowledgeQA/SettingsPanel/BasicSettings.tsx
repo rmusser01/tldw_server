@@ -54,7 +54,7 @@ export function BasicSettings() {
         </p>
         {settings.top_k > 30 && preset === "thorough" && (
           <p className="text-xs text-warn">
-            High source count with thorough preset may cause slow responses.
+            High source count with Deep preset may cause slow responses.
           </p>
         )}
       </div>

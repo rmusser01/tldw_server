@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
@@ -13,8 +13,7 @@ const {
   mockConfirmDanger,
   mockGetSetting,
   mockSetSetting,
-  mockClearSetting,
-  mockPromptModal
+  mockClearSetting
 } = vi.hoisted(() => ({
   mockBgRequest: vi.fn(),
   mockMessageSuccess: vi.fn(),
@@ -24,14 +23,8 @@ const {
   mockConfirmDanger: vi.fn(),
   mockGetSetting: vi.fn(),
   mockSetSetting: vi.fn(),
-  mockClearSetting: vi.fn(),
-  mockPromptModal: vi.fn()
+  mockClearSetting: vi.fn()
 }))
-
-vi.mock("@/components/Notes/notes-manager-utils", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/components/Notes/notes-manager-utils")>()
-  return { ...actual, promptModal: mockPromptModal }
-})
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -158,7 +151,6 @@ describe("NotesManagerPage stage 40 advanced editing and navigation", () => {
     mockGetSetting.mockResolvedValue(null)
     mockSetSetting.mockResolvedValue(undefined)
     mockClearSetting.mockResolvedValue(undefined)
-    mockPromptModal.mockResolvedValue("https://example.com")
 
     mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request.path || "")
@@ -253,116 +245,5 @@ describe("NotesManagerPage stage 40 advanced editing and navigation", () => {
       expect(markdownTextarea.value).toContain("## New Section")
       expect(markdownTextarea.value).toContain("Added **bold**")
     })
-  })
-
-  it("does not reopen wikilink suggestions after async WYSIWYG link insertion", async () => {
-    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
-      const path = String(request.path || "")
-      const method = String(request.method || "GET").toUpperCase()
-
-      if (path.startsWith("/api/v1/notes/?")) {
-        return {
-          items: [{ id: "research-1", title: "Research notes" }],
-          pagination: { total_items: 1, total_pages: 1 }
-        }
-      }
-
-      if (path === "/api/v1/admin/notes/title-settings" && method === "GET") {
-        return {
-          llm_enabled: false,
-          default_strategy: "heuristic",
-          effective_strategy: "heuristic",
-          strategies: ["heuristic"]
-        }
-      }
-
-      return {}
-    })
-
-    const originalExecCommand = document.execCommand
-    const execCommandMock = vi.fn((command: string, _showUi: boolean, value?: string) => {
-      if (command !== "createLink") return true
-      const selection = document.getSelection()
-      if (!selection || selection.rangeCount === 0) return false
-      const range = selection.getRangeAt(0)
-      const anchor = document.createElement("a")
-      anchor.setAttribute("href", String(value || ""))
-      anchor.textContent = range.toString()
-      range.deleteContents()
-      range.insertNode(anchor)
-      const nextRange = document.createRange()
-      nextRange.selectNodeContents(anchor)
-      selection.removeAllRanges()
-      selection.addRange(nextRange)
-      return true
-    })
-    Object.defineProperty(document, "execCommand", {
-      configurable: true,
-      value: execCommandMock
-    })
-
-    try {
-      renderPage()
-
-      const textarea = screen.getByPlaceholderText(
-        "Write your note here... (Markdown supported)"
-      ) as HTMLTextAreaElement
-      fireEvent.change(textarea, {
-        target: {
-          value: "Link target here\n\n[[Research"
-        }
-      })
-
-      fireEvent.click(screen.getByTestId("notes-input-mode-wysiwyg"))
-      const richEditor = await screen.findByTestId("notes-wysiwyg-editor")
-      const firstParagraph = richEditor.querySelector("p")
-      const firstTextNode = firstParagraph?.firstChild
-      expect(firstTextNode?.textContent).toContain("Link target here")
-
-      const selection = window.getSelection()
-      const range = document.createRange()
-      range.setStart(firstTextNode as Text, 0)
-      range.setEnd(firstTextNode as Text, "Link target".length)
-      selection?.removeAllRanges()
-      selection?.addRange(range)
-
-      await act(async () => {
-        fireEvent.click(screen.getByTestId("notes-toolbar-link"))
-        await Promise.resolve()
-      })
-
-      expect(mockPromptModal).toHaveBeenCalledWith(
-        expect.objectContaining({
-          title: "Insert link",
-          defaultValue: "https://"
-        })
-      )
-
-      await waitFor(() => {
-        expect(execCommandMock).toHaveBeenCalledWith("createLink", false, "https://example.com")
-      })
-
-      vi.useFakeTimers()
-      fireEvent.click(screen.getByTestId("notes-input-mode-markdown"))
-      const markdownTextarea = screen.getByPlaceholderText(
-        "Write your note here... (Markdown supported)"
-      )
-      expect(markdownTextarea).toBeInTheDocument()
-      expect(screen.queryByTestId("notes-wikilink-suggestions")).not.toBeInTheDocument()
-
-      await act(async () => {
-        vi.runAllTimers()
-      })
-    } finally {
-      if (originalExecCommand) {
-        Object.defineProperty(document, "execCommand", {
-          configurable: true,
-          value: originalExecCommand
-        })
-      } else {
-        Reflect.deleteProperty(document, "execCommand")
-      }
-      vi.useRealTimers()
-    }
   })
 })

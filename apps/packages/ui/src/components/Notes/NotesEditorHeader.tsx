@@ -432,7 +432,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
                   defaultValue: 'Add a title or content to save'
                 })
               : t('option:notesSearch.toolbarSaveTooltip', {
-                  defaultValue: 'Save note (auto-saves after 5 seconds)'
+                  defaultValue: 'Save note'
                 })
           }
         >

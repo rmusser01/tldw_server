@@ -564,11 +564,7 @@
       "updatedSuccess": "프롬프트가 업데이트되었습니다",
       "updatedSuccessDesc": "프롬프트가 정상적으로 업데이트되었습니다",
       "deletedSuccess": "프롬프트가 삭제되었습니다",
-      "deletedSuccessDesc": "프롬프트가 정상적으로 삭제되었습니다",
-      "exportFailed": "내보내기에 실패했습니다",
-      "exportFailedDesc": "프롬프트를 내보낼 수 없습니다. 다시 시도하거나 CSV/Markdown 내보내기를 위해 서버 연결을 확인하세요.",
-      "importFailed": "가져오기에 실패했습니다",
-      "importFailedDesc": "파일을 가져올 수 없습니다. 프롬프트 객체 배열이 포함된 올바른 JSON인지 확인하세요."
+      "deletedSuccessDesc": "프롬프트가 정상적으로 삭제되었습니다"
     },
     "workspaceTitle": "프롬프트 작업 공간",
     "workspaceDescription": "재사용 프롬프트는 프롬프트 작업 공간에서 관리됩니다. 아래 버튼을 눌러 열 수 있습니다.",

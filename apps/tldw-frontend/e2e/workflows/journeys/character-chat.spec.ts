@@ -61,10 +61,12 @@ test.describe("Create Character -> Chat journey", () => {
       // Set up capture to verify the system prompt is in the API call
       const capture = captureAllApiCalls(page)
 
+      await chatPage.selectCharacter(characterName)
       await chatPage.sendMessage("Hello, who are you?")
 
       // Wait for the response
       await waitForStreamComplete(page)
+      await chatPage.waitForResponse()
 
       const calls = await capture.stop()
 
@@ -74,9 +76,10 @@ test.describe("Create Character -> Chat journey", () => {
       )
 
       // If a chat call was made, verify it went through
-      if (chatCall) {
-        expect(chatCall.status).toBeLessThan(500)
-      }
+      expect(chatCall).toBeTruthy()
+      expect(chatCall?.status).toBeGreaterThanOrEqual(200)
+      expect(chatCall?.status).toBeLessThan(300)
+      expect(JSON.stringify(chatCall?.requestBody || {})).toContain(systemPrompt)
     })
   })
 })

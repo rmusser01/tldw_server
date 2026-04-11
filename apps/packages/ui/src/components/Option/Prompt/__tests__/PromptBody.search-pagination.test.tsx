@@ -64,7 +64,6 @@ const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
   hasPromptStudio: vi.fn(),
   navigate: vi.fn(),
-  confirmDanger: vi.fn(async () => true),
   setSelectedQuickPrompt: vi.fn(),
   setSelectedSystemPrompt: vi.fn()
 }))
@@ -228,7 +227,7 @@ vi.mock("@/hooks/useMessageOption", () => ({
 }))
 
 vi.mock("@/components/Common/confirm-danger", () => ({
-  useConfirmDanger: () => mocks.confirmDanger
+  useConfirmDanger: () => vi.fn(async () => true)
 }))
 
 vi.mock("@/services/application", () => ({
@@ -410,10 +409,7 @@ describe("PromptBody server search and pagination", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.sessionStorage.clear()
-    window.localStorage.clear()
     mocks.navigate.mockReset()
-    mocks.confirmDanger.mockReset()
-    mocks.confirmDanger.mockResolvedValue(true)
     mocks.setSelectedQuickPrompt.mockReset()
     mocks.setSelectedSystemPrompt.mockReset()
     state.privateMode = false
@@ -1124,52 +1120,6 @@ describe("PromptBody server search and pagination", () => {
     )
   })
 
-  it("does not reopen a shared prompt deep-link after the user changes segments mid-flight", async () => {
-    setViewportWidth(640)
-
-    let resolvePull: ((value: { success: boolean; localId?: string; syncStatus: string }) => void) | null = null
-    const importedPrompt = {
-      id: "imported-1",
-      name: "Imported Shared Prompt",
-      title: "Imported Shared Prompt",
-      content: "imported content",
-      is_system: false,
-      createdAt: 200,
-      serverId: 101,
-      keywords: []
-    }
-    mocks.getAllPrompts
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([importedPrompt])
-    mocks.pullFromStudio.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolvePull = resolve
-        })
-    )
-    const infoSpy = vi.spyOn(notification, "info")
-
-    renderPromptBody(["/prompts?prompt=101&source=studio"])
-
-    await waitFor(() => {
-      expect(mocks.pullFromStudio).toHaveBeenCalledWith(101)
-    })
-
-    fireEvent.click(screen.getByText("Trash"))
-
-    resolvePull?.({
-      success: true,
-      localId: "imported-1",
-      syncStatus: "synced"
-    })
-
-    await waitFor(() => {
-      expect(infoSpy).toHaveBeenCalled()
-    })
-    expect(screen.queryByTestId("mock-prompt-drawer")).not.toBeInTheDocument()
-    infoSpy.mockRestore()
-  })
-
   it("warns when a shared prompt deep-link cannot be pulled from server", async () => {
     const warningSpy = vi.spyOn(notification, "warning")
     mocks.getAllPrompts.mockResolvedValue([])
@@ -1539,29 +1489,6 @@ describe("PromptBody server search and pagination", () => {
     })
   })
 
-  it("requires explicit DELETE confirmation metadata before emptying trash", async () => {
-    mocks.getDeletedPrompts.mockResolvedValue([
-      { id: "trash-1", name: "Trash 1", content: "one", deletedAt: Date.now() - 1000 }
-    ])
-
-    renderPromptBody(["/prompts?tab=trash"])
-
-    await waitFor(() => {
-      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
-    })
-
-    fireEvent.click(screen.getByRole("button", { name: "Empty Trash" }))
-
-    await waitFor(() => {
-      expect(mocks.confirmDanger).toHaveBeenCalled()
-    })
-    expect(mocks.confirmDanger.mock.calls.at(-1)?.[0]).toEqual(
-      expect.objectContaining({
-        requireExactText: "DELETE"
-      })
-    )
-  })
-
   it("shows a specific error for empty import files", async () => {
     const errorSpy = vi.spyOn(notification, "error")
 
@@ -1713,41 +1640,6 @@ describe("PromptBody server search and pagination", () => {
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith("Translate to English: {text}")
     })
-  })
-
-  it("persists dismissal of the copilot help banner", async () => {
-    state.privateMode = false
-    mocks.getAllCopilotPrompts.mockResolvedValue([
-      { key: "translate", prompt: "Translate to English: {text}" }
-    ])
-
-    const { unmount } = renderPromptBody(["/prompts?tab=copilot"])
-
-    await waitFor(() => {
-      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
-    })
-
-    expect(
-      screen.getByText("Copilot prompts come from your connected server")
-    ).toBeInTheDocument()
-
-    fireEvent.click(screen.getByTestId("copilot-help-dismiss"))
-
-    expect(
-      screen.queryByText("Copilot prompts come from your connected server")
-    ).not.toBeInTheDocument()
-
-    unmount()
-
-    renderPromptBody(["/prompts?tab=copilot"])
-
-    await waitFor(() => {
-      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
-    })
-
-    expect(
-      screen.queryByText("Copilot prompts come from your connected server")
-    ).not.toBeInTheDocument()
   })
 
   it("shows copilot placeholder helper state and enforces validator before save", async () => {

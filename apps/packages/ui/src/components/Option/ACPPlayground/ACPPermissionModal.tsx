@@ -27,25 +27,7 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
 
   const [batchApprove, setBatchApprove] = useState(false)
   const [showPolicyDetails, setShowPolicyDetails] = useState(false)
-  const [now, setNow] = useState(Date.now())
   const currentPermission = pendingPermissions[0]
-
-  useEffect(() => {
-    if (!currentPermission) {
-      return
-    }
-    const interval = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(interval)
-  }, [currentPermission?.request_id])
-
-  useEffect(() => {
-    if (!currentPermission) {
-      return
-    }
-    setNow(Date.now())
-    setBatchApprove(false)
-    setShowPolicyDetails(false)
-  }, [currentPermission?.request_id])
 
   if (!currentPermission) {
     return null
@@ -81,6 +63,18 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
     }
   }
 
+  // Live countdown timer
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    setNow(Date.now())
+  }, [currentPermission.request_id])
+
   const timeElapsed = now - currentPermission.requestedAt.getTime()
   const totalMs = currentPermission.timeout_seconds * 1000
   // Guard against zero/negative timeouts to avoid Infinity/NaN in progress bar
@@ -97,6 +91,7 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
   return (
     <div
       role="dialog"
+      aria-modal="true"
       aria-label={t("playground:acp.permissionRequired", "Permission Required")}
       className="absolute bottom-4 right-4 z-50 w-[420px] max-w-[calc(100vw-2rem)] max-h-[80vh] overflow-y-auto rounded-xl border border-border bg-surface shadow-2xl p-5"
     >

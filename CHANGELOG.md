@@ -10,24 +10,9 @@ and this project adheres to Some kind of Versioning
 
 ### Added
 
-- **Writing Suite Phases 2-4** — Expanded manuscript tooling with characters, world info, plot and research management, AI analysis and visualization, agent chat, and live feedback via mood detection and Echo Chamber. (PRs #999, #1001, #1002)
-- **Persona Buddy Track-a-Plan Backend** — Completed the backend flow for persona buddy planning/tracking so the companion workflow can persist and coordinate plan progress. (PR #949)
-- **Persona-Routed Onboarding** — Added persona-guided onboarding with filtered navigation, guided task flows, and extension promotion hooks. (PR #1000)
-- **Mission Control Home and Storage Quotas** — Added progressive-unlock Mission Control home flows plus storage quota warnings. (PR #1004)
-- **Browser Web Clipper** — Added browser-based web clipping support for capturing pages into the research workflow. (PR #1005)
-- **Study Suggestions Engine** — Added study suggestions for quiz and flashcard workflows. (PR #1014)
-- **Sandbox and ACP Improvements** — Expanded the sandbox and ACP stack with a broader competitive-improvements pass across execution ergonomics and runtime polish. (PR #1023)
-- **OCR Backend Expansion** — Added `llama.cpp` and `chatllm` OCR backends. (PR #1038)
-
 ### Changed
 
-- **Theme System Expansion** — Extended the shared theme system with adjustable typography, shape, layout, and component variants. (PR #1021)
-- **GHCR Release Documentation** — Updated CI gate and release-checklist documentation for the GHCR publishing flow. (PR #1003)
-
 ### Fixed
-
-- **FTUE Follow-Through** — Addressed additional first-time-user experience issues across `/chat`, `/monitoring`, and `/watchlists`. (PR #1009)
-- **UX Audit Remediation** — Fixed Nielsen-style heuristic audit issues across chat, knowledge, workspace, and character flows. (PR #1039)
 
 ### Removed
 

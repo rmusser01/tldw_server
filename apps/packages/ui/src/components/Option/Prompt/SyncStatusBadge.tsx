@@ -62,12 +62,7 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
           icon: <AlertTriangle className="size-3" />,
           color: "red",
           label: t("settings:managePrompts.sync.conflict", "Conflict"),
-          tooltip: t(
-            "settings:managePrompts.sync.conflictTooltip",
-            isInteractive
-              ? "Local and server versions differ. Click to resolve."
-              : "Local and server versions differ."
-          )
+          tooltip: t("settings:managePrompts.sync.conflictTooltip", "Local and server versions differ")
         }
       case "local":
       default:

@@ -2,20 +2,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkspacePlayground } from "../index"
 
-const {
-  onboardingStorageState,
-  mockBrowserStorageGet,
-  mockBrowserStorageSet,
-} = vi.hoisted(() => ({
-  onboardingStorageState: {
-    value: undefined as string | undefined,
-  },
-  mockBrowserStorageGet: vi.fn(async (key: string) => ({
-    [key]: undefined as string | undefined,
-  })),
-  mockBrowserStorageSet: vi.fn(async (_payload: Record<string, string>) => undefined),
-}))
-
 const testState = {
   isMobile: false,
   storeHydrated: true,
@@ -66,8 +52,10 @@ vi.mock("react-i18next", () => ({
             defaultValue?: string
           }
     ) => {
-      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
-      if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
+      if (typeof defaultValueOrOptions === "string")
+        return defaultValueOrOptions
+      if (defaultValueOrOptions?.defaultValue)
+        return defaultValueOrOptions.defaultValue
       return key
     },
   }),
@@ -122,25 +110,6 @@ vi.mock("../WorkspaceStatusBar", () => ({
   WorkspaceStatusBar: () => <div data-testid="workspace-status-bar" />,
 }))
 
-vi.mock("wxt/browser", () => ({
-  browser: {
-    storage: {
-      local: {
-        get: (key: string) => {
-          mockBrowserStorageGet.mockImplementationOnce(async (requestedKey: string) => ({
-            [requestedKey]: onboardingStorageState.value,
-          }))
-          return mockBrowserStorageGet(key)
-        },
-        set: (payload: Record<string, string>) => {
-          onboardingStorageState.value = payload[ONBOARDING_KEY]
-          return mockBrowserStorageSet(payload)
-        },
-      },
-    },
-  },
-}))
-
 if (!(globalThis as any).ResizeObserver) {
   ;(globalThis as any).ResizeObserver = class ResizeObserver {
     observe() {}
@@ -154,7 +123,8 @@ const ONBOARDING_KEY = "tldw:workspace-playground:onboarding-dismissed:v1"
 describe("WorkspacePlayground keyboard shortcuts modal", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    onboardingStorageState.value = "1"
+    // Dismiss onboarding so it doesn't interfere with tests
+    window.localStorage.setItem(ONBOARDING_KEY, "1")
     testState.isMobile = false
     testState.storeHydrated = true
     testState.workspaceId = "workspace-1"
@@ -242,36 +212,19 @@ describe("WorkspacePlayground keyboard shortcuts modal", () => {
       expect(screen.getByText("Keyboard Shortcuts")).toBeInTheDocument()
     })
 
+    // Antd Modal uses its own close mechanism via onCancel;
+    // find and click the close button to trigger it
     const modal = screen.getByRole("dialog")
     const closeButton = modal.querySelector("button.ant-modal-close")
     if (closeButton) {
       fireEvent.click(closeButton)
     } else {
+      // Fallback: press Escape on the document, which antd Modal intercepts
       fireEvent.keyDown(document, { key: "Escape" })
     }
 
     await waitFor(() => {
-      const dialog = screen.queryByRole("dialog")
-      if (dialog) {
-        expect(dialog).toHaveClass("ant-zoom-leave")
-      } else {
-        expect(dialog).toBeNull()
-      }
-    })
-  })
-
-  it("lets Escape close the shortcuts modal even when global search is not open", async () => {
-    render(<WorkspacePlayground />)
-
-    fireEvent.keyDown(window, { key: "?" })
-
-    await waitFor(() => {
-      expect(screen.getByText("Keyboard Shortcuts")).toBeInTheDocument()
-    })
-
-    fireEvent.keyDown(window, { key: "Escape" })
-
-    await waitFor(() => {
+      // The modal should either be gone or in leave animation
       const dialog = screen.queryByRole("dialog")
       if (dialog) {
         expect(dialog).toHaveClass("ant-zoom-leave")

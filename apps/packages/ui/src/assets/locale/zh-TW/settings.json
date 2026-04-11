@@ -576,11 +576,7 @@
       "updatedSuccess": "提示詞已更新",
       "updatedSuccessDesc": "提示詞已更新成功",
       "deletedSuccess": "提示詞已刪除",
-      "deletedSuccessDesc": "提示詞已刪除成功",
-      "exportFailed": "匯出失敗",
-      "exportFailedDesc": "無法匯出提示詞。請再試一次，或檢查伺服器連線以進行 CSV/Markdown 匯出。",
-      "importFailed": "匯入失敗",
-      "importFailedDesc": "無法匯入檔案。請確認它是包含提示詞物件陣列的有效 JSON。"
+      "deletedSuccessDesc": "提示詞已刪除成功"
     },
     "workspaceTitle": "提示詞工作區",
     "workspaceDescription": "可重用提示詞在提示詞工作區中管理。使用下方按鈕開啟。",

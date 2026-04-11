@@ -4,19 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkspacePlayground } from "../index"
 
 const ONBOARDING_KEY = "tldw:workspace-playground:onboarding-dismissed:v1"
-const {
-  onboardingStorageState,
-  mockBrowserStorageGet,
-  mockBrowserStorageSet,
-} = vi.hoisted(() => ({
-  onboardingStorageState: {
-    value: undefined as string | undefined,
-  },
-  mockBrowserStorageGet: vi.fn(async (key: string) => ({
-    [key]: undefined as string | undefined,
-  })),
-  mockBrowserStorageSet: vi.fn(async (_payload: Record<string, string>) => undefined),
-}))
 
 const mockStartTutorial = vi.fn()
 
@@ -126,25 +113,6 @@ vi.mock("../WorkspaceStatusBar", () => ({
   WorkspaceStatusBar: () => <div data-testid="workspace-status-bar" />
 }))
 
-vi.mock("wxt/browser", () => ({
-  browser: {
-    storage: {
-      local: {
-        get: (key: string) => {
-          mockBrowserStorageGet.mockImplementationOnce(async (requestedKey: string) => ({
-            [requestedKey]: onboardingStorageState.value,
-          }))
-          return mockBrowserStorageGet(key)
-        },
-        set: (payload: Record<string, string>) => {
-          onboardingStorageState.value = payload[ONBOARDING_KEY]
-          return mockBrowserStorageSet(payload)
-        },
-      },
-    },
-  },
-}))
-
 if (!(globalThis as any).ResizeObserver) {
   ;(globalThis as any).ResizeObserver = class ResizeObserver {
     observe() {}
@@ -156,7 +124,7 @@ if (!(globalThis as any).ResizeObserver) {
 describe("WorkspacePlayground stage 1 onboarding walkthrough", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    onboardingStorageState.value = undefined
+    window.localStorage.removeItem(ONBOARDING_KEY)
     testState.isMobile = false
     testState.storeHydrated = true
     testState.workspaceId = "workspace-1"
@@ -196,10 +164,7 @@ describe("WorkspacePlayground stage 1 onboarding walkthrough", () => {
     expect(mockStartTutorial).toHaveBeenCalledWith(
       "workspace-playground-basics"
     )
-    await waitFor(() => {
-      expect(mockBrowserStorageSet).toHaveBeenCalledWith({ [ONBOARDING_KEY]: "1" })
-    })
-    expect(onboardingStorageState.value).toBe("1")
+    expect(window.localStorage.getItem(ONBOARDING_KEY)).toBe("1")
     expect(screen.queryByText("Start tour")).not.toBeInTheDocument()
   })
 
@@ -211,15 +176,12 @@ describe("WorkspacePlayground stage 1 onboarding walkthrough", () => {
     await user.click(dismissButton)
 
     expect(mockStartTutorial).not.toHaveBeenCalled()
-    await waitFor(() => {
-      expect(mockBrowserStorageSet).toHaveBeenCalledWith({ [ONBOARDING_KEY]: "1" })
-    })
-    expect(onboardingStorageState.value).toBe("1")
+    expect(window.localStorage.getItem(ONBOARDING_KEY)).toBe("1")
     expect(screen.queryByText("Start tour")).not.toBeInTheDocument()
   })
 
   it("does not show tour prompt when already dismissed", () => {
-    onboardingStorageState.value = "1"
+    window.localStorage.setItem(ONBOARDING_KEY, "1")
 
     render(<WorkspacePlayground />)
 

@@ -616,7 +616,7 @@ Policy precedence:
 
 Operator notes:
 - Retention TTL is only meaningful when retained artifacts are indexed; otherwise `delete_audio_after_success=true` remains the safe default.
-- Org admins manage per-org policy with `GET / PATCH /api/v1/admin/orgs/{org_id}/stt/settings`.
+- Org admins manage per-org policy with `GET/PATCH /api/v1/admin/orgs/{org_id}/stt/settings`.
 
 ## TTS Placeholder Handling (2026-03-02)
 - Legacy placeholder literals in `[TTS-Settings]` are now treated as unset during config load: empty string, `FIXME`, `TODO`, `TBD`, `CHANGE_ME`, `PLACEHOLDER`, `NONE`, `NULL`, `N/A`, `NA`.

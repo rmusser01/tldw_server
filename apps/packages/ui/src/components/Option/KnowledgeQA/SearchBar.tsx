@@ -407,7 +407,6 @@ export function SearchBar({
             <button
               type="submit"
               disabled={!query.trim() || isSearching || noSourcesBlocked}
-              aria-describedby={noSourcesBlocked ? "search-block-reason" : undefined}
               className={cn(
                 "px-4 py-2 rounded-lg",
                 "bg-primary text-white",
@@ -422,15 +421,6 @@ export function SearchBar({
           </span>
         </Tooltip>
       </div>
-
-      {noSourcesBlocked ? (
-        <div
-          id="search-block-reason"
-          className="mt-2 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn"
-        >
-          Select source categories or enable web fallback to search
-        </div>
-      ) : null}
 
       {isSearching && (
         <div

@@ -74,7 +74,6 @@ import {
   TRASH_LOOKUP_PAGE_SIZE,
   TRASH_LOOKUP_MAX_PAGES,
   sortNotesByPinnedIds,
-  promptModal,
 } from './notes-manager-utils'
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
@@ -339,8 +338,7 @@ const NotesManagerPage: React.FC = () => {
   const {
     data: noteNeighborsData,
     isLoading: noteNeighborsLoading,
-    isError: noteNeighborsError,
-    refetch: refetchNoteNeighbors
+    isError: noteNeighborsError
   } = useQuery({
     queryKey: ['note-graph-neighbors', ed.selectedId, ed.graphMutationTick],
     enabled: isOnline && ed.selectedId != null,
@@ -476,10 +474,6 @@ const NotesManagerPage: React.FC = () => {
       sources: sourceItems
     }
   }, [noteNeighborsData, ed.selectedId])
-
-  const handleRetryNeighbors = React.useCallback(() => {
-    void refetchNoteNeighbors()
-  }, [refetchNoteNeighbors])
 
   const manualLinkOptions = React.useMemo(() => {
     const selectedNormalized = normalizeGraphNoteId(ed.selectedId)
@@ -1125,13 +1119,10 @@ const NotesManagerPage: React.FC = () => {
     const okToLeave = await ed.confirmDiscardIfDirty()
     if (!okToLeave) return
     const suggested = kw.keywordTokens.join(', ')
-    const rawInput = await promptModal({
-      title: 'Assign tags to selected notes',
-      label: 'Enter tag names separated by commas.',
-      defaultValue: suggested,
-      placeholder: 'tag1, tag2, tag3',
-      okText: 'Assign',
-    })
+    const rawInput = window.prompt(
+      'Assign keywords to selected notes (comma-separated):',
+      suggested
+    )
     if (rawInput == null) return
     const keywords = rawInput.split(',').map((entry) => entry.trim()).filter(Boolean)
     if (keywords.length === 0) {
@@ -1215,33 +1206,10 @@ const NotesManagerPage: React.FC = () => {
         else if (action === 'heading') execute('formatBlock', '<h2>')
         else if (action === 'list') execute('insertUnorderedList')
         else if (action === 'link') {
-          const savedSelectionRange =
-            typeof document !== 'undefined' && document.getSelection()?.rangeCount
-              ? document.getSelection()?.getRangeAt(0).cloneRange() ?? null
-              : null
-          ;(async () => {
-            const href = await promptModal({
-              title: 'Insert link',
-              defaultValue: 'https://',
-              placeholder: 'https://example.com',
-              okText: 'Insert',
-            })
-            const normalizedHref = String(href || '').trim()
-            if (!normalizedHref) return
-            richEditor.focus()
-            if (typeof document !== 'undefined' && savedSelectionRange) {
-              const selection = document.getSelection()
-              selection?.removeAllRanges()
-              selection?.addRange(savedSelectionRange)
-            }
-            execute('createLink', normalizedHref)
-            const nextHtml = richEditor.innerHTML
-            ed.setWysiwygHtml(nextHtml)
-            ed.setWysiwygSessionDirty(true)
-            const nextMarkdown = wysiwygHtmlToMarkdown(nextHtml)
-            ed.setContentDirty(nextMarkdown)
-          })()
-          return
+          const href = typeof window !== 'undefined' ? window.prompt('Link URL', 'https://') : 'https://'
+          const normalizedHref = String(href || '').trim()
+          if (!normalizedHref) return
+          execute('createLink', normalizedHref)
         } else if (action === 'code') execute('insertText', '`code`')
 
         const nextHtml = richEditor.innerHTML
@@ -1896,18 +1864,14 @@ const NotesManagerPage: React.FC = () => {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  const clearSearchQueryTimeout = list.clearSearchQueryTimeout
-  const keywordSearchTimeoutRef = kw.keywordSearchTimeoutRef
-  const clearAutosaveTimeout = ed.clearAutosaveTimeout
-
-  // Use stable cleanup handles so debounce timers survive normal re-renders.
+  // Cleanup
   React.useEffect(() => {
     return () => {
-      clearSearchQueryTimeout()
-      if (keywordSearchTimeoutRef.current != null) clearTimeout(keywordSearchTimeoutRef.current)
-      clearAutosaveTimeout()
+      list.clearSearchQueryTimeout()
+      if (kw.keywordSearchTimeoutRef.current != null) clearTimeout(kw.keywordSearchTimeoutRef.current)
+      ed.clearAutosaveTimeout()
     }
-  }, [clearAutosaveTimeout, clearSearchQueryTimeout, keywordSearchTimeoutRef])
+  }, [ed, kw, list])
 
   const handleSkipLinkActivate = React.useCallback(
     (targetId: string) => (event: React.MouseEvent<HTMLAnchorElement>) => {
@@ -2070,7 +2034,6 @@ const NotesManagerPage: React.FC = () => {
         noteRelations={noteRelations}
         noteNeighborsLoading={noteNeighborsLoading}
         noteNeighborsError={noteNeighborsError}
-        onRetryNeighbors={handleRetryNeighbors}
         selectedNotePinned={ed.selectedNotePinned}
         editorMode={ed.editorMode}
         editorInputMode={ed.editorInputMode}

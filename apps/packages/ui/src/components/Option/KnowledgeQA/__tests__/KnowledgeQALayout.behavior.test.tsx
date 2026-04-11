@@ -346,25 +346,4 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
 
     expect(screen.getByText("Scope changed")).toBeInTheDocument()
   })
-
-  it("does not mark the scope as changed when pinned filters duplicate explicit selections", () => {
-    state.settings.sources = ["media_db", "notes"]
-    state.settings.include_media_ids = [42]
-    state.settings.include_note_ids = ["note-1"]
-    state.pinnedSourceFilters = {
-      mediaIds: [42],
-      noteIds: ["note-1"],
-    }
-    state.lastSearchScope = {
-      preset: "balanced",
-      webFallback: true,
-      sources: ["media_db", "notes"],
-      includeMediaIds: [42],
-      includeNoteIds: ["note-1"],
-    }
-
-    renderLayout()
-
-    expect(screen.getByText("Scope unchanged")).toBeInTheDocument()
-  })
 })

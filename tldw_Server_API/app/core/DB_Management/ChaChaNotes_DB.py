@@ -12408,6 +12408,51 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except _CHACHA_NONCRITICAL_EXCEPTIONS:
             return None
 
+    def get_message_metadata_map(self, message_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Fetch metadata for multiple messages in a single query."""
+        if not message_ids:
+            return {}
+
+        try:
+            self._ensure_message_metadata_table()
+            if self.backend_type == BackendType.SQLITE:
+                placeholders = ",".join(["?"] * len(message_ids))
+                query = (
+                    "SELECT message_id, tool_calls_json, extra_json, last_modified "
+                    f"FROM message_metadata WHERE message_id IN ({placeholders})"  # nosec B608
+                )
+                cursor = self.execute_query(query, tuple(message_ids))
+                rows = cursor.fetchall()
+            else:
+                placeholders = ",".join(["%s"] * len(message_ids))
+                query = (
+                    "SELECT message_id, tool_calls_json, extra_json, last_modified "
+                    f"FROM message_metadata WHERE message_id IN ({placeholders})"  # nosec B608
+                )
+                result = self.backend.execute(query, tuple(message_ids))
+                rows = result.fetchall()
+
+            metadata_by_message_id: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                try:
+                    message_id = str(row["message_id"])
+                    tc = row["tool_calls_json"]
+                    ex = row["extra_json"]
+                    lm = row["last_modified"]
+                except _CHACHA_NONCRITICAL_EXCEPTIONS:
+                    message_id = str(row[0])
+                    tc = row[1]
+                    ex = row[2]
+                    lm = row[3]
+                metadata_by_message_id[message_id] = {
+                    "tool_calls": json.loads(tc) if tc else None,
+                    "extra": json.loads(ex) if ex else None,
+                    "last_modified": lm,
+                }
+            return metadata_by_message_id
+        except _CHACHA_NONCRITICAL_EXCEPTIONS:
+            return {}
+
     def _ensure_persona_live_voice_session_summaries_table(self) -> None:
         """Ensure persona live-voice session summaries exist for analytics feedback."""
         if self.backend_type == BackendType.SQLITE:

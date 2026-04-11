@@ -561,11 +561,7 @@
       "updatedSuccess": "Instruktion Uppdaterad",
       "updatedSuccessDesc": "Instruktionen har uppdaterats framgångsrikt",
       "deletedSuccess": "Instruktion Raderad",
-      "deletedSuccessDesc": "Instruktionen har raderats framgångsrikt",
-      "exportFailed": "Exporten misslyckades",
-      "exportFailedDesc": "Kunde inte exportera promptar. Försök igen eller kontrollera serveranslutningen för CSV-/Markdown-export.",
-      "importFailed": "Importen misslyckades",
-      "importFailedDesc": "Filen kunde inte importeras. Se till att den är giltig JSON som innehåller en array med promptobjekt."
+      "deletedSuccessDesc": "Instruktionen har raderats framgångsrikt"
     },
     "workspaceTitle": "Prompts‑arbetsyta",
     "workspaceDescription": "Återanvändbara prompter hanteras i Prompts‑arbetsytan. Använd knappen nedan för att öppna den.",

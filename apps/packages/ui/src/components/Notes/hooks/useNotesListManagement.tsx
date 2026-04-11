@@ -30,7 +30,6 @@ import {
   normalizeNotebookCollectionsResponse,
   buildNotebookDefaultName,
   NOTE_SEARCH_DEBOUNCE_MS,
-  promptModal,
 } from '../notes-manager-utils'
 import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
 
@@ -416,11 +415,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   }, [moodboards, selectedMoodboardId])
 
   const createMoodboard = React.useCallback(async () => {
-    const name = await promptModal({
-      title: 'Create collection',
-      placeholder: 'Collection name',
-      okText: 'Create',
-    })
+    const name = String(window.prompt("Moodboard name") || "").trim()
     if (!name) return
     try {
       const created = await bgRequest<any>({
@@ -446,12 +441,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       message.warning("Select a moodboard first")
       return
     }
-    const nextName = await promptModal({
-      title: 'Rename collection',
-      defaultValue: selectedMoodboard.name,
-      placeholder: 'Collection name',
-      okText: 'Rename',
-    })
+    const nextName = String(window.prompt("Rename moodboard", selectedMoodboard.name) || "").trim()
     if (!nextName || nextName === selectedMoodboard.name) return
     const expectedVersion = selectedMoodboard.version ?? 1
     try {
@@ -604,13 +594,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     if (typeof window === 'undefined') return
 
     const defaultName = buildNotebookDefaultName(normalizedKeywords)
-    const rawName = await promptModal({
-      title: 'Save filter',
-      label: 'Save the current tag filters as a reusable preset.',
-      defaultValue: defaultName,
-      placeholder: 'Filter name',
-      okText: 'Save',
-    })
+    const rawName = window.prompt('Smart collection name', defaultName)
     if (rawName == null) return
 
     const notebookName = normalizeNotebookName(rawName)

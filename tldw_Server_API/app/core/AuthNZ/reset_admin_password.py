@@ -43,7 +43,7 @@ async def reset_user_password(
     # Validate password length against configured minimum
     _pw_svc = PasswordService()
     if len(new_password) < _pw_svc.min_length:
-        print("[reset-password] Password does not meet the configured minimum requirements.")
+        print(f"[reset-password] Password must be at least {_pw_svc.min_length} characters.")
         return False
 
     try:

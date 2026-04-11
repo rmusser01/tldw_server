@@ -301,15 +301,8 @@ describe("NotesManagerPage stage 25 keyword management", () => {
     })
 
     fireEvent.click(screen.getByTestId("notes-keyword-manager-merge-2"))
-    const mergeTargetContainer = await screen.findByTestId("notes-keyword-manager-merge-target")
-    const mergeTargetContent = mergeTargetContainer.querySelector('.ant-select-content') || mergeTargetContainer
-    fireEvent.mouseDown(mergeTargetContent)
-    await waitFor(() => {
-      const options = document.querySelectorAll('.ant-select-item-option')
-      const match = Array.from(options).find(el => el.textContent?.includes('alpha-renamed'))
-      if (!match) throw new Error('Option for "alpha-renamed" not found')
-      fireEvent.click(match)
-    })
+    const mergeTargetSelect = await screen.findByTestId("notes-keyword-manager-merge-target")
+    fireEvent.change(mergeTargetSelect, { target: { value: "1" } })
 
     const mergeButtons = screen.getAllByRole("button", { name: "Merge" })
     fireEvent.click(mergeButtons[mergeButtons.length - 1])

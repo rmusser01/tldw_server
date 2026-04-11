@@ -17,14 +17,18 @@ import {
 import type { Page } from "@playwright/test"
 import { SpeechPage } from "../../utils/page-objects/SpeechPage"
 import { expectApiCall } from "../../utils/api-assertions"
-import { getAntdSelectTrigger, getVisibleAntdSelectOption, seedAuth } from "../../utils/helpers"
+import {
+  getAntdSelectTrigger,
+  getVisibleAntdSelectDropdown,
+  seedAuth
+} from "../../utils/helpers"
 
 async function openSpeechInputSourcePicker(page: Page) {
   const inputSourcePicker = getAntdSelectTrigger(page, {
     ariaLabel: "Speech playground input source",
   })
   await expect(inputSourcePicker).toBeVisible()
-  await inputSourcePicker.click({ force: true })
+  await inputSourcePicker.click()
 }
 
 test.describe("Speech Playground", () => {
@@ -64,9 +68,12 @@ test.describe("Speech Playground", () => {
       await expect(speech.downloadButton).toBeVisible()
 
       await openSpeechInputSourcePicker(authedPage)
-      await expect(getVisibleAntdSelectOption(authedPage, { text: /Default microphone/i })).toBeVisible()
-      await expect(getVisibleAntdSelectOption(authedPage, { text: /Tab audio/i })).toHaveCount(0)
-      await expect(getVisibleAntdSelectOption(authedPage, { text: /System audio/i })).toHaveCount(0)
+      const inputSourceDropdown = getVisibleAntdSelectDropdown(authedPage)
+      await expect(
+        inputSourceDropdown.getByText(/Default microphone/i).first()
+      ).toBeVisible()
+      await expect(inputSourceDropdown.getByText(/Tab audio/i)).toHaveCount(0)
+      await expect(inputSourceDropdown.getByText(/System audio/i)).toHaveCount(0)
       await authedPage.keyboard.press("Escape")
 
       await assertNoCriticalErrors(diagnostics)

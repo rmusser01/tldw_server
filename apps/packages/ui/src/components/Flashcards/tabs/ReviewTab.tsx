@@ -672,9 +672,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         }
         autoEndSessionAttemptedRef.current = null
       } catch (error: unknown) {
-        if (reason === "auto") {
-          autoEndSessionAttemptedRef.current = null
-        }
         reportUiError(
           error,
           "ending the review session",
@@ -692,10 +689,8 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
       const targetId = parseStudySuggestionTargetId(response.target_id)
 
       if (response.target_service === "flashcards" && targetId) {
-        if (activeReviewSessionId != null) {
-          await completeReviewSession("manual", { revealSnapshot: false })
-        }
         setSelectedStudySessionId(null)
+        setActiveReviewSessionId(null)
         onReviewDeckChange(targetId)
         return
       }
@@ -712,15 +707,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         )
       }
     },
-    [
-      activeReviewSessionId,
-      completeReviewSession,
-      currentDeckName,
-      forceShowWorkspaceItems,
-      navigate,
-      onReviewDeckChange,
-      reviewDeckId
-    ]
+    [currentDeckName, forceShowWorkspaceItems, navigate, onReviewDeckChange, reviewDeckId]
   )
 
   React.useEffect(() => {

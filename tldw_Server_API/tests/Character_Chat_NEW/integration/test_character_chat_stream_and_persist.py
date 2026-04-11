@@ -9,7 +9,7 @@ pytestmark = pytest.mark.integration
 from fastapi.testclient import TestClient
 
 
-def _create_character_and_chat(client: TestClient, headers):
+def _create_character_and_chat(client: TestClient, headers) -> tuple[int, str]:
     char_resp = client.post(
         "/api/v1/characters/",
         json={
@@ -31,7 +31,7 @@ def _create_character_and_chat(client: TestClient, headers):
     return char_id, chat_resp.json()["id"]
 
 
-def test_offline_streaming_and_persist_flow(test_client: TestClient, auth_headers):
+def test_offline_streaming_and_persist_flow(test_client: TestClient, auth_headers) -> None:
     # Ensure offline-sim mode by not enabling any ENABLE_LOCAL_LLM_PROVIDER, etc.
     char_id, chat_id = _create_character_and_chat(test_client, auth_headers)
 
@@ -94,7 +94,7 @@ def test_offline_streaming_and_persist_flow(test_client: TestClient, auth_header
     assert any(m.get("content") == user_prompt and m.get("sender") == "StreamChar" for m in msgs)
 
 
-def test_persist_streamed_message_preserves_active_speaker_identity(test_client: TestClient, auth_headers):
+def test_persist_streamed_message_preserves_active_speaker_identity(test_client: TestClient, auth_headers) -> None:
     """Persist endpoint should allow preserving the directed/active character speaker."""
     # Primary character + chat
     char_resp = test_client.post(
@@ -219,7 +219,176 @@ def test_persist_streamed_message_preserves_active_speaker_identity(test_client:
     }
 
 
-def test_persist_streamed_message_requires_request_body(test_client: TestClient, auth_headers):
+def test_persist_streamed_message_saves_then_returns_503_when_counting_degrades(
+    test_client: TestClient,
+    auth_headers,
+    character_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+
+    original_count = character_db.count_messages_for_conversation
+
+    def broken_count(_chat_id: str) -> int:
+        raise RuntimeError("count unavailable")
+
+    monkeypatch.setattr(character_db, "count_messages_for_conversation", broken_count)
+
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json={
+            "assistant_content": "saved once despite degraded validation",
+            "assistant_message_id": "assistant-count-degraded-1",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 503
+    payload = response.json()["detail"]
+    assert payload["code"] == "persist_validation_degraded"
+    assert payload["saved"] is True
+    assert payload["assistant_message_id"]
+
+    monkeypatch.setattr(character_db, "count_messages_for_conversation", original_count)
+    messages = test_client.get(f"/api/v1/chats/{chat_id}/messages", headers=auth_headers).json()["messages"]
+    assert [m["content"] for m in messages].count("saved once despite degraded validation") == 1
+
+
+def test_persist_streamed_message_retry_reuses_saved_degraded_outcome(
+    test_client: TestClient,
+    auth_headers,
+    character_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+    monkeypatch.setattr(
+        character_db,
+        "count_messages_for_conversation",
+        lambda _chat_id: (_ for _ in ()).throw(RuntimeError("count unavailable")),
+    )
+
+    first = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json={
+            "assistant_content": "duplicate guard text",
+            "assistant_message_id": "assistant-retry-guard-1",
+            "user_message_id": None,
+        },
+        headers=auth_headers,
+    )
+    second = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json={
+            "assistant_content": "duplicate guard text",
+            "assistant_message_id": "assistant-retry-guard-1",
+            "user_message_id": None,
+        },
+        headers=auth_headers,
+    )
+
+    assert first.status_code == 503
+    assert second.status_code == 503
+    assert first.json()["detail"]["assistant_message_id"] == second.json()["detail"]["assistant_message_id"]
+
+    messages = test_client.get(f"/api/v1/chats/{chat_id}/messages", headers=auth_headers).json()["messages"]
+    assert [m["content"] for m in messages].count("duplicate guard text") == 1
+
+
+def test_persist_streamed_message_retry_reuses_assistant_message_id_when_metadata_write_fails(
+    test_client: TestClient,
+    auth_headers,
+    character_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+    monkeypatch.setattr(character_db, "add_message_metadata", lambda *args, **kwargs: False)
+
+    payload = {
+        "assistant_content": "metadata failure duplicate guard",
+        "assistant_message_id": "assistant-metadata-failure-1",
+        "user_message_id": None,
+    }
+
+    first = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json=payload,
+        headers=auth_headers,
+    )
+    second = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json=payload,
+        headers=auth_headers,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["assistant_message_id"] == payload["assistant_message_id"]
+    assert second.json()["assistant_message_id"] == payload["assistant_message_id"]
+
+    messages = test_client.get(f"/api/v1/chats/{chat_id}/messages", headers=auth_headers).json()["messages"]
+    assert [m["content"] for m in messages].count("metadata failure duplicate guard") == 1
+
+
+def test_persist_streamed_message_allows_duplicate_content_without_idempotency_key(
+    test_client: TestClient,
+    auth_headers,
+) -> None:
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+
+    first = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json={"assistant_content": "same visible reply", "user_message_id": None},
+        headers=auth_headers,
+    )
+    second = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json={"assistant_content": "same visible reply", "user_message_id": None},
+        headers=auth_headers,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["assistant_message_id"] != second.json()["assistant_message_id"]
+
+    messages = test_client.get(f"/api/v1/chats/{chat_id}/messages", headers=auth_headers).json()["messages"]
+    assert [m["content"] for m in messages].count("same visible reply") == 2
+
+
+def test_persist_streamed_message_accepts_senderless_existing_message_for_idempotent_retry(
+    test_client: TestClient,
+    auth_headers,
+    character_db,
+) -> None:
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+    payload = {
+        "assistant_content": "senderless idempotent reply",
+        "assistant_message_id": "assistant-senderless-retry-1",
+    }
+
+    first = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json=payload,
+        headers=auth_headers,
+    )
+    assert first.status_code == 200
+
+    character_db.execute_query(
+        "UPDATE messages SET sender = '' WHERE id = ?",
+        (payload["assistant_message_id"],),
+        commit=True,
+    )
+
+    second = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json=payload,
+        headers=auth_headers,
+    )
+
+    assert second.status_code == 200
+    assert second.json()["assistant_message_id"] == payload["assistant_message_id"]
+
+
+def test_persist_streamed_message_requires_request_body(test_client: TestClient, auth_headers) -> None:
     """Persist endpoint should return 422 when request body is missing."""
     _, chat_id = _create_character_and_chat(test_client, auth_headers)
 
@@ -231,13 +400,31 @@ def test_persist_streamed_message_requires_request_body(test_client: TestClient,
     assert response.status_code == 422
 
 
-def test_persist_streamed_message_rejects_empty_assistant_content(test_client: TestClient, auth_headers):
+def test_persist_streamed_message_rejects_empty_assistant_content(test_client: TestClient, auth_headers) -> None:
     """Persist endpoint should reject empty assistant_content with 422."""
     _, chat_id = _create_character_and_chat(test_client, auth_headers)
 
     response = test_client.post(
         f"/api/v1/chats/{chat_id}/completions/persist",
         json={"assistant_content": ""},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_persist_streamed_message_rejects_blank_assistant_message_id(
+    test_client: TestClient,
+    auth_headers,
+) -> None:
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json={
+            "assistant_content": "valid reply",
+            "assistant_message_id": "   ",
+        },
         headers=auth_headers,
     )
 

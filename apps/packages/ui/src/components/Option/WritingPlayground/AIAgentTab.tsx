@@ -10,8 +10,10 @@ import {
   listManuscriptCharacters,
   listManuscriptWorldInfo,
   type ManuscriptCharacter,
+  type ManuscriptCharacterListResponse,
   type ManuscriptSceneResponse,
   type ManuscriptWorldInfoItem,
+  type ManuscriptWorldInfoListResponse,
 } from "@/services/writing-playground"
 
 type AIAgentTabProps = { isOnline: boolean }
@@ -27,8 +29,7 @@ const SYSTEM_PROMPTS: Record<AgentMode, string> = {
 const chatService = new TldwChatService()
 
 export function AIAgentTab({ isOnline }: AIAgentTabProps) {
-  const activeProjectId = useWritingPlaygroundStore((state) => state.activeProjectId)
-  const activeNodeId = useWritingPlaygroundStore((state) => state.activeNodeId)
+  const { activeProjectId, activeNodeId } = useWritingPlaygroundStore()
   const [selectedModel] = useStorage<string>("selectedModel")
   const apiProvider = useStoreChatModelSettings((state) => state.apiProvider)
 
@@ -37,41 +38,12 @@ export function AIAgentTab({ isOnline }: AIAgentTabProps) {
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const messagesRef = useRef<AgentMessage[]>([])
-  const requestTokenRef = useRef(0)
-  const isMountedRef = useRef(true)
-  const liveContextRef = useRef({
-    mode,
-    activeProjectId,
-    activeNodeId,
-  })
 
   useEffect(() => {
     if (typeof messagesEndRef.current?.scrollIntoView === "function") {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
     }
   }, [messages])
-
-  useEffect(() => {
-    messagesRef.current = messages
-  }, [messages])
-
-  useEffect(() => {
-    liveContextRef.current = {
-      mode,
-      activeProjectId,
-      activeNodeId,
-    }
-    requestTokenRef.current += 1
-    setLoading(false)
-  }, [mode, activeProjectId, activeNodeId])
-
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false
-      requestTokenRef.current += 1
-    }
-  }, [])
 
   const buildContextSnippet = useCallback(async (): Promise<string> => {
     const parts: string[] = []
@@ -116,25 +88,6 @@ export function AIAgentTab({ isOnline }: AIAgentTabProps) {
     const text = input.trim()
     if (!text || loading) return
 
-    const requestToken = requestTokenRef.current + 1
-    requestTokenRef.current = requestToken
-    const contextSnapshot = {
-      mode,
-      activeProjectId,
-      activeNodeId,
-      token: requestToken,
-    }
-    const matchesCurrentContext = () => {
-      const liveContext = liveContextRef.current
-      return (
-        isMountedRef.current
-        && requestTokenRef.current === contextSnapshot.token
-        && liveContext.mode === contextSnapshot.mode
-        && liveContext.activeProjectId === contextSnapshot.activeProjectId
-        && liveContext.activeNodeId === contextSnapshot.activeNodeId
-      )
-    }
-
     const userMsg: AgentMessage = { role: "user", content: text }
     setMessages((prev) => [...prev, userMsg])
     setInput("")
@@ -142,11 +95,10 @@ export function AIAgentTab({ isOnline }: AIAgentTabProps) {
 
     try {
       const context = await buildContextSnippet()
-      if (!matchesCurrentContext()) return
-      const systemPrompt = SYSTEM_PROMPTS[contextSnapshot.mode] + context
+      const systemPrompt = SYSTEM_PROMPTS[mode] + context
 
       const chatMessages = [
-        ...messagesRef.current.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+        ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
         { role: "user" as const, content: text },
       ]
 
@@ -156,28 +108,19 @@ export function AIAgentTab({ isOnline }: AIAgentTabProps) {
           model: selectedModel || "default",
           systemPrompt,
           apiProvider: apiProvider || undefined,
-          temperature:
-            contextSnapshot.mode === "brainstorm"
-              ? 0.9
-              : contextSnapshot.mode === "quick"
-                ? 0.3
-                : 0.6,
-          maxTokens: contextSnapshot.mode === "quick" ? 256 : 1024,
+          temperature: mode === "brainstorm" ? 0.9 : mode === "quick" ? 0.3 : 0.6,
+          maxTokens: mode === "quick" ? 256 : 1024,
         }
       )
 
-      if (!matchesCurrentContext()) return
       setMessages((prev) => [...prev, { role: "assistant", content: response }])
     } catch (err: any) {
-      if (!matchesCurrentContext()) return
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: `Error: ${err?.message || "Failed to get response"}` },
       ])
     } finally {
-      if (matchesCurrentContext()) {
-        setLoading(false)
-      }
+      setLoading(false)
     }
   }
 
@@ -259,7 +202,6 @@ export function AIAgentTab({ isOnline }: AIAgentTabProps) {
           onClick={handleSend}
           disabled={!input.trim() || loading}
           className="self-end"
-          aria-label="Send message"
         />
       </div>
     </div>
