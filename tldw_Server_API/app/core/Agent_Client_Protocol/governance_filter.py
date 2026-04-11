@@ -92,12 +92,34 @@ class GovernanceFilter:
             the tier string if a ``tool_tier_overrides`` pattern matches,
             or ``None`` if the snapshot has no opinion (fall through to
             existing tier heuristics).
+
+        Policy conditions (time windows, labels, delegation) are evaluated
+        first.  If conditions are present and fail, the policy is skipped.
         """
         if self._snapshot is None:
             return None
 
         doc = getattr(self._snapshot, "resolved_policy_document", None)
         if not doc or not isinstance(doc, dict):
+            return None
+
+        # Pre-load conditions for the policy
+        from tldw_Server_API.app.core.Agent_Client_Protocol.policy_conditions import (
+            PolicyConditions, evaluate_conditions,
+        )
+        conditions = PolicyConditions.from_dict(doc.get("conditions"))
+
+        # Get resource context from session metadata
+        resource_labels = self._session_metadata.get("labels", {})
+        ancestry_chain = self._session_metadata.get("ancestry_chain", [])
+
+        # Check if conditions pass before applying any policy decision
+        if not conditions.is_empty() and not evaluate_conditions(
+            conditions,
+            resource_labels=resource_labels,
+            ancestry_chain=ancestry_chain,
+        ):
+            # Conditions failed -- policy doesn't apply, fall through
             return None
 
         # 1. Check denied_tools (highest priority)

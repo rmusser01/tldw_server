@@ -438,6 +438,11 @@ class ACPSessionInfo(BaseModel):
     auto_terminate_at_budget: bool = Field(default=False, description="Whether the session auto-terminates when budget is exceeded")
     budget_exhausted: bool = Field(default=False, description="Whether the session was terminated due to budget exhaustion")
     budget_remaining: int | None = Field(default=None, description="Tokens remaining before budget is hit (NULL if no budget set)")
+    # State-machine fields
+    phase: str | None = Field(default=None, description="Session lifecycle phase (running, planning, stalled, etc.)")
+    activity: str | None = Field(default=None, description="Current session activity (tool_call, thinking, etc.)")
+    activity_detail: dict[str, Any] | None = Field(default=None, description="Structured detail about the current activity")
+    state_version: int | None = Field(default=None, description="Monotonic version counter for optimistic concurrency")
 
 
 class ACPSessionListResponse(BaseModel):

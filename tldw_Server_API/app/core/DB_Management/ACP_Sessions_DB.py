@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
 
-_SCHEMA_VERSION = 10
+_SCHEMA_VERSION = 13
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS sessions (
@@ -52,7 +52,13 @@ CREATE TABLE IF NOT EXISTS sessions (
     model TEXT,
     token_budget INTEGER DEFAULT NULL,
     auto_terminate_at_budget INTEGER NOT NULL DEFAULT 0,
-    budget_exhausted INTEGER NOT NULL DEFAULT 0
+    budget_exhausted INTEGER NOT NULL DEFAULT 0,
+    phase TEXT NOT NULL DEFAULT 'running',
+    activity TEXT,
+    activity_detail_json TEXT,
+    state_version INTEGER NOT NULL DEFAULT 1,
+    stalled_from_activity TEXT,
+    ancestry_chain_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user_status ON sessions(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at DESC);
@@ -111,6 +117,7 @@ CREATE TABLE IF NOT EXISTS permission_policies (
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
     rules_json TEXT NOT NULL,
+    conditions_json TEXT,
     org_id TEXT,
     team_id TEXT,
     priority INTEGER DEFAULT 0,
@@ -147,6 +154,23 @@ CREATE TABLE IF NOT EXISTS webhook_triggers (
 );
 CREATE INDEX IF NOT EXISTS idx_webhook_triggers_owner
     ON webhook_triggers(owner_user_id);
+
+CREATE TABLE IF NOT EXISTS config_templates (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    scope TEXT NOT NULL DEFAULT 'system',
+    scope_id TEXT,
+    base_template_id TEXT,
+    schema_version TEXT NOT NULL DEFAULT '1',
+    config_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_config_templates_scope
+    ON config_templates(scope, scope_id);
+CREATE INDEX IF NOT EXISTS idx_config_templates_name
+    ON config_templates(name);
 """
 
 # Columns that are stored as INTEGER 0/1 but should be returned as bool
@@ -160,8 +184,8 @@ _BOOL_FIELDS = frozenset({
 })
 
 # Columns that are stored as JSON TEXT but should be returned as parsed objects
-_JSON_LIST_FIELDS = frozenset({"tags", "mcp_servers"})
-_JSON_OBJECT_FIELDS = frozenset({"policy_summary", "policy_provenance_summary"})
+_JSON_LIST_FIELDS = frozenset({"tags", "mcp_servers", "ancestry_chain_json"})
+_JSON_OBJECT_FIELDS = frozenset({"policy_summary", "policy_provenance_summary", "activity_detail_json"})
 _ALLOWED_MIGRATION_COLUMNS = {
     "sessions": {
         "policy_snapshot_version": "policy_snapshot_version TEXT",
@@ -174,6 +198,15 @@ _ALLOWED_MIGRATION_COLUMNS = {
         "token_budget": "token_budget INTEGER DEFAULT NULL",
         "auto_terminate_at_budget": "auto_terminate_at_budget INTEGER NOT NULL DEFAULT 0",
         "budget_exhausted": "budget_exhausted INTEGER NOT NULL DEFAULT 0",
+        "phase": "phase TEXT NOT NULL DEFAULT 'running'",
+        "activity": "activity TEXT",
+        "activity_detail_json": "activity_detail_json TEXT",
+        "state_version": "state_version INTEGER NOT NULL DEFAULT 1",
+        "stalled_from_activity": "stalled_from_activity TEXT",
+        "ancestry_chain_json": "ancestry_chain_json TEXT",
+    },
+    "permission_policies": {
+        "conditions_json": "conditions_json TEXT",
     },
     "agent_registry": {
         "mcp_orchestration": "mcp_orchestration TEXT NOT NULL DEFAULT 'agent_driven'",
@@ -446,6 +479,69 @@ class ACPSessionsDB:
                     CREATE INDEX IF NOT EXISTS idx_webhook_triggers_owner
                         ON webhook_triggers(owner_user_id);
                 """)
+            if current_version < 11:
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "phase",
+                    "phase TEXT NOT NULL DEFAULT 'running'",
+                )
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "activity",
+                    "activity TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "activity_detail_json",
+                    "activity_detail_json TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "state_version",
+                    "state_version INTEGER NOT NULL DEFAULT 1",
+                )
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "stalled_from_activity",
+                    "stalled_from_activity TEXT",
+                )
+            if current_version < 12:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS config_templates (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        description TEXT DEFAULT '',
+                        scope TEXT NOT NULL DEFAULT 'system',
+                        scope_id TEXT,
+                        base_template_id TEXT,
+                        schema_version TEXT NOT NULL DEFAULT '1',
+                        config_json TEXT NOT NULL DEFAULT '{}',
+                        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_config_templates_scope
+                        ON config_templates(scope, scope_id);
+                    CREATE INDEX IF NOT EXISTS idx_config_templates_name
+                        ON config_templates(name);
+                """)
+            if current_version < 13:
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "ancestry_chain_json",
+                    "ancestry_chain_json TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "permission_policies",
+                    "conditions_json",
+                    "conditions_json TEXT",
+                )
             conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
             conn.commit()
             self._initialized = True
@@ -503,6 +599,10 @@ class ACPSessionsDB:
         model: str | None = None,
         token_budget: int | None = None,
         auto_terminate_at_budget: bool = False,
+        phase: str = "running",
+        activity: str | None = None,
+        activity_detail_json: str | None = None,
+        state_version: int = 1,
     ) -> dict[str, Any]:
         """Insert a new session record and return it as a dict."""
         conn = self._get_conn()
@@ -517,8 +617,9 @@ class ACPSessionsDB:
                 policy_snapshot_version, policy_snapshot_fingerprint, policy_snapshot_refreshed_at,
                 policy_summary, policy_provenance_summary, policy_refresh_error,
                 forked_from, needs_bootstrap, model,
-                token_budget, auto_terminate_at_budget
-            ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                token_budget, auto_terminate_at_budget,
+                phase, activity, activity_detail_json, state_version
+            ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id, user_id, agent_type, name, cwd,
@@ -538,6 +639,10 @@ class ACPSessionsDB:
                 model,
                 token_budget,
                 int(auto_terminate_at_budget),
+                phase,
+                activity,
+                activity_detail_json,
+                state_version,
             ),
         )
         conn.commit()
@@ -582,6 +687,54 @@ class ACPSessionsDB:
             ),
         )
         conn.commit()
+
+    def update_session_state(
+        self,
+        session_id: str,
+        *,
+        phase: str | None = None,
+        activity: str | None = None,
+        activity_detail_json: str | None = None,
+        stalled_from_activity: str | None = None,
+        expected_state_version: int | None = None,
+    ) -> bool:
+        """Update session state fields with optimistic locking.
+
+        Always increments ``state_version`` and touches ``last_activity_at``.
+        If *expected_state_version* is provided the update is conditional:
+        it only takes effect when the current DB value matches, and the
+        method returns ``False`` on a version conflict (no rows affected).
+        """
+        set_parts: list[str] = ["state_version = state_version + 1", "last_activity_at = ?"]
+        params: list[Any] = [_utcnow_iso()]
+
+        if phase is not None:
+            set_parts.append("phase = ?")
+            params.append(phase)
+        if activity is not None:
+            set_parts.append("activity = ?")
+            params.append(activity)
+        if activity_detail_json is not None:
+            set_parts.append("activity_detail_json = ?")
+            params.append(activity_detail_json)
+        if stalled_from_activity is not None:
+            set_parts.append("stalled_from_activity = ?")
+            params.append(stalled_from_activity)
+
+        where = "session_id = ?"
+        params.append(session_id)
+
+        if expected_state_version is not None:
+            where += " AND state_version = ?"
+            params.append(expected_state_version)
+
+        conn = self._get_conn()
+        cursor = conn.execute(
+            f"UPDATE sessions SET {', '.join(set_parts)} WHERE {where}",
+            params,
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         """Fetch a single session by ID, or None if not found."""
@@ -1542,6 +1695,60 @@ class ACPSessionsDB:
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
+    # Stalled Session Detection
+    # ------------------------------------------------------------------
+
+    def list_stalled_sessions(self, threshold_iso: str) -> list[dict[str, Any]]:
+        """Return sessions that are running but have stale activity.
+
+        A session is considered stalled when:
+        - ``phase`` is ``'running'``
+        - ``activity`` is not already ``'stalled'``
+        - ``last_activity_at`` is earlier than *threshold_iso*
+
+        Returns a list of session dicts (same format as :meth:`get_session`).
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            """SELECT * FROM sessions
+               WHERE phase = 'running'
+                 AND (activity IS NULL OR activity != 'stalled')
+                 AND last_activity_at < ?""",
+            (threshold_iso,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def mark_session_stalled(
+        self,
+        session_id: str,
+        stalled_from_activity: str | None = None,
+    ) -> bool:
+        """Mark a session as stalled without touching ``last_activity_at``.
+
+        Saves the previous activity value in ``stalled_from_activity`` so the
+        platform can restore it if the session resumes.  Increments
+        ``state_version`` for optimistic-locking consumers.
+
+        Returns ``True`` if a row was updated.
+        """
+        conn = self._get_conn()
+        params: list[Any] = []
+        set_parts = [
+            "activity = 'stalled'",
+            "state_version = state_version + 1",
+        ]
+        if stalled_from_activity is not None:
+            set_parts.append("stalled_from_activity = ?")
+            params.append(stalled_from_activity)
+        params.append(session_id)
+        cursor = conn.execute(
+            f"UPDATE sessions SET {', '.join(set_parts)} WHERE session_id = ?",
+            params,
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    # ------------------------------------------------------------------
     # Permission Policy CRUD
     # ------------------------------------------------------------------
 
@@ -1828,6 +2035,117 @@ class ACPSessionsDB:
         conn = self._get_conn()
         cursor = conn.execute(
             "DELETE FROM webhook_triggers WHERE id = ?", (trigger_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Config Template CRUD
+    # ------------------------------------------------------------------
+
+    def create_config_template(
+        self,
+        name: str,
+        scope: str = "system",
+        config_json: str = "{}",
+        description: str = "",
+        scope_id: str | None = None,
+        base_template_id: str | None = None,
+        schema_version: str = "1",
+        template_id: str | None = None,
+    ) -> str:
+        """Insert a new config template. Returns the generated ID."""
+        import uuid as _uuid
+
+        tid = template_id or str(_uuid.uuid4())
+        conn = self._get_conn()
+        now = _utcnow_iso()
+        conn.execute(
+            """
+            INSERT INTO config_templates
+                (id, name, description, scope, scope_id,
+                 base_template_id, schema_version, config_json,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                tid, name, description, scope, scope_id,
+                base_template_id, schema_version, config_json,
+                now, now,
+            ),
+        )
+        conn.commit()
+        return tid
+
+    def get_config_template(self, template_id: str) -> dict[str, Any] | None:
+        """Fetch a single config template by ID, or None."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM config_templates WHERE id = ?", (template_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def list_config_templates(
+        self,
+        scope: str | None = None,
+        scope_id: str | None = None,
+        name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List config templates with optional filters."""
+        conn = self._get_conn()
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if scope is not None:
+            clauses.append("scope = ?")
+            params.append(scope)
+        if scope_id is not None:
+            clauses.append("scope_id = ?")
+            params.append(scope_id)
+        if name is not None:
+            clauses.append("name = ?")
+            params.append(name)
+
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = conn.execute(
+            f"SELECT * FROM config_templates{where} ORDER BY created_at DESC",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    _CONFIG_TEMPLATE_UPDATABLE_COLS = frozenset({
+        "name", "description", "scope", "scope_id",
+        "base_template_id", "schema_version", "config_json",
+    })
+
+    def update_config_template(self, template_id: str, **kwargs: Any) -> bool:
+        """Update fields on a config template.
+
+        Accepted kwargs: name, description, scope, scope_id,
+        base_template_id, schema_version, config_json.
+        Returns True if the row was found and updated.
+        """
+        updates = {k: v for k, v in kwargs.items() if k in self._CONFIG_TEMPLATE_UPDATABLE_COLS}
+        if not updates:
+            return False
+        updates["updated_at"] = _utcnow_iso()
+        set_clause = ", ".join(f"{col} = ?" for col in updates)
+        values = list(updates.values()) + [template_id]
+        conn = self._get_conn()
+        cursor = conn.execute(
+            f"UPDATE config_templates SET {set_clause} WHERE id = ?",
+            values,
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_config_template(self, template_id: str) -> bool:
+        """Delete a config template by ID. Returns True if a row was removed."""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "DELETE FROM config_templates WHERE id = ?", (template_id,)
         )
         conn.commit()
         return cursor.rowcount > 0

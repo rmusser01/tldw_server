@@ -7,6 +7,9 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
+from tldw_Server_API.app.core.Agent_Client_Protocol.merge_utils import (
+    merge_config as _merge_config,
+)
 from tldw_Server_API.app.services.mcp_hub_capability_resolution_service import (
     CapabilityResolutionResult,
     McpHubCapabilityResolutionService,
@@ -118,17 +121,14 @@ def _candidate_scope_filters(user_id: int | None, metadata: dict[str, Any]) -> l
 
 
 def _merge_policy_documents(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Merge policy documents with union semantics for list-based capability fields."""
-    merged = deepcopy(base)
-    for key, value in overlay.items():
-        if key in _UNION_LIST_KEYS:
-            merged[key] = _unique(_as_str_list(merged.get(key)) + _as_str_list(value))
-            continue
-        if isinstance(merged.get(key), dict) and isinstance(value, dict):
-            merged[key] = _merge_policy_documents(_as_dict(merged.get(key)), value)
-            continue
-        merged[key] = deepcopy(value)
-    return merged
+    """Merge policy documents with union semantics for list-based capability fields.
+
+    Delegates to the shared ``merge_config`` utility.  The only behavioural
+    difference is that ``merge_config`` skips ``None`` overlay values (the
+    original implementation did not), but policy documents never contain
+    ``None`` values in practice.
+    """
+    return _merge_config(base, overlay)
 
 
 def _has_explicit_scalar_value(value: Any) -> bool:
@@ -600,6 +600,9 @@ class McpHubPolicyResolver:
         # Ensure tool_tier_overrides is present in the resolved document so
         # downstream consumers (GovernanceFilter, runner_client) can rely on it.
         resolved_policy_document.setdefault("tool_tier_overrides", {})
+
+        # Propagate conditions so GovernanceFilter can evaluate them.
+        resolved_policy_document.setdefault("conditions", {})
 
         return {
             "enabled": True,

@@ -16,6 +16,21 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class _NullTemplateDB:
+    """Stub DB that returns empty results for template queries.
+
+    Used as a fallback when no real sessions DB is available so that
+    ``resolve_for_session`` can run without error (it will simply find
+    no DB-backed templates and the caller falls through to the flat dict).
+    """
+
+    def list_config_templates(self, **kwargs: Any) -> list:
+        return []
+
+    def get_config_template(self, template_id: str) -> None:
+        return None
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
@@ -207,16 +222,41 @@ class ACPRuntimePolicyService:
         # User / MCP-Hub overrides that are already in the resolved document
         # take precedence over template defaults.
         if template_name:
-            from tldw_Server_API.app.core.Agent_Client_Protocol.config import (
-                PERMISSION_POLICY_TEMPLATES,
-            )
+            _db_template_applied = False
+            try:
+                from tldw_Server_API.app.core.Agent_Client_Protocol.templates import resolve_for_session
+                # Try DB-backed templates first
+                template_config = resolve_for_session(
+                    getattr(self, "_sessions_db", None) or _NullTemplateDB(),
+                    session_id=getattr(session_record, "session_id", None),
+                    persona_id=getattr(session_record, "persona_id", None),
+                    template_name=template_name,
+                )
+                if template_config:
+                    existing_overrides = resolved_policy_document.get("tool_tier_overrides", {})
+                    template_overrides = template_config.get("tool_tier_overrides", {})
+                    merged = {**template_overrides, **existing_overrides}
+                    resolved_policy_document["tool_tier_overrides"] = merged
+                    # Also merge other template fields
+                    for key in ("denied_tools", "allowed_tools", "approval_mode", "model"):
+                        if key in template_config and key not in resolved_policy_document:
+                            resolved_policy_document[key] = template_config[key]
+                    _db_template_applied = True
+            except Exception:
+                pass  # Fall through to flat dict
 
-            template = PERMISSION_POLICY_TEMPLATES.get(template_name)
-            if template:
-                existing_overrides = resolved_policy_document.get("tool_tier_overrides", {})
-                # Template is the base layer -- merge user overrides on top.
-                merged = {**template.get("tool_tier_overrides", {}), **existing_overrides}
-                resolved_policy_document["tool_tier_overrides"] = merged
+            # Flat dict fallback (will be removed once DB migration is complete)
+            if not _db_template_applied:
+                from tldw_Server_API.app.core.Agent_Client_Protocol.config import (
+                    PERMISSION_POLICY_TEMPLATES,
+                )
+
+                template = PERMISSION_POLICY_TEMPLATES.get(template_name)
+                if template:
+                    existing_overrides = resolved_policy_document.get("tool_tier_overrides", {})
+                    # Template is the base layer -- merge user overrides on top.
+                    merged = {**template.get("tool_tier_overrides", {}), **existing_overrides}
+                    resolved_policy_document["tool_tier_overrides"] = merged
         allowed_tools = _unique(_as_str_list(resolved_policy_document.get("allowed_tools")))
         denied_tools = _unique(_as_str_list(resolved_policy_document.get("denied_tools")))
         capabilities = _unique(_as_str_list(resolved_policy_document.get("capabilities")))

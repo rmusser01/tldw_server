@@ -1445,6 +1445,11 @@ else:
     except _IMPORT_EXCEPTIONS as _acp_perm_err:
         logger.warning(f"ACP permissions endpoints unavailable at import time; deferring: {_acp_perm_err}")
         acp_permissions_router = None  # type: ignore[assignment]
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.acp_multiplex import router as acp_multiplex_router
+    except _IMPORT_EXCEPTIONS as _acp_mpx_err:
+        logger.warning(f"ACP multiplex endpoint unavailable at import time; deferring: {_acp_mpx_err}")
+        acp_multiplex_router = None  # type: ignore[assignment]
     # Users Endpoint (NEW)
     # Chatbooks Endpoint
     from tldw_Server_API.app.api.v1.endpoints.chatbooks import router as chatbooks_router
@@ -6629,6 +6634,12 @@ elif _MINIMAL_TEST_APP:
         app.include_router(acp_permissions_router, prefix=f"{API_V1_PREFIX}", tags=["acp-permissions"])
     except _IMPORT_EXCEPTIONS as _acp_perm_min_err:
         logger.debug(f"Skipping ACP permissions router in minimal test app: {_acp_perm_min_err}")
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.acp_multiplex import router as acp_multiplex_router
+
+        app.include_router(acp_multiplex_router, prefix=f"{API_V1_PREFIX}", tags=["acp-multiplex"])
+    except _IMPORT_EXCEPTIONS as _acp_mpx_min_err:
+        logger.debug(f"Skipping ACP multiplex router in minimal test app: {_acp_mpx_min_err}")
     # Agent Orchestration endpoints
     try:
         from tldw_Server_API.app.api.v1.endpoints.agent_orchestration import router as orch_router
@@ -6888,6 +6899,8 @@ else:
         _include_if_enabled("acp", acp_triggers_router, prefix=f"{API_V1_PREFIX}", tags=["acp-triggers"], default_stable=False)
     if "acp_permissions_router" in locals() and acp_permissions_router is not None:
         _include_if_enabled("acp", acp_permissions_router, prefix=f"{API_V1_PREFIX}", tags=["acp-permissions"], default_stable=False)
+    if "acp_multiplex_router" in locals() and acp_multiplex_router is not None:
+        _include_if_enabled("acp", acp_multiplex_router, prefix=f"{API_V1_PREFIX}", tags=["acp-multiplex"], default_stable=False)
     if "character_router" in locals():
         _include_if_enabled("characters", character_router, prefix=f"{API_V1_PREFIX}/characters", tags=["characters"])
     if "character_memory_router" in locals():

@@ -81,6 +81,14 @@ class SessionRecord:
     token_budget: int | None = None
     auto_terminate_at_budget: bool = False
     budget_exhausted: bool = False
+    # State-machine fields (Task 3)
+    phase: str = "running"
+    activity: str | None = None
+    activity_detail: dict[str, Any] | None = None
+    state_version: int = 1
+    stalled_from_activity: str | None = None
+    # Ancestry chain for delegation-based access
+    ancestry_chain: list[str] = field(default_factory=list)
 
     def to_info_dict(self, *, has_websocket: bool = False) -> dict[str, Any]:
         return {
@@ -120,6 +128,12 @@ class SessionRecord:
                 if self.token_budget is not None
                 else None
             ),
+            "phase": self.phase,
+            "activity": self.activity,
+            "activity_detail": self.activity_detail,
+            "state_version": self.state_version,
+            "stalled_from_activity": self.stalled_from_activity,
+            "ancestry_chain": self.ancestry_chain,
         }
 
     def to_detail_dict(
@@ -359,6 +373,12 @@ class ACPSessionStore:
             token_budget=d.get("token_budget"),
             auto_terminate_at_budget=d.get("auto_terminate_at_budget", False),
             budget_exhausted=d.get("budget_exhausted", False),
+            phase=d.get("phase", "running"),
+            activity=d.get("activity"),
+            activity_detail=d.get("activity_detail_json"),
+            state_version=d.get("state_version", 1),
+            stalled_from_activity=d.get("stalled_from_activity"),
+            ancestry_chain=d.get("ancestry_chain_json") or [],
         )
 
     # ------------------------------------------------------------------
@@ -478,6 +498,36 @@ class ACPSessionStore:
         )
         logger.debug("Registered ACP session {} for user {}", session_id, user_id)
         return self._dict_to_record(d)
+
+    async def update_session_state(
+        self,
+        session_id: str,
+        *,
+        phase: str | None = None,
+        activity: str | None = None,
+        activity_detail: dict | None = None,
+        expected_state_version: int | None = None,
+    ) -> SessionRecord | None:
+        """Update session state with optional optimistic locking.
+
+        Returns updated SessionRecord, or None if version conflict.
+        """
+        import json as _json
+
+        activity_detail_json: str | None = None
+        if activity_detail is not None:
+            activity_detail_json = _json.dumps(activity_detail)
+
+        ok = self._db.update_session_state(
+            session_id,
+            phase=phase,
+            activity=activity,
+            activity_detail_json=activity_detail_json,
+            expected_state_version=expected_state_version,
+        )
+        if not ok:
+            return None
+        return await self.get_session(session_id)
 
     async def update_session_budget(
         self,
