@@ -28,6 +28,30 @@ const isConnectionErrorMessage = (message: string): boolean =>
 const isTimeoutErrorMessage = (message: string): boolean =>
   /timeout|timed out|etimedout/i.test(message)
 
+const isSavedDegradedCharacterPersistError = (error: unknown): boolean => {
+  const candidate = error as
+    | {
+        detail?: unknown
+        details?: { detail?: unknown; code?: unknown; saved?: unknown }
+      }
+    | null
+  const detail =
+    candidate?.detail &&
+    typeof candidate.detail === "object" &&
+    !Array.isArray(candidate.detail)
+      ? candidate.detail
+      : candidate?.details?.detail &&
+            typeof candidate.details.detail === "object" &&
+            !Array.isArray(candidate.details.detail)
+        ? candidate.details.detail
+        : candidate?.details &&
+              typeof candidate.details === "object" &&
+              !Array.isArray(candidate.details)
+          ? candidate.details
+          : null
+  return detail?.code === "persist_validation_degraded" && detail?.saved === true
+}
+
 const buildSanitizedRagSearchError = (
   error: unknown
 ): Error & { status?: number; code?: string } => {
@@ -1003,14 +1027,21 @@ export const chatRagMethods = {
   ): Promise<any> {
     const cid = String(chat_id)
     const query = buildQuery(toChatScopeParams(options?.scope))
-    const res = await bgRequest<any>({
-      path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
-    this.invalidateChatMessagesCache(cid)
-    return res
+    try {
+      const res = await bgRequest<any>({
+        path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      })
+      this.invalidateChatMessagesCache(cid)
+      return res
+    } catch (error) {
+      if (isSavedDegradedCharacterPersistError(error)) {
+        this.invalidateChatMessagesCache(cid)
+      }
+      throw error
+    }
   },
 
   async *streamCharacterChatCompletion(

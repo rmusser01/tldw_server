@@ -9,7 +9,6 @@ import {
 import {
   dismissConnectionModals,
   getVisibleAntdSelectDropdown,
-  getVisibleAntdSelectOption,
   getAntdSelectTrigger,
   stubNotificationsApi,
   waitForAppShell
@@ -79,6 +78,7 @@ async function openSpeechInputSourcePicker(page: Page) {
   await inputSourcePicker.click({ force: true })
   const dropdown = getVisibleAntdSelectDropdown(page)
   await expect(dropdown).toBeVisible({ timeout: LOAD_TIMEOUT })
+  return dropdown
 }
 
 test.describe("Stage 7 audio regression gate", () => {
@@ -340,10 +340,16 @@ test.describe("Stage 7 audio regression gate", () => {
     await waitForAppShell(page, LOAD_TIMEOUT)
     await dismissConnectionModals(page)
 
-    await openSpeechInputSourcePicker(page)
-    await expect(getVisibleAntdSelectOption(page, { text: /Default microphone/i })).toBeVisible()
-    await expect(getVisibleAntdSelectOption(page, { text: /Tab audio/i })).toHaveCount(0)
-    await expect(getVisibleAntdSelectOption(page, { text: /System audio/i })).toHaveCount(0)
+    const dropdown = await openSpeechInputSourcePicker(page)
+    await expect(
+      dropdown.locator(".ant-select-item-option-content").filter({ hasText: /Default microphone/i })
+    ).toBeVisible()
+    await expect(
+      dropdown.locator(".ant-select-item-option-content").filter({ hasText: /Tab audio/i })
+    ).toHaveCount(0)
+    await expect(
+      dropdown.locator(".ant-select-item-option-content").filter({ hasText: /System audio/i })
+    ).toHaveCount(0)
   })
 
   test("stt transcription-model timeout state shows retry and recovers", async ({

@@ -1,20 +1,17 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import type { RagSource } from "@/services/rag/unified-rag"
+import {
+  ALL_RAG_SOURCES,
+  getRagSourceLabel,
+  getRagSourceTranslationKey,
+} from "@/services/rag/sourceMetadata"
 
 type SourceChipsProps = {
   selectedSources: RagSource[]
   onSourcesChange: (sources: RagSource[]) => void
   disabled?: boolean
 }
-
-const ALL_SOURCES: RagSource[] = [
-  "media_db",
-  "notes",
-  "characters",
-  "chats",
-  "kanban",
-]
 
 /**
  * Source filter chips - multi-select with "All" behavior
@@ -31,22 +28,14 @@ export const SourceChips: React.FC<SourceChipsProps> = ({
   const { t } = useTranslation(["sidepanel"])
 
   const selectedSourceSet = new Set(selectedSources)
-  const normalizedSources = ALL_SOURCES.filter((source) =>
+  const normalizedSources = ALL_RAG_SOURCES.filter((source) =>
     selectedSourceSet.has(source)
   )
 
   // Check if "All" is effectively selected (all sources or empty array)
   const isAllSelected =
     normalizedSources.length === 0 ||
-    normalizedSources.length === ALL_SOURCES.length
-
-  const sourceLabels: Record<RagSource, string> = {
-    media_db: t("sidepanel:rag.sources.media", "Media"),
-    notes: t("sidepanel:rag.sources.notes", "Notes"),
-    characters: t("sidepanel:rag.sources.characters", "Story Characters"),
-    chats: t("sidepanel:rag.sources.chats", "Conversations"),
-    kanban: t("sidepanel:rag.sources.kanban", "Task Boards"),
-  }
+    normalizedSources.length === ALL_RAG_SOURCES.length
 
   const handleAllClick = () => {
     // Clicking "All" selects all sources (or clears to default)
@@ -66,10 +55,10 @@ export const SourceChips: React.FC<SourceChipsProps> = ({
       // Add this source to selection
       const nextSourceSet = new Set(normalizedSources)
       nextSourceSet.add(source)
-      const nextSources = ALL_SOURCES.filter((s) => nextSourceSet.has(s))
+      const nextSources = ALL_RAG_SOURCES.filter((s) => nextSourceSet.has(s))
       // If all sources are now selected, treat as "All"
       onSourcesChange(
-        nextSources.length === ALL_SOURCES.length ? [] : nextSources
+        nextSources.length === ALL_RAG_SOURCES.length ? [] : nextSources
       )
     }
   }
@@ -102,7 +91,7 @@ export const SourceChips: React.FC<SourceChipsProps> = ({
         {t("sidepanel:rag.sources.all", "All")}
       </button>
 
-      {ALL_SOURCES.map((source) => {
+      {ALL_RAG_SOURCES.map((source) => {
         const isSelected = !isAllSelected && selectedSourceSet.has(source)
         return (
           <button
@@ -113,7 +102,10 @@ export const SourceChips: React.FC<SourceChipsProps> = ({
             className={chipClass(isSelected)}
             aria-pressed={isSelected}
           >
-            {sourceLabels[source]}
+            {t(
+              getRagSourceTranslationKey(source),
+              getRagSourceLabel(source)
+            )}
           </button>
         )
       })}

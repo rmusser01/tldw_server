@@ -178,7 +178,6 @@ export const DictionaryManagerOverlays: React.FC<DictionaryManagerOverlaysProps>
         onFinish={handleCreateSubmit}
         submitLabel="Create"
         submitLoading={creating}
-        tokenBudgetHelp="Optional. Used when preview or API processing calls omit token_budget."
       />
 
       <DictionaryFormModal
@@ -189,7 +188,6 @@ export const DictionaryManagerOverlays: React.FC<DictionaryManagerOverlaysProps>
         onFinish={handleEditSubmit}
         submitLabel="Save"
         submitLoading={updating}
-        tokenBudgetHelp="Optional. Clears when empty."
         includeActiveField
       />
 

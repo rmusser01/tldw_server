@@ -11,6 +11,7 @@ interface SyncStatusBadgeProps {
   lastSyncedAt?: number | null
   compact?: boolean
   onClick?: () => void
+  onRetry?: () => void
 }
 
 export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
@@ -19,7 +20,8 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
   serverId,
   lastSyncedAt,
   compact = false,
-  onClick
+  onClick,
+  onRetry
 }) => {
   const { t } = useTranslation(["settings", "common"])
   const isInteractive = typeof onClick === "function"
@@ -98,29 +100,50 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
 
   const statusConfig = getStatusConfig()
   const sourceConfig = getSourceConfig()
+  const showRetry = syncStatus === "pending" && typeof onRetry === "function"
+
+  const retryButton = showRetry ? (
+    <Tooltip title={t("settings:managePrompts.sync.retryTooltip", { defaultValue: "Retry sync" })}>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation()
+          onRetry?.()
+        }}
+        className="inline-flex items-center text-primary hover:underline focus:outline-none"
+        aria-label={t("settings:managePrompts.sync.retry", { defaultValue: "Retry sync" })}
+        data-testid="sync-retry-button"
+      >
+        <RefreshCw className="size-3" />
+      </button>
+    </Tooltip>
+  ) : null
 
   if (compact) {
     return (
       <Tooltip title={`${statusConfig.tooltip} | ${sourceConfig.tooltip}`}>
-        {isInteractive ? (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation()
-              onClick?.()
-            }}
-            className="inline-flex items-center gap-1 rounded p-0.5 text-text-muted hover:text-text focus:outline-none focus:ring-2 focus:ring-primary"
-            aria-label={t("settings:managePrompts.sync.resolveConflict", {
-              defaultValue: "Resolve conflict"
-            })}
-          >
-            {statusConfig.icon}
-          </button>
-        ) : (
-          <span className="inline-flex items-center gap-1 text-text-muted">
-            {statusConfig.icon}
-          </span>
-        )}
+        <span className="inline-flex items-center gap-1">
+          {isInteractive ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                onClick?.()
+              }}
+              className="inline-flex items-center gap-1 rounded p-0.5 text-text-muted hover:text-text focus:outline-none focus:ring-2 focus:ring-primary"
+              aria-label={t("settings:managePrompts.sync.resolveConflict", {
+                defaultValue: "Resolve conflict"
+              })}
+            >
+              {statusConfig.icon}
+            </button>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-text-muted">
+              {statusConfig.icon}
+            </span>
+          )}
+          {retryButton}
+        </span>
       </Tooltip>
     )
   }
@@ -158,6 +181,7 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
           </Tag>
         )}
       </Tooltip>
+      {retryButton}
       {serverId && (
         <Tooltip title={`Server ID: ${serverId}`}>
           <span className="text-xs text-text-muted">

@@ -4,7 +4,6 @@ import { RotateCcw } from "lucide-react"
 import type {
   ThemeDefinition,
   ThemeColorTokens,
-  ThemeRgbTokenKey,
   ThemeTypography,
   ThemeShape,
   ThemeLayout,
@@ -13,6 +12,7 @@ import type {
 import { getBuiltinPresets } from "@/themes/presets"
 import { applyThemeTokens, clearThemeTokens } from "@/themes/apply-theme"
 import { generateThemeId } from "@/themes/validation"
+import { rgbTripleToHex } from "@/themes/conversion"
 import {
   defaultTypography,
   defaultShape,
@@ -26,7 +26,7 @@ import { ColorTokenRow } from "./ColorTokenRow"
 // ---------------------------------------------------------------------------
 
 /** The 17 RGB color token keys rendered via ColorPicker rows. */
-const TOKEN_KEYS: ThemeRgbTokenKey[] = [
+const TOKEN_KEYS: (keyof ThemeColorTokens)[] = [
   "bg", "surface", "surface2", "elevated",
   "primary", "primaryStrong", "accent",
   "success", "warn", "danger", "muted",
@@ -118,7 +118,7 @@ export function ThemeAdvancedEditor({
   editingTheme,
   activeTheme,
 }: ThemeAdvancedEditorProps) {
-  const isEditing = Boolean(editingTheme?.id)
+  const isEditing = !!editingTheme
 
   const defaultPreset = getBuiltinPresets()[0]
   const initialPalette = editingTheme?.palette ?? defaultPreset.palette
@@ -172,7 +172,7 @@ export function ThemeAdvancedEditor({
 
   // ---- Build current theme for live preview ----
   const currentTheme = useMemo((): ThemeDefinition => ({
-    id: editingTheme?.id || "",
+    id: editingTheme?.id ?? "",
     name: name.trim() || "Untitled",
     version: 1,
     builtin: false,
@@ -294,7 +294,7 @@ export function ThemeAdvancedEditor({
       return
     }
     const theme: ThemeDefinition = {
-      id: editingTheme?.id || generateThemeId(name),
+      id: editingTheme?.id ?? generateThemeId(name),
       name: name.trim(),
       description: description.trim() || undefined,
       version: 1,
@@ -325,7 +325,7 @@ export function ThemeAdvancedEditor({
 
   // ---- Delete ----
   const handleDelete = useCallback(() => {
-    if (editingTheme?.id && onDelete) {
+    if (editingTheme && onDelete) {
       Modal.confirm({
         title: "Delete theme?",
         content: `"${editingTheme.name}" will be permanently removed.`,

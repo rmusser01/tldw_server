@@ -18,8 +18,77 @@ export function validateRegexPattern(pattern: string): string | null {
     }
     return null
   } catch (e: any) {
-    return e.message || "Invalid regex pattern"
+    return humanizeRegexError(e.message || "Invalid regex pattern")
   }
+}
+
+const REGEX_ERROR_PATTERNS: Array<{ pattern: RegExp; message: string; fix: string }> = [
+  {
+    pattern: /unterminated character class/i,
+    message: "Opening bracket [ has no closing ].",
+    fix: "Add a closing ] to your character class.",
+  },
+  {
+    pattern: /unterminated group/i,
+    message: "Opening parenthesis ( has no closing ).",
+    fix: "Add a closing ) to your group.",
+  },
+  {
+    pattern: /nothing to repeat/i,
+    message: "A repeat symbol (*, +, ?) has nothing before it.",
+    fix: "Put a character or group before the repeat symbol.",
+  },
+  {
+    pattern: /invalid escape/i,
+    message: "A backslash \\ is followed by an invalid character.",
+    fix: "Use a valid escape like \\d (digit), \\w (word), or \\s (space).",
+  },
+  {
+    pattern: /(?:^|[\s:])(unmatched|lone)(?=$|[\s:)\]}])/i,
+    message: "A bracket or parenthesis is not properly paired.",
+    fix: "Check that every opening ( [ { has a matching closing ) ] }.",
+  },
+  {
+    pattern: /invalid quantifier/i,
+    message: "A repeat range like {n,m} is not formatted correctly.",
+    fix: "Use the format {min,max}, e.g., {1,3} for 1 to 3 repeats.",
+  },
+]
+
+const VALIDATION_CODE_LABELS: Record<string, { label: string; fix?: string }> = {
+  regex_catastrophic_backtracking: {
+    label: "Slow pattern",
+    fix: "This pattern may run very slowly. Simplify nested repeating groups like (.+)+ or (.*)*.",
+  },
+  regex_invalid: {
+    label: "Invalid pattern",
+    fix: "The regex pattern could not be compiled. Check syntax.",
+  },
+  pattern_empty: {
+    label: "Empty pattern",
+    fix: "Add text to the pattern field.",
+  },
+  pattern_duplicate: {
+    label: "Duplicate pattern",
+    fix: "Another entry already uses this pattern. Remove one to avoid conflicts.",
+  },
+  replacement_empty: {
+    label: "Empty replacement",
+    fix: "Add text to the replacement field.",
+  },
+}
+
+export function humanizeRegexError(rawMessage: string): string {
+  for (const { pattern, message } of REGEX_ERROR_PATTERNS) {
+    if (pattern.test(rawMessage)) {
+      return message
+    }
+  }
+  return rawMessage
+}
+
+export function humanizeValidationCode(code: string): { label: string; fix?: string } {
+  return VALIDATION_CODE_LABELS[code] ?? { label: code }
 }
 
 export function toSafeNonNegativeInteger(value: unknown): number {

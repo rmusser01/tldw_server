@@ -40,9 +40,11 @@ export function useDictionaryEntryCreate({
 
   const { mutate: addEntry, isPending: adding } = useMutation({
     mutationFn: (value: any) => tldwClient.addDictionaryEntry(dictionaryId, value),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ["tldw:listDictionaryEntries", dictionaryId] })
       qc.invalidateQueries({ queryKey: allEntriesQueryKey })
+      const patternPreview = variables?.pattern || "Entry"
+      notification.success({ message: `Entry "${patternPreview}" added` })
       form.resetFields()
       setRegexError(null)
       setRegexServerError(null)

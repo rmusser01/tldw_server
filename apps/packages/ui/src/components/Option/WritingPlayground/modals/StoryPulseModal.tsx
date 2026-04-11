@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Button, Empty, List, Modal, Progress, Spin, Typography, message } from "antd"
+import { Button, Empty, List, Modal, Progress, Typography, message } from "antd"
 import { useWritingPlaygroundStore } from "@/store/writing-playground"
 import { getManuscriptStructure, analyzeChapter, listManuscriptAnalyses } from "@/services/writing-playground"
 
@@ -17,16 +17,10 @@ const METRICS = [
 ]
 
 export function StoryPulseModal({ open, onClose }: StoryPulseModalProps) {
-  const activeProjectId = useWritingPlaygroundStore((state) => state.activeProjectId)
-  const [analyzingChapterIds, setAnalyzingChapterIds] = useState<Set<string>>(
-    () => new Set()
-  )
+  const { activeProjectId } = useWritingPlaygroundStore()
+  const [analyzing, setAnalyzing] = useState<string | null>(null)
 
-  const {
-    data: structure,
-    isLoading: isStructureLoading,
-    isFetching: isStructureFetching,
-  } = useQuery({
+  const { data: structure } = useQuery({
     queryKey: ["manuscript-structure", activeProjectId],
     queryFn: () => getManuscriptStructure(activeProjectId!),
     enabled: open && !!activeProjectId,
@@ -52,22 +46,14 @@ export function StoryPulseModal({ open, onClose }: StoryPulseModalProps) {
   })()
 
   const handleAnalyze = async (chapterId: string) => {
-    setAnalyzingChapterIds((previous) => {
-      const next = new Set(previous)
-      next.add(chapterId)
-      return next
-    })
+    setAnalyzing(chapterId)
     try {
       await analyzeChapter(chapterId, { analysis_types: ["pacing"] })
       await refetchAnalyses()
     } catch {
       message.error("Failed to analyze chapter")
     } finally {
-      setAnalyzingChapterIds((previous) => {
-        const next = new Set(previous)
-        next.delete(chapterId)
-        return next
-      })
+      setAnalyzing(null)
     }
   }
 
@@ -78,10 +64,6 @@ export function StoryPulseModal({ open, onClose }: StoryPulseModalProps) {
     <Modal title="Story Pulse" open={open} onCancel={onClose} footer={null} width={700}>
       {!activeProjectId ? (
         <Empty description="Select a project first" />
-      ) : isStructureLoading || (isStructureFetching && !structure) ? (
-        <div className="flex justify-center py-10">
-          <Spin size="small" />
-        </div>
       ) : allChapters.length === 0 ? (
         <Empty description="No chapters to analyze" />
       ) : (
@@ -99,7 +81,7 @@ export function StoryPulseModal({ open, onClose }: StoryPulseModalProps) {
                     <Button
                       size="small"
                       type={analysis ? "default" : "primary"}
-                      loading={analyzingChapterIds.has(ch.id)}
+                      loading={analyzing === ch.id}
                       onClick={() => handleAnalyze(ch.id)}
                     >
                       {analysis ? (isStale ? "Re-analyze" : "Refresh") : "Analyze"}

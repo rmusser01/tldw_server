@@ -2778,7 +2778,7 @@ async def websocket_audio_chat_stream(
             paused_audio_chunks.clear()
             control_session.release_paused_audio()
             for buffered_audio, _buffered_seconds in queued_audio:
-                await _process_chat_audio(buffered_audio, allow_auto_commit=True)
+                await _process_chat_audio(buffered_audio, allow_auto_commit=False)
 
         try:
             for event in protocol_decision.events:

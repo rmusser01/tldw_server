@@ -751,7 +751,7 @@ const runDirectQuickIngestBatch = async (
               fileName,
               type: mediaType,
               data: pollResult.data,
-              persisted: shouldStoreRemote && shouldKeepOriginalFile(mediaType)
+              persisted: shouldStoreRemote && shouldKeepOriginalFile(rawType)
             })
           } catch (error) {
             if (!shouldFallbackToPersistentAdd(error)) {
@@ -767,7 +767,7 @@ const runDirectQuickIngestBatch = async (
               fileName,
               type: mediaType,
               data,
-              persisted: shouldStoreRemote && shouldKeepOriginalFile(mediaType)
+              persisted: shouldStoreRemote && shouldKeepOriginalFile(rawType)
             })
           }
           continue

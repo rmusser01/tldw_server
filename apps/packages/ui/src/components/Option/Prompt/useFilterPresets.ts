@@ -9,6 +9,7 @@ export type FilterPreset = {
   name: string
   typeFilter: string
   syncFilter: string
+  usageFilter: "all" | "used" | "unused"
   tagFilter: string[]
   tagMatchMode: TagMatchMode
   savedView: PromptSavedView
@@ -18,7 +19,16 @@ const loadPresets = (): FilterPreset[] => {
   if (typeof window === "undefined") return []
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : []
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.map((preset) => ({
+      ...preset,
+      usageFilter:
+        preset?.usageFilter === "used" || preset?.usageFilter === "unused"
+          ? preset.usageFilter
+          : "all"
+    }))
   } catch {
     return []
   }

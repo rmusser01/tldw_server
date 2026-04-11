@@ -35,5 +35,6 @@ describe("useChatActions interruption recovery guard", () => {
     expect(source).toContain("attemptCharacterStreamRecoveryPersist")
     expect(source).toContain("streamTransportInterrupted")
     expect(source).toContain("partialResponseSaved")
+    expect(source).toContain("resolveSavedDegradedCharacterPersist")
   })
 })

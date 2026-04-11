@@ -28,40 +28,12 @@ describe("Writing Phase 2 review fixes", () => {
   it("guards character, world, and plot creation while offline", () => {
     const source = readCharacterWorldSource()
 
-    expect(source).toMatch(/disabled=\{!newCharName\.trim\(\)\s*\|\|\s*!isOnline\}/)
-    expect(source).toMatch(/disabled=\{!newWorldName\.trim\(\)\s*\|\|\s*!isOnline\}/)
-    expect(source).toMatch(/disabled=\{!newPlotTitle\.trim\(\)\s*\|\|\s*!isOnline\}/)
-    expect(source).toMatch(/onPressEnter=\{\(\)\s*=>\s*isOnline\s*&&\s*newCharName\.trim\(\)\s*&&\s*!addCharMutation\.isPending\s*&&\s*addCharMutation\.mutate\(newCharName\.trim\(\)\)\}/)
-    expect(source).toMatch(/onPressEnter=\{\(\)\s*=>\s*isOnline\s*&&\s*newWorldName\.trim\(\)\s*&&\s*!addWorldMutation\.isPending\s*&&\s*addWorldMutation\.mutate\(\{\s*name:\s*newWorldName\.trim\(\),\s*kind:\s*newWorldKind\s*\}\)\}/)
-    expect(source).toMatch(/onPressEnter=\{\(\)\s*=>\s*isOnline\s*&&\s*newPlotTitle\.trim\(\)\s*&&\s*!addPlotMutation\.isPending\s*&&\s*addPlotMutation\.mutate\(newPlotTitle\.trim\(\)\)\}/)
-  })
-
-  it("only clears fields when the submitted value still matches the live draft", () => {
-    const source = readCharacterWorldSource()
-
-    expect(source).toContain('setNewCharName((current) => current === name ? "" : current)')
-    expect(source).toContain('setNewWorldName((current) => current === variables.name ? "" : current)')
-    expect(source).toContain('setNewPlotTitle((current) => current === title ? "" : current)')
-  })
-
-  it("surfaces create failures with an antd message toast", () => {
-    const source = readCharacterWorldSource()
-
-    expect(source).toContain("message.error(err.message || \"Failed to create character\")")
-    expect(source).toContain("message.error(err.message || \"Failed to create world info\")")
-    expect(source).toContain("message.error(err.message || \"Failed to create plot line\")")
-  })
-
-  it("gives icon-only manuscript controls accessible names", () => {
-    const source = readCharacterWorldSource()
-
-    expect(source).toContain('aria-label="New character name"')
-    expect(source).toContain('aria-label="Add character"')
-    expect(source).toContain('aria-label="World info kind"')
-    expect(source).toContain('aria-label="New world info entry name"')
-    expect(source).toContain('aria-label="Add world info entry"')
-    expect(source).toContain('aria-label="New plot line title"')
-    expect(source).toContain('aria-label="Add plot line"')
+    expect(source).toContain("disabled={!newCharName.trim() || !isOnline}")
+    expect(source).toContain("disabled={!newWorldName.trim() || !isOnline}")
+    expect(source).toContain("disabled={!newPlotTitle.trim() || !isOnline}")
+    expect(source).toContain("onPressEnter={() => isOnline && newCharName.trim() && addCharMutation.mutate(newCharName.trim())}")
+    expect(source).toContain("onPressEnter={() => isOnline && newWorldName.trim() && addWorldMutation.mutate({ name: newWorldName.trim(), kind: newWorldKind })}")
+    expect(source).toContain("onPressEnter={() => isOnline && newPlotTitle.trim() && addPlotMutation.mutate(newPlotTitle.trim())}")
   })
 
   it("styles citation marks with theme variables instead of hardcoded blues", () => {

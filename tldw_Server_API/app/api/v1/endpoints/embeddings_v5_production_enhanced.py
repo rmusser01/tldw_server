@@ -67,7 +67,6 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     record_byok_missing_credentials,
     resolve_byok_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
 from tldw_Server_API.app.core.AuthNZ.permissions import EMBEDDINGS_ADMIN, SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_profile_mode
@@ -1218,26 +1217,7 @@ def get_cache_key(
     if backend_identity:
         key_parts.append(backend_identity)
     key_string = "|".join(key_parts)
-    return hashlib.pbkdf2_hmac(
-        "sha256",
-        key_string.encode("utf-8"),
-        _embedding_cache_key_secret(),
-        _EMBEDDING_CACHE_KEY_PBKDF2_ITERATIONS,
-        dklen=32,
-    ).hex()
-
-
-_EMBEDDING_CACHE_KEY_PBKDF2_ITERATIONS = 2048
-
-
-@lru_cache(maxsize=1)
-def _embedding_cache_key_secret() -> bytes:
-    """Return a stable keyed-hash secret for embedding cache partitioning."""
-    try:
-        return derive_hmac_key()
-    except Exception:
-        # Keep cache keys deterministic in dev/test even when AuthNZ secrets are absent.
-        return b"tldw_embeddings_cache_hmac_fallback"
+    return hashlib.sha256(key_string.encode()).hexdigest()
 
 
 _SENSITIVE_QUERY_KEYS = frozenset({

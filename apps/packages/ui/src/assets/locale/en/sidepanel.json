@@ -231,10 +231,11 @@
     },
     "sources": {
       "all": "All",
-      "media": "Media",
+      "media": "Documents & Media",
       "notes": "Notes",
-      "characters": "Characters",
-      "chats": "Chats"
+      "characters": "Story Characters",
+      "chats": "Conversations",
+      "kanban": "Task Boards"
     },
     "preset": "Preset",
     "presets": {

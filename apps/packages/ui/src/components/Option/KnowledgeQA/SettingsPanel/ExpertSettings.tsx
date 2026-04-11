@@ -22,6 +22,7 @@ import { useKnowledgeQA } from "../KnowledgeQAProvider"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { cn } from "@/libs/utils"
 import type { RagSettings, RagTextChunkMethod } from "@/services/rag/unified-rag"
+import { getRagSourceOptions } from "@/services/rag/sourceMetadata"
 
 // Section configuration
 type SectionConfig = {
@@ -157,13 +158,7 @@ const SETTING_ENUM_OPTIONS: Partial<Record<RagKey, string[]>> = {
   sensitivity_level: ["public", "internal", "confidential", "restricted"],
 }
 
-const SOURCE_OPTIONS = [
-  { value: "media_db", label: "Your Documents" },
-  { value: "notes", label: "Your Notes" },
-  { value: "characters", label: "Characters & Profiles" },
-  { value: "chats", label: "Conversations" },
-  { value: "kanban", label: "Boards" },
-] as const
+const SOURCE_OPTIONS = getRagSourceOptions()
 
 const AUTO_OPTION_EXCLUDED_KEYS = new Set<RagKey>(["query"])
 

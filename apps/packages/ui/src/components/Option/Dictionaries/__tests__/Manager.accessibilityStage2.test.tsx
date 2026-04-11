@@ -360,39 +360,53 @@ describe("DictionariesManager accessibility stage-2 focus management", () => {
     })
   }, 30000)
 
-  it("returns focus to quick-assign trigger after closing the quick-assign modal", async () => {
+  it("opens quick-assign modal via compact dropdown", async () => {
     const user = userEvent.setup()
     render(<DictionariesManager />)
 
-    const quickAssignButton = screen.getByRole("button", {
-      name: "Quick assign Accessible Dictionary to chats"
+    const overflowButton = screen.getByRole("button", {
+      name: "More actions for Accessible Dictionary"
     })
-    quickAssignButton.focus()
-    await user.click(quickAssignButton)
+    overflowButton.focus()
+    await user.keyboard("{Enter}")
+    await waitFor(() => {
+      expect(screen.getByRole("menuitem", { name: "Quick assign to chats" })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole("menuitem", { name: "Quick assign to chats" }))
 
-    await screen.findByText("Quick assign: Accessible Dictionary")
+    expect(
+      await screen.findByText("Quick assign: Accessible Dictionary")
+    ).toBeInTheDocument()
+
     await closeTopMostModal(user)
 
     await waitFor(() => {
-      expect(quickAssignButton).toHaveFocus()
+      expect(overflowButton).toHaveFocus()
     })
   }, 60000)
 
-  it("returns focus to stats trigger after closing the statistics modal", async () => {
+  it("opens statistics modal via compact dropdown", async () => {
     const user = userEvent.setup()
     render(<DictionariesManager />)
 
-    const statsButton = screen.getByRole("button", {
-      name: "View statistics for Accessible Dictionary"
+    const overflowButton = screen.getByRole("button", {
+      name: "More actions for Accessible Dictionary"
     })
-    statsButton.focus()
-    await user.click(statsButton)
+    overflowButton.focus()
+    await user.keyboard("{Enter}")
+    await waitFor(() => {
+      expect(screen.getByRole("menuitem", { name: "View statistics" })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole("menuitem", { name: "View statistics" }))
 
-    await screen.findByText("Dictionary Statistics", {}, { timeout: 15000 })
+    expect(
+      await screen.findByText("Dictionary Statistics", {}, { timeout: 15000 })
+    ).toBeInTheDocument()
+
     await closeTopMostModal(user)
 
     await waitFor(() => {
-      expect(statsButton).toHaveFocus()
+      expect(overflowButton).toHaveFocus()
     })
   }, 90000)
 

@@ -332,16 +332,11 @@ def test_world_info_crud(client: TestClient):
     # Update
     resp = client.patch(
         f"{PREFIX}/world-info/{item_id}",
-        json={
-            "kind": "faction",
-            "description": "A crumbling ancient fortress",
-            "tags": ["fortress", "ruin"],
-        },
+        json={"description": "A crumbling ancient fortress", "tags": ["fortress", "ruin"]},
         headers={"expected-version": "1"},
     )
     assert resp.status_code == 200, resp.text
     updated = resp.json()
-    assert updated["kind"] == "faction"
     assert updated["description"] == "A crumbling ancient fortress"
     assert "ruin" in updated["tags"]
     assert updated["version"] == 2

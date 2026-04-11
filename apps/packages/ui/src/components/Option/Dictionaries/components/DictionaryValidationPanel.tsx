@@ -1,6 +1,7 @@
 import { Descriptions } from "antd"
 import React from "react"
 import { useTranslation } from "react-i18next"
+import { humanizeValidationCode } from "./dictionaryEntryUtils"
 
 type DictionaryValidationPanelProps = {
   entriesLength: number
@@ -59,10 +60,6 @@ export const DictionaryValidationPanel: React.FC<DictionaryValidationPanelProps>
               label={t("option:dictionariesTools.validationOk", "Valid")}>
               {validationReport.ok ? "Yes" : "No"}
             </Descriptions.Item>
-            <Descriptions.Item
-              label={t("option:dictionariesTools.schemaVersion", "Schema version")}>
-              {validationReport.schema_version ?? "—"}
-            </Descriptions.Item>
             {entryStats && (
               <Descriptions.Item
                 label={t("option:dictionariesTools.entryStats", "Entry stats")}>
@@ -88,11 +85,21 @@ export const DictionaryValidationPanel: React.FC<DictionaryValidationPanelProps>
                       onClick={() => onJumpToValidationEntry(err?.field)}
                       disabled={!isEntryFieldPath(err?.field)}
                     >
-                      <span className="font-medium text-text">
-                        {err?.code || "error"}:
-                      </span>{" "}
-                      {err?.message || String(err)}
-                      {err?.field ? ` (${err.field})` : ""}
+                      {(() => {
+                        const humanized = humanizeValidationCode(err?.code || "error")
+                        return (
+                          <>
+                            <span className="font-medium text-text">{humanized.label}:</span>{" "}
+                            {err?.message || String(err)}
+                            {err?.field ? ` (${err.field})` : ""}
+                            {humanized.fix && (
+                              <span className="block text-text-muted mt-0.5">
+                                {t("option:dictionariesTools.tipLabel", "Tip")}: {humanized.fix}
+                              </span>
+                            )}
+                          </>
+                        )
+                      })()}
                     </button>
                   </li>
                 ))}
@@ -121,11 +128,21 @@ export const DictionaryValidationPanel: React.FC<DictionaryValidationPanelProps>
                       onClick={() => onJumpToValidationEntry(warn?.field)}
                       disabled={!isEntryFieldPath(warn?.field)}
                     >
-                      <span className="font-medium text-text">
-                        {warn?.code || "warning"}:
-                      </span>{" "}
-                      {warn?.message || String(warn)}
-                      {warn?.field ? ` (${warn.field})` : ""}
+                      {(() => {
+                        const humanized = humanizeValidationCode(warn?.code || "warning")
+                        return (
+                          <>
+                            <span className="font-medium text-text">{humanized.label}:</span>{" "}
+                            {warn?.message || String(warn)}
+                            {warn?.field ? ` (${warn.field})` : ""}
+                            {humanized.fix && (
+                              <span className="block text-text-muted mt-0.5">
+                                {t("option:dictionariesTools.tipLabel", "Tip")}: {humanized.fix}
+                              </span>
+                            )}
+                          </>
+                        )
+                      })()}
                     </button>
                   </li>
                 ))}
