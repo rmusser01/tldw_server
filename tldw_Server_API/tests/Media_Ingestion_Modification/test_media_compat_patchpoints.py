@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 import pytest
 
@@ -39,6 +40,11 @@ def test_web_scraping_endpoint_resolves_task_without_compat_module():
     assert "compat_patchpoints" not in source  # nosec B101
     assert "_resolve_process_web_scraping_task" in source  # nosec B101
 
+    from tldw_Server_API.app.api.v1.endpoints.media import process_web_scraping as endpoint_mod
+
+    resolver_source = inspect.getsource(endpoint_mod._resolve_process_web_scraping_task)
+    assert "suppress(Exception)" not in resolver_source  # nosec B101
+
 
 def test_web_scraping_endpoint_resolver_honors_media_shim(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.media as media_mod
@@ -56,3 +62,11 @@ def test_web_scraping_endpoint_resolver_honors_media_shim(monkeypatch):
 
     resolved = endpoint_mod._resolve_process_web_scraping_task()
     assert resolved is shim_process_web_scraping_task  # nosec B101
+
+
+def test_web_scraping_endpoint_resolver_is_typed_and_documented():
+    from tldw_Server_API.app.api.v1.endpoints.media import process_web_scraping as endpoint_mod
+
+    signature = inspect.signature(endpoint_mod._resolve_process_web_scraping_task)
+    assert signature.return_annotation is not inspect.Signature.empty  # nosec B101
+    assert endpoint_mod._resolve_process_web_scraping_task.__doc__  # nosec B101

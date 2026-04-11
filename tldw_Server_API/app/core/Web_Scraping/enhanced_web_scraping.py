@@ -1226,7 +1226,10 @@ class EnhancedWebScraper:
             impersonate=impersonate,
             follow_redirects=True,
         )
-        return resp["text"]
+        status = int(resp.get("status", 0))
+        if 200 <= status < 300:
+            return resp["text"]
+        raise ValueError(f"curl fetch did not reach a terminal 2xx response (status={status})")
 
     @staticmethod
     async def _close_response(resp: Any) -> None:

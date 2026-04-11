@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import contextlib
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
@@ -18,16 +19,18 @@ from tldw_Server_API.app.services.web_scraping_service import process_web_scrapi
 
 router = APIRouter()
 
+WebScrapingTask = Callable[..., Awaitable[Any]]
 
-def _resolve_process_web_scraping_task():
-    with contextlib.suppress(Exception):
-        # Compatibility shim: older integration tests monkeypatch
-        # media.process_web_scraping_task at package scope.
-        from tldw_Server_API.app.api.v1.endpoints import media as media_mod
 
-        shim_task = getattr(media_mod, "process_web_scraping_task", None)
-        if callable(shim_task):
-            return shim_task
+def _resolve_process_web_scraping_task() -> WebScrapingTask:
+    """Return the active web scraping task, honoring the media shim when patched."""
+    # Compatibility shim: older integration tests monkeypatch
+    # media.process_web_scraping_task at package scope.
+    from tldw_Server_API.app.api.v1.endpoints import media as media_mod
+
+    shim_task = getattr(media_mod, "process_web_scraping_task", None)
+    if callable(shim_task):
+        return cast(WebScrapingTask, shim_task)
     return process_web_scraping_task
 
 

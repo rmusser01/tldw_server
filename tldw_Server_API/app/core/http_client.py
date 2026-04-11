@@ -2994,7 +2994,6 @@ def _fetch_curl_simple(
     timeout: float | None,
     impersonate: str | None,
     proxies: dict[str, str] | None,
-    allow_redirects: bool,
     session: Any | None = None,
 ) -> HttpResponse:
     CurlSession = None
@@ -3103,21 +3102,51 @@ def fetch(*args, **kwargs):
 
     def _extract_redirect_host(redirect_url: str) -> str:
         try:
-            if httpx is not None:
-                parsed = httpx.URL(redirect_url)
-                return (parsed.host or "").lower()
             parsed = urlparse(redirect_url)
             return (parsed.hostname or "").lower()
+        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+            return ""
+
+    def _extract_redirect_port(redirect_url: str) -> int | None:
+        try:
+            parsed = urlparse(redirect_url)
+            if parsed.port is not None:
+                return int(parsed.port)
+            scheme = (parsed.scheme or "").lower()
+            if scheme == "https":
+                return 443
+            if scheme == "http":
+                return 80
+            return None
+        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+            return None
+
+    def _extract_redirect_scheme(redirect_url: str) -> str:
+        try:
+            parsed = urlparse(redirect_url)
+            return (parsed.scheme or "").lower()
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
             return ""
 
     def _is_cross_host_redirect(prev: str, nxt: str) -> bool:
         prev_host = _extract_redirect_host(prev)
         next_host = _extract_redirect_host(nxt)
-        return bool(prev_host and next_host and prev_host != next_host)
+        prev_port = _extract_redirect_port(prev)
+        next_port = _extract_redirect_port(nxt)
+        return bool(
+            prev_host
+            and next_host
+            and ((prev_host, prev_port) != (next_host, next_port))
+        )
 
-    def _cross_host_redirect_headers(current_headers: dict[str, str]) -> dict[str, str]:
-        # Preserve only safe transport headers across host boundaries.
+    def _is_scheme_downgrade(prev: str, nxt: str) -> bool:
+        return (
+            _extract_redirect_scheme(prev) == "https"
+            and _extract_redirect_scheme(nxt) == "http"
+        )
+
+    def _redirect_boundary_headers(current_headers: dict[str, str]) -> dict[str, str]:
+        # Preserve only safe transport headers across origin boundaries.
         safe_headers: dict[str, str] = {}
         for header_key, header_value in (current_headers or {}).items():
             key_lc = str(header_key).lower()
@@ -3127,29 +3156,38 @@ def fetch(*args, **kwargs):
                 safe_headers["Accept-Encoding"] = str(header_value)
         return safe_headers
 
+    def _clear_session_cookie_state(session: Any) -> None:
+        for attr_name in ("cookies", "cookie_jar", "jar"):
+            store = getattr(session, attr_name, None)
+            if store is None:
+                continue
+            clear = getattr(store, "clear", None)
+            if callable(clear):
+                with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                    clear()
+                continue
+            if isinstance(store, dict):
+                store.clear()
+
     def _redirect_allowed(prev: str, nxt: str) -> bool:
         try:
-            if httpx is not None:
-                pu = httpx.URL(prev)
-                nu = httpx.URL(nxt)
-                prev_scheme = (pu.scheme or "").lower()
-                next_scheme = (nu.scheme or "").lower()
-                prev_host = (pu.host or "").lower()
-                next_host = (nu.host or "").lower()
-            else:
-                pu = urlparse(prev)
-                nu = urlparse(nxt)
-                prev_scheme = (pu.scheme or "").lower()
-                next_scheme = (nu.scheme or "").lower()
-                prev_host = (pu.hostname or "").lower()
-                next_host = (nu.hostname or "").lower()
+            prev_scheme = _extract_redirect_scheme(prev)
+            next_scheme = _extract_redirect_scheme(nxt)
+            prev_host = _extract_redirect_host(prev)
+            next_host = _extract_redirect_host(nxt)
+            prev_port = _extract_redirect_port(prev)
+            next_port = _extract_redirect_port(nxt)
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
             return False
         # Disallow scheme downgrade unless explicitly allowed
         if not allow_downgrade and prev_scheme == "https" and next_scheme == "http":
             return False
-        # Same-host redirects are always allowed (subject to egress checks)
-        if prev_host == next_host:
+        same_host = bool(prev_host and next_host and prev_host == next_host)
+        # Same-host scheme changes are governed separately by allow_downgrade.
+        if same_host and prev_scheme != next_scheme:
+            return True
+        # Same-host/same-port redirects are always allowed (subject to egress checks)
+        if (prev_host, prev_port) == (next_host, next_port):
             return True
         # Cross-host redirects configurable (default disabled)
         return bool(allow_cross_host)
@@ -3183,7 +3221,6 @@ def fetch(*args, **kwargs):
                     timeout=timeout,
                     impersonate=impersonate,
                     proxies=proxies,
-                    allow_redirects=False,
                     session=curl_session,
                 )
                 status = int(resp["status"])
@@ -3203,9 +3240,10 @@ def fetch(*args, **kwargs):
                 if not _redirect_allowed(cur_url, next_url):
                     return resp
 
-                if _is_cross_host_redirect(cur_url, next_url):
-                    hop_headers = _cross_host_redirect_headers(hop_headers)
+                if _is_cross_host_redirect(cur_url, next_url) or _is_scheme_downgrade(cur_url, next_url):
+                    hop_headers = _redirect_boundary_headers(hop_headers)
                     hop_cookies = None
+                    _clear_session_cookie_state(curl_session)
 
                 redirects += 1
                 if redirects > DEFAULT_MAX_REDIRECTS:
@@ -3238,21 +3276,18 @@ def fetch(*args, **kwargs):
             if not location:
                 break
 
-            try:
-                base_url = str(getattr(r, "url", cur_url))
-                next_url = str(httpx.URL(base_url).join(httpx.URL(location)))
-            except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-                try:
-                    next_url = str(httpx.URL(location))
-                except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-                    break
+            base_url = str(getattr(r, "url", cur_url))
+            next_url = _resolve_redirect_url(base_url, str(location))
+            if not next_url:
+                break
 
             if not _redirect_allowed(cur_url, next_url):
                 break
 
-            if _is_cross_host_redirect(cur_url, next_url):
-                hop_headers = _cross_host_redirect_headers(hop_headers)
+            if _is_cross_host_redirect(cur_url, next_url) or _is_scheme_downgrade(cur_url, next_url):
+                hop_headers = _redirect_boundary_headers(hop_headers)
                 hop_cookies = None
+                _clear_session_cookie_state(sc)
 
             redirects += 1
             if redirects > DEFAULT_MAX_REDIRECTS:
