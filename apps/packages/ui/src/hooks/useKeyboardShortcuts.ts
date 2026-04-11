@@ -158,6 +158,8 @@ export function useShortcut(
       return
     }
 
+    const listenerOptions: AddEventListenerOptions = { capture: true }
+
     const handler = (event: KeyboardEvent) => {
       // Skip if in input and not allowed
       if (!shortcut.allowInInput && isInputElement(event.target)) {
@@ -171,8 +173,9 @@ export function useShortcut(
       }
     }
 
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
+    document.addEventListener("keydown", handler, listenerOptions)
+    return () =>
+      document.removeEventListener("keydown", handler, listenerOptions)
     }, [
     shortcut.enabled,
     shortcut.key,
@@ -190,6 +193,8 @@ export function useShortcuts(shortcuts: Shortcut[], scope?: string) {
   shortcutsRef.current = shortcuts
 
   useEffect(() => {
+    const listenerOptions: AddEventListenerOptions = { capture: true }
+
     const handler = (event: KeyboardEvent) => {
       for (const shortcut of shortcutsRef.current) {
         // Check scope
@@ -211,8 +216,9 @@ export function useShortcuts(shortcuts: Shortcut[], scope?: string) {
       }
     }
 
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
+    document.addEventListener("keydown", handler, listenerOptions)
+    return () =>
+      document.removeEventListener("keydown", handler, listenerOptions)
   }, [scope])
 }
 

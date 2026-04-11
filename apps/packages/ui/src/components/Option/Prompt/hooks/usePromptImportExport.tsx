@@ -99,12 +99,8 @@ export function usePromptImportExport(deps: UsePromptImportExportDeps) {
       URL.revokeObjectURL(url)
     } catch (e) {
       notification.error({
-        message: t("managePrompts.notification.exportFailed", {
-          defaultValue: "Export failed"
-        }),
-        description: t("managePrompts.notification.exportFailedDesc", {
-          defaultValue: "Could not export prompts. Try again or check your server connection for CSV/Markdown exports."
-        })
+        message: t("managePrompts.notification.error"),
+        description: t("managePrompts.notification.someError")
       })
     }
   }, [exportFormat, guardPrivateMode, isOnline, t])
@@ -190,12 +186,8 @@ export function usePromptImportExport(deps: UsePromptImportExportDeps) {
         return
       }
       notification.error({
-        message: t("managePrompts.notification.importFailed", {
-          defaultValue: "Import failed"
-        }),
-        description: t("managePrompts.notification.importFailedDesc", {
-          defaultValue: "The file could not be imported. Make sure it is valid JSON containing an array of prompt objects."
-        })
+        message: t("managePrompts.notification.error"),
+        description: t("managePrompts.notification.someError")
       })
     }
   }, [confirmDanger, data, guardPrivateMode, importMode, queryClient, t])

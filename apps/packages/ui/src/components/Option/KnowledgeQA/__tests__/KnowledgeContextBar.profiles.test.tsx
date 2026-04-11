@@ -226,6 +226,29 @@ describe("KnowledgeContextBar saved search profiles", () => {
       expect(stored).toHaveLength(1)
       expect(stored[0].name).toBe("Profile B")
     })
+
+    it("keeps the delete action discoverable for keyboard users", () => {
+      localStorage.setItem(
+        PROFILES_STORAGE_KEY,
+        JSON.stringify([
+          {
+            name: "Profile A",
+            sources: ["media_db"],
+            preset: "fast",
+            enableWebFallback: true,
+          },
+        ])
+      )
+
+      renderContextBar()
+
+      openProfileMenu()
+      const deleteButton = screen.getByRole("button", {
+        name: "Delete profile Profile A",
+      })
+
+      expect(deleteButton.className).toContain("group-focus-within:visible")
+    })
   })
 
   // -----------------------------------------------------------------------
@@ -233,8 +256,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
   // -----------------------------------------------------------------------
   describe("max profiles limit", () => {
     it("disables save button and shows limit message when 5 profiles exist", () => {
-      const profiles = Array.from({ length: 5 }, (_, i) => ({
-        name: `Profile ${i + 1}`,
+      const profiles = Array.from({ length: 5 }, (_, index) => ({
+        name: `Profile ${index + 1}`,
         sources: ["media_db"] as string[],
         preset: "fast",
         enableWebFallback: true,
@@ -269,6 +292,9 @@ describe("KnowledgeContextBar saved search profiles", () => {
         PROFILES_STORAGE_KEY,
         JSON.stringify([
           { name: "Valid", sources: ["media_db"], preset: "fast", enableWebFallback: true },
+          { name: "", sources: ["media_db"], preset: "fast", enableWebFallback: true },
+          { name: "Bad preset", sources: ["media_db"], preset: "bogus", enableWebFallback: true },
+          { name: "Bad source", sources: ["bogus"], preset: "fast", enableWebFallback: true },
           { name: 123, sources: "not-an-array", preset: "fast", enableWebFallback: true },
           null,
           "just a string",
@@ -279,6 +305,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
 
       openProfileMenu()
       expect(screen.getByRole("menuitem", { name: /Valid/i })).toBeInTheDocument()
+      expect(screen.queryByRole("menuitem", { name: /Bad preset/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole("menuitem", { name: /Bad source/i })).not.toBeInTheDocument()
       // The invalid entries should not appear
       expect(screen.queryByText("123")).not.toBeInTheDocument()
     })

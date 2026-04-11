@@ -264,6 +264,104 @@ export class ChatPage {
     }
   }
 
+  async selectCharacter(name: string): Promise<void> {
+    const triggerCandidates = [
+      this.page.getByTestId("character-selector").first(),
+      this.page.getByRole("button", { name: /character/i }).first(),
+      this.page.locator(".character-select").first(),
+    ]
+
+    let trigger: Locator | null = null
+    await expect
+      .poll(
+        async () => {
+          for (const candidate of triggerCandidates) {
+            if (await candidate.isVisible().catch(() => false)) {
+              trigger = candidate
+              return true
+            }
+          }
+          return false
+        },
+        { timeout: 10_000, message: "Timed out waiting for character selector trigger" }
+      )
+      .toBe(true)
+
+    if (!trigger) {
+      throw new Error("Character selector trigger not found")
+    }
+
+    await trigger.click()
+
+    const pickerSurfaceCandidates = [
+      this.page.getByTestId("character-selector-menu").first(),
+      this.page.getByRole("listbox").first(),
+      this.page.getByRole("menu").first(),
+      this.page.locator(".character-select__menu").first(),
+    ]
+
+    let pickerSurface: Locator | null = null
+    await expect
+      .poll(
+        async () => {
+          for (const candidate of pickerSurfaceCandidates) {
+            if (await candidate.isVisible().catch(() => false)) {
+              pickerSurface = candidate
+              return true
+            }
+          }
+          return false
+        },
+        { timeout: 10_000, message: "Timed out waiting for character picker surface" }
+      )
+      .toBe(true)
+
+    if (!pickerSurface) {
+      throw new Error("Character picker surface not found")
+    }
+
+    const optionCandidates = [
+      pickerSurface.getByRole("option", { name }).first(),
+      pickerSurface.getByRole("menuitem", { name }).first(),
+      pickerSurface.getByText(name, { exact: true }).first(),
+    ]
+
+    let option: Locator | null = null
+    await expect
+      .poll(
+        async () => {
+          for (const candidate of optionCandidates) {
+            if (await candidate.isVisible().catch(() => false)) {
+              option = candidate
+              return true
+            }
+          }
+          return false
+        },
+        { timeout: 10_000, message: `Timed out waiting for character option ${name}` }
+      )
+      .toBe(true)
+
+    if (!option) {
+      throw new Error(`Character option not found: ${name}`)
+    }
+
+    await option.click()
+
+    await expect
+      .poll(
+        async () => {
+          const selectedDisplay = this.page.getByTestId("character-selector").first()
+          return (await selectedDisplay.textContent())?.includes(name) ?? false
+        },
+        {
+          timeout: 5_000,
+          message: `Timed out waiting for selected character ${name} to settle`
+        }
+      )
+      .toBe(true)
+  }
+
   /**
    * Wait for a response to appear
    */

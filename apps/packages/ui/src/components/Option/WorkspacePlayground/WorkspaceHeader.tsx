@@ -86,6 +86,7 @@ import {
   createRolloutSubjectId,
   normalizeRolloutPercentage
 } from "@/utils/feature-rollout"
+import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
 
 interface WorkspaceHeaderProps {
   leftPaneOpen: boolean
@@ -2047,57 +2048,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         </div>
       </Modal>
 
-      <Modal
-        title={t("playground:workspace.keyboardShortcuts", "Keyboard Shortcuts")}
+      <WorkspaceShortcutsModal
         open={shortcutsModalOpen}
-        onCancel={handleCloseShortcutsModal}
-        footer={null}
-        width={520}
-        destroyOnHidden
-      >
-        <div className="space-y-2">
-          {[
-            {
-              action: t("playground:workspace.shortcutSearch", "Search workspace"),
-              combo: `${shortcutModifierLabel}+K`
-            },
-            {
-              action: t("playground:workspace.shortcutFocusSources", "Focus sources"),
-              combo: `${shortcutModifierLabel}+1`
-            },
-            {
-              action: t("playground:workspace.shortcutFocusChat", "Focus chat"),
-              combo: `${shortcutModifierLabel}+2`
-            },
-            {
-              action: t("playground:workspace.shortcutFocusStudio", "Focus studio"),
-              combo: `${shortcutModifierLabel}+3`
-            },
-            {
-              action: t("playground:workspace.shortcutNewNote", "New note"),
-              combo: `${shortcutModifierLabel}+N`
-            },
-            {
-              action: t("playground:workspace.shortcutNewWorkspace", "New workspace"),
-              combo: `${shortcutModifierLabel}+Shift+N`
-            },
-            {
-              action: t("playground:workspace.shortcutUndo", "Undo last action"),
-              combo: `${shortcutModifierLabel}+Z`
-            }
-          ].map((item) => (
-            <div
-              key={item.action}
-              className="flex items-center justify-between rounded border border-border px-3 py-2"
-            >
-              <span className="text-sm text-text">{item.action}</span>
-              <code className="rounded bg-surface2 px-2 py-0.5 text-xs font-semibold text-text">
-                {item.combo}
-              </code>
-            </div>
-          ))}
-        </div>
-      </Modal>
+        onClose={handleCloseShortcutsModal}
+      />
 
       <Modal
         title={t("playground:workspace.telemetrySummary", "Telemetry summary")}

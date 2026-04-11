@@ -396,22 +396,30 @@ export function SearchBar({
         )}
 
         {/* Submit button */}
-        <button
-          type="submit"
-          disabled={!query.trim() || isSearching || noSourcesBlocked}
-          title={noSourcesBlocked ? "Select source categories or enable web fallback to search" : undefined}
-          className={cn(
-            "absolute right-2 top-1/2 -translate-y-1/2",
-            "px-4 py-2 rounded-lg",
-            "bg-primary text-white",
-            "font-medium text-sm",
-            "transition-all duration-200",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-            "hover:bg-primaryStrong"
-          )}
+        <Tooltip
+          title={
+            noSourcesBlocked
+              ? "Select source categories or enable web fallback to search"
+              : null
+          }
         >
-          {isSearching ? "Searching..." : "Ask"}
-        </button>
+          <span className="absolute right-2 top-1/2 inline-flex -translate-y-1/2">
+            <button
+              type="submit"
+              disabled={!query.trim() || isSearching || noSourcesBlocked}
+              className={cn(
+                "px-4 py-2 rounded-lg",
+                "bg-primary text-white",
+                "font-medium text-sm",
+                "transition-all duration-200",
+                "disabled:opacity-50 disabled:cursor-not-allowed",
+                "hover:bg-primaryStrong"
+              )}
+            >
+              {isSearching ? "Searching..." : "Ask"}
+            </button>
+          </span>
+        </Tooltip>
       </div>
 
       {isSearching && (

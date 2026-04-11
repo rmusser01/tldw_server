@@ -1,5 +1,5 @@
 import React from "react"
-import { Button, Descriptions, Modal, Tag } from "antd"
+import { Button, Collapse, Descriptions, Modal, Tag } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { formatRelativeTimestamp } from "./listUtils"
 
@@ -90,50 +90,67 @@ export function DictionaryStatsModal({
     <Modal title="Dictionary Statistics" open={open} onCancel={onClose} footer={null}>
       {stats && (
         <div className="space-y-3">
-          <Descriptions size="small" bordered column={1}>
-            <Descriptions.Item label="ID">{stats.dictionary_id}</Descriptions.Item>
-            <Descriptions.Item label="Name">{stats.name}</Descriptions.Item>
-            <Descriptions.Item label="Total Entries">{stats.total_entries}</Descriptions.Item>
-            <Descriptions.Item label="Regex Entries">{stats.regex_entries}</Descriptions.Item>
-            <Descriptions.Item label="Literal Entries">{stats.literal_entries}</Descriptions.Item>
-            <Descriptions.Item label="Enabled Entries">
-              {toDisplayStatNumber(stats.enabled_entries)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Disabled Entries">
-              {toDisplayStatNumber(stats.disabled_entries)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Probabilistic Entries">
-              {toDisplayStatNumber(stats.probabilistic_entries)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Timed Effect Entries">
-              {toDisplayStatNumber(stats.timed_effect_entries)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Unused Entries">
-              {toDisplayStatNumber(stats.zero_usage_entries)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Pattern Conflicts">
-              {toDisplayStatNumber(stats.pattern_conflict_count)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Groups">{toDisplayGroupSummary(stats.groups)}</Descriptions.Item>
-            <Descriptions.Item label="Average Probability">
-              {toDisplayProbabilitySummary(stats.average_probability)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Default Token Budget">
-              {toDisplayTokenBudgetSummary(stats.default_token_budget)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Created">
-              {formatRelativeTimestamp(stats.created_at)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Updated">
-              {formatRelativeTimestamp(stats.updated_at)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Last Used">
-              {formatRelativeTimestamp(stats.last_used)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Total Usage Count">
-              {toDisplayStatNumber(stats.total_usage_count)}
-            </Descriptions.Item>
-          </Descriptions>
+          <p className="text-sm text-text mb-3">
+            {stats.total_entries ?? 0} entries
+            {(typeof stats.pattern_conflict_count === "number" && stats.pattern_conflict_count > 0) && ` \u00b7 ${stats.pattern_conflict_count} conflicts`}
+            {(typeof stats.zero_usage_entries === "number" && stats.zero_usage_entries > 0) && ` \u00b7 ${stats.zero_usage_entries} unused`}
+            {(typeof stats.total_usage_count === "number" && stats.total_usage_count > 0) ? ` \u00b7 used ${stats.total_usage_count} times` : ""}
+          </p>
+          <Collapse
+            ghost
+            defaultActiveKey={["overview", "usage"]}
+            items={[
+              {
+                key: "overview",
+                label: "Overview",
+                children: (
+                  <Descriptions size="small" column={1} bordered>
+                    <Descriptions.Item label="Name">{stats.name}</Descriptions.Item>
+                    <Descriptions.Item label="Total Entries">{stats.total_entries ?? 0}</Descriptions.Item>
+                    <Descriptions.Item label="Literal Entries">{stats.literal_entries ?? 0}</Descriptions.Item>
+                    <Descriptions.Item label="Regex Entries">{stats.regex_entries ?? 0}</Descriptions.Item>
+                    <Descriptions.Item label="Created">{formatRelativeTimestamp(stats.created_at)}</Descriptions.Item>
+                    <Descriptions.Item label="Updated">{formatRelativeTimestamp(stats.updated_at)}</Descriptions.Item>
+                  </Descriptions>
+                ),
+              },
+              {
+                key: "usage",
+                label: "Usage",
+                children: (
+                  <Descriptions size="small" column={1} bordered>
+                    <Descriptions.Item label="Total Usage Count">{toDisplayStatNumber(stats.total_usage_count)}</Descriptions.Item>
+                    <Descriptions.Item label="Last Used">{formatRelativeTimestamp(stats.last_used)}</Descriptions.Item>
+                    <Descriptions.Item label="Enabled Entries">{toDisplayStatNumber(stats.enabled_entries)}</Descriptions.Item>
+                    <Descriptions.Item label="Disabled Entries">{toDisplayStatNumber(stats.disabled_entries)}</Descriptions.Item>
+                  </Descriptions>
+                ),
+              },
+              {
+                key: "health",
+                label: "Health",
+                children: (
+                  <Descriptions size="small" column={1} bordered>
+                    <Descriptions.Item label="Unused Entries">{toDisplayStatNumber(stats.zero_usage_entries)}</Descriptions.Item>
+                    <Descriptions.Item label="Pattern Conflicts">{toDisplayStatNumber(stats.pattern_conflict_count)}</Descriptions.Item>
+                    <Descriptions.Item label="Groups">{toDisplayGroupSummary(stats.groups)}</Descriptions.Item>
+                  </Descriptions>
+                ),
+              },
+              {
+                key: "advanced",
+                label: "Advanced",
+                children: (
+                  <Descriptions size="small" column={1} bordered>
+                    <Descriptions.Item label="Probabilistic Entries">{toDisplayStatNumber(stats.probabilistic_entries)}</Descriptions.Item>
+                    <Descriptions.Item label="Timed Effect Entries">{toDisplayStatNumber(stats.timed_effect_entries)}</Descriptions.Item>
+                    <Descriptions.Item label="Average Probability">{toDisplayProbabilitySummary(stats.average_probability)}</Descriptions.Item>
+                    <Descriptions.Item label="Processing limit">{toDisplayTokenBudgetSummary(stats.default_token_budget)}</Descriptions.Item>
+                  </Descriptions>
+                ),
+              },
+            ]}
+          />
 
           {Array.isArray(stats.entry_usage) && stats.entry_usage.length > 0 && (
             <div className="space-y-2">

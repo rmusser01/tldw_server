@@ -538,6 +538,12 @@ class CharacterChatStreamPersistRequest(BaseModel):
     Use after a streamed completion where the assistant content was not persisted.
     """
     assistant_content: str = Field(..., min_length=1, max_length=1_000_000, description="Assistant text to persist (max 1MB)")
+    assistant_message_id: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=255,
+        description="Optional stable assistant message ID used for idempotent persist retries.",
+    )
     user_message_id: Optional[str] = Field(None, description="Optional parent user message id to link threading")
     speaker_character_id: Optional[int] = Field(
         None,
@@ -568,6 +574,16 @@ class CharacterChatStreamPersistRequest(BaseModel):
     usage: Optional[dict[str, int]] = Field(None, description="Optional token usage stats: prompt_tokens, completion_tokens, total_tokens")
     chat_rating: Optional[int] = Field(None, ge=1, le=5, description="Optional conversation rating to set (1-5)")
     ranking: Optional[int] = Field(None, description="Optional ranking for the assistant message")
+
+    @field_validator("assistant_message_id")
+    @classmethod
+    def validate_assistant_message_id(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("assistant_message_id cannot be blank")
+        return normalized
 
 
 class CharacterChatStreamPersistResponse(BaseModel):

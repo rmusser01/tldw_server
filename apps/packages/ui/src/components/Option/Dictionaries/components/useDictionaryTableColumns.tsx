@@ -245,7 +245,7 @@ export function useDictionaryTableColumns({
         render: (_: any, record: any) => (
           <DictionaryActionsCell
             record={record}
-            useCompactDictionaryActions={useCompactDictionaryActions}
+            useCompactDictionaryActions
             onOpenEdit={onOpenEdit}
             onOpenEntries={onOpenEntries}
             onOpenQuickAssign={onOpenQuickAssign}

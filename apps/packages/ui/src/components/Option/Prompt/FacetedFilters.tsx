@@ -16,10 +16,10 @@ type Props = {
 }
 
 const TYPE_OPTIONS = [
-  { value: "all", label: "All", tooltip: "" },
-  { value: "system", label: "System", tooltip: "Sets AI behavior, persona, and instructions for the conversation" },
-  { value: "quick", label: "Quick", tooltip: "Reusable message template you can insert into chat" },
-  { value: "mixed", label: "Mixed", tooltip: "Has both AI instructions and a message template" },
+  { value: "all", label: "All" },
+  { value: "system", label: "System" },
+  { value: "quick", label: "Quick" },
+  { value: "mixed", label: "Mixed" },
 ]
 
 const SYNC_OPTIONS = [
@@ -74,7 +74,6 @@ export const FacetedFilters: React.FC<Props> = ({
               type="button"
               data-testid={`facet-type-${opt.value}`}
               onClick={() => onTypeFilterChange(opt.value)}
-              title={opt.tooltip || undefined}
               className={`flex w-full items-center justify-between rounded px-2 py-1 text-sm transition-colors ${
                 typeFilter === opt.value
                   ? "bg-primary/10 text-primary font-medium"

@@ -4,9 +4,11 @@ from typing import Any
 
 from fastapi import APIRouter
 
+from tldw_Server_API.app.api.v1.schemas.ocr_schemas import OCRBackendsResponse
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry import (
     list_backends as _list_backends,
 )
+from tldw_Server_API.app.core.Utils.Utils import logging
 
 router = APIRouter(prefix="/ocr", tags=["ocr"])
 
@@ -44,7 +46,17 @@ def _describe_mineru_backend_error(exc: Exception) -> dict[str, Any]:
     }
 
 
-@router.get("/backends")
+def _record_backend_discovery_error(
+    out: dict[str, Any],
+    backend_name: str,
+    exc: Exception,
+) -> None:
+    logging.error(f"OCR backend discovery failed for {backend_name}: {exc}", exc_info=True)
+    out.setdefault(backend_name, {})
+    out[backend_name]["error"] = str(exc)
+
+
+@router.get("/backends", response_model=OCRBackendsResponse)
 def list_ocr_backends() -> dict[str, Any]:
     """List available OCR backends with lightweight health information."""
     out = _list_backends()
@@ -113,6 +125,61 @@ def list_ocr_backends() -> dict[str, Any]:
                 out["hunyuan"]["vllm_reachable"] = False
     except _OCR_NONCRITICAL_EXCEPTIONS:
         pass
+
+    try:
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.llamacpp_ocr import (
+            LlamaCppOCRBackend,
+        )
+
+        llamacpp_desc = LlamaCppOCRBackend().describe()
+        out.setdefault("llamacpp", {}).update(
+            {
+                "mode": llamacpp_desc.get("mode"),
+                "configured_mode": llamacpp_desc.get("configured_mode"),
+                "model": llamacpp_desc.get("model"),
+                "configured": llamacpp_desc.get("configured"),
+                "supports_structured_output": llamacpp_desc.get("supports_structured_output"),
+                "supports_json": llamacpp_desc.get("supports_json"),
+                "configured_flags": llamacpp_desc.get("configured_flags"),
+                "auto_eligible": llamacpp_desc.get("auto_eligible"),
+                "auto_high_quality_eligible": llamacpp_desc.get("auto_high_quality_eligible"),
+                "url_configured": llamacpp_desc.get("url_configured"),
+                "managed_configured": llamacpp_desc.get("managed_configured"),
+                "managed_running": llamacpp_desc.get("managed_running"),
+                "allow_managed_start": llamacpp_desc.get("allow_managed_start"),
+                "cli_configured": llamacpp_desc.get("cli_configured"),
+                "backend_concurrency_cap": llamacpp_desc.get("backend_concurrency_cap"),
+            }
+        )
+    except _OCR_NONCRITICAL_EXCEPTIONS as exc:
+        _record_backend_discovery_error(out, "llamacpp", exc)
+
+    try:
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.chatllm_ocr import (
+            ChatLLMOCRBackend,
+        )
+
+        chatllm_desc = ChatLLMOCRBackend().describe()
+        out.setdefault("chatllm", {}).update(
+            {
+                "mode": chatllm_desc.get("mode"),
+                "configured": chatllm_desc.get("configured"),
+                "supports_structured_output": chatllm_desc.get("supports_structured_output"),
+                "supports_json": chatllm_desc.get("supports_json"),
+                "auto_eligible": chatllm_desc.get("auto_eligible"),
+                "auto_high_quality_eligible": chatllm_desc.get("auto_high_quality_eligible"),
+                "managed_configured": chatllm_desc.get("managed_configured"),
+                "managed_running": chatllm_desc.get("managed_running"),
+                "allow_managed_start": chatllm_desc.get("allow_managed_start"),
+                "url_configured": chatllm_desc.get("url_configured"),
+                "healthcheck_url_configured": chatllm_desc.get("healthcheck_url_configured"),
+                "cli_configured": chatllm_desc.get("cli_configured"),
+                "backend_concurrency_cap": chatllm_desc.get("backend_concurrency_cap"),
+                "model": chatllm_desc.get("model"),
+            }
+        )
+    except _OCR_NONCRITICAL_EXCEPTIONS as exc:
+        _record_backend_discovery_error(out, "chatllm", exc)
 
     try:
         from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.nemotron_parse import (

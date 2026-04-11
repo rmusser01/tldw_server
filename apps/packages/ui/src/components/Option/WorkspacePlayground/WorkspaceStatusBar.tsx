@@ -72,6 +72,9 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
   const connection = deriveConnectionTone(connectionState)
   const connectionUxState: ConnectionUxState = deriveConnectionUxState(connectionState)
   const [storageModalOpen, setStorageModalOpen] = React.useState(false)
+  const canRetryConnection =
+    connectionUxState === "error_unreachable" ||
+    connectionUxState === "error_auth"
 
   const storageItems = React.useMemo(() => {
     if (!storageModalOpen) return []
@@ -144,13 +147,13 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
             {connection.label}
           </span>
         </Tooltip>
-        {(connectionUxState === "error_unreachable" || connectionUxState === "error_auth") && (
+        {canRetryConnection && (
           <button
             type="button"
             data-testid="workspace-statusbar-retry"
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-error hover:bg-error/10 hover:text-error"
             onClick={() => {
-              useConnectionStore.getState().checkOnce()
+              void useConnectionStore.getState().checkOnce()
             }}
           >
             {t("playground:statusBar.retry", "Retry")}

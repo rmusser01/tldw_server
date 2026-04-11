@@ -77,7 +77,7 @@ describe("PromptDrawer structured prompts", () => {
       screen.getByRole("button", { name: /convert to structured/i })
     )
 
-    expect(await screen.findByText("Multi-section prompt mode")).toBeInTheDocument()
+    expect(await screen.findByText("Structured prompt")).toBeInTheDocument()
     expect(screen.getByTestId("prompt-drawer-system")).toBeDisabled()
     expect(screen.getByTestId("prompt-drawer-user")).toBeDisabled()
     expect(screen.getByTestId("structured-block-list")).toBeInTheDocument()

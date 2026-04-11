@@ -267,4 +267,40 @@ describe("KnowledgeContextBar", () => {
     expect(screen.queryByText("First load failed")).not.toBeInTheDocument()
     expect(screen.getByText("Recovered Planning Doc")).toBeInTheDocument()
   })
+
+  it("falls back to category counts when only non-countable sources are selected", async () => {
+    vi.mocked(tldwClient.listMedia).mockResolvedValueOnce({
+      items: [{ id: 42, title: "Quarterly Planning Doc", type: "pdf" }],
+    })
+    vi.mocked(tldwClient.listNotes).mockResolvedValueOnce({
+      items: [{ id: "note-1", title: "Meeting Notes" }],
+    })
+
+    render(
+      <KnowledgeContextBar
+        preset="balanced"
+        onPresetChange={vi.fn()}
+        sources={["characters"]}
+        onSourcesChange={vi.fn()}
+        includeMediaIds={[]}
+        onIncludeMediaIdsChange={vi.fn()}
+        includeNoteIds={[]}
+        onIncludeNoteIdsChange={vi.fn()}
+        webEnabled={true}
+        onToggleWeb={vi.fn()}
+        generationProvider={null}
+        generationModel={null}
+        onGenerationProviderChange={vi.fn()}
+        onGenerationModelChange={vi.fn()}
+        contextChangedSinceLastRun={false}
+        onOpenSettings={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Specific:/i }))
+    expect(await screen.findByText("Quarterly Planning Doc")).toBeInTheDocument()
+
+    expect(screen.getByText(/1 of 5 categories selected/)).toBeInTheDocument()
+    expect(screen.queryByText(/0 items in scope/)).not.toBeInTheDocument()
+  })
 })

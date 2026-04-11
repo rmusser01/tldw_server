@@ -419,9 +419,16 @@ describe("DictionariesManager import stage-1 preview workflow", () => {
     })
 
     render(<DictionariesManager />)
-    await user.click(
-      screen.getByRole("button", { name: "Export Medical Terms as Markdown" })
-    )
+
+    const overflowButton = screen.getByRole("button", {
+      name: "More actions for Medical Terms"
+    })
+    overflowButton.focus()
+    await user.keyboard("{Enter}")
+    await waitFor(() => {
+      expect(screen.getByRole("menuitem", { name: "Export Markdown" })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole("menuitem", { name: "Export Markdown" }))
 
     await waitFor(() => {
       expect(confirmDangerMock).toHaveBeenCalled()

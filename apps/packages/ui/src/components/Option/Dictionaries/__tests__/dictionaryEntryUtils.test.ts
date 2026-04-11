@@ -5,6 +5,8 @@ import {
   buildTimedEffectsPayload,
   extractRegexSafetyMessage,
   formatProbabilityFrequencyHint,
+  humanizeRegexError,
+  humanizeValidationCode,
   normalizeProbabilityValue,
   toSafeNonNegativeInteger,
   validateRegexPattern,
@@ -14,7 +16,7 @@ describe("dictionaryEntryUtils", () => {
   it("validates regex patterns and reports invalid syntax", () => {
     expect(validateRegexPattern("/foo+/i")).toBeNull()
     expect(validateRegexPattern("hello.*world")).toBeNull()
-    expect(validateRegexPattern("[unclosed")).toContain("Invalid")
+    expect(validateRegexPattern("[unclosed")).toBe("Opening bracket [ has no closing ].")
   })
 
   it("normalizes safe integers and timed-effects payload shape", () => {
@@ -86,5 +88,45 @@ describe("dictionaryEntryUtils", () => {
       group: "Clinical",
       timed_effects: { sticky: 1, cooldown: 2, delay: 3 },
     })
+  })
+})
+
+describe("humanizeRegexError", () => {
+  it("translates unterminated character class", () => {
+    expect(humanizeRegexError("Invalid regular expression: /[abc/: Unterminated character class"))
+      .toBe("Opening bracket [ has no closing ].")
+  })
+
+  it("translates nothing to repeat", () => {
+    expect(humanizeRegexError("Invalid regular expression: Nothing to repeat"))
+      .toBe("A repeat symbol (*, +, ?) has nothing before it.")
+  })
+
+  it("passes through unknown errors unchanged", () => {
+    expect(humanizeRegexError("Something weird happened"))
+      .toBe("Something weird happened")
+  })
+
+  it("does not over-match unrelated words that contain 'lone'", () => {
+    expect(humanizeRegexError("alone"))
+      .toBe("alone")
+  })
+})
+
+describe("humanizeValidationCode", () => {
+  it("translates known codes", () => {
+    const result = humanizeValidationCode("regex_catastrophic_backtracking")
+    expect(result.label).toBe("Slow pattern")
+    expect(result.fix).toContain("Simplify nested")
+  })
+
+  it("translates pattern_duplicate", () => {
+    const result = humanizeValidationCode("pattern_duplicate")
+    expect(result.label).toBe("Duplicate pattern")
+  })
+
+  it("falls back to raw code for unknown codes", () => {
+    expect(humanizeValidationCode("unknown_code").label).toBe("unknown_code")
+    expect(humanizeValidationCode("unknown_code").fix).toBeUndefined()
   })
 })

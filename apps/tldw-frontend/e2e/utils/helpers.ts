@@ -376,7 +376,7 @@ export function getAntdSelectTrigger(
 }
 
 export function getVisibleAntdSelectDropdown(page: Page): Locator {
-  return page.locator(".ant-select-dropdown:visible").last()
+  return page.locator('.ant-select-dropdown:visible').last();
 }
 
 /**
