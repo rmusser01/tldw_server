@@ -17,14 +17,17 @@ import {
 import type { Page } from "@playwright/test"
 import { SpeechPage } from "../../utils/page-objects/SpeechPage"
 import { expectApiCall } from "../../utils/api-assertions"
-import { getAntdSelectTrigger, seedAuth } from "../../utils/helpers"
+import { getAntdSelectTrigger, getVisibleAntdSelectDropdown, seedAuth } from "../../utils/helpers"
 
 async function openSpeechInputSourcePicker(page: Page) {
   const inputSourcePicker = getAntdSelectTrigger(page, {
     ariaLabel: "Speech playground input source",
   })
   await expect(inputSourcePicker).toBeVisible()
-  await inputSourcePicker.click()
+  await inputSourcePicker.click({ force: true })
+  const dropdown = getVisibleAntdSelectDropdown(page)
+  await dropdown.waitFor({ state: "visible", timeout: 5_000 })
+  return dropdown
 }
 
 test.describe("Speech Playground", () => {
@@ -63,15 +66,15 @@ test.describe("Speech Playground", () => {
       await expect(speech.stopButton).toBeVisible()
       await expect(speech.downloadButton).toBeVisible()
 
-      await openSpeechInputSourcePicker(authedPage)
+      const dropdown = await openSpeechInputSourcePicker(authedPage)
       await expect(
-        authedPage.getByRole("option", { name: /Default microphone/i })
+        dropdown.locator(".ant-select-item-option-content").filter({ hasText: /Default microphone/i })
       ).toBeVisible()
       await expect(
-        authedPage.getByRole("option", { name: /Tab audio/i })
+        dropdown.locator(".ant-select-item-option-content").filter({ hasText: /Tab audio/i })
       ).toHaveCount(0)
       await expect(
-        authedPage.getByRole("option", { name: /System audio/i })
+        dropdown.locator(".ant-select-item-option-content").filter({ hasText: /System audio/i })
       ).toHaveCount(0)
       await authedPage.keyboard.press("Escape")
 

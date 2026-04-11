@@ -375,6 +375,10 @@ export function getAntdSelectTrigger(
   return page.getByRole('combobox', { name: options.ariaLabel }).first();
 }
 
+export function getVisibleAntdSelectDropdown(page: Page): Locator {
+  return page.locator(".ant-select-dropdown:visible").last()
+}
+
 /**
  * Dismiss any connection/server error modals (Ant Design modals).
  * Also removes the modal backdrop via DOM manipulation to prevent

@@ -7,19 +7,15 @@ import pytest
 import tempfile
 import os
 from pathlib import Path
-import sys
 
-# Add the parent directory to the path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from app.core.Ingestion_Media_Processing.MediaWiki.Media_Wiki import (
+from tldw_Server_API.app.core.Ingestion_Media_Processing.MediaWiki.Media_Wiki import (
     validate_file_path,
     sanitize_wiki_name,
     get_safe_checkpoint_path,
     get_safe_log_path,
     import_mediawiki_dump,
 )
-from app.core.exceptions import InvalidStoragePathError
+from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
 
 
 class TestPathTraversalProtection:
