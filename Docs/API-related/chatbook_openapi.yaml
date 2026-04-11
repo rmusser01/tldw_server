@@ -348,33 +348,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
-
-  /chatbooks/import/jobs/{job_id}/remove:
-    delete:
-      tags:
-        - Jobs
-      summary: Remove import job
-      description: Remove a completed, cancelled, or failed import job
-      operationId: removeImportJob
-      parameters:
-        - $ref: '#/components/parameters/JobId'
-      responses:
-        '200':
-          description: Import job removed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RemoveJobResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /chatbooks/import/jobs/{job_id}:
     delete:
       tags:
         - Jobs
@@ -400,6 +373,31 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /chatbooks/import/jobs/{job_id}/remove:
+    delete:
+      tags:
+        - Jobs
+      summary: Remove import job
+      description: Remove a completed, cancelled, or failed import job
+      operationId: removeImportJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Import job removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoveJobResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
 
