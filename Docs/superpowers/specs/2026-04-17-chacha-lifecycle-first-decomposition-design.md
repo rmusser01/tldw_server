@@ -110,12 +110,15 @@ Cons:
 - The first decomposition pass is anchored on the character/chat/session lifecycle slice.
 - `CharactersRAGDB` remains the only public DB facade in this pass.
 - `ChaCha_Notes_DB_Deps.py` keeps the FastAPI dependency-provider role, but its runtime orchestration logic moves into a dedicated module under `app/core/DB_Management/chacha/`.
+- The new core runtime module must stay transport-neutral. It may expose domain errors, health state, or result objects, but it must not raise `HTTPException` or otherwise embed FastAPI response semantics.
+- `ChaCha_Notes_DB_Deps.py` remains the only layer that translates ChaChaNotes runtime failures into caller-visible HTTP responses such as `503 Service Unavailable`.
 - Internal decomposition is limited to the slices that support lifecycle behavior directly:
   - runtime/init/shutdown/cache orchestration
   - character lifecycle
   - conversation/session lifecycle
   - message lifecycle and related metadata/citation reads
 - Shared helpers move only when at least two extracted slices genuinely need them.
+- `CharactersRAGDB` remains the orchestration owner for cross-store lifecycle workflows in the first pass. Store modules provide focused operations; they do not coordinate multi-step flows across each other.
 - Any extraction that starts pulling in notes, prompt presets, persona state, flashcards, moodboards, note studio, or similar adjacent domains is out of scope for the first pass and should be deferred.
 
 ## 7. Target Module Layout
@@ -126,6 +129,8 @@ Recommended first-pass layout:
 
 - `tldw_Server_API/app/core/DB_Management/chacha/runtime.py`
   - owns executor lifecycle, cache reuse, initialization coordination, shutdown behavior, health snapshotting, and default-character warmup orchestration currently living in `ChaCha_Notes_DB_Deps.py`
+  - exposes an explicit runtime surface such as `get_or_create`, `shutdown`, `snapshot`, and `reset_for_tests` instead of relying on hidden module globals as the only contract
+  - must avoid import-time side effects beyond constant setup so tests can control runtime state deterministically
 - `tldw_Server_API/app/core/DB_Management/chacha/character_store.py`
   - owns character CRUD, restore/versioning behavior, and default-character support paths currently centered in `ChaChaNotes_DB.py`
 - `tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py`
@@ -140,6 +145,8 @@ Caller rules:
 - external callers continue importing and using `CharactersRAGDB`
 - endpoints and deps do not import store modules directly
 - stores do not depend on each other's private logic
+- stores do not translate failures into HTTP semantics
+- `CharactersRAGDB` owns cross-store transaction scope for workflows that span multiple lifecycle slices, such as conversation creation followed by seeded message creation and settings persistence
 - `shared.py` is not allowed to become a second monolith; if it starts collecting unrelated helpers, the first pass should stop rather than absorb more scope
 
 ## 8. Pass Order
@@ -147,11 +154,12 @@ Caller rules:
 The first implementation plan should follow this order:
 
 1. Freeze current lifecycle behavior with focused tests.
-2. Extract runtime/init/shutdown/cache/default-character orchestration out of `ChaCha_Notes_DB_Deps.py` with no intentional API contract changes.
+2. Extract runtime/init/shutdown/cache/default-character orchestration out of `ChaCha_Notes_DB_Deps.py` with no intentional API contract changes and with HTTP translation left in the dependency layer.
 3. Extract character lifecycle internals behind existing `CharactersRAGDB` methods.
 4. Extract conversation/session lifecycle internals behind existing `CharactersRAGDB` methods.
 5. Extract message lifecycle internals behind existing `CharactersRAGDB` methods.
-6. Stop unless a clearly necessary shared helper must be factored for the extracted slices to stay coherent.
+6. Keep cross-store lifecycle flows orchestrated at the `CharactersRAGDB` facade so stores remain focused and transaction scope stays explicit.
+7. Stop unless a clearly necessary shared helper must be factored for the extracted slices to stay coherent.
 
 This order keeps the most failure-prone operational seam first, then moves into the feature behavior that depends on it, while preserving a clean stopping point.
 
@@ -164,6 +172,7 @@ Required contract boundaries:
 - `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py` remains the public import path and facade
 - public method names on the extracted lifecycle slice stay stable for callers in this pass
 - `tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py` continues to expose the same dependency-provider role and caller-visible HTTP behavior
+- the new core runtime module must not expose FastAPI-specific exceptions or status codes as part of its contract
 - endpoint code such as `character_chat_sessions.py` should not need to know that internal store modules now exist
 - schema changes are excluded unless a confirmed lifecycle defect cannot be stabilized without one
 
@@ -175,7 +184,9 @@ The decomposition should stop or narrow when any of the following occurs:
 
 - extracting a helper would require pulling in notes, persona, prompt preset, flashcard, moodboard, or other unrelated domain behavior
 - a store begins depending on another store's private implementation rather than a narrow shared helper or facade context
+- a store starts owning workflow orchestration that spans character, conversation, and message concerns instead of returning focused operations to the facade
 - the shared helper layer starts accumulating unrelated logic and becoming another catch-all file
+- the new runtime module only relocates existing globals without yielding an explicit testable interface and deterministic reset semantics
 - runtime isolation alone does not fully explain the mixed-suite `503` behavior and the remaining issue looks like a separate defect rather than structural fallout
 - verification burden grows beyond what can still be reviewed coherently as one wave
 
@@ -188,8 +199,10 @@ Verification should be contract-focused and targeted at the extracted seam.
 Required verification areas:
 
 - dependency/runtime tests covering repeated init, shutdown, cache reuse, executor recreation, initialization races, and deterministic `503` behavior
+- dependency/runtime tests proving transport-neutral runtime failures are translated to HTTP responses only in `ChaCha_Notes_DB_Deps.py`
 - focused DB tests for character lifecycle behavior, including versioning, restore semantics, and default-character handling
 - focused DB tests for conversation/session/message lifecycle behavior, including settings and optimistic concurrency paths
+- focused tests for cross-store lifecycle workflows that prove `CharactersRAGDB` still owns transaction/orchestration behavior across conversation creation, seeded message creation, and settings persistence where applicable
 - integration tests for `character_chat_sessions.py` proving session creation and downstream chat flows still work through the preserved `CharactersRAGDB` facade
 - targeted regression tests for workspace-scoped conversation behavior where it depends on the extracted conversation slice
 - Bandit against touched scope using the project virtual environment, per repo policy
@@ -206,7 +219,9 @@ Evidence threshold for a stable wave:
 This design should be considered successfully implemented when:
 
 - the ChaChaNotes runtime seam has been moved out of the FastAPI dependency layer into a reviewable core runtime module
+- the runtime seam exposes an explicit, testable interface rather than only relocated module globals
 - character, conversation, and message lifecycle implementations are isolated into focused internal modules behind the existing facade
+- cross-store lifecycle workflows remain coordinated by `CharactersRAGDB` rather than leaking orchestration into individual stores
 - public contracts used by endpoints and tests remain stable
 - targeted regression coverage is stronger than before in the startup/shutdown and lifecycle paths
 - the remaining monolith is smaller in a way that clearly sets up the next decomposition pass without overstating completion
