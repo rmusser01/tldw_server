@@ -38,6 +38,10 @@ class ChaChaRuntimeUnavailableError(RuntimeError):
     """Transport-neutral runtime failure for callers that translate elsewhere."""
 
 
+class ChaChaRuntimeInitError(RuntimeError):
+    """Transport-neutral runtime failure for initialization errors."""
+
+
 class _ChaChaRuntimeState:
     def __init__(self) -> None:
         self.executor: ThreadPoolExecutor | None = None
@@ -281,6 +285,8 @@ async def _is_instance_healthy(db_instance: CharactersRAGDB) -> bool:
 
 
 async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRAGDB:
+    if _is_shutting_down():
+        raise ChaChaRuntimeUnavailableError("ChaChaNotes shutdown in progress")
     user_dir = DatabasePaths.get_user_base_directory(user_id)
     cache_key = str(user_dir)
     with _STATE.db_lock:
@@ -322,10 +328,10 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
         if cached_instance is not None:
             return cached_instance
         if init_error is not None:
-            raise ChaChaRuntimeUnavailableError(
+            raise ChaChaRuntimeInitError(
                 f"Could not initialize character & notes database for user: {init_error}"
             ) from init_error
-        raise ChaChaRuntimeUnavailableError("Could not initialize character & notes database for user: unknown error")
+        raise ChaChaRuntimeInitError("Could not initialize character & notes database for user: unknown error")
 
     loop = asyncio.get_running_loop()
     start = time.perf_counter()
@@ -347,7 +353,7 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
         _record_init(duration_ms, False, e)
         with _STATE.db_lock:
             _STATE.init_errors[cache_key] = e
-        raise ChaChaRuntimeUnavailableError(f"Could not initialize character & notes database for user: {e}") from e
+        raise ChaChaRuntimeInitError(f"Could not initialize character & notes database for user: {e}") from e
     else:
         with _STATE.db_lock:
             _STATE.cache[cache_key] = db_instance
@@ -368,11 +374,19 @@ async def _warm_chacha_db_for_user(user_id: int, client_id: str | None = None) -
     try:
         db_instance = await _get_or_init_db_instance(user_id, client_id or str(user_id))
         _STATE.health["warm_startups"] += 1
-        task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
-        _STATE.default_char_tasks.add(task)
-        task.add_done_callback(_STATE.default_char_tasks.discard)
+        schedule_default_character_ensure(db_instance, user_id)
     except (ChaChaRuntimeUnavailableError, OSError, RuntimeError, ValueError, TypeError) as e:
         logger.warning("Warm-up for ChaChaNotes user {} failed: {}", user_id, e)
+
+
+def schedule_default_character_ensure(db_instance: CharactersRAGDB, user_id: int) -> asyncio.Task[Any] | None:
+    if _is_shutting_down():
+        logger.debug("ChaChaNotes shutdown in progress; skipping default-character ensure for user {}", user_id)
+        return None
+    task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
+    _STATE.default_char_tasks.add(task)
+    task.add_done_callback(_STATE.default_char_tasks.discard)
+    return task
 
 
 def _close_all_instances() -> None:
@@ -498,6 +512,14 @@ class ChaChaRuntimeManager:
     async def warm_for_user(self, user_id: int, client_id: str | None = None) -> None:
         await _warm_chacha_db_for_user(user_id, client_id)
 
+    def schedule_default_character_ensure(
+        self, db_instance: CharactersRAGDB, user_id: int
+    ) -> asyncio.Task[Any] | None:
+        return schedule_default_character_ensure(db_instance, user_id)
+
+    def is_shutting_down(self) -> bool:
+        return _is_shutting_down()
+
     async def shutdown(self, wait_timeout: float = 5.0) -> None:
         await _shutdown(wait_timeout=wait_timeout)
 
@@ -516,10 +538,12 @@ class ChaChaRuntimeManager:
 
 __all__ = [
     "ChaChaRuntimeManager",
+    "ChaChaRuntimeInitError",
     "ChaChaRuntimeUnavailableError",
     "DEFAULT_CHARACTER_DESCRIPTION",
     "DEFAULT_CHARACTER_NAME",
     "MAX_CACHED_CHACHA_DB_INSTANCES",
     "_apply_sqlite_tuning",
     "_health_check_instance",
+    "schedule_default_character_ensure",
 ]

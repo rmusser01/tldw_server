@@ -90,21 +90,23 @@ def test_chacha_dependency_health_check_uses_shared_sqlite_policy_helper(monkeyp
 async def test_get_chacha_db_for_user_id_rejects_bool_and_non_positive_ids(monkeypatch, user_id):
     import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
 
-    called = False
+    class _Runtime:
+        async def get_or_create(self, *_args, **_kwargs):
+            raise AssertionError("runtime should not be called for invalid ids")
 
-    async def fake_get_or_init_db_instance(_user_id, _client_id):
-        nonlocal called
-        called = True
-        return object()
+        def schedule_default_character_ensure(self, *_args, **_kwargs):
+            raise AssertionError("runtime should not be called for invalid ids")
 
-    monkeypatch.setattr(deps, "_get_or_init_db_instance", fake_get_or_init_db_instance)
+        def is_shutting_down(self) -> bool:
+            return False
+
+    monkeypatch.setattr(deps, "_CHACHA_RUNTIME", _Runtime())
 
     with pytest.raises(HTTPException) as exc_info:
         await deps.get_chacha_db_for_user_id(user_id)
 
     assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
     assert exc_info.value.detail == "Invalid owner_user_id."
-    assert called is False
 
 
 @pytest.mark.unit
@@ -114,8 +116,17 @@ async def test_get_chacha_db_for_user_id_maps_runtime_unavailable_to_503(monkeyp
     from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeUnavailableError
 
     class _Runtime:
+        def __init__(self) -> None:
+            self.scheduled = 0
+
         async def get_or_create(self, *_args, **_kwargs):
             raise ChaChaRuntimeUnavailableError("ChaChaNotes shutdown in progress")
+
+        def schedule_default_character_ensure(self, *_args, **_kwargs):
+            self.scheduled += 1
+
+        def is_shutting_down(self) -> bool:
+            return False
 
     monkeypatch.setattr(deps, "_CHACHA_RUNTIME", _Runtime())
 
@@ -124,3 +135,94 @@ async def test_get_chacha_db_for_user_id_maps_runtime_unavailable_to_503(monkeyp
 
     assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     assert "shutdown" in exc_info.value.detail.lower()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_chacha_db_for_user_id_schedules_default_character_ensure_when_not_shutting_down(monkeypatch):
+    import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
+
+    class _Runtime:
+        def __init__(self) -> None:
+            self.get_calls: list[tuple[int, str | None]] = []
+            self.schedule_calls: list[tuple[object, int]] = []
+
+        async def get_or_create(self, user_id, client_id):
+            self.get_calls.append((user_id, client_id))
+            return object()
+
+        def schedule_default_character_ensure(self, db_instance, user_id):
+            self.schedule_calls.append((db_instance, user_id))
+
+        def is_shutting_down(self) -> bool:
+            return False
+
+    runtime = _Runtime()
+    monkeypatch.setattr(deps, "_CHACHA_RUNTIME", runtime)
+
+    db_instance = await deps.get_chacha_db_for_user_id(7, None)
+
+    assert runtime.get_calls == [(7, "7")]
+    assert runtime.schedule_calls == [(db_instance, 7)]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_chacha_db_for_user_does_not_call_warm_for_user_after_get_or_create(monkeypatch):
+    import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
+
+    class _Runtime:
+        def __init__(self) -> None:
+            self.get_calls: list[tuple[int, str | None]] = []
+            self.schedule_calls: list[tuple[object, int]] = []
+            self.warm_calls: list[tuple[int, str | None]] = []
+
+        async def get_or_create(self, user_id, client_id):
+            self.get_calls.append((user_id, client_id))
+            return object()
+
+        def schedule_default_character_ensure(self, db_instance, user_id):
+            self.schedule_calls.append((db_instance, user_id))
+
+        async def warm_for_user(self, user_id, client_id=None):
+            self.warm_calls.append((user_id, client_id))
+
+        def is_shutting_down(self) -> bool:
+            return False
+
+    runtime = _Runtime()
+    monkeypatch.setattr(deps, "_CHACHA_RUNTIME", runtime)
+
+    class _User:
+        id = 11
+
+    await deps.get_chacha_db_for_user(_User())
+
+    assert runtime.get_calls == [(11, "11")]
+    assert len(runtime.schedule_calls) == 1
+    assert runtime.warm_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_chacha_db_for_user_id_maps_generic_init_failure_to_500(monkeypatch):
+    import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
+    from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeInitError
+
+    class _Runtime:
+        async def get_or_create(self, *_args, **_kwargs):
+            raise ChaChaRuntimeInitError("Could not initialize character & notes database for user: boom")
+
+        def schedule_default_character_ensure(self, *_args, **_kwargs):
+            raise AssertionError("schedule should not be called on init failure")
+
+        def is_shutting_down(self) -> bool:
+            return False
+
+    monkeypatch.setattr(deps, "_CHACHA_RUNTIME", _Runtime())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await deps.get_chacha_db_for_user_id(1, "1")
+
+    assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert "boom" in exc_info.value.detail

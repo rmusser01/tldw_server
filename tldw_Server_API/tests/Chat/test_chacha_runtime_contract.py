@@ -13,6 +13,7 @@ def test_runtime_manager_exposes_explicit_resettable_surface():
     assert hasattr(runtime, "get_or_create")
     assert hasattr(runtime, "shutdown")
     assert hasattr(runtime, "snapshot")
+    assert hasattr(runtime, "schedule_default_character_ensure")
     runtime.reset_for_tests()
 
 
