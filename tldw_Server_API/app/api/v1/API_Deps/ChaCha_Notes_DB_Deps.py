@@ -648,3 +648,110 @@ def shutdown_chacha_executor(wait: bool = False) -> None:
 # async def shutdown_event():
 #     close_all_chacha_db_instances()
 #     # also close other DB instances if you have similar managers
+
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
+    ChaChaRuntimeManager,
+    ChaChaRuntimeUnavailableError,
+    _apply_sqlite_tuning as _runtime_apply_sqlite_tuning,
+    _health_check_instance as _runtime_health_check_instance,
+)
+
+_CHACHA_RUNTIME = ChaChaRuntimeManager()
+
+
+def _apply_sqlite_tuning(db_instance: CharactersRAGDB) -> None:
+    _runtime_apply_sqlite_tuning(db_instance)
+
+
+def _health_check_instance(db_instance: CharactersRAGDB) -> bool:
+    return _runtime_health_check_instance(db_instance)
+
+
+def reset_chacha_shutdown_state() -> None:
+    _CHACHA_RUNTIME.reset_for_tests()
+
+
+def get_chacha_health_snapshot() -> dict[str, Any]:
+    return _CHACHA_RUNTIME.snapshot()
+
+
+async def warm_chacha_db_for_user(user_id: int, client_id: str | None = None) -> None:
+    await _CHACHA_RUNTIME.warm_for_user(user_id, client_id)
+
+
+async def get_chacha_db_for_user_id(user_id: int, client_id: str | None = None) -> CharactersRAGDB:
+    if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid owner_user_id.",
+        )
+    try:
+        return await _CHACHA_RUNTIME.get_or_create(user_id, client_id or str(user_id))
+    except ChaChaRuntimeUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+
+async def get_chacha_db_for_user(current_user: User = Depends(get_request_user)) -> CharactersRAGDB:
+    try:
+        from tldw_Server_API.app.main import app as _app
+
+        override_fn = _app.dependency_overrides.get(get_chacha_db_for_user)
+        if override_fn is not None:
+            try:
+                result = override_fn()
+                if inspect.isawaitable(result):
+                    result = await result  # type: ignore[func-returns-value]
+                if isinstance(result, CharactersRAGDB):
+                    return result
+            except (HTTPException, TypeError, ValueError, RuntimeError, AttributeError):
+                pass
+    except (ImportError, AttributeError, RuntimeError):
+        pass
+
+    logger.info("<<<<< ACTUAL get_chacha_db_for_user CALLED >>>>>")
+    if not current_user or not isinstance(current_user.id, int):
+        logger.error("get_chacha_db_for_user called without a valid User object or user.id is not int.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="User identification failed for ChaChaNotes DB."
+        )
+
+    try:
+        db_instance = await _CHACHA_RUNTIME.get_or_create(current_user.id, str(current_user.id))
+    except ChaChaRuntimeUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    if not _CHACHA_RUNTIME.snapshot().get("shutting_down", False):
+        await _CHACHA_RUNTIME.warm_for_user(current_user.id, str(current_user.id))
+    return db_instance
+
+
+async def get_chacha_db_for_owner(owner_user_id: int) -> CharactersRAGDB:
+    if not isinstance(owner_user_id, int):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid owner_user_id.",
+        )
+    try:
+        return await _CHACHA_RUNTIME.get_or_create(owner_user_id, str(owner_user_id))
+    except ChaChaRuntimeUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+
+async def shutdown_chacha_resources(wait_timeout: float = 5.0) -> None:
+    await _CHACHA_RUNTIME.shutdown(wait_timeout=wait_timeout)
+
+
+def shutdown_chacha_executor(wait: bool = False) -> None:
+    _CHACHA_RUNTIME.shutdown_executor(wait=wait)
+
+
+def close_all_chacha_db_instances():
+    _CHACHA_RUNTIME.close_all_instances()

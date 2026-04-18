@@ -105,3 +105,22 @@ async def test_get_chacha_db_for_user_id_rejects_bool_and_non_positive_ids(monke
     assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
     assert exc_info.value.detail == "Invalid owner_user_id."
     assert called is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_chacha_db_for_user_id_maps_runtime_unavailable_to_503(monkeypatch):
+    import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
+    from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeUnavailableError
+
+    class _Runtime:
+        async def get_or_create(self, *_args, **_kwargs):
+            raise ChaChaRuntimeUnavailableError("ChaChaNotes shutdown in progress")
+
+    monkeypatch.setattr(deps, "_CHACHA_RUNTIME", _Runtime())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await deps.get_chacha_db_for_user_id(1, "1")
+
+    assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert "shutdown" in exc_info.value.detail.lower()
