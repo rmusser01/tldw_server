@@ -6,9 +6,7 @@ import pytest
 import sqlite3
 import json
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
-import os  # For :memory: check
 #
 # Third-Party Imports
 #
@@ -21,86 +19,11 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     TransactionContextManager,
 )
+from .conftest import _create_sample_card_data, get_current_utc_timestamp_iso
 #
 #######################################################################################################################
 #
 # Functions:
-
-# --- Fixtures ---
-
-@pytest.fixture
-def client_id():
-    return "test_client_001"
-
-
-@pytest.fixture
-def db_path(tmp_path):
-    """Provides a temporary path for the database file for each test."""
-    return tmp_path / "test_db.sqlite"
-
-
-@pytest.fixture(scope="function")
-def db_instance(db_path, client_id):  # Add db_path and tmp_path back
-    """Creates a DB instance for each test, ensuring a fresh database."""
-    current_db_path = Path(db_path)
-
-    # Clean up any existing files
-    for suffix in ["", "-wal", "-shm"]:
-        p = Path(str(current_db_path) + suffix)
-        if p.exists():
-            try:
-                p.unlink(missing_ok=True)
-            except Exception as e:
-                print(f"Warning: Could not unlink {p}: {e}")
-
-    db = None
-    try:
-        db = CharactersRAGDB(current_db_path, client_id)  # Use current_db_path
-        yield db
-    finally:
-        if db:
-            db.close_connection()
-            # Additional cleanup
-            for suffix in ["", "-wal", "-shm"]:
-                p = Path(str(current_db_path) + suffix)
-                if p.exists():
-                    try:
-                        p.unlink(missing_ok=True)
-                    except Exception:
-                        _ = None
-
-
-@pytest.fixture
-def mem_db_instance(client_id):
-    """Creates an in-memory DB instance."""
-    db = CharactersRAGDB(":memory:", client_id)
-    yield db
-    db.close_connection()
-
-
-# --- Helper Functions ---
-def get_current_utc_timestamp_iso():
-    return datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
-
-
-def _create_sample_card_data(name_suffix="", client_id_override=None):
-
-
-    return {
-        "name": f"Test Character {name_suffix}",
-        "description": "A test character.",
-        "personality": "Testy",
-        "scenario": "A test scenario.",
-        "image": b"testimagebytes",
-        "first_message": "Hello, test!",
-        "alternate_greetings": json.dumps(["Hi", "Hey"]),  # Ensure JSON strings for direct use
-        "tags": json.dumps(["test", "sample"]),
-        "extensions": json.dumps({"custom_field": "value"}),
-        "client_id": client_id_override  # For testing specific client_id scenarios
-    }
-
-
-# --- Test Cases ---
 
 class TestDBInitialization:
     def test_db_creation(self, db_path, client_id):
