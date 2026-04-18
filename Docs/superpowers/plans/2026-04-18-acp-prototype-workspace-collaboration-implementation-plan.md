@@ -255,7 +255,7 @@ async def create_session(
 ```
 
 Implementation requirements:
-- use the next AuthNZ migration number after `083`
+- use the next unused AuthNZ migration version without renumbering historical migrations already present in the repo
 - keep repo JSON loading/boolean normalization patterns consistent with `shared_workspace_repo.py`
 - add indexes for `(prototype_workspace_id, updated_at)` and `(share_link_id, revoked_at)`
 

@@ -643,6 +643,192 @@ def migration_085_remove_api_keys_scope_default(conn: sqlite3.Connection) -> Non
     logger.info("Migration 085: COMPLETE remove api_keys.scope default")
 
 
+def migration_086_create_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
+    """Create shared metadata tables for prototype workspaces and collaboration sessions."""
+    logger.info("Migration 086: START prototype workspace metadata tables")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prototype_workspaces (
+            id TEXT PRIMARY KEY,
+            owner_user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            creation_source TEXT NOT NULL
+                CHECK (creation_source IN ('prompt', 'template', 'existing_workspace')),
+            canonical_snapshot_id TEXT,
+            last_known_good_snapshot_id TEXT,
+            canonical_preview_status TEXT,
+            publish_validation_status TEXT,
+            preview_policy_json TEXT NOT NULL DEFAULT '{}',
+            share_policy_json TEXT NOT NULL DEFAULT '{}',
+            runtime_policy_json TEXT NOT NULL DEFAULT '{}',
+            designated_promoter_ids_json TEXT NOT NULL DEFAULT '[]',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            archived_at TIMESTAMP,
+            FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_workspaces_owner_updated "
+        "ON prototype_workspaces(owner_user_id, updated_at)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prototype_snapshots (
+            id TEXT PRIMARY KEY,
+            prototype_workspace_id TEXT NOT NULL,
+            parent_snapshot_id TEXT,
+            created_from_session_id TEXT,
+            author_user_id INTEGER,
+            author_shared_actor_id TEXT,
+            storage_ref TEXT,
+            diff_summary_json TEXT NOT NULL DEFAULT '{}',
+            prompt_summary TEXT,
+            preview_health_json TEXT NOT NULL DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (prototype_workspace_id) REFERENCES prototype_workspaces(id) ON DELETE CASCADE,
+            UNIQUE (id, prototype_workspace_id),
+            CHECK (
+                (author_user_id IS NOT NULL AND author_shared_actor_id IS NULL)
+                OR (author_user_id IS NULL AND author_shared_actor_id IS NOT NULL)
+            )
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_snapshots_workspace_created "
+        "ON prototype_snapshots(prototype_workspace_id, created_at)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prototype_shared_actors (
+            id TEXT PRIMARY KEY,
+            prototype_workspace_id TEXT NOT NULL,
+            share_link_id INTEGER NOT NULL,
+            display_name TEXT NOT NULL,
+            session_binding_id TEXT,
+            runtime_policy_profile TEXT NOT NULL,
+            quota_policy_json TEXT NOT NULL DEFAULT '{}',
+            last_activity_at TIMESTAMP,
+            expires_at TIMESTAMP,
+            revoked_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (prototype_workspace_id) REFERENCES prototype_workspaces(id) ON DELETE CASCADE,
+            UNIQUE (id, prototype_workspace_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_shared_actors_workspace "
+        "ON prototype_shared_actors(prototype_workspace_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_shared_actors_share_link_revoked "
+        "ON prototype_shared_actors(share_link_id, revoked_at)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prototype_sessions (
+            id TEXT PRIMARY KEY,
+            prototype_workspace_id TEXT NOT NULL,
+            base_snapshot_id TEXT NOT NULL,
+            actor_user_id INTEGER,
+            actor_shared_actor_id TEXT,
+            actor_type TEXT NOT NULL
+                CHECK (actor_type IN ('owner', 'internal_collaborator', 'external_collaborator')),
+            share_link_id INTEGER,
+            acp_session_id TEXT,
+            sandbox_session_id TEXT,
+            sandbox_run_id TEXT,
+            runtime_status TEXT,
+            preview_handle TEXT,
+            preview_status TEXT,
+            last_saved_snapshot_id TEXT,
+            last_activity_at TIMESTAMP,
+            expires_at TIMESTAMP,
+            revoked_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (prototype_workspace_id) REFERENCES prototype_workspaces(id) ON DELETE CASCADE,
+            FOREIGN KEY (actor_user_id) REFERENCES users(id),
+            FOREIGN KEY (base_snapshot_id, prototype_workspace_id)
+                REFERENCES prototype_snapshots(id, prototype_workspace_id),
+            FOREIGN KEY (actor_shared_actor_id, prototype_workspace_id)
+                REFERENCES prototype_shared_actors(id, prototype_workspace_id),
+            UNIQUE (id, prototype_workspace_id),
+            CHECK (
+                (actor_type = 'external_collaborator'
+                    AND actor_user_id IS NULL
+                    AND actor_shared_actor_id IS NOT NULL)
+                OR (
+                    actor_type IN ('owner', 'internal_collaborator')
+                    AND actor_user_id IS NOT NULL
+                    AND actor_shared_actor_id IS NULL
+                )
+            )
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_sessions_workspace_updated "
+        "ON prototype_sessions(prototype_workspace_id, updated_at)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prototype_promotion_requests (
+            id TEXT PRIMARY KEY,
+            prototype_workspace_id TEXT NOT NULL,
+            prototype_session_id TEXT NOT NULL,
+            candidate_snapshot_id TEXT NOT NULL,
+            requested_by_user_id INTEGER,
+            requested_by_shared_actor_id TEXT,
+            status TEXT NOT NULL
+                CHECK (status IN ('pending', 'approved', 'rejected', 'promoted', 'stale')),
+            reviewed_by_user_id INTEGER,
+            review_notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (prototype_workspace_id) REFERENCES prototype_workspaces(id) ON DELETE CASCADE,
+            FOREIGN KEY (prototype_session_id) REFERENCES prototype_sessions(id) ON DELETE CASCADE,
+            FOREIGN KEY (candidate_snapshot_id, prototype_workspace_id)
+                REFERENCES prototype_snapshots(id, prototype_workspace_id),
+            FOREIGN KEY (prototype_session_id, prototype_workspace_id)
+                REFERENCES prototype_sessions(id, prototype_workspace_id),
+            CHECK (
+                (requested_by_user_id IS NOT NULL AND requested_by_shared_actor_id IS NULL)
+                OR (requested_by_user_id IS NULL AND requested_by_shared_actor_id IS NOT NULL)
+            )
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_promotion_requests_workspace_status "
+        "ON prototype_promotion_requests(prototype_workspace_id, status)"
+    )
+
+    conn.commit()
+    logger.info("Migration 086: Created prototype workspace metadata tables")
+
+
+def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
+    """Rollback migration 086 by dropping prototype workspace metadata tables."""
+    conn.execute("DROP TABLE IF EXISTS prototype_promotion_requests")
+    conn.execute("DROP TABLE IF EXISTS prototype_sessions")
+    conn.execute("DROP TABLE IF EXISTS prototype_shared_actors")
+    conn.execute("DROP TABLE IF EXISTS prototype_snapshots")
+    conn.execute("DROP TABLE IF EXISTS prototype_workspaces")
+    conn.commit()
+    logger.info("Rollback 086: Dropped prototype workspace metadata tables")
+
+
 def migration_012_create_rbac_tables(conn: sqlite3.Connection) -> None:
     """Create core RBAC tables: roles, permissions, mappings, and user overrides."""
     logger.info("Migration 012: START RBAC core tables")
@@ -4807,6 +4993,12 @@ def get_authnz_migrations() -> list[Migration]:
             85,
             "Remove api_keys.scope default",
             migration_085_remove_api_keys_scope_default,
+        ),
+        Migration(
+            86,
+            "Create prototype workspace metadata tables",
+            migration_086_create_prototype_workspace_tables,
+            rollback_086_drop_prototype_workspace_tables,
         ),
     ]
 
