@@ -65,6 +65,7 @@ class _ChaChaRuntimeState:
         self.db_lock = threading.Lock()
         self.init_events: dict[str, threading.Event] = {}
         self.init_errors: dict[str, Exception] = {}
+        self.init_timeouts: set[str] = set()
         self.default_char_tasks: set[asyncio.Task[Any]] = set()
         self.default_char_futures: set[asyncio.Future[Any]] = set()
         self.default_char_futures_lock = threading.Lock()
@@ -94,9 +95,16 @@ def _get_executor() -> ThreadPoolExecutor:
         return _STATE.executor
 
 
-def _record_init(duration_ms: float, success: bool, error: Exception | None = None) -> None:
+def _record_init(
+    duration_ms: float,
+    success: bool,
+    error: Exception | None = None,
+    *,
+    count_attempt: bool = True,
+) -> None:
     with _STATE.health_lock:
-        _STATE.health["init_attempts"] += 1
+        if count_attempt:
+            _STATE.health["init_attempts"] += 1
         _STATE.health["last_init_ms"] = duration_ms
         _STATE.health["cached_instances"] = len(_STATE.cache)
         if success:
@@ -136,6 +144,65 @@ def _track_default_character_future(future: asyncio.Future[Any]) -> None:
     with _STATE.default_char_futures_lock:
         _STATE.default_char_futures.add(future)
     future.add_done_callback(_cleanup)
+
+
+def _handle_init_completion(
+    cache_key: str,
+    init_event: threading.Event,
+    completed_future: asyncio.Future[Any],
+    start: float,
+) -> None:
+    db_instance: CharactersRAGDB | None = None
+    error: Exception | None = None
+    success = False
+    duration_ms = (time.perf_counter() - start) * 1000
+    should_close = False
+    should_pop_event = False
+    with _STATE.db_lock:
+        current_event = _STATE.init_events.get(cache_key)
+        owns_event = current_event is init_event
+        cacheable = owns_event and not _is_shutting_down()
+        if cacheable:
+            should_pop_event = True
+        elif owns_event:
+            should_pop_event = True
+    try:
+        db_instance = completed_future.result()
+        success = True
+    except asyncio.CancelledError:
+        return
+    except Exception as exc:
+        error = exc
+
+    with _STATE.db_lock:
+        current_event = _STATE.init_events.get(cache_key)
+        owns_event = current_event is init_event
+        cacheable = owns_event and not _is_shutting_down()
+        timed_out = cache_key in _STATE.init_timeouts
+        if timed_out:
+            _STATE.init_timeouts.discard(cache_key)
+        if cacheable:
+            if success and db_instance is not None:
+                _STATE.cache[cache_key] = db_instance
+                _STATE.init_errors.pop(cache_key, None)
+                _STATE.health["cached_instances"] = len(_STATE.cache)
+            else:
+                if error is not None:
+                    _STATE.init_errors[cache_key] = error
+                should_close = db_instance is not None
+            _STATE.init_events.pop(cache_key, None)
+        else:
+            should_close = db_instance is not None
+            if owns_event:
+                _STATE.init_events.pop(cache_key, None)
+    _record_init(duration_ms, success, error, count_attempt=not timed_out)
+    if should_close and db_instance is not None:
+        try:
+            db_instance.close_all_connections()
+        except (CharactersRAGDBError, OSError, RuntimeError, ValueError, TypeError) as close_err:
+            logger.debug("ChaChaNotes stale init cleanup failed: {}", close_err)
+    if should_pop_event or owns_event:
+        init_event.set()
 
 
 def _get_chacha_db_path_for_user(user_id: int) -> Path:
@@ -336,35 +403,32 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
     loop = asyncio.get_running_loop()
     start = time.perf_counter()
     try:
+        future = loop.run_in_executor(_get_executor(), _create_and_prepare_db, user_id, client_id)
+        future.add_done_callback(
+            lambda completed_future, cache_key=cache_key, init_event=init_event, start=start: _handle_init_completion(
+                cache_key,
+                init_event,
+                completed_future,
+                start,
+            )
+        )
         db_instance = await asyncio.wait_for(
-            loop.run_in_executor(_get_executor(), _create_and_prepare_db, user_id, client_id),
+            asyncio.shield(future),
             timeout=max(_CHACHA_WATCHDOG_SECS * 3, 5),
         )
         duration_ms = (time.perf_counter() - start) * 1000
-        _record_init(duration_ms, True)
         if duration_ms / 1000 > _CHACHA_WATCHDOG_SECS:
             _maybe_dump_traceback(f"ChaChaNotes init exceeded {_CHACHA_WATCHDOG_SECS}s for user {user_id}")
     except asyncio.TimeoutError as e:
+        with _STATE.db_lock:
+            _STATE.init_timeouts.add(cache_key)
         _record_init(_CHACHA_WATCHDOG_SECS * 1000, False, e)
         _maybe_dump_traceback(f"ChaChaNotes init timed out for user {user_id}")
         raise ChaChaRuntimeUnavailableError("ChaChaNotes initialization timed out") from e
     except (CharactersRAGDBError, sqlite3.Error, OSError, RuntimeError, ValueError, TypeError) as e:
         duration_ms = (time.perf_counter() - start) * 1000
-        _record_init(duration_ms, False, e)
-        with _STATE.db_lock:
-            _STATE.init_errors[cache_key] = e
         raise ChaChaRuntimeInitError(f"Could not initialize character & notes database for user: {e}") from e
-    else:
-        with _STATE.db_lock:
-            _STATE.cache[cache_key] = db_instance
-            _STATE.init_errors.pop(cache_key, None)
-            _STATE.health["cached_instances"] = len(_STATE.cache)
-        return db_instance
-    finally:
-        with _STATE.db_lock:
-            init_event = _STATE.init_events.pop(cache_key, None)
-        if init_event is not None:
-            init_event.set()
+    return db_instance
 
 
 async def _warm_chacha_db_for_user(user_id: int, client_id: str | None = None) -> None:
@@ -486,6 +550,7 @@ def _reset_for_tests() -> None:
     _close_all_instances()
     with _STATE.db_lock:
         _STATE.init_events.clear()
+        _STATE.init_timeouts.clear()
     with _STATE.default_char_futures_lock:
         _STATE.default_char_futures.clear()
     _STATE.default_char_tasks.clear()
