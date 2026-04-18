@@ -91,7 +91,7 @@ async def get_chacha_db_for_user(current_user: User = Depends(get_request_user))
 
 
 async def get_chacha_db_for_owner(owner_user_id: int) -> CharactersRAGDB:
-    if not isinstance(owner_user_id, int):
+    if isinstance(owner_user_id, bool) or not isinstance(owner_user_id, int) or owner_user_id <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid owner_user_id.",

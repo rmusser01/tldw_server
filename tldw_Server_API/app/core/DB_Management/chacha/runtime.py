@@ -155,17 +155,7 @@ def _handle_init_completion(
     db_instance: CharactersRAGDB | None = None
     error: Exception | None = None
     success = False
-    duration_ms = (time.perf_counter() - start) * 1000
     should_close = False
-    should_pop_event = False
-    with _STATE.db_lock:
-        current_event = _STATE.init_events.get(cache_key)
-        owns_event = current_event is init_event
-        cacheable = owns_event and not _is_shutting_down()
-        if cacheable:
-            should_pop_event = True
-        elif owns_event:
-            should_pop_event = True
     try:
         db_instance = completed_future.result()
         success = True
@@ -173,14 +163,13 @@ def _handle_init_completion(
         return
     except Exception as exc:
         error = exc
+    duration_ms = (time.perf_counter() - start) * 1000
 
     with _STATE.db_lock:
         current_event = _STATE.init_events.get(cache_key)
         owns_event = current_event is init_event
         cacheable = owns_event and not _is_shutting_down()
         timed_out = cache_key in _STATE.init_timeouts
-        if timed_out:
-            _STATE.init_timeouts.discard(cache_key)
         if cacheable:
             if success and db_instance is not None:
                 _STATE.cache[cache_key] = db_instance
@@ -195,13 +184,15 @@ def _handle_init_completion(
             should_close = db_instance is not None
             if owns_event:
                 _STATE.init_events.pop(cache_key, None)
+        if timed_out:
+            _STATE.init_timeouts.discard(cache_key)
     _record_init(duration_ms, success, error, count_attempt=not timed_out)
     if should_close and db_instance is not None:
         try:
             db_instance.close_all_connections()
         except (CharactersRAGDBError, OSError, RuntimeError, ValueError, TypeError) as close_err:
             logger.debug("ChaChaNotes stale init cleanup failed: {}", close_err)
-    if should_pop_event or owns_event:
+    if owns_event:
         init_event.set()
 
 
@@ -231,14 +222,15 @@ def _apply_sqlite_tuning(db_instance: CharactersRAGDB) -> None:
 def _health_check_instance(db_instance: CharactersRAGDB) -> bool:
     try:
         conn = db_instance.get_connection()
-        sqlite_policy.configure_sqlite_connection(
-            conn,
-            use_wal=False,
-            synchronous=None,
-            foreign_keys=True,
-            busy_timeout_ms=1000,
-            temp_store=None,
-        )
+        if db_instance.backend_type == BackendType.SQLITE:
+            sqlite_policy.configure_sqlite_connection(
+                conn,
+                use_wal=False,
+                synchronous=None,
+                foreign_keys=True,
+                busy_timeout_ms=1000,
+                temp_store=None,
+            )
         conn.execute("SELECT 1")
         return True
     except (CharactersRAGDBError, sqlite3.Error, OSError, RuntimeError, ValueError) as e:

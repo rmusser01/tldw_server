@@ -6,10 +6,30 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException, status
 
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
     ChaChaRuntimeManager,
     ChaChaRuntimeUnavailableError,
 )
+
+
+class _DummyConnection:
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    def execute(self, sql: str):
+        self.statements.append(sql)
+        return None
+
+
+class _DummyPostgresDB:
+    backend_type = BackendType.POSTGRESQL
+
+    def __init__(self, connection: _DummyConnection) -> None:
+        self._connection = connection
+
+    def get_connection(self) -> _DummyConnection:
+        return self._connection
 
 
 def test_runtime_manager_exposes_explicit_resettable_surface():
@@ -28,6 +48,26 @@ def test_dependency_module_preserves_compatibility_symbols():
     assert hasattr(deps, "DEFAULT_CHARACTER_NAME")
     assert hasattr(deps, "DEFAULT_CHARACTER_DESCRIPTION")
     assert hasattr(deps, "resolve_chacha_user_base_dir")
+
+
+@pytest.mark.unit
+def test_runtime_health_check_skips_sqlite_tuning_for_non_sqlite_backend(monkeypatch):
+    import tldw_Server_API.app.core.DB_Management.chacha.runtime as runtime
+    import tldw_Server_API.app.core.DB_Management.sqlite_policy as sqlite_policy
+
+    calls: list[dict[str, object]] = []
+    conn = _DummyConnection()
+
+    def fake_configure(connection, **kwargs):
+        assert connection is conn
+        calls.append(kwargs)
+
+    monkeypatch.setattr(sqlite_policy, "configure_sqlite_connection", fake_configure)
+
+    assert runtime._health_check_instance(_DummyPostgresDB(conn)) is True
+
+    assert calls == []
+    assert conn.statements == ["SELECT 1"]
 
 
 @pytest.mark.asyncio

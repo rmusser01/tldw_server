@@ -226,3 +226,22 @@ async def test_get_chacha_db_for_user_id_maps_generic_init_failure_to_500(monkey
 
     assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
     assert "boom" in exc_info.value.detail
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner_user_id", [True, False, 0, -1])
+async def test_get_chacha_db_for_owner_rejects_bool_and_non_positive_ids(monkeypatch, owner_user_id):
+    import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
+
+    class _Runtime:
+        async def get_or_create(self, *_args, **_kwargs):
+            raise AssertionError("runtime should not be called for invalid owner ids")
+
+    monkeypatch.setattr(deps, "_CHACHA_RUNTIME", _Runtime())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await deps.get_chacha_db_for_owner(owner_user_id)
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc_info.value.detail == "Invalid owner_user_id."
