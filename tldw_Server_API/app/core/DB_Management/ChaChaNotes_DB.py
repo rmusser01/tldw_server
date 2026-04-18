@@ -17792,7 +17792,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         source_tag: str,
         target_tag: str | None,
     ) -> list[str]:
-        return self._character_store._apply_character_tag_operation_to_list(
+        from tldw_Server_API.app.core.DB_Management.chacha.character_store import CharacterStore
+
+        return CharacterStore._apply_character_tag_operation_to_list(
             tags,
             operation,
             source_tag,

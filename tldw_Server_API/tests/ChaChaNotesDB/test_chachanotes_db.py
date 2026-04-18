@@ -96,6 +96,14 @@ class TestDBInitialization:
 
 
 class TestCharacterCards:
+    def test_apply_character_tag_operation_helper_preserves_facade_contract(self):
+        assert CharactersRAGDB._apply_character_tag_operation_to_list(
+            ["legacy", "shared"],
+            "rename",
+            "legacy",
+            "modern",
+        ) == ["modern", "shared"]
+
     def test_add_character_card(self, db_instance: CharactersRAGDB):
         card_data = _create_sample_card_data("Add")
         card_id = db_instance.add_character_card(card_data)
