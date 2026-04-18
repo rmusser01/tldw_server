@@ -66,6 +66,7 @@ Central data stores and database abstractions for content, prompts, notes, evalu
 - Folder Structure:
   - Backends: `backends/` (base, sqlite/postgresql implementations, FTS/query helpers, RLS policies).
   - Content DBs: legacy media DB module, `ChaChaNotes_DB.py`, `Collections_DB.py`, `Watchlists_DB.py`.
+  - `chacha/`: internal lifecycle package for the ChaCha runtime and extracted `character_store.py`, `conversation_store.py`, and `message_store.py` seams. `ChaChaNotes_DB.py` remains the public facade and orchestration owner.
   - Prompting/Studio: `Prompts_DB.py`, `PromptStudioDatabase.py`, `migrations/` (SQL/JSON migrations).
   - Evaluations/Workflows: `Evaluations_DB.py`, `Workflows_DB.py`, `Workflows_Scheduler_DB.py`.
   - Utilities: `DB_Manager.py`, `db_path_utils.py`, `db_migration.py`, `migration_tools.py`, `transaction_utils.py`, `async_db_wrapper.py`, `content_backend.py`, `scope_context.py`, `DB_Backups.py`.
