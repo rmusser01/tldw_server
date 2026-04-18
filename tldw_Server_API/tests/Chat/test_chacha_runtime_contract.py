@@ -17,6 +17,14 @@ def test_runtime_manager_exposes_explicit_resettable_surface():
     runtime.reset_for_tests()
 
 
+def test_dependency_module_preserves_compatibility_symbols():
+    import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
+
+    assert hasattr(deps, "DEFAULT_CHARACTER_NAME")
+    assert hasattr(deps, "DEFAULT_CHARACTER_DESCRIPTION")
+    assert hasattr(deps, "resolve_chacha_user_base_dir")
+
+
 @pytest.mark.asyncio
 async def test_dependency_maps_runtime_unavailable_to_503(monkeypatch):
     import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps

@@ -8,7 +8,10 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
+    DEFAULT_CHARACTER_DESCRIPTION,
+    DEFAULT_CHARACTER_NAME,
     ChaChaRuntimeInitError,
     ChaChaRuntimeManager,
     ChaChaRuntimeUnavailableError,
@@ -25,6 +28,10 @@ def reset_chacha_shutdown_state() -> None:
 
 def get_chacha_health_snapshot() -> dict[str, Any]:
     return _CHACHA_RUNTIME.snapshot()
+
+
+def resolve_chacha_user_base_dir():
+    return DatabasePaths.get_user_db_base_dir()
 
 
 async def warm_chacha_db_for_user(user_id: int, client_id: str | None = None) -> None:
