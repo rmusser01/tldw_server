@@ -44,6 +44,8 @@ import tempfile  # noqa: E402
 import threading  # noqa: E402
 import uuid  # noqa: E402
 from collections.abc import Mapping
+from functools import wraps
+import inspect
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -5150,7 +5152,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import ConversationStore
 
         self._character_store = CharacterStore(self)
-        self.conversation_store = ConversationStore(self)
+        self._conversation_store = ConversationStore(self)
         try:
             self._initialize_schema()
             logger.debug(f"CharactersRAGDB initialization completed successfully for {self.db_path_str}")
@@ -31512,11 +31514,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
 
 def _delegate_conversation_store_method(method_name: str):
-    def _delegated(self: CharactersRAGDB, *args, **kwargs):
-        return getattr(self.conversation_store, method_name)(*args, **kwargs)
+    original_method = getattr(CharactersRAGDB, method_name)
 
-    _delegated.__name__ = method_name
-    _delegated.__qualname__ = f"CharactersRAGDB.{method_name}"
+    @wraps(original_method)
+    def _delegated(self: CharactersRAGDB, *args, **kwargs):
+        return getattr(self._conversation_store, method_name)(*args, **kwargs)
+
+    _delegated.__signature__ = inspect.signature(original_method)
     return _delegated
 
 

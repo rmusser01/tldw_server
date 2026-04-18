@@ -129,6 +129,40 @@ class TestConversationScope:
         assert [conv["scope_type"] for conv in conversations] == ["global"]
         assert total == 1
 
+    def test_facade_settings_roundtrip_preserves_workspace_scope(self, db):
+        db.upsert_workspace("ws-1", "WS1")
+        conv_id = db.add_conversation(
+            {
+                "character_id": 1,
+                "title": "Scoped with settings",
+                "scope_type": "workspace",
+                "workspace_id": "ws-1",
+            }
+        )
+
+        created = db.get_conversation_by_id(conv_id)
+        assert created is not None
+
+        assert db.upsert_conversation_settings(
+            conv_id,
+            {"greetingsChecksum": "abc123"},
+        ) is True
+
+        settings = db.get_conversation_settings(conv_id)
+        assert settings is not None
+        assert settings["settings"]["greetingsChecksum"] == "abc123"
+
+        updated = db.get_conversation_by_id(conv_id)
+        assert updated is not None
+        assert updated["version"] == created["version"] + 1
+
+        workspace_rows = db.search_conversations(
+            None,
+            scope_type="workspace",
+            workspace_id="ws-1",
+        )
+        assert [row["id"] for row in workspace_rows] == [conv_id]
+
 
 # ── workspace delete cascade ──────────────────────────────────────────────
 

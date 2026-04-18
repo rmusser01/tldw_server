@@ -1,6 +1,9 @@
+import inspect
+
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import ConversationStore
 
 
 pytestmark = pytest.mark.unit
@@ -21,7 +24,9 @@ def db(tmp_path):
 
 
 def test_conversation_store_roundtrip_preserves_scope_and_settings(db):
-    conversation_id = db.conversation_store.add_conversation(
+    store = ConversationStore(db)
+
+    conversation_id = store.add_conversation(
         {
             "character_id": 1,
             "title": "Scoped conversation",
@@ -32,18 +37,18 @@ def test_conversation_store_roundtrip_preserves_scope_and_settings(db):
 
     assert conversation_id is not None
 
-    created = db.conversation_store.get_conversation_by_id(conversation_id)
+    created = store.get_conversation_by_id(conversation_id)
     assert created is not None
     assert created["scope_type"] == "workspace"
     assert created["workspace_id"] == "ws-store"
     assert created["state"] == "in-progress"
 
-    assert db.conversation_store.upsert_conversation_settings(
+    assert store.upsert_conversation_settings(
         conversation_id,
         {"temperature": 0.2, "memory": {"enabled": True}},
     ) is True
 
-    settings_row = db.conversation_store.get_conversation_settings(conversation_id)
+    settings_row = store.get_conversation_settings(conversation_id)
     assert settings_row is not None
     assert settings_row["settings"] == {
         "temperature": 0.2,
@@ -51,17 +56,17 @@ def test_conversation_store_roundtrip_preserves_scope_and_settings(db):
     }
     assert settings_row["last_modified"] is not None
 
-    refreshed = db.conversation_store.get_conversation_by_id(conversation_id)
+    refreshed = store.get_conversation_by_id(conversation_id)
     assert refreshed is not None
     assert refreshed["version"] == created["version"] + 1
 
-    workspace_rows = db.conversation_store.search_conversations(
+    workspace_rows = store.search_conversations(
         None,
         client_id=db.client_id,
         scope_type="workspace",
         workspace_id="ws-store",
     )
-    global_rows = db.conversation_store.search_conversations(
+    global_rows = store.search_conversations(
         None,
         client_id=db.client_id,
         scope_type="global",
@@ -69,7 +74,7 @@ def test_conversation_store_roundtrip_preserves_scope_and_settings(db):
 
     assert [row["id"] for row in workspace_rows] == [conversation_id]
     assert global_rows == []
-    assert db.conversation_store.count_conversations_for_user(
+    assert store.count_conversations_for_user(
         db.client_id,
         scope_type="workspace",
         workspace_id="ws-store",
@@ -77,7 +82,9 @@ def test_conversation_store_roundtrip_preserves_scope_and_settings(db):
 
 
 def test_conversation_store_preserves_assistant_identity_updates(db):
-    conversation_id = db.conversation_store.add_conversation(
+    store = ConversationStore(db)
+
+    conversation_id = store.add_conversation(
         {
             "assistant_kind": "persona",
             "assistant_id": "persona-gardener",
@@ -88,21 +95,36 @@ def test_conversation_store_preserves_assistant_identity_updates(db):
         }
     )
 
-    created = db.conversation_store.get_conversation_by_id(conversation_id)
+    created = store.get_conversation_by_id(conversation_id)
     assert created is not None
     assert created["assistant_kind"] == "persona"
     assert created["assistant_id"] == "persona-gardener"
     assert created["persona_memory_mode"] == "read_only"
     assert created["character_id"] is None
 
-    assert db.conversation_store.update_conversation(
+    assert store.update_conversation(
         conversation_id,
         {"persona_memory_mode": "read_write"},
         expected_version=created["version"],
     ) is True
 
-    updated = db.conversation_store.get_conversation_by_id(conversation_id)
+    updated = store.get_conversation_by_id(conversation_id)
     assert updated is not None
     assert updated["assistant_kind"] == "persona"
     assert updated["assistant_id"] == "persona-gardener"
     assert updated["persona_memory_mode"] == "read_write"
+
+
+def test_conversation_facade_preserves_search_signature():
+    signature = inspect.signature(CharactersRAGDB.search_conversations_page)
+
+    assert all(
+        parameter.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+        for parameter in signature.parameters.values()
+    )
+    assert "query" in signature.parameters
+    assert "order_by" in signature.parameters
+    assert "limit" in signature.parameters
+    assert "offset" in signature.parameters
+    assert "scope_type" in signature.parameters
+    assert "workspace_id" in signature.parameters
