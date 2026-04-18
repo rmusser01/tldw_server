@@ -6,6 +6,8 @@ import pytest
 from fastapi import status
 from unittest.mock import patch
 
+from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import _compute_greetings_checksum
+
 
 def _create_character_with_alts(db):
 
@@ -153,6 +155,36 @@ def test_create_chat_with_alternate_index_out_of_range_falls_back_default(
     first = msgs["messages"][0]
     assert first["sender"].lower() in {"assistant", "greeterapi"}
     assert first["content"] == "Hello, User."
+
+
+def test_seeded_chat_creation_persists_greeting_checksum(
+    authenticated_client, mock_chacha_db, setup_dependencies, auth_headers
+):
+    char_id = _create_character_with_alts(mock_chacha_db)
+    character = mock_chacha_db.get_character_card_by_id(char_id)
+    assert character is not None
+    expected_checksum = _compute_greetings_checksum(character)
+
+    create_resp = authenticated_client.post(
+        "/api/v1/chats/",
+        params={
+            "seed_first_message": True,
+            "greeting_strategy": "default",
+        },
+        json={"character_id": char_id},
+    )
+    assert create_resp.status_code == status.HTTP_201_CREATED
+    chat_id = create_resp.json()["id"]
+
+    detail_resp = authenticated_client.get(
+        f"/api/v1/chats/{chat_id}",
+        params={"include_settings": True},
+        headers=auth_headers,
+    )
+
+    assert detail_resp.status_code == status.HTTP_200_OK
+    detail = detail_resp.json()
+    assert detail["settings"]["greetingsChecksum"] == expected_checksum
 
 
 def test_message_list_total_reflects_full_conversation_count(

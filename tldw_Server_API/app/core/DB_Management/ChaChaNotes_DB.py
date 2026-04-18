@@ -5150,9 +5150,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._schema_lock = threading.RLock()
         from tldw_Server_API.app.core.DB_Management.chacha.character_store import CharacterStore
         from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import ConversationStore
+        from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
 
         self._character_store = CharacterStore(self)
         self._conversation_store = ConversationStore(self)
+        self._message_store = MessageStore(self)
         try:
             self._initialize_schema()
             logger.debug(f"CharactersRAGDB initialization completed successfully for {self.db_path_str}")
@@ -31559,6 +31561,47 @@ for _conversation_store_method in (
         CharactersRAGDB,
         _conversation_store_method,
         _delegate_conversation_store_method(_conversation_store_method),
+    )
+
+
+def _delegate_message_store_method(method_name: str):
+    original_method = getattr(CharactersRAGDB, method_name)
+
+    @wraps(original_method)
+    def _delegated(self: CharactersRAGDB, *args, **kwargs):
+        return getattr(self._message_store, method_name)(*args, **kwargs)
+
+    _delegated.__signature__ = inspect.signature(original_method)
+    return _delegated
+
+
+for _message_store_method in (
+    "_ensure_message_metadata_table",
+    "add_message_metadata",
+    "get_message_metadata",
+    "get_message_metadata_map",
+    "get_conversation_citations",
+    "count_messages_for_conversation",
+    "count_messages_for_conversations",
+    "get_latest_message_for_conversation",
+    "count_messages_since",
+    "add_message",
+    "_insert_message_images",
+    "get_message_images",
+    "get_message_conversation_id",
+    "get_message_by_id",
+    "get_messages_for_conversation",
+    "count_root_messages_for_conversation",
+    "get_root_messages_for_conversation",
+    "get_messages_for_conversation_by_parent_ids",
+    "has_system_message_for_conversation",
+    "update_message",
+    "soft_delete_message",
+):
+    setattr(
+        CharactersRAGDB,
+        _message_store_method,
+        _delegate_message_store_method(_message_store_method),
     )
 
 

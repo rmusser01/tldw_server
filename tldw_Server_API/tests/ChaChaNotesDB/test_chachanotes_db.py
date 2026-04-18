@@ -195,6 +195,29 @@ class TestMessageMetadata:
         assert exists is not None
         db.close_connection()
 
+    def test_message_metadata_map_roundtrip(self, db_instance: CharactersRAGDB):
+        character_id = db_instance.add_character_card(_create_sample_card_data("MessageMetadataMap"))
+        assert character_id is not None
+        conversation_id = db_instance.add_conversation(
+            {"character_id": character_id, "title": "Metadata map conversation"}
+        )
+        assert conversation_id is not None
+        message_id = db_instance.add_message(
+            {"conversation_id": conversation_id, "sender": "assistant", "content": "metadata"}
+        )
+        assert message_id is not None
+        assert db_instance.add_message_metadata(
+            message_id,
+            tool_calls=[{"id": "tool-42"}],
+            extra={"mode": "roundtrip"},
+        ) is True
+
+        metadata_map = db_instance.get_message_metadata_map([message_id, "missing-message"])
+
+        assert metadata_map[message_id]["tool_calls"] == [{"id": "tool-42"}]
+        assert metadata_map[message_id]["extra"] == {"mode": "roundtrip"}
+        assert "missing-message" not in metadata_map
+
     def test_list_character_cards(self, db_instance: CharactersRAGDB):
         # Get initial count (database has a default character card)
         initial_cards = db_instance.list_character_cards()
@@ -623,6 +646,57 @@ class TestConversationsAndMessages:
         assert len(messages_desc) == 2
         assert messages_desc[0]["id"] == msg2_id
         assert messages_desc[1]["id"] == msg1_id
+
+    def test_message_tree_helpers_and_counts(self, db_instance: CharactersRAGDB, char_id):
+        conv_id = db_instance.add_conversation({"character_id": char_id, "title": "Tree helpers"})
+        other_conv_id = db_instance.add_conversation({"character_id": char_id, "title": "Other tree helpers"})
+        assert conv_id is not None
+        assert other_conv_id is not None
+
+        root_id = db_instance.add_message(
+            {
+                "conversation_id": conv_id,
+                "sender": "system",
+                "content": "root",
+                "timestamp": "2024-01-01T00:00:00Z",
+            }
+        )
+        child_id = db_instance.add_message(
+            {
+                "conversation_id": conv_id,
+                "parent_message_id": root_id,
+                "sender": "user",
+                "content": "child",
+                "timestamp": "2024-01-01T00:00:01Z",
+            }
+        )
+        latest_id = db_instance.add_message(
+            {
+                "conversation_id": conv_id,
+                "sender": "assistant",
+                "content": "latest",
+                "timestamp": "2024-01-01T00:00:02Z",
+            }
+        )
+        assert root_id is not None
+        assert child_id is not None
+        assert latest_id is not None
+
+        root_rows = db_instance.get_root_messages_for_conversation(conv_id, limit=10, offset=0)
+        child_rows = db_instance.get_messages_for_conversation_by_parent_ids(conv_id, [root_id])
+        latest_message = db_instance.get_latest_message_for_conversation(conv_id)
+        counts = db_instance.count_messages_for_conversations([conv_id, other_conv_id])
+
+        assert db_instance.count_messages_for_conversation(conv_id) == 3
+        assert counts == {conv_id: 3, other_conv_id: 0}
+        assert db_instance.count_messages_since(conv_id, root_id) == 2
+        assert db_instance.count_root_messages_for_conversation(conv_id) == 2
+        assert [row["id"] for row in root_rows] == [root_id, latest_id]
+        assert [row["id"] for row in child_rows] == [child_id]
+        assert latest_message is not None
+        assert latest_message["id"] == latest_id
+        assert db_instance.has_system_message_for_conversation(conv_id) is True
+        assert db_instance.get_message_conversation_id(child_id) == conv_id
 
     def test_update_conversation(self, db_instance: CharactersRAGDB, char_id: int):
         # 1. Setup: Add an initial conversation with a SIMPLE title
