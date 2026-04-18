@@ -17,6 +17,53 @@ if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
+def normalize_character_tags_for_operation(
+    tags_value: Any,
+    *,
+    folder_tag_prefix: str,
+) -> list[str]:
+    """Normalize character tags while preserving single-folder semantics."""
+    if tags_value is None:
+        return []
+
+    raw_tags: list[Any]
+    if isinstance(tags_value, (list, set, tuple)):
+        raw_tags = list(tags_value)
+    elif isinstance(tags_value, str):
+        if not tags_value.strip():
+            return []
+        try:
+            parsed = json.loads(tags_value)
+            if isinstance(parsed, list):
+                raw_tags = parsed
+            else:
+                raw_tags = [tags_value]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raw_tags = [tags_value]
+    else:
+        raw_tags = [tags_value]
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for tag in raw_tags:
+        tag_str = str(tag)
+        if not tag_str.strip() or tag_str in seen:
+            continue
+        seen.add(tag_str)
+        normalized.append(tag_str)
+
+    folder_tag: str | None = None
+    non_folder_tags: list[str] = []
+    for tag in normalized:
+        if tag.startswith(folder_tag_prefix):
+            folder_tag = tag
+            continue
+        non_folder_tags.append(tag)
+    if folder_tag:
+        non_folder_tags.append(folder_tag)
+    return non_folder_tags
+
+
 class CharacterStore:
     """Focused character-card lifecycle store used by CharactersRAGDB."""
 
@@ -398,45 +445,10 @@ class CharacterStore:
             raise
 
     def _normalize_character_tags_for_operation(self, tags_value: Any) -> list[str]:
-        if tags_value is None:
-            return []
-
-        raw_tags: list[Any]
-        if isinstance(tags_value, (list, set, tuple)):
-            raw_tags = list(tags_value)
-        elif isinstance(tags_value, str):
-            if not tags_value.strip():
-                return []
-            try:
-                parsed = json.loads(tags_value)
-                if isinstance(parsed, list):
-                    raw_tags = parsed
-                else:
-                    raw_tags = [tags_value]
-            except (TypeError, ValueError, json.JSONDecodeError):
-                raw_tags = [tags_value]
-        else:
-            raw_tags = [tags_value]
-
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for tag in raw_tags:
-            tag_str = str(tag)
-            if not tag_str.strip() or tag_str in seen:
-                continue
-            seen.add(tag_str)
-            normalized.append(tag_str)
-
-        folder_tag: str | None = None
-        non_folder_tags: list[str] = []
-        for tag in normalized:
-            if tag.startswith(self.db._CHARACTER_FOLDER_TAG_PREFIX):
-                folder_tag = tag
-                continue
-            non_folder_tags.append(tag)
-        if folder_tag:
-            non_folder_tags.append(folder_tag)
-        return non_folder_tags
+        return normalize_character_tags_for_operation(
+            tags_value,
+            folder_tag_prefix=self.db._CHARACTER_FOLDER_TAG_PREFIX,
+        )
 
     @staticmethod
     def _apply_character_tag_operation_to_list(

@@ -96,6 +96,18 @@ class TestDBInitialization:
 
 
 class TestCharacterCards:
+    def test_normalize_character_tags_helper_preserves_facade_contract(self):
+        folder_tag_prefix = CharactersRAGDB._CHARACTER_FOLDER_TAG_PREFIX
+        assert CharactersRAGDB._normalize_character_tags_for_operation(
+            [
+                "shared",
+                "",
+                f"{folder_tag_prefix}alpha",
+                "shared",
+                f"{folder_tag_prefix}beta",
+            ],
+        ) == ["shared", f"{folder_tag_prefix}beta"]
+
     def test_apply_character_tag_operation_helper_preserves_facade_contract(self):
         assert CharactersRAGDB._apply_character_tag_operation_to_list(
             ["legacy", "shared"],

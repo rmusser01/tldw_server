@@ -17782,8 +17782,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             offset=offset,
         )
 
-    def _normalize_character_tags_for_operation(self, tags_value: Any) -> list[str]:
-        return self._character_store._normalize_character_tags_for_operation(tags_value)
+    @classmethod
+    def _normalize_character_tags_for_operation(cls, tags_value: Any) -> list[str]:
+        from tldw_Server_API.app.core.DB_Management.chacha.character_store import (
+            normalize_character_tags_for_operation,
+        )
+
+        return normalize_character_tags_for_operation(
+            tags_value,
+            folder_tag_prefix=cls._CHARACTER_FOLDER_TAG_PREFIX,
+        )
 
     @staticmethod
     def _apply_character_tag_operation_to_list(
