@@ -1,6 +1,8 @@
 import asyncio
+import contextlib
 import inspect
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -124,22 +126,59 @@ async def test_timeout_keeps_init_gate_until_background_completion(monkeypatch, 
     monkeypatch.setattr(runtime, "_create_and_prepare_db", fake_create_and_prepare_db)
     monkeypatch.setattr(runtime.asyncio, "wait_for", fake_wait_for)
 
-    first_task = asyncio.create_task(runtime._get_or_init_db_instance(42, "42"))
-    with pytest.raises(runtime.ChaChaRuntimeUnavailableError, match="timed out"):
-        await first_task
+    second_task = None
+    try:
+        first_task = asyncio.create_task(runtime._get_or_init_db_instance(42, "42"))
+        with pytest.raises(runtime.ChaChaRuntimeUnavailableError, match="timed out"):
+            await first_task
 
-    await asyncio.to_thread(started.wait)
-    assert init_calls == [(42, "42")]
+        await asyncio.wait_for(asyncio.to_thread(started.wait), timeout=2.0)
+        assert init_calls == [(42, "42")]
 
-    second_task = asyncio.create_task(runtime._get_or_init_db_instance(42, "42"))
-    await asyncio.sleep(0.05)
-    assert init_calls == [(42, "42")]
-    assert not second_task.done()
+        second_task = asyncio.create_task(runtime._get_or_init_db_instance(42, "42"))
+        await asyncio.sleep(0.05)
+        assert init_calls == [(42, "42")]
+        assert not second_task.done()
 
-    proceed.set()
-    result = await second_task
+        proceed.set()
+        result = await second_task
 
-    assert isinstance(result, _FakeDB)
-    assert init_calls == [(42, "42")]
-    assert runtime._snapshot()["cached_instances"] == 1
+        assert isinstance(result, _FakeDB)
+        assert init_calls == [(42, "42")]
+        assert runtime._snapshot()["cached_instances"] == 1
+    finally:
+        proceed.set()
+        if second_task is not None and not second_task.done():
+            second_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await second_task
+        runtime._reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_init_completion_releases_waiters():
+    import tldw_Server_API.app.core.DB_Management.chacha.runtime as runtime
+
+    runtime._reset_for_tests()
+    cache_key = "cancelled-init"
+    init_event = threading.Event()
+    completed_future = asyncio.get_running_loop().create_future()
+    completed_future.cancel()
+
+    with runtime._STATE.db_lock:
+        runtime._STATE.init_events[cache_key] = init_event
+
+    runtime._handle_init_completion(
+        cache_key,
+        init_event,
+        completed_future,
+        time.perf_counter(),
+    )
+
+    with runtime._STATE.db_lock:
+        assert cache_key not in runtime._STATE.init_events
+        assert cache_key in runtime._STATE.init_errors
+
+    assert init_event.is_set() is True
+    assert isinstance(runtime._STATE.init_errors[cache_key], runtime.ChaChaRuntimeInitError)
     runtime._reset_for_tests()

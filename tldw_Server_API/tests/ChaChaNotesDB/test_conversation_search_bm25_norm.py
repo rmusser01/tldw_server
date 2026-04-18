@@ -60,3 +60,42 @@ def test_conversation_search_global_bm25_normalization(tmp_path):
     assert page1[0]["id"] == full[1]["id"]
     assert page1[0]["bm25_norm"] == full[1]["bm25_norm"]
     assert page1[0]["bm25_norm"] < 1.0
+
+
+def test_conversation_search_prefers_more_recent_rows_when_scores_tie(tmp_path):
+    db_path = tmp_path / "chacha.db"
+    db = CharactersRAGDB(db_path=str(db_path), client_id="user-1")
+
+    older_id = db.add_conversation(
+        {
+            "id": "c-old",
+            "root_id": "c-old",
+            "character_id": 1,
+            "title": "alpha tie",
+            "client_id": "user-1",
+        }
+    )
+    newer_id = db.add_conversation(
+        {
+            "id": "c-new",
+            "root_id": "c-new",
+            "character_id": 1,
+            "title": "alpha tie",
+            "client_id": "user-1",
+        }
+    )
+
+    db.execute_query(
+        "UPDATE conversations SET last_modified = ? WHERE id = ?",
+        ("2024-01-01T00:00:00Z", older_id),
+        commit=True,
+    )
+    db.execute_query(
+        "UPDATE conversations SET last_modified = ? WHERE id = ?",
+        ("2024-01-02T00:00:00Z", newer_id),
+        commit=True,
+    )
+
+    results = db.search_conversations_by_title("alpha", limit=2, offset=0)
+
+    assert [row["id"] for row in results[:2]] == ["c-new", "c-old"]

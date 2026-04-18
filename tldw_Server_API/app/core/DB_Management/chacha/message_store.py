@@ -182,29 +182,52 @@ class MessageStore:
     def get_conversation_citations(self, conversation_id: str) -> list[dict[str, Any]]:
         """Retrieve all citations from a conversation's messages."""
         try:
-            messages = self.get_messages_for_conversation(conversation_id, limit=1000)
             citations_by_id: dict[str, dict[str, Any]] = {}
+            batch_size = 1000
+            offset = 0
 
-            for message in messages:
-                message_id = message.get("id")
-                if not message_id:
-                    continue
+            while True:
+                messages = self.get_messages_for_conversation(
+                    conversation_id,
+                    limit=batch_size,
+                    offset=offset,
+                )
+                if not messages:
+                    break
 
-                rag_context = self._db.get_message_rag_context(message_id)
-                if not rag_context:
-                    continue
+                for message in messages:
+                    message_id = message.get("id")
+                    if not message_id:
+                        continue
 
-                retrieved_docs = rag_context.get("retrieved_documents", [])
-                for document in retrieved_docs:
-                    doc_id = document.get("id") or document.get("chunk_id") or f"anon_{len(citations_by_id)}"
-                    if doc_id not in citations_by_id:
-                        citations_by_id[doc_id] = {
-                            **document,
-                            "message_ids": [message_id],
-                            "first_cited_at": message.get("timestamp"),
-                        }
-                    elif message_id not in citations_by_id[doc_id]["message_ids"]:
-                        citations_by_id[doc_id]["message_ids"].append(message_id)
+                    rag_context = self._db.get_message_rag_context(message_id)
+                    if not rag_context:
+                        continue
+
+                    retrieved_docs = rag_context.get("retrieved_documents", [])
+                    for document in retrieved_docs:
+                        doc_id = document.get("id") or document.get("chunk_id") or f"anon_{len(citations_by_id)}"
+                        if doc_id not in citations_by_id:
+                            citations_by_id[doc_id] = {
+                                **document,
+                                "message_ids": [message_id],
+                                "first_cited_at": message.get("timestamp"),
+                            }
+                            continue
+
+                        citation = citations_by_id[doc_id]
+                        if message_id not in citation["message_ids"]:
+                            citation["message_ids"].append(message_id)
+
+                        first_cited_at = citation.get("first_cited_at")
+                        message_timestamp = message.get("timestamp")
+                        if first_cited_at is None or (
+                            message_timestamp is not None
+                            and str(message_timestamp) < str(first_cited_at)
+                        ):
+                            citation["first_cited_at"] = message_timestamp
+
+                offset += len(messages)
 
             return list(citations_by_id.values())
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
@@ -312,17 +335,21 @@ class MessageStore:
             return self.count_messages_for_conversation(conversation_id)
 
         since_timestamp = since_message.get("timestamp")
-        if not since_timestamp:
+        since_id = since_message.get("id")
+        if not since_timestamp or not since_id:
             return self.count_messages_for_conversation(conversation_id)
 
         query = (
             "SELECT COUNT(1) FROM messages m "
             "JOIN conversations c ON m.conversation_id = c.id "
             "WHERE m.conversation_id = ? AND m.deleted = 0 AND c.deleted = 0 "
-            "AND m.timestamp > ?"
+            "AND (m.timestamp > ? OR (m.timestamp = ? AND m.id > ?))"
         )
         try:
-            cursor = self._db.execute_query(query, (conversation_id, since_timestamp))
+            cursor = self._db.execute_query(
+                query,
+                (conversation_id, since_timestamp, since_timestamp, since_id),
+            )
             row = cursor.fetchone()
             if row is None:
                 return 0

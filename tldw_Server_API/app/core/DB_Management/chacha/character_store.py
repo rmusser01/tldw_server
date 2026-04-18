@@ -155,13 +155,14 @@ class CharacterStore:
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
+        client_id = card_data.get("client_id") or self.db.client_id
         params = (
             card_data["name"], card_data.get("description"), card_data.get("personality"),
             card_data.get("scenario"), card_data.get("image"), card_data.get("post_history_instructions"),
             card_data.get("first_message"), card_data.get("message_example"), card_data.get("creator_notes"),
             card_data.get("system_prompt"), alt_greetings_json, tags_json,
             card_data.get("creator"), card_data.get("character_version"), extensions_json,
-            now, now, self.db.client_id,
+            now, now, client_id,
         )
         try:
             with self.db.transaction() as conn:

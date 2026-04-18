@@ -64,20 +64,22 @@ class ConversationStore:
             self._ensure_conversation_settings_table()
             payload = json.dumps(settings)
             if self._db.backend_type == BackendType.SQLITE:
-                query = (
+                update_query = (
+                    "UPDATE conversations SET version = version + 1, last_modified = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND deleted = 0"
+                )
+                upsert_query = (
                     "INSERT INTO conversation_settings(conversation_id, settings_json, last_modified) "
                     "VALUES (?, ?, CURRENT_TIMESTAMP) "
                     "ON CONFLICT(conversation_id) DO UPDATE SET settings_json=excluded.settings_json, "
                     "last_modified=CURRENT_TIMESTAMP"
                 )
-                self._db.execute_query(query, (conversation_id, payload), commit=True)
-                self._db.execute_query(
-                    "UPDATE conversations SET version = version + 1, last_modified = CURRENT_TIMESTAMP "
-                    "WHERE id = ? AND deleted = 0",
-                    (conversation_id,),
-                    commit=True,
-                )
-                return True
+                with self._db.transaction() as conn:
+                    update_cursor = conn.execute(update_query, (conversation_id,))
+                    if update_cursor.rowcount == 0:
+                        return False
+                    conn.execute(upsert_query, (conversation_id, payload))
+                    return True
 
             upsert = (
                 "INSERT INTO conversation_settings(conversation_id, settings_json, last_modified) "
@@ -85,13 +87,24 @@ class ConversationStore:
                 "ON CONFLICT (conversation_id) DO UPDATE SET settings_json = EXCLUDED.settings_json, "
                 "last_modified = NOW()"
             )
-            self._db.backend.execute(upsert, (conversation_id, payload))
-            self._db.backend.execute(
+            update = (
                 "UPDATE conversations SET version = version + 1, last_modified = NOW() "
                 "WHERE id = %s AND deleted = 0",
-                (conversation_id,),
             )
-            return True
+            with self._db.backend.transaction() as conn:
+                update_result = self._db.backend.execute(
+                    update,
+                    (conversation_id,),
+                    connection=conn,
+                )
+                if update_result.rowcount == 0:
+                    return False
+                self._db.backend.execute(
+                    upsert,
+                    (conversation_id, payload),
+                    connection=conn,
+                )
+                return True
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(f"upsert_conversation_settings failed for {conversation_id}: {exc}")
             return False
@@ -184,17 +197,23 @@ class ConversationStore:
             return None
         return f"{column} = {false_literal}"
 
+    @staticmethod
     def _normalize_scope(
-        self,
         scope_type: str | None,
         workspace_id: str | None,
     ) -> tuple[str, str | None]:
+        allowed_scope_types = ("global", "workspace")
         if scope_type is None:
             scope_type = "global"
+        elif not isinstance(scope_type, str):
+            raise InputError(  # noqa: TRY003
+                "scope_type must be a string or null. "
+                f"Got {type(scope_type).__name__}: {scope_type!r}"
+            )
         scope_type = scope_type.strip().lower()
-        if scope_type not in self._db._ALLOWED_SCOPE_TYPES:
+        if scope_type not in allowed_scope_types:
             raise InputError(
-                f"Invalid scope_type '{scope_type}'. Allowed: {', '.join(self._db._ALLOWED_SCOPE_TYPES)}"
+                f"Invalid scope_type '{scope_type}'. Allowed: {', '.join(allowed_scope_types)}"
             )  # noqa: TRY003
         if scope_type == "workspace":
             if not workspace_id:
@@ -1020,8 +1039,8 @@ class ConversationStore:
                 raw = row.get("bm25_raw", 0) or 0
                 row["bm25_norm"] = (raw / max_score) if max_score else 0
             rows.sort(
-                key=lambda row: (-(row.get("bm25_norm") or 0), str(row.get("last_modified") or ""), row.get("id") or ""),
-                reverse=False,
+                key=lambda row: ((row.get("bm25_norm") or 0), str(row.get("last_modified") or ""), row.get("id") or ""),
+                reverse=True,
             )
             return rows[offset: offset + limit]
 
@@ -1059,8 +1078,8 @@ class ConversationStore:
             row["bm25_norm"] = (raw / max_bm25) if max_bm25 else 0
 
         rows.sort(
-            key=lambda row: (-(row.get("bm25_norm") or 0), str(row.get("last_modified") or ""), row.get("id") or ""),
-            reverse=False,
+            key=lambda row: ((row.get("bm25_norm") or 0), str(row.get("last_modified") or ""), row.get("id") or ""),
+            reverse=True,
         )
         return rows[offset: offset + limit]
 

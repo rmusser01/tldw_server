@@ -2,11 +2,14 @@ pytest_plugins = [
     "tldw_Server_API.tests._plugins.chat_fixtures",
 ]
 
+import hashlib
+
 import pytest
 from fastapi import status
 from unittest.mock import patch
 
-from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import _compute_greetings_checksum
+def _expected_checksum(*greetings: str) -> str:
+    return hashlib.sha256("\n---\n".join(greetings).encode("utf-8")).hexdigest()[:16]
 
 
 def _create_character_with_alts(db):
@@ -161,9 +164,11 @@ def test_seeded_chat_creation_persists_greeting_checksum(
     authenticated_client, mock_chacha_db, setup_dependencies, auth_headers
 ):
     char_id = _create_character_with_alts(mock_chacha_db)
-    character = mock_chacha_db.get_character_card_by_id(char_id)
-    assert character is not None
-    expected_checksum = _compute_greetings_checksum(character)
+    expected_checksum = _expected_checksum(
+        "Hello, {{user}}.",
+        "Hey there, {{user}}!",
+        "Welcome, {{user}}.",
+    )
 
     create_resp = authenticated_client.post(
         "/api/v1/chats/",

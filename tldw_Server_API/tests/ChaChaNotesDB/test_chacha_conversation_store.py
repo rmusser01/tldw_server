@@ -2,7 +2,7 @@ import inspect
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import ConversationStore
 
 
@@ -113,6 +113,41 @@ def test_conversation_store_preserves_assistant_identity_updates(db):
     assert updated["assistant_kind"] == "persona"
     assert updated["assistant_id"] == "persona-gardener"
     assert updated["persona_memory_mode"] == "read_write"
+
+
+def test_conversation_store_rejects_settings_updates_for_deleted_parents(db):
+    store = ConversationStore(db)
+
+    conversation_id = store.add_conversation(
+        {
+            "character_id": 1,
+            "title": "Deleted parent settings",
+        }
+    )
+    assert conversation_id is not None
+    assert store.upsert_conversation_settings(conversation_id, {"temperature": 0.2}) is True
+
+    created = store.get_conversation_by_id(conversation_id)
+    assert created is not None
+    assert store.soft_delete_conversation(conversation_id, created["version"]) is True
+
+    assert store.upsert_conversation_settings(conversation_id, {"temperature": 0.9}) is False
+
+    settings_row = store.get_conversation_settings(conversation_id)
+    assert settings_row is not None
+    assert settings_row["settings"] == {"temperature": 0.2}
+
+
+def test_conversation_store_scope_normalization_rejects_non_strings_and_preserves_static_binding(db):
+    store = ConversationStore(db)
+
+    with pytest.raises(InputError, match="scope_type must be a string or null"):
+        store._normalize_scope(True, None)
+
+    assert CharactersRAGDB._normalize_scope("workspace", "ws-store") == (
+        "workspace",
+        "ws-store",
+    )
 
 
 def test_conversation_facade_preserves_search_signature():

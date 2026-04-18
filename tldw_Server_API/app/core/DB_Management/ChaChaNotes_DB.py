@@ -31516,7 +31516,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
 
 def _delegate_conversation_store_method(method_name: str):
+    original_descriptor = inspect.getattr_static(CharactersRAGDB, method_name)
     original_method = getattr(CharactersRAGDB, method_name)
+
+    if isinstance(original_descriptor, staticmethod):
+
+        @wraps(original_method)
+        def _delegated(*args, **kwargs):
+            from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import (
+                ConversationStore,
+            )
+
+            return getattr(ConversationStore, method_name)(*args, **kwargs)
+
+        _delegated.__signature__ = inspect.signature(original_method)
+        return staticmethod(_delegated)
 
     @wraps(original_method)
     def _delegated(self: CharactersRAGDB, *args, **kwargs):

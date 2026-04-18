@@ -225,7 +225,7 @@ async def test_get_chacha_db_for_user_id_maps_generic_init_failure_to_500(monkey
         await deps.get_chacha_db_for_user_id(1, "1")
 
     assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-    assert "boom" in exc_info.value.detail
+    assert exc_info.value.detail == "ChaCha runtime initialization failed."
 
 
 @pytest.mark.unit

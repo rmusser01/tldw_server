@@ -64,3 +64,15 @@ def test_character_store_add_update_restore_roundtrip(db_instance):
     assert restored is not None
     assert not restored["deleted"]
     assert restored["description"] == "Updated by store"
+
+
+def test_character_store_preserves_client_id_override(db_instance):
+    store = db_instance._character_store
+
+    created_id = store.add_character_card(
+        _create_sample_card_data("Override", client_id_override="external-client")
+    )
+
+    created = store.get_character_card_by_id(created_id)
+    assert created is not None
+    assert created["client_id"] == "external-client"

@@ -47,7 +47,11 @@ async def _resolve_runtime_db(user_id: int, client_id: str | None) -> Characters
     except ChaChaRuntimeUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except ChaChaRuntimeInitError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        logger.error("ChaCha runtime initialization failed for user {}: {}", user_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ChaCha runtime initialization failed.",
+        ) from exc
 
 
 async def get_chacha_db_for_user_id(user_id: int, client_id: str | None = None) -> CharactersRAGDB:

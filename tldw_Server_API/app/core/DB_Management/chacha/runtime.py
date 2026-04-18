@@ -159,8 +159,8 @@ def _handle_init_completion(
     try:
         db_instance = completed_future.result()
         success = True
-    except asyncio.CancelledError:
-        return
+    except asyncio.CancelledError as exc:
+        error = ChaChaRuntimeInitError("ChaChaNotes initialization was cancelled.")
     except Exception as exc:
         error = exc
     duration_ms = (time.perf_counter() - start) * 1000
