@@ -31,7 +31,9 @@ from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     ToggleAllChecklistItemsRequest,
 )
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
+    InputError as KanbanInputError,
     KanbanDB,
+    KanbanDBError,
 )
 
 router = APIRouter(tags=["Kanban Checklists"])
@@ -73,7 +75,7 @@ async def create_checklist(
             position=checklist_in.position
         )
         return ChecklistResponse(**checklist)
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.get(
     "/cards/{card_id}/checklists",
@@ -92,7 +94,7 @@ async def list_checklists(
         return ChecklistsListResponse(
             checklists=[ChecklistResponse(**cl) for cl in checklists]
         )
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.get(
     "/checklists/{checklist_id}",
@@ -116,7 +118,7 @@ async def get_checklist(
         return ChecklistWithItemsResponse(**checklist)
     except HTTPException:
         raise
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.patch(
     "/checklists/{checklist_id}",
@@ -141,7 +143,7 @@ async def update_checklist(
             name=checklist_in.name
         )
         return ChecklistResponse(**checklist)
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.delete(
     "/checklists/{checklist_id}",
@@ -166,7 +168,7 @@ async def delete_checklist(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.post(
     "/cards/{card_id}/checklists/reorder",
@@ -193,7 +195,7 @@ async def reorder_checklists(
         return ChecklistsListResponse(
             checklists=[ChecklistResponse(**cl) for cl in checklists]
         )
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 # =============================================================================
 # Checklist Item CRUD Endpoints
@@ -227,7 +229,7 @@ async def create_checklist_item(
             checked=item_in.checked
         )
         return ChecklistItemResponse(**item)
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.get(
     "/checklists/{checklist_id}/items",
@@ -246,7 +248,7 @@ async def list_checklist_items(
         return ChecklistItemsListResponse(
             items=[ChecklistItemResponse(**item) for item in items]
         )
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.get(
     "/checklist-items/{item_id}",
@@ -270,7 +272,7 @@ async def get_checklist_item(
         return ChecklistItemResponse(**item)
     except HTTPException:
         raise
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.patch(
     "/checklist-items/{item_id}",
@@ -297,7 +299,7 @@ async def update_checklist_item(
             checked=item_in.checked
         )
         return ChecklistItemResponse(**item)
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.delete(
     "/checklist-items/{item_id}",
@@ -322,7 +324,7 @@ async def delete_checklist_item(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.post(
     "/checklists/{checklist_id}/items/reorder",
@@ -349,7 +351,7 @@ async def reorder_checklist_items(
         return ChecklistItemsListResponse(
             items=[ChecklistItemResponse(**item) for item in items]
         )
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 # =============================================================================
 # Convenience Endpoints
@@ -370,7 +372,7 @@ async def check_item(
     try:
         item = db.update_checklist_item(item_id=item_id, checked=True)
         return ChecklistItemResponse(**item)
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.post(
     "/checklist-items/{item_id}/uncheck",
@@ -387,7 +389,7 @@ async def uncheck_item(
     try:
         item = db.update_checklist_item(item_id=item_id, checked=False)
         return ChecklistItemResponse(**item)
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.post(
     "/checklists/{checklist_id}/toggle-all",
@@ -412,5 +414,5 @@ async def toggle_all_checklist_items(
             checked=request.checked
         )
         return ChecklistWithItemsResponse(**checklist)
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e

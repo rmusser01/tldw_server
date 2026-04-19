@@ -23,7 +23,9 @@ from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     LabelUpdate,
 )
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
+    InputError as KanbanInputError,
     KanbanDB,
+    KanbanDBError,
 )
 
 router = APIRouter(tags=["Kanban Labels"])
@@ -65,7 +67,7 @@ async def create_label(
             color=label_in.color
         )
         return LabelResponse(**label)
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.get(
     "/boards/{board_id}/labels",
@@ -84,7 +86,7 @@ async def list_labels(
         return LabelsListResponse(
             labels=[LabelResponse(**label) for label in labels]
         )
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.get(
     "/labels/{label_id}",
@@ -108,7 +110,7 @@ async def get_label(
         return LabelResponse(**label)
     except HTTPException:
         raise
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.patch(
     "/labels/{label_id}",
@@ -135,7 +137,7 @@ async def update_label(
             color=label_in.color
         )
         return LabelResponse(**label)
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.delete(
     "/labels/{label_id}",
@@ -160,7 +162,7 @@ async def delete_label(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 # =============================================================================
 # Card-Label Association Endpoints
@@ -188,7 +190,7 @@ async def assign_label_to_card(
     try:
         db.assign_label_to_card(card_id=card_id, label_id=label_id)
         return DetailResponse(detail="Label assigned to card")
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.delete(
     "/cards/{card_id}/labels/{label_id}",
@@ -208,7 +210,7 @@ async def remove_label_from_card(
         db.remove_label_from_card(card_id=card_id, label_id=label_id)
         # Don't raise 404 if the association didn't exist - idempotent behavior
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.get(
     "/cards/{card_id}/labels",
@@ -227,5 +229,5 @@ async def get_card_labels(
         return LabelsListResponse(
             labels=[LabelResponse(**label) for label in labels]
         )
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e

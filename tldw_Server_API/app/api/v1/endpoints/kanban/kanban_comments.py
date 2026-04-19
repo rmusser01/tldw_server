@@ -21,7 +21,11 @@ from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     CommentUpdate,
     PaginationInfo,
 )
-from tldw_Server_API.app.core.DB_Management.Kanban_DB import KanbanDB
+from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
+    InputError as KanbanInputError,
+    KanbanDB,
+    KanbanDBError,
+)
 
 router = APIRouter(tags=["Kanban Comments"])
 
@@ -62,7 +66,7 @@ async def create_comment(
             content=comment_in.content
         )
         return CommentResponse(**comment)
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 
 
@@ -100,7 +104,7 @@ async def list_comments(
                 has_more=has_more
             )
         )
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 
 
@@ -127,7 +131,7 @@ async def get_comment(
         return CommentResponse(**comment)
     except HTTPException:
         raise
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 
 
@@ -156,7 +160,7 @@ async def update_comment(
             content=comment_in.content
         )
         return CommentResponse(**comment)
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 
 
@@ -189,5 +193,5 @@ async def delete_comment(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e

@@ -415,7 +415,7 @@ async def create_chat_dictionary(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
     except InputError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — outermost endpoint handler
         logger.error(f"Error creating dictionary: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -491,7 +491,7 @@ async def list_chat_dictionaries(
             active_count=active_count,
             inactive_count=inactive_count,
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error listing dictionaries: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -514,7 +514,7 @@ async def get_chat_dictionary(
         entries = service.get_entries(dictionary_id=dictionary_id, active_only=False) if dict_data else []
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error getting dictionary: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -572,7 +572,7 @@ async def update_chat_dictionary(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error updating dictionary: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -603,7 +603,7 @@ async def delete_chat_dictionary(
         success = service.delete_dictionary(dictionary_id, hard_delete=hard_delete)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error deleting dictionary: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -631,7 +631,7 @@ async def add_dictionary_entry(
     service = ChatDictionaryService(db)
     try:
         dict_data = service.get_dictionary(dictionary_id)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error retrieving dictionary before adding entry: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -658,7 +658,7 @@ async def add_dictionary_entry(
         entry_data = next((item for item in created_entries if item.get("id") == entry_id), None)
     except InputError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error adding dictionary entry: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -701,7 +701,7 @@ async def list_dictionary_entries(
         entries = service.get_entries(dictionary_id=dictionary_id, group=group, active_only=False) if dict_data else []
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error listing dictionary entries: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -782,7 +782,7 @@ async def update_dictionary_entry(
                     ) from e
         except HTTPException:
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Error checking existing entry type for regex validation: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -820,7 +820,7 @@ async def update_dictionary_entry(
         updated_entry = next((item for item in refreshed_entries if item.get("id") == entry_id), None)
     except InputError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error updating dictionary entry: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -848,7 +848,7 @@ async def delete_dictionary_entry(
         success = service.delete_entry(entry_id)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error deleting dictionary entry: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -896,7 +896,7 @@ async def bulk_dictionary_entry_operations(
                     f"Bulk operation '{operation.operation}' failed for entry {entry_id}: {e}"
                 )
                 failed_ids.append(entry_id)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(
                     f"Bulk operation '{operation.operation}' failed for entry {entry_id}: {e}"
                 )
@@ -916,7 +916,7 @@ async def bulk_dictionary_entry_operations(
         )
     except InputError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error performing bulk entry operation: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -959,7 +959,7 @@ async def reorder_dictionary_entries(
         raise
     except InputError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error reordering dictionary entries: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -1014,7 +1014,7 @@ async def process_text_with_dictionaries(
         )
     except InputError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error processing text: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -1055,7 +1055,7 @@ async def import_dictionary(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except ConflictError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error importing dictionary: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -1087,7 +1087,7 @@ async def export_dictionary(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error exporting dictionary: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -1124,7 +1124,7 @@ async def export_dictionary_json(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error exporting dictionary JSON: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -1159,7 +1159,7 @@ async def import_dictionary_json(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except ConflictError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error importing dictionary JSON: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -1198,7 +1198,7 @@ async def list_dictionary_activity(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error listing dictionary activity: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -1243,7 +1243,7 @@ async def list_dictionary_versions(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error listing dictionary versions: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -1300,7 +1300,7 @@ async def get_dictionary_version(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error reading dictionary revision: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -1328,7 +1328,7 @@ async def revert_dictionary_version(
         detail = str(e)
         status_code_value = status.HTTP_404_NOT_FOUND if "not found" in detail.lower() else status.HTTP_400_BAD_REQUEST
         raise HTTPException(status_code=status_code_value, detail=detail) from e
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error reverting dictionary revision: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
@@ -1353,7 +1353,7 @@ async def get_dictionary_statistics(
         usage_stats = service.get_usage_statistics(dictionary_id) if dict_data else {}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error getting dictionary statistics: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 

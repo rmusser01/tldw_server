@@ -263,7 +263,7 @@ def _get_persona_max_tool_steps() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_MAX_TOOL_STEPS", 3))
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = 3
     return max(1, min(value, 20))
 
@@ -273,7 +273,7 @@ def _get_persona_memory_top_k() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_MEMORY_TOP_K", 3))
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = 3
     return max(1, min(value, 10))
 
@@ -283,7 +283,7 @@ def _get_persona_state_hint_max_chars() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_STATE_HINT_MAX_CHARS", 1024))
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = 1024
     return max(128, min(value, 8192))
 
@@ -293,7 +293,7 @@ def _get_persona_state_hint_per_doc_max_chars() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_STATE_HINT_PER_DOC_MAX_CHARS", 384))
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = 384
     return max(64, min(value, 2048))
 
@@ -303,7 +303,7 @@ def _get_persona_state_doc_max_chars() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_STATE_DOC_MAX_CHARS", 50_000))
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = 50_000
     return max(256, min(value, 1_000_000))
 
@@ -313,7 +313,7 @@ def _get_persona_state_history_max_entries() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_STATE_HISTORY_MAX_ENTRIES", 200))
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = 200
     return max(1, min(value, 2000))
 
@@ -323,7 +323,7 @@ def _get_persona_allowed_audio_formats() -> set[str]:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         raw = str(_app_settings.get("PERSONA_AUDIO_ALLOWED_FORMATS", "pcm16,wav,mp3,opus"))
-    except Exception:
+    except Exception:  # noqa: BLE001
         raw = "pcm16,wav,mp3,opus"
     parts = [p.strip().lower() for p in raw.split(",") if p.strip()]
     return set(parts) if parts else {"pcm16"}
@@ -334,7 +334,7 @@ def _get_persona_audio_chunk_max_bytes() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_AUDIO_CHUNK_MAX_BYTES", 1_048_576))
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = 1_048_576
     return max(1024, min(value, 8_388_608))
 
@@ -344,7 +344,7 @@ def _get_persona_audio_chunks_per_minute() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_AUDIO_CHUNKS_PER_MINUTE", 120))
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = 120
     return max(1, min(value, 1200))
 
@@ -354,7 +354,7 @@ def _get_persona_tts_chunk_size_bytes() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_TTS_CHUNK_SIZE_BYTES", 8192))
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = 8192
     return max(256, min(value, 65536))
 
@@ -364,7 +364,7 @@ def _get_persona_tts_max_chunks() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_TTS_MAX_CHUNKS", 16))
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = 16
     return max(1, min(value, 256))
 
@@ -374,7 +374,7 @@ def _get_persona_tts_max_total_bytes() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_TTS_MAX_TOTAL_BYTES", 131072))
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = 131072
     return max(1024, min(value, 2_097_152))
 
@@ -384,7 +384,7 @@ def _get_persona_tts_max_in_flight_chunks() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_TTS_MAX_IN_FLIGHT_CHUNKS", 4))
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = 4
     return max(1, min(value, 32))
 
@@ -399,7 +399,7 @@ def _get_persona_ws_auth_revalidate_interval_s() -> float:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = float(_app_settings.get("PERSONA_WS_AUTH_REVALIDATE_INTERVAL_S", 15.0))
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = 15.0
     if value <= 0:
         return 0.0
@@ -413,7 +413,7 @@ def _get_persona_rbac_flags() -> tuple[bool, bool]:
 
         allow_export = bool(_app_settings.get("PERSONA_RBAC_ALLOW_EXPORT", False))
         allow_delete = bool(_app_settings.get("PERSONA_RBAC_ALLOW_DELETE", False))
-    except Exception:
+    except Exception:  # noqa: BLE001
         allow_export = False
         allow_delete = False
     return allow_export, allow_delete
@@ -595,7 +595,7 @@ def _parse_persona_connection_test_response_body(response: Any) -> Any:
     if "json" in content_type and callable(getattr(response, "json", None)):
         try:
             return response.json()
-        except Exception:
+        except Exception:  # noqa: BLE001
             return getattr(response, "text", None)
     text = getattr(response, "text", None)
     return text if isinstance(text, str) else None
@@ -767,7 +767,7 @@ async def _test_persona_connection(
             body_preview = _parse_persona_connection_test_response_body(response)
         finally:
             await _close_persona_connection_test_response(response)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return PersonaConnectionTestResponse(
             ok=False,
             connection_id=connection_id,
@@ -1462,7 +1462,7 @@ def _persona_profile_to_response(
             if isinstance(raw_voice_defaults, dict)
             else PersonaVoiceDefaults()
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         voice_defaults = PersonaVoiceDefaults()
     try:
         setup = (
@@ -1470,7 +1470,7 @@ def _persona_profile_to_response(
             if isinstance(raw_setup, dict)
             else PersonaSetupState()
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         setup = PersonaSetupState()
     return PersonaProfileResponse(
         id=str(profile.get("id") or ""),
@@ -1719,7 +1719,7 @@ def _load_persona_state_hints_for_runtime(
             user_id=user_id,
             persona_id=persona_id,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.debug(
             "persona state hint lookup skipped for persona_hash {}: {}",
             _redacted_id_for_logs(persona_id),
@@ -1952,7 +1952,7 @@ def _load_persona_buddy_row_for_projection(
             user_id=user_id,
             include_deleted_personas=bool(profile.get("deleted", False)),
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Failed to load persona buddy projection for persona_hash {}: {}",
             _redacted_id_for_logs(persona_id),
@@ -1998,7 +1998,7 @@ def _load_persona_buddy_rows_for_projection(
             persona_ids=persona_ids,
             include_deleted_personas=include_deleted_personas,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Failed bulk persona buddy projection load for user_hash {}: {}",
             _redacted_id_for_logs(user_id),
@@ -2129,7 +2129,7 @@ async def _transcribe_audio_chunk(audio_bytes: bytes, audio_format: str) -> str:
         return ""
     try:
         text = audio_bytes.decode("utf-8", errors="ignore").strip()
-    except Exception:
+    except Exception:  # noqa: BLE001
         text = ""
     if text:
         return text
@@ -2416,7 +2416,7 @@ def _is_authnz_access_token(token: str) -> bool:
         return True
     except InvalidTokenError:
         return False
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -2440,7 +2440,7 @@ def _should_treat_bearer_as_api_key(
         settings = get_settings()
         if getattr(settings, "AUTH_MODE", None) == "single_user":
             return True
-    except Exception as settings_error:
+    except Exception as settings_error:  # noqa: BLE001
         # Fall through to token-shape heuristics when settings resolution fails.
         logger.debug("Failed to resolve auth settings for WS bearer handling", exc_info=settings_error)
 
@@ -2460,14 +2460,14 @@ def _extract_auth_credentials(
         authz = ws.headers.get("authorization") or ws.headers.get("Authorization")
         if authz and authz.lower().startswith("bearer "):
             auth_token = authz.split(" ", 1)[1].strip()
-    except Exception as authz_header_error:
+    except Exception as authz_header_error:  # noqa: BLE001
         logger.debug("Failed to parse websocket authorization header", exc_info=authz_header_error)
 
     try:
         header_key = ws.headers.get("x-api-key") or ws.headers.get("X-API-KEY")
         if header_key:
             resolved_api_key = header_key.strip()
-    except Exception as api_key_header_error:
+    except Exception as api_key_header_error:  # noqa: BLE001
         logger.debug("Failed to parse websocket x-api-key header", exc_info=api_key_header_error)
 
     try:
@@ -2476,7 +2476,7 @@ def _extract_auth_credentials(
             parts = [p.strip() for p in proto.split(",")]
             if len(parts) >= 2 and parts[0].lower() == "bearer" and parts[1]:
                 auth_token = parts[1]
-    except Exception as protocol_header_error:
+    except Exception as protocol_header_error:  # noqa: BLE001
         logger.debug("Failed to parse websocket subprotocol auth header", exc_info=protocol_header_error)
 
     return auth_token, resolved_api_key
@@ -2498,7 +2498,7 @@ def _build_request_from_websocket(ws: WebSocket) -> StarletteRequest:
             scope["client"] = (client[0], client[1])
         elif client is not None and getattr(client, "host", None) is not None:
             scope["client"] = (client.host, getattr(client, "port", 0))
-    except Exception as client_scope_error:
+    except Exception as client_scope_error:  # noqa: BLE001
         logger.debug("Failed to propagate websocket client scope details", exc_info=client_scope_error)
     return StarletteRequest(scope)
 
@@ -2528,7 +2528,7 @@ async def _resolve_authenticated_user_id(
                 "persona_api_key_scopes",
                 sorted(str(scope).strip().lower() for scope in (api_key_scopes or set()) if str(scope).strip()),
             )
-        except Exception:
+        except Exception:  # noqa: BLE001
             return
 
     def _clear_auth_context() -> None:
@@ -2551,7 +2551,7 @@ async def _resolve_authenticated_user_id(
                 auth_ok = True
                 auth_method = "jwt_authnz"
                 logger.debug("persona stream: authenticated via AuthNZ JWT")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.debug(f"persona stream: AuthNZ JWT auth failed: {exc}")
             if _is_authnz_access_token(auth_token):
                 authnz_token_failed = True
@@ -2567,7 +2567,7 @@ async def _resolve_authenticated_user_id(
                     auth_ok = True
                     auth_method = "jwt_mcp"
                     logger.debug("persona stream: authenticated via MCP JWT")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.debug(f"persona stream: MCP JWT auth failed: {exc}")
         if auth_token and not auth_ok and not resolved_api_key:
             _clear_auth_context()
@@ -2599,7 +2599,7 @@ async def _resolve_authenticated_user_id(
             logger.debug(f"persona stream: API key authentication failed: {exc}")
             _clear_auth_context()
             return None, True, False
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.exception("persona stream: unexpected API key authentication error")
             _clear_auth_context()
             return None, True, False
@@ -3614,7 +3614,7 @@ async def get_persona_setup_analytics(
         )
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="get persona setup analytics") from exc
 
 
@@ -3667,7 +3667,7 @@ async def create_persona_setup_event(
         )
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="record persona setup event") from exc
 
 
@@ -3838,7 +3838,7 @@ async def get_persona_voice_analytics(
         )
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="get persona voice analytics") from exc
 
 
@@ -3924,7 +3924,7 @@ async def update_persona_live_voice_session_analytics(
         )
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="update persona live voice session analytics") from exc
 
 
@@ -3976,7 +3976,7 @@ async def list_persona_voice_commands(
         return VoiceCommandListResponse(commands=command_infos, total=len(command_infos))
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="list persona voice commands") from exc
 
 
@@ -4044,7 +4044,7 @@ async def create_persona_voice_command(
         )
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="create persona voice command") from exc
 
 
@@ -4128,7 +4128,7 @@ async def update_persona_voice_command(
         )
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="update persona voice command") from exc
 
 
@@ -4198,7 +4198,7 @@ async def toggle_persona_voice_command(
         )
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="toggle persona voice command") from exc
 
 
@@ -4235,7 +4235,7 @@ async def delete_persona_voice_command(
         registry.unregister_command(command_id, int(user_id), persona_id=persona_id)
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="delete persona voice command") from exc
 
 
@@ -4337,7 +4337,7 @@ async def dry_run_persona_voice_command(
         )
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="dry run persona voice command") from exc
 
 
@@ -4361,7 +4361,7 @@ async def list_persona_connections(
         return await _list_persona_connections(db, user_id=user_id, persona_id=persona_id)
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="list persona connections") from exc
 
 
@@ -4403,7 +4403,7 @@ async def create_persona_connection(
         return response
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="create persona connection") from exc
 
 
@@ -4452,7 +4452,7 @@ async def update_persona_connection(
         return response
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="update persona connection") from exc
 
 
@@ -4489,7 +4489,7 @@ async def delete_persona_connection(
         )
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="delete persona connection") from exc
 
 
@@ -4523,7 +4523,7 @@ async def test_persona_connection(
         return await _test_persona_connection(connection_id, connection, payload)
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc, action="test persona connection") from exc
 
 
@@ -4849,7 +4849,7 @@ async def persona_stream(
                     token=token,
                     api_key=api_key,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.debug("persona stream auth revalidation failed with exception: {}", exc)
                 return False
             if not revalidated_ok:
@@ -4903,7 +4903,7 @@ async def persona_stream(
         def _api_key_scope_allows(required_scope: Any) -> bool:
             try:
                 auth_method = str(getattr(ws.state, "persona_auth_method", "") or "").strip().lower()
-            except Exception:
+            except Exception:  # noqa: BLE001
                 auth_method = ""
             if auth_method != "api_key":
                 return True
@@ -4912,7 +4912,7 @@ async def persona_stream(
                 return True
             try:
                 key_scopes = normalize_scope(getattr(ws.state, "persona_api_key_scopes", None))
-            except Exception:
+            except Exception:  # noqa: BLE001
                 key_scopes = set()
             return has_scope(key_scopes, required)
 
@@ -5076,7 +5076,7 @@ async def persona_stream(
                     )
                 except asyncio.CancelledError:
                     return
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     logger.debug(
                         "persona live processing notice skipped for session {}: {}",
                         session_id,
@@ -5151,7 +5151,7 @@ async def persona_stream(
                     turn_type=turn_type,
                     metadata=metadata,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.debug(f"persona turn append skipped: {exc}")
             if persist_personalization:
                 _ = await asyncio.to_thread(
@@ -5199,7 +5199,7 @@ async def persona_stream(
                 )
                 if not audio_bytes:
                     raise RuntimeError("TTS returned no audio")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 updated_voice_runtime = dict(voice_runtime)
                 updated_voice_runtime["text_only_due_to_tts_failure"] = True
                 with contextlib.suppress(Exception):
@@ -5258,7 +5258,7 @@ async def persona_stream(
                 )
                 try:
                     await stream.ws.send_bytes(chunk)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     await _emit_notice(
                         session_id=session_id,
                         level="warning",
@@ -5324,7 +5324,7 @@ async def persona_stream(
                     voice_runtime=voice_runtime,
                 )
                 transcriber.initialize()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.debug(
                     "persona live STT initialization failed for session {}: {}",
                     session_id,
@@ -5342,7 +5342,7 @@ async def persona_stream(
                     manual_mode_reason = str(
                         getattr(turn_detector, "unavailable_reason", "") or "vad_unavailable"
                     )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.debug(
                     "persona live VAD initialization failed for session {}: {}",
                     session_id,
@@ -5385,7 +5385,7 @@ async def persona_stream(
                     session_id=session_id,
                     user_id=authenticated_user_id,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.debug(
                     "persona live analytics persona resolution failed for session {}: {}",
                     session_id,
@@ -5466,7 +5466,7 @@ async def persona_stream(
                     text_only_tts_increment=text_only_tts_increment,
                     finalize=finalize,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.debug(
                     "persona live session summary update skipped for session {}: {}",
                     session_id,
@@ -5497,7 +5497,7 @@ async def persona_stream(
                     event_type=event_type,
                     commit_source=commit_source,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.debug(
                     "persona live analytics event skipped for session {}: {}",
                     session_id,
@@ -5890,7 +5890,7 @@ async def persona_stream(
                     db=persona_scope_db,
                     request_context=None,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.debug("persona skill execution error for {}: {}", skill_name, exc)
                 _increment_persona_metric(
                     "persona_ws_tool_calls_total",
@@ -6654,7 +6654,7 @@ async def persona_stream(
             raw = await stream.receive_text()
             try:
                 msg = json.loads(raw)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 msg = {"type": "unknown", "raw": raw}
 
             mtype = msg.get("type") or msg.get("event") or "unknown"
@@ -6871,7 +6871,7 @@ async def persona_stream(
                                 )
                                 await _ensure_persona_live_manual_mode_notice(session_id, stt_state)
                                 auto_commit_triggered = False
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001
                         logger.debug(
                             "persona live STT processing failed for session {}: {}",
                             session_id,
@@ -6966,7 +6966,7 @@ async def persona_stream(
                     )
                     try:
                         await stream.ws.send_bytes(chunk)
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001
                         await _emit_notice(
                             session_id=session_id,
                             level="warning",
@@ -7360,7 +7360,7 @@ async def persona_stream(
             logger.info("Persona stream disconnected after auth revalidation failure")
         else:
             logger.info("Persona stream disconnected")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning(f"Persona stream error: {e}")
         if stream is not None:
             with contextlib.suppress(Exception):
