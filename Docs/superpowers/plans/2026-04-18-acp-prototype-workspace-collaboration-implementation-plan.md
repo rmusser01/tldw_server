@@ -56,7 +56,7 @@ Do not split this into separate plans unless implementation stalls on infrastruc
 **Tests**:
 - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_endpoints.py -q`
 - `cd apps/packages/ui && bunx vitest run src/hooks/__tests__/usePrototypeWorkspaces.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspacePage.test.tsx src/routes/__tests__/option-prototype-workspaces.route.test.tsx`
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 5: Harden, Document, And Verify The Slice End-To-End
 **Goal**: Close the loop with audit/security checks, docs, and targeted end-to-end verification, including Bandit on the touched Python scope.
@@ -65,7 +65,7 @@ Do not split this into separate plans unless implementation stalls on infrastruc
 - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q`
 - `cd apps/packages/ui && bunx vitest run src/hooks/__tests__/usePrototypeWorkspaces.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspacePage.test.tsx src/routes/__tests__/option-prototype-workspaces.route.test.tsx`
 - `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/prototype_workspaces.py tldw_Server_API/app/core/Prototype_Workspaces tldw_Server_API/app/core/AuthNZ/repos/prototype_workspaces_repo.py -f json -o /tmp/bandit_prototype_workspaces.json`
-**Status**: Not Started
+**Status**: Complete
 
 ## File Map
 
@@ -526,7 +526,7 @@ git commit -m "feat: add prototype workspace api endpoints"
 - Modify: `apps/packages/ui/src/hooks/useSharing.ts`
 - Modify: `apps/packages/ui/src/types/sharing.ts`
 
-- [ ] **Step 1: Write failing client and component tests**
+- [x] **Step 1: Write failing client and component tests**
 
 ```tsx
 it("renders owner controls when the current viewer owns the prototype", async () => {
@@ -547,13 +547,13 @@ Also cover:
 - private-link exchange hook calls the new sharing endpoint
 - route component mounts the feature inside `OptionLayout`/`PageShell`
 
-- [ ] **Step 2: Run the new frontend tests to verify they fail**
+- [x] **Step 2: Run the new frontend tests to verify they fail**
 
 Run: `cd apps/packages/ui && bunx vitest run src/hooks/__tests__/usePrototypeWorkspaces.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspacePage.test.tsx src/routes/__tests__/option-prototype-workspaces.route.test.tsx`
 
 Expected: FAIL because the new hooks, types, and route do not exist yet.
 
-- [ ] **Step 3: Implement the minimal domain methods, hooks, store, and screens**
+- [x] **Step 3: Implement the minimal domain methods, hooks, store, and screens**
 
 ```ts
 export const prototypeWorkspaceMethods = {
@@ -573,13 +573,13 @@ Implementation requirements:
 - reuse existing ACP UI primitives instead of inventing a parallel terminal/chat system
 - keep the first UI intentionally narrow: canonical preview, branch session entry, candidate list, promotion request action, and share controls
 
-- [ ] **Step 4: Re-run the frontend tests**
+- [x] **Step 4: Re-run the frontend tests**
 
 Run: `cd apps/packages/ui && bunx vitest run src/hooks/__tests__/usePrototypeWorkspaces.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspacePage.test.tsx src/routes/__tests__/option-prototype-workspaces.route.test.tsx`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the frontend MVP**
+- [x] **Step 5: Commit the frontend MVP**
 
 ```bash
 git add apps/packages/ui/src/types/prototype-workspace.ts \
@@ -603,7 +603,7 @@ git commit -m "feat: add prototype workspace web ui"
 - Create: `Docs/API-related/Prototype_Workspaces_API.md`
 - Modify: `Docs/superpowers/plans/2026-04-18-acp-prototype-workspace-collaboration-implementation-plan.md`
 
-- [ ] **Step 1: Write the operator/developer doc**
+- [x] **Step 1: Write the operator/developer doc**
 
 Document:
 - prototype workspace lifecycle
@@ -612,25 +612,25 @@ Document:
 - preview broker behavior
 - promotion and publish-validation guarantees
 
-- [ ] **Step 2: Run the targeted backend test suite**
+- [x] **Step 2: Run the targeted backend test suite**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces tldw_Server_API/tests/Sharing/test_sharing_endpoints.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 3: Run the targeted frontend test suite**
+- [x] **Step 3: Run the targeted frontend test suite**
 
-Run: `cd apps/packages/ui && bunx vitest run src/hooks/__tests__/usePrototypeWorkspaces.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspacePage.test.tsx src/routes/__tests__/option-prototype-workspaces.route.test.tsx src/hooks/__tests__/useSharing.auth.test.tsx`
+Run: `cd apps/packages/ui && bunx vitest run src/hooks/__tests__/usePrototypeWorkspaces.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspacePage.test.tsx src/routes/__tests__/option-prototype-workspaces.route.test.tsx src/hooks/__tests__/useSharing.auth.test.tsx src/components/Option/__tests__/PublicShare.test.tsx`
 
 Expected: PASS.
 
-- [ ] **Step 4: Run Bandit on the touched Python scope**
+- [x] **Step 4: Run Bandit on the touched Python scope**
 
 Run: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/prototype_workspaces.py tldw_Server_API/app/core/Prototype_Workspaces tldw_Server_API/app/core/AuthNZ/repos/prototype_workspaces_repo.py -f json -o /tmp/bandit_prototype_workspaces.json`
 
 Expected: JSON output written to `/tmp/bandit_prototype_workspaces.json` with no new findings in touched code.
 
-- [ ] **Step 5: Commit docs and verification notes**
+- [x] **Step 5: Commit docs and verification notes**
 
 ```bash
 git add Docs/API-related/Prototype_Workspaces_API.md \
@@ -640,13 +640,13 @@ git commit -m "docs: add prototype workspace api and verification notes"
 
 ## Verification Checklist
 
-- [ ] Shared AuthNZ migration creates and indexes all prototype tables.
-- [ ] External private-link exchange yields a `Prototype Shared Actor`, not a full AuthNZ user.
-- [ ] Branch session bootstrap and promotion jobs are idempotent and cleanup-aware.
-- [ ] Preview access is brokered by `preview_handle` rather than leaked raw runtime URLs.
-- [ ] Publish validation must succeed before canonical pointer updates.
-- [ ] Frontend owner and collaborator views both work against the same backend contracts.
-- [ ] Bandit is green on touched Python scope.
+- [x] Shared AuthNZ migration creates and indexes all prototype tables.
+- [x] External private-link exchange yields a `Prototype Shared Actor`, not a full AuthNZ user.
+- [x] Branch session bootstrap and promotion jobs are idempotent and cleanup-aware.
+- [x] Preview access is brokered by `preview_handle` rather than leaked raw runtime URLs.
+- [x] Publish validation must succeed before canonical pointer updates.
+- [x] Frontend owner and collaborator views both work against the same backend contracts.
+- [x] Bandit is green on touched Python scope.
 
 ## Open Decisions To Confirm During Execution
 
