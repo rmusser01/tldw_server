@@ -113,7 +113,7 @@ import type { ChatDocuments } from "@/models/ChatTypes"
 import { formatFileSize } from "@/utils/format"
 import { formatPinnedResults } from "@/utils/rag-format"
 import { createRenderPerfTracker } from "@/utils/perf/render-profiler"
-import { useQueuedRequests } from "@/hooks/chat/useQueuedRequests"
+import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
 import {
   buildAvailableChatModelIds,
   findUnavailableChatModel,
@@ -2195,14 +2195,84 @@ export const SidepanelForm = ({
     ]
   )
 
-  const queuedRequestActions = useQueuedRequests({
+  const resolveQueueConversationId = React.useCallback(
+    () => historyId ?? serverChatId ?? null,
+    [historyId, serverChatId]
+  )
+
+  const handleQueueEnqueueBlocked = React.useCallback(() => {
+    notification.warning({
+      message: t(
+        "playground:composer.queue.attachmentsNeedManualRepairTitle",
+        "Queue needs a simpler draft"
+      ),
+      description: t(
+        "playground:composer.queue.attachmentsNeedManualRepairBody",
+        "Queued requests currently support text, images, and selected tabs. Clear attached files/context before queueing this draft."
+      )
+    })
+  }, [notification, t])
+
+  const handleQueueEnqueueSuccess = React.useCallback(
+    (isStreamingAtEnqueue: boolean) => {
+      form.reset()
+      clearSelectedDocuments()
+      setContextFiles([])
+      setKnowledgeMentionActive(false)
+      textAreaFocus()
+      notification.info({
+        message: t("playground:composer.queue.requestQueued", "Request queued"),
+        description: isStreamingAtEnqueue
+          ? t(
+              "playground:composer.queue.requestQueuedWhileBusy",
+              "We'll run it after the current response finishes."
+            )
+          : t(
+              "playground:composer.queue.requestQueuedWhileOffline",
+              "We'll send it when your tldw server reconnects."
+            )
+      })
+    },
+    [
+      clearSelectedDocuments,
+      form,
+      notification,
+      setContextFiles,
+      setKnowledgeMentionActive,
+      t,
+      textAreaFocus
+    ]
+  )
+
+  const sidepanelQueueCancelReasonText =
+    isSending && serverChatId
+      ? t(
+          "playground:composer.queue.cancelAndRunDisabled",
+          "Cancel current & run now is not available for server-backed turns yet."
+        )
+      : null
+
+  const queue = useComposerQueue({
     isConnectionReady,
     isStreaming: isSending,
-    queue: queuedMessages,
-    setQueue: setQueuedMessages,
+    queuedMessages,
+    setQueuedMessages,
     sendQueuedRequest,
-    stopStreamingRequest
+    stopStreamingRequest,
+    resolveConversationId: resolveQueueConversationId,
+    buildQueuedDocuments,
+    buildQueuedRequestSnapshot,
+    isQueuedDispatchBlocked: isQueuedDispatchBlockedByComposerState,
+    onEnqueueBlocked: handleQueueEnqueueBlocked,
+    onEnqueueSuccess: handleQueueEnqueueSuccess,
+    cancelCurrentAndRunDisabledReasonText: sidepanelQueueCancelReasonText
   })
+
+  const queuedRequestActions = queue.queuedRequestActions
+  const cancelCurrentAndRunDisabledReason =
+    queue.cancelCurrentAndRunDisabledReason
+  const handleRunQueuedRequest = queue.handleRunQueuedRequest
+  const handleRunNextQueuedRequest = queue.handleRunNextQueuedRequest
 
   const queueSubmission = React.useCallback(
     ({
@@ -2214,23 +2284,8 @@ export const SidepanelForm = ({
       image: string
       intent: ReturnType<typeof resolveSubmissionIntent>
     }) => {
-      if (isQueuedDispatchBlockedByComposerState) {
-        notification.warning({
-          message: t(
-            "playground:composer.queue.attachmentsNeedManualRepairTitle",
-            "Queue needs a simpler draft"
-          ),
-          description: t(
-            "playground:composer.queue.attachmentsNeedManualRepairBody",
-            "Queued requests currently support text, images, and selected tabs. Clear attached files/context before queueing this draft."
-          )
-        })
-        return null
-      }
-
       const documents = buildQueuedDocuments()
-      const queuedItem = queuedRequestActions.enqueue({
-        conversationId: historyId ?? serverChatId ?? null,
+      return queue.enqueue({
         promptText,
         image: intent.isImageCommand ? "" : image,
         attachments: documents,
@@ -2241,115 +2296,17 @@ export const SidepanelForm = ({
             : undefined,
           isImageCommand: intent.isImageCommand
         },
-        snapshot: buildQueuedRequestSnapshot()
+        blockedReason: isQueuedDispatchBlockedByComposerState
+          ? "draft-attachments-conflict"
+          : null
       })
-
-      form.reset()
-      clearSelectedDocuments()
-      setContextFiles([])
-      setKnowledgeMentionActive(false)
-      textAreaFocus()
-      notification.info({
-        message: t("playground:composer.queue.requestQueued", "Request queued"),
-        description: isSending
-          ? t(
-              "playground:composer.queue.requestQueuedWhileBusy",
-              "We'll run it after the current response finishes."
-            )
-          : t(
-              "playground:composer.queue.requestQueuedWhileOffline",
-              "We'll send it when your tldw server reconnects."
-            )
-      })
-      return queuedItem
     },
     [
       buildQueuedDocuments,
-      buildQueuedRequestSnapshot,
-      clearSelectedDocuments,
-      form,
-      historyId,
       isQueuedDispatchBlockedByComposerState,
-      isSending,
-      notification,
-      queuedRequestActions,
-      serverChatId,
-      setContextFiles,
-      t,
-      textAreaFocus
+      queue
     ]
   )
-
-  const cancelCurrentAndRunDisabledReason =
-    isSending && serverChatId
-      ? t(
-          "playground:composer.queue.cancelAndRunDisabled",
-          "Cancel current & run now is not available for server-backed turns yet."
-        )
-      : null
-
-  const handleRunQueuedRequest = React.useCallback(
-    async (requestId: string) => {
-      if (isSending && cancelCurrentAndRunDisabledReason) {
-        return
-      }
-      await queuedRequestActions.runNow(requestId)
-      if (!isSending && isConnectionReady) {
-        await queuedRequestActions.flushNext()
-      }
-    },
-    [
-      cancelCurrentAndRunDisabledReason,
-      isConnectionReady,
-      isSending,
-      queuedRequestActions
-    ]
-  )
-
-  const handleRunNextQueuedRequest = React.useCallback(async () => {
-    const next = queuedMessages[0]
-    if (!next) return
-    if (isSending && cancelCurrentAndRunDisabledReason) {
-      return
-    }
-    if (next.status === "blocked") {
-      await handleRunQueuedRequest(next.id)
-      return
-    }
-    await queuedRequestActions.flushNext()
-  }, [
-    cancelCurrentAndRunDisabledReason,
-    handleRunQueuedRequest,
-    isSending,
-    queuedMessages,
-    queuedRequestActions
-  ])
-
-  const autoDrainingQueuedRequestsRef = React.useRef(false)
-  React.useEffect(() => {
-    const next = queuedMessages[0]
-    if (
-      autoDrainingQueuedRequestsRef.current ||
-      !next ||
-      !isConnectionReady ||
-      isSending ||
-      next.status !== "queued" ||
-      isQueuedDispatchBlockedByComposerState
-    ) {
-      return
-    }
-
-    autoDrainingQueuedRequestsRef.current = true
-    void queuedRequestActions.flushNext().finally(() => {
-      autoDrainingQueuedRequestsRef.current = false
-    })
-  }, [
-    isConnectionReady,
-    isQueuedDispatchBlockedByComposerState,
-    isSending,
-    queuedMessages,
-    queuedRequestActions
-  ])
 
   const submitCurrentRequest = React.useCallback(
     async (
