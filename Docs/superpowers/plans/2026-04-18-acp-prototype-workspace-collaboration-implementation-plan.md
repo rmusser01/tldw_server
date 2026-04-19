@@ -423,7 +423,7 @@ Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Protot
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the runtime orchestration layer**
+- [x] **Step 5: Commit the runtime orchestration layer**
 
 ```bash
 git add tldw_Server_API/app/core/Prototype_Workspaces/models.py \

@@ -74,6 +74,8 @@ class PrototypeWorkspaceService:
         workspace = await self._repo.get_workspace(prototype_workspace_id)
         if not workspace:
             raise ValueError("prototype workspace not found")
+        if workspace.get("is_archived"):
+            raise RuntimeError("archived workspaces cannot create branch sessions")
 
         resolved_base_snapshot_id = str(
             base_snapshot_id
@@ -154,6 +156,11 @@ class PrototypeWorkspaceService:
         session = await self._repo.get_session(prototype_session_id)
         if not session:
             raise ValueError("prototype session not found")
+        workspace = await self._repo.get_workspace(str(session["prototype_workspace_id"]))
+        if not workspace:
+            raise ValueError("prototype workspace not found")
+        if workspace.get("is_archived"):
+            raise RuntimeError("archived workspaces cannot save snapshots")
         await self._assert_session_is_active(session)
 
         new_snapshot_id = str(snapshot_id or f"psnap_{uuid.uuid4().hex}")

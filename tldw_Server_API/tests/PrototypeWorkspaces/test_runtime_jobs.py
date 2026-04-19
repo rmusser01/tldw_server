@@ -209,3 +209,57 @@ async def test_expired_session_cannot_save_snapshot(
             prototype_session_id=session["id"],
             snapshot_id="snap_should_not_save",
         )
+
+
+@pytest.mark.asyncio
+async def test_archived_workspace_blocks_branch_session_creation(
+    repo,
+    prototype_db,
+):
+    workspace, _canonical = await _seed_branch_workspace(repo, prototype_db)
+    prototype_db.execute(
+        "UPDATE prototype_workspaces SET archived_at = ? WHERE id = ?",
+        (datetime.now(timezone.utc).isoformat(), workspace["id"]),
+    )
+    prototype_db.commit()
+
+    service_module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.service")
+    service_cls = _load_attr(service_module, "PrototypeWorkspaceService", "PrototypePromotionService")
+    service = service_cls(repo=repo)
+
+    with pytest.raises(RuntimeError, match="archived"):
+        await service.create_or_reuse_branch_session(
+            prototype_workspace_id=workspace["id"],
+            actor_type="internal_collaborator",
+            actor_user_id=2,
+            request_nonce="archived-block",
+        )
+
+
+@pytest.mark.asyncio
+async def test_archived_workspace_blocks_snapshot_save(
+    repo,
+    prototype_db,
+):
+    workspace, canonical = await _seed_branch_workspace(repo, prototype_db)
+    session = await repo.create_session(
+        prototype_workspace_id=workspace["id"],
+        base_snapshot_id=canonical["snapshot_id"],
+        actor_type="internal_collaborator",
+        actor_user_id=2,
+    )
+    prototype_db.execute(
+        "UPDATE prototype_workspaces SET archived_at = ? WHERE id = ?",
+        (datetime.now(timezone.utc).isoformat(), workspace["id"]),
+    )
+    prototype_db.commit()
+
+    service_module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.service")
+    service_cls = _load_attr(service_module, "PrototypeWorkspaceService", "PrototypePromotionService")
+    service = service_cls(repo=repo)
+
+    with pytest.raises(RuntimeError, match="archived"):
+        await service.save_session_snapshot(
+            prototype_session_id=session["id"],
+            snapshot_id="snap_archived_block",
+        )
