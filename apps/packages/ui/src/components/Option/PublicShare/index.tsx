@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import { Card, Button, Input, Spin, Empty, Tag, message } from "antd"
 import { Lock, Download } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 import {
   usePublicPreview,
   useVerifySharePassword,
@@ -13,6 +14,7 @@ interface PublicShareProps {
 }
 
 export const PublicShare: React.FC<PublicShareProps> = ({ token }) => {
+  const navigate = useNavigate()
   const { data, isLoading, error } = usePublicPreview(token)
   const verifyPassword = useVerifySharePassword()
   const importToken = useImportFromToken()
@@ -57,6 +59,11 @@ export const PublicShare: React.FC<PublicShareProps> = ({ token }) => {
   }
 
   const needsPassword = data.is_password_protected && !passwordVerified
+  const isPrototypeWorkspace = data.resource_type === "prototype_workspace"
+
+  const handlePrototypeContinue = () => {
+    navigate(`/prototype-workspaces?share_token=${encodeURIComponent(token)}`)
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
@@ -75,7 +82,11 @@ export const PublicShare: React.FC<PublicShareProps> = ({ token }) => {
 
           <div className="flex justify-center gap-2">
             <Tag color="blue">
-              {data.resource_type === "workspace" ? "Workspace" : "Chatbook"}
+              {data.resource_type === "workspace"
+                ? "Workspace"
+                : data.resource_type === "prototype_workspace"
+                  ? "Prototype Workspace"
+                  : "Chatbook"}
             </Tag>
             <Tag>
               {ACCESS_LEVEL_LABELS[data.access_level as AccessLevel] ||
@@ -106,18 +117,36 @@ export const PublicShare: React.FC<PublicShareProps> = ({ token }) => {
             </div>
           ) : (
             <div className="space-y-3">
-              <Button
-                type="primary"
-                block
-                icon={<Download className="h-4 w-4" />}
-                loading={importToken.isPending}
-                onClick={handleImport}
-              >
-                Import to My Account
-              </Button>
-              <p className="text-center text-xs text-text-muted">
-                You must be logged in to import this resource.
-              </p>
+              {isPrototypeWorkspace ? (
+                <>
+                  <Button
+                    type="primary"
+                    block
+                    onClick={handlePrototypeContinue}
+                  >
+                    Open Prototype Collaboration
+                  </Button>
+                  <p className="text-center text-xs text-text-muted">
+                    Continue into the prototype workspace flow to exchange the
+                    share link and start a collaborator session.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Button
+                    type="primary"
+                    block
+                    icon={<Download className="h-4 w-4" />}
+                    loading={importToken.isPending}
+                    onClick={handleImport}
+                  >
+                    Import to My Account
+                  </Button>
+                  <p className="text-center text-xs text-text-muted">
+                    You must be logged in to import this resource.
+                  </p>
+                </>
+              )}
             </div>
           )}
         </div>

@@ -6,6 +6,7 @@ import {
 export const CHAT_PATH = "/chat"
 export const CHAT_WORKSPACE_PATH = "/chat-workspace"
 export const RESEARCH_PATH = "/research"
+export const PROTOTYPE_WORKSPACES_PATH = "/prototype-workspaces"
 export const WORKSPACE_PLAYGROUND_PATH = "/workspace-playground"
 export const DOCUMENT_WORKSPACE_PATH = "/document-workspace"
 export const PRESENTATION_STUDIO_PATH = "/presentation-studio"

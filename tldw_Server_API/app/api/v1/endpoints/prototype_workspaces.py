@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from ....core.AuthNZ.User_DB_Handling import User, get_request_user
 from ..schemas.prototype_workspace_schemas import (
     PrototypeCollaboratorSessionCreateRequest,
+    PrototypeWorkspaceDetailResponse,
     PrototypePreviewGrantResponse,
     PrototypePreviewRenewRequest,
     PrototypePromotionCreateRequest,
@@ -107,6 +108,31 @@ def _epoch_to_iso8601(epoch: int | None) -> str | None:
     return datetime.fromtimestamp(int(epoch), timezone.utc).isoformat()
 
 
+async def _build_workspace_detail_response(repo, workspace: dict) -> PrototypeWorkspaceDetailResponse:
+    sessions = await repo.list_sessions_for_workspace(str(workspace["id"]))
+    snapshots = await repo.list_snapshots_for_workspace(str(workspace["id"]))
+    canonical_snapshot_id = str(workspace.get("canonical_snapshot_id") or "")
+    last_known_good_snapshot_id = str(workspace.get("last_known_good_snapshot_id") or "")
+
+    snapshot_records = [
+        {
+            **snapshot,
+            "is_canonical": str(snapshot.get("snapshot_id") or "") == canonical_snapshot_id,
+            "is_last_known_good": str(snapshot.get("snapshot_id") or "") == last_known_good_snapshot_id,
+        }
+        for snapshot in snapshots
+    ]
+
+    return PrototypeWorkspaceDetailResponse.model_validate(
+        {
+            **workspace,
+            "viewer_role": "owner",
+            "sessions": sessions,
+            "snapshots": snapshot_records,
+        }
+    )
+
+
 @router.post(
     "/prototype-workspaces",
     response_model=PrototypeWorkspaceResponse,
@@ -130,6 +156,28 @@ async def create_prototype_workspace(
         designated_promoter_ids=body.designated_promoter_ids,
     )
     return PrototypeWorkspaceResponse.model_validate(workspace)
+
+
+@router.get(
+    "/prototype-workspaces/{prototype_workspace_id}",
+    response_model=PrototypeWorkspaceDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get prototype workspace detail for the owner workspace view",
+)
+async def get_prototype_workspace(
+    prototype_workspace_id: str,
+    user: User = Depends(get_request_user),
+):
+    repo = await _maybe_await(_get_repo())
+    workspace = await repo.get_workspace(prototype_workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype workspace not found")
+
+    owner_user_id = int(workspace["owner_user_id"])
+    if _coerce_user_id(user) != owner_user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can view prototype workspace detail")
+
+    return await _build_workspace_detail_response(repo, workspace)
 
 
 @router.post(

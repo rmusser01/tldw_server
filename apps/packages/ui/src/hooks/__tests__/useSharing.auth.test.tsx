@@ -14,7 +14,11 @@ vi.mock("@/services/tldw-server", () => ({
   getTldwServerURL: getTldwServerURLMock
 }))
 
-import { useCloneWorkspace, useSharedWithMe } from "@/hooks/useSharing"
+import {
+  useCloneWorkspace,
+  usePrototypePrivateLinkExchange,
+  useSharedWithMe
+} from "@/hooks/useSharing"
 
 const buildWrapper = () => {
   const queryClient = new QueryClient({
@@ -85,6 +89,48 @@ describe("useSharing auth wiring", () => {
           "Content-Type": "application/json"
         }),
         body: JSON.stringify({ new_name: "My Clone" })
+      })
+    )
+  })
+
+  it("exchanges a prototype share token for a collaborator session through the authenticated tldw fetch helper", async () => {
+    fetchWithTldwAuthMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          actor_type: "external_collaborator",
+          shared_actor_id: "psa_1",
+          session_token: "session-token"
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    )
+
+    const { result } = renderHook(() => usePrototypePrivateLinkExchange(), {
+      wrapper: buildWrapper()
+    })
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        token: "prototype-token",
+        display_name: "Acme PM",
+        password: "demo-pass"
+      })
+    })
+
+    expect(fetchWithTldwAuthMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/v1/sharing/public/prototype-token/prototype-session",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json"
+        }),
+        body: JSON.stringify({
+          display_name: "Acme PM",
+          password: "demo-pass"
+        })
       })
     )
   })

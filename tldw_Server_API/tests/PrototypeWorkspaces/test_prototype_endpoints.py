@@ -147,6 +147,48 @@ def client(test_app: FastAPI) -> TestClient:
 
 
 class TestPrototypeWorkspaceEndpoints:
+    def test_owner_can_fetch_workspace_detail_with_snapshot_and_session_inventory(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+    ) -> None:
+        workspace, seed_snapshot = _seed_workspace(test_services, title="Detail prototype")
+        owner_session_result = _run(
+            test_services.service.create_or_reuse_branch_session(
+                prototype_workspace_id=workspace["id"],
+                actor_type="owner",
+                actor_user_id=1,
+                request_nonce="req_owner_detail_view",
+            )
+        )
+        owner_session = owner_session_result["session"]
+        candidate_snapshot = _run(
+            test_services.repo.create_snapshot(
+                prototype_workspace_id=workspace["id"],
+                snapshot_id="psnap_candidate_detail_1",
+                created_by_user_id=1,
+                parent_snapshot_id=seed_snapshot["snapshot_id"],
+                created_from_session_id=owner_session["id"],
+                storage_ref="prototype://candidate-detail",
+                prompt_summary="Candidate snapshot for detail view",
+            )
+        )
+
+        resp = client.get(f"/api/v1/prototype-workspaces/{workspace['id']}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == workspace["id"]
+        assert body["viewer_role"] == "owner"
+        assert body["canonical_snapshot_id"] == seed_snapshot["snapshot_id"]
+        assert len(body["sessions"]) == 1
+        assert body["sessions"][0]["id"] == owner_session["id"]
+        assert len(body["snapshots"]) == 2
+        assert body["snapshots"][0]["snapshot_id"] == candidate_snapshot["snapshot_id"]
+        assert body["snapshots"][0]["is_canonical"] is False
+        assert body["snapshots"][1]["snapshot_id"] == seed_snapshot["snapshot_id"]
+        assert body["snapshots"][1]["is_canonical"] is True
+
     def test_owner_can_create_workspace_and_request_branch_session(self, client: TestClient) -> None:
         created = client.post(
             "/api/v1/prototype-workspaces",

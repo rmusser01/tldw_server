@@ -37,6 +37,51 @@ class PrototypeWorkspaceResponse(BaseModel):
     is_archived: bool = False
 
 
+class PrototypeWorkspaceSessionSummaryResponse(BaseModel):
+    id: str
+    prototype_workspace_id: str
+    base_snapshot_id: str
+    actor_user_id: int | None = None
+    actor_shared_actor_id: str | None = None
+    actor_type: str
+    share_link_id: int | None = None
+    acp_session_id: str | None = None
+    sandbox_session_id: str | None = None
+    sandbox_run_id: str | None = None
+    runtime_status: str
+    preview_handle: str | None = None
+    preview_status: str
+    last_saved_snapshot_id: str | None = None
+    last_activity_at: str | None = None
+    expires_at: str | None = None
+    revoked_at: str | None = None
+    created_at: str
+    updated_at: str
+    is_revoked: bool = False
+
+
+class PrototypeWorkspaceSnapshotSummaryResponse(BaseModel):
+    snapshot_id: str
+    prototype_workspace_id: str
+    parent_snapshot_id: str | None = None
+    created_from_session_id: str | None = None
+    author_user_id: int | None = None
+    author_shared_actor_id: str | None = None
+    storage_ref: str | None = None
+    diff_summary: dict[str, Any] = Field(default_factory=dict)
+    prompt_summary: str | None = None
+    preview_health: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+    is_canonical: bool = False
+    is_last_known_good: bool = False
+
+
+class PrototypeWorkspaceDetailResponse(PrototypeWorkspaceResponse):
+    viewer_role: Literal["owner", "internal_collaborator"] = "owner"
+    sessions: list[PrototypeWorkspaceSessionSummaryResponse] = Field(default_factory=list)
+    snapshots: list[PrototypeWorkspaceSnapshotSummaryResponse] = Field(default_factory=list)
+
+
 class PrototypeWorkspaceSessionCreateRequest(BaseModel):
     request_nonce: str | None = Field(None, min_length=1, max_length=255)
 
