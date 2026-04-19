@@ -818,6 +818,108 @@ def migration_086_create_prototype_workspace_tables(conn: sqlite3.Connection) ->
     logger.info("Migration 086: Created prototype workspace metadata tables")
 
 
+def migration_087_expand_share_tokens_resource_type_for_prototypes(conn: sqlite3.Connection) -> None:
+    """Rebuild share_tokens to support prototype_workspace and backfill legacy encoded rows."""
+    logger.info("Migration 087: START expand share_tokens resource_type for prototypes")
+
+    if not _sqlite_table_exists(conn, "share_tokens"):
+        logger.info("Migration 087: share_tokens table missing; skipping")
+        return
+
+    table_sql_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'share_tokens'"
+    ).fetchone()
+    table_sql = str(table_sql_row[0] if table_sql_row else "").lower()
+    has_prototype_type = "prototype_workspace" in table_sql
+    legacy_count_row = conn.execute(
+        """
+        SELECT COUNT(*) FROM share_tokens
+        WHERE resource_type = 'workspace'
+          AND resource_id LIKE 'prototype_workspace::%'
+        """
+    ).fetchone()
+    legacy_count = int(legacy_count_row[0]) if legacy_count_row else 0
+
+    if has_prototype_type and legacy_count == 0:
+        logger.info("Migration 087: share_tokens already supports prototype_workspace; skipping")
+        return
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS share_tokens_new (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_hash      TEXT UNIQUE NOT NULL,
+                token_prefix    TEXT NOT NULL,
+                resource_type   TEXT NOT NULL
+                    CHECK (resource_type IN ('chatbook', 'workspace', 'prototype_workspace')),
+                resource_id     TEXT NOT NULL,
+                owner_user_id   INTEGER NOT NULL,
+                access_level    TEXT NOT NULL DEFAULT 'view_chat',
+                allow_clone     INTEGER NOT NULL DEFAULT 1,
+                password_hash   TEXT,
+                max_uses        INTEGER,
+                use_count       INTEGER NOT NULL DEFAULT 0,
+                expires_at      TIMESTAMP,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                revoked_at      TIMESTAMP,
+                FOREIGN KEY (owner_user_id) REFERENCES users(id)
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            INSERT INTO share_tokens_new (
+                id, token_hash, token_prefix, resource_type, resource_id,
+                owner_user_id, access_level, allow_clone, password_hash,
+                max_uses, use_count, expires_at, created_at, revoked_at
+            )
+            SELECT
+                id,
+                token_hash,
+                token_prefix,
+                CASE
+                    WHEN resource_type = 'workspace'
+                         AND resource_id LIKE 'prototype_workspace::%'
+                    THEN 'prototype_workspace'
+                    ELSE resource_type
+                END AS resource_type,
+                CASE
+                    WHEN resource_type = 'workspace'
+                         AND resource_id LIKE 'prototype_workspace::%'
+                    THEN substr(resource_id, 22)
+                    ELSE resource_id
+                END AS resource_id,
+                owner_user_id,
+                access_level,
+                allow_clone,
+                password_hash,
+                max_uses,
+                use_count,
+                expires_at,
+                created_at,
+                revoked_at
+            FROM share_tokens
+            """
+        )
+
+        conn.execute("DROP TABLE IF EXISTS share_tokens")
+        conn.execute("ALTER TABLE share_tokens_new RENAME TO share_tokens")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_share_tokens_prefix ON share_tokens(token_prefix)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_share_tokens_owner ON share_tokens(owner_user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_share_tokens_resource ON share_tokens(resource_type, resource_id)")
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+    conn.commit()
+    logger.info(
+        "Migration 087: Expanded share_tokens resource_type and backfilled {} legacy prototype rows",
+        legacy_count,
+    )
+
+
 def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
     """Rollback migration 086 by dropping prototype workspace metadata tables."""
     conn.execute("DROP TABLE IF EXISTS prototype_promotion_requests")
@@ -4999,6 +5101,11 @@ def get_authnz_migrations() -> list[Migration]:
             "Create prototype workspace metadata tables",
             migration_086_create_prototype_workspace_tables,
             rollback_086_drop_prototype_workspace_tables,
+        ),
+        Migration(
+            87,
+            "Expand share_tokens resource_type for prototype workspace links",
+            migration_087_expand_share_tokens_resource_type_for_prototypes,
         ),
     ]
 

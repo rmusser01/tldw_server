@@ -14,7 +14,7 @@ import time
 from collections import defaultdict
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, User
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
@@ -27,6 +27,9 @@ from ..schemas.sharing_schemas import (
     CloneWorkspaceResponse,
     CreateTokenRequest,
     PublicSharePreview,
+    PrototypeLinkExchangeRequest,
+    PrototypeLinkExchangeResponse,
+    ResourceType,
     SharedChatRequest,
     SharedMediaResponse,
     SharedWithMeItem,
@@ -63,6 +66,21 @@ def _get_token_service():
     return ShareTokenService(_get_repo())
 
 
+def _get_prototype_repo():
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
+        PrototypeWorkspacesRepo,
+    )
+
+    return PrototypeWorkspacesRepo(db_pool=get_db_pool())
+
+
+def _get_prototype_access_service():
+    from tldw_Server_API.app.core.Prototype_Workspaces.access import PrototypeAccessService
+
+    return PrototypeAccessService(_get_prototype_repo())
+
+
 _cached_audit_service: "ShareAuditService | None" = None  # noqa: F821
 
 
@@ -84,6 +102,13 @@ async def shutdown_sharing_audit_service() -> None:
 
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
+
+
+def _request_is_secure(request: Request) -> bool:
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    if forwarded_proto and "https" in forwarded_proto.lower():
+        return True
+    return request.url.scheme == "https"
 
 
 def _sanitize_shared_chat_result(value: Any) -> Any:
@@ -870,6 +895,142 @@ async def public_verify_password(
 
 
 @router.post(
+    "/public/{token}/prototype-session",
+    response_model=PrototypeLinkExchangeResponse,
+    summary="Exchange a prototype private link for an external collaborator session",
+)
+async def public_prototype_session_exchange(
+    token: str,
+    body: PrototypeLinkExchangeRequest,
+    request: Request,
+    response: Response,
+):
+    _check_public_rate_limit(request)
+
+    from tldw_Server_API.app.core.Prototype_Workspaces.access import (
+        PROTOTYPE_SHARED_ACTOR_COOKIE,
+        PrototypeAccessError,
+    )
+
+    svc = _get_token_service()
+    audit = _get_audit_service()
+    validated = await svc.validate_token(token, allow_exhausted=True)
+    if not validated:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    resource_type = str(validated.get("resource_type") or "").strip().lower()
+    prototype_workspace_id = str(validated.get("resource_id") or "").strip()
+    if resource_type != ResourceType.PROTOTYPE_WORKSPACE.value or not prototype_workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Share token is not a prototype workspace link",
+        )
+
+    resume_cookie_value = request.cookies.get(PROTOTYPE_SHARED_ACTOR_COOKIE)
+    access_service = _get_prototype_access_service()
+    can_resume_without_password = await access_service.can_resume_external_collaborator(
+        prototype_workspace_id=prototype_workspace_id,
+        share_link_id=int(validated["id"]),
+        resume_cookie_value=resume_cookie_value,
+    )
+    if validated.get("is_password_protected"):
+        if body.password:
+            password_ok = await svc.verify_password(validated, body.password)
+            await audit.log(
+                "token.password_verified" if password_ok else "token.password_failed",
+                resource_type=validated["resource_type"],
+                resource_id=validated["resource_id"],
+                owner_user_id=validated["owner_user_id"],
+                token_id=validated["id"],
+                ip_address=_client_ip(request),
+                user_agent=request.headers.get("user-agent"),
+            )
+            if not password_ok:
+                raise HTTPException(status_code=403, detail="Invalid password")
+        else:
+            if not can_resume_without_password:
+                raise HTTPException(status_code=403, detail="Password required")
+
+    if not can_resume_without_password and not str(body.display_name or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="display_name is required for first-time sessions",
+        )
+
+    claimed_new_use = False
+    if not can_resume_without_password:
+        claimed_new_use = await svc.claim_token_use(validated["id"])
+        if not claimed_new_use:
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+    claim_released = False
+    try:
+        access_context = await access_service.exchange_external_collaborator(
+            prototype_workspace_id=prototype_workspace_id,
+            share_link_id=int(validated["id"]),
+            display_name=body.display_name,
+            resume_cookie_value=resume_cookie_value,
+            allow_create=claimed_new_use,
+            expires_at=validated.get("expires_at"),
+        )
+    except PrototypeAccessError as exc:
+        if claimed_new_use:
+            await svc.release_token_use(validated["id"])
+        if exc.code == "workspace_not_found":
+            raise HTTPException(status_code=404, detail="Prototype workspace not found") from exc
+        if exc.code == "workspace_archived":
+            raise HTTPException(status_code=403, detail="Prototype workspace is archived") from exc
+        if exc.code == "resume_required":
+            raise HTTPException(status_code=404, detail="Resource not found") from exc
+        raise
+    except Exception:
+        if claimed_new_use and not claim_released:
+            await svc.release_token_use(validated["id"])
+            claim_released = True
+        raise
+    if access_context.is_resume and claimed_new_use:
+        await svc.release_token_use(validated["id"])
+        claim_released = True
+    try:
+        await audit.log(
+            "token.prototype_session_exchanged",
+            resource_type=validated["resource_type"],
+            resource_id=validated["resource_id"],
+            owner_user_id=validated["owner_user_id"],
+            token_id=validated["id"],
+            ip_address=_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+            metadata={
+                "shared_actor_id": access_context.shared_actor_id,
+                "actor_type": access_context.actor_type,
+                "runtime_policy_profile": access_context.runtime_policy_profile,
+                "is_resume": access_context.is_resume,
+                "resumed_without_password": can_resume_without_password,
+                "claimed_new_use": claimed_new_use,
+            },
+        )
+
+        response.set_cookie(
+            key=PROTOTYPE_SHARED_ACTOR_COOKIE,
+            value=access_context.resume_cookie_value,
+            max_age=7 * 24 * 60 * 60,
+            httponly=True,
+            samesite="lax",
+            secure=_request_is_secure(request),
+        )
+        return PrototypeLinkExchangeResponse(
+            shared_actor_id=access_context.shared_actor_id,
+            actor_type="external_collaborator",
+            session_token=access_context.session_token,
+            runtime_policy_profile=access_context.runtime_policy_profile,
+        )
+    except Exception:
+        if claimed_new_use and not claim_released:
+            await svc.release_token_use(validated["id"])
+        raise
+
+
+@router.post(
     "/public/{token}/import",
     dependencies=[Depends(rbac_rate_limit("sharing.read"))],
     summary="Import resource from share token (requires auth)",
@@ -885,6 +1046,12 @@ async def public_import(
     validated = await svc.validate_token(token)
     if not validated:
         raise HTTPException(status_code=404, detail="Resource not found")
+
+    if validated.get("resource_type") == ResourceType.PROTOTYPE_WORKSPACE.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Prototype workspace links must be exchanged via /prototype-session",
+        )
 
     # [CRITICAL FIX #4] Block import on password-protected tokens without verification
     if validated.get("is_password_protected"):

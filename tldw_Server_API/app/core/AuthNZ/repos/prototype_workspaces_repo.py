@@ -307,6 +307,7 @@ class PrototypeWorkspacesRepo:
         prototype_workspace_id: str,
         share_link_id: int,
         display_name: str,
+        session_binding_id: str | None = None,
         runtime_policy_profile: str,
         quota_policy: dict[str, Any] | None = None,
         expires_at: str | None = None,
@@ -317,15 +318,16 @@ class PrototypeWorkspacesRepo:
             """
             INSERT INTO prototype_shared_actors (
                 id, prototype_workspace_id, share_link_id, display_name,
-                runtime_policy_profile, quota_policy_json, last_activity_at,
-                expires_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                session_binding_id, runtime_policy_profile, quota_policy_json,
+                last_activity_at, expires_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 actor_id,
                 prototype_workspace_id,
                 int(share_link_id),
                 display_name,
+                session_binding_id,
                 runtime_policy_profile,
                 json.dumps(quota_policy or {}),
                 ts,
@@ -336,6 +338,35 @@ class PrototypeWorkspacesRepo:
         )
         created = await self.get_shared_actor(actor_id)
         return created or {}
+
+    async def touch_shared_actor(self, shared_actor_id: str) -> dict[str, Any] | None:
+        ts = self._ts()
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_shared_actors
+            SET last_activity_at = ?, updated_at = ?
+            WHERE id = ? AND revoked_at IS NULL
+            """,
+            (ts, ts, shared_actor_id),
+        )
+        return await self.get_shared_actor(shared_actor_id)
+
+    async def rotate_shared_actor_binding(
+        self,
+        shared_actor_id: str,
+        *,
+        new_session_binding_id: str,
+    ) -> dict[str, Any] | None:
+        ts = self._ts()
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_shared_actors
+            SET session_binding_id = ?, last_activity_at = ?, updated_at = ?
+            WHERE id = ? AND revoked_at IS NULL
+            """,
+            (new_session_binding_id, ts, ts, shared_actor_id),
+        )
+        return await self.get_shared_actor(shared_actor_id)
 
     async def get_shared_actor(self, shared_actor_id: str) -> dict[str, Any] | None:
         row = await self.db_pool.fetchone(

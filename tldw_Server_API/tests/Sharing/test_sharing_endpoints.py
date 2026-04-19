@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import builtins
+import asyncio
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -558,6 +559,17 @@ class TestShareTokens:
         assert "raw_token" in data
         assert data["resource_type"] == "workspace"
 
+    def test_create_prototype_workspace_token(self, client, mock_repo):
+        resp = client.post("/api/v1/sharing/tokens", json={
+            "resource_type": "prototype_workspace",
+            "resource_id": "pws-1",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "raw_token" in data
+        assert data["resource_type"] == "prototype_workspace"
+        assert data["resource_id"] == "pws-1"
+
     def test_list_tokens(self, client, mock_repo):
         client.post("/api/v1/sharing/tokens", json={
             "resource_type": "workspace",
@@ -587,6 +599,16 @@ class TestPublicEndpoints:
         resp = client.get(f"/api/v1/sharing/public/{raw_token}")
         assert resp.status_code == 200
         assert resp.json()["resource_type"] == "workspace"
+
+    def test_public_preview_prototype_workspace_token(self, client, mock_repo):
+        create = client.post("/api/v1/sharing/tokens", json={
+            "resource_type": "prototype_workspace",
+            "resource_id": "pws-1",
+        })
+        raw_token = create.json()["raw_token"]
+        resp = client.get(f"/api/v1/sharing/public/{raw_token}")
+        assert resp.status_code == 200
+        assert resp.json()["resource_type"] == "prototype_workspace"
 
     def test_public_preview_invalid(self, client, mock_repo):
         resp = client.get("/api/v1/sharing/public/not-a-valid-token-here-12345678")
@@ -638,6 +660,22 @@ class TestPublicEndpoints:
         resp = client.post(f"/api/v1/sharing/public/{raw_token}/import")
         assert resp.status_code == 403
         assert "Password verification required" in resp.json()["detail"]
+
+    def test_public_import_rejects_prototype_workspace_token(self, client, mock_repo):
+        create = client.post("/api/v1/sharing/tokens", json={
+            "resource_type": "prototype_workspace",
+            "resource_id": "pws-import",
+        })
+        token_id = create.json()["id"]
+        raw_token = create.json()["raw_token"]
+
+        resp = client.post(f"/api/v1/sharing/public/{raw_token}/import")
+        assert resp.status_code == 422
+        assert "prototype-session" in resp.json()["detail"]
+
+        token_row = asyncio.run(mock_repo.get_token(token_id))
+        assert token_row is not None
+        assert token_row["use_count"] == 0
 
 
 class TestAdmin:

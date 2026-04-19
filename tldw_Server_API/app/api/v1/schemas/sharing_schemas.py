@@ -9,7 +9,7 @@ Pydantic models for workspace sharing CRUD, share tokens, and admin operations.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -30,6 +30,7 @@ class AccessLevel(str, Enum):
 class ResourceType(str, Enum):
     CHATBOOK = "chatbook"
     WORKSPACE = "workspace"
+    PROTOTYPE_WORKSPACE = "prototype_workspace"
 
 
 # ── Workspace Sharing ──
@@ -135,6 +136,18 @@ class VerifyPasswordRequest(BaseModel):
 class VerifyPasswordResponse(BaseModel):
     verified: bool
     session_token: str | None = None
+
+
+class PrototypeLinkExchangeRequest(BaseModel):
+    display_name: str | None = Field(None, min_length=1, max_length=120)
+    password: str | None = Field(None, min_length=1, max_length=128)
+
+
+class PrototypeLinkExchangeResponse(BaseModel):
+    shared_actor_id: str
+    actor_type: Literal["external_collaborator"] = "external_collaborator"
+    session_token: str
+    runtime_policy_profile: str
 
 
 # ── Clone ──
