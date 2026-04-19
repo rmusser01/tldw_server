@@ -36,31 +36,22 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { getVariable } from "@/utils/select-variable"
-import { useSpeechRecognition } from "@/hooks/useSpeechRecognition"
 import { useTldwStt } from "@/hooks/useTldwStt"
 import { useMicStream } from "@/hooks/useMicStream"
-import type {
-  DictationErrorClass,
-  DictationModePreference,
-  DictationResolvedMode,
-  DictationServerErrorTransition
-} from "@/hooks/useDictationStrategy"
-import { useDictationStrategy } from "@/hooks/useDictationStrategy"
+import type { DictationModePreference } from "@/hooks/useDictationStrategy"
 import { BsIncognito } from "react-icons/bs"
 import { handleChatInputKeyDown } from "@/utils/key-down"
 import { getIsSimpleInternetSearch } from "@/services/search"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useSttSettings } from "@/hooks/useSttSettings"
-import { useServerDictation } from "@/hooks/useServerDictation"
 import { useVoiceChatSettings } from "@/hooks/useVoiceChatSettings"
 import { useVoiceChatStream } from "@/hooks/useVoiceChatStream"
 import { useVoiceChatMessages } from "@/hooks/useVoiceChatMessages"
 import { useComposerEvents } from "@/hooks/useComposerEvents"
 import { useTemporaryChatToggle } from "@/hooks/useTemporaryChatToggle"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
-import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog"
-import { useAudioSourcePreferences } from "@/hooks/useAudioSourcePreferences"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { useComposerVoiceChat } from "@/components/Chat/composer/hooks/useComposerVoiceChat"
 import {
   COMPOSER_CONSTANTS,
   SPACING,
@@ -121,10 +112,8 @@ import type { UploadedFile } from "@/db/dexie/types"
 import type { ChatDocuments } from "@/models/ChatTypes"
 import { formatFileSize } from "@/utils/format"
 import { formatPinnedResults } from "@/utils/rag-format"
-import { emitDictationDiagnostics } from "@/utils/dictation-diagnostics"
 import { createRenderPerfTracker } from "@/utils/perf/render-profiler"
 import { useQueuedRequests } from "@/hooks/chat/useQueuedRequests"
-import { resolveAudioCapturePlan, type AudioCaptureRequestedSource } from "@/audio"
 import {
   buildAvailableChatModelIds,
   findUnavailableChatModel,
@@ -380,14 +369,6 @@ export const SidepanelForm = ({
   }, [form.values.image])
   const [contextFiles, setContextFiles] = React.useState<UploadedFile[]>([])
   const [mentionActiveIndex, setMentionActiveIndex] = React.useState(0)
-  const {
-    transcript,
-    isListening,
-    resetTranscript,
-    start: startListening,
-    stop: stopSpeechRecognition,
-    supported: browserSupportsSpeechRecognition
-  } = useSpeechRecognition()
   const [dictationAutoFallbackEnabled] = useStorage(
     "dictation_auto_fallback",
     false
@@ -396,16 +377,8 @@ export const SidepanelForm = ({
     "dictationModeOverride",
     null
   )
-  const {
-    preference: dictationAudioSourcePreference,
-    isLoading: dictationSourceLoading,
-    setPreference: setDictationAudioSourcePreference
-  } = useAudioSourcePreferences("dictation")
-  const {
-    devices: audioInputDevices,
-    isSettled: hasAudioCatalogSettled
-  } = useAudioSourceCatalog()
-  const [pendingDictationStart, setPendingDictationStart] = React.useState(false)
+  // Voice/dictation orchestration is wired below via `useComposerVoiceChat`,
+  // after `canUseServerStt` and `speechToTextLanguage` are computed.
 
   const {
     tabMentionsEnabled,
@@ -422,12 +395,6 @@ export const SidepanelForm = ({
     reloadTabs,
     handleMentionsOpen
   } = useTabMentions(textareaRef, { includeActive: true })
-
-  const stopListening = async () => {
-    if (isListening) {
-      stopSpeechRecognition()
-    }
-  }
 
   const hasWarnedPrivateMode = React.useRef(false)
 
@@ -546,8 +513,8 @@ export const SidepanelForm = ({
   const canUseServerAudio =
     hasServerVoiceChat && audioHealthState !== "unhealthy"
   const canUseServerStt = hasServerStt && sttHealthState !== "unhealthy"
-  const hasVoiceInputControls =
-    browserSupportsSpeechRecognition || hasServerStt || hasServerVoiceChat
+  // `hasVoiceInputControls` is computed below, after `useComposerVoiceChat`
+  // exposes `browserSupportsSpeechRecognition`.
   const voiceConversationTtsConfig = React.useMemo(
     () =>
       resolveVoiceConversationTtsConfig({
@@ -609,72 +576,6 @@ export const SidepanelForm = ({
     ]
   )
   const voiceChatAvailable = voiceConversationAvailability.available
-  const dictationCapturePlan = React.useMemo(
-    () =>
-      resolveAudioCapturePlan({
-        featureGroup: "dictation",
-        requestedSource: dictationAudioSourcePreference,
-        requestedSpeechPath:
-          dictationModeOverride === "browser"
-            ? "browser_dictation"
-            : "server_dictation",
-        capabilities: {
-          browserDictationSupported: browserSupportsSpeechRecognition,
-          serverDictationSupported: canUseServerStt,
-          liveVoiceSupported: false,
-          secureContextAvailable:
-            typeof window === "undefined" ? true : window.isSecureContext
-        }
-      }),
-    [
-      browserSupportsSpeechRecognition,
-      canUseServerStt,
-      dictationAudioSourcePreference,
-      dictationModeOverride
-    ]
-  )
-  const dictationSourceReady = hasAudioCatalogSettled && !dictationSourceLoading
-  const resolvedDictationSourcePreference = React.useMemo(() => {
-    if (!dictationSourceReady) {
-      return dictationAudioSourcePreference
-    }
-
-    if (dictationAudioSourcePreference.sourceKind !== "mic_device") {
-      return dictationAudioSourcePreference
-    }
-
-    const requestedDeviceId = String(dictationAudioSourcePreference.deviceId || "").trim()
-    const deviceStillAvailable = audioInputDevices.some(
-      (device) => device.deviceId === requestedDeviceId
-    )
-
-    if (deviceStillAvailable) {
-      return dictationAudioSourcePreference
-    }
-
-    return {
-      featureGroup: "dictation" as const,
-      sourceKind: "default_mic" as const,
-      deviceId: null,
-      lastKnownLabel: null
-    }
-  }, [audioInputDevices, dictationAudioSourcePreference, dictationSourceReady])
-  const resolvedDictationSourceKind = resolvedDictationSourcePreference.sourceKind
-  const browserDictationCompatible =
-    resolvedDictationSourcePreference.sourceKind === "default_mic"
-  const resolvedModeOverride =
-    dictationModeOverride === "browser" && !browserDictationCompatible
-      ? (canUseServerStt ? ("server" as const) : ("unavailable" as const))
-      : null
-  const requestedServerDictationSource = React.useMemo<
-    AudioCaptureRequestedSource | undefined
-  >(
-    () =>
-      resolvedDictationSourcePreference.sourceKind === "mic_device"
-        ? resolvedDictationSourcePreference
-        : undefined,
-    [resolvedDictationSourcePreference]
-  )
 
   const voiceChat = useVoiceChatStream({
     active: voiceChatEnabled && voiceChatAvailable,
@@ -938,108 +839,35 @@ export const SidepanelForm = ({
   // When sidepanel connection transitions to CONNECTED, focus the composer
   useFocusComposerOnConnect(phase)
 
-  const dictationDiagnosticsSnapshotRef = React.useRef<{
-    requestedMode: DictationModePreference
-    resolvedMode: DictationResolvedMode
-    requestedSourceKind: "default_mic" | "mic_device" | "tab_audio" | "system_audio"
-    resolvedSourceKind: "default_mic" | "mic_device" | "tab_audio" | "system_audio"
-    speechAvailable: boolean
-    speechUsesServer: boolean
-    fallbackReason: DictationErrorClass | null
-  }>({
-    requestedMode: "auto",
-    resolvedMode: "unavailable",
-    requestedSourceKind: "default_mic",
-    resolvedSourceKind: "default_mic",
-    speechAvailable: false,
-    speechUsesServer: false,
-    fallbackReason: null
-  })
-  const serverDictationErrorBridgeRef = React.useRef<
-    (error: unknown) => DictationServerErrorTransition
-  >(
-    () => ({
-      errorClass: "unknown_error",
-      appliedFallback: false,
-      requestedMode: "auto",
-      resolvedModeBeforeError: "unavailable",
-      speechAvailableBeforeError: false,
-      speechUsesServerBeforeError: false,
-      browserSupportsSpeechRecognition: false,
-      autoFallbackEnabled: false
-    })
-  )
-  const serverDictationSuccessBridgeRef = React.useRef<() => void>(() => {})
-  const handleServerDictationError = React.useCallback((error: unknown) => {
-    const transition = serverDictationErrorBridgeRef.current(error)
-    const snapshot = dictationDiagnosticsSnapshotRef.current
-    emitDictationDiagnostics({
-      surface: "sidepanel",
-      kind: "server_error",
-      requestedMode: transition.requestedMode,
-      resolvedMode: transition.resolvedModeBeforeError,
-      requestedSourceKind: snapshot.requestedSourceKind,
-      resolvedSourceKind: snapshot.resolvedSourceKind,
-      speechAvailable: transition.speechAvailableBeforeError,
-      speechUsesServer: transition.speechUsesServerBeforeError,
-      errorClass: transition.errorClass,
-      fallbackApplied: transition.appliedFallback,
-      fallbackReason: transition.appliedFallback ? transition.errorClass : null
-    })
-  }, [])
-  const handleServerDictationSuccess = React.useCallback(() => {
-    serverDictationSuccessBridgeRef.current()
-    const snapshot = dictationDiagnosticsSnapshotRef.current
-    emitDictationDiagnostics({
-      surface: "sidepanel",
-      kind: "server_success",
-      requestedMode: snapshot.requestedMode,
-      resolvedMode: snapshot.resolvedMode,
-      requestedSourceKind: snapshot.requestedSourceKind,
-      resolvedSourceKind: snapshot.resolvedSourceKind,
-      speechAvailable: snapshot.speechAvailable,
-      speechUsesServer: snapshot.speechUsesServer,
-      fallbackReason: snapshot.fallbackReason
-    })
-  }, [])
-
-  // Server-side dictation hook
+  // Voice/dictation orchestration — delegates the full browser+server STT
+  // pipeline (source preferences, capture plan, strategy, diagnostics,
+  // toggle handler, transcript streaming) to the shared composer primitive.
+  // Sidepanel writes transcripts straight into the message field; it does
+  // not auto-submit on dictation end.
   const {
+    isListening,
+    browserSupportsSpeechRecognition,
     isServerDictating,
-    startServerDictation,
-    stopServerDictation
-  } = useServerDictation({
+    stopServerDictation,
+    dictationAudioSourcePreference,
+    setDictationAudioSourcePreference,
+    dictationResolvedSourceKind: resolvedDictationSourceKind,
+    audioInputDevices,
+    speechAvailable,
+    speechUsesServer,
+    stopListening,
+    handleDictationToggle
+  } = useComposerVoiceChat({
+    surface: "sidepanel",
     canUseServerStt,
     speechToTextLanguage,
     sttSettings,
-    onTranscript: (text) => form.setFieldValue("message", text),
-    onError: handleServerDictationError,
-    onSuccess: handleServerDictationSuccess
+    dictationModeOverride,
+    dictationAutoFallbackEnabled: Boolean(dictationAutoFallbackEnabled),
+    onTranscript: (text) => form.setFieldValue("message", text)
   })
-
-  const dictationStrategy = useDictationStrategy({
-    canUseServerStt,
-    browserSupportsSpeechRecognition,
-    browserDictationCompatible,
-    resolvedModeOverride,
-    isServerDictating,
-    isBrowserDictating: isListening,
-    modeOverride: dictationModeOverride,
-    autoFallbackEnabled: Boolean(dictationAutoFallbackEnabled)
-  })
-  serverDictationErrorBridgeRef.current = dictationStrategy.recordServerError
-  serverDictationSuccessBridgeRef.current = dictationStrategy.recordServerSuccess
-  dictationDiagnosticsSnapshotRef.current = {
-    requestedMode: dictationStrategy.requestedMode,
-    resolvedMode: dictationStrategy.resolvedMode,
-    requestedSourceKind: dictationCapturePlan.requestedSourceKind,
-    resolvedSourceKind: resolvedDictationSourceKind,
-    speechAvailable: dictationStrategy.speechAvailable,
-    speechUsesServer: dictationStrategy.speechUsesServer,
-    fallbackReason: dictationStrategy.autoFallbackErrorClass
-  }
-  const speechAvailable = dictationStrategy.speechAvailable
-  const speechUsesServer = dictationStrategy.speechUsesServer
+  const hasVoiceInputControls =
+    browserSupportsSpeechRecognition || hasServerStt || hasServerVoiceChat
 
   // Composer window events hook
   const handleOpenQuickIngest = React.useCallback(() => {
@@ -1890,96 +1718,10 @@ export const SidepanelForm = ({
     setContextFiles([])
   }, [])
 
-  const startBrowserDictation = React.useCallback(() => {
-    resetTranscript()
-    startListening({
-      continuous: true,
-      lang: speechToTextLanguage
-    })
-  }, [resetTranscript, speechToTextLanguage, startListening])
-  const runPendingDictationStart = React.useCallback(() => {
-    switch (dictationStrategy.toggleIntent) {
-      case "start_server":
-        void startServerDictation(requestedServerDictationSource)
-        return true
-      case "start_browser":
-        startBrowserDictation()
-        return true
-      default:
-        return false
-    }
-  }, [
-    dictationStrategy.toggleIntent,
-    requestedServerDictationSource,
-    startBrowserDictation,
-    startServerDictation
-  ])
-
-  const handleDictationToggle = React.useCallback(() => {
-    if (pendingDictationStart) {
-      setPendingDictationStart(false)
-      return
-    }
-
-    switch (dictationStrategy.toggleIntent) {
-      case "start_server":
-        if (!dictationSourceReady) {
-          setPendingDictationStart(true)
-          return
-        }
-        void startServerDictation(requestedServerDictationSource)
-        break
-      case "stop_server":
-        setPendingDictationStart(false)
-        stopServerDictation()
-        break
-      case "start_browser":
-        if (!dictationSourceReady) {
-          setPendingDictationStart(true)
-          return
-        }
-        startBrowserDictation()
-        break
-      case "stop_browser":
-        setPendingDictationStart(false)
-        stopListening()
-        break
-      default:
-        break
-    }
-    const snapshot = dictationDiagnosticsSnapshotRef.current
-    emitDictationDiagnostics({
-      surface: "sidepanel",
-      kind: "toggle",
-      requestedMode: snapshot.requestedMode,
-      resolvedMode: snapshot.resolvedMode,
-      requestedSourceKind: snapshot.requestedSourceKind,
-      resolvedSourceKind: snapshot.resolvedSourceKind,
-      speechAvailable: snapshot.speechAvailable,
-      speechUsesServer: snapshot.speechUsesServer,
-      toggleIntent: dictationStrategy.toggleIntent,
-      fallbackReason: snapshot.fallbackReason
-    })
-  }, [
-    dictationSourceReady,
-    dictationStrategy.toggleIntent,
-    pendingDictationStart,
-    requestedServerDictationSource,
-    startBrowserDictation,
-    startServerDictation,
-    stopListening,
-    stopServerDictation
-  ])
-
-  React.useEffect(() => {
-    if (!pendingDictationStart) return
-    if (!dictationSourceReady) return
-    if (!runPendingDictationStart()) {
-      setPendingDictationStart(false)
-      return
-    }
-    setPendingDictationStart(false)
-  }, [dictationSourceReady, pendingDictationStart, runPendingDictationStart])
+  // Dictation toggle + transcript streaming + pending-start handling are
+  // owned by `useComposerVoiceChat` (see top of component); nothing extra to
+  // wire here. `handleDictationToggle` and `stopListening` are destructured
+  // above for the controls below to consume.
 
   const voiceChatStatusLabel = React.useMemo(() => {
     switch (voiceChat.state) {
@@ -2286,11 +2028,8 @@ export const SidepanelForm = ({
 
   useDynamicTextareaSize(textareaRef, form.values.message, textareaMaxHeight)
 
-  React.useEffect(() => {
-    if (isListening) {
-      form.setFieldValue("message", transcript)
-    }
-  }, [transcript])
+  // Browser-dictation transcript streaming is handled by `useComposerVoiceChat`
+  // via its `onTranscript` callback above; no local effect needed here.
 
   React.useEffect(() => {
     if (selectedQuickPrompt) {
