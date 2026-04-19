@@ -71,6 +71,7 @@ import { isFireFoxPrivateMode } from "@/utils/is-private-mode"
 import { useFocusShortcuts } from "@/hooks/keyboard"
 import { isFirefoxTarget } from "@/config/platform"
 import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText"
+import { useComposerSubmit } from "@/components/Chat/composer/hooks/useComposerSubmit"
 import { useSlashCommands, type SlashCommandItem } from "@/hooks/useSlashCommands"
 import { useTabMentions, type TabInfo } from "~/hooks/useTabMentions"
 import { useDeferredComposerInput } from "@/hooks/playground"
@@ -1707,28 +1708,36 @@ export const SidepanelForm = ({
         return
       }
     }
-    form.reset()
-    textAreaFocus()
-    await sendMessage({
-      image: intent.isImageCommand ? "" : image,
-      message: trimmed,
-      docs: intent.isImageCommand
-        ? []
-        : selectedDocuments.map((doc) => ({
-            type: "tab",
-            tabId: doc.id,
-            title: doc.title,
-            url: doc.url,
-            favIconUrl: doc.favIconUrl
-          })),
-      uploadedFiles: intent.isImageCommand ? [] : contextFiles,
-      imageBackendOverride: intent.isImageCommand
-        ? intent.imageBackendOverride
-        : undefined
-    })
-    clearSelectedDocuments()
-    setContextFiles([])
-    setKnowledgeMentionActive(false)
+    await submitDispatch(
+      {
+        image: intent.isImageCommand ? "" : image,
+        message: trimmed,
+        docs: intent.isImageCommand
+          ? []
+          : selectedDocuments.map((doc) => ({
+              type: "tab",
+              tabId: doc.id,
+              title: doc.title,
+              url: doc.url,
+              favIconUrl: doc.favIconUrl
+            })),
+        uploadedFiles: intent.isImageCommand ? [] : contextFiles,
+        imageBackendOverride: intent.isImageCommand
+          ? intent.imageBackendOverride
+          : undefined
+      },
+      {
+        beforeSend: () => {
+          form.reset()
+          textAreaFocus()
+        },
+        afterSend: () => {
+          clearSelectedDocuments()
+          setContextFiles([])
+          setKnowledgeMentionActive(false)
+        }
+      }
+    )
   }
   const sendCurrentFormMessageRef = React.useRef(sendCurrentFormMessage)
   React.useEffect(() => {
@@ -2308,6 +2317,11 @@ export const SidepanelForm = ({
       textAreaFocus()
     }
   })
+
+  // Shared composer dispatch. Wraps sendMessage with before/after hooks so
+  // Sidepanel's "reset + focus before, clear attachments after" pattern
+  // mirrors Playground's. See Chat/composer/hooks/useComposerSubmit.ts.
+  const { dispatch: submitDispatch } = useComposerSubmit({ sendMessage })
 
   const buildQueuedDocuments = React.useCallback(
     (): ChatDocuments =>
