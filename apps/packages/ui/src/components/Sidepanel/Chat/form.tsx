@@ -70,7 +70,7 @@ import {
 import { isFireFoxPrivateMode } from "@/utils/is-private-mode"
 import { useFocusShortcuts } from "@/hooks/keyboard"
 import { isFirefoxTarget } from "@/config/platform"
-import { useDraftPersistence } from "@/hooks/useDraftPersistence"
+import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText"
 import { useSlashCommands, type SlashCommandItem } from "@/hooks/useSlashCommands"
 import { useTabMentions, type TabInfo } from "~/hooks/useTabMentions"
 import { useDeferredComposerInput } from "@/hooks/playground"
@@ -115,7 +115,6 @@ import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
 import { shallow } from "zustand/shallow"
 import { Button } from "@/components/Common/Button"
-import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { generateID } from "@/db/dexie/helpers"
 import type { UploadedFile } from "@/db/dexie/types"
 import type { ChatDocuments } from "@/models/ChatTypes"
@@ -310,11 +309,15 @@ export const SidepanelForm = ({
     ? COMPOSER_CONSTANTS.TEXTAREA_MIN_HEIGHT_PRO
     : COMPOSER_CONSTANTS.TEXTAREA_MIN_HEIGHT_CASUAL
   const storageKey = draftKey || STORAGE_KEYS.SIDEPANEL_CHAT_DRAFT
-  const form = useSimpleForm({
-    initialValues: {
-      message: "",
-      image: ""
-    }
+  // Shared primitive: form state + draft persistence.
+  // See apps/packages/ui/src/components/Chat/composer/hooks/useComposerText.ts.
+  // Sidepanel intentionally keeps its own local `textAreaFocus` below (plain
+  // .focus() without the mobile blur heuristic) to preserve exact behavior —
+  // adopt the primitive's `textAreaFocus` in a follow-up if desired.
+  const { form, draftSaved } = useComposerText({
+    draftKey: storageKey,
+    textareaRef,
+    isProMode
   })
   const { deferredInput: deferredComposerInput } = useDeferredComposerInput(
     form.values.message || ""
@@ -425,12 +428,6 @@ export const SidepanelForm = ({
     }
   }
 
-  // Draft persistence - saves/restores message draft to local-only storage
-  const { draftSaved } = useDraftPersistence({
-    storageKey,
-    getValue: () => form.values.message,
-    setValue: (value) => form.setFieldValue("message", value)
-  })
   const hasWarnedPrivateMode = React.useRef(false)
 
   // Warn Firefox private mode users on mount that data won't persist
