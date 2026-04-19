@@ -219,6 +219,53 @@ class PrototypeAccessService:
             return None
         return {"shared_actor_id": shared_actor_id, "binding_secret": binding_secret}
 
+    def decode_session_token(self, value: str | None) -> dict[str, Any] | None:
+        if not value:
+            return None
+        parts = str(value).split(".")
+        if len(parts) != 3 or parts[0] != "ptc":
+            return None
+        payload_b64, signature_b64 = parts[1], parts[2]
+        expected_sig = hmac.new(
+            self._signing_secret.encode("utf-8"),
+            payload_b64.encode("utf-8"),
+            hashlib.sha256,
+        ).digest()
+        expected_sig_b64 = _b64url(expected_sig)
+        if not hmac.compare_digest(expected_sig_b64, signature_b64):
+            return None
+        try:
+            payload_raw = _b64url_decode(payload_b64)
+            payload = json.loads(payload_raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+
+        shared_actor_id = str(payload.get("sub") or "").strip()
+        prototype_workspace_id = str(payload.get("workspace_id") or "").strip()
+        actor_type = str(payload.get("actor_type") or "").strip()
+        runtime_policy_profile = str(payload.get("runtime_policy_profile") or "").strip()
+        try:
+            share_link_id = int(payload.get("share_link_id"))
+            exp = int(payload.get("exp"))
+            iat = int(payload.get("iat"))
+        except (TypeError, ValueError):
+            return None
+        if not shared_actor_id or not prototype_workspace_id:
+            return None
+        if actor_type != "external_collaborator":
+            return None
+        if exp <= int(time.time()):
+            return None
+        return {
+            "shared_actor_id": shared_actor_id,
+            "prototype_workspace_id": prototype_workspace_id,
+            "share_link_id": share_link_id,
+            "actor_type": actor_type,
+            "runtime_policy_profile": runtime_policy_profile,
+            "iat": iat,
+            "exp": exp,
+        }
+
     async def _resolve_resume_candidate(
         self,
         *,

@@ -555,6 +555,13 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.prototype_workspaces",
+            log_name="prototype_workspaces",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("prototype-workspaces",),
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.personalization",
             log_name="personalization",
             prefix=f"{API_V1_PREFIX}/personalization",

@@ -445,7 +445,7 @@ git commit -m "feat: add prototype runtime jobs and preview broker"
 - Create: `tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_endpoints.py`
 - Modify: `tldw_Server_API/app/main.py`
 
-- [ ] **Step 1: Write failing endpoint integration tests for the owner and collaborator flows**
+- [x] **Step 1: Write failing endpoint integration tests for the owner and collaborator flows**
 
 ```python
 def test_owner_can_create_workspace_and_request_branch_session(client):
@@ -468,13 +468,13 @@ Also cover:
 - preview grant renewal
 - stale promotion response shape
 
-- [ ] **Step 2: Run the endpoint tests to verify they fail**
+- [x] **Step 2: Run the endpoint tests to verify they fail**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_endpoints.py -q`
 
 Expected: FAIL because the router and schemas do not exist yet.
 
-- [ ] **Step 3: Implement the router and schemas with minimal happy-path behavior first**
+- [x] **Step 3: Implement the router and schemas with minimal happy-path behavior first**
 
 ```python
 @router.post("/prototype-workspaces", response_model=PrototypeWorkspaceResponse, status_code=201)
@@ -490,7 +490,7 @@ Implementation requirements:
 - use explicit Pydantic models for job responses, preview responses, and promotion responses
 - include the new router in `main.py` using the same conditional include style already used for sharing/sandbox routers
 
-- [ ] **Step 4: Re-run the endpoint integration tests**
+- [x] **Step 4: Re-run the endpoint integration tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_endpoints.py -q`
 

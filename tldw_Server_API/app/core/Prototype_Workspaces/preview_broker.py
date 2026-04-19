@@ -218,6 +218,36 @@ class PrototypePreviewBroker:
                 return None
             return self._record_to_dict(record)
 
+    async def renew_preview_grant(self, preview_handle: str) -> dict[str, Any]:
+        handle_id = str(preview_handle or "").strip()
+        if not handle_id:
+            raise RuntimeError("preview handle is required")
+
+        with self._lock:
+            record = self._records.get(handle_id)
+            if not record or not record.is_active:
+                raise RuntimeError("preview handle not found")
+            record_dict = self._record_to_dict(record)
+
+        if not await self._is_grant_still_authorized(record):
+            raise RuntimeError("preview handle is no longer authorized")
+
+        token, expires_at = self._mint_grant_token(
+            preview_handle=handle_id,
+            actor_key=str(record_dict["actor_key"]),
+        )
+        return {
+            "preview_handle": handle_id,
+            "preview_scope": record_dict["preview_scope"],
+            "prototype_workspace_id": record_dict["prototype_workspace_id"],
+            "prototype_session_id": record_dict["prototype_session_id"],
+            "snapshot_id": (record_dict.get("metadata") or {}).get("snapshot_id"),
+            "preview_url": f"{self._base_preview_path}/{handle_id}?exp={expires_at}&token={token}",
+            "expires_at": datetime.fromtimestamp(expires_at, timezone.utc).isoformat(),
+            "token": token,
+            "runtime_policy_profile": str(record_dict["runtime_policy_profile"]),
+        }
+
     async def validate_preview_grant(
         self,
         *,

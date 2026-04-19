@@ -59,6 +59,46 @@ class PrototypeWorkspaceService:
         self._preview_broker = preview_broker or PrototypePreviewBroker(repo=repo)
         self._publish_validator = publish_validator
 
+    async def create_workspace(
+        self,
+        *,
+        owner_user_id: int,
+        title: str,
+        creation_source: str,
+        description: str | None = None,
+        prompt: str | None = None,
+        preview_policy: dict[str, Any] | None = None,
+        share_policy: dict[str, Any] | None = None,
+        runtime_policy: dict[str, Any] | None = None,
+        designated_promoter_ids: list[int] | None = None,
+    ) -> dict[str, Any]:
+        workspace = await self._repo.create_workspace(
+            owner_user_id=int(owner_user_id),
+            title=title,
+            description=description,
+            creation_source=creation_source,
+            preview_policy=preview_policy,
+            share_policy=share_policy,
+            runtime_policy=runtime_policy,
+            designated_promoter_ids=designated_promoter_ids,
+        )
+        seed_snapshot = await self._repo.create_snapshot(
+            prototype_workspace_id=workspace["id"],
+            snapshot_id=f"psnap_{uuid.uuid4().hex}",
+            created_by_user_id=int(owner_user_id),
+            storage_ref="prototype://seed",
+            prompt_summary=prompt,
+            diff_summary={"creation_source": creation_source},
+        )
+        updated = await self._repo.update_workspace_state(
+            workspace["id"],
+            canonical_snapshot_id=seed_snapshot["snapshot_id"],
+            last_known_good_snapshot_id=seed_snapshot["snapshot_id"],
+            canonical_preview_status="uninitialized",
+            publish_validation_status="pending",
+        )
+        return updated or workspace
+
     async def create_or_reuse_branch_session(
         self,
         *,
@@ -142,6 +182,9 @@ class PrototypeWorkspaceService:
             runtime_policy_profile=runtime_policy_profile,
             metadata=metadata,
         )
+
+    async def renew_preview_grant(self, *, preview_handle: str) -> dict[str, Any]:
+        return await self._preview_broker.renew_preview_grant(preview_handle)
 
     async def save_session_snapshot(
         self,
