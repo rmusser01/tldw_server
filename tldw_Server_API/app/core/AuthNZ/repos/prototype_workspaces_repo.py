@@ -77,6 +77,18 @@ def _normalize_promotion_status(status: str | None) -> str:
     return value
 
 
+def _normalize_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
 @dataclass
 class PrototypeWorkspacesRepo:
     """Data access for prototype workspace metadata in the AuthNZ DB."""
@@ -247,6 +259,47 @@ class PrototypeWorkspacesRepo:
         )
         return self._normalize_workspace_row(self._row_to_dict(row) if row else None)
 
+    async def update_workspace_state(
+        self,
+        prototype_workspace_id: str,
+        *,
+        canonical_snapshot_id: str | None = None,
+        last_known_good_snapshot_id: str | None = None,
+        canonical_preview_status: str | None = None,
+        publish_validation_status: str | None = None,
+    ) -> dict[str, Any] | None:
+        existing = await self.get_workspace(prototype_workspace_id)
+        if not existing:
+            return None
+
+        ts = self._ts()
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_workspaces
+            SET canonical_snapshot_id = ?,
+                last_known_good_snapshot_id = ?,
+                canonical_preview_status = ?,
+                publish_validation_status = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                canonical_snapshot_id if canonical_snapshot_id is not None else existing.get("canonical_snapshot_id"),
+                last_known_good_snapshot_id
+                if last_known_good_snapshot_id is not None
+                else existing.get("last_known_good_snapshot_id"),
+                canonical_preview_status
+                if canonical_preview_status is not None
+                else existing.get("canonical_preview_status"),
+                publish_validation_status
+                if publish_validation_status is not None
+                else existing.get("publish_validation_status"),
+                ts,
+                prototype_workspace_id,
+            ),
+        )
+        return await self.get_workspace(prototype_workspace_id)
+
     async def create_snapshot(
         self,
         *,
@@ -300,6 +353,20 @@ class PrototypeWorkspacesRepo:
             (snapshot_id,),
         )
         return self._normalize_snapshot_row(self._row_to_dict(row) if row else None)
+
+    async def list_snapshots_for_workspace(self, prototype_workspace_id: str) -> list[dict[str, Any]]:
+        rows = await self.db_pool.fetchall(
+            """
+            SELECT id, prototype_workspace_id, parent_snapshot_id, created_from_session_id,
+                   author_user_id, author_shared_actor_id, storage_ref, diff_summary_json,
+                   prompt_summary, preview_health_json, created_at
+            FROM prototype_snapshots
+            WHERE prototype_workspace_id = ?
+            ORDER BY created_at DESC
+            """,
+            (prototype_workspace_id,),
+        )
+        return [self._normalize_snapshot_row(self._row_to_dict(r)) or {} for r in rows]
 
     async def create_shared_actor(
         self,
@@ -489,6 +556,126 @@ class PrototypeWorkspacesRepo:
         )
         return self._normalize_session_row(self._row_to_dict(row) if row else None)
 
+    async def list_sessions_for_workspace(
+        self,
+        prototype_workspace_id: str,
+        *,
+        include_revoked: bool = False,
+    ) -> list[dict[str, Any]]:
+        if include_revoked:
+            rows = await self.db_pool.fetchall(
+                """
+                SELECT id, prototype_workspace_id, base_snapshot_id, actor_user_id,
+                       actor_shared_actor_id, actor_type, share_link_id, acp_session_id,
+                       sandbox_session_id, sandbox_run_id, runtime_status, preview_handle,
+                       preview_status, last_saved_snapshot_id, last_activity_at, expires_at,
+                       revoked_at, created_at, updated_at
+                FROM prototype_sessions
+                WHERE prototype_workspace_id = ?
+                ORDER BY updated_at DESC, created_at DESC
+                """,
+                (prototype_workspace_id,),
+            )
+        else:
+            rows = await self.db_pool.fetchall(
+                """
+                SELECT id, prototype_workspace_id, base_snapshot_id, actor_user_id,
+                       actor_shared_actor_id, actor_type, share_link_id, acp_session_id,
+                       sandbox_session_id, sandbox_run_id, runtime_status, preview_handle,
+                       preview_status, last_saved_snapshot_id, last_activity_at, expires_at,
+                       revoked_at, created_at, updated_at
+                FROM prototype_sessions
+                WHERE prototype_workspace_id = ? AND revoked_at IS NULL
+                ORDER BY updated_at DESC, created_at DESC
+                """,
+                (prototype_workspace_id,),
+            )
+        return [self._normalize_session_row(self._row_to_dict(r)) or {} for r in rows]
+
+    async def find_active_session(
+        self,
+        *,
+        prototype_workspace_id: str,
+        base_snapshot_id: str,
+        actor_type: str,
+        actor_user_id: int | None = None,
+        actor_shared_actor_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        actor_type_value = _normalize_actor_type(actor_type)
+        rows = await self.list_sessions_for_workspace(
+            prototype_workspace_id,
+            include_revoked=False,
+        )
+        for session in rows:
+            if session.get("base_snapshot_id") != base_snapshot_id:
+                continue
+            if session.get("actor_type") != actor_type_value:
+                continue
+            if actor_user_id is not None and session.get("actor_user_id") != int(actor_user_id):
+                continue
+            if actor_shared_actor_id is not None and session.get("actor_shared_actor_id") != actor_shared_actor_id:
+                continue
+            runtime_status = str(session.get("runtime_status") or "").strip().lower()
+            if runtime_status in {"failed", "revoked", "closed"}:
+                continue
+            expires_at = _normalize_datetime(session.get("expires_at"))
+            if expires_at is not None and expires_at <= datetime.now(timezone.utc):
+                continue
+            return session
+        return None
+
+    async def update_session_state(
+        self,
+        prototype_session_id: str,
+        *,
+        acp_session_id: str | None = None,
+        sandbox_session_id: str | None = None,
+        sandbox_run_id: str | None = None,
+        runtime_status: str | None = None,
+        preview_handle: str | None = None,
+        preview_status: str | None = None,
+        last_saved_snapshot_id: str | None = None,
+        last_activity_at: str | datetime | None = None,
+        revoked_at: str | datetime | None = None,
+    ) -> dict[str, Any] | None:
+        existing = await self.get_session(prototype_session_id)
+        if not existing:
+            return None
+
+        ts = self._ts()
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_sessions
+            SET acp_session_id = ?,
+                sandbox_session_id = ?,
+                sandbox_run_id = ?,
+                runtime_status = ?,
+                preview_handle = ?,
+                preview_status = ?,
+                last_saved_snapshot_id = ?,
+                last_activity_at = ?,
+                revoked_at = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                acp_session_id if acp_session_id is not None else existing.get("acp_session_id"),
+                sandbox_session_id if sandbox_session_id is not None else existing.get("sandbox_session_id"),
+                sandbox_run_id if sandbox_run_id is not None else existing.get("sandbox_run_id"),
+                runtime_status if runtime_status is not None else existing.get("runtime_status"),
+                preview_handle if preview_handle is not None else existing.get("preview_handle"),
+                preview_status if preview_status is not None else existing.get("preview_status"),
+                last_saved_snapshot_id
+                if last_saved_snapshot_id is not None
+                else existing.get("last_saved_snapshot_id"),
+                last_activity_at if last_activity_at is not None else ts,
+                revoked_at if revoked_at is not None else existing.get("revoked_at"),
+                ts,
+                prototype_session_id,
+            ),
+        )
+        return await self.get_session(prototype_session_id)
+
     async def create_promotion_request(
         self,
         *,
@@ -579,3 +766,40 @@ class PrototypeWorkspacesRepo:
             (promotion_request_id,),
         )
         return self._normalize_promotion_request_row(self._row_to_dict(row) if row else None)
+
+    async def update_promotion_request(
+        self,
+        promotion_request_id: str,
+        *,
+        status: str | None = None,
+        reviewed_by_user_id: int | None = None,
+        review_notes: str | None = None,
+    ) -> dict[str, Any] | None:
+        existing = await self.get_promotion_request(promotion_request_id)
+        if not existing:
+            return None
+
+        status_value = (
+            _normalize_promotion_status(status)
+            if status is not None
+            else str(existing.get("status") or "pending")
+        )
+        ts = self._ts()
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_promotion_requests
+            SET status = ?,
+                reviewed_by_user_id = ?,
+                review_notes = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                status_value,
+                int(reviewed_by_user_id) if reviewed_by_user_id is not None else existing.get("reviewed_by_user_id"),
+                review_notes if review_notes is not None else existing.get("review_notes"),
+                ts,
+                promotion_request_id,
+            ),
+        )
+        return await self.get_promotion_request(promotion_request_id)

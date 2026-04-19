@@ -31,7 +31,7 @@ Do not split this into separate plans unless implementation stalls on infrastruc
 - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_sharing_endpoints.py -q`
 - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_sharing_integration.py -q`
 - `cd apps/packages/ui && bunx vitest run src/hooks/__tests__/useSharing.auth.test.tsx src/store/__tests__/acp-sessions.test.ts`
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 2: Build Shared Prototype Metadata And External Collaboration Identity
 **Goal**: Add prototype tables, repo access, and the `Prototype Shared Actor` collaboration identity flow before touching ACP/Sandbox orchestration.
@@ -39,7 +39,7 @@ Do not split this into separate plans unless implementation stalls on infrastruc
 **Tests**:
 - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_repo.py -q`
 - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_link_exchange.py -q`
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 3: Add Jobs-Backed Runtime, Snapshot, Preview, And Publish Validation
 **Goal**: Implement idempotent branch-session creation, snapshot save, brokered preview handles, and publish validation against a fresh canonical runtime.
@@ -48,7 +48,7 @@ Do not split this into separate plans unless implementation stalls on infrastruc
 - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_runtime_jobs.py -q`
 - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_promotion_service.py -q`
 - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_preview_broker.py -q`
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 4: Expose The Prototype API Surface And Minimal WebUI
 **Goal**: Ship the backend endpoints and a minimal owner/collaborator frontend flow that can create, share, enter, operate, and request promotion for a prototype workspace.
@@ -157,7 +157,7 @@ Do not split this into separate plans unless implementation stalls on infrastruc
 **Files:**
 - Modify: `Docs/superpowers/plans/2026-04-18-acp-prototype-workspace-collaboration-implementation-plan.md`
 
-- [ ] **Step 1: Create or switch to an isolated worktree**
+- [x] **Step 1: Create or switch to an isolated worktree**
 
 ```bash
 git worktree add ../tldw_server2-prototype-workspaces -b codex/prototype-workspace-collaboration
@@ -165,7 +165,7 @@ git worktree add ../tldw_server2-prototype-workspaces -b codex/prototype-workspa
 
 Expected: a new worktree exists on branch `codex/prototype-workspace-collaboration`.
 
-- [ ] **Step 2: Install backend and frontend dependencies in the new worktree**
+- [x] **Step 2: Install backend and frontend dependencies in the new worktree**
 
 Run: `source .venv/bin/activate && python -V`
 
@@ -173,19 +173,19 @@ Run: `cd apps && bun install --frozen-lockfile`
 
 Expected: Python commands resolve inside the repo virtualenv and frontend packages are ready without lockfile drift.
 
-- [ ] **Step 3: Run the baseline backend sharing tests**
+- [x] **Step 3: Run the baseline backend sharing tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Sharing/test_sharing_endpoints.py tldw_Server_API/tests/Sharing/test_sharing_integration.py -q`
 
 Expected: PASS. This confirms the existing sharing path is stable before prototype-specific extension work starts.
 
-- [ ] **Step 4: Run the baseline frontend sharing/ACP store tests**
+- [x] **Step 4: Run the baseline frontend sharing/ACP store tests**
 
 Run: `cd apps/packages/ui && bunx vitest run src/hooks/__tests__/useSharing.auth.test.tsx src/store/__tests__/acp-sessions.test.ts`
 
 Expected: PASS. This confirms the existing client sharing and ACP session store contracts are stable before adding prototype flows.
 
-- [ ] **Step 5: Commit the clean-room baseline checkpoint**
+- [x] **Step 5: Commit the clean-room baseline checkpoint**
 
 ```bash
 git add Docs/superpowers/plans/2026-04-18-acp-prototype-workspace-collaboration-implementation-plan.md
@@ -201,7 +201,7 @@ git commit -m "docs: add prototype workspace implementation plan"
 - Modify: `tldw_Server_API/app/core/AuthNZ/migrations.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/repos/__init__.py`
 
-- [ ] **Step 1: Write the failing repo and migration tests**
+- [x] **Step 1: Write the failing repo and migration tests**
 
 ```python
 async def test_create_workspace_snapshot_and_session_enforce_single_actor_identity(repo):
@@ -231,13 +231,13 @@ Also add a migration test asserting the next AuthNZ migration creates:
 - `prototype_shared_actors`
 - `prototype_promotion_requests`
 
-- [ ] **Step 2: Run the new repo tests to verify they fail**
+- [x] **Step 2: Run the new repo tests to verify they fail**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_repo.py -q`
 
 Expected: FAIL because the migration and repo do not exist yet.
 
-- [ ] **Step 3: Implement the minimal migration and repo**
+- [x] **Step 3: Implement the minimal migration and repo**
 
 ```python
 async def create_session(
@@ -259,13 +259,13 @@ Implementation requirements:
 - keep repo JSON loading/boolean normalization patterns consistent with `shared_workspace_repo.py`
 - add indexes for `(prototype_workspace_id, updated_at)` and `(share_link_id, revoked_at)`
 
-- [ ] **Step 4: Re-run the repo tests**
+- [x] **Step 4: Re-run the repo tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_repo.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the metadata foundation**
+- [x] **Step 5: Commit the metadata foundation**
 
 ```bash
 git add tldw_Server_API/app/core/AuthNZ/migrations.py \
@@ -285,7 +285,7 @@ git commit -m "feat: add prototype workspace shared metadata store"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/sharing.py`
 - Modify: `tldw_Server_API/app/core/Sharing/share_token_service.py`
 
-- [ ] **Step 1: Add failing tests for private-link to shared-actor exchange**
+- [x] **Step 1: Add failing tests for private-link to shared-actor exchange**
 
 ```python
 def test_public_prototype_exchange_creates_shared_actor(client, prototype_share_token):
@@ -307,13 +307,13 @@ Also cover:
 - non-prototype token returns 422
 - repeated exchange on the same browser session resumes the same shared actor when allowed by policy
 
-- [ ] **Step 2: Run the exchange tests to verify they fail**
+- [x] **Step 2: Run the exchange tests to verify they fail**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_link_exchange.py -q`
 
 Expected: FAIL because the endpoint and response schema do not exist yet.
 
-- [ ] **Step 3: Implement the prototype exchange endpoint and access context helper**
+- [x] **Step 3: Implement the prototype exchange endpoint and access context helper**
 
 ```python
 class PrototypeLinkExchangeResponse(BaseModel):
@@ -329,13 +329,13 @@ Implementation requirements:
 - require password verification when the token is protected
 - create or resume a `Prototype Shared Actor` and return a short-lived collaboration token
 
-- [ ] **Step 4: Re-run sharing and exchange tests**
+- [x] **Step 4: Re-run sharing and exchange tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_link_exchange.py tldw_Server_API/tests/Sharing/test_sharing_endpoints.py -q`
 
 Expected: PASS. Existing sharing tests should remain green.
 
-- [ ] **Step 5: Commit the sharing extension checkpoint**
+- [x] **Step 5: Commit the sharing extension checkpoint**
 
 ```bash
 git add tldw_Server_API/app/core/Prototype_Workspaces/access.py \
@@ -358,7 +358,7 @@ git commit -m "feat: add prototype private-link collaboration exchange"
 - Create: `tldw_Server_API/tests/PrototypeWorkspaces/test_preview_broker.py`
 - Create: `tldw_Server_API/tests/PrototypeWorkspaces/test_promotion_service.py`
 
-- [ ] **Step 1: Write failing runtime and publish-validation tests**
+- [x] **Step 1: Write failing runtime and publish-validation tests**
 
 ```python
 async def test_promote_candidate_requires_publish_validation(repo, prototype_service):
@@ -387,13 +387,13 @@ Also add tests for:
 - stale candidate never advances canonical state
 - failed validation preserves `last_known_good_snapshot_id`
 
-- [ ] **Step 2: Run the new runtime tests to verify they fail**
+- [x] **Step 2: Run the new runtime tests to verify they fail**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_runtime_jobs.py tldw_Server_API/tests/PrototypeWorkspaces/test_preview_broker.py tldw_Server_API/tests/PrototypeWorkspaces/test_promotion_service.py -q`
 
 Expected: FAIL because the runtime services and worker do not exist yet.
 
-- [ ] **Step 3: Implement the service, preview broker, and worker skeleton**
+- [x] **Step 3: Implement the service, preview broker, and worker skeleton**
 
 ```python
 PROTOTYPE_JOB_TYPES = {
@@ -417,7 +417,7 @@ Implementation requirements:
 - publish validation must restore a snapshot into a fresh runtime profile before flipping the canonical pointer
 - cleanup retries must terminate orphan preview/runtime resources before creating replacements
 
-- [ ] **Step 4: Re-run the runtime tests**
+- [x] **Step 4: Re-run the runtime tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_runtime_jobs.py tldw_Server_API/tests/PrototypeWorkspaces/test_preview_broker.py tldw_Server_API/tests/PrototypeWorkspaces/test_promotion_service.py -q`
 
