@@ -2,7 +2,6 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import React from "react"
 import useDynamicTextareaSize from "~/hooks/useDynamicTextareaSize"
 import { useMessage } from "~/hooks/useMessage"
-import { toBase64 } from "~/libs/to-base64"
 import {
   Checkbox,
   Dropdown,
@@ -63,6 +62,7 @@ import { useFocusShortcuts } from "@/hooks/keyboard"
 import { isFirefoxTarget } from "@/config/platform"
 import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText"
 import { useComposerSubmit } from "@/components/Chat/composer/hooks/useComposerSubmit"
+import { useComposerAttachments } from "@/components/Chat/composer/hooks/useComposerAttachments"
 import { useSlashCommands, type SlashCommandItem } from "@/hooks/useSlashCommands"
 import { useTabMentions, type TabInfo } from "~/hooks/useTabMentions"
 import { useDeferredComposerInput } from "@/hooks/playground"
@@ -159,7 +159,6 @@ export const SidepanelForm = ({
   const formContainerRef = React.useRef<HTMLDivElement>(null)
   const localTextareaRef = React.useRef<HTMLTextAreaElement>(null)
   const textareaRef = inputRef ?? localTextareaRef
-  const fileInputRef = React.useRef<HTMLInputElement>(null)
   const contextFileInputRef = React.useRef<HTMLInputElement>(null)
   const { sendWhenEnter, setSendWhenEnter } = useWebUI()
   const setOptionalPanelVisible = useChatSurfaceCoordinatorStore(
@@ -776,60 +775,46 @@ export const SidepanelForm = ({
       ? (t("playground:sendWhenEnter") as string)
       : undefined
 
-  const openUploadDialog = React.useCallback(() => {
-    fileInputRef.current?.click()
-  }, [])
-
-  const onInputChange = React.useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement> | File) => {
-      try {
-        let file: File
-        if (e instanceof File) {
-          file = e
-        } else if (e.target.files && e.target.files[0]) {
-          file = e.target.files[0]
-        } else {
-          return
-        }
-
-        // Validate that the file is an image
-        if (!file.type.startsWith("image/")) {
-          message.error({
-            content: t(
-              "sidepanel:composer.imageTypeError",
-              "Please select an image file"
-            ),
-            duration: 3
-          })
-          return
-        }
-
-        const base64 = await toBase64(file)
-        form.setFieldValue("image", base64)
-
-        // Show success feedback
-        message.success({
-          content: t("sidepanel:composer.imageUploaded", {
-            defaultValue: "Image added: {{name}}",
-            name:
-              file.name.length > 20
-                ? `${file.name.slice(0, 17)}...`
-                : file.name
-          }),
-          duration: 2
-        })
-      } catch {
-        message.error({
-          content: t(
-            "sidepanel:composer.imageUploadError",
-            "Failed to process image"
-          ),
-          duration: 3
-        })
-      }
+  // Sidepanel is image-only — images are read to base64 and written to the
+  // form; non-images trigger a toast. The shared primitive centralizes
+  // the decision tree (unsupported-type check, image vs non-image branch,
+  // base64 encoding); we supply Sidepanel-specific toast callbacks.
+  const attachmentHandler = useComposerAttachments({
+    chatMode: "normal",
+    setImageField: (base64) => form.setFieldValue("image", base64),
+    onImageAccepted: (file) => {
+      message.success({
+        content: t("sidepanel:composer.imageUploaded", {
+          defaultValue: "Image added: {{name}}",
+          name:
+            file.name.length > 20
+              ? `${file.name.slice(0, 17)}...`
+              : file.name
+        }),
+        duration: 2
+      })
     },
-    [form.setFieldValue, t]
-  )
+    onNonImageRejected: () => {
+      message.error({
+        content: t(
+          "sidepanel:composer.imageTypeError",
+          "Please select an image file"
+        ),
+        duration: 3
+      })
+    },
+    onImageReadError: () => {
+      message.error({
+        content: t(
+          "sidepanel:composer.imageUploadError",
+          "Failed to process image"
+        ),
+        duration: 3
+      })
+    },
+  })
+  const onInputChange = attachmentHandler.onInputChange
+  const openUploadDialog = attachmentHandler.handleDocumentUpload
   const textAreaFocus = React.useCallback(() => {
     if (textareaRef.current) {
       textareaRef.current.focus()
@@ -1949,10 +1934,6 @@ export const SidepanelForm = ({
     setChatMode(chatMode === "vision" ? "normal" : "vision")
   }, [chatMode, setChatMode])
 
-  const handleImageUpload = React.useCallback(() => {
-    fileInputRef.current?.click()
-  }, [])
-
   const handleRagToggle = React.useCallback(() => {
     window.dispatchEvent(new CustomEvent("tldw:toggle-rag"))
   }, [])
@@ -2646,7 +2627,7 @@ export const SidepanelForm = ({
                     name="file-upload"
                     type="file"
                     className="sr-only"
-                    ref={fileInputRef}
+                    ref={attachmentHandler.fileInputRef}
                     accept="image/*"
                     multiple={false}
                     tabIndex={-1}
