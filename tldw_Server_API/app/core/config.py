@@ -5338,6 +5338,48 @@ def clear_config_cache() -> None:
     default_api_endpoint = "openai"
     object.__setattr__(settings, "_data", None)
     object.__setattr__(loaded_config_data, "_data", None)
+# ---------------------------------------------------------------------------
+# Startup config validation
+# ---------------------------------------------------------------------------
+
+_PLACEHOLDER_LITERALS = frozenset({
+    "FIXME", "TODO", "TBD", "CHANGE_ME", "CHANGE-ME",
+    "PLACEHOLDER", "NONE", "NULL", "N/A", "NA",
+})
+
+
+def validate_config() -> list[str]:
+    """Validate the loaded configuration and return a list of warnings.
+
+    Call this during lifespan startup. Warnings are logged but do not
+    prevent startup. Returns the list so tests can assert on it.
+    """
+    warnings: list[str] = []
+    cfg = dict(loaded_config_data)
+
+    # Check for placeholder values in any config key
+    for key, value in cfg.items():
+        if isinstance(value, str) and value.strip().upper() in _PLACEHOLDER_LITERALS:
+            msg = f"Config key '{key}' has placeholder value '{value}' — set a real value or leave empty"
+            warnings.append(msg)
+
+    # Check critical URL values parse correctly
+    for key in ("embedding_api_url", "pg_connection_string", "swarmui_base_url"):
+        val = cfg.get(key, "")
+        if val and not isinstance(val, str):
+            warnings.append(f"Config key '{key}' should be a string, got {type(val).__name__}")
+        elif val and not (val.startswith("http://") or val.startswith("https://") or val.startswith("postgresql")):
+            warnings.append(f"Config key '{key}' has unexpected URL scheme: {val[:30]}")
+
+    for w in warnings:
+        logger.warning("Config validation: {}", w)
+
+    if not warnings:
+        logger.info("Config validation passed — no issues found")
+
+    return warnings
+
+
 # --- Optional: Export individual variables if needed for backward compatibility (less recommended) ---
 # SINGLE_USER_MODE = settings["SINGLE_USER_MODE"]
 # SINGLE_USER_FIXED_ID = settings["SINGLE_USER_FIXED_ID"]

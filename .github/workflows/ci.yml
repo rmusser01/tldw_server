@@ -75,7 +75,6 @@ jobs:
     name: Lint & Type Check
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -89,16 +88,18 @@ jobs:
             pyproject.toml
             uv.lock
 
-      - name: Install mypy
+      - name: Install tools
         run: |
           python -m pip install --upgrade pip
-          pip install mypy
+          pip install mypy ruff
 
-      - name: MyPy (non-blocking)
-        run: |
-          set +e
-          mypy tldw_Server_API/
-          set -e
+      - name: Ruff lint (non-blocking, baseline 1419 errors)
+        continue-on-error: true
+        run: ruff check tldw_Server_API/
+
+      - name: MyPy (non-blocking, baseline 10191 errors)
+        continue-on-error: true
+        run: mypy tldw_Server_API/
 
   frontend-lint:
     name: Frontend Lint (Next.js)
