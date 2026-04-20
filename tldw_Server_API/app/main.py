@@ -3883,6 +3883,13 @@ async def lifespan(app: FastAPI):
     except _STARTUP_GUARD_EXCEPTIONS as _pf_e:
         logger.warning(f"Preflight report could not be generated: {_pf_e}")
 
+    # Validate configuration — warnings only, does not block startup.
+    try:
+        from tldw_Server_API.app.core.config import validate_config
+        validate_config()
+    except _STARTUP_GUARD_EXCEPTIONS as _vc_e:
+        logger.warning(f"Config validation could not run: {_vc_e}")
+
     yield
 
     # Build and record the legacy shutdown inventory first.
@@ -5390,51 +5397,22 @@ def _apply_runtime_cors_headers(request: Request, response: Any) -> Any:
 # layers would otherwise swallow, producing only a bare
 # "Exception in ASGI application" in the uvicorn log.
 # ---------------------------------------------------------------------------
-from fastapi.responses import JSONResponse as _JSONResponse  # noqa: E402
+from tldw_Server_API.app.api.v1.utils.exception_handlers import (  # noqa: E402
+    client_disconnect_handler as _client_disconnect_handler,
+    global_unhandled_exception_handler as _global_handler,
+)
 
 
 @app.exception_handler(Exception)
 async def _global_unhandled_exception_handler(request, exc):
-    if isinstance(exc, ClientDisconnect):
-        logger.debug(
-            "Client disconnected during {method} {url}",
-            method=request.method,
-            url=request.url,
-        )
-        return _JSONResponse(
-            status_code=499,
-            content={"detail": "Client disconnected"},
-        )
-
-    logger.opt(exception=exc).error(
-        "Unhandled exception on {method} {url}: {exc}",
-        method=request.method,
-        url=request.url,
-        exc=exc,
-    )
-    return _apply_runtime_cors_headers(
-        request,
-        _JSONResponse(
-            status_code=500,
-            content={"detail": "Internal server error"},
-        ),
-    )
+    response = await _global_handler(request, exc)
+    return _apply_runtime_cors_headers(request, response)
 
 
 @app.exception_handler(ClientDisconnect)
 async def _client_disconnect_exception_handler(request: Request, exc: ClientDisconnect):
-    logger.debug(
-        "Client disconnected during {method} {url}",
-        method=request.method,
-        url=request.url,
-    )
-    return _apply_runtime_cors_headers(
-        request,
-        _JSONResponse(
-            status_code=499,
-            content={"detail": "Client disconnected"},
-        ),
-    )
+    response = await _client_disconnect_handler(request, exc)
+    return _apply_runtime_cors_headers(request, response)
 
 
 # Early middleware to guard workflow templates path traversal attempts
