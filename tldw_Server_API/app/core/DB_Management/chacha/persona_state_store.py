@@ -30,6 +30,77 @@ class PersonaStateStore:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._db, name)
 
+    @staticmethod
+    def _as_bool(value: Any) -> bool:
+        """Coerce mixed persistence values into a boolean."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+        return bool(value)
+
+    @staticmethod
+    def _normalize_deleted_input(value: Any) -> bool:
+        """Normalize soft-delete inputs for persona records."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            return value.strip().lower() not in {"false", "0"}
+        return bool(value)
+
+    @staticmethod
+    def _parse_version_input(value: Any) -> int:
+        """Parse optimistic-lock version values and require positive integers."""
+        try:
+            version = int(value)
+        except (TypeError, ValueError) as exc:
+            raise InputError("version must be an integer >= 1.") from exc  # noqa: TRY003
+        if version < 1:
+            raise InputError("version must be >= 1.")  # noqa: TRY003
+        return version
+
+    def _normalize_persona_mode(self, value: Any) -> str:
+        """Normalize persona mode into one of the allowed lowercase values."""
+        mode = str(value or self._DEFAULT_PERSONA_MODE).strip().lower()
+        if mode not in self._ALLOWED_PERSONA_MODES:
+            allowed = ", ".join(self._ALLOWED_PERSONA_MODES)
+            raise InputError(f"Invalid persona mode '{mode}'. Allowed: {allowed}.")  # noqa: TRY003
+        return mode
+
+    def _normalize_persona_scope_rule_type(self, value: Any) -> str:
+        """Normalize scope rule types for persona rule persistence."""
+        rule_type = str(value or "").strip().lower()
+        if rule_type not in self._ALLOWED_PERSONA_SCOPE_RULE_TYPES:
+            allowed = ", ".join(self._ALLOWED_PERSONA_SCOPE_RULE_TYPES)
+            raise InputError(
+                f"Invalid persona scope rule_type '{rule_type}'. Allowed: {allowed}."
+            )  # noqa: TRY003
+        return rule_type
+
+    def _normalize_persona_policy_rule_kind(self, value: Any) -> str:
+        """Normalize policy rule kinds for persona rule persistence."""
+        rule_kind = str(value or "").strip().lower()
+        if rule_kind not in self._ALLOWED_PERSONA_POLICY_RULE_KINDS:
+            allowed = ", ".join(self._ALLOWED_PERSONA_POLICY_RULE_KINDS)
+            raise InputError(
+                f"Invalid persona policy rule_kind '{rule_kind}'. Allowed: {allowed}."
+            )  # noqa: TRY003
+        return rule_kind
+
+    def _normalize_persona_session_status(self, value: Any) -> str:
+        """Normalize persona session statuses into the allowed set."""
+        status = str(value or "active").strip().lower()
+        if status not in self._ALLOWED_PERSONA_SESSION_STATUSES:
+            allowed = ", ".join(self._ALLOWED_PERSONA_SESSION_STATUSES)
+            raise InputError(
+                f"Invalid persona session status '{status}'. Allowed: {allowed}."
+            )  # noqa: TRY003
+        return status
+
     def _ensure_persona_live_voice_session_summaries_table(self) -> None:
         if self.backend_type == BackendType.SQLITE:
             self.execute_query(

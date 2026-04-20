@@ -1,3 +1,7 @@
+import ast
+import inspect
+from pathlib import Path
+
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -7,6 +11,74 @@ from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
 
 
 pytestmark = pytest.mark.unit
+
+
+_DELEGATED_PERSONA_STATE_METHODS = {
+    "_ensure_persona_live_voice_session_summaries_table",
+    "upsert_persona_live_voice_session_summary",
+    "list_persona_live_voice_session_summaries",
+    "get_persona_live_voice_session_summary",
+    "_ensure_persona_setup_events_table",
+    "_persona_setup_event_row_to_dict",
+    "_decode_persona_json_object",
+    "record_persona_setup_event",
+    "list_persona_setup_events",
+    "get_persona_setup_analytics_summary",
+    "_persona_profile_row_to_dict",
+    "_persona_buddy_row_to_dict",
+    "_persona_scope_rule_row_to_dict",
+    "_persona_policy_rule_row_to_dict",
+    "_persona_session_row_to_dict",
+    "_normalize_persona_session_activity_surface",
+    "_persona_memory_row_to_dict",
+    "_persona_exemplar_row_to_dict",
+    "_require_active_persona_profile_owner",
+    "_normalize_persona_exemplar_tone",
+    "create_persona_exemplar",
+    "get_persona_exemplar",
+    "list_persona_exemplars",
+    "update_persona_exemplar",
+    "soft_delete_persona_exemplar",
+    "create_persona_profile",
+    "get_persona_profile",
+    "list_persona_profiles",
+    "update_persona_profile",
+    "soft_delete_persona_profile",
+    "restore_persona_profile",
+    "get_persona_buddy",
+    "list_persona_buddies",
+    "upsert_persona_buddy",
+    "list_persona_scope_rules",
+    "replace_persona_scope_rules",
+    "list_persona_policy_rules",
+    "replace_persona_policy_rules",
+    "create_persona_session",
+    "get_persona_session",
+    "list_persona_sessions",
+    "update_persona_session",
+    "add_persona_memory_entry",
+    "list_persona_memory_entries",
+    "get_persona_memory_entry_by_id",
+    "count_persona_memory_entries",
+    "set_persona_memory_archived",
+    "update_persona_memory_entry",
+    "backfill_persona_memory_scope_namespace",
+    "soft_delete_persona_memory_entry",
+}
+
+
+def _class_method_names(class_obj: type[object]) -> set[str]:
+    source_path = Path(inspect.getsourcefile(class_obj) or "")
+    assert source_path.exists()
+    tree = ast.parse(source_path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_obj.__name__:
+            return {
+                item.name
+                for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+    raise AssertionError(f"Class {class_obj.__name__} not found in {source_path}")
 
 
 @pytest.fixture()
@@ -22,6 +94,22 @@ def db(tmp_path):
 @pytest.fixture()
 def store(db):
     return PersonaStateStore(db)
+
+
+def test_persona_state_store_owns_delegated_methods_without_monolith_duplicates(db, monkeypatch):
+    class_method_names = _class_method_names(CharactersRAGDB)
+    assert _DELEGATED_PERSONA_STATE_METHODS.isdisjoint(class_method_names)
+
+    captured: dict[str, object] = {}
+
+    def _fake_create_persona_profile(profile_data):
+        captured["profile_data"] = profile_data
+        return "persona-from-store"
+
+    monkeypatch.setattr(db.persona_state_store, "create_persona_profile", _fake_create_persona_profile)
+
+    assert db.create_persona_profile({"user_id": "user-1", "name": "Delegated Persona"}) == "persona-from-store"
+    assert captured["profile_data"] == {"user_id": "user-1", "name": "Delegated Persona"}
 
 
 def test_persona_profile_rules_soft_delete_and_restore_roundtrip(store):

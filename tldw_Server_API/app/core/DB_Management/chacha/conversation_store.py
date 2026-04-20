@@ -1337,5 +1337,273 @@ class ConversationStore:
         cursor = self._db.execute_query(base_query, tuple(params))
         return [dict(row) for row in cursor.fetchall()]
 
-    def search_conversations_page(self, query: str | None, **kwargs: Any) -> tuple[list[dict[str, Any]], int, float]:
-        return self._db._search_conversations_page_impl(query, **kwargs)
+    def search_conversations_page(
+        self,
+        query: str | None,
+        *,
+        client_id: str | None = None,
+        include_deleted: bool = False,
+        deleted_only: bool = False,
+        character_id: int | None = None,
+        character_scope: str | None = None,
+        state: str | None = None,
+        topic_label: str | None = None,
+        topic_prefix: bool = False,
+        cluster_id: str | None = None,
+        keywords: list[str] | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        date_field: str = "last_modified",
+        order_by: str = "recency",
+        limit: int = 50,
+        offset: int = 0,
+        as_of: datetime | None = None,
+        half_life_days: float = 14.0,
+        bm25_weight: float = 0.65,
+        recency_weight: float = 0.35,
+        scope_type: str | None = None,
+        workspace_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int, float]:
+        client_filter = self._db.client_id if client_id is None else client_id
+        safe_query = (query or "").strip() or None
+
+        if date_field not in {"last_modified", "created_at"}:
+            raise InputError("date_field must be 'last_modified' or 'created_at'")  # noqa: TRY003
+
+        normalized_order = self._normalize_conversation_search_order(order_by)
+        as_of_dt = as_of or datetime.now(timezone.utc)
+        if as_of_dt.tzinfo is None:
+            as_of_dt = as_of_dt.replace(tzinfo=timezone.utc)
+        else:
+            as_of_dt = as_of_dt.astimezone(timezone.utc)
+
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
+        total_weight = (bm25_weight or 0.0) + (recency_weight or 0.0)
+        if total_weight <= 0:
+            normalized_bm25_weight = 0.65
+            normalized_recency_weight = 0.35
+        else:
+            normalized_bm25_weight = (bm25_weight or 0.0) / total_weight
+            normalized_recency_weight = (recency_weight or 0.0) / total_weight
+
+        keyword_table = self._db._map_table_for_backend("keywords")
+        use_deleted_text_search = safe_query is not None and (include_deleted or deleted_only)
+
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            date_expr = "c.created_at" if date_field == "created_at" else "COALESCE(c.last_modified, c.created_at)"
+            bm25_expr = "0.0"
+            where_clauses = ["TRUE"]
+            base_params: list[Any] = []
+            count_params: list[Any] = []
+            if safe_query:
+                if use_deleted_text_search:
+                    text_clause, text_params = self._conversation_deleted_text_search_clause(
+                        alias="c",
+                        query=safe_query,
+                    )
+                    where_clauses.append(text_clause)
+                    base_params.extend(text_params)
+                    count_params.extend(text_params)
+                else:
+                    tsquery = FTSQueryTranslator.normalize_query(safe_query, "postgresql")
+                    if not tsquery:
+                        return [], 0, 0.0
+                    bm25_expr = "ts_rank(c.conversations_fts_tsv, to_tsquery('english', ?))"
+                    base_params.append(tsquery)
+                    where_clauses.append("c.conversations_fts_tsv @@ to_tsquery('english', ?)")
+                    base_params.append(tsquery)
+                    count_params.append(tsquery)
+
+            extra_filters, extra_params = self._build_conversation_search_filters(
+                alias="c",
+                client_filter=client_filter,
+                include_deleted=include_deleted or deleted_only,
+                deleted_only=deleted_only,
+                character_id=character_id,
+                character_scope=character_scope,
+                scope_type=scope_type,
+                workspace_id=workspace_id,
+                state=state,
+                topic_label=topic_label,
+                topic_prefix=topic_prefix,
+                cluster_id=cluster_id,
+                keywords=keywords,
+                start_date=start_date,
+                end_date=end_date,
+                date_expr=date_expr,
+                keyword_table=keyword_table,
+                keyword_deleted_literal="FALSE",
+                deleted_true_literal="TRUE",
+                deleted_false_literal="FALSE",
+            )
+            where_clauses.extend(extra_filters)
+            base_params.extend(extra_params)
+            count_params.extend(extra_params)
+            topic_sort_expr = "NULLIF(LOWER(BTRIM(c.topic_label)), '')"
+            recency_expr = (
+                "CASE WHEN sort_timestamp IS NULL OR ? <= 0 THEN 0.0 "
+                "ELSE EXP(-GREATEST(EXTRACT(EPOCH FROM (?::timestamptz - sort_timestamp)) / 86400.0, 0.0) / ?) END"
+            )
+            from_clause = "conversations c"
+        else:
+            date_expr = "c.created_at" if date_field == "created_at" else "COALESCE(NULLIF(c.last_modified,''), c.created_at)"
+            bm25_expr = "0.0"
+            where_clauses = ["1 = 1"]
+            base_params = []
+            count_params = []
+            if safe_query:
+                if use_deleted_text_search:
+                    text_clause, text_params = self._conversation_deleted_text_search_clause(
+                        alias="c",
+                        query=safe_query,
+                    )
+                    where_clauses.append(text_clause)
+                    base_params.extend(text_params)
+                    count_params.extend(text_params)
+                else:
+                    bm25_expr = "(bm25(conversations_fts) * -1)"
+                    where_clauses.append("conversations_fts MATCH ?")
+                    base_params.append(safe_query)
+                    count_params.append(safe_query)
+
+            extra_filters, extra_params = self._build_conversation_search_filters(
+                alias="c",
+                client_filter=client_filter,
+                include_deleted=include_deleted or deleted_only,
+                deleted_only=deleted_only,
+                character_id=character_id,
+                character_scope=character_scope,
+                scope_type=scope_type,
+                workspace_id=workspace_id,
+                state=state,
+                topic_label=topic_label,
+                topic_prefix=topic_prefix,
+                cluster_id=cluster_id,
+                keywords=keywords,
+                start_date=start_date,
+                end_date=end_date,
+                date_expr=date_expr,
+                keyword_table=keyword_table,
+                keyword_deleted_literal="0",
+                deleted_true_literal="1",
+                deleted_false_literal="0",
+            )
+            where_clauses.extend(extra_filters)
+            base_params.extend(extra_params)
+            count_params.extend(extra_params)
+            topic_sort_expr = "NULLIF(LOWER(TRIM(c.topic_label)), '')"
+            recency_expr = (
+                "CASE WHEN sort_timestamp IS NULL OR ? <= 0 THEN 0.0 "
+                "ELSE exp(-MAX(julianday(?) - julianday(sort_timestamp), 0.0) / ?) END"
+            )
+            from_clause = (
+                "conversations_fts JOIN conversations c ON conversations_fts.rowid = c.rowid"
+                if safe_query and not use_deleted_text_search
+                else "conversations c"
+            )
+
+        base_query = (
+            "SELECT c.*, "
+            f"{date_expr} AS sort_timestamp, "
+            f"{topic_sort_expr} AS topic_sort_key, "
+            f"{bm25_expr} AS bm25_raw "
+            f"FROM {from_clause} "  # nosec B608
+            f"WHERE {' AND '.join(where_clauses)}"
+        )  # nosec B608
+        count_query = (
+            "SELECT COUNT(*) AS total "
+            f"FROM {from_clause} "  # nosec B608
+            f"WHERE {' AND '.join(where_clauses)}"
+        )  # nosec B608
+
+        needs_global_bm25 = (
+            safe_query is not None
+            and not use_deleted_text_search
+            and normalized_order in {"bm25", "hybrid", "topic"}
+        )
+        try:
+            count_cursor = self._db.execute_query(count_query, tuple(count_params))
+            count_row = count_cursor.fetchone()
+        except CharactersRAGDBError as exc:
+            logger.error("Error counting paged conversation search rows: {}", exc)
+            raise
+
+        if count_row is None:
+            return [], 0, 0.0
+
+        try:
+            total = int(count_row[0] or 0)
+        except _CHACHA_NONCRITICAL_EXCEPTIONS:
+            total = int(count_row.get("total") or count_row.get("count") or 0)
+
+        max_bm25 = 0.0
+        if total > 0 and needs_global_bm25:
+            if self._db.backend_type == BackendType.POSTGRESQL:
+                max_query = (
+                    f"WITH candidate_rows AS ({base_query}) "  # nosec B608
+                    "SELECT COALESCE(MAX(bm25_raw), 0.0) AS max_bm25 FROM candidate_rows"
+                )
+                max_params = list(base_params)
+            else:
+                max_query = (
+                    f"WITH candidate_rows AS ({base_query}) "  # nosec B608
+                    "SELECT bm25_raw FROM candidate_rows "
+                    "ORDER BY bm25_raw DESC, sort_timestamp DESC, id ASC LIMIT 1"
+                )
+                max_params = list(base_params)
+
+            try:
+                max_cursor = self._db.execute_query(max_query, tuple(max_params))
+                max_row = max_cursor.fetchone()
+            except CharactersRAGDBError as exc:
+                logger.error("Error fetching paged conversation search max bm25: {}", exc)
+                raise
+
+            if max_row is not None:
+                try:
+                    max_bm25 = float(max_row[0] or 0.0)
+                except _CHACHA_NONCRITICAL_EXCEPTIONS:
+                    max_bm25 = float(max_row.get("max_bm25") or max_row.get("bm25_raw") or 0.0)
+
+        if total == 0:
+            return [], 0, max_bm25
+
+        page_params = list(base_params)
+        page_params.extend([half_life_days, as_of_dt.isoformat(), half_life_days, max_bm25, max_bm25])
+
+        if normalized_order == "bm25" and safe_query:
+            order_clause = "bm25_norm DESC, sort_timestamp DESC, id ASC"
+        elif normalized_order == "topic":
+            if safe_query:
+                order_clause = "topic_sort_is_null ASC, topic_sort_key ASC, bm25_norm DESC, recency_score DESC, id ASC"
+            else:
+                order_clause = "topic_sort_is_null ASC, topic_sort_key ASC, recency_score DESC, id ASC"
+        elif normalized_order == "hybrid" and safe_query:
+            order_clause = "((bm25_norm * ?) + (recency_score * ?)) DESC, sort_timestamp DESC, id ASC"
+            page_params.extend([normalized_bm25_weight, normalized_recency_weight])
+        else:
+            order_clause = "recency_score DESC, sort_timestamp DESC, id ASC"
+
+        page_params.extend([normalized_limit, normalized_offset])
+        page_query = (
+            f"WITH candidate_rows AS ({base_query}), "  # nosec B608
+            "scored_rows AS ("
+            "SELECT candidate_rows.*, "
+            f"{recency_expr} AS recency_score, "
+            "CASE WHEN topic_sort_key IS NULL THEN 1 ELSE 0 END AS topic_sort_is_null, "
+            "CASE WHEN ? > 0 THEN bm25_raw / ? ELSE 0.0 END AS bm25_norm "
+            "FROM candidate_rows"
+            ") "
+            "SELECT * FROM scored_rows "
+            f"ORDER BY {order_clause} LIMIT ? OFFSET ?"
+        )  # nosec B608
+
+        try:
+            cursor = self._db.execute_query(page_query, tuple(page_params))
+            rows = [dict(row) for row in cursor.fetchall()]
+        except CharactersRAGDBError as exc:
+            logger.error("Error fetching paged conversation search rows: {}", exc)
+            raise
+
+        return rows, total, max_bm25

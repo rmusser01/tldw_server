@@ -144,3 +144,17 @@ def test_conversation_store_title_search_prefers_newer_last_modified(db):
     rows = db.search_conversations_by_title("alpha", limit=10, offset=0)
 
     assert [row["id"] for row in rows[:2]] == [newer_id, older_id]
+
+
+def test_conversation_store_owns_paginated_search_without_monolith_alias(db, monkeypatch):
+    sentinel = ([{"id": "sentinel"}], 1, 0.75)
+
+    def fake_search(query, **kwargs):
+        assert query == "alpha"
+        assert kwargs["limit"] == 1
+        return sentinel
+
+    monkeypatch.setattr(db.conversation_store, "search_conversations_page", fake_search)
+
+    assert not hasattr(CharactersRAGDB, "_search_conversations_page_impl")
+    assert db.search_conversations_page("alpha", limit=1) == sentinel
