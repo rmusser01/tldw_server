@@ -2601,6 +2601,46 @@ async def lifespan(app: FastAPI):
         "companion-reflection-jobs", "COMPANION_REFLECTION_JOBS_WORKER_ENABLED", "companion",
         "tldw_Server_API.app.core.Personalization.companion_reflection_jobs_worker",
         "run_companion_reflection_jobs_worker")
+    _worker_registry.register(
+        "evals-abtest-jobs", "EVALUATIONS_ABTEST_JOBS_WORKER_ENABLED", "evaluations",
+        "tldw_Server_API.app.core.Evaluations.embeddings_abtest_jobs_worker",
+        "run_embeddings_abtest_jobs_worker", default_stable=False)
+    _worker_registry.register(
+        "jobs-metrics-gauges", "JOBS_METRICS_GAUGES_ENABLED", "jobs",
+        "tldw_Server_API.app.services.jobs_metrics_service",
+        "run_jobs_metrics_gauges")
+    _worker_registry.register(
+        "loop-lag-watchdog", "EVENT_LOOP_LAG_WATCHDOG_ENABLED", "monitoring",
+        "tldw_Server_API.app.services.loop_lag_watchdog",
+        "run_loop_lag_watchdog", default_stable=False)
+    _worker_registry.register(
+        "jobs-metrics-reconcile", "JOBS_METRICS_RECONCILE_ENABLE", "jobs",
+        "tldw_Server_API.app.services.jobs_metrics_service",
+        "run_jobs_metrics_reconcile", default_stable=False)
+    _worker_registry.register(
+        "jobs-crypto-rotate", "JOBS_CRYPTO_ROTATE_SERVICE_ENABLED", "jobs",
+        "tldw_Server_API.app.services.jobs_crypto_rotate_service",
+        "run_jobs_crypto_rotate", default_stable=False)
+    _worker_registry.register(
+        "meetings-webhook-dlq", "MEETINGS_WEBHOOK_DLQ_ENABLED", "meetings",
+        "tldw_Server_API.app.services.meetings_webhook_dlq_service",
+        "run_meetings_webhook_dlq_worker", default_stable=False)
+    _worker_registry.register(
+        "workflows-dlq", "WORKFLOWS_WEBHOOK_DLQ_ENABLED", "workflows",
+        "tldw_Server_API.app.services.workflows_webhook_dlq_service",
+        "run_workflows_webhook_dlq_worker", default_stable=False)
+    _worker_registry.register(
+        "workflows-gc", "WORKFLOWS_ARTIFACT_GC_ENABLED", "workflows",
+        "tldw_Server_API.app.services.workflows_artifact_gc_service",
+        "run_workflows_artifact_gc_worker", default_stable=False)
+    _worker_registry.register(
+        "workflows-maint", "WORKFLOWS_DB_MAINTENANCE_ENABLED", "workflows",
+        "tldw_Server_API.app.services.workflows_db_maintenance",
+        "run_workflows_db_maintenance", default_stable=False)
+    _worker_registry.register(
+        "jobs-integrity", "JOBS_INTEGRITY_SWEEP_ENABLED", "jobs",
+        "tldw_Server_API.app.services.jobs_integrity_service",
+        "run_jobs_integrity_sweeper", default_stable=False)
 
     # Start background workers: ephemeral collections cleanup, core Jobs (chatbooks), audio Jobs (MVP), claims rebuild
     cleanup_task = None
@@ -2967,96 +3007,15 @@ async def lifespan(app: FastAPI):
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.warning(f"Failed to start Jobs notifications bridge worker: {e}")
 
-    # Evaluations Embeddings A/B Jobs worker
-    try:
-        import asyncio as _asyncio
-        import os as _os
+    # Evaluations A/B Jobs worker — migrated to WorkerRegistry
 
-        from tldw_Server_API.app.core.Evaluations.embeddings_abtest_jobs_worker import (
-            run_embeddings_abtest_jobs_worker as _run_abtest_jobs,
-        )
+    # Jobs metrics gauges worker — migrated to WorkerRegistry
 
-        _enabled = _os.getenv("EVALUATIONS_ABTEST_JOBS_WORKER_ENABLED", "false").lower() in {"true", "1", "yes", "y", "on"}
-        if not _enabled:
-            _enabled = _os.getenv("EVALS_ABTEST_JOBS_WORKER_ENABLED", "false").lower() in {"true", "1", "yes", "y", "on"}
-        if _sidecar_mode:
-            _enabled = False
-        if _enabled:
-            evals_abtest_jobs_stop_event = _asyncio.Event()
-            evals_abtest_jobs_task = _asyncio.create_task(_run_abtest_jobs(evals_abtest_jobs_stop_event))
-            logger.info("Embeddings A/B Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info("Embeddings A/B Jobs worker disabled by flag")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Embeddings A/B Jobs worker: {e}")
+    # Event loop lag watchdog — migrated to WorkerRegistry
 
-    # Jobs metrics gauges worker (SLO percentiles)
-    try:
-        import asyncio as _asyncio
-        import os as _os
+    # Jobs metrics reconcile worker — migrated to WorkerRegistry
 
-        from tldw_Server_API.app.services.jobs_metrics_service import run_jobs_metrics_gauges as _run_jobs_metrics
-
-        _enabled = _os.getenv("JOBS_METRICS_GAUGES_ENABLED", "true").lower() in {"true", "1", "yes", "y", "on"}
-        if _enabled:
-            jobs_metrics_stop_event = _asyncio.Event()
-            jobs_metrics_task = _asyncio.create_task(_run_jobs_metrics(jobs_metrics_stop_event))
-            logger.info("Jobs metrics gauge worker started with explicit stop_event signal")
-        else:
-            logger.info("Jobs metrics gauge worker disabled by flag")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Jobs metrics gauge worker: {e}")
-
-    # Event loop lag watchdog (lightweight)
-    try:
-        import asyncio as _asyncio
-        import os as _os
-
-        from tldw_Server_API.app.services.loop_lag_watchdog import run_loop_lag_watchdog as _run_loop_lag_watchdog
-
-        _enabled = _os.getenv("EVENT_LOOP_LAG_WATCHDOG_ENABLED", "false").lower() in {"true", "1", "yes", "y", "on"}
-        if _enabled:
-            loop_lag_stop_event = _asyncio.Event()
-            loop_lag_task = _asyncio.create_task(_run_loop_lag_watchdog(loop_lag_stop_event))
-            logger.info("Event loop lag watchdog started")
-        else:
-            logger.info("Event loop lag watchdog disabled by flag")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start event loop lag watchdog: {e}")
-
-    # Jobs metrics reconcile worker (job_counters/gauges amortized refresh)
-    try:
-        import asyncio as _asyncio
-        import os as _os
-
-        from tldw_Server_API.app.services.jobs_metrics_service import run_jobs_metrics_reconcile as _run_jobs_reconcile
-
-        _enabled_recon = _os.getenv("JOBS_METRICS_RECONCILE_ENABLE", "false").lower() in {"true", "1", "yes", "y", "on"}
-        if _enabled_recon:
-            jobs_metrics_reconcile_stop = _asyncio.Event()
-            _ = _asyncio.create_task(_run_jobs_reconcile(jobs_metrics_reconcile_stop))
-            logger.info("Jobs metrics reconcile worker started with explicit stop_event signal")
-        else:
-            logger.info("Jobs metrics reconcile worker disabled by flag (JOBS_METRICS_RECONCILE_ENABLE)")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Jobs metrics reconcile worker: {e}")
-
-    # Jobs crypto rotate worker (optional staged rotation)
-    try:
-        import asyncio as _asyncio
-        import os as _os
-
-        from tldw_Server_API.app.services.jobs_crypto_rotate_service import run_jobs_crypto_rotate as _run_jobs_crypto
-
-        _enabled = _os.getenv("JOBS_CRYPTO_ROTATE_SERVICE_ENABLED", "false").lower() in {"true", "1", "yes", "y", "on"}
-        if _enabled:
-            jobs_crypto_rotate_stop_event = _asyncio.Event()
-            jobs_crypto_rotate_task = _asyncio.create_task(_run_jobs_crypto(jobs_crypto_rotate_stop_event))
-            logger.info("Jobs crypto rotate worker started with explicit stop_event signal")
-        else:
-            logger.info("Jobs crypto rotate worker disabled by flag")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Jobs crypto rotate worker: {e}")
+    # Jobs crypto rotate worker — migrated to WorkerRegistry
 
     # Jobs webhooks worker (signed callbacks)
     try:
@@ -3077,112 +3036,15 @@ async def lifespan(app: FastAPI):
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.warning(f"Failed to start Jobs webhooks worker: {e}")
 
-    # Meetings webhook DLQ worker
-    try:
-        import asyncio as _asyncio
-        import os as _os
+    # Meetings webhook DLQ worker — migrated to WorkerRegistry
 
-        from tldw_Server_API.app.services.meetings_webhook_dlq_service import (
-            run_meetings_webhook_dlq_worker as _run_meetings_dlq,
-        )
+    # Workflows webhook DLQ worker — migrated to WorkerRegistry
 
-        _meetings_dlq_enabled = _os.getenv("MEETINGS_WEBHOOK_DLQ_ENABLED", "false").lower() in {
-            "true",
-            "1",
-            "yes",
-            "y",
-            "on",
-        }
-        if _meetings_dlq_enabled:
-            meetings_webhook_dlq_stop_event = _asyncio.Event()
-            meetings_webhook_dlq_task = _asyncio.create_task(
-                _run_meetings_dlq(meetings_webhook_dlq_stop_event)
-            )
-            logger.info("Meetings webhook DLQ worker started with explicit stop_event signal")
-        else:
-            logger.info("Meetings webhook DLQ worker disabled by flag")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Meetings webhook DLQ worker: {e}")
+    # Workflows artifact GC worker — migrated to WorkerRegistry
 
-    # Workflows webhook DLQ retry worker
-    try:
-        import asyncio as _asyncio
-        import os as _os
+    # Workflows DB maintenance worker — migrated to WorkerRegistry
 
-        from tldw_Server_API.app.services.workflows_webhook_dlq_service import (
-            run_workflows_webhook_dlq_worker as _run_wf_dlq,
-        )
-
-        _wf_enabled = _os.getenv("WORKFLOWS_WEBHOOK_DLQ_ENABLED", "false").lower() in {"true", "1", "yes", "y", "on"}
-        if _wf_enabled:
-            workflows_dlq_stop_event = _asyncio.Event()
-            workflows_dlq_task = _asyncio.create_task(_run_wf_dlq(workflows_dlq_stop_event))
-            logger.info("Workflows webhook DLQ worker started with explicit stop_event signal")
-        else:
-            logger.info("Workflows webhook DLQ worker disabled by flag")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Workflows webhook DLQ worker: {e}")
-
-    # Workflows artifact GC worker
-    try:
-        import asyncio as _asyncio
-        import os as _os
-
-        from tldw_Server_API.app.services.workflows_artifact_gc_service import (
-            run_workflows_artifact_gc_worker as _run_wf_gc,
-        )
-
-        _wf_gc_enabled = _os.getenv("WORKFLOWS_ARTIFACT_GC_ENABLED", "false").lower() in {"true", "1", "yes", "y", "on"}
-        if _wf_gc_enabled:
-            workflows_gc_stop_event = _asyncio.Event()
-            workflows_gc_task = _asyncio.create_task(_run_wf_gc(workflows_gc_stop_event))
-            logger.info("Workflows artifact GC worker started with explicit stop_event signal")
-        else:
-            logger.info("Workflows artifact GC worker disabled by flag")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Workflows artifact GC worker: {e}")
-
-    # Workflows DB maintenance worker (checkpoint/VACUUM)
-    try:
-        import asyncio as _asyncio
-        import os as _os
-
-        from tldw_Server_API.app.services.workflows_db_maintenance import run_workflows_db_maintenance as _run_wf_maint
-
-        _wf_maint_enabled = _os.getenv("WORKFLOWS_DB_MAINTENANCE_ENABLED", "false").lower() in {
-            "true",
-            "1",
-            "yes",
-            "y",
-            "on",
-        }
-        if _wf_maint_enabled:
-            workflows_maint_stop_event = _asyncio.Event()
-            workflows_maint_task = _asyncio.create_task(_run_wf_maint(workflows_maint_stop_event))
-            logger.info("Workflows DB maintenance worker started with explicit stop_event signal")
-        else:
-            logger.info("Workflows DB maintenance worker disabled by flag")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Workflows DB maintenance worker: {e}")
-
-    # Jobs integrity sweeper (periodic validator)
-    try:
-        import asyncio as _asyncio
-        import os as _os
-
-        from tldw_Server_API.app.services.jobs_integrity_service import (
-            run_jobs_integrity_sweeper as _run_jobs_integrity,
-        )
-
-        _enabled = _os.getenv("JOBS_INTEGRITY_SWEEP_ENABLED", "false").lower() in {"true", "1", "yes", "y", "on"}
-        if _enabled:
-            jobs_integrity_stop_event = _asyncio.Event()
-            jobs_integrity_task = _asyncio.create_task(_run_jobs_integrity(jobs_integrity_stop_event))
-            logger.info("Jobs integrity sweeper started with explicit stop_event signal")
-        else:
-            logger.info("Jobs integrity sweeper disabled by flag")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Jobs integrity sweeper: {e}")
+    # Jobs integrity sweeper — migrated to WorkerRegistry
 
     # Claims rebuild worker (periodic)
     try:
@@ -3931,16 +3793,7 @@ async def lifespan(app: FastAPI):
             except _STARTUP_GUARD_EXCEPTIONS:
                 with suppress(_STARTUP_GUARD_EXCEPTIONS):
                     recipe_run_jobs_task.cancel()
-        if "evals_abtest_jobs_task" in locals() and evals_abtest_jobs_task:
-            if "evals_abtest_jobs_stop_event" in locals() and evals_abtest_jobs_stop_event:
-                try:
-                    evals_abtest_jobs_stop_event.set()
-                    await _asyncio.wait_for(evals_abtest_jobs_task, timeout=5.0)
-                    logger.info("Embeddings A/B Jobs worker stopped via stop_event")
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    evals_abtest_jobs_task.cancel()
-            else:
-                evals_abtest_jobs_task.cancel()
+        # evals_abtest — shutdown via WorkerRegistry
         if "claims_task" in locals() and claims_task:
             claims_task.cancel()
         if "jobs_prune_task" in locals() and jobs_prune_task:
@@ -4069,33 +3922,7 @@ async def lifespan(app: FastAPI):
                     connectors_sync_sched_task.cancel()
             except _STARTUP_GUARD_EXCEPTIONS:
                 pass
-        # Jobs metrics gauges worker shutdown
-        if "jobs_metrics_task" in locals() and jobs_metrics_task:
-            try:
-                if "jobs_metrics_stop_event" in locals() and jobs_metrics_stop_event:
-                    jobs_metrics_stop_event.set()
-                    await _asyncio.wait_for(jobs_metrics_task, timeout=5.0)
-                    logger.info("Jobs metrics gauge worker stopped via stop_event")
-                else:
-                    jobs_metrics_task.cancel()
-            except _STARTUP_GUARD_EXCEPTIONS:
-                with suppress(_STARTUP_GUARD_EXCEPTIONS):
-                    jobs_metrics_task.cancel()
-
-        # Event loop lag watchdog shutdown
-        if "loop_lag_task" in locals() and loop_lag_task:
-            try:
-                if "loop_lag_stop_event" in locals() and loop_lag_stop_event:
-                    loop_lag_stop_event.set()
-                    await _asyncio.wait_for(loop_lag_task, timeout=2.0)
-                    logger.info("Event loop lag watchdog stopped via stop_event")
-                else:
-                    loop_lag_task.cancel()
-            except _STARTUP_GUARD_EXCEPTIONS:
-                try:
-                    loop_lag_task.cancel()
-                except _STARTUP_GUARD_EXCEPTIONS as _lag_cancel_err:
-                    logger.debug(f"Event loop lag watchdog cancel failed: {_lag_cancel_err}")
+        # jobs_metrics_gauges, loop_lag_watchdog — shutdown via WorkerRegistry
 
         # Personalization consolidation service shutdown
         try:
@@ -4107,31 +3934,7 @@ async def lifespan(app: FastAPI):
         except _STARTUP_GUARD_EXCEPTIONS:
             pass
 
-        # Jobs crypto rotate worker shutdown
-        if "jobs_crypto_rotate_task" in locals() and jobs_crypto_rotate_task:
-            try:
-                if "jobs_crypto_rotate_stop_event" in locals() and jobs_crypto_rotate_stop_event:
-                    jobs_crypto_rotate_stop_event.set()
-                    await _asyncio.wait_for(jobs_crypto_rotate_task, timeout=5.0)
-                    logger.info("Jobs crypto rotate worker stopped via stop_event")
-                else:
-                    jobs_crypto_rotate_task.cancel()
-            except _STARTUP_GUARD_EXCEPTIONS:
-                with suppress(_STARTUP_GUARD_EXCEPTIONS):
-                    jobs_crypto_rotate_task.cancel()
-
-        # Jobs integrity sweeper shutdown
-        if "jobs_integrity_task" in locals() and jobs_integrity_task:
-            try:
-                if "jobs_integrity_stop_event" in locals() and jobs_integrity_stop_event:
-                    jobs_integrity_stop_event.set()
-                    await _asyncio.wait_for(jobs_integrity_task, timeout=5.0)
-                    logger.info("Jobs integrity sweeper stopped via stop_event")
-                else:
-                    jobs_integrity_task.cancel()
-            except _STARTUP_GUARD_EXCEPTIONS:
-                with suppress(_STARTUP_GUARD_EXCEPTIONS):
-                    jobs_integrity_task.cancel()
+        # jobs_crypto_rotate, jobs_integrity — shutdown via WorkerRegistry
 
         # Jobs webhooks worker shutdown
         if "jobs_webhooks_task" in locals() and jobs_webhooks_task:
@@ -4146,57 +3949,7 @@ async def lifespan(app: FastAPI):
                 with suppress(_STARTUP_GUARD_EXCEPTIONS):
                     jobs_webhooks_task.cancel()
 
-        # Meetings webhook DLQ worker shutdown
-        if "meetings_webhook_dlq_task" in locals() and meetings_webhook_dlq_task:
-            try:
-                if "meetings_webhook_dlq_stop_event" in locals() and meetings_webhook_dlq_stop_event:
-                    meetings_webhook_dlq_stop_event.set()
-                    await _asyncio.wait_for(meetings_webhook_dlq_task, timeout=5.0)
-                    logger.info("Meetings webhook DLQ worker stopped via stop_event")
-                else:
-                    meetings_webhook_dlq_task.cancel()
-            except _STARTUP_GUARD_EXCEPTIONS:
-                with suppress(_STARTUP_GUARD_EXCEPTIONS):
-                    meetings_webhook_dlq_task.cancel()
-
-        # Workflows webhook DLQ worker shutdown
-        if "workflows_dlq_task" in locals() and workflows_dlq_task:
-            try:
-                if "workflows_dlq_stop_event" in locals() and workflows_dlq_stop_event:
-                    workflows_dlq_stop_event.set()
-                    await _asyncio.wait_for(workflows_dlq_task, timeout=5.0)
-                    logger.info("Workflows webhook DLQ worker stopped via stop_event")
-                else:
-                    workflows_dlq_task.cancel()
-            except _STARTUP_GUARD_EXCEPTIONS:
-                with suppress(_STARTUP_GUARD_EXCEPTIONS):
-                    workflows_dlq_task.cancel()
-
-        # Workflows artifact GC worker shutdown
-        if "workflows_gc_task" in locals() and workflows_gc_task:
-            try:
-                if "workflows_gc_stop_event" in locals() and workflows_gc_stop_event:
-                    workflows_gc_stop_event.set()
-                    await _asyncio.wait_for(workflows_gc_task, timeout=5.0)
-                    logger.info("Workflows artifact GC worker stopped via stop_event")
-                else:
-                    workflows_gc_task.cancel()
-            except _STARTUP_GUARD_EXCEPTIONS:
-                with suppress(_STARTUP_GUARD_EXCEPTIONS):
-                    workflows_gc_task.cancel()
-
-        # Workflows DB maintenance worker shutdown
-        if "workflows_maint_task" in locals() and workflows_maint_task:
-            try:
-                if "workflows_maint_stop_event" in locals() and workflows_maint_stop_event:
-                    workflows_maint_stop_event.set()
-                    await _asyncio.wait_for(workflows_maint_task, timeout=5.0)
-                    logger.info("Workflows DB maintenance worker stopped via stop_event")
-                else:
-                    workflows_maint_task.cancel()
-            except _STARTUP_GUARD_EXCEPTIONS:
-                with suppress(_STARTUP_GUARD_EXCEPTIONS):
-                    workflows_maint_task.cancel()
+        # meetings_dlq, workflows_dlq, workflows_gc, workflows_maint — shutdown via WorkerRegistry
     except _STARTUP_GUARD_EXCEPTIONS:
         pass
 
