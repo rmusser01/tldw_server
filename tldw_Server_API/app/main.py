@@ -1847,76 +1847,10 @@ async def lifespan(app: FastAPI):
         raise
 
     try:
-        # Initialize database pool for auth
-        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        # Auth services initialization (extracted to startup_auth.py)
+        from tldw_Server_API.app.services.startup_auth import init_auth_services
 
-        db_pool = await get_db_pool()
-        logger.info("App Startup: Database pool initialized")
-
-        # Ensure AuthNZ schema/migrations (centralized helper for SQLite; PG extras as before)
-        try:
-            from tldw_Server_API.app.core.AuthNZ.initialize import ensure_authnz_schema_ready_once
-
-            await ensure_authnz_schema_ready_once()
-        except _IMPORT_EXCEPTIONS as _e:
-            logger.debug(f"App Startup: Skipped AuthNZ SQLite migration ensure: {_e}")
-        # Postgres-only: ensure additive extras (tool catalogs, privilege snapshots, usage tables, VK counters)
-        try:
-            if getattr(db_pool, "pool", None):
-                from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
-                    ensure_api_keys_tables_pg,
-                    ensure_authnz_core_tables_pg,
-                    ensure_generated_files_table_pg,
-                    ensure_llm_provider_overrides_pg,
-                    ensure_privilege_snapshots_table_pg,
-                    ensure_tool_catalogs_tables_pg,
-                    ensure_usage_tables_pg,
-                    ensure_virtual_key_counters_pg,
-                )
-
-                ok_authnz_core_pg = await ensure_authnz_core_tables_pg(db_pool)
-                if ok_authnz_core_pg:
-                    logger.info("App Startup: Ensured PG AuthNZ core tables")
-                ok_generated_files_pg = await ensure_generated_files_table_pg(db_pool)
-                if ok_generated_files_pg:
-                    logger.info("App Startup: Ensured PG generated_files table")
-                ok_catalogs = await ensure_tool_catalogs_tables_pg(db_pool)
-                if ok_catalogs:
-                    logger.info("App Startup: Ensured PG tool catalogs tables")
-                ok_priv_snapshots = await ensure_privilege_snapshots_table_pg(db_pool)
-                if ok_priv_snapshots:
-                    logger.info("App Startup: Ensured PG privilege_snapshots table")
-                ok_api_keys_pg = await ensure_api_keys_tables_pg(db_pool)
-                if ok_api_keys_pg:
-                    logger.info("App Startup: Ensured PG api_keys tables")
-                ok_usage_pg = await ensure_usage_tables_pg(db_pool)
-                if ok_usage_pg:
-                    logger.info("App Startup: Ensured PG usage tables")
-                ok_vk_pg = await ensure_virtual_key_counters_pg(db_pool)
-                if ok_vk_pg:
-                    logger.info("App Startup: Ensured PG virtual-key counters tables")
-                ok_overrides_pg = await ensure_llm_provider_overrides_pg(db_pool)
-                if ok_overrides_pg:
-                    logger.info("App Startup: Ensured PG llm_provider_overrides table")
-        except _STARTUP_GUARD_EXCEPTIONS as _pg_e:
-            logger.debug(f"App Startup: PG extras ensure failed/skipped: {_pg_e}")
-        # Ensure RBAC seed exists in single-user mode (idempotent; both backends)
-        try:
-            await ensure_single_user_rbac_seed_if_needed()
-            logger.info("App Startup: Ensured single-user RBAC seed (baseline roles/permissions)")
-        except _IMPORT_EXCEPTIONS as _e:
-            logger.debug(f"App Startup: RBAC single-user seed ensure skipped: {_e}")
-
-        # Load LLM provider overrides into memory for runtime enforcement.
-        try:
-            from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-                refresh_llm_provider_overrides as _refresh_llm_provider_overrides,
-            )
-
-            await _refresh_llm_provider_overrides(db_pool)
-            logger.info("App Startup: Loaded LLM provider overrides")
-        except _IMPORT_EXCEPTIONS as _e:
-            logger.debug(f"App Startup: LLM provider overrides load skipped: {_e}")
+        db_pool = await init_auth_services()
 
         # Initialize ResourceGovernor policy loader (file or DB store)
         try:
