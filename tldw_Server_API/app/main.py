@@ -2581,6 +2581,26 @@ async def lifespan(app: FastAPI):
         "reading-digest-jobs", "READING_DIGEST_JOBS_WORKER_ENABLED", "reading",
         "tldw_Server_API.app.services.reading_digest_jobs_worker",
         "run_reading_digest_jobs_worker")
+    _worker_registry.register(
+        "audiobook-jobs", "AUDIOBOOK_JOBS_WORKER_ENABLED", "audiobooks",
+        "tldw_Server_API.app.services.audiobook_jobs_worker",
+        "run_audiobook_jobs_worker")
+    _worker_registry.register(
+        "presentation-render-jobs", "PRESENTATION_RENDER_JOBS_WORKER_ENABLED", "slides",
+        "tldw_Server_API.app.services.presentation_render_jobs_worker",
+        "run_presentation_render_jobs_worker")
+    _worker_registry.register(
+        "media-ingest-jobs", "MEDIA_INGEST_JOBS_WORKER_ENABLED", "media",
+        "tldw_Server_API.app.services.media_ingest_jobs_worker",
+        "run_media_ingest_jobs_worker")
+    _worker_registry.register(
+        "media-ingest-heavy-jobs", "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "media-ingest-heavy-jobs",
+        "tldw_Server_API.app.services.media_ingest_jobs_worker",
+        "run_media_ingest_heavy_jobs_worker", default_stable=False)
+    _worker_registry.register(
+        "companion-reflection-jobs", "COMPANION_REFLECTION_JOBS_WORKER_ENABLED", "companion",
+        "tldw_Server_API.app.core.Personalization.companion_reflection_jobs_worker",
+        "run_companion_reflection_jobs_worker")
 
     # Start background workers: ephemeral collections cleanup, core Jobs (chatbooks), audio Jobs (MVP), claims rebuild
     cleanup_task = None
@@ -2814,107 +2834,11 @@ async def lifespan(app: FastAPI):
 
     # Audio Jobs worker — migrated to WorkerRegistry
 
-    # Audiobook Jobs worker
-    try:
-        import asyncio as _asyncio
-
-        _enabled = _should_start_worker("AUDIOBOOK_JOBS_WORKER_ENABLED", "audiobooks")
-        if _enabled:
-            from tldw_Server_API.app.services.audiobook_jobs_worker import (
-                run_audiobook_jobs_worker as _run_audiobook_jobs,
-            )
-
-            audiobook_jobs_stop_event = _asyncio.Event()
-            audiobook_jobs_task = _asyncio.create_task(_run_audiobook_jobs(audiobook_jobs_stop_event))
-            logger.info("Audiobook Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info("Audiobook Jobs worker disabled by flag (AUDIOBOOK_JOBS_WORKER_ENABLED)")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Audiobook Jobs worker: {e}")
-
-    # Presentation Render Jobs worker
-    try:
-        import asyncio as _asyncio
-
-        _enabled = _should_start_worker("PRESENTATION_RENDER_JOBS_WORKER_ENABLED", "slides")
-        if _enabled:
-            from tldw_Server_API.app.services.presentation_render_jobs_worker import (
-                run_presentation_render_jobs_worker as _run_presentation_render_jobs,
-            )
-
-            presentation_render_jobs_stop_event = _asyncio.Event()
-            presentation_render_jobs_task = _asyncio.create_task(
-                _run_presentation_render_jobs(presentation_render_jobs_stop_event)
-            )
-            logger.info("Presentation Render Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info(
-                "Presentation Render Jobs worker disabled by flag (PRESENTATION_RENDER_JOBS_WORKER_ENABLED)"
-            )
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Presentation Render Jobs worker: {e}")
-
-    # Media Ingest Jobs worker
-    try:
-        import asyncio as _asyncio
-
-        _enabled = _should_start_worker("MEDIA_INGEST_JOBS_WORKER_ENABLED", "media")
-        if _enabled:
-            from tldw_Server_API.app.services.media_ingest_jobs_worker import (
-                run_media_ingest_jobs_worker as _run_media_jobs,
-            )
-
-            media_ingest_jobs_stop_event = _asyncio.Event()
-            media_ingest_jobs_task = _asyncio.create_task(_run_media_jobs(media_ingest_jobs_stop_event))
-            logger.info("Media Ingest Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info("Media Ingest Jobs worker disabled by flag (MEDIA_INGEST_JOBS_WORKER_ENABLED)")
-
-        _heavy_enabled = _should_start_worker(
-            "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
-            "media-ingest-heavy-jobs",
-            default_enabled=False,
-        )
-        if _heavy_enabled:
-            from tldw_Server_API.app.services.media_ingest_jobs_worker import (
-                run_media_ingest_heavy_jobs_worker as _run_media_heavy_jobs,
-            )
-
-            media_ingest_heavy_jobs_stop_event = _asyncio.Event()
-            media_ingest_heavy_jobs_task = _asyncio.create_task(
-                _run_media_heavy_jobs(media_ingest_heavy_jobs_stop_event)
-            )
-            logger.info("Media Ingest Heavy Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info(
-                "Media Ingest Heavy Jobs worker disabled by flag (MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED)"
-            )
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Media Ingest Jobs worker: {e}")
+    # Audiobook, Presentation Render, Media Ingest (regular + heavy) — migrated to WorkerRegistry
 
     # Reading digest Jobs worker — migrated to WorkerRegistry
 
-    # Companion reflection Jobs worker
-    try:
-        import asyncio as _asyncio
-
-        _enabled = _should_start_worker("COMPANION_REFLECTION_JOBS_WORKER_ENABLED", "companion")
-        if _enabled:
-            from tldw_Server_API.app.core.Personalization.companion_reflection_jobs_worker import (
-                run_companion_reflection_jobs_worker as _run_companion_reflection_jobs,
-            )
-
-            companion_reflection_jobs_stop_event = _asyncio.Event()
-            companion_reflection_jobs_task = _asyncio.create_task(
-                _run_companion_reflection_jobs(companion_reflection_jobs_stop_event)
-            )
-            logger.info("Companion reflection Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info(
-                "Companion reflection Jobs worker disabled by flag (COMPANION_REFLECTION_JOBS_WORKER_ENABLED)"
-            )
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Companion reflection Jobs worker: {e}")
+    # Companion reflection Jobs worker — migrated to WorkerRegistry
 
     # Reminder Jobs worker
     try:
@@ -3963,60 +3887,10 @@ async def lifespan(app: FastAPI):
                     core_jobs_task.cancel()
             else:
                 core_jobs_task.cancel()
-        # files, data_tables, prompt_studio, privilege_snapshot, audio — shutdown via WorkerRegistry
-        if "presentation_render_jobs_task" in locals() and presentation_render_jobs_task:
-            if "presentation_render_jobs_stop_event" in locals() and presentation_render_jobs_stop_event:
-                try:
-                    presentation_render_jobs_stop_event.set()
-                    await _asyncio.wait_for(presentation_render_jobs_task, timeout=5.0)
-                    logger.info("Presentation Render Jobs worker stopped via stop_event")
-                except _asyncio.CancelledError:
-                    raise
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    presentation_render_jobs_task.cancel()
-                except Exception as e:
-                    logger.warning(
-                        f"Presentation Render Jobs worker exited with exception before shutdown completion: {e}"
-                    )
-                    with suppress(_STARTUP_GUARD_EXCEPTIONS):
-                        presentation_render_jobs_task.cancel()
-            else:
-                presentation_render_jobs_task.cancel()
-        if "media_ingest_jobs_task" in locals() and media_ingest_jobs_task:
-            # Prefer graceful stop via explicit stop_event
-            if "media_ingest_jobs_stop_event" in locals() and media_ingest_jobs_stop_event:
-                try:
-                    media_ingest_jobs_stop_event.set()
-                    await _asyncio.wait_for(media_ingest_jobs_task, timeout=5.0)
-                    logger.info("Media Ingest Jobs worker stopped via stop_event")
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    media_ingest_jobs_task.cancel()
-            else:
-                media_ingest_jobs_task.cancel()
-        if "media_ingest_heavy_jobs_task" in locals() and media_ingest_heavy_jobs_task:
-            if (
-                "media_ingest_heavy_jobs_stop_event" in locals()
-                and media_ingest_heavy_jobs_stop_event
-            ):
-                try:
-                    media_ingest_heavy_jobs_stop_event.set()
-                    await _asyncio.wait_for(media_ingest_heavy_jobs_task, timeout=5.0)
-                    logger.info("Media Ingest Heavy Jobs worker stopped via stop_event")
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    media_ingest_heavy_jobs_task.cancel()
-            else:
-                media_ingest_heavy_jobs_task.cancel()
-        # reading_digest, study_pack, study_suggestions — shutdown via WorkerRegistry
-        if "companion_reflection_jobs_task" in locals() and companion_reflection_jobs_task:
-            if "companion_reflection_jobs_stop_event" in locals() and companion_reflection_jobs_stop_event:
-                try:
-                    companion_reflection_jobs_stop_event.set()
-                    await _asyncio.wait_for(companion_reflection_jobs_task, timeout=5.0)
-                    logger.info("Companion reflection Jobs worker stopped via stop_event")
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    companion_reflection_jobs_task.cancel()
-            else:
-                companion_reflection_jobs_task.cancel()
+        # files, data_tables, prompt_studio, privilege_snapshot, audio,
+        # presentation_render, media_ingest (+heavy), reading_digest,
+        # study_pack, study_suggestions, companion_reflection
+        # — all shutdown via WorkerRegistry.stop_all()
         if "reminder_jobs_task" in locals() and reminder_jobs_task:
             try:
                 reminder_jobs_task.cancel()
