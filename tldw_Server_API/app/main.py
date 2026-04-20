@@ -2546,7 +2546,41 @@ async def lifespan(app: FastAPI):
 
     _worker_sidecar = os.getenv("TLDW_WORKERS_SIDECAR_MODE", "").lower() in {"true", "1"}
     _worker_registry = WorkerRegistry(sidecar_mode=_worker_sidecar, test_mode=bool(_TEST_MODE))
-    # (Workers will be registered here as they migrate from inline code below)
+
+    # Register workers migrated from inline startup code.
+    # Each replaces ~20 lines of try/import/flag-check/create_task/except.
+    _worker_registry.register(
+        "files-jobs", "FILES_JOBS_WORKER_ENABLED", "files",
+        "tldw_Server_API.app.core.File_Artifacts.jobs_worker",
+        "run_file_artifacts_jobs_worker")
+    _worker_registry.register(
+        "data-tables-jobs", "DATA_TABLES_JOBS_WORKER_ENABLED", "data-tables",
+        "tldw_Server_API.app.core.Data_Tables.jobs_worker",
+        "run_data_tables_jobs_worker")
+    _worker_registry.register(
+        "prompt-studio-jobs", "PROMPT_STUDIO_JOBS_WORKER_ENABLED", "prompt-studio",
+        "tldw_Server_API.app.core.Prompt_Management.prompt_studio.services.jobs_worker",
+        "run_prompt_studio_jobs_worker")
+    _worker_registry.register(
+        "study-pack-jobs", "STUDY_PACK_JOBS_WORKER_ENABLED", "flashcards",
+        "tldw_Server_API.app.services.study_pack_jobs_worker",
+        "run_study_pack_jobs_worker")
+    _worker_registry.register(
+        "study-suggestions-jobs", "STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED", "study-suggestions",
+        "tldw_Server_API.app.services.study_suggestions_jobs_worker",
+        "run_study_suggestions_jobs_worker")
+    _worker_registry.register(
+        "privilege-snapshot", "PRIVILEGE_SNAPSHOT_WORKER_ENABLED", "privileges",
+        "tldw_Server_API.app.services.privilege_snapshot_worker",
+        "run_privilege_snapshot_worker")
+    _worker_registry.register(
+        "audio-jobs", "AUDIO_JOBS_WORKER_ENABLED", "audio-jobs",
+        "tldw_Server_API.app.services.audio_jobs_worker",
+        "run_audio_jobs_worker")
+    _worker_registry.register(
+        "reading-digest-jobs", "READING_DIGEST_JOBS_WORKER_ENABLED", "reading",
+        "tldw_Server_API.app.services.reading_digest_jobs_worker",
+        "run_reading_digest_jobs_worker")
 
     # Start background workers: ephemeral collections cleanup, core Jobs (chatbooks), audio Jobs (MVP), claims rebuild
     cleanup_task = None
@@ -2731,123 +2765,17 @@ async def lifespan(app: FastAPI):
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.warning(f"Failed to start core Jobs worker (Chatbooks): {e}")
 
-    # File Artifacts Jobs worker
-    try:
-        import asyncio as _asyncio
-        import os as _os
+    # File Artifacts Jobs worker — migrated to WorkerRegistry
 
-        from tldw_Server_API.app.core.File_Artifacts.jobs_worker import (
-            run_file_artifacts_jobs_worker as _run_files_jobs,
-        )
+    # Data Tables Jobs worker — migrated to WorkerRegistry
 
-        _enabled = _should_start_worker("FILES_JOBS_WORKER_ENABLED", "files")
-        if _enabled:
-            files_jobs_stop_event = _asyncio.Event()
-            files_jobs_task = _asyncio.create_task(_run_files_jobs(files_jobs_stop_event))
-            logger.info("File Artifacts Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info("File Artifacts Jobs worker disabled by flag (FILES_JOBS_WORKER_ENABLED)")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        # startup/shutdown guard; log and continue
-        logger.warning(f"Failed to start File Artifacts Jobs worker: {e}")
+    # Prompt Studio Jobs worker — migrated to WorkerRegistry
 
-    # Data Tables Jobs worker
-    try:
-        import asyncio as _asyncio
-        import os as _os
+    # Study-pack Jobs worker — migrated to WorkerRegistry
 
-        from tldw_Server_API.app.core.Data_Tables.jobs_worker import (
-            run_data_tables_jobs_worker as _run_data_tables_jobs,
-        )
+    # Study-suggestions Jobs worker — migrated to WorkerRegistry
 
-        _enabled = _should_start_worker("DATA_TABLES_JOBS_WORKER_ENABLED", "data-tables")
-        if _enabled:
-            data_tables_jobs_stop_event = _asyncio.Event()
-            data_tables_jobs_task = _asyncio.create_task(_run_data_tables_jobs(data_tables_jobs_stop_event))
-            logger.info("Data Tables Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info("Data Tables Jobs worker disabled by flag (DATA_TABLES_JOBS_WORKER_ENABLED)")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        # startup/shutdown guard; log and continue
-        logger.warning(f"Failed to start Data Tables Jobs worker: {e}")
-
-    # Prompt Studio Jobs worker
-    try:
-        import asyncio as _asyncio
-        import os as _os
-
-        from tldw_Server_API.app.core.Prompt_Management.prompt_studio.services.jobs_worker import (
-            run_prompt_studio_jobs_worker as _run_prompt_studio_jobs,
-        )
-
-        _enabled = _should_start_worker("PROMPT_STUDIO_JOBS_WORKER_ENABLED", "prompt-studio")
-        if _enabled:
-            prompt_studio_jobs_stop_event = _asyncio.Event()
-            prompt_studio_jobs_task = _asyncio.create_task(_run_prompt_studio_jobs(prompt_studio_jobs_stop_event))
-            logger.info("Prompt Studio Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info("Prompt Studio Jobs worker disabled by flag (PROMPT_STUDIO_JOBS_WORKER_ENABLED)")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        # startup/shutdown guard; log and continue
-        logger.warning(f"Failed to start Prompt Studio Jobs worker: {e}")
-
-    # Study-pack Jobs worker
-    try:
-        import asyncio as _asyncio
-
-        _enabled = _should_start_worker("STUDY_PACK_JOBS_WORKER_ENABLED", "flashcards")
-        if _enabled:
-            from tldw_Server_API.app.services.study_pack_jobs_worker import (
-                run_study_pack_jobs_worker as _run_study_pack_jobs,
-            )
-
-            study_pack_jobs_stop_event = _asyncio.Event()
-            study_pack_jobs_task = _asyncio.create_task(_run_study_pack_jobs(study_pack_jobs_stop_event))
-            logger.info("Study-pack Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info("Study-pack Jobs worker disabled by flag (STUDY_PACK_JOBS_WORKER_ENABLED)")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Study-pack Jobs worker: {e}")
-
-    # Study-suggestions Jobs worker
-    try:
-        import asyncio as _asyncio
-
-        _enabled = _should_start_worker("STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED", "study-suggestions")
-        if _enabled:
-            from tldw_Server_API.app.services.study_suggestions_jobs_worker import (
-                run_study_suggestions_jobs_worker as _run_study_suggestions_jobs,
-            )
-
-            study_suggestions_jobs_stop_event = _asyncio.Event()
-            study_suggestions_jobs_task = _asyncio.create_task(
-                _run_study_suggestions_jobs(study_suggestions_jobs_stop_event)
-            )
-            logger.info("Study-suggestions Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info("Study-suggestions Jobs worker disabled by flag (STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED)")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Study-suggestions Jobs worker: {e}")
-
-    # Privilege snapshot worker
-    try:
-        import asyncio as _asyncio
-        import os as _os
-
-        from tldw_Server_API.app.services.privilege_snapshot_worker import (
-            run_privilege_snapshot_worker as _run_priv_snapshot,
-        )
-
-        _enabled = _should_start_worker("PRIVILEGE_SNAPSHOT_WORKER_ENABLED", "privileges")
-        if _enabled:
-            privilege_snapshot_stop_event = _asyncio.Event()
-            privilege_snapshot_task = _asyncio.create_task(_run_priv_snapshot(privilege_snapshot_stop_event))
-            logger.info("Privilege snapshot worker started with explicit stop_event signal")
-        else:
-            logger.info("Privilege snapshot worker disabled by flag (PRIVILEGE_SNAPSHOT_WORKER_ENABLED)")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        # startup/shutdown guard; log and continue
-        logger.warning(f"Failed to start privilege snapshot worker: {e}")
+    # Privilege snapshot worker — migrated to WorkerRegistry
 
     # Embeddings Vector Compactor (soft-delete propagation)
     try:
@@ -2884,21 +2812,7 @@ async def lifespan(app: FastAPI):
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.warning(f"Failed to start WebSub renewal worker: {e}")
 
-    # Audio Jobs worker (MVP)
-    try:
-        import asyncio as _asyncio
-
-        _enabled = _should_start_worker("AUDIO_JOBS_WORKER_ENABLED", "audio-jobs")
-        if _enabled:
-            from tldw_Server_API.app.services.audio_jobs_worker import run_audio_jobs_worker as _run_audio_jobs
-
-            audio_jobs_stop_event = _asyncio.Event()
-            audio_jobs_task = _asyncio.create_task(_run_audio_jobs(audio_jobs_stop_event))
-            logger.info("Audio Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info("Audio Jobs worker disabled by flag (AUDIO_JOBS_WORKER_ENABLED)")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Audio Jobs worker: {e}")
+    # Audio Jobs worker — migrated to WorkerRegistry
 
     # Audiobook Jobs worker
     try:
@@ -2978,25 +2892,7 @@ async def lifespan(app: FastAPI):
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.warning(f"Failed to start Media Ingest Jobs worker: {e}")
 
-    # Reading Digest Jobs worker
-    try:
-        import asyncio as _asyncio
-
-        _enabled = _should_start_worker("READING_DIGEST_JOBS_WORKER_ENABLED", "reading")
-        if _enabled:
-            from tldw_Server_API.app.core.Collections.reading_digest_jobs_worker import (
-                run_reading_digest_jobs_worker as _run_reading_digest_jobs,
-            )
-
-            reading_digest_jobs_stop_event = _asyncio.Event()
-            reading_digest_jobs_task = _asyncio.create_task(
-                _run_reading_digest_jobs(reading_digest_jobs_stop_event)
-            )
-            logger.info("Reading digest Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info("Reading digest Jobs worker disabled by flag (READING_DIGEST_JOBS_WORKER_ENABLED)")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning(f"Failed to start Reading digest Jobs worker: {e}")
+    # Reading digest Jobs worker — migrated to WorkerRegistry
 
     # Companion reflection Jobs worker
     try:
@@ -4067,70 +3963,7 @@ async def lifespan(app: FastAPI):
                     core_jobs_task.cancel()
             else:
                 core_jobs_task.cancel()
-        if "files_jobs_task" in locals() and files_jobs_task:
-            # Prefer graceful stop via explicit stop_event
-            if "files_jobs_stop_event" in locals() and files_jobs_stop_event:
-                try:
-                    files_jobs_stop_event.set()
-                    await _asyncio.wait_for(files_jobs_task, timeout=5.0)
-                    logger.info("File Artifacts Jobs worker stopped via stop_event")
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    # startup/shutdown guard; log and continue
-                    files_jobs_task.cancel()
-            else:
-                files_jobs_task.cancel()
-        if "data_tables_jobs_task" in locals() and data_tables_jobs_task:
-            # Prefer graceful stop via explicit stop_event
-            if "data_tables_jobs_stop_event" in locals() and data_tables_jobs_stop_event:
-                try:
-                    data_tables_jobs_stop_event.set()
-                    await _asyncio.wait_for(data_tables_jobs_task, timeout=5.0)
-                    logger.info("Data Tables Jobs worker stopped via stop_event")
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    data_tables_jobs_task.cancel()
-            else:
-                data_tables_jobs_task.cancel()
-        if "prompt_studio_jobs_task" in locals() and prompt_studio_jobs_task:
-            # Prefer graceful stop via explicit stop_event
-            if "prompt_studio_jobs_stop_event" in locals() and prompt_studio_jobs_stop_event:
-                try:
-                    prompt_studio_jobs_stop_event.set()
-                    await _asyncio.wait_for(prompt_studio_jobs_task, timeout=5.0)
-                    logger.info("Prompt Studio Jobs worker stopped via stop_event")
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    prompt_studio_jobs_task.cancel()
-            else:
-                prompt_studio_jobs_task.cancel()
-        if "privilege_snapshot_task" in locals() and privilege_snapshot_task:
-            # Prefer graceful stop via explicit stop_event
-            if "privilege_snapshot_stop_event" in locals() and privilege_snapshot_stop_event:
-                try:
-                    privilege_snapshot_stop_event.set()
-                    await _asyncio.wait_for(privilege_snapshot_task, timeout=5.0)
-                    logger.info("Privilege snapshot worker stopped via stop_event")
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    privilege_snapshot_task.cancel()
-            else:
-                privilege_snapshot_task.cancel()
-        if "audio_jobs_task" in locals() and audio_jobs_task:
-            # Prefer graceful stop via explicit stop_event
-            if "audio_jobs_stop_event" in locals() and audio_jobs_stop_event:
-                try:
-                    audio_jobs_stop_event.set()
-                    await _asyncio.wait_for(audio_jobs_task, timeout=5.0)
-                    logger.info("Audio Jobs worker stopped via stop_event")
-                except _asyncio.CancelledError:
-                    raise
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    audio_jobs_task.cancel()
-                except Exception as e:
-                    logger.warning(
-                        f"Audio Jobs worker exited with exception before shutdown completion: {e}"
-                    )
-                    with suppress(_STARTUP_GUARD_EXCEPTIONS):
-                        audio_jobs_task.cancel()
-            else:
-                audio_jobs_task.cancel()
+        # files, data_tables, prompt_studio, privilege_snapshot, audio — shutdown via WorkerRegistry
         if "presentation_render_jobs_task" in locals() and presentation_render_jobs_task:
             if "presentation_render_jobs_stop_event" in locals() and presentation_render_jobs_stop_event:
                 try:
@@ -4173,36 +4006,7 @@ async def lifespan(app: FastAPI):
                     media_ingest_heavy_jobs_task.cancel()
             else:
                 media_ingest_heavy_jobs_task.cancel()
-        if "reading_digest_jobs_task" in locals() and reading_digest_jobs_task:
-            if "reading_digest_jobs_stop_event" in locals() and reading_digest_jobs_stop_event:
-                try:
-                    reading_digest_jobs_stop_event.set()
-                    await _asyncio.wait_for(reading_digest_jobs_task, timeout=5.0)
-                    logger.info("Reading digest Jobs worker stopped via stop_event")
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    reading_digest_jobs_task.cancel()
-            else:
-                reading_digest_jobs_task.cancel()
-        if "study_pack_jobs_task" in locals() and study_pack_jobs_task:
-            if "study_pack_jobs_stop_event" in locals() and study_pack_jobs_stop_event:
-                try:
-                    study_pack_jobs_stop_event.set()
-                    await _asyncio.wait_for(study_pack_jobs_task, timeout=5.0)
-                    logger.info("Study-pack Jobs worker stopped via stop_event")
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    study_pack_jobs_task.cancel()
-            else:
-                study_pack_jobs_task.cancel()
-        if "study_suggestions_jobs_task" in locals() and study_suggestions_jobs_task:
-            if "study_suggestions_jobs_stop_event" in locals() and study_suggestions_jobs_stop_event:
-                try:
-                    study_suggestions_jobs_stop_event.set()
-                    await _asyncio.wait_for(study_suggestions_jobs_task, timeout=5.0)
-                    logger.info("Study-suggestions Jobs worker stopped via stop_event")
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    study_suggestions_jobs_task.cancel()
-            else:
-                study_suggestions_jobs_task.cancel()
+        # reading_digest, study_pack, study_suggestions — shutdown via WorkerRegistry
         if "companion_reflection_jobs_task" in locals() and companion_reflection_jobs_task:
             if "companion_reflection_jobs_stop_event" in locals() and companion_reflection_jobs_stop_event:
                 try:
