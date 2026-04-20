@@ -411,7 +411,10 @@ class KeywordStore:
             raise InputError("Search term cannot be empty.")  # noqa: TRY003
         if '"' in search_term or "'" in search_term:
             raise InputError("Search term contains unsupported characters.")  # noqa: TRY003
-        is_simple_token = re.fullmatch(r"[\w-]+", search_term) is not None
+        # SQLite FTS prefix queries treat punctuation such as "-" as operators.
+        # Keep raw FTS only for plain word tokens and fall back to LIKE/ILIKE
+        # for literal punctuation searches like "C++" or "foo-bar".
+        is_simple_token = re.fullmatch(r"\w+", search_term) is not None
         if self._db.backend_type == BackendType.POSTGRESQL:
             if is_simple_token:
                 tsquery = FTSQueryTranslator.normalize_query(search_term, 'postgresql')
@@ -442,7 +445,7 @@ class KeywordStore:
                 SELECT k.*
                 FROM {source_table} k
                 WHERE k.deleted = FALSE
-                  AND k.keyword ILIKE ? ESCAPE '\\\\'
+                  AND k.keyword ILIKE ? ESCAPE '\\'
                 ORDER BY k.last_modified DESC
                 LIMIT ?
             """.format_map(locals())  # nosec B608
@@ -468,7 +471,7 @@ class KeywordStore:
             SELECT k.*
             FROM {keyword_table} k
             WHERE k.deleted = 0
-              AND k.keyword LIKE ? ESCAPE '\\\\'
+              AND k.keyword LIKE ? ESCAPE '\\'
             ORDER BY k.last_modified DESC
             LIMIT ?
         """.format_map(locals())  # nosec B608
@@ -678,6 +681,14 @@ class KeywordStore:
     def unlink_collection_from_keyword(self, collection_id: int, keyword_id: int) -> bool:
         return self._db._manage_link("collection_keywords", "collection_id", collection_id, "keyword_id", keyword_id,
                                      "unlink")
+
+    def unlink_collection_to_keyword(
+        self,
+        collection_id: int,
+        keyword_id: int,
+    ) -> bool:  # pragma: no cover - compat alias
+        """Backward-compatible alias for the extracted facade delegation typo."""
+        return self.unlink_collection_from_keyword(collection_id, keyword_id)
 
     def get_keywords_for_collection(self, collection_id: int) -> list[dict[str, Any]]:
         keyword_table = self._db._map_table_for_backend("keywords")

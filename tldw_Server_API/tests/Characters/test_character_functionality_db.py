@@ -81,6 +81,22 @@ def sample_card_data(name="Test Character", **kwargs) -> dict:
     return data
 
 
+def normalize_expected_character_tags(tags: Any) -> set[str]:
+    """Mirror the public contract for stored character tags."""
+    if isinstance(tags, str):
+        try:
+            tags = json.loads(tags)
+        except json.JSONDecodeError:
+            tags = [tags]
+    if not isinstance(tags, list):
+        tags = [] if tags is None else [tags]
+    return {
+        str(tag).strip()
+        for tag in tags
+        if tag is not None and str(tag).strip()
+    }
+
+
 # --- Helper for sample conversation data ---
 def sample_conversation_data(character_id: int, **kwargs) -> dict:
     data = {
@@ -445,6 +461,20 @@ class TestCharacterCardAddition:
 
         assert retrieved["tags"] == ["tag_json_str1", "tag_json_str2"]
 
+    def test_add_character_with_whitespace_only_tags_in_json_string_normalizes_empty(
+        self,
+        db: CharactersRAGDB,
+    ):
+        data = sample_card_data(
+            name="WhitespaceTagsJSONChar",
+            tags='[" ", "\\t"]',  # type: ignore[arg-type]
+        )
+
+        card_id = db.add_character_card(data)
+        retrieved = db.get_character_card_by_id(card_id)
+
+        assert retrieved["tags"] == []
+
     def test_add_character_with_invalid_string_for_json_field_becomes_none(self, db: CharactersRAGDB):
         invalid_json_str = "this is not a valid json array"
         data = sample_card_data(name="InvalidStringJSONChar", tags=invalid_json_str)  # type: ignore
@@ -502,13 +532,21 @@ class TestCharacterCardAddition:
             if isinstance(original_value, str):
                 try:
                     expected_deserialized = json.loads(original_value)
-                    assert retrieved_value == expected_deserialized
+                    if key == "tags":
+                        assert set(retrieved_value or []) == normalize_expected_character_tags(
+                            expected_deserialized
+                        )
+                    else:
+                        assert retrieved_value == expected_deserialized
                 except json.JSONDecodeError:
                     assert retrieved_value is None
             elif original_value is None:
                 assert retrieved_value is None
             elif isinstance(original_value, list) and key in ["tags", "alternate_greetings"]:
-                assert set(retrieved_value or []) == set(original_value or [])
+                if key == "tags":
+                    assert set(retrieved_value or []) == normalize_expected_character_tags(original_value)
+                else:
+                    assert set(retrieved_value or []) == set(original_value or [])
             else:  # dicts for extensions
                 assert retrieved_value == original_value
 
@@ -802,11 +840,22 @@ class TestCharacterCardUpdate:
                 if isinstance(value, str) and key in db._CHARACTER_CARD_JSON_FIELDS:
                     try:
                         expected_deserialized = json.loads(value)
-                        assert retrieved_value == expected_deserialized
+                        if key == "tags":
+                            assert set(retrieved_value or []) == normalize_expected_character_tags(
+                                expected_deserialized
+                            )
+                        else:
+                            assert retrieved_value == expected_deserialized
                     except json.JSONDecodeError:
-                        assert retrieved_value is None
+                        if key == "tags":
+                            assert set(retrieved_value or []) == normalize_expected_character_tags(value)
+                        else:
+                            assert retrieved_value is None
                 elif isinstance(value, list) and key in ["tags", "alternate_greetings"]:
-                    assert set(retrieved_value or []) == set(value or [])
+                    if key == "tags":
+                        assert set(retrieved_value or []) == normalize_expected_character_tags(value)
+                    else:
+                        assert set(retrieved_value or []) == set(value or [])
                 else:
                     assert retrieved_value == value
         check_sync_log_entry(db, "character_cards", card_id, "update", expected_version=original_card["version"] + 1)

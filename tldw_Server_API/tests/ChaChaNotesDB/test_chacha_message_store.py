@@ -113,6 +113,68 @@ def test_message_store_metadata_and_citations_roundtrip(db):
     # get_conversation_citations not yet extracted to MessageStore — tested via CharactersRAGDB directly
 
 
+def test_message_store_rag_context_helpers_latest_and_since(db):
+    store = db["store"]
+    conversation_id = db["conversation_id"]
+
+    first_message_id = store.add_message(
+        {
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "First message",
+            "timestamp": "2024-01-01T00:00:00Z",
+        }
+    )
+    second_message_id = store.add_message(
+        {
+            "conversation_id": conversation_id,
+            "sender": "assistant",
+            "content": "Second message",
+            "timestamp": "2024-01-01T00:00:01Z",
+        }
+    )
+    third_message_id = store.add_message(
+        {
+            "conversation_id": conversation_id,
+            "sender": "assistant",
+            "content": "Third message",
+            "timestamp": "2024-01-01T00:00:02Z",
+        }
+    )
+
+    assert store.set_message_metadata_extra(
+        first_message_id,
+        {"tool_results": {"call-1": {"status": "ok"}}, "trace_id": "trace-1"},
+    )
+    assert store.set_message_metadata_extra(
+        first_message_id,
+        {"tool_results": {"call-2": {"status": "later"}}, "note": "merged"},
+    )
+
+    merged_metadata = store.get_message_metadata(first_message_id)
+    assert merged_metadata is not None
+    assert merged_metadata["extra"]["tool_results"]["call-1"]["status"] == "ok"
+    assert merged_metadata["extra"]["tool_results"]["call-2"]["status"] == "later"
+    assert merged_metadata["extra"]["trace_id"] == "trace-1"
+    assert merged_metadata["extra"]["note"] == "merged"
+
+    rag_context = {
+        "search_query": "galaxy",
+        "retrieved_documents": [{"id": "doc-1", "title": "Galaxy Notes"}],
+    }
+    assert store.set_message_rag_context(second_message_id, rag_context)
+    assert store.get_message_rag_context(second_message_id) == rag_context
+
+    with_rag_context = store.get_messages_with_rag_context(conversation_id, limit=10, offset=0)
+    second_message = next(item for item in with_rag_context if item["id"] == second_message_id)
+    assert second_message["rag_context"]["retrieved_documents"][0]["id"] == "doc-1"
+
+    latest_message = store.get_latest_message_for_conversation(conversation_id)
+    assert latest_message is not None
+    assert latest_message["id"] == third_message_id
+    assert store.count_messages_since(conversation_id, first_message_id) == 2
+
+
 def test_message_store_counts_and_soft_delete_roundtrip(db):
     store = db["store"]
     conversation_id = db["conversation_id"]

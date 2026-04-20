@@ -173,7 +173,11 @@ class CharacterStore:
     # Character card retrieval
     # ------------------------------------------------------------------
 
-    def get_character_card_by_id(self, character_id: int) -> dict[str, Any] | None:
+    def get_character_card_by_id(
+        self,
+        character_id: int,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
         """
         Retrieve a specific character card by its ID.
 
@@ -191,9 +195,15 @@ class CharacterStore:
         Raises:
             CharactersRAGDBError: For database errors during fetching.
         """
-        query = "SELECT * FROM character_cards WHERE id = ? AND deleted = 0"
+        query = "SELECT * FROM character_cards WHERE id = ?"
+        params: tuple[Any, ...]
+        if include_deleted:
+            params = (character_id,)
+        else:
+            query += " AND deleted = 0"
+            params = (character_id,)
         try:
-            cursor = self._db.execute_query(query, (character_id,))
+            cursor = self._db.execute_query(query, params)
             row = cursor.fetchone()
             return self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
         except CharactersRAGDBError as e:

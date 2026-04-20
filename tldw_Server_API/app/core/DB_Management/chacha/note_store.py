@@ -175,6 +175,34 @@ class NoteStore:
                 results.append(r)
         return results
 
+    def get_all_note_ids_for_graph(self, include_deleted: bool = True, limit: int = 500) -> list[str]:
+        """Return note IDs ordered by last_modified DESC, id ASC. For seedless graph."""
+        deleted_clause = "" if include_deleted else " WHERE deleted = 0"
+        query = f"SELECT id FROM notes{deleted_clause} ORDER BY last_modified DESC, id ASC LIMIT ?"  # nosec B608
+        cur = self._db.execute_query(query, (limit,))
+        return [row[0] for row in cur.fetchall()]
+
+    def get_note_tag_edges(self, note_ids: list[str]) -> list[dict[str, Any]]:
+        """Return (note_id, keyword_id, keyword) for notes with active keywords."""
+        if not note_ids:
+            return []
+        results: list[dict[str, Any]] = []
+        for batch in self._db._chunk_list(note_ids, self._db._SQLITE_PARAM_LIMIT):
+            ph = ",".join(["?"] * len(batch))
+            query = (
+                f"SELECT nk.note_id, k.id AS keyword_id, k.keyword "  # nosec B608
+                f"FROM note_keywords nk "
+                f"JOIN keywords k ON k.id = nk.keyword_id "
+                f"WHERE nk.note_id IN ({ph}) AND k.deleted = 0"
+            )
+            cur = self._db.execute_query(query, tuple(batch))
+            for row in cur.fetchall():
+                r = dict(row) if hasattr(row, "keys") else {
+                    "note_id": row[0], "keyword_id": row[1], "keyword": row[2],
+                }
+                results.append(r)
+        return results
+
     # ------------------------------------------------------------------
     # Note counting
     # ------------------------------------------------------------------
@@ -704,6 +732,10 @@ class NoteStore:
 
     def unlink_note_from_keyword(self, note_id: str, keyword_id: int) -> bool:  # note_id is str
         return self._db._manage_link("note_keywords", "note_id", note_id, "keyword_id", keyword_id, "unlink")
+
+    def unlink_note_to_keyword(self, note_id: str, keyword_id: int) -> bool:  # pragma: no cover - compat alias
+        """Backward-compatible alias for the extracted facade delegation typo."""
+        return self.unlink_note_from_keyword(note_id, keyword_id)
 
     def get_keywords_for_note(self, note_id: str) -> list[dict[str, Any]]:  # note_id is str
         keyword_table = self._db._map_table_for_backend("keywords")

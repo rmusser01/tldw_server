@@ -112,3 +112,29 @@ class TestCharacterStoreSearch:
         results = store.search_character_cards("Searchable")
         assert len(results) >= 1
         assert any("Searchable" in r["name"] for r in results)
+
+    def test_manage_tags_rename_updates_tag_search_results(self, store):
+        first_id = store.add_character_card({"name": "Tagged One", "tags": ["old-tag", "shared"]})
+        second_id = store.add_character_card({"name": "Tagged Two", "tags": ["shared"]})
+
+        before = store.search_character_cards_by_tags(["old-tag"])
+        assert {row["id"] for row in before} == {first_id}
+
+        summary = store.manage_character_tags(
+            operation="rename",
+            source_tag="old-tag",
+            target_tag="new-tag",
+        )
+
+        assert summary["matched_count"] == 1
+        assert summary["updated_count"] == 1
+        assert summary["updated_character_ids"] == [first_id]
+
+        renamed = store.get_character_card_by_id(first_id)
+        untouched = store.get_character_card_by_id(second_id)
+        assert renamed is not None
+        assert untouched is not None
+        assert set(renamed["tags"]) == {"new-tag", "shared"}
+        assert set(untouched["tags"]) == {"shared"}
+        assert store.search_character_cards_by_tags(["old-tag"]) == []
+        assert {row["id"] for row in store.search_character_cards_by_tags(["new-tag"])} == {first_id}

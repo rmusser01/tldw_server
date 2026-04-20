@@ -2,7 +2,10 @@
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    ConflictError,
+)
 from tldw_Server_API.app.core.DB_Management.chacha.keyword_store import KeywordStore
 
 
@@ -28,9 +31,9 @@ class TestKeywordStoreAdd:
         assert kw_id is not None
         assert isinstance(kw_id, int)
 
-    def test_add_duplicate_raises(self, store):
+    def test_add_duplicate_raises_conflict(self, store):
         store.add_keyword("duplicate")
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError, match="already exists and is active"):
             store.add_keyword("duplicate")
 
 
@@ -65,16 +68,21 @@ class TestKeywordStoreList:
 
 
 class TestKeywordStoreSearch:
-    def test_search_does_not_crash_on_missing_fts(self, store):
-        store.add_keyword("unique-searchterm-xyz")
-        # search_keywords delegates to _search_generic_items_fts which may
-        # fail if keyword FTS tables aren't fully set up in test context.
-        # Verify it either returns results or raises a known DB error.
-        try:
-            results = store.search_keywords("unique-searchterm-xyz")
-            assert isinstance(results, list)
-        except Exception:
-            pass  # FTS schema may not be available in minimal test setup
+    def test_search_keywords_returns_exact_match(self, store):
+        keyword_id = store.add_keyword("unique-searchterm-xyz")
+
+        results = store.search_keywords("unique-searchterm-xyz")
+
+        assert len(results) == 1
+        assert results[0]["id"] == keyword_id
+        assert results[0]["keyword"] == "unique-searchterm-xyz"
+
+    def test_search_keywords_allows_punctuation(self, store):
+        keyword_id = store.add_keyword("C++")
+
+        results = store.search_keywords("C++")
+
+        assert any(row["id"] == keyword_id for row in results)
 
 
 class TestKeywordCollectionCRUD:
@@ -93,3 +101,55 @@ class TestKeywordCollectionCRUD:
         store.add_keyword_collection("Coll B")
         colls = store.list_keyword_collections()
         assert len(colls) >= 2
+
+
+def test_keyword_store_rename_merge_and_link_helpers(store, db):
+    character_id = db.add_character_card({"name": "Keyword Link Character"})
+    conversation_id = db.add_conversation(
+        {
+            "character_id": character_id,
+            "title": "Keyword Link Conversation",
+        }
+    )
+    note_id = db.add_note(title="Keyword linked note", content="linked content")
+    collection_id = store.add_keyword_collection("Linked Collection")
+    source_keyword_id = store.add_keyword("merge-source")
+    target_keyword_id = store.add_keyword("merge-target")
+
+    assert db.link_note_to_keyword(note_id, source_keyword_id)
+    assert store.link_conversation_to_keyword(conversation_id, source_keyword_id)
+    assert store.link_collection_to_keyword(collection_id, source_keyword_id)
+
+    source_keyword = store.get_keyword_by_id(source_keyword_id)
+    target_keyword = store.get_keyword_by_id(target_keyword_id)
+    assert source_keyword is not None
+    assert target_keyword is not None
+
+    renamed_source = store.rename_keyword(
+        source_keyword_id,
+        "merge-source-renamed",
+        expected_version=source_keyword["version"],
+    )
+    assert renamed_source["keyword"] == "merge-source-renamed"
+
+    merged = store.merge_keywords(
+        source_keyword_id=source_keyword_id,
+        target_keyword_id=target_keyword_id,
+        expected_source_version=renamed_source["version"],
+        expected_target_version=target_keyword["version"],
+    )
+
+    assert merged["merged_note_links"] == 1
+    assert merged["merged_conversation_links"] == 1
+    assert merged["merged_collection_links"] == 1
+    assert store.get_keyword_by_id(source_keyword_id) is None
+    assert {row["id"] for row in store.get_keywords_for_conversation(conversation_id)} == {
+        target_keyword_id
+    }
+    assert [row["id"] for row in store.get_notes_for_keyword(target_keyword_id)] == [note_id]
+    assert [row["id"] for row in store.get_collections_for_keyword(target_keyword_id)] == [collection_id]
+
+    assert store.unlink_conversation_from_keyword(conversation_id, target_keyword_id)
+    assert store.get_keywords_for_conversation(conversation_id) == []
+    assert db.unlink_collection_to_keyword(collection_id, target_keyword_id)
+    assert store.get_collections_for_keyword(target_keyword_id) == []
