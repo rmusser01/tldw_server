@@ -2537,6 +2537,17 @@ async def lifespan(app: FastAPI):
     # No need to initialize globally - use get_audit_service_for_user dependency in endpoints
     logger.info("App Startup: Audit service available via dependency injection")
 
+    # ---------------------------------------------------------------------------
+    # Worker Registry — new infrastructure for Phase 2.1 worker extraction.
+    # Workers registered here are started/stopped via the registry. Legacy
+    # workers below will be migrated incrementally in future PRs.
+    # ---------------------------------------------------------------------------
+    from tldw_Server_API.app.services.worker_registry import WorkerRegistry
+
+    _worker_sidecar = os.getenv("TLDW_WORKERS_SIDECAR_MODE", "").lower() in {"true", "1"}
+    _worker_registry = WorkerRegistry(sidecar_mode=_worker_sidecar, test_mode=bool(_TEST_MODE))
+    # (Workers will be registered here as they migrate from inline code below)
+
     # Start background workers: ephemeral collections cleanup, core Jobs (chatbooks), audio Jobs (MVP), claims rebuild
     cleanup_task = None
     chatbooks_cleanup_task = None
@@ -3883,7 +3894,23 @@ async def lifespan(app: FastAPI):
     except _STARTUP_GUARD_EXCEPTIONS as _pf_e:
         logger.warning(f"Preflight report could not be generated: {_pf_e}")
 
+    # Start any workers registered via WorkerRegistry (Phase 2.1 migration)
+    try:
+        _registry_started = await _worker_registry.start_all()
+        if _registry_started:
+            logger.info(f"Worker registry: started {_registry_started} workers")
+    except _STARTUP_GUARD_EXCEPTIONS as _wr_e:
+        logger.warning(f"Worker registry startup failed: {_wr_e}")
+
     yield
+
+    # Stop registry-managed workers first (they have clean shutdown semantics)
+    try:
+        _registry_stopped = await _worker_registry.stop_all(timeout=8.0)
+        if _registry_stopped:
+            logger.info(f"Worker registry: stopped {_registry_stopped} workers")
+    except _STARTUP_GUARD_EXCEPTIONS as _wr_e:
+        logger.warning(f"Worker registry shutdown failed: {_wr_e}")
 
     # Build and record the legacy shutdown inventory first.
     # Execute only the narrow transition gate handoff through the coordinator;
