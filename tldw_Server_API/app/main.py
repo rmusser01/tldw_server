@@ -6766,6 +6766,12 @@ elif _MINIMAL_TEST_APP:
     except _STARTUP_GUARD_EXCEPTIONS as _monitoring_min_err:
         logger.debug(f"Skipping monitoring router in minimal test app: {_monitoring_min_err}")
 else:
+    # Register grouped routers first (idempotent — won't conflict with later registrations)
+    from tldw_Server_API.app.api.v1.router_registry import register_all_routers as _register_grouped
+
+    _grouped_count = _register_grouped(app)
+    logger.info(f"Registered {_grouped_count} routers from router groups")
+
     # Small helper to guard route inclusion via config.txt and ENV
     def _include_if_enabled(
         route_key: str, router, *, prefix: str = "", tags: list | None = None, default_stable: bool = True
