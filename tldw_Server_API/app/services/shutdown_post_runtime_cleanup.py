@@ -22,6 +22,9 @@ async def shutdown_post_runtime_cleanup(
     await _shutdown_content_backend(
         guard_exceptions=startup_guard_exceptions,
     )
+    await _close_managed_backend_registries(
+        guard_exceptions=startup_guard_exceptions,
+    )
     await _close_test_db_connections(
         test_db_instance_ref=test_db_instance_ref,
     )
@@ -50,6 +53,17 @@ async def _shutdown_content_backend(
         logger.info("App Shutdown: Content DB backend pool closed")
     except guard_exceptions as exc:
         logger.debug(f"App Shutdown: Content backend pool close skipped/failed: {exc}")
+
+
+async def _close_managed_backend_registries(
+    *,
+    guard_exceptions: tuple[type[BaseException], ...],
+) -> None:
+    try:
+        _close_all_backends_service()
+        logger.info("App Shutdown: Database backend registries cleared")
+    except guard_exceptions as exc:
+        logger.debug(f"App Shutdown: Database backend registry cleanup skipped/failed: {exc}")
 
 
 async def _close_test_db_connections(
@@ -85,6 +99,14 @@ def _shutdown_content_backend_service() -> None:
     )
 
     shutdown_content_backend()
+
+
+def _close_all_backends_service() -> None:
+    from tldw_Server_API.app.core.DB_Management.backends.factory import (
+        close_all_backends,
+    )
+
+    close_all_backends()
 
 
 def _set_jobs_acquire_gate_service(*, enabled: bool) -> None:
