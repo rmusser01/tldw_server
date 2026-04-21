@@ -155,9 +155,11 @@ That runtime must contain:
 
 ### Source Preference
 
-The managed install flow should prefer the sibling checkout at `../OmniVoice` when it exists.
+The managed install flow should support an explicit local-development source mode that prefers the sibling checkout at `../OmniVoice` when it exists.
 
-If the sibling checkout does not exist, the installer may fall back to a standard package source.
+That local-checkout preference should not be automatic in general deployments. It should activate only when the operator explicitly selects a local source or setup detects a development-oriented provisioning mode.
+
+In the default path, the installer should use the normal managed package/provisioning source.
 
 This preference is intentional because the current development context already includes a local OmniVoice clone one directory above the repo.
 
@@ -191,6 +193,8 @@ The `voice` field is not used as a named built-in voice inventory for OmniVoice.
 
 - `auto` for default automatic voice selection
 - `custom:<voice_id>` for stored custom voice cloning
+
+Because the public OpenAI-compatible request schema currently defaults `voice` to a legacy non-OmniVoice value, request normalization must explicitly override that inherited default when the resolved provider is OmniVoice and the caller did not intentionally choose a voice. In other words, OmniVoice provider resolution must normalize the effective voice to `auto` rather than reusing the schema-level legacy default.
 
 ### CLI Argument Mapping
 
@@ -271,6 +275,21 @@ This preserves API compatibility while keeping the implementation honest about w
 
 Future work may replace this with a warm worker or sidecar process if true streaming becomes important.
 
+### Fallback Constraints
+
+Cross-provider fallback should be restricted for OmniVoice-specific requests.
+
+For requests that rely on OmniVoice semantics, including:
+
+- voice cloning
+- stored `custom:` voices
+- voice design via `extra_params.instruct`
+- OmniVoice-specific advanced generation parameters
+
+the service should not silently fall back to a different provider. At most, it may retry within the OmniVoice provider boundary if the failure mode supports that.
+
+This prevents a request that depends on OmniVoice-specific behavior from degrading into a semantically different provider response that appears successful but is wrong.
+
 ## 11. Validation Rules
 
 OmniVoice-specific validation should be added in the same places where other providers are validated today.
@@ -305,7 +324,10 @@ OmniVoice should be considered healthy only when:
 - the isolated runtime exists
 - the OmniVoice CLI entrypoint is executable
 - the configured source/model path resolves
+- managed model assets have been prefetched into the configured runtime storage
 - a lightweight verification flow succeeds
+
+Fully managed provisioning therefore includes model prefetch, not just runtime installation.
 
 ### Verification
 
@@ -314,6 +336,8 @@ Verification should be cheap and deterministic, for example:
 - synthesize a very short text sample to a temp WAV
 - confirm the output file exists
 - confirm the output is non-empty and parseable
+
+Normal health endpoints should not run this synthesis probe on every request. Instead, health should report cached readiness plus the last known verification result, while explicit setup/admin verification flows should trigger the real smoke test.
 
 ### Health Surface
 
@@ -327,7 +351,20 @@ Health/readiness should expose OmniVoice-specific failure reasons such as:
 
 This prevents "enabled in config" from being confused with real runtime availability.
 
-## 13. Concurrency And Performance
+## 13. Setup Path Isolation
+
+OmniVoice must not reuse the generic TTS dependency-install path that installs packages into the server interpreter.
+
+Instead, provisioning should use a dedicated OmniVoice runtime creation path that:
+
+- creates or updates the isolated runtime
+- installs OmniVoice into that runtime
+- installs or resolves model assets for that runtime
+- records the runtime metadata needed by readiness and health
+
+This protects the main `tldw_server` environment from heavyweight Torch/audio dependency churn and makes the isolation decision enforceable rather than advisory.
+
+## 14. Concurrency And Performance
 
 OmniVoice is a heavy subprocess-based provider.
 
@@ -345,7 +382,7 @@ Future optimization options:
 
 None of those are required for v1.
 
-## 14. Error Handling
+## 15. Error Handling
 
 The adapter must translate subprocess failures into ordinary TTS exceptions.
 
@@ -361,7 +398,7 @@ User-facing APIs should receive sanitized structured errors. Internal logs may i
 
 Whenever possible, failures should happen before response streaming begins.
 
-## 15. Setup Catalog Integration
+## 16. Setup Catalog Integration
 
 OmniVoice should become installable through the setup system, but it should not automatically be added to every curated bundle choice.
 
@@ -373,7 +410,7 @@ The safer initial design is:
 
 This prevents a heavyweight runtime from becoming an accidental default in lightweight CPU-oriented setup flows.
 
-## 16. Expected Touchpoints
+## 17. Expected Touchpoints
 
 The implementation is expected to touch at least these areas:
 
@@ -389,7 +426,7 @@ The implementation is expected to touch at least these areas:
 - public audio request schema/docs where provider lists are described
 - unit and integration tests across TTS, setup, and voice flows
 
-## 17. Testing Requirements
+## 18. Testing Requirements
 
 ### Unit Tests
 
@@ -424,7 +461,7 @@ The implementation is expected to touch at least these areas:
 - verification success/failure envelopes
 - setup-catalog integration where applicable
 
-## 18. Rollout Notes
+## 19. Rollout Notes
 
 The implementation should preserve reversibility:
 
@@ -432,7 +469,7 @@ The implementation should preserve reversibility:
 - no existing default provider behavior changes unless the operator opts in
 - the isolated runtime keeps OmniVoice dependency churn separate from the main server environment
 
-## 19. Approved Outcome
+## 20. Approved Outcome
 
 The approved design is to add OmniVoice as a managed, first-class, CLI-backed TTS provider with:
 
