@@ -1,4 +1,5 @@
 import asyncio
+import builtins
 import importlib
 import os
 from pathlib import Path
@@ -250,6 +251,28 @@ def test_global_unhandled_exception_handler_keeps_cors_for_allowed_origin() -> N
 
     assert response.status_code == 500
     assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+
+
+def test_run_startup_config_validation_logs_warning_on_import_error(monkeypatch) -> None:
+    warnings: list[str] = []
+
+    class _StubLogger:
+        def warning(self, message: str) -> None:
+            warnings.append(message)
+
+    real_import = builtins.__import__
+
+    def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):  # noqa: ANN001, D401
+        if name == "tldw_Server_API.app.core.config":
+            raise ModuleNotFoundError("config import failed for test")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(app_main, "logger", _StubLogger(), raising=True)
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+    app_main._run_startup_config_validation()
+
+    assert warnings == ["Config validation could not run: config import failed for test"]
 
 
 def test_compute_openapi_cors_allow_origin_rejects_disallowed_origin() -> None:

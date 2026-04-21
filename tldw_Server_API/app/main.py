@@ -4424,12 +4424,7 @@ async def lifespan(app: FastAPI):
     except _STARTUP_GUARD_EXCEPTIONS as _pf_e:
         logger.warning(f"Preflight report could not be generated: {_pf_e}")
 
-    # Validate configuration — warnings only, does not block startup.
-    try:
-        from tldw_Server_API.app.core.config import validate_config
-        validate_config()
-    except _STARTUP_GUARD_EXCEPTIONS as _vc_e:
-        logger.warning(f"Config validation could not run: {_vc_e}")
+    _run_startup_config_validation()
 
     yield
 
@@ -5993,6 +5988,16 @@ from tldw_Server_API.app.api.v1.utils.exception_handlers import (  # noqa: E402
     client_disconnect_handler as _client_disconnect_handler,
     global_unhandled_exception_handler as _global_handler,
 )
+
+
+def _run_startup_config_validation() -> None:
+    """Run best-effort startup config validation without blocking app startup."""
+    try:
+        from tldw_Server_API.app.core.config import validate_config
+
+        validate_config()
+    except (_STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS) as _vc_e:
+        logger.warning(f"Config validation could not run: {_vc_e}")
 
 
 @app.exception_handler(Exception)

@@ -91,7 +91,7 @@ jobs:
       - name: Install tools
         run: |
           python -m pip install --upgrade pip
-          pip install mypy ruff
+          pip install "mypy==1.20.1" "ruff==0.15.10"
 
       - name: Ruff lint (non-blocking, baseline 1419 errors)
         continue-on-error: true

@@ -236,6 +236,8 @@ def get_config_value(
     return parser.get(section, key, fallback=default)
 
 
+ACTUAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+
 _INGESTION_SOURCE_ALLOWED_ROOT_SECTION = "Files"
 _INGESTION_SOURCE_ALLOWED_ROOT_KEY = "ingestion_source_allowed_roots"
 _INGESTION_SOURCE_ALLOWED_ROOT_ENV_KEYS = (
@@ -714,10 +716,6 @@ def load_settings():
         This function may load .env files, consult on-disk config files, emit startup warnings, and create filesystem directories (for the main SQLite database and the user data base directory) as needed.
     """
 
-    # Determine Actual Project Root based on the location of this file
-    # config.py is in project_root/tldw_server_api/app/core/config.py
-    # ACTUAL_PROJECT_ROOT will be /project_root/
-    ACTUAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
     _log_info(f"Determined ACTUAL_PROJECT_ROOT for database paths: {ACTUAL_PROJECT_ROOT}")
 
     # Ensure .env files are loaded before reading any environment variables
@@ -5357,19 +5355,43 @@ def validate_config() -> list[str]:
     warnings: list[str] = []
     cfg = dict(loaded_config_data)
 
+    def _iter_scalar_values(prefix: str, value: Any):
+        if isinstance(value, MutableMapping):
+            for key, child in value.items():
+                child_prefix = f"{prefix}.{key}" if prefix else str(key)
+                yield from _iter_scalar_values(child_prefix, child)
+            return
+        if isinstance(value, list | tuple):
+            for index, child in enumerate(value):
+                child_prefix = f"{prefix}[{index}]"
+                yield from _iter_scalar_values(child_prefix, child)
+            return
+        yield prefix, value
+
+    validation_values = dict(_iter_scalar_values("", cfg))
+    validation_values.update({
+        "Database.pg_connection_string": get_config_value("Database", "pg_connection_string", default=""),
+        "Image-Generation.swarmui_base_url": get_config_value("Image-Generation", "swarmui_base_url", default=""),
+    })
+
     # Check for placeholder values in any config key
-    for key, value in cfg.items():
+    for key, value in validation_values.items():
         if isinstance(value, str) and value.strip().upper() in _PLACEHOLDER_LITERALS:
             msg = f"Config key '{key}' has placeholder value '{value}' — set a real value or leave empty"
             warnings.append(msg)
 
     # Check critical URL values parse correctly
-    for key in ("embedding_api_url", "pg_connection_string", "swarmui_base_url"):
-        val = cfg.get(key, "")
+    url_rules = {
+        "embedding_config.embedding_api_url": ("http://", "https://"),
+        "Database.pg_connection_string": ("postgres://", "postgresql://", "postgres+", "postgresql+"),
+        "Image-Generation.swarmui_base_url": ("http://", "https://"),
+    }
+    for key, allowed_prefixes in url_rules.items():
+        val = validation_values.get(key, "")
         if val and not isinstance(val, str):
             warnings.append(f"Config key '{key}' should be a string, got {type(val).__name__}")
-        elif val and not (val.startswith("http://") or val.startswith("https://") or val.startswith("postgresql")):
-            warnings.append(f"Config key '{key}' has unexpected URL scheme: {val[:30]}")
+        elif isinstance(val, str) and val and not val.startswith(allowed_prefixes):
+            warnings.append(f"Config key '{key}' has unexpected URL scheme")
 
     for w in warnings:
         logger.warning("Config validation: {}", w)
