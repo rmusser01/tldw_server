@@ -52,7 +52,8 @@ sd_cpp_timeout_seconds = 120
 
 # SwarmUI backend settings
 # Base URL for SwarmUI (eg http://localhost:7801)
-swarmui_base_url = http://127.0.0.1:7801  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+swarmui_base_url = http://127.0.0.1:7801
 # Optional default model to use when payload.model is omitted.
 swarmui_default_model =
 # Optional swarm_token cookie value for authenticated SwarmUI instances.
@@ -139,7 +140,8 @@ read_only_root = true
 # SSH settings
 ssh_enabled = true
 ssh_user = acp
-ssh_host = 127.0.0.1  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+ssh_host = 127.0.0.1
 # Container-internal SSH listen port (host port remains allocated from ssh_port_min/max).
 ssh_container_port = 2222
 ssh_port_min = 2222
@@ -361,7 +363,8 @@ sqlite_wal_mode = true
 sqlite_foreign_keys = true
 backup_path = ./tldw_DB_Backups/
 pg_connection_string =
-pg_host = localhost  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+pg_host = localhost
 pg_port = 5432
 pg_database = tldw_content
 pg_user = tldw_user
@@ -370,7 +373,8 @@ pg_sslmode = prefer
 pg_pool_size = 20
 pg_max_overflow = 40
 pg_pool_timeout = 30.0
-elasticsearch_host = localhost  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+elasticsearch_host = localhost
 elasticsearch_port = 9200
 chroma_db_path = Databases/chroma_db
 prompts_db_path = Databases/prompts.db
@@ -574,7 +578,8 @@ embedding_provider = huggingface
 embedding_model = Qwen/Qwen3-Embedding-0.6B
 onnx_model_path = ./App_Function_Libraries/models/onnx_models/
 model_dir = ./App_Function_Libraries/models/embedding_models
-embedding_api_url = http://localhost:8080/v1/embeddings  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+embedding_api_url = http://localhost:8080/v1/embeddings
 chunk_size = 400
 overlap = 200
 # Comma-separated media types that may legitimately produce zero embeddings
@@ -1001,8 +1006,10 @@ mlx_trust_remote_code = false
 # Local-API: OpenAI-compatible servers expect a 'model' in requests (per OpenAI spec + server docs).
 # If your server does not expose a default, add a placeholder model name here so the UI/clients can send one.
 [Local-API]
-kobold_api_IP = http://127.0.0.1:5001/api/v1/generate  # Dev default — override via .env for deployment
-kobold_openai_api_IP = http://127.0.0.1:5001/v1/chat/completions  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+kobold_api_IP = http://127.0.0.1:5001/api/v1/generate
+# Dev default — override via .env for deployment
+kobold_openai_api_IP = http://127.0.0.1:5001/v1/chat/completions
 # Koboldcpp OpenAI endpoint follows OpenAI spec and expects a model id (README "OpenAI API" section).
 # kobold_model = <model_name_for_openai_endpoint>
 kobold_streaming = False
@@ -1014,7 +1021,8 @@ kobold_max_tokens = 4096
 kobold_api_timeout = 90
 kobold_api_retry = 3
 kobold_api_retry_delay = 1
-llama_api_IP = http://127.0.0.1:8080/completion  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+llama_api_IP = http://127.0.0.1:8080/completion
 # llama.cpp (llama-server) is OpenAI-compatible and expects model (OpenAI Chat API spec; llama-server docs).
 # llama_model = <model_name_for_openai_endpoint>
 llama_streaming = True
@@ -1039,7 +1047,8 @@ ooba_max_tokens = 4096
 ooba_api_timeout = 90
 ooba_api_retry = 3
 ooba_api_retry_delay = 1
-tabby_api_IP = http://127.0.0.1:5000/v1/chat/completions  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+tabby_api_IP = http://127.0.0.1:5000/v1/chat/completions
 # TabbyAPI is OpenAI-compatible; send a model string per the OpenAI spec.
 # tabby_model = <model_name_for_openai_endpoint>
 tabby_streaming = False
@@ -1049,7 +1058,8 @@ tabby_max_tokens = 4096
 tabby_api_timeout = 90
 tabby_api_retry = 3
 tabby_api_retry_delay = 1
-vllm_api_IP = http://127.0.0.1:8000/v1/chat/completions  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+vllm_api_IP = http://127.0.0.1:8000/v1/chat/completions
 # vLLM OpenAI server examples include model (docs: OpenAI-Compatible Server -> chat.completions).
 vllm_model =
 vllm_streaming = False
@@ -1071,7 +1081,8 @@ ollama_max_tokens = 4096
 ollama_api_timeout = 9009
 ollama_api_retry = 3
 ollama_api_retry_delay = 1
-aphrodite_api_IP = http://127.0.0.1:8080/completion  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+aphrodite_api_IP = http://127.0.0.1:8080/completion
 # Aphrodite Engine exposes an OpenAI-compatible server; include model (README run examples).
 aphrodite_model =
 aphrodite_streaming = False
@@ -1096,7 +1107,8 @@ min_p = 0.05
 enabled = false
 executable_path = vendor/llama.cpp/server
 models_dir = models/gguf_models
-default_host = 127.0.0.1  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+default_host = 127.0.0.1
 default_port = 8080
 default_threads =
 default_n_gpu_layers = 0
@@ -1261,7 +1273,8 @@ default_alltalk_tts_speed = 1.0
 default_alltalk_tts_voice = alloy
 default_alltalk_tts_model = alltalk
 default_alltalk_tts_output_format = mp3
-alltalk_api_ip = http://127.0.0.1:7851/v1/audio/speech  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+alltalk_api_ip = http://127.0.0.1:7851/v1/audio/speech
 kokoro_model_path = ./App_Function_Libraries/models/kokoro_models/
 default_kokoro_tts_speed = 1.0
 default_kokoro_tts_voice = af_sky
@@ -1271,7 +1284,8 @@ default_custom_openai_tts_speed = 1
 default_custom_openai_tts_model = tts-1-hd
 default_custom_openai_tts_output_format = mp3
 # Placeholder; override with your custom OpenAI-compatible endpoint
-default_custom_openai_api_ip = http://localhost:8000/v1  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+default_custom_openai_api_ip = http://localhost:8000/v1
 # VibeVoice TTS Provider Configuration
 # VibeVoice is a local, voice-cloning TTS engine. Configure model paths, inference parameters (CFG scale, diffusion steps),
 # streaming behavior, and speaker context for optimal quality and performance.
@@ -1466,7 +1480,8 @@ runtime_overrides_file = tldw_Server_API/Config_Files/moderation_runtime_overrid
 
 [Redis]
 redis_enabled = False
-redis_host = localhost  # Dev default — override via .env for deployment
+# Dev default — override via .env for deployment
+redis_host = localhost
 redis_port = 6379
 redis_db = 0
 cache_ttl = 300

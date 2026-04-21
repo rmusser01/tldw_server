@@ -206,6 +206,8 @@ async def delete_media_item(
             media_id,
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except HTTPException:
+        raise
     except (ConflictError, InputError, DatabaseError) as exc:
         raise map_db_error_to_http(
             exc,
@@ -214,8 +216,6 @@ async def delete_media_item(
             conflict_detail="Media was modified concurrently",
             log_context=f"delete_media_item media_id={media_id}",
         ) from exc
-    except HTTPException:
-        raise
     except Exception as exc:
         logger.error(
             "Unexpected error trashing media {}: {}",
@@ -301,6 +301,8 @@ async def restore_media_item(
                 detail="Media not found or is inactive/trashed",
             )
         return MediaDetailResponse(**details)
+    except HTTPException:
+        raise
     except (ConflictError, InputError, DatabaseError) as exc:
         raise map_db_error_to_http(
             exc,
@@ -309,8 +311,6 @@ async def restore_media_item(
             conflict_detail="Media was modified concurrently",
             log_context=f"restore_media_item media_id={media_id}",
         ) from exc
-    except HTTPException:
-        raise
     except Exception as exc:
         logger.error(
             "Unexpected error restoring media {}: {}",
@@ -378,6 +378,8 @@ async def permanently_delete_media_item(
             media_id,
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except HTTPException:
+        raise
     except (ConflictError, InputError, DatabaseError) as exc:
         raise map_db_error_to_http(
             exc,
@@ -386,8 +388,6 @@ async def permanently_delete_media_item(
             conflict_detail="Media was modified concurrently",
             log_context=f"permanently_delete_media_item media_id={media_id}",
         ) from exc
-    except HTTPException:
-        raise
     except Exception as exc:
         logger.error(
             "Unexpected error permanently deleting media {}: {}",
@@ -721,13 +721,27 @@ async def update_media_keywords(
         db.update_keywords_for_media(media_id=media_id, keywords=desired)
         updated_keywords = fetch_keywords_for_media(db, media_id)
         return MediaKeywordsResponse(media_id=media_id, keywords=updated_keywords)
-    except (InputError, DatabaseError) as exc:
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, DatabaseError) as exc:
         raise map_db_error_to_http(
             exc,
             input_status=status.HTTP_404_NOT_FOUND,
             default_detail="Failed to update keywords",
             input_detail="Media not found or deleted",
+            conflict_detail="Conflict detected updating keywords",
             log_context=f"update_media_keywords media_id={media_id}",
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "Unexpected error updating keywords for media {}: {}",
+            media_id,
+            exc,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update keywords",
         ) from exc
 
 

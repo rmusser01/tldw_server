@@ -91,3 +91,22 @@ async def test_update_media_keywords_returns_not_found_for_missing_media(monkeyp
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail == "Media not found or deleted"
+
+
+@pytest.mark.asyncio
+async def test_update_media_keywords_returns_stable_500_for_unexpected_errors(monkeypatch):
+    def _explode(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(item_mod, "fetch_keywords_for_media", _explode)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await item_mod.update_media_keywords(
+            payload=MediaKeywordsUpdateRequest(mode="set", keywords=["beta"]),
+            media_id=42,
+            db=object(),
+            _current_user=SimpleNamespace(id="user-1"),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to update keywords"
