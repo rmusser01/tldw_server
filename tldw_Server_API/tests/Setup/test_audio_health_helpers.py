@@ -1,6 +1,8 @@
 from fastapi import HTTPException
 
 import pytest
+import time
+from unittest.mock import MagicMock
 
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_health
 
@@ -70,3 +72,295 @@ async def test_get_stt_health_sanitizes_suspicious_runtime_strings(mocker):
 
     assert result["message"] == "Internal health diagnostics were suppressed."
     assert "details" not in result
+
+
+@pytest.mark.asyncio
+async def test_get_tts_health_surfaces_sanitized_omnivoice_sidecar_status(monkeypatch):
+    class _FakeRegistry:
+        def list_capabilities(self, include_disabled=True):
+            assert include_disabled is True
+            return [
+                {
+                    "provider": "omnivoice",
+                    "availability": "enabled",
+                    "capabilities": {
+                        "provider_name": "OmniVoice",
+                        "metadata": {"runtime": "sidecar"},
+                    },
+                }
+            ]
+
+        async def get_adapter(self, _provider):
+            return None
+
+    class _FakeFactory:
+        registry = _FakeRegistry()
+
+    class _FakeTTSService:
+        def __init__(self):
+            self._omnivoice_supervisor = MagicMock(
+                _closing=False,
+                _process=MagicMock(returncode=None),
+                _base_url="http://127.0.0.1:8039",
+                _last_activity_at=time.time(),
+                last_failure_at=time.time(),
+                _startup_backoff_seconds=5.0,
+            )
+
+        def get_status(self):
+            return {
+                "providers": {
+                    "omnivoice": {
+                        "status": "available",
+                        "availability": "enabled",
+                        "initialized": True,
+                        "failed": False,
+                        "token": "secret-token",
+                        "command": ["python", "/Users/private/omnivoice_sidecar.py"],
+                        "traceback": "Traceback: /Users/private/omnivoice_sidecar.py",
+                        "repo_path": "/Users/private/OmniVoice",
+                        "authToken": "secret-auth-token",
+                        "apiKey": "secret-api-key",
+                        "baseURL": "http://127.0.0.1:8039",
+                        "repoPath": "/Users/private/OmniVoiceCamel",
+                        "stackTrace": "Traceback: /Users/private/camel.py",
+                    }
+                },
+                "available": 1,
+                "total_providers": 1,
+                "circuit_breakers": {},
+            }
+
+        async def get_capabilities(self):
+            return {}
+
+    async def _fake_get_tts_factory():
+        return _FakeFactory()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapter_registry.get_tts_factory",
+        _fake_get_tts_factory,
+        raising=True,
+    )
+
+    health = await audio_health.get_tts_health(
+        request=MagicMock(),
+        tts_service=_FakeTTSService(),
+    )
+
+    omnivoice_detail = health["providers"]["details"]["omnivoice"]
+    assert omnivoice_detail["availability"] == "enabled"
+    assert omnivoice_detail["runtime"] == "sidecar"
+    assert omnivoice_detail["sidecar_state"] == "ready"
+    assert "last_error_code" not in omnivoice_detail
+    assert "token" not in omnivoice_detail
+    assert "command" not in omnivoice_detail
+    assert "traceback" not in omnivoice_detail
+    assert "repo_path" not in omnivoice_detail
+    assert "authToken" not in omnivoice_detail
+    assert "apiKey" not in omnivoice_detail
+    assert "baseURL" not in omnivoice_detail
+    assert "repoPath" not in omnivoice_detail
+    assert "stackTrace" not in omnivoice_detail
+
+    envelope = health["capabilities_envelope"][0]
+    assert envelope["provider"] == "omnivoice"
+    assert envelope["runtime"] == "sidecar"
+
+
+@pytest.mark.asyncio
+async def test_get_tts_health_derives_omnivoice_backoff_state_from_supervisor(monkeypatch):
+    class _FakeRegistry:
+        def list_capabilities(self, include_disabled=True):
+            assert include_disabled is True
+            return [
+                {
+                    "provider": "omnivoice",
+                    "availability": "enabled",
+                    "capabilities": {
+                        "provider_name": "OmniVoice",
+                        "metadata": {"runtime": "sidecar"},
+                    },
+                }
+            ]
+
+        async def get_adapter(self, _provider):
+            return None
+
+    class _FakeFactory:
+        registry = _FakeRegistry()
+
+    class _FakeTTSService:
+        def __init__(self):
+            self._omnivoice_supervisor = MagicMock(
+                _closing=False,
+                _process=None,
+                _base_url=None,
+                last_failure_at=time.time(),
+                _startup_backoff_seconds=30.0,
+            )
+
+        def get_status(self):
+            return {
+                "providers": {
+                    "omnivoice": {
+                        "status": "available",
+                        "availability": "enabled",
+                        "initialized": True,
+                        "failed": False,
+                    }
+                },
+                "available": 1,
+                "total_providers": 1,
+                "circuit_breakers": {},
+            }
+
+        async def get_capabilities(self):
+            return {}
+
+    async def _fake_get_tts_factory():
+        return _FakeFactory()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapter_registry.get_tts_factory",
+        _fake_get_tts_factory,
+        raising=True,
+    )
+
+    health = await audio_health.get_tts_health(
+        request=MagicMock(),
+        tts_service=_FakeTTSService(),
+    )
+
+    omnivoice_detail = health["providers"]["details"]["omnivoice"]
+    assert omnivoice_detail["runtime"] == "sidecar"
+    assert omnivoice_detail["sidecar_state"] == "degraded"
+    assert omnivoice_detail["last_error_code"] == "startup_backoff"
+
+
+@pytest.mark.asyncio
+async def test_get_tts_health_marks_enabled_omnivoice_without_supervisor_idle_stopped(monkeypatch):
+    class _FakeRegistry:
+        def list_capabilities(self, include_disabled=True):
+            assert include_disabled is True
+            return [
+                {
+                    "provider": "omnivoice",
+                    "availability": "enabled",
+                    "capabilities": {
+                        "provider_name": "OmniVoice",
+                    },
+                }
+            ]
+
+        async def get_adapter(self, _provider):
+            return None
+
+    class _FakeFactory:
+        registry = _FakeRegistry()
+
+    class _FakeTTSService:
+        def get_status(self):
+            return {
+                "providers": {
+                    "omnivoice": {
+                        "status": "enabled",
+                        "availability": "enabled",
+                        "initialized": False,
+                        "failed": False,
+                    }
+                },
+                "available": 1,
+                "total_providers": 1,
+                "circuit_breakers": {},
+            }
+
+        async def get_capabilities(self):
+            return {}
+
+    async def _fake_get_tts_factory():
+        return _FakeFactory()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapter_registry.get_tts_factory",
+        _fake_get_tts_factory,
+        raising=True,
+    )
+
+    health = await audio_health.get_tts_health(
+        request=MagicMock(),
+        tts_service=_FakeTTSService(),
+    )
+
+    omnivoice_detail = health["providers"]["details"]["omnivoice"]
+    assert omnivoice_detail["runtime"] == "sidecar"
+    assert omnivoice_detail["sidecar_state"] == "idle_stopped"
+
+
+@pytest.mark.asyncio
+async def test_get_tts_health_keeps_live_omnivoice_startup_as_starting(monkeypatch):
+    class _FakeRegistry:
+        def list_capabilities(self, include_disabled=True):
+            assert include_disabled is True
+            return [
+                {
+                    "provider": "omnivoice",
+                    "availability": "enabled",
+                    "capabilities": {
+                        "provider_name": "OmniVoice",
+                    },
+                }
+            ]
+
+        async def get_adapter(self, _provider):
+            return None
+
+    class _FakeFactory:
+        registry = _FakeRegistry()
+
+    class _FakeTTSService:
+        def __init__(self):
+            self._omnivoice_supervisor = MagicMock(
+                _closing=False,
+                _process=MagicMock(returncode=None),
+                _base_url="http://127.0.0.1:8039",
+                _last_activity_at=None,
+                last_failure_at=None,
+                _startup_backoff_seconds=30.0,
+            )
+
+        def get_status(self):
+            return {
+                "providers": {
+                    "omnivoice": {
+                        "status": "enabled",
+                        "availability": "enabled",
+                        "initialized": False,
+                        "failed": False,
+                    }
+                },
+                "available": 1,
+                "total_providers": 1,
+                "circuit_breakers": {},
+            }
+
+        async def get_capabilities(self):
+            return {}
+
+    async def _fake_get_tts_factory():
+        return _FakeFactory()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapter_registry.get_tts_factory",
+        _fake_get_tts_factory,
+        raising=True,
+    )
+
+    health = await audio_health.get_tts_health(
+        request=MagicMock(),
+        tts_service=_FakeTTSService(),
+    )
+
+    omnivoice_detail = health["providers"]["details"]["omnivoice"]
+    assert omnivoice_detail["runtime"] == "sidecar"
+    assert omnivoice_detail["sidecar_state"] == "starting"

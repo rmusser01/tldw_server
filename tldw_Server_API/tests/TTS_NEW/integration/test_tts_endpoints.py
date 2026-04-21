@@ -23,6 +23,7 @@ from tldw_Server_API.app.api.v1.endpoints.audio import audio_jobs
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.TTS.adapters.base import TTSResponse
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 from tldw_Server_API.app.core.TTS.tts_jobs_worker import _handle_tts_job
 
@@ -307,6 +308,56 @@ class TestTTSGenerateEndpoint:
 
             # Should handle long text appropriately
             assert response.status_code in [status.HTTP_200_OK, status.HTTP_413_CONTENT_TOO_LARGE]
+
+    async def test_generate_omnivoice_without_voice_normalizes_to_auto(self, test_client, auth_headers, monkeypatch):
+        """OmniVoice requests without an explicit voice should reach the adapter with voice='auto'."""
+
+        seen: dict[str, Any] = {}
+
+        class _FakeAdapter:
+            provider_name = "omnivoice"
+            provider_key = "omnivoice"
+
+            async def generate(self, request):
+                seen["voice"] = request.voice
+                seen["model"] = request.model
+                return TTSResponse(audio_data=b"omnivoice-audio", format=request.format, sample_rate=24000)
+
+        class _FakeFactory:
+            def get_provider_for_model(self, _model):
+                return "omnivoice"
+
+        service = TTSServiceV2()
+        service._ensure_factory = AsyncMock(return_value=_FakeFactory())
+        service._get_adapter = AsyncMock(return_value=_FakeAdapter())
+
+        async def _fake_get_tts_service_v2():
+            return service
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.TTS.tts_service_v2.get_tts_service_v2",
+            _fake_get_tts_service_v2,
+            raising=True,
+        )
+        test_client.app.dependency_overrides[audio_endpoints.get_tts_service] = _fake_get_tts_service_v2
+
+        try:
+            response = test_client.post(
+                "/api/v1/audio/speech",
+                json={
+                    "input": "Hello OmniVoice",
+                    "model": "omnivoice",
+                    "response_format": "wav",
+                    "stream": False,
+                },
+                headers=auth_headers,
+            )
+        finally:
+            test_client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert seen["model"] == "omnivoice"
+        assert seen["voice"] == "auto"
 
 # ========================================================================
 # TTS Streaming Endpoint Tests
