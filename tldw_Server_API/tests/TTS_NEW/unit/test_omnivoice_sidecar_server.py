@@ -35,3 +35,18 @@ def test_sidecar_accepts_authorized_health_probe(test_client: TestClient):
     payload = response.json()
     assert payload["status"] == "ok"  # nosec B101
     assert payload["ready"] is True  # nosec B101
+
+
+@pytest.mark.unit
+def test_sidecar_runtime_rejects_non_loopback_bind_host():
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server import validate_loopback_host
+
+    with pytest.raises(ValueError, match="loopback"):
+        validate_loopback_host("0.0.0.0")  # nosec B104
+
+
+@pytest.mark.unit
+def test_sidecar_runtime_normalizes_localhost_to_loopback():
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server import validate_loopback_host
+
+    assert validate_loopback_host("localhost") == "127.0.0.1"  # nosec B101

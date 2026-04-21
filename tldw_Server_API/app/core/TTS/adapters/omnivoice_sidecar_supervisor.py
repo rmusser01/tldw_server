@@ -15,6 +15,7 @@ from loguru import logger
 from tldw_Server_API.app.core.Local_LLM.handler_utils import build_base_url, is_port_free, resolve_client_host
 
 from .omnivoice_sidecar_protocol import X_TLDW_SIDECAR_TOKEN_HEADER, build_sidecar_auth_headers
+from .omnivoice_sidecar_server import validate_loopback_host
 
 
 def create_sidecar_async_client(*, timeout: float) -> httpx.AsyncClient:
@@ -29,14 +30,14 @@ class OmniVoiceSidecarSupervisor:
         self._provider_config = dict(provider_config or {})
         self._extra_params = dict(self._provider_config.get("extra_params") or {})
         self._repo_root = Path(repo_root or Path.cwd()).resolve()
-        self._host = str(self._extra_params.get("host") or "127.0.0.1")
-        self._start_port = int(self._extra_params.get("port") or 8039)
+        self._host = validate_loopback_host(self._extra_params.get("host"))
+        self._start_port = int(self._coalesce_extra_param("port", 8039))
         self._autoselect_port = bool(self._extra_params.get("autoselect_port", True))
-        self._port_probe_max = max(0, int(self._extra_params.get("port_probe_max") or 10))
-        self._healthcheck_timeout_seconds = float(self._extra_params.get("healthcheck_timeout_seconds") or 10.0)
-        self._healthcheck_interval_seconds = float(self._extra_params.get("healthcheck_interval_seconds") or 0.25)
-        self._startup_backoff_seconds = float(self._extra_params.get("startup_backoff_seconds") or 5.0)
-        self._idle_shutdown_seconds = float(self._extra_params.get("idle_shutdown_seconds") or 900.0)
+        self._port_probe_max = max(0, int(self._coalesce_extra_param("port_probe_max", 10)))
+        self._healthcheck_timeout_seconds = float(self._coalesce_extra_param("healthcheck_timeout_seconds", 10.0))
+        self._healthcheck_interval_seconds = float(self._coalesce_extra_param("healthcheck_interval_seconds", 0.25))
+        self._startup_backoff_seconds = float(self._coalesce_extra_param("startup_backoff_seconds", 5.0))
+        self._idle_shutdown_seconds = float(self._coalesce_extra_param("idle_shutdown_seconds", 900.0))
         self._closing = False
         self._token = secrets.token_urlsafe(32)
         self._process: asyncio.subprocess.Process | None = None
@@ -45,6 +46,10 @@ class OmniVoiceSidecarSupervisor:
         self._last_failure_at: float | None = None
         self._last_activity_at: float | None = None
         self._lock = asyncio.Lock()
+
+    def _coalesce_extra_param(self, key: str, default: Any) -> Any:
+        value = self._extra_params.get(key)
+        return default if value is None else value
 
     @property
     def sidecar_token(self) -> str:
@@ -100,7 +105,11 @@ class OmniVoiceSidecarSupervisor:
             return False
         if (time.time() - self._last_activity_at) < self._idle_shutdown_seconds:
             return False
+        if self._process is None or self._process.returncode is not None:
+            self._last_activity_at = None
+            return False
         await self._stop_process()
+        self._last_activity_at = None
         return True
 
     def _record_failure(self) -> None:
@@ -149,6 +158,10 @@ class OmniVoiceSidecarSupervisor:
 
         async with create_sidecar_async_client(timeout=self._healthcheck_interval_seconds) as client:
             while asyncio.get_running_loop().time() < deadline:
+                if self._process is not None and self._process.returncode is not None:
+                    raise RuntimeError(
+                        f"OmniVoice sidecar exited during startup with code {self._process.returncode}"
+                    )
                 try:
                     response = await client.get(
                         f"{self._base_url.rstrip('/')}/health",

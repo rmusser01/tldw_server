@@ -26,6 +26,12 @@ class _FakeProcess:
         self.returncode = -9
 
 
+class _ExitedProcess(_FakeProcess):
+    def __init__(self, returncode: int = 1):
+        super().__init__()
+        self.returncode = returncode
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_supervisor_generates_fresh_token_and_includes_it_on_internal_requests(tmp_path, monkeypatch):
@@ -199,3 +205,121 @@ async def test_supervisor_readiness_polling_fails_cleanly_when_sidecar_never_rea
         await supervisor.ensure_started()
 
     assert supervisor.last_failure_at is not None  # nosec B101
+
+
+@pytest.mark.unit
+def test_supervisor_rejects_non_loopback_host(tmp_path):
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
+
+    with pytest.raises(ValueError, match="loopback"):
+        OmniVoiceSidecarSupervisor(
+            provider_config={"extra_params": {"host": "192.168.1.40", "port": 8039}},
+            repo_root=tmp_path,
+        )
+
+
+@pytest.mark.unit
+def test_supervisor_preserves_explicit_zero_config_values(tmp_path):
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
+
+    supervisor = OmniVoiceSidecarSupervisor(
+        provider_config={
+            "extra_params": {
+                "host": "127.0.0.1",
+                "port_probe_max": 0,
+                "startup_backoff_seconds": 0,
+                "idle_shutdown_seconds": 0,
+            }
+        },
+        repo_root=tmp_path,
+    )
+
+    assert supervisor._port_probe_max == 0  # nosec B101
+    assert supervisor._startup_backoff_seconds == 0  # nosec B101
+    assert supervisor._idle_shutdown_seconds == 0  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_shutdown_if_idle_returns_false_without_live_process(tmp_path):
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
+
+    supervisor = OmniVoiceSidecarSupervisor(
+        provider_config={"extra_params": {"host": "127.0.0.1", "idle_shutdown_seconds": 1}},
+        repo_root=tmp_path,
+    )
+    supervisor._last_activity_at = 0
+
+    stopped = await supervisor.shutdown_if_idle()
+
+    assert stopped is False  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_shutdown_if_idle_clears_idle_state_after_stopping_live_process(tmp_path):
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
+
+    supervisor = OmniVoiceSidecarSupervisor(
+        provider_config={"extra_params": {"host": "127.0.0.1", "idle_shutdown_seconds": 1}},
+        repo_root=tmp_path,
+    )
+    supervisor._process = _FakeProcess()
+    supervisor._last_activity_at = 0
+
+    first = await supervisor.shutdown_if_idle()
+    second = await supervisor.shutdown_if_idle()
+
+    assert first is True  # nosec B101
+    assert second is False  # nosec B101
+    assert supervisor._last_activity_at is None  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_supervisor_readiness_fails_fast_when_child_exits_during_startup(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters import omnivoice_sidecar_supervisor as supervisor_module
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
+
+    call_count = 0
+
+    class _NeverReadyClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, *, headers=None):  # noqa: ARG002
+            nonlocal call_count
+            call_count += 1
+            raise httpx.ConnectError("not ready")
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ARG001
+        return _ExitedProcess(returncode=3)
+
+    monkeypatch.setattr(supervisor_module, "is_port_free", lambda host, port: True, raising=True)
+    monkeypatch.setattr(supervisor_module.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec, raising=True)
+    monkeypatch.setattr(
+        supervisor_module,
+        "create_sidecar_async_client",
+        lambda *, timeout: _NeverReadyClient(),
+        raising=True,
+    )
+
+    supervisor = OmniVoiceSidecarSupervisor(
+        provider_config={
+            "extra_params": {
+                "host": "127.0.0.1",
+                "port": 8039,
+                "healthcheck_timeout_seconds": 10,
+                "healthcheck_interval_seconds": 0.01,
+            }
+        },
+        repo_root=tmp_path,
+    )
+
+    with pytest.raises(RuntimeError, match="health"):
+        await supervisor.ensure_started()
+
+    assert call_count <= 1  # nosec B101

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import os
 import wave
 from io import BytesIO
@@ -12,6 +13,22 @@ from .omnivoice_sidecar_protocol import (
     OmniVoiceSynthesizeResponse,
     X_TLDW_SIDECAR_TOKEN_HEADER,
 )
+
+
+def validate_loopback_host(host: str | None) -> str:
+    """Normalize accepted loopback bind hosts and reject everything else."""
+    candidate = str(host or "").strip()
+    if not candidate or candidate.lower() == "localhost":
+        return "127.0.0.1"
+
+    try:
+        parsed = ipaddress.ip_address(candidate)
+    except ValueError as exc:
+        raise ValueError("OmniVoice sidecar host must be a loopback address") from exc
+
+    if not parsed.is_loopback:
+        raise ValueError("OmniVoice sidecar host must be a loopback address")
+    return "127.0.0.1" if parsed.version == 4 else "::1"
 
 
 def _build_silent_wav(*, sample_rate: int = 24000, channels: int = 1, sample_width: int = 2) -> bytes:
@@ -86,9 +103,8 @@ app = _load_app_from_env() if os.environ.get("OMNIVOICE_SIDECAR_TOKEN") else Non
 if __name__ == "__main__":  # pragma: no cover - runtime entrypoint
     import uvicorn
 
-    host = os.environ.get("OMNIVOICE_SIDECAR_HOST", "127.0.0.1")
+    host = validate_loopback_host(os.environ.get("OMNIVOICE_SIDECAR_HOST", "127.0.0.1"))
     port = int(os.environ.get("OMNIVOICE_SIDECAR_PORT", "8039"))
     if app is None:
         raise RuntimeError("OMNIVOICE_SIDECAR_TOKEN is required")
     uvicorn.run(app, host=host, port=port, log_level="warning")
-
