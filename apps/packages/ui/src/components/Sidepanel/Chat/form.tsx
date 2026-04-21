@@ -128,6 +128,11 @@ import {
   shouldResetDefaultCharacterBootstrap
 } from "@/utils/default-character-preference"
 import { CONTEXT_FILE_SIZE_MB_SETTING } from "@/services/settings/ui-settings"
+import {
+  ChatComposer,
+  useComposerVariantPreference,
+} from "@/components/Chat/composer/ChatComposer"
+import { useComposerEnabledPreference } from "@/components/Chat/composer/hooks/useComposerEnabledPreference"
 import { browser } from "wxt/browser"
 import type { Character } from "@/types/character"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
@@ -308,6 +313,26 @@ export const SidepanelForm = ({
     textareaRef,
     isProMode
   })
+
+  // Experimental Primer composer wire-up — opt in via ?nextgenComposer=1
+  // query param OR the Settings "Enable new composer" toggle. Mirrors
+  // the Playground integration: when ON, renders <ChatComposer> via the
+  // shared message + submitForm pipeline.
+  //
+  // URL flag is mount-static; the toggle uses the live-syncing hook so
+  // cross-tab flips update this surface without a reload.
+  const [urlFlagEnabled] = React.useState(() => {
+    if (typeof window === "undefined") return false
+    try {
+      const params = new URLSearchParams(window.location.search)
+      return params.get("nextgenComposer") === "1"
+    } catch {
+      return false
+    }
+  })
+  const [toggleEnabled] = useComposerEnabledPreference()
+  const nextgenComposerEnabled = urlFlagEnabled || toggleEnabled
+  const [nextgenComposerVariant] = useComposerVariantPreference()
   const { deferredInput: deferredComposerInput } = useDeferredComposerInput(
     form.values.message || ""
   )
@@ -2678,7 +2703,9 @@ export const SidepanelForm = ({
                         )}
                       </div>
                     )}
-                    <div className="relative">
+                    {(() => {
+                      const composerTextareaShellNode = (
+                        <div className="relative">
                       {wrapComposerProfile(
                         "sidepanel-textarea-shell",
                         <div className="relative rounded-2xl border border-border/70 bg-surface/80 px-1 py-1.5 transition focus-within:border-focus/60 focus-within:ring-2 focus-within:ring-focus/30">
@@ -2773,52 +2800,58 @@ export const SidepanelForm = ({
                           {t("sidepanel:composer.draftSaved", "Draft saved")}
                         </span>
                       )}
-                    </div>
-                    {/* Inline error message - positioned right after textarea for visibility */}
-                    {form.errors.message && (
-                      <div
-                        role="alert"
-                        aria-live="assertive"
-                        aria-atomic="true"
-                        className="flex items-center justify-between gap-2 px-2 py-1 text-xs text-danger animate-shake"
-                      >
-                        <div className="flex items-center gap-2">
-                          <svg className="h-3.5 w-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                          <span>{form.errors.message}</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => form.clearFieldError("message")}
-                          className="flex-shrink-0 text-danger hover:text-danger"
-                          aria-label={t("common:dismiss", "Dismiss")}
-                          title={t("common:dismiss", "Dismiss")}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    )}
-                    {/* Proactive validation hints - show why send might be disabled */}
-                    {!form.errors.message && isConnectionReady && !streaming && isProMode && (
-                      <div className="px-2 py-1 text-label text-text-subtle">
-                        {!selectedModel ? (
-                          <span className="flex items-center gap-1">
-                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            {t("sidepanel:composer.hints.selectModel", "Select a model above to start chatting")}
-                          </span>
-                        ) : form.values.message.trim().length === 0 && form.values.image.length === 0 ? (
-                          <span>
-                            {sendWhenEnter
-                              ? t("sidepanel:composer.hints.typeAndEnter", "Type a message and press Enter to send")
-                              : t("sidepanel:composer.hints.typeAndClick", "Type a message and click Send")}
-                          </span>
-                        ) : null}
-                      </div>
-                    )}
-                    <div className="mt-2 flex flex-col gap-2">
+                      )
+
+                      const composerInlineMessagesNode = (
+                        <>
+                          {form.errors.message && (
+                            <div
+                              role="alert"
+                              aria-live="assertive"
+                              aria-atomic="true"
+                              className="flex items-center justify-between gap-2 px-2 py-1 text-xs text-danger animate-shake"
+                            >
+                              <div className="flex items-center gap-2">
+                                <svg className="h-3.5 w-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                                <span>{form.errors.message}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => form.clearFieldError("message")}
+                                className="flex-shrink-0 text-danger hover:text-danger"
+                                aria-label={t("common:dismiss", "Dismiss")}
+                                title={t("common:dismiss", "Dismiss")}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
+                          {!form.errors.message && isConnectionReady && !streaming && isProMode && (
+                            <div className="px-2 py-1 text-label text-text-subtle">
+                              {!selectedModel ? (
+                                <span className="flex items-center gap-1">
+                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  {t("sidepanel:composer.hints.selectModel", "Select a model above to start chatting")}
+                                </span>
+                              ) : form.values.message.trim().length === 0 && form.values.image.length === 0 ? (
+                                <span>
+                                  {sendWhenEnter
+                                    ? t("sidepanel:composer.hints.typeAndEnter", "Type a message and press Enter to send")
+                                    : t("sidepanel:composer.hints.typeAndClick", "Type a message and click Send")}
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
+                        </>
+                      )
+
+                      const composerControlAreaNode = (
+                        <div className="mt-2 flex flex-col gap-2">
                       <Tooltip title={persistenceTooltip}>
                         <div className="flex items-center gap-2">
                           <Switch
@@ -3337,8 +3370,133 @@ export const SidepanelForm = ({
                           </div>
                         </>
                       )}
-                    </div>
-                  </div>
+                        </div>
+                        </div>
+                      )
+
+                      if (nextgenComposerEnabled) {
+                        const sharedNoticesSlot = composerInlineMessagesNode
+
+                        // Compact brief for V3 in the sidepanel — same idea
+                        // as Playground's, trimmed to the data Sidepanel
+                        // actually has (no character picker, no source list
+                        // beyond chat-with-page mode). Click handlers route
+                        // to the same actions the legacy controls expose.
+                        const briefSections = [
+                          {
+                            id: "sidepanel-brief",
+                            label: "Brief",
+                            fields: [
+                              {
+                                id: "model",
+                                fieldKey: "mdl",
+                                value: selectedModel || "—",
+                                active: Boolean(selectedModel),
+                                onClick: () => setOpenModelSettings(true),
+                                "aria-label": selectedModel
+                                  ? `Change model (current: ${selectedModel})`
+                                  : "Pick a model",
+                              },
+                              {
+                                id: "mode",
+                                fieldKey: "mod",
+                                value: chatMode,
+                                active: chatMode !== "normal",
+                                onClick: () =>
+                                  setChatMode(
+                                    chatMode === "rag" ? "normal" : "rag"
+                                  ),
+                                "aria-label":
+                                  chatMode === "rag"
+                                    ? "Switch to normal chat mode"
+                                    : "Switch to chat-with-page (RAG) mode",
+                              },
+                              {
+                                id: "web",
+                                fieldKey: "web",
+                                value: webSearch ? "on" : "off",
+                                active: webSearch,
+                                onClick: () => setWebSearch(!webSearch),
+                                "aria-label": webSearch
+                                  ? "Turn web search off"
+                                  : "Turn web search on",
+                              },
+                            ],
+                          },
+                        ]
+
+                        const variantNode =
+                          nextgenComposerVariant === "v5" ? (
+                            <ChatComposer
+                              variant="v5"
+                              message={form.values.message}
+                              onMessageChange={(value) =>
+                                form.setFieldValue("message", value)
+                              }
+                              onSend={() => void submitForm()}
+                              sending={isSending}
+                              stopStreaming={stopStreamingRequest}
+                              onPaletteTrigger={() => {
+                                // V5 design: ⌘K injects `/` to open the
+                                // textarea's existing slash menu.
+                                const current = form.values.message
+                                form.setFieldValue(
+                                  "message",
+                                  current.endsWith("/") ? current : `${current}/`
+                                )
+                                textareaRef.current?.focus()
+                              }}
+                              textareaSlot={composerTextareaShellNode}
+                              facetsSlot={composerControlAreaNode}
+                              noticesSlot={sharedNoticesSlot}
+                            />
+                          ) : nextgenComposerVariant === "v3" ? (
+                            <ChatComposer
+                              variant="v3"
+                              message={form.values.message}
+                              onMessageChange={(value) =>
+                                form.setFieldValue("message", value)
+                              }
+                              onSend={() => void submitForm()}
+                              sending={isSending}
+                              stopStreaming={stopStreamingRequest}
+                              briefSections={briefSections}
+                              textareaSlot={composerTextareaShellNode}
+                              bottomBarSlot={composerControlAreaNode}
+                              noticesSlot={sharedNoticesSlot}
+                            />
+                          ) : (
+                            <ChatComposer
+                              variant="v1"
+                              message={form.values.message}
+                              onMessageChange={(value) =>
+                                form.setFieldValue("message", value)
+                              }
+                              onSend={() => void submitForm()}
+                              sending={isSending}
+                              stopStreaming={stopStreamingRequest}
+                              density="compact"
+                              textareaSlot={composerTextareaShellNode}
+                              bottomBarSlot={composerControlAreaNode}
+                              noticesSlot={sharedNoticesSlot}
+                            />
+                          )
+
+                        return (
+                          <div data-testid="nextgen-composer-wrapper">
+                            {variantNode}
+                          </div>
+                        )
+                      }
+
+                      return (
+                        <>
+                          {composerTextareaShellNode}
+                          {composerInlineMessagesNode}
+                          {composerControlAreaNode}
+                        </>
+                      )
+                    })()}
                   </div>
                 </form>
               </div>
