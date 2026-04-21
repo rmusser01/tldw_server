@@ -6,14 +6,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-from collections import defaultdict, deque
 import contextlib
-from datetime import datetime, timezone
 import hashlib
 import json
 import re
 import time
 import uuid
+from collections import defaultdict, deque
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urljoin
 
@@ -24,6 +24,7 @@ from starlette.requests import Request as StarletteRequest
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.persona import (
+    PersonaBuddyResponse,
     PersonaCommandDryRunRequest,
     PersonaCommandDryRunResponse,
     PersonaCommandPlannedActionResponse,
@@ -38,50 +39,47 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaExemplarCreate,
     PersonaExemplarDeleteResponse,
     PersonaExemplarImportRequest,
-    PersonaExemplarReviewRequest,
     PersonaExemplarResponse,
+    PersonaExemplarReviewRequest,
     PersonaExemplarUpdate,
     PersonaInfo,
+    PersonaLiveVoiceAnalyticsSummary,
+    PersonaLiveVoiceSessionSummary,
+    PersonaLiveVoiceSessionUpdateRequest,
     PersonaPolicyRulesReplaceRequest,
     PersonaPolicyRulesResponse,
-    PersonaBuddyResponse,
     PersonaProfileCreate,
     PersonaProfileResponse,
     PersonaProfileUpdate,
+    PersonaScopeRulesReplaceRequest,
+    PersonaScopeRulesResponse,
+    PersonaSessionDetail,
+    PersonaSessionRequest,
+    PersonaSessionResponse,
+    PersonaSessionSummary,
     PersonaSetupAnalyticsResponse,
     PersonaSetupAnalyticsRunSummary,
     PersonaSetupAnalyticsSummary,
     PersonaSetupEventCreate,
     PersonaSetupEventWriteResponse,
     PersonaSetupState,
-    PersonaVoiceDefaults,
     PersonaStateHistoryResponse,
-    PersonaStateRestoreRequest,
     PersonaStateResponse,
+    PersonaStateRestoreRequest,
     PersonaStateUpdateRequest,
-    PersonaSessionDetail,
-    PersonaSessionRequest,
-    PersonaSessionResponse,
-    PersonaSessionSummary,
-    PersonaLiveVoiceAnalyticsSummary,
-    PersonaLiveVoiceSessionSummary,
-    PersonaLiveVoiceSessionUpdateRequest,
-    PersonaScopeRulesReplaceRequest,
-    PersonaScopeRulesResponse,
     PersonaVoiceAnalyticsResponse,
     PersonaVoiceAnalyticsSummary,
     PersonaVoiceCommandAnalyticsItem,
+    PersonaVoiceDefaults,
     PersonaVoiceFallbackAnalytics,
 )
 from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
+    VoiceActionType,
     VoiceCommandDefinition,
     VoiceCommandInfo,
     VoiceCommandListResponse,
     VoiceCommandToggleRequest,
-    VoiceActionType,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import verify_jwt_and_fetch_user
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import (
     get_api_key_manager,
     has_scope,
@@ -91,10 +89,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, InvalidTok
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.feature_flags import (
-    is_mcp_hub_policy_enforcement_enabled,
-    is_persona_enabled,
-)
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user, verify_jwt_and_fetch_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -102,10 +97,19 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.feature_flags import (
+    is_mcp_hub_policy_enforcement_enabled,
+    is_persona_enabled,
+)
+from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
 from tldw_Server_API.app.core.MCP_unified import MCPRequest, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.MCP_unified.persona_scope import normalize_persona_scope_payload
 from tldw_Server_API.app.core.Metrics import increment_counter
+from tldw_Server_API.app.core.Persona.buddy import (
+    build_persona_buddy_summary,
+    ensure_persona_buddy_for_profile,
+)
 from tldw_Server_API.app.core.Persona.connections import (
     PERSONA_CONNECTION_STATUS_FIELD,
     PersonaConnectionConfigError,
@@ -122,11 +126,26 @@ from tldw_Server_API.app.core.Persona.connections import (
     safe_template_context,
     validate_connection_request_target,
 )
+from tldw_Server_API.app.core.Persona.exemplar_ingestion import (
+    append_exemplar_review_note,
+    build_transcript_exemplar_candidates,
+)
+from tldw_Server_API.app.core.Persona.exemplar_runtime import (
+    append_persona_exemplar_sections,
+    resolve_persona_exemplar_runtime_context,
+)
+from tldw_Server_API.app.core.Persona.exemplar_turn_classifier import classify_persona_turn
 from tldw_Server_API.app.core.Persona.memory_integration import (
     persist_persona_turn,
     persist_tool_outcome,
     retrieve_top_memories,
 )
+from tldw_Server_API.app.core.Persona.policy_evaluator import (
+    default_allow_rules,
+    evaluate_canonical_policy,
+    normalize_policy_rules,
+)
+from tldw_Server_API.app.core.Persona.session_manager import get_session_manager
 from tldw_Server_API.app.core.Personalization.companion_activity import (
     normalize_persona_activity_surface,
     record_persona_session_started,
@@ -134,42 +153,27 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_persona_tool_executed,
 )
 from tldw_Server_API.app.core.Personalization.companion_context import load_companion_context
-from tldw_Server_API.app.core.Persona.exemplar_runtime import (
-    append_persona_exemplar_sections,
-    resolve_persona_exemplar_runtime_context,
-)
-from tldw_Server_API.app.core.Persona.exemplar_turn_classifier import classify_persona_turn
-from tldw_Server_API.app.core.Persona.exemplar_ingestion import (
-    append_exemplar_review_note,
-    build_transcript_exemplar_candidates,
-)
-from tldw_Server_API.app.core.Persona.policy_evaluator import (
-    default_allow_rules,
-    evaluate_canonical_policy,
-    normalize_policy_rules,
-)
-from tldw_Server_API.app.core.Persona.buddy import (
-    build_persona_buddy_summary,
-    ensure_persona_buddy_for_profile,
-)
-from tldw_Server_API.app.core.Persona.session_manager import get_session_manager
-from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
 from tldw_Server_API.app.core.Skills.context_integration import handle_skill_tool_call
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.VoiceAssistant import (
     ActionType as VoiceActionTypeInternal,
+)
+from tldw_Server_API.app.core.VoiceAssistant import (
     VoiceCommand,
     get_persona_live_voice_summary,
-    delete_voice_command as delete_voice_command_db,
     get_voice_analytics_summary_stats,
-    get_user_voice_commands,
-    get_voice_command as get_voice_command_db,
     get_voice_command_registry,
     get_voice_command_router,
     get_voice_resolution_stats,
     get_voice_top_commands,
     record_persona_live_voice_event,
     save_voice_command,
+)
+from tldw_Server_API.app.core.VoiceAssistant import (
+    delete_voice_command as delete_voice_command_db,
+)
+from tldw_Server_API.app.core.VoiceAssistant import (
+    get_voice_command as get_voice_command_db,
 )
 
 router = APIRouter()
@@ -258,23 +262,48 @@ def _increment_persona_metric(metric_name: str, labels: dict[str, str]) -> None:
         increment_counter(metric_name, 1, labels=safe_labels)
 
 
+_PERSONA_SETTING_READ_EXCEPTIONS = (AttributeError, ImportError, TypeError, ValueError)
+
+
+def _log_persona_setting_fallback(key: str, default: int | float, exc: Exception) -> None:
+    logger.debug(
+        "Falling back to default persona setting {}={} after config read failure: {}",
+        key,
+        default,
+        exc,
+    )
+
+
 def _persona_int_setting(key: str, default: int, min_val: int, max_val: int) -> int:
+    """Read an integer persona setting, then clamp it into the supported range."""
     try:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get(key, default))
-    except Exception:  # noqa: BLE001
+    except _PERSONA_SETTING_READ_EXCEPTIONS as exc:
+        _log_persona_setting_fallback(key, default, exc)
         value = default
     return max(min_val, min(value, max_val))
 
 
-def _persona_float_setting(key: str, default: float, min_val: float, max_val: float) -> float:
+def _persona_float_setting(
+    key: str,
+    default: float,
+    min_val: float,
+    max_val: float,
+    *,
+    disable_on_zero: bool = False,
+) -> float:
+    """Read a float persona setting with fallback, optional zero-disable, and clamping."""
     try:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = float(_app_settings.get(key, default))
-    except Exception:  # noqa: BLE001
+    except _PERSONA_SETTING_READ_EXCEPTIONS as exc:
+        _log_persona_setting_fallback(key, default, exc)
         value = default
+    if disable_on_zero and value <= 0:
+        return 0.0
     return max(min_val, min(value, max_val))
 
 
@@ -342,15 +371,13 @@ def _get_persona_ws_auth_revalidate_interval_s() -> float:
 
     A value <= 0 disables the background watchdog.
     """
-    try:
-        from tldw_Server_API.app.core.config import settings as _app_settings
-
-        value = float(_app_settings.get("PERSONA_WS_AUTH_REVALIDATE_INTERVAL_S", 15.0))
-    except Exception:  # noqa: BLE001
-        value = 15.0
-    if value <= 0:
-        return 0.0
-    return max(0.5, min(value, 300.0))
+    return _persona_float_setting(
+        "PERSONA_WS_AUTH_REVALIDATE_INTERVAL_S",
+        15.0,
+        0.5,
+        300.0,
+        disable_on_zero=True,
+    )
 
 
 def _get_persona_rbac_flags() -> tuple[bool, bool]:
@@ -1216,10 +1243,8 @@ def _memory_mode_allows_personalization_retrieval(runtime_mode: str, *, session_
     normalized = str(runtime_mode or "").strip().lower()
     if normalized == "persistent_scoped":
         return True
-    if normalized == "session_scoped" and session_exists:
-        return False
     # Backward compatibility for pre-session-scaffold clients that don't create persisted sessions first.
-    return True
+    return not (normalized == "session_scoped" and session_exists)
 
 
 def _require_current_user_id(current_user: User) -> str:
@@ -1501,7 +1526,7 @@ def _rollback_updated_persona_profile_after_buddy_failure(
 ) -> None:
     """Restore the previous visible profile state when buddy sync fails after update."""
     persona_hash = _redacted_id_for_logs(persona_id)
-    rollback_data = {field: previous_profile.get(field) for field in update_data.keys()}
+    rollback_data = {field: previous_profile.get(field) for field in update_data}
     if not rollback_data:
         return
     try:
@@ -2469,11 +2494,9 @@ async def _resolve_authenticated_user_id(
 
     def _set_auth_context(*, method: str | None, api_key_scopes: set[str] | None = None) -> None:
         try:
-            setattr(ws.state, "persona_auth_method", str(method or "").strip().lower())
-            setattr(
-                ws.state,
-                "persona_api_key_scopes",
-                sorted(str(scope).strip().lower() for scope in (api_key_scopes or set()) if str(scope).strip()),
+            ws.state.persona_auth_method = str(method or "").strip().lower()
+            ws.state.persona_api_key_scopes = sorted(
+                str(scope).strip().lower() for scope in (api_key_scopes or set()) if str(scope).strip()
             )
         except Exception:
             return

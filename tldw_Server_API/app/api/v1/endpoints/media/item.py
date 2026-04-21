@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
+
 from .....core.DB_Management.media_db.legacy_maintenance import (
     permanently_delete_item,
 )
@@ -134,7 +135,13 @@ async def get_media_item(
     except HTTPException:
         raise
     except (DatabaseError, InputError, ConflictError) as exc:
-        raise map_db_error_to_http(exc, default_detail="Database error retrieving media details") from exc
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error retrieving media details",
+            input_detail="Invalid media identifier",
+            conflict_detail="Conflict detected while retrieving media details",
+            log_context=f"get_media_item media_id={media_id}",
+        ) from exc
     except Exception as exc:
         logger.error(
             "Unexpected error fetching details for media {}: {}",
@@ -200,7 +207,13 @@ async def delete_media_item(
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except (ConflictError, InputError, DatabaseError) as exc:
-        raise map_db_error_to_http(exc, default_detail="Database error moving media to trash") from exc
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error moving media to trash",
+            input_detail="Invalid media identifier",
+            conflict_detail="Media was modified concurrently",
+            log_context=f"delete_media_item media_id={media_id}",
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -289,7 +302,13 @@ async def restore_media_item(
             )
         return MediaDetailResponse(**details)
     except (ConflictError, InputError, DatabaseError) as exc:
-        raise map_db_error_to_http(exc, default_detail="Database error restoring media from trash") from exc
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error restoring media from trash",
+            input_detail="Invalid media identifier",
+            conflict_detail="Media was modified concurrently",
+            log_context=f"restore_media_item media_id={media_id}",
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -360,7 +379,13 @@ async def permanently_delete_media_item(
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except (ConflictError, InputError, DatabaseError) as exc:
-        raise map_db_error_to_http(exc, default_detail="Database error permanently deleting media") from exc
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error permanently deleting media",
+            input_detail="Invalid media identifier",
+            conflict_detail="Media was modified concurrently",
+            log_context=f"permanently_delete_media_item media_id={media_id}",
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -643,7 +668,14 @@ async def update_media_item(
     except HTTPException:
         raise
     except (ConflictError, InputError, DatabaseError) as exc:
-        raise map_db_error_to_http(exc, default_detail="Database error during update") from exc
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            default_detail="Database error during update",
+            input_detail="Database error during update",
+            conflict_detail="Conflict detected during update",
+            log_context=f"update_media_item media_id={media_id}",
+        ) from exc
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "Unexpected error updating media {}: {}",
@@ -690,7 +722,13 @@ async def update_media_keywords(
         updated_keywords = fetch_keywords_for_media(db, media_id)
         return MediaKeywordsResponse(media_id=media_id, keywords=updated_keywords)
     except (InputError, DatabaseError) as exc:
-        raise map_db_error_to_http(exc, default_detail="Failed to update keywords") from exc
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_404_NOT_FOUND,
+            default_detail="Failed to update keywords",
+            input_detail="Media not found or deleted",
+            log_context=f"update_media_keywords media_id={media_id}",
+        ) from exc
 
 
 __all__ = ["router"]
