@@ -1,483 +1,578 @@
-# OmniVoice TTS Adapter Design
+# OmniVoice TTS Sidecar Adapter Design
 
 - Date: 2026-04-21
 - Project: tldw_server
-- Topic: Add OmniVoice as a first-class TTS adapter in the registry with managed local runtime support
+- Topic: Add OmniVoice as a first-class TTS provider via a managed local sidecar
 - Mode: Design for implementation
 
 ## 1. Objective
 
 Add support for [k2-fsa/OmniVoice](https://github.com/k2-fsa/OmniVoice) as a first-class provider in the `tldw_server` TTS registry.
 
-The integration must fit the existing adapter architecture, support the current `/audio/speech` and `/audio/voices/*` flows, and remain operable in a self-hosted environment without leaking OmniVoice-specific logic into generic endpoint code.
+The integration must fit the current TTS architecture, support the existing `/api/v1/audio/speech` and voice-management flows, and remain operable in a self-hosted environment without pushing OmniVoice-specific runtime logic into generic API endpoints.
 
 The approved direction is:
 
 - first-class `omnivoice` provider in the TTS registry
-- CLI/subprocess integration, not direct in-process Python imports
-- fully managed by `tldw_server`
+- managed local sidecar, not direct in-process imports
+- `tldw_server` owns sidecar startup, warmup, health, and shutdown
+- local HTTP on loopback only
 - broad OmniVoice feature exposure in v1
-- buffered streaming in v1, with a clean future path to true streaming
-- required `reference_text` for stored and direct cloning flows in v1
+- main app keeps `custom:` voice resolution, request normalization, and final format conversion
+- sidecar returns OmniVoice-native WAV/PCM output only
 
 ## 2. Scope
 
 ### In Scope
 
 - add `omnivoice` as a registry-backed TTS provider
-- create a dedicated OmniVoice adapter that shells out to a managed CLI runtime
+- add an OmniVoice adapter in the main app that talks to a managed local sidecar
 - support OmniVoice auto voice, voice design, and voice cloning
-- integrate OmniVoice with stored custom voices via `custom:<voice_id>`
-- define OmniVoice-specific request validation, defaults, and provider limits
-- add managed setup/readiness/health support for OmniVoice
-- add tests for registry resolution, adapter behavior, stored voice flows, and readiness
+- integrate OmniVoice with stored `custom:<voice_id>` voices through the existing voice manager
+- support OmniVoice-specific advanced parameters such as `instruct`, `num_step`, `guidance_scale`, `duration`, `speed`, `denoise`, `t_shift`, and related generation controls
+- provision an isolated OmniVoice runtime and managed sidecar entrypoint
+- add setup, readiness, health, and verification coverage for the managed runtime
+- add tests for registry behavior, supervisor lifecycle, protocol mapping, stored voice flows, and health/readiness
 
 ### Out Of Scope
 
+- direct in-process Python embedding of OmniVoice into the main server runtime
 - true incremental audio streaming from OmniVoice in v1
-- a long-lived OmniVoice sidecar service or warm worker process
-- automatic Whisper-style reference transcription for cloning in v1
-- a generic multi-provider subprocess abstraction beyond what OmniVoice directly needs
-- adding OmniVoice to every curated setup bundle by default
+- a generic multi-provider model-runtime sidecar framework
+- automatic speech-to-text derivation of `reference_text` for cloning in v1
+- automatic promotion of OmniVoice into every curated setup bundle
 
-## 3. Constraints And Decisions
+## 3. Approved Constraints
 
-### User-Approved Constraints
+### User-Approved Decisions
 
-1. OmniVoice must be treated as a first-class provider, not a thin one-off helper.
-2. Integration must use CLI/subprocess execution.
-3. `tldw_server` should manage the runtime rather than expecting a manually prepared environment.
-4. The feature surface should include:
-   - auto voice
-   - voice cloning
-   - voice design via `extra_params.instruct`
-   - advanced generation controls such as `num_step`, `guidance_scale`, `duration`, `speed`, `denoise`, and language selection
-5. Stored voices must require `reference_text`.
+1. OmniVoice must be a first-class provider, not a one-off helper.
+2. The integration should use a sidecar design rather than direct runtime coupling.
+3. The sidecar should be a `tldw_server`-managed local service that the main app starts, checks, and stops.
+4. Main app and sidecar communication should use local HTTP on `127.0.0.1` with a private port and health endpoint.
+5. The sidecar boundary should stay narrow:
+   - sidecar owns OmniVoice runtime concerns
+   - main app owns voice-manager behavior, request normalization, `custom:` resolution, and public API semantics
+6. Startup policy should be hybrid:
+   - lazy start by default
+   - optional eager warmup mode
+7. Only one configured OmniVoice model should be loaded at a time.
+8. Model changes should require a managed reload or restart.
+9. Idle shutdown should be the default lifecycle policy, with resident mode optional.
+10. The sidecar synth contract should return OmniVoice-native WAV/PCM output, while the main app performs final format conversion and public streaming behavior.
+11. Cloning requires `reference_text` for both stored and direct flows in v1.
 
-### Design Corrections Identified During Review
+### Design Corrections From Review
 
-1. OmniVoice must not be installed into the server's main Python environment because the current setup installer installs packages into the active interpreter.
-2. `/audio/voices/encode` cannot mean "generate latent artifacts" for OmniVoice because the upstream CLI does not expose a compact pre-encode path analogous to NeuTTS `ref_codes`.
-3. "Fully managed" requires setup, readiness, and health support in addition to adapter code.
-4. A CLI-per-request provider must use a conservative concurrency default.
+1. Loopback sidecar traffic cannot silently reuse the normal shared outbound HTTP path because current egress policy blocks private IPs by default outside tests.
+2. Sidecar ownership cannot live only on `app.state`, because the TTS stack is currently exposed through process-global singleton services.
+3. Startup, retry, and crash-loop handling should reuse existing provider-registry failure backoff and local-runtime readiness patterns rather than inventing a second retry system.
+4. Lazy sidecar startup must respect application draining so shutdown cannot trigger a fresh sidecar spawn.
+5. Loopback binding alone is not enough as an internal trust boundary; the sidecar should require an ephemeral per-process shared secret.
 
 ## 4. Approaches Considered
 
-### Recommended: Dedicated OmniVoice CLI Adapter With Managed Runtime
+### Recommended: Thin Managed Local HTTP Sidecar
 
-Add a specific `omnivoice` provider with its own adapter, config, setup, health, and voice-manager integration.
-
-Pros:
-
-- matches the current registry-based TTS architecture
-- keeps OmniVoice-specific behavior isolated
-- minimizes endpoint churn
-- leaves room for a future sidecar refactor if needed
-
-Cons:
-
-- subprocess startup cost remains visible
-- setup/runtime management is broader than an adapter-only feature
-
-### Alternative: Generic External-CLI TTS Framework First
-
-Create a reusable subprocess-provider layer and implement OmniVoice on top of it.
+Add `omnivoice` as a first-class provider in the main TTS registry, but run the OmniVoice runtime behind a narrowly scoped local HTTP sidecar that is supervised by `tldw_server`.
 
 Pros:
 
-- more reusable if several CLI-only engines are expected soon
+- fits the existing provider architecture
+- isolates heavy OmniVoice runtime dependencies from the main process
+- keeps `custom:` voice logic and public API semantics in the current TTS stack
+- provides a clean path to warm runtime behavior without over-generalizing
 
 Cons:
 
-- adds abstraction before concrete need is proven
-- expands scope immediately
+- adds process supervision and internal protocol work
+- requires explicit loopback-security and egress-policy handling
 
-### Rejected: Sidecar Service First
+### Alternative: Rich OmniVoice Sidecar
 
-Run OmniVoice as its own managed service and proxy requests to it.
+Move more logic into the sidecar, including parts of voice preparation, request normalization, and response formatting.
+
+Pros:
+
+- thinner main-app adapter
+- more OmniVoice behavior centralized in one process
+
+Cons:
+
+- cuts across current `TTSServiceV2` and voice-manager responsibilities
+- makes public behavior harder to reason about
+- increases drift from existing provider patterns
+
+### Rejected: Direct CLI-Per-Request Adapter
+
+Launch OmniVoice CLI processes directly from the main app for each request without a resident sidecar.
 
 Reason rejected:
 
-- too large for the first integration
-- operationally heavier than the current requirement
-- unnecessary before proving the provider's usage and performance profile
+- colder startup path for every request
+- weaker path toward future warm runtime behavior
+- less aligned with the approved managed-sidecar direction
+
+### Rejected: Generic Multi-Provider Runtime Sidecar First
+
+Build a shared sidecar framework for several TTS providers before integrating OmniVoice.
+
+Reason rejected:
+
+- broader than the current need
+- introduces abstraction before the concrete OmniVoice path is proven
 
 ## 5. Approved Design
 
-Implement the recommended approach with one important adjustment:
-
-- OmniVoice uses a dedicated, setup-managed isolated runtime rather than the server's main interpreter.
+Implement OmniVoice as a normal provider in the main TTS registry, but make the provider adapter a client to a managed local sidecar instead of a direct model runner.
 
 At a high level:
 
 1. register `omnivoice` in the TTS registry and request-resolution surfaces
-2. add an `OmniVoiceAdapter` that shells out to the isolated OmniVoice CLI
-3. extend voice-manager and `TTSServiceV2` flows so stored `custom:` voices work for OmniVoice
-4. add setup, verification, and health/readiness support for the managed runtime
-5. keep v1 streaming buffered rather than truly incremental
+2. add an `OmniVoiceAdapter` in the main app that translates normalized TTS requests into internal sidecar HTTP requests
+3. add an OmniVoice supervisor service that owns sidecar startup, readiness, idle shutdown, and reload behavior
+4. provision OmniVoice into an isolated managed runtime with explicit setup and verification support
+5. keep stored `custom:` voice resolution, reference-text injection, output conversion, and public API semantics in the main app
 
 ## 6. Architecture
 
-OmniVoice should be integrated as a normal TTS provider behind the existing `TTSRequest` and `TTSResponse` abstractions.
+### Main App Responsibilities
 
-The adapter owns only provider-specific concerns:
+The main `tldw_server` process continues to own:
 
-- CLI path and runtime resolution
-- temp-file lifecycle
-- argument construction
-- OmniVoice-specific validation
-- stderr/exit-code translation
-- output WAV collection and metadata
+- provider selection and registry behavior
+- `custom:` voice lookup and stored-reference retrieval
+- request normalization and OmniVoice-specific validation
+- `reference_text` injection for stored voices
+- provider fallback policy
+- public streaming and non-streaming API behavior
+- final response-format conversion
+- public error mapping, observability, and history logging
 
-The generic TTS service continues to own:
+This matches the current TTS service design, where `TTSServiceV2` already handles stored `custom:` voice resolution and provider-specific artifact injection before calling an adapter.
 
-- provider selection
-- fallback and circuit-breaker behavior
-- request normalization
-- stored-voice lookup
-- response-format conversion
-- cross-provider observability
+### Sidecar Responsibilities
 
-This keeps the OmniVoice boundary narrow and prevents provider-specific behavior from leaking into endpoint code.
+The OmniVoice sidecar owns only OmniVoice runtime concerns:
 
-## 7. Runtime Strategy
+- isolated runtime bootstrapping entrypoint
+- model load/unload behavior for one configured model
+- OmniVoice synthesis execution
+- sidecar-local health and readiness status
+- minimal warmup, shutdown, and reload control operations
 
-### Isolated Runtime
+The sidecar should not own:
 
-`tldw_server` should provision OmniVoice into a dedicated runtime directory managed by setup logic, for example under a provider-specific managed path inside the repository/runtime area.
+- public OpenAI-compatible request semantics
+- general voice-manager behavior
+- cross-provider fallback
+- final audio conversion to all public response formats
 
-That runtime must contain:
+### Supervisor Ownership
 
-- a Python interpreter or virtualenv entrypoint
-- the installed OmniVoice package
-- the resolved `omnivoice-infer` command path
-- recorded provenance about where OmniVoice was installed from
+The sidecar supervisor must be a TTS-owned singleton/service that is initialized and closed with the TTS service lifecycle.
 
-### Source Preference
+It must not be designed as an `app.state`-only dependency, because the current TTS stack is primarily accessed through `get_tts_service_v2()` and other global TTS service paths rather than request-scoped app references.
 
-The managed install flow should support an explicit local-development source mode that prefers the sibling checkout at `../OmniVoice` when it exists.
+## 7. Internal Transport And Security
 
-That local-checkout preference should not be automatic in general deployments. It should activate only when the operator explicitly selects a local source or setup detects a development-oriented provisioning mode.
+### Loopback Transport Rule
 
-In the default path, the installer should use the normal managed package/provisioning source.
+The OmniVoice sidecar should listen on loopback only:
 
-This preference is intentional because the current development context already includes a local OmniVoice clone one directory above the repo.
+- `127.0.0.1` by default
+- optional IPv6 loopback support if needed later
 
-### Model Ownership
+The internal HTTP client path must explicitly handle loopback sidecar traffic without weakening the general outbound egress policy used for arbitrary external requests.
 
-The OmniVoice model path or model identifier should be explicit in provider config.
+The design requirement is:
 
-The runtime may rely on a managed local model path or a provider-configured model identifier, but it should not guess implicitly at request time.
+- do not globally relax private-IP egress checks
+- do not route OmniVoice sidecar requests through the same unrestricted path used for arbitrary external HTTP
+- do introduce an explicit internal-loopback transport allowance or sidecar-specific client path
 
-## 8. Request And Feature Mapping
+### Sidecar Authentication
 
-OmniVoice v1 supports three request modes:
+Loopback binding is not sufficient on its own because any local process could otherwise hit synth or control endpoints.
 
-1. auto voice
-2. voice design
-3. voice cloning
+The sidecar should therefore require an ephemeral shared secret generated by the supervisor at startup and attached to every internal request, for example in a dedicated header such as `X-TLDW-Sidecar-Token`.
 
-The adapter behavior is determined by the normalized unified request:
+This token should:
 
-- auto voice when there is no `voice_reference` and no `extra_params.instruct`
-- voice design when `extra_params.instruct` is present
-- voice cloning when `voice_reference` is present
+- be generated per sidecar process
+- never be exposed through public APIs
+- never be logged in plaintext
+- be rotated on restart
+
+### Port Selection
+
+Port selection should follow the existing local-runtime pattern:
+
+- probe for an available local port in a bounded range
+- spawn the sidecar
+- verify actual readiness over HTTP
+- retry on collision or failed bind within a bounded startup path
+
+The supervisor should treat port probing as advisory rather than authoritative and rely on post-spawn readiness verification before declaring the sidecar usable.
+
+## 8. Request Flow
+
+The request path should be:
+
+1. public request enters existing `/api/v1/audio/speech` flow
+2. `TTSServiceV2` normalizes provider selection and request semantics
+3. stored `custom:` voices are resolved in-process through the current voice-manager path
+4. OmniVoice-specific request extras are normalized in the main app
+5. the OmniVoice adapter sends a narrow internal request to the sidecar
+6. the sidecar returns OmniVoice-native WAV/PCM output plus minimal execution metadata
+7. the main app converts the audio to the public response format and applies current streaming/non-streaming behavior
 
 ### Default Semantics
 
 - provider key: `omnivoice`
-- default model: `omnivoice`
+- default model: provider-configured OmniVoice model
 - default voice: `auto`
 
-The `voice` field is not used as a named built-in voice inventory for OmniVoice. In OmniVoice requests, it serves only these roles:
+Because the public OpenAI-compatible schema still has a legacy default `voice`, OmniVoice request normalization must explicitly normalize the effective voice to `auto` when the caller did not intentionally choose a voice.
 
-- `auto` for default automatic voice selection
-- `custom:<voice_id>` for stored custom voice cloning
+### Stored Voice Handling
 
-Because the public OpenAI-compatible request schema currently defaults `voice` to a legacy non-OmniVoice value, request normalization must explicitly override that inherited default when the resolved provider is OmniVoice and the caller did not intentionally choose a voice. In other words, OmniVoice provider resolution must normalize the effective voice to `auto` rather than reusing the schema-level legacy default.
+When a request uses `voice="custom:<voice_id>"`, the existing `TTSServiceV2` flow should:
 
-### CLI Argument Mapping
-
-The adapter should map the normalized request to CLI flags as follows:
-
-- request text -> `--text`
-- configured model id/path -> `--model`
-- normalized language -> `--language`
-- `speed` -> `--speed`
-- `extra_params.duration` -> `--duration`
-- `extra_params.instruct` -> `--instruct`
-- `extra_params.num_step` -> `--num_step`
-- `extra_params.guidance_scale` -> `--guidance_scale`
-- `extra_params.t_shift` -> `--t_shift`
-- `extra_params.denoise` -> `--denoise`
-- `extra_params.layer_penalty_factor` -> `--layer_penalty_factor`
-- `extra_params.position_temperature` -> `--position_temperature`
-- `extra_params.class_temperature` -> `--class_temperature`
-
-For cloning:
-
-- write `voice_reference` bytes to a temp audio file
-- pass that path to `--ref_audio`
-- require `reference_text`
-- accept direct-request reference text through `extra_params.reference_text` (or equivalent normalized aliases already used by the TTS service)
-- pass the resolved reference text to `--ref_text`
-
-## 9. Stored Voice Lifecycle
-
-Stored OmniVoice voices should use the existing `/audio/voices` system instead of a provider-specific side channel.
-
-### Upload
-
-`/audio/voices/upload` with `provider="omnivoice"` should:
-
-- validate file type, size, and duration against OmniVoice-specific requirements
-- require `reference_text`
-- normalize/store the processed reference sample through the existing voice-manager flow
-- persist OmniVoice-compatible metadata
-
-### Encode
-
-`/audio/voices/encode` for OmniVoice is a staging/validation operation in v1, not a latent-token generation step.
-
-It should:
-
-- confirm the stored voice exists
-- require `reference_text` to exist
-- validate the stored sample against OmniVoice provider requirements
-- persist provider metadata showing the voice is OmniVoice-ready
-- return success without inventing `ref_codes`-style artifacts, leaving `ref_codes_len` unset/null in the response
-
-This keeps API behavior consistent while acknowledging that OmniVoice does not expose a NeuTTS-like pre-encode artifact through the CLI path.
-
-### Request-Time Resolution
-
-When a request uses `voice="custom:<voice_id>"`, the existing `TTSServiceV2` custom-voice resolution path should:
-
-- load the stored reference audio bytes
+- load the stored reference audio
 - load stored `reference_text`
-- inject both into the normalized OmniVoice request
-- let the adapter handle the request exactly like a direct cloning request
+- inject those values into the normalized OmniVoice request
+- pass the request to the OmniVoice adapter exactly like a direct cloning request
 
-Direct one-off cloning requests and stored custom voices should share the same internal validation and temp-file preparation logic.
+This is intentional. The sidecar should not be responsible for voice-manager lookups.
 
-## 10. Streaming Behavior
+### Stored Voice Upload And Encode Semantics
 
-True incremental streaming is out of scope for v1.
+Stored OmniVoice voices should continue to use the existing `/api/v1/audio/voices/*` system.
 
-For `stream=true`, OmniVoice v1 should:
+For `/audio/voices/upload` with `provider="omnivoice"`:
 
-- generate the full WAV output first
-- convert or package the result as needed
-- stream the completed payload in chunks through the existing response path
-- surface metadata that the transport was buffered rather than live
+- validate file format, size, and duration against OmniVoice requirements
+- require `reference_text`
+- normalize or convert the stored sample as needed through current voice-manager flows
+- persist OmniVoice-compatible reference metadata
 
-This preserves API compatibility while keeping the implementation honest about what the provider can actually do today.
+For `/audio/voices/encode` with `provider="omnivoice"`:
 
-Future work may replace this with a warm worker or sidecar process if true streaming becomes important.
+- treat the operation as staging and validation, not latent-token generation
+- confirm the stored voice exists
+- confirm `reference_text` exists
+- mark the voice as OmniVoice-ready in provider metadata
+- do not invent NeuTTS-style `ref_codes` artifacts that OmniVoice does not expose
 
-### Fallback Constraints
+## 9. Sidecar API Contract
 
-Cross-provider fallback should be restricted for OmniVoice-specific requests.
+### Endpoints
 
-For requests that rely on OmniVoice semantics, including:
+The sidecar should expose a minimal internal API:
 
-- voice cloning
-- stored `custom:` voices
-- voice design via `extra_params.instruct`
-- OmniVoice-specific advanced generation parameters
+- `GET /health`
+- `GET /status`
+- `POST /v1/synthesize`
+- `POST /control/warmup`
+- `POST /control/shutdown`
+- optional `POST /control/reload`
 
-the service should not silently fall back to a different provider. At most, it may retry within the OmniVoice provider boundary if the failure mode supports that.
+### Synthesize Request
 
-This prevents a request that depends on OmniVoice-specific behavior from degrading into a semantically different provider response that appears successful but is wrong.
+The synth request should include only OmniVoice-relevant fields, such as:
 
-## 11. Validation Rules
+- text
+- configured model identifier or path
+- normalized language
+- synthesis mode implied by presence of `instruct` and/or reference audio
+- `instruct`
+- `reference_text`
+- generation controls such as `num_step`, `guidance_scale`, `duration`, `speed`, `denoise`, `t_shift`, `layer_penalty_factor`, `position_temperature`, and `class_temperature`
+- managed reference-audio handle when cloning
 
-OmniVoice-specific validation should be added in the same places where other providers are validated today.
+### Reference Audio Transport
 
-### Request Validation
+For cloning requests, the recommended v1 transport is:
 
-- supported response formats
-- text length ceiling
-- supported speed range
-- supported language semantics
-- cloning requires `reference_text`
-- voice design parameters allowed only through approved extra params
-- advanced param ranges and types
+- main app materializes reference audio into a managed temporary file under a supervisor-owned scratch area
+- main app passes a safe managed handle or bounded path reference to the sidecar
+- sidecar accepts only references under that managed area
 
-### Voice Reference Validation
+This avoids repeated large base64 JSON payloads and keeps trust boundaries narrow.
 
-OmniVoice voice references should have provider requirements defined in the voice manager, including:
+The design should also define:
 
-- allowed file formats
-- max size
-- min and max duration
-- target sample rate / conversion target
+- bounded file size limits
+- ownership of the scratch directory
+- per-request cleanup or lease cleanup
+- behavior when temp-file preparation fails before synthesis
 
-The initial limits should be conservative and reflect upstream guidance rather than theoretical maximum tolerance.
+### Synthesize Response
 
-## 12. Setup, Readiness, And Health
+The recommended v1 synth response is:
 
-Because this provider is fully managed, readiness must be explicit.
+- binary OmniVoice-native WAV or PCM payload
+- sidecar metadata returned as headers or simple metadata fields, including:
+  - sample rate
+  - configured model id
+  - cold-start vs warm-run marker
+  - generation duration
 
-OmniVoice should be considered healthy only when:
+The sidecar should not perform broad public-format packaging for `mp3`, `aac`, `opus`, or similar output types. That remains the main app's responsibility.
 
-- the isolated runtime exists
-- the OmniVoice CLI entrypoint is executable
-- the configured source/model path resolves
-- managed model assets have been prefetched into the configured runtime storage
-- a lightweight verification flow succeeds
+## 10. Lifecycle And Readiness
 
-Fully managed provisioning therefore includes model prefetch, not just runtime installation.
+### Startup Policy
+
+The sidecar lifecycle should be hybrid:
+
+- lazy start by default
+- optional eager warmup at app startup
+
+The first-use startup path must be idempotent and concurrent requests must coalesce behind one startup/warmup path.
+
+### Model Loading
+
+Only one configured OmniVoice model should be loaded in memory at a time.
+
+Changing the configured model should require:
+
+- a managed reload if supported
+- otherwise a managed stop and restart
+
+The design should not assume per-request model switching.
+
+### Idle Shutdown
+
+Idle shutdown should be the default lifecycle mode.
+
+The supervisor should:
+
+- keep last-used timestamps
+- stop the sidecar after a configurable inactivity timeout
+- support a resident mode that disables idle shutdown
+
+### Concurrency Policy
+
+OmniVoice should use a conservative default concurrency policy in v1.
+
+The default should be:
+
+- one loaded model per sidecar
+- one in-flight synthesis per sidecar by default
+
+If the main app already exposes provider-specific concurrency control, the initial default should effectively behave like:
+
+- `providers.omnivoice.max_concurrent_generations = 1`
+
+This keeps the first version predictable while avoiding bursty cold-start or memory contention behavior.
+
+### Drain Gate
+
+No lazy startup, warmup, or auto-restart should begin once the app enters draining mode.
+
+This should align with the existing lifecycle gate so shutdown cannot race with a new OmniVoice process launch.
+
+### Readiness States
+
+Health and status should distinguish at least:
+
+- `disabled`
+- `idle_stopped`
+- `starting`
+- `live_model_cold`
+- `warming`
+- `ready`
+- `degraded`
+- `shutting_down`
 
 ### Verification
 
-Verification should be cheap and deterministic, for example:
+Verification should be explicit and cheap:
 
-- synthesize a very short text sample to a temp WAV
-- confirm the output file exists
+- ensure the runtime exists
+- ensure the sidecar entrypoint is launchable
+- ensure the configured model is loadable
+- run a tiny synth smoke test on demand
 - confirm the output is non-empty and parseable
 
-Normal health endpoints should not run this synthesis probe on every request. Instead, health should report cached readiness plus the last known verification result, while explicit setup/admin verification flows should trigger the real smoke test.
+Normal health endpoints should report cached readiness and last verification results rather than running a synthesis probe on every call.
 
-### Health Surface
+## 11. Setup And Runtime Provisioning
 
-Health/readiness should expose OmniVoice-specific failure reasons such as:
+OmniVoice must be provisioned into a dedicated managed runtime rather than the main server interpreter.
 
-- `disabled`
-- `runtime_missing`
-- `cli_missing`
-- `model_unavailable`
-- `verification_failed`
+Provisioning should create:
 
-This prevents "enabled in config" from being confused with real runtime availability.
+- isolated Python environment or equivalent runtime
+- sidecar launch entrypoint inside that runtime
+- recorded runtime metadata
+- model asset metadata and provisioning provenance
 
-## 13. Setup Path Isolation
+### Source Preference
 
-OmniVoice must not reuse the generic TTS dependency-install path that installs packages into the server interpreter.
+The local checkout at `../OmniVoice` should be supported as an explicit local-development source mode.
 
-Instead, provisioning should use a dedicated OmniVoice runtime creation path that:
+It should not become the silent default for general deployments.
 
-- creates or updates the isolated runtime
-- installs OmniVoice into that runtime
-- installs or resolves model assets for that runtime
-- records the runtime metadata needed by readiness and health
+The default managed path should remain a normal reproducible install/provision flow, with the sibling checkout used only when the operator explicitly chooses local-source provisioning.
 
-This protects the main `tldw_server` environment from heavyweight Torch/audio dependency churn and makes the isolation decision enforceable rather than advisory.
+## 12. Validation, Fallback, And Error Semantics
 
-## 14. Concurrency And Performance
+### Validation Rules
 
-OmniVoice is a heavy subprocess-based provider.
+OmniVoice-specific validation should enforce:
 
-The design should therefore set a conservative default concurrency limit:
+- supported response formats
+- supported text length ceilings
+- supported speed range
+- cloning requires `reference_text`
+- allowed advanced generation parameters and ranges
+- provider-specific voice-reference format, size, and duration requirements
 
-- `providers.omnivoice.max_concurrent_generations = 1` by default
+### Fallback Rules
 
-This uses the provider-specific semaphore path already present in `TTSServiceV2` and avoids spawning multiple heavyweight model loads under bursty traffic.
+OmniVoice-specific requests should not silently cross-fallback to another provider when they depend on OmniVoice semantics, including:
 
-Future optimization options:
+- cloning
+- stored `custom:` voices
+- voice design via `extra_params.instruct`
+- OmniVoice-only advanced parameters
 
-- persistent warm worker
-- process pooling
-- sidecar service promotion
+Retry is allowed inside the OmniVoice provider boundary when the failure mode supports it.
 
-None of those are required for v1.
+### Error Classes
 
-## 15. Error Handling
+The design should distinguish at least:
 
-The adapter must translate subprocess failures into ordinary TTS exceptions.
+- sidecar launch failure
+- sidecar connectivity failure
+- sidecar startup timeout
+- model load failure
+- synth execution failure
+- invalid managed reference handle
+- sidecar auth mismatch
+- idle-stop race during request dispatch
 
-Error classes should distinguish at least:
+Sidecar responses should use structured error codes so the main app can decide whether to:
 
-- validation errors
-- runtime/readiness errors
-- timeout errors
-- CLI non-zero exit failures
-- output file missing/invalid failures
+- retry
+- restart the sidecar
+- mark the provider failed with backoff
+- fail fast to the caller
 
-User-facing APIs should receive sanitized structured errors. Internal logs may include richer subprocess stderr details for debugging.
+## 13. Observability And Failure Backoff
 
-Whenever possible, failures should happen before response streaming begins.
+The design should reuse current runtime patterns where possible.
 
-## 16. Setup Catalog Integration
+### Startup And Health Pattern
 
-OmniVoice should become installable through the setup system, but it should not automatically be added to every curated bundle choice.
+Sidecar readiness should reuse the existing local-runtime approach:
 
-The safer initial design is:
+- spawn subprocess
+- poll internal HTTP readiness
+- classify startup failure cleanly if the process exits or never becomes ready
 
-1. make OmniVoice a supported setup/install target
-2. add readiness and health coverage
-3. add it selectively to curated setup bundles where the machine profile and resource tier make sense
+### Registry Failure Backoff
 
-This prevents a heavyweight runtime from becoming an accidental default in lightweight CPU-oriented setup flows.
+Repeated OmniVoice startup failures should feed into the existing provider-registry failure/backoff behavior rather than introducing an unrelated retry system.
 
-## 17. Expected Touchpoints
+This gives OmniVoice the same coarse provider-availability semantics already used elsewhere in the TTS stack.
 
-The implementation is expected to touch at least these areas:
+### Logging And Metrics
 
-- TTS registry and provider enums
-- TTS request resolution defaults and provider inference
-- OmniVoice adapter implementation
-- OmniVoice config schema and provider settings
-- TTS validation and provider limits
-- voice-manager provider requirements and encode semantics
-- setup installer schema and engine list
-- setup install manager and readiness verification
-- audio health/readiness surfaces
-- public audio request schema/docs where provider lists are described
-- unit and integration tests across TTS, setup, and voice flows
+The implementation should log or track:
 
-## 18. Testing Requirements
+- request id and correlation id when available
+- sidecar PID
+- host and port
+- configured model id
+- startup duration
+- cold vs warm synth count
+- idle shutdown count
+- restart count
+- sidecar-specific failure codes
+
+Logs must avoid leaking the sidecar shared secret or raw sensitive request payloads.
+
+## 14. Expected Touchpoints
+
+The implementation is expected to touch at least:
+
+- TTS provider enum and registry entries
+- OmniVoice provider config schema
+- request-resolution and provider-default handling
+- OmniVoice adapter implementation in the main app
+- OmniVoice supervisor/service lifecycle wiring
+- setup/install/runtime provisioning path
+- health and readiness reporting
+- voice-manager provider requirements
+- TTS validation and fallback rules
+- tests for adapter, supervisor, setup, and voice flows
+
+## 15. Testing Requirements
 
 ### Unit Tests
 
-- provider alias/model inference
+- provider alias and default resolution
 - OmniVoice config parsing
-- CLI command construction
-- request-to-flag mapping
-- required `reference_text` behavior
-- readiness classification
+- sidecar request mapping
+- shared-secret header injection
+- managed reference-file preparation
+- supervisor state transitions
+- idle-timeout policy
+- drain-gate behavior
 
-### Adapter Integration Tests
+### Protocol Tests
 
-- successful auto-voice generation
-- successful voice-design generation
-- successful cloning generation
-- timeout path
-- non-zero CLI exit path
-- missing runtime / missing CLI path
-- buffered `stream=true` behavior
+- `GET /health`
+- `GET /status`
+- `POST /v1/synthesize`
+- `POST /control/warmup`
+- `POST /control/shutdown`
+- reload behavior if implemented
 
-### Service And Voice Tests
+### Integration Tests
 
-- `custom:<voice_id>` resolution for OmniVoice
-- stored `reference_text` injection
-- OmniVoice upload validation
-- OmniVoice encode-as-staging semantics
+- lazy startup on first request
+- optional eager warmup path
+- idle shutdown and restart after idle stop
+- startup coalescing under concurrent first-use requests
+- sidecar unavailable failure path
+- sidecar auth failure path
+- model reload or restart behavior after config change
+- `custom:<voice_id>` resolution with stored `reference_text`
+- OmniVoice-specific no-cross-provider-fallback behavior
 
 ### Setup And Health Tests
 
-- install metadata and source provenance
+- isolated runtime provisioning metadata
+- explicit local-source install mode using `../OmniVoice`
 - readiness state transitions
-- verification success/failure envelopes
-- setup-catalog integration where applicable
+- cached health vs explicit verify behavior
+- launch metadata recorded for diagnostics
 
-## 19. Rollout Notes
+## 16. Rollout Notes
 
-The implementation should preserve reversibility:
+The rollout should remain reversible:
 
-- OmniVoice remains disabled until explicitly configured or provisioned
-- no existing default provider behavior changes unless the operator opts in
-- the isolated runtime keeps OmniVoice dependency churn separate from the main server environment
+- OmniVoice stays disabled until explicitly configured or provisioned
+- no existing default TTS provider behavior changes unless the operator opts in
+- the internal loopback allowance must stay scoped to the OmniVoice sidecar path only
+- the sidecar remains host-local and non-public
 
-## 20. Approved Outcome
+## 17. Approved Outcome
 
-The approved design is to add OmniVoice as a managed, first-class, CLI-backed TTS provider with:
+The approved design is to add OmniVoice as a managed, first-class TTS provider with:
 
+- a thin main-app adapter
+- a `tldw_server`-supervised local sidecar
 - isolated runtime provisioning
-- broad feature exposure
-- stored custom voice support through existing voice-manager flows
-- explicit readiness/health semantics
-- buffered v1 streaming
-- conservative concurrency defaults
+- stored custom voice support through the existing voice-manager path
+- explicit loopback-security and egress-policy handling
+- explicit readiness, verification, and idle-shutdown semantics
+- buffered public streaming behavior in v1
+- one-model-at-a-time runtime behavior
 
-This gives `tldw_server` a clear, operable OmniVoice integration without overcommitting to a sidecar or true streaming architecture before it is needed.
+This gives `tldw_server` a usable OmniVoice integration that matches current TTS boundaries while avoiding direct runtime coupling and leaving a clean future path for optimization.
