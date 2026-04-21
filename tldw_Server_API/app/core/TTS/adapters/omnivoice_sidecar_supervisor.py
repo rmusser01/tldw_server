@@ -51,6 +51,17 @@ class OmniVoiceSidecarSupervisor:
         value = self._extra_params.get(key)
         return default if value is None else value
 
+    def _resolve_interpreter(self) -> str:
+        configured = self._extra_params.get("python_path") or self._extra_params.get("interpreter_path")
+        if configured:
+            candidate = Path(str(configured)).expanduser()
+            if not candidate.is_absolute():
+                candidate = (self._repo_root / candidate).resolve()
+            if candidate.exists():
+                return str(candidate)
+            logger.warning("Configured OmniVoice interpreter does not exist: {}", candidate)
+        return sys.executable
+
     @property
     def sidecar_token(self) -> str:
         return self._token
@@ -142,7 +153,7 @@ class OmniVoiceSidecarSupervisor:
         )
         logger.debug("Starting OmniVoice sidecar on {}:{}", self._host, port)
         return await asyncio.create_subprocess_exec(
-            sys.executable,
+            self._resolve_interpreter(),
             "-m",
             "tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server",
             cwd=str(self._repo_root),

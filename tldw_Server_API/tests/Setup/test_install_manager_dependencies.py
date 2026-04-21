@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+from pathlib import Path
 import sys
 import tempfile
 import types
@@ -100,6 +101,13 @@ def test_install_plan_accepts_kitten_tts():
 
     assert plan.tts[0].engine == 'kitten_tts'
     assert plan.tts[0].variants == ['nano']
+
+
+def test_install_plan_accepts_omnivoice():
+    plan = InstallPlan(tts=[TTSInstall(engine='omnivoice')])
+
+    assert plan.tts[0].engine == 'omnivoice'
+    assert plan.tts[0].variants == []
 
 
 def test_kitten_tts_dependencies_trigger_pip_install(monkeypatch):
@@ -222,4 +230,80 @@ def test_install_kitten_tts_prefetch_uses_configured_cache_dir(monkeypatch):
 
     assert download_calls == [
         ("KittenML/kitten-tts-nano-0.8", "cache/kitten_tts", True, None)
+    ]
+
+
+def test_omnivoice_install_routes_to_sidecar_installer(monkeypatch):
+    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
+
+    calls: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(
+        installer,
+        "resolve_source_checkout",
+        lambda repo_root=None: calls.append(("resolve_source_checkout", repo_root)) or Path("/tmp/OmniVoice"),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "build_runtime_layout",
+        lambda runtime_base, repo_root=None: calls.append(("build_runtime_layout", runtime_base)) or types.SimpleNamespace(
+            runtime_base=Path(runtime_base),
+            venv_dir=Path(runtime_base) / ".venv",
+            runtime_dir=Path(runtime_base) / "runtime",
+            logs_dir=Path(runtime_base) / "logs",
+            interpreter_path=Path(runtime_base) / ".venv" / "bin" / "python",
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "create_runtime_layout",
+        lambda layout: calls.append(("create_runtime_layout", layout.runtime_base)),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "clone_repository",
+        lambda repo_url, source_dir: calls.append(("clone_repository", repo_url, source_dir)),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "create_virtualenv",
+        lambda venv_dir: calls.append(("create_virtualenv", venv_dir)),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "install_sidecar_runtime",
+        lambda *, interpreter_path, repo_root, source_checkout: calls.append(
+            ("install_sidecar_runtime", interpreter_path, repo_root, source_checkout)
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "validate_runtime_layout",
+        lambda layout: calls.append(("validate_runtime_layout", layout.runtime_base)) or [],
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "patch_tts_config",
+        lambda **kwargs: calls.append(("patch_tts_config", kwargs["config_path"])) or True,
+        raising=True,
+    )
+
+    install_manager._install_omnivoice()
+
+    assert [entry[0] for entry in calls] == [
+        "resolve_source_checkout",
+        "build_runtime_layout",
+        "create_runtime_layout",
+        "clone_repository",
+        "create_virtualenv",
+        "install_sidecar_runtime",
+        "validate_runtime_layout",
+        "patch_tts_config",
     ]
