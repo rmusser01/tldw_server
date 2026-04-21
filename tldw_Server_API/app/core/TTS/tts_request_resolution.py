@@ -13,6 +13,8 @@ DEFAULT_KOKORO_TTS_MODEL = "kokoro"
 DEFAULT_KOKORO_TTS_VOICE = "af_heart"
 DEFAULT_ELEVENLABS_TTS_MODEL = "eleven_monolingual_v1"
 DEFAULT_ELEVENLABS_TTS_VOICE = "Rachel"
+DEFAULT_OMNIVOICE_TTS_MODEL = "omnivoice"
+DEFAULT_OMNIVOICE_TTS_VOICE = "auto"
 
 _PROVIDER_ALIASES = {
     "kitten": DEFAULT_KITTEN_TTS_PROVIDER,
@@ -27,6 +29,7 @@ _DEFAULT_MODELS_BY_PROVIDER = {
     "pocket_tts_cpp": "pocket_tts_cpp",
     "pocket_tts": "pocket_tts",
     "elevenlabs": DEFAULT_ELEVENLABS_TTS_MODEL,
+    "omnivoice": DEFAULT_OMNIVOICE_TTS_MODEL,
 }
 
 _DEFAULT_VOICES_BY_PROVIDER = {
@@ -34,6 +37,7 @@ _DEFAULT_VOICES_BY_PROVIDER = {
     "openai": DEFAULT_OPENAI_TTS_VOICE,
     "kokoro": DEFAULT_KOKORO_TTS_VOICE,
     "elevenlabs": DEFAULT_ELEVENLABS_TTS_VOICE,
+    "omnivoice": DEFAULT_OMNIVOICE_TTS_VOICE,
 }
 
 
@@ -81,6 +85,8 @@ def infer_tts_provider_from_model(model: str | None) -> str | None:
         return DEFAULT_KITTEN_TTS_PROVIDER
     if lowered.startswith("eleven"):
         return "elevenlabs"
+    if lowered.startswith("omnivoice") or lowered.startswith("omni-voice") or lowered.startswith("omni_voice"):
+        return "omnivoice"
     return None
 
 

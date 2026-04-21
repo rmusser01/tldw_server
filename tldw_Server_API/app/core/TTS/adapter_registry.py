@@ -72,6 +72,7 @@ class TTSProvider(Enum):
     POCKET_TTS_CPP = "pocket_tts_cpp"
     ECHO_TTS = "echo_tts"
     QWEN3_TTS = "qwen3_tts"
+    OMNIVOICE = "omnivoice"
     LUX_TTS = "lux_tts"
     KITTEN_TTS = "kitten_tts"
     # Additional providers
@@ -269,6 +270,7 @@ class TTSAdapterRegistry:
         TTSProvider.POCKET_TTS_CPP: "tldw_Server_API.app.core.TTS.adapters.pocket_tts_cpp_adapter.PocketTTSCppAdapter",
         TTSProvider.ECHO_TTS: "tldw_Server_API.app.core.TTS.adapters.echo_tts_adapter.EchoTTSAdapter",
         TTSProvider.QWEN3_TTS: "tldw_Server_API.app.core.TTS.adapters.qwen3_tts_adapter.Qwen3TTSAdapter",
+        TTSProvider.OMNIVOICE: "tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter.OmniVoiceAdapter",
         TTSProvider.LUX_TTS: "tldw_Server_API.app.core.TTS.adapters.luxtts_adapter.LuxTTSAdapter",
         TTSProvider.KITTEN_TTS: "tldw_Server_API.app.core.TTS.adapters.kitten_tts_adapter.KittenTTSAdapter",
     }
@@ -1091,6 +1093,9 @@ class TTSAdapterFactory:
         # Qwen3-TTS models
         "qwen3-tts": TTSProvider.QWEN3_TTS,
         "qwen3_tts": TTSProvider.QWEN3_TTS,
+        "omnivoice": TTSProvider.OMNIVOICE,
+        "omni-voice": TTSProvider.OMNIVOICE,
+        "omni_voice": TTSProvider.OMNIVOICE,
         "qwen/qwen3-tts-12hz-1.7b-customvoice": TTSProvider.QWEN3_TTS,
         "qwen/qwen3-tts-12hz-0.6b-customvoice": TTSProvider.QWEN3_TTS,
         "qwen/qwen3-tts-12hz-1.7b-voicedesign": TTSProvider.QWEN3_TTS,
