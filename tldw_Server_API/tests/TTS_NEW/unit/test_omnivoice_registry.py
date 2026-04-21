@@ -49,6 +49,27 @@ def test_omnivoice_provider_aliases_use_auto_voice(
     TestCase().assertEqual(resolved.voice, "auto")
 
 
+@pytest.mark.parametrize("model_alias", ["omnivoice", "omni-voice", "omni_voice"])
+def test_omnivoice_model_aliases_use_canonical_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    model_alias: str,
+) -> None:
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.tts_request_resolution.get_tts_config",
+        lambda: SimpleNamespace(default_provider=None, default_voice=None),
+    )
+
+    resolved = resolve_tts_request_defaults(
+        provider=None,
+        model=model_alias,
+        voice=None,
+    )
+
+    TestCase().assertEqual(resolved.provider, "omnivoice")
+    TestCase().assertEqual(resolved.model, "omnivoice")
+    TestCase().assertEqual(resolved.voice, "auto")
+
+
 def test_omnivoice_default_adapter_path_is_registered() -> None:
     TestCase().assertEqual(
         TTSAdapterRegistry.DEFAULT_ADAPTERS[TTSProvider.OMNIVOICE],

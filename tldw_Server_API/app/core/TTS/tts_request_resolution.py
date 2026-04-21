@@ -43,6 +43,11 @@ _DEFAULT_VOICES_BY_PROVIDER = {
     "omnivoice": DEFAULT_OMNIVOICE_TTS_VOICE,
 }
 
+_MODEL_ALIASES = {
+    "omni-voice": DEFAULT_OMNIVOICE_TTS_MODEL,
+    "omni_voice": DEFAULT_OMNIVOICE_TTS_MODEL,
+}
+
 
 @dataclass(frozen=True)
 class ResolvedTTSRequestDefaults:
@@ -101,6 +106,15 @@ def _default_voice_for_provider(provider: str) -> str:
     return _DEFAULT_VOICES_BY_PROVIDER.get(provider, DEFAULT_KITTEN_TTS_VOICE)
 
 
+def _normalize_model_for_provider(provider: str, model: str | None) -> str | None:
+    if model is None:
+        return None
+    lowered = model.lower()
+    if provider == "omnivoice":
+        return _MODEL_ALIASES.get(lowered, model)
+    return model
+
+
 def resolve_tts_request_defaults(
     *,
     provider: str | None,
@@ -128,7 +142,8 @@ def resolve_tts_request_defaults(
         or configured_provider
         or DEFAULT_KITTEN_TTS_PROVIDER
     )
-    resolved_model = cleaned_model or _default_model_for_provider(resolved_provider)
+    normalized_model = _normalize_model_for_provider(resolved_provider, cleaned_model)
+    resolved_model = normalized_model or _default_model_for_provider(resolved_provider)
     resolved_voice = (
         cleaned_voice
         or (configured_voice if configured_voice and resolved_provider == configured_provider else None)
