@@ -8,7 +8,7 @@ const commonTextProps = {
   onSend: vi.fn(),
 }
 
-// Variants are lazy-loaded via React.lazy — awaitng a sentinel inside the
+// Variants are lazy-loaded via React.lazy — awaiting a sentinel inside the
 // chosen variant proves the chunk resolved. Each variant renders a root
 // `[data-variant='vN']` we can wait for.
 const waitForVariant = async (

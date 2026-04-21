@@ -4,7 +4,6 @@ import { SplitBriefV3 } from "@/components/Chat/composer/variants/SplitBriefV3"
 import { RadialCommandV5 } from "@/components/Chat/composer/variants/RadialCommandV5"
 import {
   ChatComposer,
-  useComposerVariantPreference,
 } from "@/components/Chat/composer/ChatComposer"
 import type { ChatComposerVariant } from "@/components/Chat/composer/types"
 
@@ -224,11 +223,8 @@ const ComposerVariantsPreview: React.FC = () => {
   const [v5PaletteOpen, setV5PaletteOpen] = React.useState(true)
   const [v5PaletteIdx, setV5PaletteIdx] = React.useState(0)
   const [sendCount, setSendCount] = React.useState(0)
-
-  // Live variant preference — renders the dispatcher with whatever the user
-  // picks. Persists to localStorage; mirrors what Playground / Sidepanel
-  // will read in follow-up PRs.
-  const [preferredVariant, setPreferredVariant] = useComposerVariantPreference()
+  const [previewVariant, setPreviewVariant] =
+    React.useState<ChatComposerVariant>("v1")
   const [liveMessage, setLiveMessage] = React.useState("")
 
   const onSend = React.useCallback(() => {
@@ -266,20 +262,20 @@ const ComposerVariantsPreview: React.FC = () => {
             Live dispatcher
           </span>
           <span className="font-mono text-[10px] px-2 py-0.5 rounded-full border border-primary/40 text-primary uppercase tracking-wider">
-            useComposerVariantPreference
+            isolated preview state
           </span>
           <span className="font-serif italic text-text-muted text-sm ml-2">
-            Pick a variant — selection persists to <code className="font-mono">localStorage</code> so
-            reloading the page keeps your choice.
+            Pick a variant without mutating the real composer preference
+            used by Playground or the sidepanel.
           </span>
           <div className="ml-auto flex items-center gap-1.5">
             {(["v1", "v3", "v5"] as ChatComposerVariant[]).map((v) => {
-              const active = v === preferredVariant
+              const active = v === previewVariant
               return (
                 <button
                   key={v}
                   type="button"
-                  onClick={() => setPreferredVariant(v)}
+                  onClick={() => setPreviewVariant(v)}
                   aria-pressed={active}
                   className={
                     "px-2.5 py-1 rounded-md font-mono text-[11px] border transition-colors " +
@@ -295,8 +291,8 @@ const ComposerVariantsPreview: React.FC = () => {
           </div>
         </div>
         <div className="p-6 border border-t-0 border-border rounded-b-md bg-surface/40">
-          <Frame label={`preferredVariant=${preferredVariant}`}>
-            {preferredVariant === "v1" && (
+          <Frame label={`previewVariant=${previewVariant}`}>
+            {previewVariant === "v1" && (
               <ChatComposer
                 variant="v1"
                 message={liveMessage}
@@ -309,7 +305,7 @@ const ComposerVariantsPreview: React.FC = () => {
                 tokens={{ used: liveMessage.length, max: 8000 }}
               />
             )}
-            {preferredVariant === "v3" && (
+            {previewVariant === "v3" && (
               <ChatComposer
                 variant="v3"
                 message={liveMessage}
@@ -321,7 +317,7 @@ const ComposerVariantsPreview: React.FC = () => {
                 costLabel="≈ $0.001"
               />
             )}
-            {preferredVariant === "v5" && (
+            {previewVariant === "v5" && (
               <ChatComposer
                 variant="v5"
                 message={liveMessage}

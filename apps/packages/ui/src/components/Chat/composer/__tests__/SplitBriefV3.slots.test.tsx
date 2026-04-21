@@ -78,7 +78,7 @@ describe("SplitBriefV3 · slot overrides", () => {
     expect(container.querySelector('[data-testid="mentions-menu"]')).toBeTruthy()
   })
 
-  it("briefSlot + bottomBarSlot + sendSlot compose together", () => {
+  it("briefSlot + bottomBarSlot compose together", () => {
     render(
       <SplitBriefV3
         {...base}

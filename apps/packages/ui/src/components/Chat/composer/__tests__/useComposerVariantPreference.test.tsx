@@ -197,6 +197,36 @@ describe("useComposerVariantPreference", () => {
     expect(mocks.updateCurrentUserProfile).not.toHaveBeenCalled()
   })
 
+  it("does not let a late server hydrate overwrite a fresh local variant pick", async () => {
+    let resolveProfile:
+      | ((value: { preferences: Record<string, unknown> }) => void)
+      | undefined
+    const pendingProfile = new Promise<{ preferences: Record<string, unknown> }>(
+      (resolve) => {
+        resolveProfile = resolve
+      }
+    )
+    mocks.getCurrentUserProfile.mockReturnValue(pendingProfile)
+
+    const { result } = renderHook(() => useComposerVariantPreference())
+
+    act(() => {
+      result.current[1]("v5")
+    })
+
+    await act(async () => {
+      resolveProfile?.({
+        preferences: { [COMPOSER_VARIANT_PROFILE_KEY]: "v3" },
+      })
+      await pendingProfile
+    })
+
+    expect(result.current[0]).toBe("v5")
+    expect(window.localStorage.getItem(COMPOSER_VARIANT_PREFERENCE_KEY)).toBe(
+      "v5"
+    )
+  })
+
   // --- Cross-tab live sync ---
 
   it("picks up variant changes from another tab via storage event", () => {

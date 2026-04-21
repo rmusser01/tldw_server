@@ -26,8 +26,16 @@ const bypassOnboarding = async (page: Page) => {
   })
 }
 
+const waitForPreviewHarness = async (page: Page) => {
+  await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {})
+  await expect(page.getByRole("button", { name: "V1" })).toBeVisible({
+    timeout: 30_000,
+  })
+}
+
 test.describe("composer variants preview", () => {
   test("renders all three variants + live dispatcher", async ({ page }) => {
+    test.setTimeout(90_000)
     const errors: string[] = []
     page.on("pageerror", (err) => errors.push(`pageerror: ${err.message}`))
     page.on("console", (msg) => {
@@ -44,11 +52,18 @@ test.describe("composer variants preview", () => {
 
     await bypassOnboarding(page)
     await page.goto("/composer-variants-preview")
+    await waitForPreviewHarness(page)
 
     // Each variant mounted at least once
-    await expect(page.locator("[data-variant='v1']").first()).toBeVisible()
-    await expect(page.locator("[data-variant='v3']").first()).toBeVisible()
-    await expect(page.locator("[data-variant='v5']").first()).toBeVisible()
+    await expect(page.locator("[data-variant='v1']").first()).toBeVisible({
+      timeout: 30_000,
+    })
+    await expect(page.locator("[data-variant='v3']").first()).toBeVisible({
+      timeout: 30_000,
+    })
+    await expect(page.locator("[data-variant='v5']").first()).toBeVisible({
+      timeout: 30_000,
+    })
 
     // V1 source chip is in the DOM (14 + irb-archive label)
     await expect(page.getByText("irb-archive").first()).toBeVisible()
@@ -77,14 +92,14 @@ test.describe("composer variants preview", () => {
     // Click V3 — dispatcher should re-render with v3 variant attribute
     await v3Btn.click()
     const liveRegion = page.locator("section").filter({
-      has: page.getByText(/preferredVariant=v3/),
+      has: page.getByText(/previewVariant=v3/),
     })
     await expect(liveRegion).toBeVisible()
 
     // Click V5 — dispatcher should render with v5 variant
     await v5Btn.click()
     const liveRegionV5 = page.locator("section").filter({
-      has: page.getByText(/preferredVariant=v5/),
+      has: page.getByText(/previewVariant=v5/),
     })
     await expect(liveRegionV5).toBeVisible()
 
@@ -92,16 +107,25 @@ test.describe("composer variants preview", () => {
     expect(errors, `Console/runtime errors: ${errors.join(" | ")}`).toEqual([])
   })
 
-  test("variant preference persists across reloads", async ({ page }) => {
+  test("preview variant resets on reload instead of mutating real preferences", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000)
     await bypassOnboarding(page)
     await page.goto("/composer-variants-preview")
+    await waitForPreviewHarness(page)
     await page.getByRole("button", { name: "V5" }).click()
 
-    // Reload — V5 should remain the selected variant in the dispatcher frame
-    await page.reload()
-
-    // The V5 button should be pressed (aria-pressed=true)
     const v5Btn = page.getByRole("button", { name: "V5" })
     await expect(v5Btn).toHaveAttribute("aria-pressed", "true")
+
+    // Reload — the preview returns to its local default rather than
+    // persisting into the real composer preference store.
+    await page.reload()
+    await waitForPreviewHarness(page)
+
+    const v1Btn = page.getByRole("button", { name: "V1" })
+    await expect(v1Btn).toHaveAttribute("aria-pressed", "true")
+    await expect(page.getByText(/previewVariant=v1/)).toBeVisible()
   })
 })

@@ -10,12 +10,39 @@ const bypassOnboarding = async (page: Page) => {
   })
 }
 
+const mockComposerProfile = async (page: Page) => {
+  await page.route(/\/api\/v1\/users\/me\/profile.*/, async (route) => {
+    const method = route.request().method()
+    if (method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          profile_version: "2026-04-20T00:00:00Z",
+          preferences: {},
+        }),
+      })
+      return
+    }
+    if (method === "PATCH") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ applied: [], skipped: [] }),
+      })
+      return
+    }
+    await route.continue()
+  })
+}
+
 const captureVariant = async (
   page: Page,
   variant: "v1" | "v3" | "v5",
   outputPath: string
 ) => {
   await bypassOnboarding(page)
+  await mockComposerProfile(page)
   await page.addInitScript((v: string) => {
     try {
       window.localStorage.setItem("tldw:composerVariant", v)
@@ -40,17 +67,17 @@ const captureVariant = async (
   await wrapper.screenshot({ path: outputPath })
 }
 
-test("sidepanel · nextgen wrapper screenshot V1", async ({ page }) => {
+test("sidepanel · nextgen wrapper screenshot V1", async ({ page }, testInfo) => {
   test.setTimeout(90_000)
-  await captureVariant(page, "v1", "test-results/sidepanel-nextgen-v1.png")
+  await captureVariant(page, "v1", testInfo.outputPath("sidepanel-nextgen-v1.png"))
 })
 
-test("sidepanel · nextgen wrapper screenshot V3", async ({ page }) => {
+test("sidepanel · nextgen wrapper screenshot V3", async ({ page }, testInfo) => {
   test.setTimeout(90_000)
-  await captureVariant(page, "v3", "test-results/sidepanel-nextgen-v3.png")
+  await captureVariant(page, "v3", testInfo.outputPath("sidepanel-nextgen-v3.png"))
 })
 
-test("sidepanel · nextgen wrapper screenshot V5", async ({ page }) => {
+test("sidepanel · nextgen wrapper screenshot V5", async ({ page }, testInfo) => {
   test.setTimeout(90_000)
-  await captureVariant(page, "v5", "test-results/sidepanel-nextgen-v5.png")
+  await captureVariant(page, "v5", testInfo.outputPath("sidepanel-nextgen-v5.png"))
 })

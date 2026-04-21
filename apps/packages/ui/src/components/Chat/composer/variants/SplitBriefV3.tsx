@@ -49,6 +49,7 @@ export interface IconButtonSpec {
   label: string
   icon: React.ReactNode
   active?: boolean
+  pressed?: boolean
   onClick?: () => void
 }
 
@@ -247,7 +248,7 @@ export const SplitBriefV3: React.FC<SplitBriefV3Props> = ({
     >
       {noticesSlot && <div className="mb-2">{noticesSlot}</div>}
       <div
-        className={`${boxLayoutCls} relative bg-surface border border-border rounded-lg overflow-hidden transition-shadow ${boxFocusCls}`}
+        className={`${boxLayoutCls} relative bg-surface border border-border rounded-lg overflow-hidden transition ${boxFocusCls}`}
       >
         {overlaysSlot}
         {briefSlot ?? defaultBrief}
@@ -282,6 +283,7 @@ export const SplitBriefV3: React.FC<SplitBriefV3Props> = ({
                     key={btn.id}
                     label={btn.label}
                     active={btn.active}
+                    pressed={btn.pressed}
                     onClick={btn.onClick}
                     density={density}
                   >

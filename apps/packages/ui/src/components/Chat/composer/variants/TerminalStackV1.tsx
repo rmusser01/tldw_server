@@ -38,6 +38,7 @@ export interface IconButtonSpec {
   label: string
   icon: React.ReactNode
   active?: boolean
+  pressed?: boolean
   onClick?: () => void
 }
 
@@ -165,9 +166,7 @@ export const TerminalStackV1: React.FC<TerminalStackV1Props> = ({
     if (e.defaultPrevented) return
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
-      if (canSend && !sending) {
-        onSend()
-      }
+      handleSend()
     }
   }
 
@@ -211,7 +210,7 @@ export const TerminalStackV1: React.FC<TerminalStackV1Props> = ({
     >
       {noticesSlot && <div className="mb-2">{noticesSlot}</div>}
       <div
-        className={`relative bg-surface border border-border rounded-lg transition-shadow ${boxFocusCls}`}
+        className={`relative bg-surface border border-border rounded-lg transition ${boxFocusCls}`}
       >
         {overlaysSlot}
         {topContent && (
@@ -281,6 +280,7 @@ export const TerminalStackV1: React.FC<TerminalStackV1Props> = ({
                   key={btn.id}
                   label={btn.label}
                   active={btn.active}
+                  pressed={btn.pressed}
                   onClick={btn.onClick}
                   density={density}
                 >

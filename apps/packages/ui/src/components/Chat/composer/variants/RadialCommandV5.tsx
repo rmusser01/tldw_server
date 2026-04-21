@@ -37,6 +37,7 @@ export interface RadialCommandV5IconButton {
   label: string
   icon: React.ReactNode
   active?: boolean
+  pressed?: boolean
   onClick?: () => void
 }
 
@@ -203,7 +204,7 @@ export const RadialCommandV5: React.FC<RadialCommandV5Props> = ({
         ) : null)}
 
       <div
-        className={`bg-surface border border-border rounded-full flex items-center gap-2.5 transition-shadow ${boxFocusCls} ${
+        className={`bg-surface border border-border rounded-full flex items-center gap-2.5 transition ${boxFocusCls} ${
           compact ? "px-3 py-1 mt-2" : "px-4 py-1 mt-2.5"
         }`}
       >
@@ -248,6 +249,7 @@ export const RadialCommandV5: React.FC<RadialCommandV5Props> = ({
                 key={btn.id}
                 label={btn.label}
                 active={btn.active}
+                pressed={btn.pressed}
                 onClick={btn.onClick}
                 density={density}
               >

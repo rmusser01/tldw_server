@@ -78,9 +78,12 @@ const VARIANTS: VariantOption[] = [
 export const ComposerStyleSettings: React.FC = () => {
   const [variant, setVariant] = useComposerVariantPreference()
   const [enabled, setEnabled] = useComposerEnabledPreference()
-  const toggleEnabled = React.useCallback(() => {
-    setEnabled(!enabled)
-  }, [enabled, setEnabled])
+  const handleEnabledChange = React.useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setEnabled(event.target.checked)
+    },
+    [setEnabled]
+  )
 
   return (
     <section
@@ -104,7 +107,7 @@ export const ComposerStyleSettings: React.FC = () => {
             <input
               type="checkbox"
               checked={enabled}
-              onChange={toggleEnabled}
+              onChange={handleEnabledChange}
               data-testid="composer-enabled-toggle"
               className="h-4 w-4 rounded border-border accent-primary"
               aria-describedby="composer-enabled-hint"
