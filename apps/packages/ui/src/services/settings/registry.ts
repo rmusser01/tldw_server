@@ -5,6 +5,7 @@ type CoerceFn<T> = (value: unknown) => T
 type ValidateFn<T> = (value: T) => boolean
 type LocalStorageSerializeFn<T> = (value: T) => string
 type LocalStorageDeserializeFn = (value: string) => unknown
+type BeforeGetFn = () => void | Promise<void>
 
 type SettingOptions<T> = {
   coerce?: CoerceFn<T>
@@ -14,6 +15,7 @@ type SettingOptions<T> = {
   mirrorToLocalStorage?: boolean
   localStorageSerialize?: LocalStorageSerializeFn<T>
   localStorageDeserialize?: LocalStorageDeserializeFn
+  beforeGet?: BeforeGetFn
 }
 
 export type SettingDef<T> = {
@@ -26,6 +28,7 @@ export type SettingDef<T> = {
   mirrorToLocalStorage?: boolean
   localStorageSerialize?: LocalStorageSerializeFn<T>
   localStorageDeserialize?: LocalStorageDeserializeFn
+  beforeGet?: BeforeGetFn
 }
 
 const storageCache = new Map<StorageOptions["area"] | undefined, ReturnType<typeof createSafeStorage>>()
@@ -129,6 +132,7 @@ export const normalizeSettingValue = <T>(
 
 export const getSetting = async <T>(setting: SettingDef<T>): Promise<T> => {
   try {
+    await setting.beforeGet?.()
     const storage = getStorageForSetting(setting)
     const raw = await storage.get(setting.key)
     if (isUnset(raw)) {

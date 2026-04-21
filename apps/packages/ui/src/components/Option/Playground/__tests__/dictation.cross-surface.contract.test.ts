@@ -18,70 +18,67 @@ const resolveSidepanelFormPath = () => {
   return candidates.find((candidate) => fs.existsSync(candidate))
 }
 
+const resolveSharedVoiceHookPath = () => {
+  const candidates = [
+    path.resolve(
+      __dirname,
+      "../../Chat/composer/hooks/useComposerVoiceChat.ts"
+    ),
+    path.resolve(
+      process.cwd(),
+      "src/components/Chat/composer/hooks/useComposerVoiceChat.ts"
+    ),
+    path.resolve(
+      process.cwd(),
+      "apps/packages/ui/src/components/Chat/composer/hooks/useComposerVoiceChat.ts"
+    )
+  ]
+  return candidates.find((candidate) => fs.existsSync(candidate))
+}
+
 describe("dictation cross-surface contract", () => {
-  it("keeps Playground and Sidepanel on the same shared dictation source path", () => {
-    const playgroundVoiceChatPath = path.resolve(
-      __dirname,
-      "../hooks/usePlaygroundVoiceChat.ts"
-    )
-    const sidepanelFormPath = resolveSidepanelFormPath()
-    if (!sidepanelFormPath) {
-      throw new Error("Unable to locate Sidepanel chat form source")
+  // After Phase 2 extraction, both surfaces share the dictation orchestration
+  // through `useComposerVoiceChat`. The shared hook owns the source-resolution
+  // pipeline, the strategy bridge, and the diagnostics snapshot — so the
+  // contract assertions live there. We additionally assert that both
+  // Playground and Sidepanel surfaces consume the shared hook so the contract
+  // can't be silently re-divided.
+
+  it("keeps the shared dictation source path co-located in the composer voice hook", () => {
+    const sharedHookPath = resolveSharedVoiceHookPath()
+    if (!sharedHookPath) {
+      throw new Error("Unable to locate shared composer voice hook")
     }
+    const sharedSource = fs.readFileSync(sharedHookPath, "utf8")
 
-    const playgroundSource = fs.readFileSync(playgroundVoiceChatPath, "utf8")
-    const sidepanelSource = fs.readFileSync(sidepanelFormPath, "utf8")
-
-    expect(playgroundSource).toContain('useAudioSourcePreferences("dictation")')
-    expect(sidepanelSource).toContain('useAudioSourcePreferences("dictation")')
-    expect(playgroundSource).toContain("resolveAudioCapturePlan({")
-    expect(sidepanelSource).toContain("resolveAudioCapturePlan({")
-    expect(playgroundSource).toContain(
+    expect(sharedSource).toContain('useAudioSourcePreferences("dictation")')
+    expect(sharedSource).toContain("resolveAudioCapturePlan({")
+    expect(sharedSource).toContain(
       'dictationModeOverride === "browser" && !browserDictationCompatible'
     )
-    expect(sidepanelSource).toContain(
-      'dictationModeOverride === "browser" && !browserDictationCompatible'
+    expect(sharedSource).toContain(
+      'canUseServerStt\n        ? ("server" as const)\n        : ("unavailable" as const)'
     )
-    expect(playgroundSource).toContain('canUseServerStt ? ("server" as const) : ("unavailable" as const)')
-    expect(sidepanelSource).toContain('canUseServerStt ? ("server" as const) : ("unavailable" as const)')
-    expect(playgroundSource).toContain("resolvedModeOverride,")
-    expect(sidepanelSource).toContain("resolvedModeOverride,")
-    expect(playgroundSource).toContain("resolvedDictationSourcePreference.sourceKind")
-    expect(sidepanelSource).toContain("resolvedDictationSourcePreference.sourceKind")
-    expect(playgroundSource).toContain("audioInputDevices.some(")
-    expect(sidepanelSource).toContain("audioInputDevices.some(")
-    expect(playgroundSource).toContain("dictationSourceReady")
-    expect(sidepanelSource).toContain("dictationSourceReady")
-    expect(playgroundSource).toContain("pendingDictationStart")
-    expect(sidepanelSource).toContain("pendingDictationStart")
-    expect(playgroundSource).toContain("hasAudioCatalogSettled")
-    expect(sidepanelSource).toContain("hasAudioCatalogSettled")
-
-    expect(playgroundSource).toContain(
+    expect(sharedSource).toContain("resolvedModeOverride,")
+    expect(sharedSource).toContain("resolvedDictationSourcePreference.sourceKind")
+    expect(sharedSource).toContain("audioInputDevices.some(")
+    expect(sharedSource).toContain("dictationSourceReady")
+    expect(sharedSource).toContain("pendingDictationStart")
+    expect(sharedSource).toContain("hasAudioCatalogSettled")
+    expect(sharedSource).toContain(
       "serverDictationErrorBridgeRef.current = dictationStrategy.recordServerError"
     )
-    expect(playgroundSource).toContain(
+    expect(sharedSource).toContain(
       "serverDictationSuccessBridgeRef.current = dictationStrategy.recordServerSuccess"
     )
-    expect(sidepanelSource).toContain(
-      "serverDictationErrorBridgeRef.current = dictationStrategy.recordServerError"
-    )
-    expect(sidepanelSource).toContain(
-      "serverDictationSuccessBridgeRef.current = dictationStrategy.recordServerSuccess"
-    )
-    expect(playgroundSource).toContain(
+    expect(sharedSource).toContain(
       "const snapshot = dictationDiagnosticsSnapshotRef.current"
     )
-    expect(sidepanelSource).toContain(
-      "const snapshot = dictationDiagnosticsSnapshotRef.current"
-    )
-    expect(playgroundSource).toContain("requestedSourceKind:")
-    expect(playgroundSource).toContain("resolvedSourceKind:")
-    expect(sidepanelSource).toContain("requestedSourceKind:")
-    expect(sidepanelSource).toContain("resolvedSourceKind:")
+    expect(sharedSource).toContain("requestedSourceKind:")
+    expect(sharedSource).toContain("resolvedSourceKind:")
   })
 
-  it("routes dictation controls through unified toggle intent handlers in both forms", () => {
+  it("requires both Playground and Sidepanel surfaces to consume the shared composer voice hook", () => {
     const playgroundVoiceChatPath = path.resolve(
       __dirname,
       "../hooks/usePlaygroundVoiceChat.ts"
@@ -94,16 +91,33 @@ describe("dictation cross-surface contract", () => {
     const playgroundSource = fs.readFileSync(playgroundVoiceChatPath, "utf8")
     const sidepanelSource = fs.readFileSync(sidepanelFormPath, "utf8")
 
-    expect(playgroundSource).toContain("const handleDictationToggle = React.useCallback(() => {")
-    expect(playgroundSource).toContain("switch (dictationToggleIntent)")
-    expect(playgroundSource).toContain("startServerDictation(requestedServerDictationSource)")
-
-    expect(sidepanelSource).toContain("const handleDictationToggle = React.useCallback(() => {")
-    expect(sidepanelSource).toContain("switch (dictationStrategy.toggleIntent)")
-    expect(sidepanelSource).toContain("startServerDictation(requestedServerDictationSource)")
+    expect(playgroundSource).toContain(
+      'from "@/components/Chat/composer/hooks/useComposerVoiceChat"'
+    )
+    expect(playgroundSource).toContain("useComposerVoiceChat(")
+    expect(sidepanelSource).toContain(
+      'from "@/components/Chat/composer/hooks/useComposerVoiceChat"'
+    )
+    expect(sidepanelSource).toContain("useComposerVoiceChat(")
   })
 
-  it("keeps transcript insertion attached to the composer message in both forms", () => {
+  it("routes dictation controls through unified toggle intent handlers in the shared hook", () => {
+    const sharedHookPath = resolveSharedVoiceHookPath()
+    if (!sharedHookPath) {
+      throw new Error("Unable to locate shared composer voice hook")
+    }
+    const sharedSource = fs.readFileSync(sharedHookPath, "utf8")
+
+    expect(sharedSource).toContain(
+      "const handleDictationToggle = React.useCallback(() => {"
+    )
+    expect(sharedSource).toContain("switch (dictationToggleIntent)")
+    expect(sharedSource).toContain(
+      "startServerDictation(requestedServerDictationSource)"
+    )
+  })
+
+  it("keeps transcript insertion attached to the composer message in both surfaces", () => {
     const playgroundVoiceChatPath = path.resolve(
       __dirname,
       "../hooks/usePlaygroundVoiceChat.ts"
@@ -116,12 +130,13 @@ describe("dictation cross-surface contract", () => {
     const playgroundSource = fs.readFileSync(playgroundVoiceChatPath, "utf8")
     const sidepanelSource = fs.readFileSync(sidepanelFormPath, "utf8")
 
-    expect(playgroundSource).toContain("onTranscript: (text) => {")
+    // Playground keeps its collapse-aware transcript handler.
     expect(playgroundSource).toContain(
-      "setMessageValue(text, { collapseLarge: true, forceCollapse: true })"
+      'setMessageValue(text, { collapseLarge: true, forceCollapse: true })'
     )
+    // Sidepanel keeps its plain-text transcript handler.
     expect(sidepanelSource).toContain(
-      'onTranscript: (text) => form.setFieldValue("message", text)'
+      'form.setFieldValue("message", text)'
     )
   })
 })
