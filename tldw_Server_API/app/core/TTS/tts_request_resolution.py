@@ -20,6 +20,9 @@ _PROVIDER_ALIASES = {
     "kitten": DEFAULT_KITTEN_TTS_PROVIDER,
     "kittentts": DEFAULT_KITTEN_TTS_PROVIDER,
     "tldw": DEFAULT_KITTEN_TTS_PROVIDER,
+    "omnivoice": "omnivoice",
+    "omni-voice": "omnivoice",
+    "omni_voice": "omnivoice",
 }
 
 _DEFAULT_MODELS_BY_PROVIDER = {
