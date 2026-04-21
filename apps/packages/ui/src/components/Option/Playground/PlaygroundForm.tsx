@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import React from "react"
+import {
+  ChatComposer,
+  useComposerVariantPreference,
+} from "@/components/Chat/composer/ChatComposer"
+import { useComposerEnabledPreference } from "@/components/Chat/composer/hooks/useComposerEnabledPreference"
 import { useMessageOption } from "~/hooks/useMessageOption"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import {
@@ -479,6 +484,27 @@ export const PlaygroundForm = ({
   } = useMessageOption()
   const setRagMediaIds = useStoreMessageOption((s) => s.setRagMediaIds)
   const setRagPinnedResults = useStoreMessageOption((s) => s.setRagPinnedResults)
+
+  // Experimental Primer composer wire-up — opt in via ?nextgenComposer=1
+  // query param OR the Settings "Enable new composer" toggle. When ON,
+  // the existing ComposerTextarea + ComposerToolbar render inside
+  // <ChatComposer variant={pref}> via the slot APIs.
+  //
+  // URL flag is read once at mount; the toggle uses the live-syncing
+  // hook so cross-tab flips and server-profile hydrates flow through
+  // without a reload.
+  const [urlFlagEnabled] = React.useState(() => {
+    if (typeof window === "undefined") return false
+    try {
+      const params = new URLSearchParams(window.location.search)
+      return params.get("nextgenComposer") === "1"
+    } catch {
+      return false
+    }
+  })
+  const [toggleEnabled] = useComposerEnabledPreference()
+  const nextgenComposerEnabled = urlFlagEnabled || toggleEnabled
+  const [nextgenComposerVariant] = useComposerVariantPreference()
   const { settings: chatSettings, updateSettings: updateChatSettings } =
     useChatSettingsRecord({
       historyId,
@@ -4330,8 +4356,8 @@ export const PlaygroundForm = ({
                       wrapComposerProfile={wrapComposerProfile}
                       t={t}
                     />
-                    <div className="relative">
-                      {isProMode && replyTarget && (
+                    {(() => {
+                      const replyTargetNode = isProMode && replyTarget ? (
                         <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text">
                           <div className="flex min-w-0 items-center gap-2">
                             <CornerUpLeft className="h-3.5 w-3.5 text-text-subtle" />
@@ -4354,245 +4380,410 @@ export const PlaygroundForm = ({
                             <X className="h-3.5 w-3.5" aria-hidden="true" />
                           </button>
                         </div>
-                      )}
-                      {wrapComposerProfile(
-                        "composer-textarea",
-                        <ComposerTextarea
-                          textareaRef={textareaRef}
-                          value={form.values.message}
-                          displayValue={messageDisplayValue}
-                          onChange={handleTextareaChange}
-                          onKeyDown={handleTextareaKeyDown}
-                          onPaste={handlePaste}
-                          onFocus={handleTextareaFocus}
-                          onSelect={handleTextareaSelect}
-                          onCompositionStart={handleCompositionStart}
-                          onCompositionEnd={handleCompositionEnd}
-                          onMouseDown={handleTextareaMouseDown}
-                          onMouseUp={handleTextareaMouseUp}
-                          placeholder={
-                            isConnectionReady
-                              ? t(
-                                  "playground:composer.placeholderWithMentions",
-                                  "Type a message... (/ commands, @ mentions)"
-                                )
-                              : t(
-                                  "playground:composer.connectionPlaceholder",
-                                  "Connect to tldw to start chatting."
-                                )
-                          }
-                          isProMode={isProMode}
-                          isMobile={isMobileViewport}
-                          isConnectionReady={isConnectionReady}
-                          isCollapsed={isMessageCollapsed}
-                          ariaExpanded={!isMessageCollapsed}
-                          compactWhenInactive={shouldCompactComposerTextarea}
-                          formInputProps={form.getInputProps("message")}
-                          showSlashMenu={showSlashMenu}
-                          slashCommands={filteredSlashCommands}
-                          slashActiveIndex={slashActiveIndex}
-                          onSlashSelect={handleSlashCommandSelect}
-                          onSlashActiveIndexChange={setSlashActiveIndex}
-                          slashEmptyLabel={t(
-                            "common:commandPalette.noResults",
-                            "No results found"
+                      ) : null
+
+                      const composerTextareaNode = (
+                        <div className="relative">
+                          {replyTargetNode}
+                          {wrapComposerProfile(
+                            "composer-textarea",
+                            <ComposerTextarea
+                              textareaRef={textareaRef}
+                              value={form.values.message}
+                              displayValue={messageDisplayValue}
+                              onChange={handleTextareaChange}
+                              onKeyDown={handleTextareaKeyDown}
+                              onPaste={handlePaste}
+                              onFocus={handleTextareaFocus}
+                              onSelect={handleTextareaSelect}
+                              onCompositionStart={handleCompositionStart}
+                              onCompositionEnd={handleCompositionEnd}
+                              onMouseDown={handleTextareaMouseDown}
+                              onMouseUp={handleTextareaMouseUp}
+                              placeholder={
+                                isConnectionReady
+                                  ? t(
+                                      "playground:composer.placeholderWithMentions",
+                                      "Type a message... (/ commands, @ mentions)"
+                                    )
+                                  : t(
+                                      "playground:composer.connectionPlaceholder",
+                                      "Connect to tldw to start chatting."
+                                    )
+                              }
+                              isProMode={isProMode}
+                              isMobile={isMobileViewport}
+                              isConnectionReady={isConnectionReady}
+                              isCollapsed={isMessageCollapsed}
+                              ariaExpanded={!isMessageCollapsed}
+                              compactWhenInactive={shouldCompactComposerTextarea}
+                              formInputProps={form.getInputProps("message")}
+                              showSlashMenu={showSlashMenu}
+                              slashCommands={filteredSlashCommands}
+                              slashActiveIndex={slashActiveIndex}
+                              onSlashSelect={handleSlashCommandSelect}
+                              onSlashActiveIndexChange={setSlashActiveIndex}
+                              slashEmptyLabel={t(
+                                "common:commandPalette.noResults",
+                                "No results found"
+                              )}
+                              showMentions={showMentions}
+                              filteredTabs={filteredTabs}
+                              mentionPosition={mentionPosition}
+                              onMentionSelect={handleMentionSelect}
+                              onMentionsClose={closeMentions}
+                              onMentionRefetch={handleMentionRefetch}
+                              onMentionsOpen={handleMentionsOpen}
+                              draftSaved={draftSaved}
+                            />
                           )}
-                          showMentions={showMentions}
-                          filteredTabs={filteredTabs}
-                          mentionPosition={mentionPosition}
-                          onMentionSelect={handleMentionSelect}
-                          onMentionsClose={closeMentions}
-                          onMentionRefetch={handleMentionRefetch}
-                          onMentionsOpen={handleMentionsOpen}
-                          draftSaved={draftSaved}
-                        />
-                      )}
-                    </div>
-                    {/* Inline error message with shake animation */}
-                    {form.errors.message && (
-                      <div
-                        role="alert"
-                        aria-live="assertive"
-                        aria-atomic="true"
-                        className="flex items-center justify-between gap-2 px-2 py-1 text-xs text-danger animate-shake"
-                      >
-                        <div className="flex items-center gap-2">
-                          <svg className="h-3.5 w-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                          <span>{form.errors.message}</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => form.clearFieldError("message")}
-                          className="flex-shrink-0 text-danger hover:text-danger"
-                          aria-label={t("common:dismiss", "Dismiss") as string}
-                          title={t("common:dismiss", "Dismiss") as string}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    )}
-                    {/* Proactive validation hints - show why send might be disabled */}
-                    {!form.errors.message && isConnectionReady && !isSending && isProMode && (
-                      <div className="px-2 py-1 text-label text-text-subtle">
-                        {!selectedModel && !activeImageCommand ? (
-                          <span className="flex items-center gap-1">
-                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            {t("sidepanel:composer.hints.selectModel", "Select a model above to start chatting")}
-                          </span>
-                        ) : form.values.message.trim().length === 0 && form.values.image.length === 0 ? (
-                          <span>
-                            {sendWhenEnter
-                              ? t("sidepanel:composer.hints.typeAndEnter", "Type a message and press Enter to send")
-                              : t("sidepanel:composer.hints.typeAndClick", "Type a message and click Send")}
-                          </span>
-                        ) : null}
-                      </div>
-                    )}
-                    {/* Guarded top-level notice/modal contract:
-                        Changed since last send:
-                        playground:composer.providerDegraded
-                        playground:composer.compareActivationTitle
-                        playground:composer.compareActivationBody
-                        playground:composer.compareActivationInteroperability
-                        compare-interoperability-notices
-                        playground:composer.validationCompareMinModelsInline
-                        playground:composer.jsonModeHint
-                        playground:composer.characterPendingNotice
-                        { mode: "voice" }
-                        previousSendStateRef
-                        tldw:focus-composer
-                        el.focus()
-                        tldw:toggle-compare-mode
-                        tldw:toggle-mode-launcher
-                        ContextFootprintPanel
-                        playground:composer.context.sessionStatus
-                        playground:composer.context.truncationRisk
-                        playground:composer.context.contextMix
-                        isSessionDegraded
-                        playground:composer.conflict.summaryCheckpointBudget
-                        playground:composer.conflict.contextFootprint
-                        evaluateSummaryCheckpointSuggestion
-                        resolveTokenBudgetRisk
-                        playground:tokens.truncationRisk
-                        tldw:playground-starter-selected
-                        SessionInsightsPanel
-                        ModelRecommendationsPanel
-                        buildSessionInsights
-                        buildModelRecommendations
-                        buildCompareInteroperabilityNotices
-                        data-testid="startup-template-controls"
-                        startup-template-preview-modal
-                        image-refine-with-llm
-                        image-prompt-refine-diff
-                        imageGenerationRefine
-                        playground:insights.modalTitle
-                        playground:composer.startupTemplatePreviewTitle */}
-                    <PlaygroundComposerNotices
-                      modeAnnouncement={modeAnnouncement}
-                      characterPendingApply={characterPendingApply}
-                      selectedCharacterGreeting={selectedCharacterGreeting}
-                      selectedCharacterName={selectedCharacter?.name || null}
-                      compareModeActive={compareModeActive}
-                      compareSelectedModels={compareSelectedModels}
-                      compareSelectedModelLabels={compareSelectedModelLabels}
-                      compareNeedsMoreModels={compareNeedsMoreModels}
-                      compareSharedContextLabels={compareSharedContextLabels}
-                      compareInteroperabilityNotices={compareInteroperabilityNotices}
-                      noticesExpanded={noticesExpanded}
-                      setNoticesExpanded={setNoticesExpanded}
-                      contextDeltaLabels={contextDeltaLabels}
-                      contextConflictWarnings={contextConflictWarnings}
-                      visibleModelRecommendations={visibleModelRecommendations}
-                      sessionInsightsTotalTokens={sessionInsights.totals.totalTokens}
-                      jsonMode={Boolean(currentChatModelSettings.jsonMode)}
-                      isConnectionReady={isConnectionReady}
-                      connectionUxState={connectionUxState}
-                      isProMode={isProMode}
-                      selectedModel={selectedModel}
-                      systemPrompt={systemPrompt}
-                      selectedCharacter={selectedCharacter}
-                      ragPinnedResultsLength={ragPinnedResults.length}
-                      startupTemplateDraftName={startupTemplateDraftName}
-                      setStartupTemplateDraftName={setStartupTemplateDraftName}
-                      startupTemplates={startupTemplates}
-                      handleSaveStartupTemplate={handleSaveStartupTemplate}
-                      handleOpenStartupTemplatePreview={handleOpenStartupTemplatePreview}
-                      setOpenModelSettings={setOpenModelSettings}
-                      setOpenActorSettings={setOpenActorSettings}
-                      setMessageValue={setMessageValue}
-                      textAreaFocus={textAreaFocus}
-                      openModelApiSelector={openModelApiSelector}
-                      openSessionInsightsModal={openSessionInsightsModal}
-                      handleModelRecommendationAction={handleModelRecommendationAction}
-                      dismissModelRecommendation={dismissModelRecommendation}
-                      getModelRecommendationActionLabel={getModelRecommendationActionLabel}
-                      wrapComposerProfile={wrapComposerProfile}
-                      t={t}
-                    />
-                    <div
-                      aria-hidden={!actionBarVisible}
-                      className={`transition-all duration-200 overflow-hidden ${actionBarVisibilityClass}`}
-                    >
-                      {wrapComposerProfile(
-                        "composer-toolbar",
-                        <ComposerToolbar
-                          isProMode={isProMode}
-                          isMobile={isMobileViewport}
+                      )
+
+                      const composerInlineMessagesNode = (
+                        <>
+                          {form.errors.message && (
+                            <div
+                              role="alert"
+                              aria-live="assertive"
+                              aria-atomic="true"
+                              className="flex items-center justify-between gap-2 px-2 py-1 text-xs text-danger animate-shake"
+                            >
+                              <div className="flex items-center gap-2">
+                                <svg className="h-3.5 w-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                                <span>{form.errors.message}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => form.clearFieldError("message")}
+                                className="flex-shrink-0 text-danger hover:text-danger"
+                                aria-label={t("common:dismiss", "Dismiss") as string}
+                                title={t("common:dismiss", "Dismiss") as string}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
+                          {!form.errors.message && isConnectionReady && !isSending && isProMode && (
+                            <div className="px-2 py-1 text-label text-text-subtle">
+                              {!selectedModel && !activeImageCommand ? (
+                                <span className="flex items-center gap-1">
+                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  {t("sidepanel:composer.hints.selectModel", "Select a model above to start chatting")}
+                                </span>
+                              ) : form.values.message.trim().length === 0 && form.values.image.length === 0 ? (
+                                <span>
+                                  {sendWhenEnter
+                                    ? t("sidepanel:composer.hints.typeAndEnter", "Type a message and press Enter to send")
+                                    : t("sidepanel:composer.hints.typeAndClick", "Type a message and click Send")}
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
+                        </>
+                      )
+                      /* Guarded top-level notice/modal contract:
+                          Changed since last send:
+                          playground:composer.providerDegraded
+                          playground:composer.compareActivationTitle
+                          playground:composer.compareActivationBody
+                          playground:composer.compareActivationInteroperability
+                          compare-interoperability-notices
+                          playground:composer.validationCompareMinModelsInline
+                          playground:composer.jsonModeHint
+                          playground:composer.characterPendingNotice
+                          { mode: "voice" }
+                          previousSendStateRef
+                          tldw:focus-composer
+                          el.focus()
+                          tldw:toggle-compare-mode
+                          tldw:toggle-mode-launcher
+                          ContextFootprintPanel
+                          playground:composer.context.sessionStatus
+                          playground:composer.context.truncationRisk
+                          playground:composer.context.contextMix
+                          isSessionDegraded
+                          playground:composer.conflict.summaryCheckpointBudget
+                          playground:composer.conflict.contextFootprint
+                          evaluateSummaryCheckpointSuggestion
+                          resolveTokenBudgetRisk
+                          playground:tokens.truncationRisk
+                          tldw:playground-starter-selected
+                          SessionInsightsPanel
+                          ModelRecommendationsPanel
+                          buildSessionInsights
+                          buildModelRecommendations
+                          buildCompareInteroperabilityNotices
+                          data-testid="startup-template-controls"
+                          startup-template-preview-modal
+                          image-refine-with-llm
+                          image-prompt-refine-diff
+                          imageGenerationRefine
+                          playground:insights.modalTitle
+                          playground:composer.startupTemplatePreviewTitle */
+                      const composerNoticesNode = (
+                        <PlaygroundComposerNotices
+                          modeAnnouncement={modeAnnouncement}
+                          characterPendingApply={characterPendingApply}
+                          selectedCharacterGreeting={selectedCharacterGreeting}
+                          selectedCharacterName={selectedCharacter?.name || null}
+                          compareModeActive={compareModeActive}
+                          compareSelectedModels={compareSelectedModels}
+                          compareSelectedModelLabels={compareSelectedModelLabels}
+                          compareNeedsMoreModels={compareNeedsMoreModels}
+                          compareSharedContextLabels={compareSharedContextLabels}
+                          compareInteroperabilityNotices={compareInteroperabilityNotices}
+                          noticesExpanded={noticesExpanded}
+                          setNoticesExpanded={setNoticesExpanded}
+                          contextDeltaLabels={contextDeltaLabels}
+                          contextConflictWarnings={contextConflictWarnings}
+                          visibleModelRecommendations={visibleModelRecommendations}
+                          sessionInsightsTotalTokens={sessionInsights.totals.totalTokens}
+                          jsonMode={Boolean(currentChatModelSettings.jsonMode)}
                           isConnectionReady={isConnectionReady}
-                          isSending={isSending}
-                          modeLauncherButton={modeLauncherButton}
-                          compareControl={compareControl}
-                          modelSelectButton={modelSelectButton}
-                          mcpControl={mcpControl}
-                          sendControl={sendControl}
-                          attachmentButton={attachmentButton}
-                          toolsButton={toolsButton}
-                          voiceChatButton={voiceChatButton}
-                          modelUsageBadge={modelUsageBadge}
-                          selectedSystemPrompt={selectedSystemPrompt}
-                          systemPrompt={systemPrompt}
-                          setSystemPrompt={setSystemPrompt}
-                          setSelectedSystemPrompt={setSelectedSystemPrompt}
-                          setSelectedQuickPrompt={setSelectedQuickPrompt}
-                          temporaryChat={temporaryChat}
-                          onToggleTemporaryChat={handleToggleTemporaryChat}
-                          privateChatLocked={privateChatLocked}
-                          isFireFoxPrivateMode={isFireFoxPrivateMode}
-                          persistenceTooltip={persistenceTooltip}
-                          contextToolsOpen={contextToolsOpen}
-                          onToggleKnowledgePanel={toggleKnowledgePanel}
-                          webSearch={webSearch}
-                          onToggleWebSearch={handleToggleWebSearch}
-                          hasWebSearch={!!capabilities?.hasWebSearch}
-                          onOpenModelSettings={handleOpenModelSettings}
-                          modelSummaryLabel={modelSummaryLabel}
-                          promptSummaryLabel={promptSummaryLabel}
-                          hasDictation={!!(browserSupportsSpeechRecognition || hasServerStt)}
-                          speechAvailable={speechAvailable}
-                          speechUsesServer={speechUsesServer}
-                          isListening={isListening}
-                          isServerDictating={isServerDictating}
-                          voiceChatEnabled={voiceChatEnabled}
-                          speechTooltip={speechTooltipText}
-                          onDictationToggle={handleDictationToggle}
-                          onTemplateSelect={handleTemplateSelect}
+                          connectionUxState={connectionUxState}
+                          isProMode={isProMode}
                           selectedModel={selectedModel}
-                          resolvedProviderKey={resolvedProviderKey}
-                          messages={messages}
-                          selectedDocumentsCount={selectedDocuments.length}
-                          uploadedFilesCount={uploadedFiles.length}
-                          serverChatId={serverChatId}
-                          showServerPersistenceHint={showServerPersistenceHint}
-                          onDismissServerPersistenceHint={handleDismissServerPersistenceHint}
-                          onFocusConnectionCard={focusConnectionCard}
-                          contextItems={contextItems}
+                          systemPrompt={systemPrompt}
+                          selectedCharacter={selectedCharacter}
+                          ragPinnedResultsLength={ragPinnedResults.length}
+                          startupTemplateDraftName={startupTemplateDraftName}
+                          setStartupTemplateDraftName={setStartupTemplateDraftName}
+                          startupTemplates={startupTemplates}
+                          handleSaveStartupTemplate={handleSaveStartupTemplate}
+                          handleOpenStartupTemplatePreview={handleOpenStartupTemplatePreview}
+                          setOpenModelSettings={setOpenModelSettings}
+                          setOpenActorSettings={setOpenActorSettings}
+                          setMessageValue={setMessageValue}
+                          textAreaFocus={textAreaFocus}
+                          openModelApiSelector={openModelApiSelector}
+                          openSessionInsightsModal={openSessionInsightsModal}
+                          handleModelRecommendationAction={handleModelRecommendationAction}
+                          dismissModelRecommendation={dismissModelRecommendation}
+                          getModelRecommendationActionLabel={getModelRecommendationActionLabel}
+                          wrapComposerProfile={wrapComposerProfile}
+                          t={t}
                         />
-                      )}
-                    </div>
+                      )
+
+                      const composerToolbarNode = (
+                        <div
+                          aria-hidden={!actionBarVisible}
+                          className={`w-full transition-all duration-200 overflow-hidden ${actionBarVisibilityClass}`}
+                        >
+                          {wrapComposerProfile(
+                            "composer-toolbar",
+                            <ComposerToolbar
+                              isProMode={isProMode}
+                              isMobile={isMobileViewport}
+                              isConnectionReady={isConnectionReady}
+                              isSending={isSending}
+                              modeLauncherButton={modeLauncherButton}
+                              compareControl={compareControl}
+                              modelSelectButton={modelSelectButton}
+                              mcpControl={mcpControl}
+                              sendControl={sendControl}
+                              attachmentButton={attachmentButton}
+                              toolsButton={toolsButton}
+                              voiceChatButton={voiceChatButton}
+                              modelUsageBadge={modelUsageBadge}
+                              selectedSystemPrompt={selectedSystemPrompt}
+                              systemPrompt={systemPrompt}
+                              setSystemPrompt={setSystemPrompt}
+                              setSelectedSystemPrompt={setSelectedSystemPrompt}
+                              setSelectedQuickPrompt={setSelectedQuickPrompt}
+                              temporaryChat={temporaryChat}
+                              onToggleTemporaryChat={handleToggleTemporaryChat}
+                              privateChatLocked={privateChatLocked}
+                              isFireFoxPrivateMode={isFireFoxPrivateMode}
+                              persistenceTooltip={persistenceTooltip}
+                              contextToolsOpen={contextToolsOpen}
+                              onToggleKnowledgePanel={toggleKnowledgePanel}
+                              webSearch={webSearch}
+                              onToggleWebSearch={handleToggleWebSearch}
+                              hasWebSearch={!!capabilities?.hasWebSearch}
+                              onOpenModelSettings={handleOpenModelSettings}
+                              modelSummaryLabel={modelSummaryLabel}
+                              promptSummaryLabel={promptSummaryLabel}
+                              hasDictation={!!(browserSupportsSpeechRecognition || hasServerStt)}
+                              speechAvailable={speechAvailable}
+                              speechUsesServer={speechUsesServer}
+                              isListening={isListening}
+                              isServerDictating={isServerDictating}
+                              voiceChatEnabled={voiceChatEnabled}
+                              speechTooltip={speechTooltipText}
+                              onDictationToggle={handleDictationToggle}
+                              onTemplateSelect={handleTemplateSelect}
+                              selectedModel={selectedModel}
+                              resolvedProviderKey={resolvedProviderKey}
+                              messages={messages}
+                              selectedDocumentsCount={selectedDocuments.length}
+                              uploadedFilesCount={uploadedFiles.length}
+                              serverChatId={serverChatId}
+                              showServerPersistenceHint={showServerPersistenceHint}
+                              onDismissServerPersistenceHint={handleDismissServerPersistenceHint}
+                              onFocusConnectionCard={focusConnectionCard}
+                              contextItems={contextItems}
+                            />
+                          )}
+                        </div>
+                      )
+
+                      if (nextgenComposerEnabled) {
+                        const sharedNoticesSlot = (
+                          <>
+                            {composerInlineMessagesNode}
+                            {composerNoticesNode}
+                          </>
+                        )
+                        const tokensProp =
+                          resolvedMaxContext > 0
+                            ? {
+                                used: conversationTokenCount,
+                                max: resolvedMaxContext,
+                              }
+                            : undefined
+
+                        // V3 brief panel + V5 facet row data sourced from the
+                        // same Playground state the legacy composer reads.
+                        // Click handlers route to the same actions the
+                        // legacy toolbar exposes — model picker, character
+                        // sheet, knowledge panel, web-search toggle.
+                        const briefFields: Array<{
+                          id: string
+                          fieldKey: string
+                          value: string
+                          active?: boolean
+                          onClick?: () => void
+                          "aria-label"?: string
+                        }> = [
+                          {
+                            id: "model",
+                            fieldKey: "mdl",
+                            value: selectedModel || "—",
+                            active: Boolean(selectedModel),
+                            onClick: handleOpenModelSettings,
+                            "aria-label": selectedModel
+                              ? `Change model (current: ${selectedModel})`
+                              : "Pick a model",
+                          },
+                          {
+                            id: "character",
+                            fieldKey: "chr",
+                            value: selectedCharacter?.name || "—",
+                            active: Boolean(selectedCharacter?.name),
+                            onClick: () => setOpenActorSettings(true),
+                            "aria-label": selectedCharacter?.name
+                              ? `Change character (current: ${selectedCharacter.name})`
+                              : "Pick a character",
+                          },
+                          {
+                            id: "sources",
+                            fieldKey: "src",
+                            value: String(
+                              selectedDocuments.length + uploadedFiles.length
+                            ),
+                            active:
+                              selectedDocuments.length + uploadedFiles.length > 0,
+                            onClick: toggleKnowledgePanel,
+                            "aria-label": "Open knowledge panel",
+                          },
+                          {
+                            id: "web",
+                            fieldKey: "web",
+                            value: webSearch ? "on" : "off",
+                            active: webSearch,
+                            onClick: handleToggleWebSearch,
+                            "aria-label": webSearch
+                              ? "Turn web search off"
+                              : "Turn web search on",
+                          },
+                        ]
+                        const briefSections = [
+                          { id: "playground-brief", label: "Brief", fields: briefFields },
+                        ]
+
+                        const variantNode =
+                          nextgenComposerVariant === "v5" ? (
+                            <ChatComposer
+                              variant="v5"
+                              message={form.values.message}
+                              onMessageChange={(value) =>
+                                form.setFieldValue("message", value)
+                              }
+                              onSend={() => submitForm()}
+                              sending={isSending}
+                              stopStreaming={stopStreamingRequest}
+                              tokens={tokensProp}
+                              onPaletteTrigger={() => {
+                                // V5 design: ⌘K injects `/` into the
+                                // textarea, opening the existing
+                                // ComposerTextarea slash menu instead
+                                // of a separate palette surface.
+                                const current = form.values.message
+                                form.setFieldValue(
+                                  "message",
+                                  current.endsWith("/") ? current : `${current}/`
+                                )
+                                textareaRef.current?.focus()
+                              }}
+                              textareaSlot={composerTextareaNode}
+                              facetsSlot={composerToolbarNode}
+                              noticesSlot={sharedNoticesSlot}
+                            />
+                          ) : nextgenComposerVariant === "v3" ? (
+                            <ChatComposer
+                              variant="v3"
+                              message={form.values.message}
+                              onMessageChange={(value) =>
+                                form.setFieldValue("message", value)
+                              }
+                              onSend={() => submitForm()}
+                              sending={isSending}
+                              stopStreaming={stopStreamingRequest}
+                              tokens={tokensProp}
+                              briefSections={briefSections}
+                              textareaSlot={composerTextareaNode}
+                              bottomBarSlot={composerToolbarNode}
+                              noticesSlot={sharedNoticesSlot}
+                            />
+                          ) : (
+                            <ChatComposer
+                              variant="v1"
+                              message={form.values.message}
+                              onMessageChange={(value) =>
+                                form.setFieldValue("message", value)
+                              }
+                              onSend={() => submitForm()}
+                              sending={isSending}
+                              stopStreaming={stopStreamingRequest}
+                              tokens={tokensProp}
+                              textareaSlot={composerTextareaNode}
+                              bottomBarSlot={composerToolbarNode}
+                              noticesSlot={sharedNoticesSlot}
+                            />
+                          )
+
+                        return (
+                          <div data-testid="nextgen-composer-wrapper">
+                            {variantNode}
+                          </div>
+                        )
+                      }
+
+                      return (
+                        <>
+                          {composerTextareaNode}
+                          {composerInlineMessagesNode}
+                          {composerNoticesNode}
+                          {composerToolbarNode}
+                        </>
+                      )
+                    })()}
                     {showConnectBanner && !isConnectionReady && (
                       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
                         <p className="max-w-xs text-left">
