@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 X_TLDW_SIDECAR_TOKEN_HEADER = "X-TLDW-Sidecar-Token"  # nosec B105
@@ -14,7 +14,18 @@ class OmniVoiceSynthesizeRequest(BaseModel):
     text: str = Field(..., min_length=1)
     mode: str = Field(default="auto", min_length=1)
     voice: str | None = None
+    reference_audio_path: str | None = None
+    reference_text: str | None = None
     sample_rate: int = Field(default=24000, ge=8000, le=192000)
+
+    @model_validator(mode="after")
+    def validate_clone_inputs(self) -> "OmniVoiceSynthesizeRequest":
+        if self.mode == "clone":
+            if not self.reference_audio_path:
+                raise ValueError("reference_audio_path is required for clone mode")
+            if not self.reference_text:
+                raise ValueError("reference_text is required for clone mode")
+        return self
 
 
 class OmniVoiceSynthesizeResponse(BaseModel):

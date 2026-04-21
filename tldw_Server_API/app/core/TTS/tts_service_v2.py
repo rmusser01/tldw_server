@@ -7,6 +7,7 @@ import base64
 import copy
 import inspect
 import os
+import tempfile
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
@@ -34,6 +35,7 @@ from .adapter_registry import (
     get_tts_factory,
 )
 from .adapters.base import AudioFormat, TTSAdapter, TTSCapabilities, TTSRequest, TTSResponse
+from .adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
 from .adapters.pocket_tts_cpp_runtime import (
     cleanup_transient_voice_reference,
     get_runtime_dir,
@@ -44,6 +46,7 @@ from .adapters.pocket_tts_cpp_runtime import (
     register_provider_managed_voice_path,
     revoke_provider_managed_voice_token,
 )
+from .audio_converter import AudioConverter
 from .audio_utils import (
     crossfade_audio,
     evaluate_audio_quality,
@@ -200,6 +203,8 @@ class TTSServiceV2:
         self._active_requests_lock = asyncio.Lock()
         self._provider_semaphores: dict[str, asyncio.Semaphore] = {}
         self._provider_limits: dict[str, int] = {}
+        self._closing = False
+        self._omnivoice_supervisor: Optional[OmniVoiceSidecarSupervisor] = None
 
         # Initialize metrics
         self.metrics = get_metrics_registry()
@@ -1172,7 +1177,16 @@ class TTSServiceV2:
 
     async def shutdown(self) -> None:
         """Gracefully close any underlying factory/adapters (best-effort)."""
+        self._closing = True
         try:
+            if self._omnivoice_supervisor is not None:
+                with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
+                    self._omnivoice_supervisor.mark_closing()
+                stop_process = getattr(self._omnivoice_supervisor, "_stop_process", None)
+                if callable(stop_process):
+                    maybe_stop = stop_process()
+                    if asyncio.iscoroutine(maybe_stop):
+                        await maybe_stop
             if self.factory and hasattr(self.factory, "close"):
                 maybe = self.factory.close()  # type: ignore[attr-defined]
                 if asyncio.iscoroutine(maybe):
@@ -1679,6 +1693,7 @@ class TTSServiceV2:
             bool(getattr(request, "stream", False)),
             metadata_only,
         )
+        fallback = fallback and not self._is_explicit_omnivoice_request(request, provider)
         factory = await self._ensure_factory()
 
         provider_hint: Optional[str] = None
@@ -1856,6 +1871,11 @@ class TTSServiceV2:
                         response = await _generate_with_adapter()
 
                     if fallback_plan is None and response is not None:
+                        if provider_key == "omnivoice" and not metadata_only:
+                            response = await self._convert_omnivoice_response_if_needed(
+                                response,
+                                request_for_provider,
+                            )
                         self._attach_response_metadata(
                             request,
                             response,
@@ -2530,12 +2550,109 @@ class TTSServiceV2:
             if provider_enum is None:
                 logger.warning(f"Unknown provider: {provider}")
             else:
+                if provider_enum == TTSProvider.OMNIVOICE:
+                    return await factory.registry.create_adapter_with_overrides(
+                        provider_enum,
+                        self._build_omnivoice_adapter_overrides(overrides),
+                    )
                 if overrides:
                     return await factory.registry.create_adapter_with_overrides(provider_enum, overrides)
                 return await factory.registry.get_adapter(provider_enum)
 
         # Get adapter by model name
+        model_provider = factory.get_provider_for_model(model)
+        if model_provider == TTSProvider.OMNIVOICE:
+            return await factory.registry.create_adapter_with_overrides(
+                model_provider,
+                self._build_omnivoice_adapter_overrides(overrides),
+            )
         return await factory.get_adapter_by_model(model)
+
+    def _build_omnivoice_adapter_overrides(
+        self,
+        overrides: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        merged_overrides = dict(overrides or {})
+        merged_overrides["_supervisor"] = self._get_or_create_omnivoice_supervisor()
+        return merged_overrides
+
+    @staticmethod
+    def _is_explicit_omnivoice_request(
+        request: OpenAISpeechRequest,
+        provider: Optional[str] = None,
+    ) -> bool:
+        provider_value = (provider or "").strip().lower()
+        if provider_value in {"omnivoice", "omni-voice", "omni_voice"}:
+            return True
+        model_value = (getattr(request, "model", None) or "").strip().lower()
+        return (
+            model_value.startswith("omnivoice")
+            or model_value.startswith("omni-voice")
+            or model_value.startswith("omni_voice")
+        )
+
+    def _get_or_create_omnivoice_supervisor(self) -> OmniVoiceSidecarSupervisor:
+        if self._closing:
+            raise RuntimeError("TTS service is closing")
+        if self._omnivoice_supervisor is None:
+            provider_cfg = self._get_provider_runtime_config("omnivoice")
+            repo_root = Path(__file__).resolve().parents[4]
+            self._omnivoice_supervisor = OmniVoiceSidecarSupervisor(
+                provider_cfg,
+                repo_root=repo_root,
+            )
+        return self._omnivoice_supervisor
+
+    async def _convert_omnivoice_response_if_needed(
+        self,
+        response: TTSResponse,
+        request: TTSRequest,
+    ) -> TTSResponse:
+        if response.audio_data is None:
+            return response
+        if response.format == request.format:
+            return response
+        if response.format != AudioFormat.WAV:
+            return response
+
+        input_path = None
+        output_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as input_file:
+                input_file.write(response.audio_data)
+                input_path = Path(input_file.name)
+            with tempfile.NamedTemporaryFile(
+                suffix=f".{request.format.value}",
+                delete=False,
+            ) as output_file:
+                output_path = Path(output_file.name)
+
+            converted = await AudioConverter.convert_format(
+                input_path,
+                output_path,
+                request.format.value,
+                sample_rate=response.sample_rate,
+                channels=response.channels,
+            )
+            if not converted or output_path is None or not output_path.exists():
+                raise TTSGenerationError(
+                    "OmniVoice output conversion failed",
+                    provider="omnivoice",
+                    details={"target_format": request.format.value},
+                )
+
+            converted_bytes = output_path.read_bytes()
+            response.audio_data = converted_bytes
+            response.audio_content = converted_bytes
+            response.format = request.format
+            return response
+        finally:
+            if input_path is not None:
+                with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
+                    input_path.unlink()
+            if output_path is not None:
+                with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
+                    output_path.unlink()
 
     def _resolve_provider_key(self, adapter: TTSAdapter) -> str:
         provider_key = getattr(adapter, "provider_key", None)

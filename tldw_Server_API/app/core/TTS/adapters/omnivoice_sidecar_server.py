@@ -4,6 +4,7 @@ import ipaddress
 import os
 import wave
 from io import BytesIO
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 
@@ -76,6 +77,13 @@ def create_app(*, sidecar_token: str) -> FastAPI:
         request: OmniVoiceSynthesizeRequest,
         _: None = Depends(require_sidecar_token),
     ) -> Response:
+        if request.mode == "clone":
+            reference_path = Path(request.reference_audio_path or "")
+            if not reference_path.exists():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Clone reference audio path does not exist",
+                )
         metadata = OmniVoiceSynthesizeResponse(sample_rate=request.sample_rate, mode=request.mode)
         audio_bytes = _build_silent_wav(sample_rate=request.sample_rate, channels=metadata.channels)
         return Response(
@@ -86,6 +94,7 @@ def create_app(*, sidecar_token: str) -> FastAPI:
                 "X-OmniVoice-Sample-Rate": str(metadata.sample_rate),
                 "X-OmniVoice-Channels": str(metadata.channels),
                 "X-OmniVoice-Provider": metadata.provider,
+                "X-OmniVoice-Mode": metadata.mode,
             },
         )
 

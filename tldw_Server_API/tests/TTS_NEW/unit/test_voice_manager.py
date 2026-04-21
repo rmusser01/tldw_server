@@ -320,6 +320,75 @@ async def test_encode_voice_reference_stores_artifacts(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_encode_voice_reference_for_omnivoice_is_metadata_only(tmp_path, monkeypatch):
+    manager = VoiceManager()
+
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+
+    voices_root = tmp_path / "voices"
+
+    def _fake_user_db_base_dir(*, allow_legacy_alias: bool = False):
+        return tmp_path
+
+    def _fake_user_voices_dir(user_id):
+        voices_root.mkdir(parents=True, exist_ok=True)
+        (voices_root / "uploads").mkdir(parents=True, exist_ok=True)
+        (voices_root / "processed").mkdir(parents=True, exist_ok=True)
+        (voices_root / "temp").mkdir(parents=True, exist_ok=True)
+        (voices_root / "metadata").mkdir(parents=True, exist_ok=True)
+        return voices_root
+
+    monkeypatch.setattr(DatabasePaths, "get_user_db_base_dir", _fake_user_db_base_dir, raising=True)
+    monkeypatch.setattr(DatabasePaths, "get_user_voices_dir", _fake_user_voices_dir, raising=True)
+
+    voice_id = "voice-omnivoice"
+    processed_path = voices_root / "processed" / f"{voice_id}.wav"
+    processed_path.parent.mkdir(parents=True, exist_ok=True)
+    processed_path.write_bytes(b"RIFF" + b"\x00" * 1000)
+
+    voice_info = VoiceInfo(
+        voice_id=voice_id,
+        name="omnivoice-voice",
+        description=None,
+        file_path=str(processed_path.relative_to(voices_root)),
+        format="wav",
+        duration=4.0,
+        sample_rate=24000,
+        size_bytes=processed_path.stat().st_size,
+        provider="omnivoice",
+        created_at=datetime.utcnow(),
+        file_hash="",
+    )
+
+    await manager.registry.register_voice(user_id=1, voice_info=voice_info)
+
+    result = await manager.encode_voice_reference(
+        user_id=1,
+        voice_id=voice_id,
+        provider="omnivoice",
+        reference_text="Stored transcript",
+    )
+
+    assert result.cached is False
+    assert result.ref_codes_len is None
+    assert result.reference_text == "Stored transcript"
+
+    metadata = await manager.load_reference_metadata(user_id=1, voice_id=voice_id)
+    assert metadata is not None
+    assert metadata.provider_artifacts["omnivoice"]["reference_text"] == "Stored transcript"
+
+    cached = await manager.encode_voice_reference(
+        user_id=1,
+        voice_id=voice_id,
+        provider="omnivoice",
+    )
+
+    assert cached.cached is True
+    assert cached.ref_codes_len is None
+    assert cached.reference_text == "Stored transcript"
+
+
+@pytest.mark.asyncio
 async def test_list_user_voices_syncs_after_external_filesystem_changes(tmp_path, monkeypatch):
     """Registry views should refresh when processed files are added/removed externally."""
     manager = VoiceManager()
