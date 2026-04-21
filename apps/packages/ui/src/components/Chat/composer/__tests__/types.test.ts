@@ -44,9 +44,18 @@ describe("chat composer shared types", () => {
       message: "hello",
       docs: [],
       uploadedFiles: [],
-      requestOverrides: { chatMode: "normal", webSearch: true },
+      requestOverrides: {
+        chatMode: "normal",
+        selectedModel: null,
+        selectedSystemPrompt: null,
+        toolChoice: null,
+        webSearch: true,
+      },
     }
     expect(payload.requestOverrides?.webSearch).toBe(true)
+    expect(payload.requestOverrides?.selectedModel).toBeNull()
+    expect(payload.requestOverrides?.selectedSystemPrompt).toBeNull()
+    expect(payload.requestOverrides?.toolChoice).toBeNull()
   })
 
   it("accepts playground-specific fields on the submit payload", () => {

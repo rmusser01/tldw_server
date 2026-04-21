@@ -16,7 +16,7 @@ const makeBlockedFile = () =>
 
 const makeEvent = (file: File) =>
   ({
-    target: { files: [file], value: "" },
+    target: { files: [file], value: "C:\\fakepath\\photo.png" },
   }) as unknown as React.ChangeEvent<HTMLInputElement>
 
 describe("useComposerAttachments", () => {

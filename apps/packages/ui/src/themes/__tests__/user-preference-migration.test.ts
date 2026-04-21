@@ -31,6 +31,17 @@ describe("migrateThemeUserPreferences", () => {
     )
   })
 
+  it("does not switch existing users who already have other persisted UI state", () => {
+    window.localStorage.setItem("theme", "dark")
+
+    migrateThemeUserPreferences()
+
+    expect(window.localStorage.getItem(THEME_PRESET_KEY)).toBeNull()
+    expect(window.localStorage.getItem(THEME_MIGRATION_VERSION_KEY)).toBe(
+      String(CURRENT_USER_PREFERENCE_MIGRATION)
+    )
+  })
+
   it("does not re-migrate once the version marker is set", () => {
     window.localStorage.setItem(
       THEME_MIGRATION_VERSION_KEY,
@@ -49,6 +60,18 @@ describe("migrateThemeUserPreferences", () => {
     migrateThemeUserPreferences()
 
     expect(window.localStorage.getItem(THEME_PRESET_KEY)).toBe("default")
+    expect(window.localStorage.getItem(THEME_MIGRATION_VERSION_KEY)).toBe(
+      String(CURRENT_USER_PREFERENCE_MIGRATION)
+    )
+  })
+
+  it("treats an empty stored preset as corrupt and repairs it to primer", () => {
+    window.localStorage.setItem(THEME_PRESET_KEY, "   ")
+    window.localStorage.setItem("theme", "dark")
+
+    migrateThemeUserPreferences()
+
+    expect(window.localStorage.getItem(THEME_PRESET_KEY)).toBe("primer")
     expect(window.localStorage.getItem(THEME_MIGRATION_VERSION_KEY)).toBe(
       String(CURRENT_USER_PREFERENCE_MIGRATION)
     )
@@ -81,14 +104,27 @@ describe("migrateThemeUserPreferences", () => {
     )
   })
 
+  it("treats partially numeric version markers as corrupt and migrates again", () => {
+    window.localStorage.setItem(THEME_MIGRATION_VERSION_KEY, "1foo")
+
+    migrateThemeUserPreferences()
+
+    expect(window.localStorage.getItem(THEME_PRESET_KEY)).toBe("primer")
+    expect(window.localStorage.getItem(THEME_MIGRATION_VERSION_KEY)).toBe(
+      String(CURRENT_USER_PREFERENCE_MIGRATION)
+    )
+  })
+
   it("does not throw if localStorage.setItem rejects (quota / Safari private)", () => {
     const originalSetItem = window.localStorage.setItem
-    window.localStorage.setItem = () => {
-      throw new Error("QuotaExceededError")
+    try {
+      window.localStorage.setItem = () => {
+        throw new Error("QuotaExceededError")
+      }
+
+      expect(() => migrateThemeUserPreferences()).not.toThrow()
+    } finally {
+      window.localStorage.setItem = originalSetItem
     }
-
-    expect(() => migrateThemeUserPreferences()).not.toThrow()
-
-    window.localStorage.setItem = originalSetItem
   })
 })

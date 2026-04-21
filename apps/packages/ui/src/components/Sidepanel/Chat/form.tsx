@@ -303,7 +303,7 @@ export const SidepanelForm = ({
   // Sidepanel intentionally keeps its own local `textAreaFocus` below (plain
   // .focus() without the mobile blur heuristic) to preserve exact behavior —
   // adopt the primitive's `textAreaFocus` in a follow-up if desired.
-  const { form, draftSaved } = useComposerText({
+  const { form, draftSaved, clearDraft } = useComposerText({
     draftKey: storageKey,
     textareaRef,
     isProMode
@@ -1545,6 +1545,7 @@ export const SidepanelForm = ({
           textAreaFocus()
         },
         afterSend: () => {
+          clearDraft()
           clearSelectedDocuments()
           setContextFiles([])
           setKnowledgeMentionActive(false)
@@ -2215,6 +2216,7 @@ export const SidepanelForm = ({
 
   const handleQueueEnqueueSuccess = React.useCallback(
     (isStreamingAtEnqueue: boolean) => {
+      clearDraft()
       form.reset()
       clearSelectedDocuments()
       setContextFiles([])
@@ -2234,6 +2236,7 @@ export const SidepanelForm = ({
       })
     },
     [
+      clearDraft,
       clearSelectedDocuments,
       form,
       notification,
@@ -2590,7 +2593,7 @@ export const SidepanelForm = ({
                     tabIndex={-1}
                     aria-hidden="true"
                     aria-label={t("playground:actions.attachImage", "Attach image") as string}
-                    onChange={onInputChange}
+                    onChange={attachmentHandler.onFileInputChange}
                   />
                   <input
                     id="context-file-upload"

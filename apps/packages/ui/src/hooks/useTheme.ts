@@ -9,11 +9,6 @@ import { getThemeById, getDefaultTheme, getAllPresets } from "@/themes/presets"
 import { applyThemeTokens, clearThemeTokens } from "@/themes/apply-theme"
 import { buildAntdThemeConfig } from "@/themes/antd-theme"
 import { saveCustomTheme as saveCustomThemeFn, deleteCustomTheme as deleteCustomThemeFn } from "@/themes/custom-themes"
-import { migrateThemeUserPreferences } from "@/themes/user-preference-migration"
-
-// Run once on module import so the migration lands before useSetting hydrates
-// its in-memory state from localStorage on first render.
-migrateThemeUserPreferences()
 
 export function useTheme() {
   // Existing dark mode hook — handles class toggling, system preference, persistence
