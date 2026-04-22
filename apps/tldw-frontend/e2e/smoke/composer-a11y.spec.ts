@@ -33,6 +33,32 @@ const setVariant = (variant: "v1" | "v3" | "v5") => async (page: Page) => {
   }, variant)
 }
 
+const mockComposerProfile = async (page: Page) => {
+  await page.route(/\/api\/v1\/users\/me\/profile.*/, async (route) => {
+    const method = route.request().method()
+    if (method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          profile_version: "2026-04-20T00:00:00Z",
+          preferences: {},
+        }),
+      })
+      return
+    }
+    if (method === "PATCH") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ applied: [], skipped: [] }),
+      })
+      return
+    }
+    await route.continue()
+  })
+}
+
 for (const variant of ["v1", "v3", "v5"] as const) {
   test(`composer a11y · sidepanel ${variant} has no critical axe violations`, async ({
     page,
@@ -40,6 +66,7 @@ for (const variant of ["v1", "v3", "v5"] as const) {
     test.setTimeout(90_000)
     await bypassOnboarding(page)
     await setVariant(variant)(page)
+    await mockComposerProfile(page)
     await page.setViewportSize({ width: 480, height: 1000 })
 
     await page.goto("/__debug__/sidepanel-chat?nextgenComposer=1")

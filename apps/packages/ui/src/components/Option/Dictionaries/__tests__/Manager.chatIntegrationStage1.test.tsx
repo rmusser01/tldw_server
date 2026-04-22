@@ -273,15 +273,11 @@ describe("DictionariesManager chat integration stage-1", () => {
     const user = userEvent.setup()
     render(<DictionariesManager />)
 
-    const overflowButton = screen.getByRole("button", {
-      name: "More actions for Medical Terms"
-    })
-    overflowButton.focus()
-    await user.keyboard("{Enter}")
-    await waitFor(() => {
-      expect(screen.getByRole("menuitem", { name: "Quick assign to chats" })).toBeInTheDocument()
-    })
-    await user.click(screen.getByRole("menuitem", { name: "Quick assign to chats" }))
+    await user.click(
+      screen.getByRole("button", {
+        name: "Quick assign Medical Terms to chats"
+      })
+    )
 
     await user.click(screen.getByRole("checkbox", { name: "Select chat ICU Follow-up" }))
 

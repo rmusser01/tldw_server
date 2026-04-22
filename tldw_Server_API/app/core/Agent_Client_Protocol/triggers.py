@@ -470,9 +470,9 @@ class ACPTriggerManager:
         # 7. Submit acp_run task
         try:
             task_id = await self._submit_acp_run(acp_payload)
-        except Exception as exc:
-            logger.error("Failed to submit acp_run for trigger_id={}: {}", trigger_id, exc)
-            return {"error": f"submission_failed: {exc}", "status": "error"}
+        except Exception:
+            logger.exception("Failed to submit acp_run for trigger_id={}", trigger_id)
+            return {"error": "submission_failed", "status": "error"}
 
         logger.info(
             "Webhook trigger_id={} submitted acp_run task_id={}",

@@ -4,6 +4,26 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { DictionariesManager } from "../Manager"
 
+const setViewportMode = ({ mobile }: { mobile: boolean }) => {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: (query: string) => ({
+      matches: mobile
+        ? /max-width:\s*767px/.test(query)
+        : /min-width:\s*576px/.test(query) ||
+          /min-width:\s*768px/.test(query) ||
+          /min-width:\s*992px/.test(query),
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false
+    })
+  })
+}
+
 if (typeof window.ResizeObserver === "undefined") {
   class ResizeObserverMock {
     observe() {}
@@ -209,23 +229,7 @@ const makeUseMutationResult = (opts: any) => ({
 describe("DictionariesManager accessibility stage-2 focus management", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: (query: string) => ({
-        matches:
-          /min-width:\s*576px/.test(query) ||
-          /min-width:\s*768px/.test(query) ||
-          /min-width:\s*992px/.test(query),
-        media: query,
-        onchange: null,
-        addListener: () => undefined,
-        removeListener: () => undefined,
-        addEventListener: () => undefined,
-        removeEventListener: () => undefined,
-        dispatchEvent: () => false
-      })
-    })
+    setViewportMode({ mobile: false })
 
     useQueryClientMock.mockReturnValue({
       invalidateQueries: vi.fn(),
@@ -362,6 +366,7 @@ describe("DictionariesManager accessibility stage-2 focus management", () => {
 
   it("opens quick-assign modal via compact dropdown", async () => {
     const user = userEvent.setup()
+    setViewportMode({ mobile: true })
     render(<DictionariesManager />)
 
     const overflowButton = screen.getByRole("button", {
@@ -387,6 +392,7 @@ describe("DictionariesManager accessibility stage-2 focus management", () => {
 
   it("opens statistics modal via compact dropdown", async () => {
     const user = userEvent.setup()
+    setViewportMode({ mobile: true })
     render(<DictionariesManager />)
 
     const overflowButton = screen.getByRole("button", {

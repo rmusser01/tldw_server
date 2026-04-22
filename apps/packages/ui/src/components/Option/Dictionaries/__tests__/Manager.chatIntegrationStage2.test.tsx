@@ -269,15 +269,11 @@ describe("DictionariesManager chat integration stage-2", () => {
     expect(String(deactivateCall?.content || "")).toContain("1 active chat session")
     expect(String(deactivateCall?.content || "")).toContain("3 linked chat sessions")
 
-    const overflowButton = screen.getByRole("button", {
-      name: "More actions for Alpha Dictionary"
-    })
-    overflowButton.focus()
-    await user.keyboard("{Enter}")
-    await waitFor(() => {
-      expect(screen.getByRole("menuitem", { name: "Delete dictionary" })).toBeInTheDocument()
-    })
-    await user.click(screen.getByRole("menuitem", { name: "Delete dictionary" }))
+    await user.click(
+      screen.getByRole("button", {
+        name: "Delete dictionary Alpha Dictionary"
+      })
+    )
 
     await waitFor(() => {
       expect(confirmDangerMock).toHaveBeenCalledTimes(2)

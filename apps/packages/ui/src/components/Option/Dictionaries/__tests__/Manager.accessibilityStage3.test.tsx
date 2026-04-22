@@ -478,30 +478,35 @@ describe("DictionariesManager accessibility stage-3", () => {
     render(<DictionariesManager />)
 
     expect(
+      screen.getByRole("button", { name: "Validate dictionary Valid Dictionary" })
+    ).toBeInTheDocument()
+    expect(
       screen.getByRole("button", { name: "Edit dictionary Valid Dictionary" })
     ).toBeInTheDocument()
     expect(
       screen.getByRole("button", { name: "Manage entries for Valid Dictionary" })
     ).toBeInTheDocument()
-
-    // Compact mode: secondary actions are inside the "More actions" dropdown
-    const overflowButton = screen.getByRole("button", {
-      name: "More actions for Valid Dictionary"
-    })
-    expect(overflowButton).toHaveAttribute("aria-haspopup", "menu")
-
-    overflowButton.focus()
-    await user.keyboard("{Enter}")
-    await waitFor(() => {
-      expect(screen.getByRole("menuitem", { name: "Quick assign to chats" })).toBeInTheDocument()
-      expect(screen.getByRole("menuitem", { name: "Export JSON" })).toBeInTheDocument()
-      expect(screen.getByRole("menuitem", { name: "Export Markdown" })).toBeInTheDocument()
-      expect(screen.getByRole("menuitem", { name: "View statistics" })).toBeInTheDocument()
-      expect(screen.getByRole("menuitem", { name: "Duplicate dictionary" })).toBeInTheDocument()
-      expect(screen.getByRole("menuitem", { name: "Delete dictionary" })).toBeInTheDocument()
-    })
-    // Close dropdown by pressing Escape
-    await user.keyboard("{Escape}")
+    expect(
+      screen.getByRole("button", { name: "Quick assign Valid Dictionary to chats" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Export Valid Dictionary as JSON" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Export Valid Dictionary as Markdown" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "View statistics for Valid Dictionary" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Version history for Valid Dictionary" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Duplicate dictionary Valid Dictionary" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Delete dictionary Valid Dictionary" })
+    ).toBeInTheDocument()
 
     await user.click(
       screen.getByRole("button", {

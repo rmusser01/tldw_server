@@ -4983,7 +4983,7 @@ export const PlaygroundForm = ({
                                 selectedDocuments.length +
                                   uploadedFiles.length >
                                 0,
-                              onClick: toggleKnowledgePanel,
+                              onClick: () => toggleKnowledgePanel(),
                               "aria-label": "Open knowledge panel"
                             },
                             {

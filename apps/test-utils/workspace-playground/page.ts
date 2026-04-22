@@ -38,7 +38,43 @@ export class WorkspacePlaygroundParityPage {
     })
   }
 
+  private async dismissAssistantSetupBlockingModal(timeoutMs = 5_000): Promise<void> {
+    const setupHeading = this.page.getByText(/build your assistant/i).first()
+    const overlay = this.page.getByTestId("assistant-setup-overlay").first()
+    const overlayVisible =
+      (await overlay.isVisible({ timeout: 1_000 }).catch(() => false)) ||
+      (await setupHeading.isVisible({ timeout: 1_000 }).catch(() => false))
+
+    if (!overlayVisible) {
+      return
+    }
+
+    const skipControl = this.page.getByRole("button", { name: /skip for now/i }).first()
+    await expect(skipControl).toBeVisible({ timeout: timeoutMs })
+    await skipControl.click()
+
+    await expect
+      .poll(
+        async () =>
+          !(await overlay.isVisible().catch(() => false)) &&
+          !(await setupHeading.isVisible().catch(() => false)),
+        {
+          timeout: timeoutMs,
+          message: "Timed out dismissing the assistant setup modal",
+        }
+      )
+      .toBe(true)
+  }
+
   async goto(platform: WorkspacePlaygroundPlatform, optionsUrl?: string): Promise<void> {
+    await this.page.addInitScript(() => {
+      try {
+        window.localStorage.setItem("assistant_setup_dismissed", "true")
+      } catch {
+        // Ignore storage access issues in constrained environments.
+      }
+    })
+
     if (platform === "extension") {
       if (!optionsUrl) {
         throw new Error("optionsUrl is required for extension parity navigation")
@@ -56,6 +92,7 @@ export class WorkspacePlaygroundParityPage {
   }
 
   async waitForReady(): Promise<void> {
+    await this.dismissAssistantSetupBlockingModal()
     await expect(this.workspacesButton).toBeVisible({ timeout: 30_000 })
     await expect(this.chatPanel).toBeVisible({ timeout: 30_000 })
     await this.disablePortalPointerInterception()

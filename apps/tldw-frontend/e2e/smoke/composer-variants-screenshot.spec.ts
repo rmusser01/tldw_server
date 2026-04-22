@@ -14,7 +14,7 @@ const bypassOnboarding = async (page: Page) => {
   })
 }
 
-test("composer preview — full-page screenshot", async ({ page }) => {
+test("composer preview — full-page screenshot", async ({ page }, testInfo) => {
   await bypassOnboarding(page)
   await page.setViewportSize({ width: 1440, height: 2600 })
   await page.goto("/composer-variants-preview")
@@ -23,7 +23,7 @@ test("composer preview — full-page screenshot", async ({ page }) => {
   await page.waitForSelector("[data-variant='v3']", { state: "visible" })
   await page.waitForSelector("[data-variant='v5']", { state: "visible" })
   await page.screenshot({
-    path: "test-results/composer-variants-preview.png",
+    path: testInfo.outputPath("composer-variants-preview.png"),
     fullPage: true,
   })
 })

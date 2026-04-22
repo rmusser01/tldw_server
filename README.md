@@ -103,9 +103,9 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.3.1` Beta status. Expect rough edges and please report issues.
+- `0.1.31` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
-- The `dev` branch currently contains additional unreleased work beyond `0.3.1`; see [CHANGELOG.md](CHANGELOG.md) for branch-level detail and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The `dev` branch currently contains additional unreleased work beyond `0.1.31`; see [CHANGELOG.md](CHANGELOG.md) for branch-level detail and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -152,7 +152,7 @@ Recently shipped:
 - MCP Hub governance pack management and broader ACP workspace discovery/health support.
 - Audio installer and bundle follow-through, including curated `kitten_tts` and `pocket_tts_cpp` paths.
 
-Currently landing on `dev` (post-`0.3.1` branch work):
+Currently landing on `dev` (post-`0.1.31` branch work):
 - Writing Suite Phases 2-4 with characters, world info, plot/research tools, AI analysis, agent chat, and live writing feedback.
 - Persona-routed onboarding, Mission Control home flows, and storage quota warnings.
 - Browser web clipper support for capturing pages into the research workflow.
@@ -871,8 +871,7 @@ Examples
 │   ├── cli/                      # CLI entry points
 │   ├── Config_Files/             # config.txt, example YAMLs, migration helpers
 │   ├── Databases/                # Default DBs (runtime data; some are gitignored)
-│   ├── tests/                    # Pytest suite
-│   └── requirements.txt          # Legacy pin set (prefer pyproject extras)
+│   └── tests/                    # Pytest suite
 ├── admin-ui/                     # Admin dashboard
 ├── apps/tldw-frontend/                # Next.js WebUI (primary web client)
 ├── Docs/                         # Documentation (API, Development, RAG, AuthNZ, TTS, etc.)

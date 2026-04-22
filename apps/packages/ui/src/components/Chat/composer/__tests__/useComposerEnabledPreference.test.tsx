@@ -155,6 +155,36 @@ describe("useComposerEnabledPreference", () => {
     expect(mocks.updateCurrentUserProfile).not.toHaveBeenCalled()
   })
 
+  it("does not let a late server hydrate overwrite a fresh local toggle", async () => {
+    let resolveProfile:
+      | ((value: { preferences: Record<string, unknown> }) => void)
+      | undefined
+    const pendingProfile = new Promise<{ preferences: Record<string, unknown> }>(
+      (resolve) => {
+        resolveProfile = resolve
+      }
+    )
+    mocks.getCurrentUserProfile.mockReturnValue(pendingProfile)
+
+    const { result } = renderHook(() => useComposerEnabledPreference())
+
+    act(() => {
+      result.current[1](true)
+    })
+
+    await act(async () => {
+      resolveProfile?.({
+        preferences: { [COMPOSER_ENABLED_PROFILE_KEY]: false },
+      })
+      await pendingProfile
+    })
+
+    expect(result.current[0]).toBe(true)
+    expect(
+      window.localStorage.getItem(COMPOSER_ENABLED_PREFERENCE_KEY)
+    ).toBe("1")
+  })
+
   it("picks up cross-tab storage events", () => {
     const { result } = renderHook(() =>
       useComposerEnabledPreference({ disableServerSync: true })

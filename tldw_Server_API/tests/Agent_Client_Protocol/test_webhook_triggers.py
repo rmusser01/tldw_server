@@ -412,6 +412,35 @@ async def test_handle_webhook_invalid_signature(
     assert result["error"] == "verification_failed"
 
 
+@pytest.mark.asyncio
+async def test_handle_webhook_submission_failure_hides_exception_details(
+    mgr: ACPTriggerManager,
+) -> None:
+    trigger_id = mgr.create_trigger(
+        name="Submission Failure",
+        source_type="generic",
+        secret="submit-secret",
+        owner_user_id=7,
+    )
+    payload = b'{"event":"push"}'
+    timestamp = str(int(time.time()))
+    sig = _make_generic_signature(payload, "submit-secret", timestamp=timestamp)
+
+    with patch.object(mgr, "_submit_acp_run", new_callable=AsyncMock) as mock_submit:
+        mock_submit.side_effect = RuntimeError("database password=super-secret")
+
+        result = await mgr.handle_webhook(
+            trigger_id=trigger_id,
+            payload_body=payload,
+            headers={
+                "x-webhook-signature": sig,
+                "x-webhook-timestamp": timestamp,
+            },
+        )
+
+    assert result == {"error": "submission_failed", "status": "error"}
+
+
 # ---------------------------------------------------------------------------
 # 9. Trigger CRUD lifecycle
 # ---------------------------------------------------------------------------

@@ -76,17 +76,20 @@ export function useComposerVariantPreference(
 
   const [variant, setVariantState] =
     React.useState<ChatComposerVariant>(readInitial)
+  const localChangeVersionRef = React.useRef(0)
 
   // Hydrate from server on mount. Only one fetch per hook instance.
   React.useEffect(() => {
     if (disableServerSync) return
     let cancelled = false
+    const hydrateVersion = localChangeVersionRef.current
     const hydrate = async () => {
       try {
         const profile = await tldwClient.getCurrentUserProfile({
           sections: "preferences",
         })
         if (cancelled) return
+        if (localChangeVersionRef.current !== hydrateVersion) return
         const serverValue = profile?.preferences?.[COMPOSER_VARIANT_PROFILE_KEY]
         if (!isValidVariant(serverValue)) return
         setVariantState((current) =>
@@ -122,6 +125,7 @@ export function useComposerVariantPreference(
       if (event.key !== COMPOSER_VARIANT_PREFERENCE_KEY) return
       const next = event.newValue
       if (!isValidVariant(next)) return
+      localChangeVersionRef.current += 1
       setVariantState((current) => (current === next ? current : next))
     }
     window.addEventListener("storage", handler)
@@ -131,6 +135,7 @@ export function useComposerVariantPreference(
   const setVariant = React.useCallback(
     (next: ChatComposerVariant) => {
       if (!isValidVariant(next)) return
+      localChangeVersionRef.current += 1
       setVariantState(next)
       if (typeof window !== "undefined") {
         try {

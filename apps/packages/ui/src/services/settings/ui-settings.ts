@@ -14,6 +14,7 @@ import {
   normalizeWatchlistChatHandoffPayload,
   type WatchlistChatHandoffPayload
 } from "@/services/tldw/watchlist-chat-handoff"
+import { migrateThemeUserPreferences } from "@/themes/user-preference-migration"
 import type { ThemeDefinition } from "@/themes/types"
 import { validateThemeDefinition } from "@/themes/validation"
 
@@ -46,6 +47,7 @@ export const THEME_PRESET_SETTING = defineSetting(
   (value) => coerceString(value, "default"),
   {
     area: "local",
+    beforeGet: migrateThemeUserPreferences,
     localStorageKey: "tldw:themePreset",
     mirrorToLocalStorage: true
   }

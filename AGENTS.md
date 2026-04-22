@@ -27,8 +27,7 @@ The project is a FastAPI-first backend with a Next.js WebUI, mature AuthNZ (sing
 │   │   └── main.py               # FastAPI entry point
 │   ├── Config_Files/             # config.txt, example YAMLs, migration helpers
 │   ├── Databases/                # Default DBs (runtime data; some are gitignored)
-│   ├── tests/                    # Pytest suite
-│   └── requirements.txt          # Legacy pin set (prefer pyproject extras)
+│   └── tests/                    # Pytest suite
 ├── Dockerfiles/                  # Docker images and compose files
 ├── Docs/                         # Documentation (API, Development, RAG, AuthNZ, TTS, etc.)
 ├── Helper_Scripts/               # Utilities (installers, prompt tools, doc generators)

@@ -71,7 +71,13 @@ vi.mock("react-i18next", () => ({
     ) => {
       if (typeof fallbackOrOptions === "string") return fallbackOrOptions
       if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        return fallbackOrOptions.defaultValue || key
+        if (fallbackOrOptions.defaultValue) {
+          const count = (fallbackOrOptions as { count?: number }).count
+          return typeof count === "number"
+            ? fallbackOrOptions.defaultValue.replace("{{count}}", String(count))
+            : fallbackOrOptions.defaultValue
+        }
+        return key
       }
       return key
     }
@@ -221,24 +227,21 @@ describe("DictionariesManager statistics stage-1 coverage", () => {
 
     render(<DictionariesManager />)
 
-    {
-      const overflowButton = screen.getByRole("button", {
-        name: "More actions for Medical Terms"
+    await user.click(
+      screen.getByRole("button", {
+        name: "View statistics for Medical Terms"
       })
-      overflowButton.focus()
-      await user.keyboard("{Enter}")
-      await waitFor(() => {
-        expect(screen.getByRole("menuitem", { name: "View statistics" })).toBeInTheDocument()
-      })
-      await user.click(screen.getByRole("menuitem", { name: "View statistics" }))
-    }
+    )
 
     expect(
       await screen.findByText("Dictionary Statistics", {}, { timeout: 15000 })
     ).toBeInTheDocument()
 
     // Summary sentence at top (use getAllByText since "4 entries" also appears in list)
-    const summaryEl = screen.getByText(/used 12 times/)
+    const summaryEl = screen.getByText(
+      (_content, element) =>
+        element?.tagName === "P" && (element.textContent || "").includes("used 12 times")
+    )
     expect(summaryEl).toBeInTheDocument()
     expect(summaryEl.textContent).toMatch(/4\s+entries/)
     expect(summaryEl.textContent).toMatch(/1 conflicts/)
@@ -301,17 +304,11 @@ describe("DictionariesManager statistics stage-1 coverage", () => {
 
     render(<DictionariesManager />)
 
-    {
-      const overflowButton = screen.getByRole("button", {
-        name: "More actions for Medical Terms"
+    await user.click(
+      screen.getByRole("button", {
+        name: "View statistics for Medical Terms"
       })
-      overflowButton.focus()
-      await user.keyboard("{Enter}")
-      await waitFor(() => {
-        expect(screen.getByRole("menuitem", { name: "View statistics" })).toBeInTheDocument()
-      })
-      await user.click(screen.getByRole("menuitem", { name: "View statistics" }))
-    }
+    )
 
     await screen.findByText("Dictionary Statistics")
 

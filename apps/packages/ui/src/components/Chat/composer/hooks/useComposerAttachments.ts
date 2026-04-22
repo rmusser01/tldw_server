@@ -61,9 +61,9 @@ export interface UseComposerAttachmentsOptions {
 
 export interface UseComposerAttachmentsResult {
   /** Ref for the hidden <input type="file" accept="image/*"> trigger. */
-  inputRef: React.RefObject<HTMLInputElement>
+  inputRef: React.RefObject<HTMLInputElement | null>
   /** Ref for the hidden <input type="file"> document trigger. */
-  fileInputRef: React.RefObject<HTMLInputElement>
+  fileInputRef: React.RefObject<HTMLInputElement | null>
   /** Onchange handler for `<input type="file">`. Routes through `onInputChange`. */
   onFileInputChange: (
     e: React.ChangeEvent<HTMLInputElement>

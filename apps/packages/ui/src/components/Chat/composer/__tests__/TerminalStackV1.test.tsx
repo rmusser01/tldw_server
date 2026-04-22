@@ -99,6 +99,23 @@ describe("TerminalStackV1", () => {
     expect(onSend).toHaveBeenCalledOnce()
   })
 
+  it("routes Cmd+Enter to stopStreaming while a response is in flight", () => {
+    const onSend = vi.fn()
+    const stopStreaming = vi.fn()
+    render(
+      <TerminalStackV1
+        {...minimalProps}
+        onSend={onSend}
+        sending={true}
+        stopStreaming={stopStreaming}
+      />
+    )
+    const textarea = screen.getByRole("textbox", { name: "Message" })
+    fireEvent.keyDown(textarea, { key: "Enter", metaKey: true })
+    expect(stopStreaming).toHaveBeenCalledOnce()
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
   it("does not fire onSend on plain Enter (unmodified)", () => {
     const onSend = vi.fn()
     render(<TerminalStackV1 {...minimalProps} onSend={onSend} />)

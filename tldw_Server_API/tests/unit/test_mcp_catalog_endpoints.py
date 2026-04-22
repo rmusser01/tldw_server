@@ -77,9 +77,21 @@ async def test_list_catalog_unknown_archetype_returns_empty():
 
 
 @pytest.mark.asyncio
-async def test_connection_unreachable():
-    """Connecting to a port that is almost certainly closed should fail gracefully."""
-    req = MCPConnectionTestRequest(url="http://127.0.0.1:1")
+async def test_connection_unreachable(monkeypatch: pytest.MonkeyPatch):
+    """Catalog connection failures should return a safe unreachable response."""
+    req = MCPConnectionTestRequest(url="https://api.github.com")
+
+    async def _failing_probe(_url: str, _headers: dict[str, str]) -> None:
+        raise OSError("network down")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint._is_private_ip",
+        lambda _host: False,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint._probe_mcp_connection",
+        _failing_probe,
+    )
 
     resp = await check_mcp_connection(req)
 
@@ -94,16 +106,21 @@ async def test_connection_uses_api_key_header(monkeypatch: pytest.MonkeyPatch):
     captured_headers: dict[str, str] = {}
 
     async def _fake_probe(url: str, headers: dict[str, str]):
+        assert url == "https://api.github.com"
         captured_headers.update(headers)
         return None
 
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint._is_private_ip",
+        lambda _host: False,
+    )
     monkeypatch.setattr(
         "tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint._probe_mcp_connection",
         _fake_probe,
     )
 
     req = MCPConnectionTestRequest(
-        url="https://8.8.8.8/mcp",
+        url="https://api.github.com",
         auth_type="api_key",
         secret="secret-token",
     )
@@ -117,7 +134,7 @@ async def test_connection_uses_api_key_header(monkeypatch: pytest.MonkeyPatch):
 @pytest.mark.asyncio
 async def test_connection_rejects_unsupported_auth_type():
     req = MCPConnectionTestRequest(
-        url="https://8.8.8.8/mcp",
+        url="https://api.github.com",
         auth_type="digest",
         secret="secret-token",
     )
@@ -152,10 +169,26 @@ async def test_connection_uses_central_url_safety_guard(monkeypatch: pytest.Monk
         _unexpected_probe,
     )
 
-    req = MCPConnectionTestRequest(url="http://example.com:22")
+    req = MCPConnectionTestRequest(url="https://api.github.com")
 
     with pytest.raises(HTTPException) as excinfo:
         await check_mcp_connection(req)
 
-    assert captured_urls == ["http://example.com:22"]
+    assert captured_urls == ["https://api.github.com"]
     assert excinfo.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_connection_rejects_uncurated_url(monkeypatch: pytest.MonkeyPatch):
+    async def _unexpected_probe(_url: str, _headers: dict[str, str]) -> None:  # pragma: no cover - defensive
+        raise AssertionError("_probe_mcp_connection should not run for uncataloged URLs")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint._probe_mcp_connection",
+        _unexpected_probe,
+    )
+
+    resp = await check_mcp_connection(MCPConnectionTestRequest(url="https://8.8.8.8/mcp"))
+
+    assert resp.reachable is False
+    assert resp.error == "URL must match a curated MCP catalog entry"

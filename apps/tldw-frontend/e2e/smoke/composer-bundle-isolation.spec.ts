@@ -34,6 +34,32 @@ const setVariant = (variant: "v1" | "v3" | "v5") => async (page: Page) => {
   }, variant)
 }
 
+const mockComposerProfile = async (page: Page) => {
+  await page.route(/\/api\/v1\/users\/me\/profile.*/, async (route) => {
+    const method = route.request().method()
+    if (method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          profile_version: "2026-04-20T00:00:00Z",
+          preferences: {},
+        }),
+      })
+      return
+    }
+    if (method === "PATCH") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ applied: [], skipped: [] }),
+      })
+      return
+    }
+    await route.continue()
+  })
+}
+
 const collectVariantChunks = (page: Page) => {
   const fetched: string[] = []
   page.on("request", (req) => {
@@ -56,6 +82,7 @@ test.describe("composer · bundle isolation", () => {
     test.setTimeout(90_000)
     await bypassOnboarding(page)
     await setVariant("v1")(page)
+    await mockComposerProfile(page)
     const fetched = collectVariantChunks(page)
 
     await page.goto("/__debug__/sidepanel-chat?nextgenComposer=1")
@@ -79,6 +106,7 @@ test.describe("composer · bundle isolation", () => {
     test.setTimeout(90_000)
     await bypassOnboarding(page)
     await setVariant("v5")(page)
+    await mockComposerProfile(page)
     const fetched = collectVariantChunks(page)
 
     await page.goto("/__debug__/sidepanel-chat?nextgenComposer=1")

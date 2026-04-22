@@ -132,7 +132,7 @@ Migration preserves existing user selections — only installs with no stored pr
 
 ## Composer variants × theme
 
-The chat-composer variants (V1 Terminal Stack, V3 Split Brief, V5 Radial Command) are **theme-agnostic**: they reference only CSS custom properties (`--color-primary`, `--glow-cyan`, etc.). Any registered theme reskins all three variants automatically.
+The chat-composer variants (V1 Terminal Stack, V3 Split Brief, V5 Radial Command) are **theme-agnostic**: they reference only CSS custom properties (`--color-primary`, `--glow-primary`, etc.). Any registered theme reskins all three variants automatically.
 
 Optional glow tokens (`--glow-primary`, `--glow-accent`, `--glow-success`) are defined in `tailwind-shared.css` derived from the active theme's `primary`/`accent`/`success` — your brand palette drives the glow color without additional work.
 

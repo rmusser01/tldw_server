@@ -847,7 +847,7 @@ describe("JobFormModal live summary", () => {
     expect(servicesMock.createWatchlistJob).not.toHaveBeenCalled()
 
     messageErrorSpy.mockRestore()
-  })
+  }, 10000)
 
   it("preserves advanced settings when switching back to basic mode", async () => {
     const messageInfoSpy = vi

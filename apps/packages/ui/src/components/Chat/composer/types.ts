@@ -5,8 +5,7 @@
  * — and render against it without knowing which surface they're on.
  *
  * Populated incrementally across Phase 2 as hooks are lifted from
- * Playground/Sidepanel into the shared `hooks/` directory. Fields marked
- * `// TODO(phase-2)` are planned but not yet wired.
+ * Playground/Sidepanel into the shared `hooks/` directory.
  */
 
 /** Which parent surface is hosting the composer. */
@@ -49,9 +48,9 @@ export interface ChatComposerSubmitPayload {
   uploadedFiles?: unknown[]
   requestOverrides?: {
     chatMode?: string
-    selectedModel?: string
-    selectedSystemPrompt?: string
-    toolChoice?: "auto" | "required" | "none"
+    selectedModel?: string | null
+    selectedSystemPrompt?: string | null
+    toolChoice?: "auto" | "required" | "none" | null
     useOCR?: boolean
     webSearch?: boolean
   }
@@ -75,6 +74,5 @@ export interface ChatComposerContext {
   /** Variant chosen by the user's preference. */
   variant: ChatComposerVariant
 
-  // TODO(phase-2): text, model, sources, attachments, commands, submit
-  // slices populated as each concern is lifted into the shared hook.
+  // Additional slices land here as hook extraction continues.
 }

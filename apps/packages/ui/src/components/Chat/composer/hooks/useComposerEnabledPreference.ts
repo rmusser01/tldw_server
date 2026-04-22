@@ -61,17 +61,20 @@ export function useComposerEnabledPreference(
   const disableServerSync = options.disableServerSync ?? false
 
   const [enabled, setEnabledState] = React.useState<boolean>(readStored)
+  const localChangeVersionRef = React.useRef(0)
 
   // Server hydrate on mount.
   React.useEffect(() => {
     if (disableServerSync) return
     let cancelled = false
+    const hydrateVersion = localChangeVersionRef.current
     const hydrate = async () => {
       try {
         const profile = await tldwClient.getCurrentUserProfile({
           sections: "preferences",
         })
         if (cancelled) return
+        if (localChangeVersionRef.current !== hydrateVersion) return
         const serverValue = profile?.preferences?.[COMPOSER_ENABLED_PROFILE_KEY]
         if (!isBool(serverValue)) return
         setEnabledState((current) =>
@@ -101,6 +104,7 @@ export function useComposerEnabledPreference(
     const handler = (event: StorageEvent) => {
       if (event.key !== COMPOSER_ENABLED_PREFERENCE_KEY) return
       const next = event.newValue === "1"
+      localChangeVersionRef.current += 1
       setEnabledState((current) => (current === next ? current : next))
     }
     window.addEventListener("storage", handler)
@@ -109,6 +113,7 @@ export function useComposerEnabledPreference(
 
   const setEnabled = React.useCallback(
     (next: boolean) => {
+      localChangeVersionRef.current += 1
       setEnabledState(next)
       if (typeof window !== "undefined") {
         try {

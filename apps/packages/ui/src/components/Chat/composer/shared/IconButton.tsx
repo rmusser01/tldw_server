@@ -12,6 +12,8 @@ export interface IconButtonProps {
   onClick?: () => void
   children: React.ReactNode
   active?: boolean
+  /** Explicit toggle semantics. Omit for buttons that are not true toggles. */
+  pressed?: boolean
   disabled?: boolean
   density?: "desktop" | "compact"
 }
@@ -21,6 +23,7 @@ export const IconButton: React.FC<IconButtonProps> = ({
   onClick,
   children,
   active = false,
+  pressed,
   disabled = false,
   density = "desktop",
 }) => {
@@ -42,7 +45,7 @@ export const IconButton: React.FC<IconButtonProps> = ({
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
-      aria-pressed={active}
+      aria-pressed={typeof pressed === "boolean" ? pressed : undefined}
       title={label}
     >
       <span aria-hidden="true">{children}</span>

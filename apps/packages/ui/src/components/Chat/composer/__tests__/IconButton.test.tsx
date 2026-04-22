@@ -26,9 +26,19 @@ describe("IconButton", () => {
     expect(onClick).toHaveBeenCalledOnce()
   })
 
-  it("sets aria-pressed when active=true", () => {
+  it("does not expose toggle semantics unless pressed is provided", () => {
     render(
       <IconButton label="Voice" active>
+        ◉
+      </IconButton>
+    )
+    const btn = screen.getByRole("button", { name: "Voice" })
+    expect(btn.hasAttribute("aria-pressed")).toBe(false)
+  })
+
+  it("sets aria-pressed when pressed=true", () => {
+    render(
+      <IconButton label="Voice" pressed>
         ◉
       </IconButton>
     )
@@ -36,8 +46,12 @@ describe("IconButton", () => {
     expect(btn.getAttribute("aria-pressed")).toBe("true")
   })
 
-  it("sets aria-pressed to false when active=false", () => {
-    render(<IconButton label="Voice">◉</IconButton>)
+  it("sets aria-pressed to false when pressed=false", () => {
+    render(
+      <IconButton label="Voice" pressed={false}>
+        ◉
+      </IconButton>
+    )
     const btn = screen.getByRole("button", { name: "Voice" })
     expect(btn.getAttribute("aria-pressed")).toBe("false")
   })
