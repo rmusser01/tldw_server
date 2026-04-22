@@ -1,36 +1,38 @@
-import React from "react"
-import { useTranslation } from "react-i18next"
-import { Tooltip } from "antd"
-import { useStorage } from "@plasmohq/storage/hook"
-import {
-  Globe,
-  MicIcon,
-  Search,
-  FileText,
-  FileIcon,
-  Gauge,
-  ChevronDown
-} from "lucide-react"
-import { PromptSelect } from "@/components/Common/PromptSelect"
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { Button as TldwButton } from "@/components/Common/Button"
+import { PromptSelect } from "@/components/Common/PromptSelect"
 import { ConnectionStatus } from "@/components/Layouts/ConnectionStatus"
+import { PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY } from "@/utils/output-formatting-guide"
+import { Tooltip } from "antd"
 import {
-  ParameterPresets,
-  SystemPromptTemplatesButton,
-  SessionCostEstimation,
-  type PromptTemplate
-} from "./playground-features"
+  ChevronDown,
+  FileIcon,
+  FileText,
+  Gauge,
+  Globe,
+  MicIcon,
+  Search
+} from "lucide-react"
+import React from "react"
+import { useTranslation } from "react-i18next"
+
+import { useStorage } from "@plasmohq/storage/hook"
+
 import { ComposerToolbarOverflow } from "./ComposerToolbarOverflow"
 import {
-  PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY
-} from "@/utils/output-formatting-guide"
+  ParameterPresets,
+  type PromptTemplate,
+  SessionCostEstimation,
+  SystemPromptTemplatesButton
+} from "./playground-features"
 
 export type ComposerToolbarProps = {
   isProMode: boolean
   isMobile: boolean
   isConnectionReady: boolean
   isSending: boolean
+  optionsExpanded?: boolean
+  sendControlPlacement?: "toolbar" | "external"
   modeLauncherButton?: React.ReactNode
   compareControl?: React.ReactNode
   // Row 1: primary selectors (pre-rendered by parent)
@@ -108,7 +110,13 @@ export type ComposerContextItem = {
 export const ComposerToolbar = React.memo(function ComposerToolbar(
   props: ComposerToolbarProps
 ) {
-  const { t } = useTranslation(["playground", "common", "option", "sidepanel", "settings"])
+  const { t } = useTranslation([
+    "playground",
+    "common",
+    "option",
+    "sidepanel",
+    "settings"
+  ])
   const {
     isProMode,
     isMobile,
@@ -118,6 +126,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     modelSelectButton,
     mcpControl,
     sendControl,
+    optionsExpanded = true,
+    sendControlPlacement = "toolbar",
     researchLaunchButton,
     attachmentButton,
     toolsButton,
@@ -161,6 +171,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     onFocusConnectionCard,
     contextItems = []
   } = props
+  const toolbarSendControl =
+    sendControlPlacement === "toolbar" ? sendControl : null
 
   const ephemeralDisabled = privateChatLocked || isFireFoxPrivateMode
   const [advancedControlsOpen, setAdvancedControlsOpen] = useStorage(
@@ -184,15 +196,17 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             aria-pressed={temporaryChat}
             aria-label={
               temporaryChat
-                ? (t("playground:composer.ephemeralLabel", "Temporary") as string)
+                ? (t(
+                    "playground:composer.ephemeralLabel",
+                    "Temporary"
+                  ) as string)
                 : (t("playground:composer.savedLabel", "Saved") as string)
             }
             className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition hover:bg-surface2 hover:text-text ${
               temporaryChat
                 ? "bg-primary/10 text-primaryStrong"
                 : "text-text-muted"
-            } ${ephemeralDisabled ? "cursor-not-allowed opacity-50" : ""}`}
-          >
+            } ${ephemeralDisabled ? "cursor-not-allowed opacity-50" : ""}`}>
             {temporaryChat
               ? t("playground:composer.ephemeralLabel", "Temporary")
               : t("playground:composer.savedLabel", "Saved")}
@@ -220,7 +234,10 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
                 "playground:composer.contextKnowledgeClose",
                 "Close Search & Context"
               ) as string)
-            : (t("playground:composer.contextKnowledge", "Search & Context") as string)
+            : (t(
+                "playground:composer.contextKnowledge",
+                "Search & Context"
+              ) as string)
         }
         aria-pressed={contextToolsOpen}
         aria-expanded={contextToolsOpen}
@@ -230,19 +247,24 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
                 "playground:composer.contextKnowledgeClose",
                 "Close Search & Context"
               ) as string)
-            : (t("playground:composer.contextKnowledge", "Search & Context") as string)
+            : (t(
+                "playground:composer.contextKnowledge",
+                "Search & Context"
+              ) as string)
         }
         data-testid="knowledge-search-toggle"
         className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition hover:bg-surface2 hover:text-text ${
           contextToolsOpen
             ? "bg-primary/10 text-primaryStrong"
             : "text-text-muted"
-        }`}
-      >
+        }`}>
         <Search className="h-3 w-3" />
         <span className={isProMode ? "" : "truncate"}>
           {contextToolsOpen
-            ? t("playground:composer.contextKnowledgeClose", "Close Search & Context")
+            ? t(
+                "playground:composer.contextKnowledgeClose",
+                "Close Search & Context"
+              )
             : t("playground:composer.contextKnowledge", "Search & Context")}
         </span>
       </button>
@@ -261,11 +283,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           title={t("playground:tools.webSearch", "Web search") as string}
           data-testid="web-search-toggle"
           className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition hover:bg-surface2 hover:text-text ${
-            webSearch
-              ? "bg-primary/10 text-primaryStrong"
-              : "text-text-muted"
-          }`}
-        >
+            webSearch ? "bg-primary/10 text-primaryStrong" : "text-text-muted"
+          }`}>
           <Globe className="h-3 w-3" />
           <span>{t("playground:actions.webSearchShort", "Web")}</span>
         </button>
@@ -296,14 +315,25 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
                     "Dictation unavailable"
                   ) as string)
                 : speechUsesServer
-                  ? (isServerDictating
-                      ? (t("playground:actions.speechStop", "Stop dictation") as string)
-                      : (t("playground:actions.speechStart", "Start dictation") as string))
-                  : (isListening
-                      ? (t("playground:actions.speechStop", "Stop dictation") as string)
-                      : (t("playground:actions.speechStart", "Start dictation") as string))
-            }
-          >
+                  ? isServerDictating
+                    ? (t(
+                        "playground:actions.speechStop",
+                        "Stop dictation"
+                      ) as string)
+                    : (t(
+                        "playground:actions.speechStart",
+                        "Start dictation"
+                      ) as string)
+                  : isListening
+                    ? (t(
+                        "playground:actions.speechStop",
+                        "Stop dictation"
+                      ) as string)
+                    : (t(
+                        "playground:actions.speechStart",
+                        "Start dictation"
+                      ) as string)
+            }>
             <MicIcon className="h-4 w-4" />
           </button>
         </Tooltip>
@@ -330,8 +360,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             type="button"
             onClick={onOpenModelSettings}
             aria-label={t("common:currentChatModelSettings") as string}
-            className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text transition hover:bg-surface2"
-          >
+            className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text transition hover:bg-surface2">
             <Gauge className="h-4 w-4" aria-hidden="true" />
             <span className="flex flex-col items-start text-left">
               <span className="font-medium">
@@ -351,8 +380,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             iconOnly
             onClick={onOpenModelSettings}
             ariaLabel={t("common:currentChatModelSettings") as string}
-            className="text-text-muted"
-          >
+            className="text-text-muted">
             <Gauge className="h-4 w-4" aria-hidden="true" />
             <span className="sr-only">
               {t("playground:composer.chatSettings", "Chat Settings")}
@@ -383,14 +411,15 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
               "Review or remove referenced tabs, or add more from your open browser tabs."
             ) as string
           }
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-muted transition hover:bg-surface2 hover:text-text"
-        >
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-muted transition hover:bg-surface2 hover:text-text">
           <FileText className="h-3 w-3 text-text-subtle" />
           <span>
-            {t("playground:composer.contextTabs", {
-              defaultValue: "{{count}} tabs",
-              count: selectedDocumentsCount
-            } as any) as string}
+            {
+              t("playground:composer.contextTabs", {
+                defaultValue: "{{count}} tabs",
+                count: selectedDocumentsCount
+              } as any) as string
+            }
           </span>
         </button>
       ) : null,
@@ -417,14 +446,15 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
               "Review attached files, remove them, or add more."
             ) as string
           }
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-muted transition hover:bg-surface2 hover:text-text"
-        >
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-muted transition hover:bg-surface2 hover:text-text">
           <FileIcon className="h-3 w-3 text-text-subtle" />
           <span>
-            {t("playground:composer.contextFiles", {
-              defaultValue: "{{count}} files",
-              count: uploadedFilesCount
-            } as any) as string}
+            {
+              t("playground:composer.contextFiles", {
+                defaultValue: "{{count}} files",
+                count: uploadedFilesCount
+              } as any) as string
+            }
           </span>
         </button>
       ) : null,
@@ -476,12 +506,15 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       ]),
     []
   )
-  const getContextItemTestId = React.useCallback((item: ComposerContextItem) => {
-    if (item.id === "sessionStatus") {
-      return "composer-session-status-chip"
-    }
-    return undefined
-  }, [])
+  const getContextItemTestId = React.useCallback(
+    (item: ComposerContextItem) => {
+      if (item.id === "sessionStatus") {
+        return "composer-session-status-chip"
+      }
+      return undefined
+    },
+    []
+  )
 
   const renderContextItem = (
     item: ComposerContextItem,
@@ -495,13 +528,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           : "border-border bg-surface2 text-text-muted"
     const content = (
       <>
-        <span className="font-medium">
-          {item.label}
-        </span>
+        <span className="font-medium">{item.label}</span>
         {item.value ? (
-          <span className="max-w-[150px] truncate text-text">
-            {item.value}
-          </span>
+          <span className="max-w-[150px] truncate text-text">{item.value}</span>
         ) : null}
       </>
     )
@@ -514,12 +543,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           onClick={item.onClick}
           data-testid={dataTestId}
           className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition hover:bg-surface2 ${baseClasses}`}
-          title={
-            item.value
-              ? `${item.label}: ${item.value}`
-              : item.label
-          }
-        >
+          title={item.value ? `${item.label}: ${item.value}` : item.label}>
           {content}
         </button>
       )
@@ -530,12 +554,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         key={item.id}
         data-testid={dataTestId}
         className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${baseClasses}`}
-        title={
-          item.value
-            ? `${item.label}: ${item.value}`
-            : item.label
-        }
-      >
+        title={item.value ? `${item.label}: ${item.value}` : item.label}>
         {content}
       </span>
     )
@@ -578,7 +597,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   const formattingGuideControl = (
     <button
       type="button"
-      onClick={() => setAppendFormattingGuidePrompt(!appendFormattingGuidePrompt)}
+      onClick={() =>
+        setAppendFormattingGuidePrompt(!appendFormattingGuidePrompt)
+      }
       aria-pressed={appendFormattingGuidePrompt}
       data-testid="composer-formatting-guide-toggle"
       className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition hover:bg-surface2 hover:text-text ${formattingGuideToggleClass}`}
@@ -587,26 +608,44 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           "playground:composer.outputFormattingGuideHint",
           "Append a formatting style guide to the system prompt."
         ) as string
-      }
-    >
+      }>
       <FileText className="h-3.5 w-3.5" aria-hidden="true" />
       <span>
         {t("playground:composer.outputFormattingGuide", "Formatting guide")}
       </span>
     </button>
   )
+  const casualAdvancedControlsToggle = (
+    <button
+      type="button"
+      onClick={() =>
+        setCasualAdvancedControlsOpen(!casualAdvancedControlsOpen)
+      }
+      aria-expanded={casualAdvancedControlsOpen}
+      aria-pressed={casualAdvancedControlsOpen}
+      data-testid="composer-casual-advanced-chip"
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition hover:bg-surface2 ${advancedChipClass}`}>
+      <span>{t("playground:composer.advancedControls", "Advanced controls")}</span>
+      <ChevronDown
+        className={`h-3 w-3 transition-transform ${
+          casualAdvancedControlsOpen ? "rotate-180" : ""
+        }`}
+        aria-hidden="true"
+      />
+    </button>
+  )
 
   const casualContextStrip = (
     <div
       data-testid="composer-context-strip"
-      aria-label={t("playground:composer.activeContext", "Active context") as string}
-      className="flex flex-wrap items-center gap-1.5 border-t border-border/50 pt-2"
-    >
+      aria-label={
+        t("playground:composer.activeContext", "Active context") as string
+      }
+      className="flex flex-wrap items-center gap-1.5 border-t border-border/50 pt-2">
       {modelSelectButton ? (
         <span
           data-testid="composer-casual-model-selector-chip"
-          className="inline-flex items-center"
-        >
+          className="inline-flex items-center">
           {modelSelectButton}
         </span>
       ) : (
@@ -618,27 +657,10 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       {modelUsageBadge ? (
         <span
           data-testid="composer-casual-token-chip"
-          className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-2 py-0.5 text-[11px] text-text-muted"
-        >
+          className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-2 py-0.5 text-[11px] text-text-muted">
           {modelUsageBadge}
         </span>
       ) : null}
-      <button
-        type="button"
-        onClick={() => setCasualAdvancedControlsOpen(!casualAdvancedControlsOpen)}
-        aria-expanded={casualAdvancedControlsOpen}
-        aria-pressed={casualAdvancedControlsOpen}
-        data-testid="composer-casual-advanced-chip"
-        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition hover:bg-surface2 ${advancedChipClass}`}
-      >
-        <span>{t("playground:composer.advancedControls", "Advanced controls")}</span>
-        <ChevronDown
-          className={`h-3 w-3 transition-transform ${
-            casualAdvancedControlsOpen ? "rotate-180" : ""
-          }`}
-          aria-hidden="true"
-        />
-      </button>
       <Tooltip title={persistenceTooltip}>
         <span>
           <button
@@ -649,15 +671,18 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             aria-pressed={temporaryChat}
             aria-label={
               temporaryChat
-                ? (t("playground:composer.ephemeralLabel", "Temporary") as string)
+                ? (t(
+                    "playground:composer.ephemeralLabel",
+                    "Temporary"
+                  ) as string)
                 : (t("playground:composer.savedLabel", "Saved") as string)
             }
-            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition hover:bg-surface2 ${persistenceChipClass} ${ephemeralDisabled ? "cursor-not-allowed opacity-50" : ""}`}
-          >
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition hover:bg-surface2 ${persistenceChipClass} ${ephemeralDisabled ? "cursor-not-allowed opacity-50" : ""}`}>
             <span>{persistenceChipLabel}</span>
           </button>
         </span>
       </Tooltip>
+      {casualAdvancedControlsToggle}
     </div>
   )
 
@@ -665,9 +690,10 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     visibleContextItems.length > 0 ? (
       <div
         data-testid="composer-context-strip"
-        aria-label={t("playground:composer.activeContext", "Active context") as string}
-        className="flex flex-wrap items-center gap-1.5 border-t border-border/50 pt-2"
-      >
+        aria-label={
+          t("playground:composer.activeContext", "Active context") as string
+        }
+        className="flex flex-wrap items-center gap-1.5 border-t border-border/50 pt-2">
         {visibleContextItems.map((item) =>
           renderContextItem(item, getContextItemTestId(item))
         )}
@@ -682,13 +708,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           onClick={() => setAdvancedControlsOpen(!advancedControlsOpen)}
           aria-expanded={advancedControlsOpen}
           data-testid="composer-advanced-toggle"
-          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs font-medium text-text-muted transition hover:bg-surface2 hover:text-text"
-        >
+          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs font-medium text-text-muted transition hover:bg-surface2 hover:text-text">
           <span>
-            {t(
-              "playground:composer.advancedControls",
-              "Advanced controls"
-            )}
+            {t("playground:composer.advancedControls", "Advanced controls")}
           </span>
           <ChevronDown
             className={`h-3.5 w-3.5 transition-transform ${
@@ -700,8 +722,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         {advancedControlsOpen && (
           <div
             data-playground-toolbar-row="advanced"
-            className="mt-2 flex flex-wrap items-center justify-between gap-3"
-          >
+            className="mt-2 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <ParameterPresets compact />
               {formattingGuideControl}
@@ -725,8 +746,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     <div className="flex flex-col gap-2">
       <div
         data-playground-toolbar-row="primary"
-        className="flex flex-wrap items-center gap-2"
-      >
+        className="flex flex-wrap items-center gap-2">
         {modeLauncherButton}
         <ConnectionStatus showLabel={false} className="px-1 py-0.5" />
         {modelSelectButton}
@@ -736,8 +756,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       </div>
       <div
         data-playground-toolbar-row="actions"
-        className="flex items-center justify-between gap-2"
-      >
+        className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           {ephemeralToggle}
           {searchContextButton}
@@ -768,20 +787,22 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           {voiceChatButton}
           {attachmentButton}
           {toolsButton}
-          {sendControl}
+          {toolbarSendControl}
         </div>
       </div>
     </div>
   )
 
   const casualToolbarLayout = (
-    <div data-playground-toolbar-layout="casual" className="flex flex-col gap-2">
+    <div
+      data-playground-toolbar-layout="casual"
+      className="flex flex-col gap-2">
       <div
         data-playground-toolbar-row="actions"
-        className="flex flex-nowrap items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
+        className="flex flex-nowrap items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="flex flex-nowrap items-center gap-2 text-text-muted">
           {modeLauncherButton}
+          {mcpControl}
           {searchContextButton}
           {promptSelectControl}
           {characterSelectControl}
@@ -794,42 +815,40 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           {attachmentButton}
           {toolsButton}
           {chatSettingsButton}
-          {sendControl}
+          {toolbarSendControl}
         </div>
       </div>
-      {casualAdvancedControlsOpen && (
-        <div
-          data-playground-toolbar-row="advanced"
-          className="rounded-md border border-border/60 bg-surface2/60 p-2"
-        >
-          <div
-            data-testid="composer-casual-advanced-controls-row"
-            className="flex flex-nowrap items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          >
-            <ConnectionStatus showLabel={false} className="px-1 py-0.5" />
-            {mcpControl}
-            {tabsCountBadge}
-            {filesCountBadge}
-            <ParameterPresets compact />
-            <SystemPromptTemplatesButton onSelect={onTemplateSelect} />
-            {formattingGuideControl}
-          </div>
-        </div>
-      )}
     </div>
   )
+  const casualAdvancedControlsPanel =
+    casualAdvancedControlsOpen && !isMobile && !isProMode ? (
+      <div
+        data-playground-toolbar-row="advanced"
+        className="rounded-md border border-border/60 bg-surface2/60 p-2">
+        <div
+          data-testid="composer-casual-advanced-controls-row"
+          className="flex flex-nowrap items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <ConnectionStatus showLabel={false} className="px-1 py-0.5" />
+          {tabsCountBadge}
+          {filesCountBadge}
+          <ParameterPresets compact />
+          <SystemPromptTemplatesButton onSelect={onTemplateSelect} />
+          {formattingGuideControl}
+        </div>
+      </div>
+    ) : null
 
   const proSplitToolbarLayout = (
-    <div data-playground-toolbar-layout="pro-split" className="flex flex-col gap-2">
+    <div
+      data-playground-toolbar-layout="pro-split"
+      className="flex flex-col gap-2">
       <div className="grid gap-2 lg:grid-cols-2">
         <section
           data-testid="composer-pro-context-panel"
-          className="rounded-md border border-border/60 bg-surface2/60 p-2"
-        >
+          className="rounded-md border border-border/60 bg-surface2/60 p-2">
           <div
             data-playground-toolbar-row="primary"
-            className="flex flex-wrap items-center gap-2"
-          >
+            className="flex flex-wrap items-center gap-2">
             {modeLauncherButton}
             {compareControl}
             {ephemeralToggle}
@@ -847,8 +866,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         </section>
         <section
           data-testid="composer-pro-generation-panel"
-          className="rounded-md border border-border/60 bg-surface2/60 p-2"
-        >
+          className="rounded-md border border-border/60 bg-surface2/60 p-2">
           <div className="flex flex-wrap items-center gap-2">
             <ConnectionStatus showLabel={false} className="px-1 py-0.5" />
             {mcpControl}
@@ -856,8 +874,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           </div>
           <div
             data-playground-toolbar-row="actions"
-            className="mt-2 flex flex-wrap items-center justify-between gap-2"
-          >
+            className="mt-2 flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2 text-text-muted">
               {dictationButton}
               {modelUsageBadge}
@@ -868,7 +885,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
               {voiceChatButton}
               {attachmentButton}
               {toolsButton}
-              {sendControl}
+              {toolbarSendControl}
             </div>
           </div>
         </section>
@@ -878,56 +895,64 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   )
 
   return (
-    <div className="mt-2 flex flex-col gap-1">
-      {isMobile
-        ? mobileToolbarLayout
-        : isProMode
-          ? proSplitToolbarLayout
-          : casualToolbarLayout}
+    <div
+      data-testid="composer-options-panel"
+      className={`mt-2 flex flex-col gap-1 ${optionsExpanded ? "" : "hidden"}`}>
+      {optionsExpanded ? (
+        <>
+          {isMobile
+            ? mobileToolbarLayout
+            : isProMode
+              ? proSplitToolbarLayout
+              : casualToolbarLayout}
 
-      {/* Pro-only: persistence hints (desktop only) */}
-      {!isMobile && isProMode && !temporaryChat && !isConnectionReady && (
-        <button
-          type="button"
-          onClick={onFocusConnectionCard}
-          title={
-            t(
-              "playground:composer.persistence.connectToSave",
-              "Connect your server to sync chats."
-            ) as string
-          }
-          className="inline-flex w-fit items-center gap-1 text-xs font-medium text-primary hover:text-primaryStrong"
-        >
-          {t(
-            "playground:composer.persistence.connectToSave",
-            "Connect your server to sync chats."
+          {/* Pro-only: persistence hints (desktop only) */}
+          {!isMobile && isProMode && !temporaryChat && !isConnectionReady && (
+            <button
+              type="button"
+              onClick={onFocusConnectionCard}
+              title={
+                t(
+                  "playground:composer.persistence.connectToSave",
+                  "Connect your server to sync chats."
+                ) as string
+              }
+              className="inline-flex w-fit items-center gap-1 text-xs font-medium text-primary hover:text-primaryStrong">
+              {t(
+                "playground:composer.persistence.connectToSave",
+                "Connect your server to sync chats."
+              )}
+            </button>
           )}
-        </button>
-      )}
-      {isProMode && !temporaryChat && serverChatId && showServerPersistenceHint && (
-        <p className="max-w-md text-xs text-text-muted">
-          <span className="font-semibold">
-            {t(
-              "playground:composer.persistence.serverInlineTitle",
-              "Saved locally + on your server"
+          {isProMode &&
+            !temporaryChat &&
+            serverChatId &&
+            showServerPersistenceHint && (
+              <p className="max-w-md text-xs text-text-muted">
+                <span className="font-semibold">
+                  {t(
+                    "playground:composer.persistence.serverInlineTitle",
+                    "Saved locally + on your server"
+                  )}
+                  {": "}
+                </span>
+                {t(
+                  "playground:composer.persistence.serverInlineBody",
+                  "This chat is stored both in this browser and on your tldw server, so you can reopen it from server history, keep a long-term record, and analyze it alongside other conversations."
+                )}
+                <button
+                  type="button"
+                  onClick={onDismissServerPersistenceHint}
+                  title={t("common:dismiss", "Dismiss") as string}
+                  className="ml-1 text-xs font-medium text-primary hover:text-primaryStrong">
+                  {t("common:dismiss", "Dismiss")}
+                </button>
+              </p>
             )}
-            {": "}
-          </span>
-          {t(
-            "playground:composer.persistence.serverInlineBody",
-            "This chat is stored both in this browser and on your tldw server, so you can reopen it from server history, keep a long-term record, and analyze it alongside other conversations."
-          )}
-          <button
-            type="button"
-            onClick={onDismissServerPersistenceHint}
-            title={t("common:dismiss", "Dismiss") as string}
-            className="ml-1 text-xs font-medium text-primary hover:text-primaryStrong"
-          >
-            {t("common:dismiss", "Dismiss")}
-          </button>
-        </p>
-      )}
-      {!isMobile && !isProMode ? casualContextStrip : contextStrip}
+          {!isMobile && !isProMode ? casualContextStrip : contextStrip}
+          {!isMobile && !isProMode ? casualAdvancedControlsPanel : null}
+        </>
+      ) : null}
     </div>
   )
 })
