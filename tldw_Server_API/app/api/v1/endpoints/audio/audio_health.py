@@ -619,6 +619,18 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
         omnivoice_runtime = _derive_omnivoice_supervisor_health(tts_service, omnivoice_detail)
         if omnivoice_runtime:
             omnivoice_detail.update(omnivoice_runtime)
+            sidecar_state = str(omnivoice_runtime.get("sidecar_state") or "").strip().lower()
+            if sidecar_state == "degraded" or omnivoice_runtime.get("last_error_code"):
+                omnivoice_detail["status"] = "degraded"
+                omnivoice_detail["availability"] = "degraded"
+                omnivoice_detail["failed"] = True
+                for entry in capability_envelopes:
+                    if str(entry.get("provider") or "").strip().lower() != "omnivoice":
+                        continue
+                    entry["status"] = "degraded"
+                    entry["availability"] = "degraded"
+                    entry["failed"] = True
+                _recompute_health_rollup(health, provider_details, capability_envelopes)
 
         try:
             from tldw_Server_API.app.core.TTS.adapter_registry import TTSProvider

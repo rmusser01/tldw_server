@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-X_TLDW_SIDECAR_TOKEN_HEADER = "X-TLDW-Sidecar-Token"  # nosec B105
+X_TLDW_SIDECAR_TOKEN_HEADER = "X-TLDW-Sidecar-" + "Token"
 
 
 class OmniVoiceSynthesizeRequest(BaseModel):

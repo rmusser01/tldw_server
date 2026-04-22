@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 import httpx
 import pytest
@@ -51,7 +52,7 @@ async def test_supervisor_generates_fresh_token_and_includes_it_on_internal_requ
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        async def get(self, url, *, headers=None):
+        async def get(self, url, *, headers=None, timeout=None):  # noqa: ARG002
             recorded["headers"].append((url, dict(headers or {})))
             return httpx.Response(200, json={"status": "ok", "ready": True})
 
@@ -110,7 +111,7 @@ async def test_supervisor_retries_bounded_port_collisions_before_succeeding(tmp_
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        async def get(self, url, *, headers=None):  # noqa: ARG002
+        async def get(self, url, *, headers=None, timeout=None):  # noqa: ARG002
             return httpx.Response(200, json={"status": "ok", "ready": True})
 
     async def _fake_create_subprocess_exec(*args, **kwargs):
@@ -323,3 +324,99 @@ async def test_supervisor_readiness_fails_fast_when_child_exits_during_startup(t
         await supervisor.ensure_started()
 
     assert call_count <= 1  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_supervisor_spawn_sets_pythonpath_and_rotates_token_on_restart(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters import omnivoice_sidecar_supervisor as supervisor_module
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
+
+    spawn_envs: list[dict[str, str]] = []
+
+    class _ReadyClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, *, headers=None, timeout=None):  # noqa: ARG002
+            return httpx.Response(200, json={"status": "ok", "ready": True})
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ARG001
+        spawn_envs.append(dict(kwargs["env"]))
+        return _FakeProcess()
+
+    monkeypatch.setattr(supervisor_module, "is_port_free", lambda host, port: True, raising=True)
+    monkeypatch.setattr(supervisor_module.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec, raising=True)
+    monkeypatch.setattr(
+        supervisor_module,
+        "create_sidecar_async_client",
+        lambda *, timeout: _ReadyClient(),
+        raising=True,
+    )
+
+    supervisor = OmniVoiceSidecarSupervisor(
+        provider_config={"extra_params": {"host": "127.0.0.1", "port": 8039}},
+        repo_root=tmp_path,
+    )
+
+    await supervisor.ensure_started()
+    first_token = supervisor.sidecar_token
+    first_process = supervisor._process
+    assert first_process is not None  # nosec B101
+
+    first_process.returncode = 1
+    await supervisor.ensure_started()
+
+    assert len(spawn_envs) == 2  # nosec B101
+    assert spawn_envs[0]["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path)  # nosec B101
+    assert spawn_envs[0]["OMNIVOICE_SIDECAR_TOKEN"] != spawn_envs[1]["OMNIVOICE_SIDECAR_TOKEN"]  # nosec B101
+    assert supervisor.sidecar_token != first_token  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_supervisor_restarts_existing_process_after_idle_timeout(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters import omnivoice_sidecar_supervisor as supervisor_module
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
+
+    spawned_processes: list[_FakeProcess] = []
+
+    class _ReadyClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, *, headers=None, timeout=None):  # noqa: ARG002
+            return httpx.Response(200, json={"status": "ok", "ready": True})
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ARG001
+        process = _FakeProcess()
+        spawned_processes.append(process)
+        return process
+
+    monkeypatch.setattr(supervisor_module, "is_port_free", lambda host, port: True, raising=True)
+    monkeypatch.setattr(supervisor_module.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec, raising=True)
+    monkeypatch.setattr(
+        supervisor_module,
+        "create_sidecar_async_client",
+        lambda *, timeout: _ReadyClient(),
+        raising=True,
+    )
+
+    supervisor = OmniVoiceSidecarSupervisor(
+        provider_config={"extra_params": {"host": "127.0.0.1", "port": 8039, "idle_shutdown_seconds": 1}},
+        repo_root=tmp_path,
+    )
+
+    await supervisor.ensure_started()
+    supervisor._last_activity_at = 0
+
+    await supervisor.ensure_started()
+
+    assert len(spawned_processes) == 2  # nosec B101
+    assert spawned_processes[0].terminate_called is True  # nosec B101

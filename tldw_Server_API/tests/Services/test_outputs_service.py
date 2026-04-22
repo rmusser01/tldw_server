@@ -140,3 +140,17 @@ async def test_resolve_tts_generation_defaults_template_selected_omnivoice_prese
     assert resolved_model == "omnivoice"
     assert resolved_voice == "caller-selected"
     assert resolved_speed == 0.9
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_resolve_tts_generation_defaults_omnivoice_blank_voice_falls_back_to_auto() -> None:
+    resolved_model, resolved_voice, resolved_speed = await outputs_service._resolve_tts_generation_defaults(
+        tts_model="omnivoice",
+        tts_voice="   ",
+        template_row=SimpleNamespace(metadata_json=None),
+    )
+
+    assert resolved_model == "omnivoice"
+    assert resolved_voice == outputs_service.DEFAULT_OMNIVOICE_TTS_VOICE
+    assert resolved_speed is None

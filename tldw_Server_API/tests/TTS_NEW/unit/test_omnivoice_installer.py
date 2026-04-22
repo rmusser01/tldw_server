@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 @pytest.mark.unit
@@ -65,7 +66,7 @@ providers:
     )
     layout = build_runtime_layout(Path("models") / "omnivoice_sidecar", repo_root=tmp_path)
     source_checkout = tmp_path.parent / "OmniVoice"
-    source_checkout.mkdir()
+    source_checkout.mkdir(exist_ok=True)
 
     changed = patch_tts_config(
         config_path=config_path,
@@ -83,3 +84,91 @@ providers:
     assert 'runtime_path: "models/omnivoice_sidecar/runtime"' in content
     assert 'logs_path: "models/omnivoice_sidecar/logs"' in content
     assert 'repo_path: "../OmniVoice"' in content
+
+
+@pytest.mark.unit
+def test_omnivoice_installer_inserts_valid_yaml_when_provider_block_is_missing(tmp_path):
+    from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import (
+        build_runtime_layout,
+        patch_tts_config,
+    )
+
+    config_path = tmp_path / "tts_providers_config.yaml"
+    config_path.write_text(
+        """
+providers:
+  kitten_tts:
+    enabled: false
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    layout = build_runtime_layout(Path("models") / "omnivoice_sidecar", repo_root=tmp_path)
+    source_checkout = tmp_path / "external" / "OmniVoice"
+    source_checkout.mkdir(parents=True)
+
+    changed = patch_tts_config(
+        config_path=config_path,
+        layout=layout,
+        source_checkout=source_checkout,
+        repo_root=tmp_path,
+    )
+
+    content = config_path.read_text(encoding="utf-8")
+    parsed = yaml.safe_load(content)
+
+    assert changed is True
+    assert "  omnivoice:" in content
+    assert parsed["providers"]["omnivoice"]["enabled"] is True
+    assert parsed["providers"]["omnivoice"]["extra_params"]["repo_path"] == "external/OmniVoice"
+
+
+@pytest.mark.unit
+def test_omnivoice_installer_skips_complex_yaml_constructs(tmp_path):
+    from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import (
+        build_runtime_layout,
+        patch_tts_config,
+    )
+
+    config_path = tmp_path / "tts_providers_config.yaml"
+    original = (
+        """
+providers:
+  kitten_tts: # keep legacy comment
+    enabled: false
+""".strip()
+        + "\n"
+    )
+    config_path.write_text(original, encoding="utf-8")
+    layout = build_runtime_layout(Path("models") / "omnivoice_sidecar", repo_root=tmp_path)
+    source_checkout = tmp_path / "external" / "OmniVoice"
+    source_checkout.mkdir(parents=True)
+
+    changed = patch_tts_config(
+        config_path=config_path,
+        layout=layout,
+        source_checkout=source_checkout,
+        repo_root=tmp_path,
+    )
+
+    assert changed is False
+    assert config_path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.unit
+def test_omnivoice_installer_rejects_malformed_repo_urls(tmp_path, monkeypatch):
+    from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import clone_repository
+
+    monkeypatch.setattr(
+        "Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar._run_checked_command",
+        lambda command, cwd=None: pytest.fail(f"clone should not run for invalid repo URL: {command}"),  # noqa: ARG005
+        raising=True,
+    )
+    monkeypatch.setattr(
+        "Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar.shutil.which",
+        lambda name: "/usr/bin/git" if name == "git" else None,
+        raising=True,
+    )
+
+    with pytest.raises(SystemExit, match="Invalid repository URL"):
+        clone_repository("https://github.com/example/repo.git; rm -rf /", tmp_path / "OmniVoice")

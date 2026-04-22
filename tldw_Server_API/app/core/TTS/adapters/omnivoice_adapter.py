@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import tempfile
 import wave
@@ -9,6 +10,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from ..audio_converter import AudioConverter
 from ..tts_exceptions import (
     TTSGenerationError,
     TTSProviderInitializationError,
@@ -150,7 +152,7 @@ class OmniVoiceAdapter(TTSAdapter):
 
         mode = self._resolve_mode(request)
         sample_rate = self._resolve_sample_rate(request)
-        reference_audio_path = self._materialize_reference_audio(request) if request.voice_reference else None
+        reference_audio_path = await self._materialize_reference_audio(request) if request.voice_reference else None
         payload = self._build_sidecar_payload(
             request,
             mode=mode,
@@ -162,21 +164,36 @@ class OmniVoiceAdapter(TTSAdapter):
             base_url = await supervisor.ensure_started()
             token = getattr(supervisor, "sidecar_token", None)
             headers = build_sidecar_auth_headers(token) if token else {}
-
-            async with create_sidecar_async_client(timeout=self.timeout) as client:
+            channels = 1
+            get_http_client = getattr(supervisor, "get_http_client", None)
+            if callable(get_http_client):
+                client = await get_http_client()
                 response = await client.post(
                     f"{str(base_url).rstrip('/')}/v1/synthesize",
                     json=payload,
                     headers=headers,
+                    timeout=self.timeout,
                 )
+            else:
+                async with create_sidecar_async_client(timeout=self.timeout) as client:
+                    response = await client.post(
+                        f"{str(base_url).rstrip('/')}/v1/synthesize",
+                        json=payload,
+                        headers=headers,
+                    )
 
             if response.status_code != 200:
+                logger.warning(
+                    "OmniVoice sidecar returned status {} with body: {}",
+                    response.status_code,
+                    response.text,
+                )
                 raise TTSGenerationError(
                     "OmniVoice sidecar returned an error",
                     provider=self.PROVIDER_KEY,
                     details={
                         "status_code": response.status_code,
-                        "response_text": response.text,
+                        "response_text": self._sanitize_sidecar_error_text(response.text),
                     },
                 )
 
@@ -191,24 +208,26 @@ class OmniVoiceAdapter(TTSAdapter):
                 )
 
             audio_bytes = response.content
+            channels = int(response.headers.get("X-OmniVoice-Channels", "1") or "1")
             if not audio_bytes:
                 raise TTSGenerationError(
                     "OmniVoice sidecar returned empty audio",
                     provider=self.PROVIDER_KEY,
                 )
 
-            response_audio, response_format = self._normalize_sidecar_audio(
+            response_audio, response_format = await self._normalize_sidecar_audio(
                 audio_bytes,
                 sidecar_audio_format=sidecar_audio_format,
                 requested_format=request.format,
                 sample_rate=sample_rate,
+                channels=channels,
             )
 
             return TTSResponse(
                 audio_data=response_audio,
                 format=response_format,
                 sample_rate=sample_rate,
-                channels=int(response.headers.get("X-OmniVoice-Channels", "1") or "1"),
+                channels=channels,
                 text_processed=request.text,
                 voice_used=request.voice,
                 provider=self.PROVIDER_KEY,
@@ -217,7 +236,7 @@ class OmniVoiceAdapter(TTSAdapter):
                     "transport": "sidecar",
                     "sidecar_mode": mode,
                     "sidecar_audio_format": sidecar_audio_format,
-                    "reference_audio_path": str(reference_audio_path) if reference_audio_path else None,
+                    "used_reference_audio": reference_audio_path is not None,
                 },
             )
         finally:
@@ -286,10 +305,12 @@ class OmniVoiceAdapter(TTSAdapter):
                 payload["reference_text"] = reference_text.strip()
         return payload
 
-    def _materialize_reference_audio(self, request: TTSRequest) -> Optional[Path]:
+    async def _materialize_reference_audio(self, request: TTSRequest) -> Optional[Path]:
         if request.voice_reference is None:
             return None
+        return await asyncio.to_thread(self._materialize_reference_audio_sync, request.voice_reference)
 
+    def _materialize_reference_audio_sync(self, voice_reference: bytes) -> Path:
         self._ensure_temp_dir()
         temp_file = tempfile.NamedTemporaryFile(
             suffix=".wav",
@@ -299,44 +320,123 @@ class OmniVoiceAdapter(TTSAdapter):
         )
         temp_path = Path(temp_file.name)
         with temp_file:
-            temp_file.write(request.voice_reference)
+            temp_file.write(voice_reference)
         return temp_path
+
+    def _write_temp_audio_file_sync(self, audio_data: bytes, *, suffix: str) -> Path:
+        self._ensure_temp_dir()
+        with tempfile.NamedTemporaryFile(
+            suffix=suffix,
+            dir=str(self.temp_dir) if self.temp_dir else None,
+            delete=False,
+        ) as handle:
+            handle.write(audio_data)
+            return Path(handle.name)
+
+    def _reserve_temp_audio_path_sync(self, *, suffix: str) -> Path:
+        self._ensure_temp_dir()
+        with tempfile.NamedTemporaryFile(
+            suffix=suffix,
+            dir=str(self.temp_dir) if self.temp_dir else None,
+            delete=False,
+        ) as handle:
+            return Path(handle.name)
+
+    @staticmethod
+    def _remove_temp_path_sync(path: Path) -> None:
+        with contextlib.suppress(OSError):
+            path.unlink()
+
+    @staticmethod
+    def _sanitize_sidecar_error_text(response_text: str | None) -> str:
+        if str(response_text or "").strip():
+            return "OmniVoice sidecar reported an internal error; see server logs."
+        return "OmniVoice sidecar returned an empty error response."
 
     def _ensure_temp_dir(self) -> None:
         if self.temp_dir is None:
             return
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
-    def _normalize_sidecar_audio(
+    async def _normalize_sidecar_audio(
         self,
         audio_bytes: bytes,
         *,
         sidecar_audio_format: str,
         requested_format: AudioFormat,
         sample_rate: int,
+        channels: int,
     ) -> tuple[bytes, AudioFormat]:
         if requested_format == AudioFormat.PCM:
             if sidecar_audio_format == "pcm":
                 return audio_bytes, AudioFormat.PCM
             return self._wav_to_pcm(audio_bytes), AudioFormat.PCM
 
+        wav_audio = (
+            audio_bytes
+            if sidecar_audio_format == "wav"
+            else self._pcm_to_wav(audio_bytes, sample_rate=sample_rate, channels=channels)
+        )
         if requested_format == AudioFormat.WAV:
-            if sidecar_audio_format == "wav":
-                return audio_bytes, AudioFormat.WAV
-            return self._pcm_to_wav(audio_bytes, sample_rate=sample_rate), AudioFormat.WAV
+            return wav_audio, AudioFormat.WAV
 
-        if sidecar_audio_format == "wav":
-            return audio_bytes, AudioFormat.WAV
-        return self._pcm_to_wav(audio_bytes, sample_rate=sample_rate), AudioFormat.WAV
+        return await self._convert_wav_to_requested_format(
+            wav_audio,
+            requested_format=requested_format,
+            sample_rate=sample_rate,
+            channels=channels,
+        )
+
+    async def _convert_wav_to_requested_format(
+        self,
+        audio_bytes: bytes,
+        *,
+        requested_format: AudioFormat,
+        sample_rate: int,
+        channels: int,
+    ) -> tuple[bytes, AudioFormat]:
+        input_path = None
+        output_path = None
+        try:
+            input_path = await asyncio.to_thread(
+                self._write_temp_audio_file_sync,
+                audio_bytes,
+                suffix=".wav",
+            )
+            output_path = await asyncio.to_thread(
+                self._reserve_temp_audio_path_sync,
+                suffix=f".{requested_format.value}",
+            )
+            converted = await AudioConverter.convert_format(
+                input_path,
+                output_path,
+                requested_format.value,
+                sample_rate=sample_rate,
+                channels=channels,
+            )
+            if not converted or output_path is None or not output_path.exists():
+                raise TTSGenerationError(
+                    "OmniVoice audio conversion failed",
+                    provider=self.PROVIDER_KEY,
+                    details={"target_format": requested_format.value},
+                )
+
+            converted_bytes = await asyncio.to_thread(output_path.read_bytes)
+            return converted_bytes, requested_format
+        finally:
+            if input_path is not None:
+                await asyncio.to_thread(self._remove_temp_path_sync, input_path)
+            if output_path is not None:
+                await asyncio.to_thread(self._remove_temp_path_sync, output_path)
 
     def _wav_to_pcm(self, audio_bytes: bytes) -> bytes:
         with wave.open(BytesIO(audio_bytes), "rb") as wav_file:
             return wav_file.readframes(wav_file.getnframes())
 
-    def _pcm_to_wav(self, audio_bytes: bytes, *, sample_rate: int) -> bytes:
+    def _pcm_to_wav(self, audio_bytes: bytes, *, sample_rate: int, channels: int) -> bytes:
         buffer = BytesIO()
         with wave.open(buffer, "wb") as wav_file:
-            wav_file.setnchannels(1)
+            wav_file.setnchannels(max(1, channels))
             wav_file.setsampwidth(2)
             wav_file.setframerate(sample_rate)
             wav_file.writeframes(audio_bytes)

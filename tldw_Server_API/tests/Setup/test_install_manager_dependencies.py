@@ -307,3 +307,18 @@ def test_omnivoice_install_routes_to_sidecar_installer(monkeypatch):
         "validate_runtime_layout",
         "patch_tts_config",
     ]
+
+
+def test_omnivoice_install_checks_download_policy_before_running_installer(monkeypatch):
+    calls: list[tuple[str, object]] = []
+
+    def _blocked(label):
+        calls.append(("ensure_downloads_allowed", label))
+        raise install_manager.DownloadBlockedError("downloads blocked for test")
+
+    monkeypatch.setattr(install_manager, "_ensure_downloads_allowed", _blocked, raising=True)
+
+    with pytest.raises(install_manager.DownloadBlockedError, match="downloads blocked for test"):
+        install_manager._install_omnivoice()
+
+    assert calls == [("ensure_downloads_allowed", "OmniVoice sidecar runtime")]

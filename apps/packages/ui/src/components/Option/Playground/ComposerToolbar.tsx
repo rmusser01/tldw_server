@@ -897,7 +897,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   return (
     <div
       data-testid="composer-options-panel"
-      className={`mt-2 flex flex-col gap-1 ${optionsExpanded ? "" : "hidden"}`}>
+      className="mt-2 flex flex-col gap-1">
       {optionsExpanded ? (
         <>
           {isMobile

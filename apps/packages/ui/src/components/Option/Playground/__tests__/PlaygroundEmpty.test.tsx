@@ -22,6 +22,10 @@ vi.mock("@/context/demo-mode", () => ({
   useDemoMode: () => ({ demoEnabled: false }),
 }));
 
+vi.mock("@/hooks/useConnectionState", () => ({
+  useIsConnected: () => true,
+}));
+
 vi.mock("@/store/tutorials", () => ({
   useHelpModal: () => ({ open: openHelpModal }),
 }));
@@ -56,6 +60,14 @@ describe("PlaygroundEmpty", () => {
     ).toBeInTheDocument();
     expect(
       within(shell).getByRole("button", { name: "Take a quick tour" }),
+    ).toBeInTheDocument();
+    expect(
+      within(shell).queryByRole("button", { name: /open settings/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(shell).getByText(
+        "Experiment with different models, prompts, and knowledge sources here.",
+      ),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Start with a guided mode:"),

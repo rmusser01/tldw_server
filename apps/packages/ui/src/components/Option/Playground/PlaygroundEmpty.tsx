@@ -20,7 +20,7 @@ const actionButtonFocusClassName =
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg";
 
 export const PlaygroundEmpty = () => {
-  const { t } = useTranslation(["playground", "common"]);
+  const { t } = useTranslation(["playground", "common", "option"]);
   const { demoEnabled } = useDemoMode();
   const isConnected = useIsConnected();
   const { open: openHelpModal } = useHelpModal();

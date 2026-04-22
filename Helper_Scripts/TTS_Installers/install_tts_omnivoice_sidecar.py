@@ -11,13 +11,15 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
-import subprocess  # nosec B404
+import subprocess  # nosec B404 - installer intentionally launches vetted local git/pip argv without a shell
 import sys
 import venv
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -28,6 +30,7 @@ DEFAULT_CONFIG_PATH = Path("tldw_Server_API") / "Config_Files" / "tts_providers_
 DEFAULT_SOURCE_CHECKOUT = Path("external") / "OmniVoice"
 DEFAULT_LOCAL_CHECKOUT = Path("..") / "OmniVoice"
 PROVIDER_NAME = "omnivoice"
+_GIT_SCP_URL_RE = re.compile(r"^[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+:[A-Za-z0-9_./-]+(?:\.git)?$")
 
 
 @dataclass(frozen=True)
@@ -119,11 +122,11 @@ def create_runtime_layout(layout: OmniVoiceRuntimeLayout) -> OmniVoiceRuntimeLay
 def validate_runtime_layout(layout: OmniVoiceRuntimeLayout) -> list[str]:
     """Return a list of missing required runtime artifacts."""
 
-    missing: list[str] = []
-    for path in (layout.runtime_base, layout.venv_dir, layout.runtime_dir, layout.logs_dir, layout.interpreter_path):
-        if not path.exists():
-            missing.append(str(path))
-    return missing
+    return [
+        str(path)
+        for path in (layout.runtime_base, layout.venv_dir, layout.runtime_dir, layout.logs_dir, layout.interpreter_path)
+        if not path.exists()
+    ]
 
 
 def _path_for_config(path: Path, repo_root: Optional[Path]) -> str:
@@ -171,6 +174,13 @@ def _find_provider_block(lines: list[str], provider_name: str) -> tuple[Optional
     return None, None, None
 
 
+def _find_providers_indent(lines: list[str]) -> Optional[int]:
+    for line in lines:
+        if line.strip() == "providers:":
+            return len(line) - len(line.lstrip(" "))
+    return None
+
+
 def _insert_provider_block(lines: list[str], provider_name: str, block_lines: list[str]) -> list[str]:
     block_start, block_end, _block_indent = _find_provider_block(lines, provider_name)
     if block_start is not None and block_end is not None:
@@ -201,6 +211,58 @@ def _insert_provider_block(lines: list[str], provider_name: str, block_lines: li
     return lines
 
 
+def _line_has_inline_yaml_comment(line: str) -> bool:
+    in_single_quote = False
+    in_double_quote = False
+    saw_mapping_separator = False
+
+    for character in line:
+        if character == "'" and not in_double_quote:
+            in_single_quote = not in_single_quote
+            continue
+        if character == '"' and not in_single_quote:
+            in_double_quote = not in_double_quote
+            continue
+        if in_single_quote or in_double_quote:
+            continue
+        if character == ":":
+            saw_mapping_separator = True
+            continue
+        if character == "#" and saw_mapping_separator:
+            return True
+    return False
+
+
+def _find_unsupported_yaml_construct(lines: list[str]) -> str | None:
+    for index, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if _line_has_inline_yaml_comment(line):
+            return f"inline comment on line {index}"
+        if "{" in stripped or "}" in stripped:
+            return f"flow-style mapping on line {index}"
+        if re.search(r":\s*[>|](?:\s|$)", line):
+            return f"multiline scalar on line {index}"
+    return None
+
+
+def _validate_repository_url(repo_url: str) -> str:
+    candidate = str(repo_url or "").strip()
+    if not candidate:
+        raise SystemExit("Repository URL is required")
+    if any(token in candidate for token in (";", "|", "&", "$", "\n", "\r")):
+        raise SystemExit(f"Invalid repository URL: {repo_url}")
+    if _GIT_SCP_URL_RE.match(candidate):
+        return candidate
+
+    parsed = urlparse(candidate)
+    if parsed.scheme in {"https", "http", "ssh", "git"} and parsed.netloc and parsed.path:
+        return candidate
+
+    raise SystemExit(f"Invalid repository URL: {repo_url}")
+
+
 def patch_tts_config(
     *,
     config_path: Path,
@@ -215,8 +277,18 @@ def patch_tts_config(
         return False
 
     lines = config_path.read_text(encoding="utf-8").splitlines()
+    unsupported_construct = _find_unsupported_yaml_construct(lines)
+    if unsupported_construct is not None:
+        logger.warning(
+            "Skipping OmniVoice provider config patch at {} because the YAML contains unsupported constructs ({})",
+            config_path,
+            unsupported_construct,
+        )
+        return False
     block_start, block_end, block_indent = _find_provider_block(lines, PROVIDER_NAME)
-    provider_indent = " " * (block_indent or 0)
+    providers_indent = _find_providers_indent(lines)
+    effective_block_indent = block_indent if block_indent is not None else ((providers_indent or 0) + 2)
+    provider_indent = " " * effective_block_indent
     key_indent = provider_indent + "  "
     nested_indent = key_indent + "  "
     block_lines = [
@@ -262,17 +334,26 @@ def _ensure_prerequisites() -> None:
         raise SystemExit(f"Missing prerequisites: {', '.join(missing)}")
 
 
+def _run_checked_command(command: Sequence[str], *, cwd: Optional[Path] = None) -> None:
+    subprocess.run(  # nosec B603 - fixed argv list, no shell, installer-controlled executable paths
+        [str(part) for part in command],
+        check=True,
+        cwd=str(cwd) if cwd is not None else None,
+    )
+
+
 def clone_repository(repo_url: str, source_dir: Path) -> None:
     """Clone OmniVoice if the checkout does not already exist."""
 
     if source_dir.exists():
         logger.info("Using existing OmniVoice checkout at {}", source_dir)
         return
+    validated_repo_url = _validate_repository_url(repo_url)
     git_executable = shutil.which("git")
     if not git_executable:
         raise SystemExit("Missing prerequisites: git")
     source_dir.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run([git_executable, "clone", repo_url, str(source_dir)], check=True)  # nosec B603
+    _run_checked_command([git_executable, "clone", validated_repo_url, str(source_dir)])
 
 
 def create_virtualenv(venv_dir: Path) -> None:
@@ -293,8 +374,8 @@ def install_sidecar_runtime(
 ) -> None:
     """Install the minimal sidecar runtime into the dedicated environment."""
 
-    subprocess.run([str(interpreter_path), "-m", "pip", "install", "--upgrade", "pip"], check=True)  # nosec B603
-    subprocess.run(  # nosec B603
+    _run_checked_command([str(interpreter_path), "-m", "pip", "install", "--upgrade", "pip"])
+    _run_checked_command(
         [
             str(interpreter_path),
             "-m",
@@ -305,11 +386,10 @@ def install_sidecar_runtime(
             "httpx>=0.27.0",
             "pydantic>=2.7.0",
             "loguru>=0.7.0",
-        ],
-        check=True,
+        ]
     )
     if source_checkout.exists():
-        subprocess.run(  # nosec B603
+        _run_checked_command(
             [
                 str(interpreter_path),
                 "-m",
@@ -319,8 +399,7 @@ def install_sidecar_runtime(
                 "-e",
                 str(source_checkout),
             ],
-            check=True,
-            cwd=str(repo_root),
+            cwd=repo_root,
         )
 
 

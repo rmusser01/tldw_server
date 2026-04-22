@@ -78,8 +78,13 @@ def create_app(*, sidecar_token: str) -> FastAPI:
         _: None = Depends(require_sidecar_token),
     ) -> Response:
         if request.mode == "clone":
-            reference_path = Path(request.reference_audio_path or "")
-            if not reference_path.exists():
+            if not request.reference_audio_path:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Clone reference audio path does not exist",
+                )
+            reference_path = Path(request.reference_audio_path)
+            if not reference_path.is_file():
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="Clone reference audio path does not exist",

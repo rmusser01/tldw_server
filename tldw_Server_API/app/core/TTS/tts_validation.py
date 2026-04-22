@@ -666,6 +666,7 @@ class TTSInputValidator:
                 )
             elif provider == "omnivoice":
                 voice = (request.voice or "").strip()
+                is_clone_voice = voice.lower() == "clone"
                 is_custom_voice = voice.startswith("custom:")
                 ref_text = None
                 if isinstance(extras, dict):
@@ -674,7 +675,12 @@ class TTSInputValidator:
                         or extras.get("ref_text")
                         or extras.get("voice_reference_text")
                     )
-                clone_requested = bool(request.voice_reference) or voice.lower() == "clone" or is_custom_voice
+                clone_requested = bool(request.voice_reference) or is_clone_voice or is_custom_voice
+                if is_clone_voice and not request.voice_reference:
+                    raise TTSInvalidVoiceReferenceError(
+                        "OmniVoice clone requests require voice_reference",
+                        provider=provider,
+                    )
                 if is_custom_voice and not request.voice_reference:
                     raise TTSInvalidVoiceReferenceError(
                         "OmniVoice custom: voices require a resolved voice_reference before provider validation",

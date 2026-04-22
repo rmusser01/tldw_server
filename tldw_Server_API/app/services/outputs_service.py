@@ -391,7 +391,8 @@ async def _resolve_tts_generation_defaults(
     provider_hint = _infer_output_tts_provider_from_model(resolved_model)
     if provider_hint == "omnivoice":
         resolved_model = str(resolved_model)
-        resolved_voice = str(tts_voice) if tts_voice is not None else DEFAULT_OMNIVOICE_TTS_VOICE
+        voice_candidate = str(tts_voice).strip() if tts_voice is not None else ""
+        resolved_voice = voice_candidate or DEFAULT_OMNIVOICE_TTS_VOICE
         return resolved_model, resolved_voice, tpl_speed
     if not explicit_model and provider_hint == "pocket_tts_cpp":
         if not await _is_pocket_tts_cpp_ready(resolved_voice):

@@ -22,3 +22,31 @@ def test_resolve_audiobook_generation_defaults_preserves_omnivoice(provider_name
     assert provider == "omnivoice"
     assert model == "omnivoice"
     assert voice == "auto"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("model_name", ["omnivoice", "omni-voice", "omni_voice"])
+def test_resolve_audiobook_generation_defaults_canonicalizes_explicit_omnivoice_model(model_name: str) -> None:
+    provider, model, voice = _resolve_audiobook_generation_defaults(
+        provider="omnivoice",
+        model=model_name,
+        voice=None,
+    )
+
+    assert provider == "omnivoice"
+    assert model == "omnivoice"
+    assert voice == "auto"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("model_name", ["omnivoice", "omni-voice", "omni_voice"])
+def test_resolve_audiobook_generation_defaults_infers_provider_from_omnivoice_alias(model_name: str) -> None:
+    provider, model, voice = _resolve_audiobook_generation_defaults(
+        provider=None,
+        model=model_name,
+        voice=None,
+    )
+
+    assert provider == "omnivoice"
+    assert model == "omnivoice"
+    assert voice == "auto"

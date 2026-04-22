@@ -131,7 +131,7 @@ describe("ComposerToolbar web search", () => {
     )
 
     const panel = screen.getByTestId("composer-options-panel")
-    expect(panel.className).toContain("hidden")
+    expect(panel.className).toBe("mt-2 flex flex-col gap-1")
     expect(screen.queryByText("Model selector")).toBeNull()
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
   })

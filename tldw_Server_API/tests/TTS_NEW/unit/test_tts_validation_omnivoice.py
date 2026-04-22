@@ -54,6 +54,21 @@ def test_omnivoice_clone_accepts_reference_text():
     assert error is None
 
 
+def test_omnivoice_clone_requires_reference_audio():
+    validator = TTSInputValidator()
+    request = TTSRequest(
+        text="hello",
+        voice="clone",
+        format=AudioFormat.WAV,
+        extra_params={"reference_text": "reference transcript"},
+    )
+
+    is_valid, error = validator.validate_request(request, provider="omnivoice")
+
+    assert is_valid is False
+    assert "voice_reference" in str(error)
+
+
 def test_omnivoice_clone_rejects_too_short_reference_audio():
     validator = TTSInputValidator()
     request = TTSRequest(

@@ -18,9 +18,12 @@ from .omnivoice_sidecar_protocol import X_TLDW_SIDECAR_TOKEN_HEADER, build_sidec
 from .omnivoice_sidecar_server import validate_loopback_host
 
 
-def create_sidecar_async_client(*, timeout: float) -> httpx.AsyncClient:
+def create_sidecar_async_client(*, timeout: float | None = None) -> httpx.AsyncClient:
     """Create an httpx client dedicated to loopback sidecar traffic."""
-    return httpx.AsyncClient(trust_env=False, timeout=timeout)
+    kwargs: dict[str, Any] = {"trust_env": False}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    return httpx.AsyncClient(**kwargs)
 
 
 class OmniVoiceSidecarSupervisor:
@@ -40,6 +43,7 @@ class OmniVoiceSidecarSupervisor:
         self._idle_shutdown_seconds = float(self._coalesce_extra_param("idle_shutdown_seconds", 900.0))
         self._closing = False
         self._token = secrets.token_urlsafe(32)
+        self._client: httpx.AsyncClient | None = None
         self._process: asyncio.subprocess.Process | None = None
         self._port: int | None = None
         self._base_url: str | None = None
@@ -81,19 +85,19 @@ class OmniVoiceSidecarSupervisor:
         if self._closing:
             raise RuntimeError("OmniVoice sidecar supervisor is closing")
 
-        if self._process is not None and self._process.returncode is None and self._base_url:
-            self._last_activity_at = time.time()
-            return self._base_url
-
         async with self._lock:
             if self._closing:
                 raise RuntimeError("OmniVoice sidecar supervisor is closing")
-            if self._process is not None and self._process.returncode is None and self._base_url:
-                self._last_activity_at = time.time()
-                return self._base_url
+            if self._is_process_running() and self._base_url:
+                if await self._shutdown_if_idle_locked():
+                    logger.debug("Restarting OmniVoice sidecar after idle timeout")
+                else:
+                    self._last_activity_at = time.time()
+                    return self._base_url
             if self._last_failure_at is not None and (time.time() - self._last_failure_at) < self._startup_backoff_seconds:
                 raise RuntimeError("OmniVoice sidecar startup is backing off after a recent failure")
 
+            self._rotate_token()
             selected_port = self._select_port()
             self._process = await self._spawn_sidecar(selected_port)
             self._port = selected_port
@@ -103,13 +107,66 @@ class OmniVoiceSidecarSupervisor:
                 await self._wait_for_ready()
             except Exception as exc:
                 self._record_failure()
-                await self._stop_process()
+                await self._stop_process_locked()
                 raise RuntimeError("OmniVoice sidecar did not reach /health") from exc
 
             self._last_activity_at = time.time()
             return self._base_url
 
+    async def get_http_client(self, *, timeout: float | None = None) -> httpx.AsyncClient:
+        if self._client is None or self._client_is_closed(self._client):
+            self._client = create_sidecar_async_client(timeout=timeout)
+        return self._client
+
+    async def shutdown(self) -> None:
+        self._closing = True
+        async with self._lock:
+            await self._stop_process_locked()
+            client = self._client
+            self._client = None
+        if client is not None and not self._client_is_closed(client):
+            await client.aclose()
+
+    @staticmethod
+    def _client_is_closed(client: httpx.AsyncClient) -> bool:
+        return bool(getattr(client, "is_closed", False))
+
+    def _is_process_running(self) -> bool:
+        return self._process is not None and self._process.returncode is None
+
+    def _is_idle(self) -> bool:
+        if self._idle_shutdown_seconds <= 0:
+            return False
+        if self._last_activity_at is None:
+            return False
+        return (time.time() - self._last_activity_at) >= self._idle_shutdown_seconds
+
+    def _rotate_token(self) -> None:
+        self._token = secrets.token_urlsafe(32)
+
+    def _build_subprocess_env(self, *, port: int) -> dict[str, str]:
+        env = os.environ.copy()
+        existing_pythonpath = env.get("PYTHONPATH")
+        repo_pythonpath = str(self._repo_root)
+        env["PYTHONPATH"] = (
+            os.pathsep.join([repo_pythonpath, existing_pythonpath])
+            if existing_pythonpath
+            else repo_pythonpath
+        )
+        env.update(
+            {
+                "OMNIVOICE_SIDECAR_TOKEN": self._token,
+                "OMNIVOICE_SIDECAR_HOST": self._host,
+                "OMNIVOICE_SIDECAR_PORT": str(port),
+            }
+        )
+        return env
+
     async def shutdown_if_idle(self) -> bool:
+        async with self._lock:
+            return await self._shutdown_if_idle_locked()
+
+    async def _shutdown_if_idle_locked(self) -> bool:
         if self._idle_shutdown_seconds <= 0:
             return False
         if self._last_activity_at is None:
@@ -119,7 +176,7 @@ class OmniVoiceSidecarSupervisor:
         if self._process is None or self._process.returncode is not None:
             self._last_activity_at = None
             return False
-        await self._stop_process()
+        await self._stop_process_locked()
         self._last_activity_at = None
         return True
 
@@ -143,14 +200,7 @@ class OmniVoiceSidecarSupervisor:
         )
 
     async def _spawn_sidecar(self, port: int) -> asyncio.subprocess.Process:
-        env = os.environ.copy()
-        env.update(
-            {
-                "OMNIVOICE_SIDECAR_TOKEN": self._token,
-                "OMNIVOICE_SIDECAR_HOST": self._host,
-                "OMNIVOICE_SIDECAR_PORT": str(port),
-            }
-        )
+        env = self._build_subprocess_env(port=port)
         logger.debug("Starting OmniVoice sidecar on {}:{}", self._host, port)
         return await asyncio.create_subprocess_exec(
             self._resolve_interpreter(),
@@ -166,36 +216,48 @@ class OmniVoiceSidecarSupervisor:
 
         deadline = asyncio.get_running_loop().time() + self._healthcheck_timeout_seconds
         headers = build_sidecar_auth_headers(self._token)
+        client = await self.get_http_client(timeout=self._healthcheck_interval_seconds)
 
-        async with create_sidecar_async_client(timeout=self._healthcheck_interval_seconds) as client:
-            while asyncio.get_running_loop().time() < deadline:
-                if self._process is not None and self._process.returncode is not None:
-                    raise RuntimeError(
-                        f"OmniVoice sidecar exited during startup with code {self._process.returncode}"
-                    )
-                try:
-                    response = await client.get(
-                        f"{self._base_url.rstrip('/')}/health",
-                        headers=headers,
-                    )
-                    if response.status_code == 200:
-                        payload = response.json()
-                        if bool(payload.get("ready", True)):
-                            return
-                except httpx.HTTPError:
-                    pass
-                await asyncio.sleep(self._healthcheck_interval_seconds)
+        while asyncio.get_running_loop().time() < deadline:
+            if self._process is not None and self._process.returncode is not None:
+                raise RuntimeError(
+                    f"OmniVoice sidecar exited during startup with code {self._process.returncode}"
+                )
+            try:
+                response = await client.get(
+                    f"{self._base_url.rstrip('/')}/health",
+                    headers=headers,
+                    timeout=self._healthcheck_interval_seconds,
+                )
+                if response.status_code == 200:
+                    payload = response.json()
+                    if bool(payload.get("ready", True)):
+                        return
+            except httpx.HTTPError:
+                pass
+            await asyncio.sleep(self._healthcheck_interval_seconds)
 
         raise RuntimeError("OmniVoice sidecar did not reach /health")
 
-    async def _stop_process(self) -> None:
-        process = self._process
+    def _clear_process_state(self, process: asyncio.subprocess.Process | None = None) -> None:
+        if process is not None and self._process is not None and self._process is not process:
+            return
         self._process = None
         self._base_url = None
         self._port = None
+        self._last_activity_at = None
+
+    async def _stop_process(self) -> None:
+        async with self._lock:
+            await self._stop_process_locked()
+
+    async def _stop_process_locked(self) -> None:
+        process = self._process
         if process is None:
+            self._clear_process_state()
             return
         if process.returncode is not None:
+            self._clear_process_state(process)
             return
         with contextlib.suppress(ProcessLookupError):
             process.terminate()
@@ -206,6 +268,8 @@ class OmniVoiceSidecarSupervisor:
                 process.kill()
             with contextlib.suppress(Exception):
                 await process.wait()
+        finally:
+            self._clear_process_state(process)
 
 
 __all__ = ["OmniVoiceSidecarSupervisor", "X_TLDW_SIDECAR_TOKEN_HEADER"]

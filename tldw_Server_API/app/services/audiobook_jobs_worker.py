@@ -199,10 +199,22 @@ def _is_kokoro_request(provider: str | None, model: str | None) -> bool:
     return False
 
 
+def _canonicalize_omnivoice_model(model: str | None) -> str | None:
+    if model is None:
+        return None
+    normalized = str(model).strip()
+    collapsed = normalized.lower().replace("-", "").replace("_", "")
+    if collapsed == "omnivoice":
+        return DEFAULT_OMNIVOICE_TTS_MODEL
+    return normalized
+
+
 def _resolve_tts_model(provider: str | None, model: str | None) -> str:
-    if model is not None:
-        return str(model)
     provider_norm = str(provider).strip().lower() if provider else ""
+    if model is not None:
+        model_value = _canonicalize_omnivoice_model(model)
+        if model_value is not None:
+            return model_value
     if provider_norm == "openai":
         return "tts-1"
     if provider_norm == "kitten_tts":
@@ -238,9 +250,10 @@ def _resolve_tts_voice(provider: str | None, voice: str | None) -> str:
 
 
 def _infer_tts_provider_from_model(model: str | None) -> str | None:
-    if not model:
+    canonical = _canonicalize_omnivoice_model(model)
+    if not canonical:
         return None
-    m = str(model).strip().lower()
+    m = canonical.lower()
     if m in {"tts-1", "tts-1-hd"}:
         return "openai"
     if (

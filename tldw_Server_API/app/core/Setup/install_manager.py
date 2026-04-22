@@ -1339,6 +1339,7 @@ def _install_vibevoice(variants: list[str]) -> None:
 def _install_omnivoice() -> None:
     from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
 
+    _ensure_downloads_allowed("OmniVoice sidecar runtime")
     repo_root = Path(__file__).resolve().parents[4]
     runtime_base = repo_root / "models" / "omnivoice_sidecar"
     source_checkout = installer.resolve_source_checkout(repo_root=repo_root)

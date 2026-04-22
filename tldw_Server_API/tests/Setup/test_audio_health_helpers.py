@@ -236,6 +236,12 @@ async def test_get_tts_health_derives_omnivoice_backoff_state_from_supervisor(mo
     assert omnivoice_detail["runtime"] == "sidecar"
     assert omnivoice_detail["sidecar_state"] == "degraded"
     assert omnivoice_detail["last_error_code"] == "startup_backoff"
+    assert omnivoice_detail["status"] == "degraded"
+    assert omnivoice_detail["availability"] == "degraded"
+    assert omnivoice_detail["failed"] is True
+    assert health["providers"]["available"] == 0
+    assert health["status"] == "unhealthy"
+    assert health["capabilities_envelope"][0]["availability"] == "degraded"
 
 
 @pytest.mark.asyncio
