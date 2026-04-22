@@ -1108,6 +1108,8 @@ def _install_tts(plan: InstallPlan, status: InstallationStatus, errors: list[str
                 _install_higgs()
             elif entry.engine == 'vibevoice':
                 _install_vibevoice(entry.variants)
+            elif entry.engine == 'omnivoice':
+                _install_omnivoice()
             status.step(step_name, 'completed')
         except DownloadBlockedError as exc:
             logger.info('Skipping TTS install {}: {}', entry.engine, exc)
@@ -1332,6 +1334,33 @@ def _install_vibevoice(variants: list[str]) -> None:
     if '7B-Q8' in selected:
         # Community 8-bit quantized 7B variant (reduced VRAM usage)
         _snapshot_repo('FabioSarracino/VibeVoice-Large-Q8')
+
+
+def _install_omnivoice() -> None:
+    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
+
+    _ensure_downloads_allowed("OmniVoice sidecar runtime")
+    repo_root = Path(__file__).resolve().parents[4]
+    runtime_base = repo_root / "models" / "omnivoice_sidecar"
+    source_checkout = installer.resolve_source_checkout(repo_root=repo_root)
+    layout = installer.build_runtime_layout(runtime_base, repo_root=repo_root)
+    installer.create_runtime_layout(layout)
+    installer.clone_repository(installer.DEFAULT_REPO_URL, source_checkout)
+    installer.create_virtualenv(layout.venv_dir)
+    installer.install_sidecar_runtime(
+        interpreter_path=layout.interpreter_path,
+        repo_root=repo_root,
+        source_checkout=source_checkout,
+    )
+    missing = installer.validate_runtime_layout(layout)
+    if missing:
+        raise RuntimeError(f"OmniVoice runtime layout incomplete: {', '.join(missing)}")
+    installer.patch_tts_config(
+        config_path=repo_root / installer.DEFAULT_CONFIG_PATH,
+        layout=layout,
+        source_checkout=source_checkout,
+        repo_root=repo_root,
+    )
 
 
 def _download_huggingface_models(models: list[str]) -> None:
@@ -1594,6 +1623,7 @@ TTS_DEPENDENCIES: dict[str, list[PipRequirement]] = {
         PipRequirement(package='safetensors>=0.4.2', import_name='safetensors'),
         PipRequirement(package='einops>=0.8.0', import_name='einops'),
     ],
+    'omnivoice': [],
 }
 
 EMBEDDING_DEPENDENCIES: dict[str, list[PipRequirement]] = {

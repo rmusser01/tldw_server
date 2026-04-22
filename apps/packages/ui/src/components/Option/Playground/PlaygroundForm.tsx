@@ -1,81 +1,60 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import React from "react"
 import {
   ChatComposer,
-  useComposerVariantPreference,
+  useComposerVariantPreference
 } from "@/components/Chat/composer/ChatComposer"
 import { useComposerEnabledPreference } from "@/components/Chat/composer/hooks/useComposerEnabledPreference"
-import { useMessageOption } from "~/hooks/useMessageOption"
+import { AudioSourcePicker } from "@/components/Common/AudioSourcePicker"
+import { BetaTag } from "@/components/Common/Beta"
+// getImageBackendConfigs, normalizeImageBackendConfig, resolveImageBackendConfig moved to usePlaygroundImageGen
+import { CharacterSelect } from "@/components/Common/CharacterSelect"
+import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel"
+import { ProviderIcons } from "@/components/Common/ProviderIcon"
+import { type KnowledgeTab } from "@/components/Knowledge"
+import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandMenu"
+import { isFirefoxTarget } from "@/config/platform"
+import { getAllPrompts } from "@/db/dexie/helpers"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import {
-  Checkbox,
-  Dropdown,
-  Input,
-  InputNumber,
-  Radio,
-  Select,
-  Switch,
-  Tooltip,
-  Modal,
-  Button
-} from "antd"
-import { useWebUI } from "~/store/webui"
-import {
-  ChevronRight,
-  ImageIcon,
-  Headphones,
-  X,
-  CornerUpLeft,
-  HelpCircle,
-  ArrowRight
-} from "lucide-react"
-import { getVariable } from "@/utils/select-variable"
-import { useTranslation } from "react-i18next"
-import type {
-  DictationModePreference
-} from "@/hooks/useDictationStrategy"
-import { isFirefoxTarget } from "@/config/platform"
-import { handleChatInputKeyDown } from "@/utils/key-down"
-import { getProviderDisplayName } from "@/utils/provider-registry"
-import { useStorage } from "@plasmohq/storage/hook"
-import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
-import { useTabMentions } from "~/hooks/useTabMentions"
-import { useFocusShortcuts } from "~/hooks/keyboard"
-// isMac moved to PlaygroundSendControl
-import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
-import { useVoiceChatSettings } from "@/hooks/useVoiceChatSettings"
-import { useVoiceChatStream } from "@/hooks/useVoiceChatStream"
-import { useVoiceChatMessages } from "@/hooks/useVoiceChatMessages"
+  type CollapsedRange,
+  type ModelSortMode,
+  useActionBarVisibility,
+  useComposerTokens,
+  useDeferredComposerInput,
+  useImageBackend,
+  useMcpToolsControl,
+  useMessageCollapse,
+  useModelSelector,
+  useSlashCommands
+} from "@/hooks/playground"
+// TldwButton moved to extracted sub-components
+import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
-import { AttachedResearchContextChip } from "./AttachedResearchContextChip"
-import { MentionsDropdown } from "./MentionsDropdown"
-import { ComposerTextarea } from "./ComposerTextarea"
-import { ComposerToolbar } from "./ComposerToolbar"
-// ContextFootprintPanel moved to PlaygroundContextWindowModal
-import { CompareToggle } from "./CompareToggle"
-import { useMobileComposerViewport } from "./useMobileComposerViewport"
-import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant"
-import { isFireFoxPrivateMode } from "@/utils/is-private-mode"
-import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel"
+import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
 import { useConnectionState } from "@/hooks/useConnectionState"
-import { ConnectionPhase, deriveConnectionUxState } from "@/types/connection"
-import { Link, useNavigate } from "react-router-dom"
-import { fetchChatModels, fetchImageModels } from "@/services/tldw-server"
+import type { DictationModePreference } from "@/hooks/useDictationStrategy"
+import { useMcpTools } from "@/hooks/useMcpTools"
+import { useMobile } from "@/hooks/useMediaQuery"
+// isMac moved to PlaygroundSendControl
+import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useTldwAudioStatus } from "@/hooks/useTldwAudioStatus"
-import { useMcpTools } from "@/hooks/useMcpTools"
+import { useVoiceChatMessages } from "@/hooks/useVoiceChatMessages"
+import { useVoiceChatSettings } from "@/hooks/useVoiceChatSettings"
+import { useVoiceChatStream } from "@/hooks/useVoiceChatStream"
+// useQueuedRequests moved to usePlaygroundQueueManagement
+import type { ChatDocuments } from "@/models/ChatTypes"
+import { clearSetting, getSetting } from "@/services/settings/registry"
 import {
-  tldwClient,
+  DISCUSS_MEDIA_PROMPT_SETTING,
+  DISCUSS_WATCHLIST_PROMPT_SETTING
+} from "@/services/settings/ui-settings"
+import { fetchChatModels, fetchImageModels } from "@/services/tldw-server"
+import {
   type ResearchRunCreateRequest,
-  type ResearchRunFollowUpBackground
+  type ResearchRunFollowUpBackground,
+  tldwClient
 } from "@/services/tldw/TldwApiClient"
-import {
-  normalizeVoiceConversationRuntimeError,
-  resolveVoiceConversationAvailability,
-  resolveVoiceConversationTtsConfig,
-  shouldProbeVoiceConversationAudioHealth
-} from "@/services/tldw/voice-conversation"
 // ChatRequestDebugSnapshot moved to usePlaygroundRawPreview
 import {
   buildDiscussMediaHint,
@@ -84,44 +63,29 @@ import {
   parseMediaIdAsNumber
 } from "@/services/tldw/media-chat-handoff"
 import {
-  normalizeWatchlistChatHandoffPayload,
-  buildWatchlistChatHint
-} from "@/services/tldw/watchlist-chat-handoff"
-// getImageBackendConfigs, normalizeImageBackendConfig, resolveImageBackendConfig moved to usePlaygroundImageGen
-import { CharacterSelect } from "@/components/Common/CharacterSelect"
-import { ProviderIcons } from "@/components/Common/ProviderIcon"
-import type { Character } from "@/types/character"
-import { type KnowledgeTab } from "@/components/Knowledge"
-import { BetaTag } from "@/components/Common/Beta"
-import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandMenu"
-import { useUiModeStore } from "@/store/ui-mode"
+  normalizeVoiceConversationRuntimeError,
+  resolveVoiceConversationAvailability,
+  resolveVoiceConversationTtsConfig,
+  shouldProbeVoiceConversationAudioHealth
+} from "@/services/tldw/voice-conversation"
 import {
-  useStoreChatModelSettings,
-  type ChatModelSettings
-} from "@/store/model"
-import { getAllPrompts } from "@/db/dexie/helpers"
-import { getPresetByKey } from "./ParameterPresets"
-import { TokenProgressBar } from "./TokenProgressBar"
-import { AttachmentsSummary } from "./AttachmentsSummary"
-import { VoiceChatIndicator } from "./VoiceChatIndicator"
-import { AudioSourcePicker } from "@/components/Common/AudioSourcePicker"
-import { PlaygroundToolsPopover } from "./PlaygroundToolsPopover"
-import { PlaygroundModeLauncher } from "./PlaygroundModeLauncher"
-import { PlaygroundMcpControl } from "./PlaygroundMcpControl"
-import { PlaygroundSendControl, PlaygroundAttachmentButton } from "./PlaygroundSendControl"
-import { PlaygroundComposerNotices } from "./PlaygroundComposerNotices"
-import { PlaygroundKnowledgeSection } from "./PlaygroundKnowledgeSection"
-import { useMobile } from "@/hooks/useMediaQuery"
-import { clearSetting, getSetting } from "@/services/settings/registry"
-import { DISCUSS_MEDIA_PROMPT_SETTING, DISCUSS_WATCHLIST_PROMPT_SETTING } from "@/services/settings/ui-settings"
-// TldwButton moved to extracted sub-components
-import { useAntdNotification } from "@/hooks/useAntdNotification"
-import { useStoreMessageOption } from "@/store/option"
+  buildWatchlistChatHint,
+  normalizeWatchlistChatHandoffPayload
+} from "@/services/tldw/watchlist-chat-handoff"
 import {
   shouldEnableOptionalResource,
   useChatSurfaceCoordinatorStore
 } from "@/store/chat-surface-coordinator"
-import { trackOnboardingChatSubmitSuccess } from "@/utils/onboarding-ingestion-telemetry"
+import {
+  type ChatModelSettings,
+  useStoreChatModelSettings
+} from "@/store/model"
+import { useStoreMessageOption } from "@/store/option"
+import { useUiModeStore } from "@/store/ui-mode"
+import type { Character } from "@/types/character"
+import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
+import { ConnectionPhase, deriveConnectionUxState } from "@/types/connection"
+import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant"
 // resolveApiProviderForModel moved to usePlaygroundRawPreview and usePlaygroundImageGen
 import {
   DEFAULT_CHARACTER_STORAGE_KEY,
@@ -131,72 +95,111 @@ import {
   shouldApplyDefaultCharacter,
   shouldResetDefaultCharacterBootstrap
 } from "@/utils/default-character-preference"
-import { resolveStartupSelectedModel } from "@/utils/model-startup-selection"
 import {
-  useModelSelector,
-  useComposerTokens,
-  useImageBackend,
-  useActionBarVisibility,
-  useSlashCommands,
-  useMessageCollapse,
-  useDeferredComposerInput,
-  useMcpToolsControl,
-  type CollapsedRange,
-  type ModelSortMode
-} from "@/hooks/playground"
-// useQueuedRequests moved to usePlaygroundQueueManagement
-import type { ChatDocuments } from "@/models/ChatTypes"
-import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
-import {
-  buildConversationSummaryCheckpointPrompt
-} from "./conversation-summary-checkpoint"
-// SessionInsightsPanel moved to PlaygroundContextWindowModal
-import {
-  type ModelRecommendationAction
-} from "./model-recommendations"
-import {
-  describeStartupTemplatePrompt,
-  resolveStartupTemplatePrompt,
-  type StartupTemplateBundle
-} from "./startup-template-bundles"
-import {
+  type ImageGenerationEventSyncMode,
+  type ImageGenerationEventSyncPolicy,
+  type ImageGenerationRefineMetadata,
+  type ImageGenerationRequestSnapshot,
   PLAYGROUND_IMAGE_EVENT_SYNC_DEFAULT_STORAGE_KEY,
-  resolveImageGenerationEventSyncMode,
   normalizeImageGenerationEventSyncMode,
   normalizeImageGenerationEventSyncPolicy,
-  type ImageGenerationEventSyncPolicy,
-  type ImageGenerationEventSyncMode,
-  type ImageGenerationRefineMetadata,
-  type ImageGenerationRequestSnapshot
+  resolveImageGenerationEventSyncMode
 } from "@/utils/image-generation-chat"
+import { isFireFoxPrivateMode } from "@/utils/is-private-mode"
+import { handleChatInputKeyDown } from "@/utils/key-down"
+import { resolveStartupSelectedModel } from "@/utils/model-startup-selection"
+import { trackOnboardingChatSubmitSuccess } from "@/utils/onboarding-ingestion-telemetry"
+import { getProviderDisplayName } from "@/utils/provider-registry"
+import { getVariable } from "@/utils/select-variable"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  Button,
+  Checkbox,
+  Dropdown,
+  Input,
+  InputNumber,
+  Modal,
+  Radio,
+  Select,
+  Switch,
+  Tooltip
+} from "antd"
+import {
+  ArrowRight,
+  ChevronRight,
+  CornerUpLeft,
+  Headphones,
+  HelpCircle,
+  ImageIcon,
+  X
+} from "lucide-react"
+import React from "react"
+import { useTranslation } from "react-i18next"
+import { Link, useNavigate } from "react-router-dom"
+
+import { useStorage } from "@plasmohq/storage/hook"
+
+import { useFocusShortcuts } from "~/hooks/keyboard"
+import { useMessageOption } from "~/hooks/useMessageOption"
+import { useTabMentions } from "~/hooks/useTabMentions"
+import { useWebUI } from "~/store/webui"
+
+import { AttachedResearchContextChip } from "./AttachedResearchContextChip"
+import { AttachmentsSummary } from "./AttachmentsSummary"
+// ContextFootprintPanel moved to PlaygroundContextWindowModal
+import { CompareToggle } from "./CompareToggle"
+import { ComposerTextarea } from "./ComposerTextarea"
+import { ComposerToolbar } from "./ComposerToolbar"
+import { MentionsDropdown } from "./MentionsDropdown"
+import { getPresetByKey } from "./ParameterPresets"
+import { PlaygroundComposerNotices } from "./PlaygroundComposerNotices"
+import { PlaygroundKnowledgeSection } from "./PlaygroundKnowledgeSection"
+import { PlaygroundMcpControl } from "./PlaygroundMcpControl"
+import { PlaygroundModeLauncher } from "./PlaygroundModeLauncher"
+import {
+  PlaygroundAttachmentButton,
+  PlaygroundSendControl
+} from "./PlaygroundSendControl"
+import { PlaygroundToolsPopover } from "./PlaygroundToolsPopover"
+import { TokenProgressBar } from "./TokenProgressBar"
+import { VoiceChatIndicator } from "./VoiceChatIndicator"
+import { buildConversationSummaryCheckpointPrompt } from "./conversation-summary-checkpoint"
 // buildImagePromptRefineMessages, extractImagePromptRefineCandidate moved to usePlaygroundImageGen
 // QueuedRequest moved to usePlaygroundQueueManagement
 // WeightedImagePromptContextEntry moved to usePlaygroundImageGen
 // CompareResponseDiff moved to usePlaygroundImageGen
 import {
-  useModelComparison,
-  useContextWindow,
-  usePlaygroundVoiceChat,
-  usePromptTemplates,
-  usePlaygroundAttachments,
+  estimateTokensFromText,
+  toText,
   useComposerInput,
+  useContextWindow,
+  useModelComparison,
+  usePlaygroundAttachments,
+  usePlaygroundContextItems,
   usePlaygroundImageGen,
   usePlaygroundPersistence,
-  usePlaygroundRawPreview,
   usePlaygroundQueueManagement,
+  usePlaygroundRawPreview,
   usePlaygroundSettings,
-  usePlaygroundContextItems,
   usePlaygroundSubmit,
-  toText,
-  estimateTokensFromText
+  usePlaygroundVoiceChat,
+  usePromptTemplates
 } from "./hooks"
+// SessionInsightsPanel moved to PlaygroundContextWindowModal
+import { type ModelRecommendationAction } from "./model-recommendations"
 import {
+  type AttachedResearchContext,
+  type ResearchFollowUpTarget,
   applyAttachedResearchContextEdits,
   resetAttachedResearchContext,
-  toChatResearchContext,
-  type AttachedResearchContext,
-  type ResearchFollowUpTarget
+  toChatResearchContext
 } from "./research-chat-context"
+import {
+  type StartupTemplateBundle,
+  describeStartupTemplatePrompt,
+  resolveStartupTemplatePrompt
+} from "./startup-template-bundles"
+import { useMobileComposerViewport } from "./useMobileComposerViewport"
 
 type Props = {
   droppedFiles: File[]
@@ -253,7 +256,8 @@ const buildFollowUpResearchBackground = (
       ? context.outline
           .filter(
             (section) =>
-              typeof section?.title === "string" && section.title.trim().length > 0
+              typeof section?.title === "string" &&
+              section.title.trim().length > 0
           )
           .map((section) => ({ title: section.title.trim() }))
       : [],
@@ -268,7 +272,8 @@ const buildFollowUpResearchBackground = (
               : null
           )
           .filter(
-            (claim): claim is { claim_id: string; text: string } => claim !== null
+            (claim): claim is { claim_id: string; text: string } =>
+              claim !== null
           )
       : [],
     unresolved_questions: Array.isArray(context.unresolved_questions)
@@ -328,8 +333,8 @@ const LazyActorPopout = React.lazy(() =>
   }))
 )
 
-const LazyDocumentGeneratorDrawer = React.lazy(() =>
-  import("@/components/Common/Playground/DocumentGeneratorDrawer")
+const LazyDocumentGeneratorDrawer = React.lazy(
+  () => import("@/components/Common/Playground/DocumentGeneratorDrawer")
 )
 
 const LazyVoiceModeSelector = React.lazy(() =>
@@ -483,7 +488,9 @@ export const PlaygroundForm = ({
     }
   } = useMessageOption()
   const setRagMediaIds = useStoreMessageOption((s) => s.setRagMediaIds)
-  const setRagPinnedResults = useStoreMessageOption((s) => s.setRagPinnedResults)
+  const setRagPinnedResults = useStoreMessageOption(
+    (s) => s.setRagPinnedResults
+  )
 
   // Experimental Primer composer wire-up — opt in via ?nextgenComposer=1
   // query param OR the Settings "Enable new composer" toggle. When ON,
@@ -516,7 +523,11 @@ export const PlaygroundForm = ({
       "off"
     )
   const imageEventSyncChatMode = React.useMemo(
-    () => normalizeImageGenerationEventSyncMode(chatSettings?.imageEventSyncMode, "off"),
+    () =>
+      normalizeImageGenerationEventSyncMode(
+        chatSettings?.imageEventSyncMode,
+        "off"
+      ),
     [chatSettings?.imageEventSyncMode]
   )
 
@@ -581,8 +592,10 @@ export const PlaygroundForm = ({
   } = useVoiceChatSettings()
   const voiceChatMessages = useVoiceChatMessages()
   const { devices: audioInputDevices } = useAudioSourceCatalog()
-  const { config: canonicalConnectionConfig, loading: canonicalConnectionLoading } =
-    useCanonicalConnectionConfig()
+  const {
+    config: canonicalConnectionConfig,
+    loading: canonicalConnectionLoading
+  } = useCanonicalConnectionConfig()
   const [ttsProvider] = useStorage("ttsProvider", "browser")
   const [tldwTtsModel] = useStorage("tldwTtsModel", "kokoro")
   const [tldwTtsVoice] = useStorage("tldwTtsVoice", "af_heart")
@@ -665,12 +678,10 @@ export const PlaygroundForm = ({
     !capsLoading &&
     Boolean(
       capabilities?.hasVoiceChat ??
-        (capabilities?.hasStt && capabilities?.hasTts)
+      (capabilities?.hasStt && capabilities?.hasTts)
     )
   const hasServerStt =
-    isConnectionReady &&
-    !capsLoading &&
-    Boolean(capabilities?.hasStt)
+    isConnectionReady && !capsLoading && Boolean(capabilities?.hasStt)
   const shouldProbeAudioHealth = React.useMemo(
     () =>
       shouldProbeVoiceConversationAudioHealth({
@@ -679,12 +690,7 @@ export const PlaygroundForm = ({
         hasServerStt,
         optionalAudioHealthEnabled: audioHealthEnabled
       }),
-    [
-      audioHealthEnabled,
-      hasServerStt,
-      hasServerVoiceChat,
-      isConnectionReady
-    ]
+    [audioHealthEnabled, hasServerStt, hasServerVoiceChat, isConnectionReady]
   )
   const {
     healthState: audioHealthState,
@@ -734,9 +740,9 @@ export const PlaygroundForm = ({
         hasVoiceConversationTransport,
         authReady: Boolean(
           canonicalConnectionConfig?.serverUrl &&
-            (canonicalConnectionConfig?.authMode === "multi-user"
-              ? canonicalConnectionConfig.accessToken
-              : canonicalConnectionConfig.apiKey)
+          (canonicalConnectionConfig?.authMode === "multi-user"
+            ? canonicalConnectionConfig.accessToken
+            : canonicalConnectionConfig.apiKey)
         ),
         sttHealthState,
         ttsHealthState: audioHealthState,
@@ -795,11 +801,13 @@ export const PlaygroundForm = ({
       })
     }
   })
-  const [hasShownConnectBanner, setHasShownConnectBanner] = React.useState(false)
+  const [hasShownConnectBanner, setHasShownConnectBanner] =
+    React.useState(false)
   const [showConnectBanner, setShowConnectBanner] = React.useState(false)
   const [documentGeneratorOpen, setDocumentGeneratorOpen] =
     React.useState(false)
-  const [voiceModeSelectorOpen, setVoiceModeSelectorOpen] = React.useState(false)
+  const [voiceModeSelectorOpen, setVoiceModeSelectorOpen] =
+    React.useState(false)
   const [modeLauncherOpen, setModeLauncherOpen] = React.useState(false)
   const [modeAnnouncement, setModeAnnouncement] = React.useState<string | null>(
     null
@@ -852,16 +860,18 @@ export const PlaygroundForm = ({
     },
     null
   )
-  const { data: defaultCharacterPreference } = useQuery<DefaultCharacterPreferenceQueryResult>({
-    queryKey: ["tldw:defaultCharacterPreference:playground"],
-    queryFn: async () => {
-      await tldwClient.initialize()
-      const defaultCharacterId = await tldwClient.getDefaultCharacterPreference()
-      return { defaultCharacterId }
-    },
-    staleTime: 60 * 1000,
-    throwOnError: false
-  })
+  const { data: defaultCharacterPreference } =
+    useQuery<DefaultCharacterPreferenceQueryResult>({
+      queryKey: ["tldw:defaultCharacterPreference:playground"],
+      queryFn: async () => {
+        await tldwClient.initialize()
+        const defaultCharacterId =
+          await tldwClient.getDefaultCharacterPreference()
+        return { defaultCharacterId }
+      },
+      staleTime: 60 * 1000,
+      throwOnError: false
+    })
   const [showMoodConfidence, setShowMoodConfidence] = useStorage(
     "chatShowMoodConfidence",
     Boolean(selectedCharacter?.id) && !compareMode
@@ -922,7 +932,8 @@ export const PlaygroundForm = ({
     () => resolveCharacterSelectionId(defaultCharacter),
     [defaultCharacter]
   )
-  const serverDefaultCharacterId = defaultCharacterPreference?.defaultCharacterId
+  const serverDefaultCharacterId =
+    defaultCharacterPreference?.defaultCharacterId
   const effectiveDefaultCharacter = React.useMemo<Character | null>(() => {
     if (typeof serverDefaultCharacterId === "undefined") {
       return defaultCharacter
@@ -961,11 +972,7 @@ export const PlaygroundForm = ({
 
     if (localDefaultCharacterId === serverDefaultCharacterId) return
     void setDefaultCharacter({ id: serverDefaultCharacterId } as Character)
-  }, [
-    localDefaultCharacterId,
-    serverDefaultCharacterId,
-    setDefaultCharacter
-  ])
+  }, [localDefaultCharacterId, serverDefaultCharacterId, setDefaultCharacter])
 
   React.useEffect(() => {
     defaultCharacterBootstrapAppliedRef.current = false
@@ -1205,9 +1212,7 @@ export const PlaygroundForm = ({
     for (const model of models) {
       const pLabel = getProviderDisplayName(model.provider || "")
       const modelLabel = model.nickname || model.model || model.name
-      const label = pLabel
-        ? `${pLabel} - ${modelLabel}`
-        : modelLabel
+      const label = pLabel ? `${pLabel} - ${modelLabel}` : modelLabel
       options.push({
         value: model.model || model.name,
         label
@@ -1271,13 +1276,20 @@ export const PlaygroundForm = ({
         )
       } else {
         const presetLabel = currentPreset
-          ? t(`playground:presets.${currentPreset.key}.label`, currentPreset.label)
+          ? t(
+              `playground:presets.${currentPreset.key}.label`,
+              currentPreset.label
+            )
           : currentPresetKey
         setModeAnnouncement(
           toText(
-            t("playground:composer.presetChanged", "{{preset}} preset applied.", {
-              preset: presetLabel
-            } as any)
+            t(
+              "playground:composer.presetChanged",
+              "{{preset}} preset applied.",
+              {
+                preset: presetLabel
+              } as any
+            )
           )
         )
       }
@@ -1294,7 +1306,10 @@ export const PlaygroundForm = ({
       setModeAnnouncement(
         isJsonModeActive
           ? t("playground:composer.jsonModeEnabledNotice", "JSON mode enabled.")
-          : t("playground:composer.jsonModeDisabledNotice", "JSON mode disabled.")
+          : t(
+              "playground:composer.jsonModeDisabledNotice",
+              "JSON mode disabled."
+            )
       )
     }
     previousJsonModeRef.current = isJsonModeActive
@@ -1334,8 +1349,7 @@ export const PlaygroundForm = ({
     return t("playground:composer.providerStatusHealthy", "Healthy")
   }, [connectionUxState, isConnectionReady, t])
   const isSessionDegraded = React.useMemo(
-    () =>
-      !isConnectionReady || connectionUxState === "connected_degraded",
+    () => !isConnectionReady || connectionUxState === "connected_degraded",
     [connectionUxState, isConnectionReady]
   )
   const currentContextSnapshot = React.useMemo(
@@ -1369,30 +1383,52 @@ export const PlaygroundForm = ({
       deltas.push(t("playground:composer.delta.model", "Model changed"))
     }
     if (
-      lastSubmittedContext.compareEnabled !== currentContextSnapshot.compareEnabled ||
+      lastSubmittedContext.compareEnabled !==
+        currentContextSnapshot.compareEnabled ||
       lastSubmittedContext.compareCount !== currentContextSnapshot.compareCount
     ) {
-      deltas.push(t("playground:composer.delta.compare", "Compare settings changed"))
+      deltas.push(
+        t("playground:composer.delta.compare", "Compare settings changed")
+      )
     }
     if (
-      lastSubmittedContext.characterName !== currentContextSnapshot.characterName
+      lastSubmittedContext.characterName !==
+      currentContextSnapshot.characterName
     ) {
       deltas.push(t("playground:composer.delta.character", "Character changed"))
     }
-    if (lastSubmittedContext.promptSummary !== currentContextSnapshot.promptSummary) {
-      deltas.push(t("playground:composer.delta.prompt", "Prompt settings changed"))
+    if (
+      lastSubmittedContext.promptSummary !==
+      currentContextSnapshot.promptSummary
+    ) {
+      deltas.push(
+        t("playground:composer.delta.prompt", "Prompt settings changed")
+      )
     }
     if (lastSubmittedContext.jsonMode !== currentContextSnapshot.jsonMode) {
       deltas.push(t("playground:composer.delta.json", "JSON mode changed"))
     }
-    if (lastSubmittedContext.temporaryChat !== currentContextSnapshot.temporaryChat) {
+    if (
+      lastSubmittedContext.temporaryChat !==
+      currentContextSnapshot.temporaryChat
+    ) {
       deltas.push(t("playground:composer.delta.temporary", "Save mode changed"))
     }
     if (lastSubmittedContext.webSearch !== currentContextSnapshot.webSearch) {
-      deltas.push(t("playground:composer.delta.webSearch", "Web search changed"))
+      deltas.push(
+        t("playground:composer.delta.webSearch", "Web search changed")
+      )
     }
-    if (lastSubmittedContext.contextToolsOpen !== currentContextSnapshot.contextToolsOpen) {
-      deltas.push(t("playground:composer.delta.knowledge", "Knowledge panel state changed"))
+    if (
+      lastSubmittedContext.contextToolsOpen !==
+      currentContextSnapshot.contextToolsOpen
+    ) {
+      deltas.push(
+        t(
+          "playground:composer.delta.knowledge",
+          "Knowledge panel state changed"
+        )
+      )
     }
     return deltas
   }, [currentContextSnapshot, lastSubmittedContext, t])
@@ -1514,9 +1550,7 @@ export const PlaygroundForm = ({
     apiModelLabel,
     isSending
   })
-  const tokenUsageDisplay = isProMode
-    ? tokenUsageLabel
-    : tokenUsageCompactLabel
+  const tokenUsageDisplay = isProMode ? tokenUsageLabel : tokenUsageCompactLabel
 
   const contextWindow = useContextWindow({
     draftTokenCount,
@@ -1627,7 +1661,10 @@ export const PlaygroundForm = ({
           "Open insights"
         )
       }
-      return t("playground:composer.recommendationReviewModels", "Review models")
+      return t(
+        "playground:composer.recommendationReviewModels",
+        "Review models"
+      )
     },
     [t]
   )
@@ -1666,9 +1703,12 @@ export const PlaygroundForm = ({
     largestContextContributor
   ])
   const insertSummaryCheckpointPrompt = React.useCallback(() => {
-    const checkpointPrompt = buildConversationSummaryCheckpointPrompt(messages, {
-      maxRecentMessages: 10
-    })
+    const checkpointPrompt = buildConversationSummaryCheckpointPrompt(
+      messages,
+      {
+        maxRecentMessages: 10
+      }
+    )
     setMessageValue(checkpointPrompt, {
       collapseLarge: true,
       forceCollapse: true
@@ -1705,7 +1745,10 @@ export const PlaygroundForm = ({
           <div className="p-2 border-b border-border flex items-center gap-2">
             <Input
               size="small"
-              placeholder={t("playground:composer.modelSearchPlaceholder", "Search models")}
+              placeholder={t(
+                "playground:composer.modelSearchPlaceholder",
+                "Search models"
+              )}
               value={modelSearchQuery}
               allowClear
               className="flex-1"
@@ -1717,10 +1760,19 @@ export const PlaygroundForm = ({
               value={modelSortMode}
               onChange={(value) => setModelSortMode(value as ModelSortMode)}
               options={[
-                { value: "favorites", label: t("playground:composer.sort.favorites", "Favorites") },
+                {
+                  value: "favorites",
+                  label: t("playground:composer.sort.favorites", "Favorites")
+                },
                 { value: "az", label: t("playground:composer.sort.az", "A-Z") },
-                { value: "provider", label: t("playground:composer.sort.provider", "Provider") },
-                { value: "localFirst", label: t("playground:composer.sort.localFirst", "Local-first") }
+                {
+                  value: "provider",
+                  label: t("playground:composer.sort.provider", "Provider")
+                },
+                {
+                  value: "localFirst",
+                  label: t("playground:composer.sort.localFirst", "Local-first")
+                }
               ]}
               className="min-w-[120px]"
               onKeyDown={(event) => event.stopPropagation()}
@@ -1733,19 +1785,31 @@ export const PlaygroundForm = ({
             <Link
               to="/docs/models"
               className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors"
-              onClick={() => setModelDropdownOpen(false)}
-            >
+              onClick={() => setModelDropdownOpen(false)}>
               <HelpCircle className="h-3.5 w-3.5" />
-              <span>{t("playground:composer.helpMeChoose", "Help me choose a model")}</span>
+              <span>
+                {t(
+                  "playground:composer.helpMeChoose",
+                  "Help me choose a model"
+                )}
+              </span>
               <ArrowRight className="h-3 w-3" />
             </Link>
           </div>
         </div>
       )}
       trigger={["click"]}
-      placement="topLeft"
-    >
-      <Tooltip title={modelSelectorWarning ? t("playground:composer.selectModelTooltip", "Click to select a model") : apiModelLabel} placement="top">
+      placement="topLeft">
+      <Tooltip
+        title={
+          modelSelectorWarning
+            ? t(
+                "playground:composer.selectModelTooltip",
+                "Click to select a model"
+              )
+            : apiModelLabel
+        }
+        placement="top">
         <button
           type="button"
           title={apiModelLabel}
@@ -1757,26 +1821,24 @@ export const PlaygroundForm = ({
             modelSelectorWarning
               ? "border-warn/50 bg-warn/10 text-warn hover:bg-warn/20"
               : "border-border bg-surface hover:bg-surface-hover"
-          }`}
-        >
+          }`}>
           <ProviderIcons
             provider={resolvedProviderKey}
             className={`h-3 w-3 ${modelSelectorWarning ? "text-warn" : "text-text-subtle"}`}
           />
-          <span className="truncate max-w-[120px]">
-            {apiModelLabel}
-          </span>
+          <span className="truncate max-w-[120px]">{apiModelLabel}</span>
           <span
             className={`rounded-full px-1.5 py-0.5 text-[9px] ${
               !isConnectionReady || connectionUxState === "connected_degraded"
                 ? "bg-warn/10 text-warn"
                 : "bg-success/10 text-success"
             }`}
-            title={t(
-              "playground:composer.providerStatusTooltip",
-              "Provider status"
-            ) as string}
-          >
+            title={
+              t(
+                "playground:composer.providerStatusTooltip",
+                "Provider status"
+              ) as string
+            }>
             {connectionStatusLabel}
           </span>
         </button>
@@ -1815,8 +1877,7 @@ export const PlaygroundForm = ({
         activeKey: imageBackendActiveKey
       }}
       trigger={["hover", "click"]}
-      placement="topRight"
-    >
+      placement="topRight">
       <button
         type="button"
         title={t(
@@ -1824,8 +1885,7 @@ export const PlaygroundForm = ({
           "Default image provider for /generate-image."
         )}
         aria-label={imageBackendBadgeLabel}
-        className="flex w-full items-center justify-between rounded-md px-2 py-1 text-sm text-text transition hover:bg-surface2"
-      >
+        className="flex w-full items-center justify-between rounded-md px-2 py-1 text-sm text-text transition hover:bg-surface2">
         <span className="flex min-w-0 items-center gap-2">
           <ImageIcon className="h-4 w-4 text-text-subtle" />
           <span className="truncate">
@@ -1847,12 +1907,12 @@ export const PlaygroundForm = ({
   // Allow other components (e.g., connection card) to request focus
   React.useEffect(() => {
     const handler = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === "visible") {
         textAreaFocus()
       }
     }
-    window.addEventListener('tldw:focus-composer', handler)
-    return () => window.removeEventListener('tldw:focus-composer', handler)
+    window.addEventListener("tldw:focus-composer", handler)
+    return () => window.removeEventListener("tldw:focus-composer", handler)
   }, [textAreaFocus])
 
   // Allow other components (e.g., empty state) to set the composer message
@@ -1862,8 +1922,15 @@ export const PlaygroundForm = ({
         form.setFieldValue("message", event.detail.message)
       }
     }
-    window.addEventListener('tldw:set-composer-message', handler as EventListener)
-    return () => window.removeEventListener('tldw:set-composer-message', handler as EventListener)
+    window.addEventListener(
+      "tldw:set-composer-message",
+      handler as EventListener
+    )
+    return () =>
+      window.removeEventListener(
+        "tldw:set-composer-message",
+        handler as EventListener
+      )
   }, [form])
 
   React.useEffect(() => {
@@ -1875,7 +1942,10 @@ export const PlaygroundForm = ({
     }
 
     window.addEventListener("tldw:toggle-compare-mode", handleToggleCompareMode)
-    window.addEventListener("tldw:toggle-mode-launcher", handleToggleModeLauncher)
+    window.addEventListener(
+      "tldw:toggle-mode-launcher",
+      handleToggleModeLauncher
+    )
     return () => {
       window.removeEventListener(
         "tldw:toggle-compare-mode",
@@ -1949,10 +2019,7 @@ export const PlaygroundForm = ({
   }, [applyDiscussMediaPayload])
 
   const applyDiscussWatchlistPayload = React.useCallback(
-    (
-      rawPayload: unknown,
-      options?: { clearAfterUse?: boolean }
-    ) => {
+    (rawPayload: unknown, options?: { clearAfterUse?: boolean }) => {
       const payload = normalizeWatchlistChatHandoffPayload(rawPayload)
       if (!payload) {
         if (options?.clearAfterUse) {
@@ -2060,10 +2127,7 @@ export const PlaygroundForm = ({
       const pastedText = e.clipboardData.getData("text/plain")
       if (!pastedText) return
 
-      if (
-        pasteLargeTextAsFile &&
-        pastedText.length > PASTED_TEXT_CHAR_LIMIT
-      ) {
+      if (pasteLargeTextAsFile && pastedText.length > PASTED_TEXT_CHAR_LIMIT) {
         e.preventDefault()
         const blob = new Blob([pastedText], { type: "text/plain" })
         const file = new File([blob], `pasted-text-${Date.now()}.txt`, {
@@ -2119,10 +2183,10 @@ export const PlaygroundForm = ({
         }
         const caretPrefer =
           rawStart > meta.labelStart && rawStart < meta.labelEnd
-            ? (pendingCaretRef.current !== null &&
+            ? pendingCaretRef.current !== null &&
               pendingCaretRef.current <= meta.rangeStart
-                ? "before"
-                : "after")
+              ? "before"
+              : "after"
             : undefined
         let caret = getMessageCaretFromDisplay(rawStart, meta, {
           prefer: caretPrefer
@@ -2136,7 +2200,13 @@ export const PlaygroundForm = ({
             : caret >= meta.rangeEnd
               ? caret
               : meta.rangeEnd
-        replaceCollapsedRange(currentValue, meta, insertAt, insertAt, pastedText)
+        replaceCollapsedRange(
+          currentValue,
+          meta,
+          insertAt,
+          insertAt,
+          pastedText
+        )
         return
       }
 
@@ -2189,7 +2259,9 @@ export const PlaygroundForm = ({
     }
   }, [hasShownConnectBanner, isConnectionReady])
 
-  const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleTextareaKeyDown = (
+    e: React.KeyboardEvent<HTMLTextAreaElement>
+  ) => {
     if (handleCollapsedKeyDown(e)) return
     handleKeyDown(e)
   }
@@ -2208,7 +2280,12 @@ export const PlaygroundForm = ({
       }
     }
     syncCollapsedCaret()
-  }, [handleDisconnectedFocus, isMessageCollapsed, syncCollapsedCaret, textareaRef])
+  }, [
+    handleDisconnectedFocus,
+    isMessageCollapsed,
+    syncCollapsedCaret,
+    textareaRef
+  ])
 
   const handleMentionSelect = React.useCallback(
     (tab: any) =>
@@ -2400,6 +2477,8 @@ export const PlaygroundForm = ({
     !temporaryChat &&
     Boolean(serverChatId) &&
     followUpResearchDraftQuery.length > 0
+  const showFollowUpResearchButton =
+    Boolean(attachedResearchContext) && canLaunchFollowUpResearch
 
   const openFollowUpResearchModal = React.useCallback(() => {
     if (!canLaunchFollowUpResearch) return
@@ -2710,7 +2789,10 @@ export const PlaygroundForm = ({
       const tab = detail?.tab === "context" ? "context" : "search"
       openKnowledgePanel(tab)
       setModeAnnouncement(
-        t("playground:starter.noticeKnowledge", "Opened Search & Context panel.")
+        t(
+          "playground:starter.noticeKnowledge",
+          "Opened Search & Context panel."
+        )
       )
     }
     window.addEventListener(
@@ -2730,11 +2812,16 @@ export const PlaygroundForm = ({
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ mode?: string; prompt?: string }>)
         .detail
-      const mode = String(detail?.mode || "").trim().toLowerCase()
+      const mode = String(detail?.mode || "")
+        .trim()
+        .toLowerCase()
       if (mode === "compare") {
         if (!compareFeatureEnabled) {
           notificationApi.warning({
-            message: t("playground:starter.compareUnavailable", "Compare mode unavailable")
+            message: t(
+              "playground:starter.compareUnavailable",
+              "Compare mode unavailable"
+            )
           })
           return
         }
@@ -2780,10 +2867,7 @@ export const PlaygroundForm = ({
         form.setFieldValue("message", String(detail.prompt))
       }
       setModeAnnouncement(
-        t(
-          "playground:starter.noticeGeneral",
-          "General chat starter selected."
-        )
+        t("playground:starter.noticeGeneral", "General chat starter selected.")
       )
       textAreaFocus()
     }
@@ -2865,8 +2949,7 @@ export const PlaygroundForm = ({
           size="small"
           optionType="button"
           value={voiceChatTtsMode}
-          onChange={(e) => setVoiceChatTtsMode(e.target.value)}
-        >
+          onChange={(e) => setVoiceChatTtsMode(e.target.value)}>
           <Radio.Button value="stream">
             {t("playground:voiceChat.ttsModeStream", "Stream")}
           </Radio.Button>
@@ -2901,7 +2984,10 @@ export const PlaygroundForm = ({
       </div>
       <div className="flex items-center justify-between gap-2">
         <span className="text-[11px] text-text-muted">
-          {t("playground:voiceChat.autoResume", "Continue listening after response")}
+          {t(
+            "playground:voiceChat.autoResume",
+            "Continue listening after response"
+          )}
         </span>
         <Switch
           size="small"
@@ -2929,7 +3015,8 @@ export const PlaygroundForm = ({
   }, [contextToolsOpen, reloadTabs])
 
   // State for collapsible advanced section in tools popover
-  const [advancedToolsExpanded, setAdvancedToolsExpanded] = React.useState(isProMode)
+  const [advancedToolsExpanded, setAdvancedToolsExpanded] =
+    React.useState(isProMode)
 
   const imageGen = usePlaygroundImageGen({
     imageBackendDefaultTrimmed: imageBackendDefaultTrimmed,
@@ -2951,22 +3038,36 @@ export const PlaygroundForm = ({
   })
   const {
     imageGenerateModalOpen,
-    imageGenerateBackend, setImageGenerateBackend,
-    imageGeneratePrompt, setImageGeneratePrompt,
-    imageGeneratePromptMode, setImageGeneratePromptMode,
-    imageGenerateFormat, setImageGenerateFormat,
-    imageGenerateNegativePrompt, setImageGenerateNegativePrompt,
-    imageGenerateWidth, setImageGenerateWidth,
-    imageGenerateHeight, setImageGenerateHeight,
-    imageGenerateSteps, setImageGenerateSteps,
-    imageGenerateCfgScale, setImageGenerateCfgScale,
-    imageGenerateSeed, setImageGenerateSeed,
-    imageGenerateSampler, setImageGenerateSampler,
-    imageGenerateModel, setImageGenerateModel,
-    imageGenerateExtraParams, setImageGenerateExtraParams,
+    imageGenerateBackend,
+    setImageGenerateBackend,
+    imageGeneratePrompt,
+    setImageGeneratePrompt,
+    imageGeneratePromptMode,
+    setImageGeneratePromptMode,
+    imageGenerateFormat,
+    setImageGenerateFormat,
+    imageGenerateNegativePrompt,
+    setImageGenerateNegativePrompt,
+    imageGenerateWidth,
+    setImageGenerateWidth,
+    imageGenerateHeight,
+    setImageGenerateHeight,
+    imageGenerateSteps,
+    setImageGenerateSteps,
+    imageGenerateCfgScale,
+    setImageGenerateCfgScale,
+    imageGenerateSeed,
+    setImageGenerateSeed,
+    imageGenerateSampler,
+    setImageGenerateSampler,
+    imageGenerateModel,
+    setImageGenerateModel,
+    imageGenerateExtraParams,
+    setImageGenerateExtraParams,
     imageGenerateReferenceFileId,
     setImageGenerateReferenceFileId,
-    imageGenerateSyncPolicy, setImageGenerateSyncPolicy,
+    imageGenerateSyncPolicy,
+    setImageGenerateSyncPolicy,
     referenceImageCandidates,
     referenceImageCandidatesLoading,
     imagePromptContextBreakdown,
@@ -3133,9 +3234,7 @@ export const PlaygroundForm = ({
     (event: React.ChangeEvent<HTMLTextAreaElement>) => {
       const nextQuestions = event.target.value.split("\n")
       setAttachedResearchContextDraft((current) =>
-        current
-          ? { ...current, unresolved_questions: nextQuestions }
-          : current
+        current ? { ...current, unresolved_questions: nextQuestions } : current
       )
     },
     []
@@ -3178,10 +3277,7 @@ export const PlaygroundForm = ({
       }
       if (e.key === "Escape") {
         e.preventDefault()
-        form.setFieldValue(
-          "message",
-          form.values.message.replace(/^\s*\//, "")
-        )
+        form.setFieldValue("message", form.values.message.replace(/^\s*\//, ""))
         return
       }
     }
@@ -3262,10 +3358,10 @@ export const PlaygroundForm = ({
       }
       const caretPrefer =
         rawStart > meta.labelStart && rawStart < meta.labelEnd
-          ? (pendingCaretRef.current !== null &&
+          ? pendingCaretRef.current !== null &&
             pendingCaretRef.current <= meta.rangeStart
-              ? "before"
-              : "after")
+            ? "before"
+            : "after"
           : undefined
       let caret = getMessageCaretFromDisplay(rawStart, meta, {
         prefer: caretPrefer
@@ -3297,16 +3393,14 @@ export const PlaygroundForm = ({
         e.preventDefault()
         let nextCaret = caret
         if (hasSelection) {
-          nextCaret =
-            e.key === "ArrowLeft" ? selectionStart : selectionEnd
+          nextCaret = e.key === "ArrowLeft" ? selectionStart : selectionEnd
         } else {
           nextCaret =
             e.key === "ArrowLeft"
               ? Math.max(0, caret - 1)
               : Math.min(meta.messageLength, caret + 1)
           if (nextCaret > meta.rangeStart && nextCaret < meta.rangeEnd) {
-            nextCaret =
-              e.key === "ArrowLeft" ? meta.rangeStart : meta.rangeEnd
+            nextCaret = e.key === "ArrowLeft" ? meta.rangeStart : meta.rangeEnd
           }
         }
         pendingCaretRef.current = nextCaret
@@ -3572,6 +3666,10 @@ export const PlaygroundForm = ({
     actionBarVisibilityClass,
     handlers: actionBarHandlers
   } = useActionBarVisibility({ externalPinSources })
+  const [composerOptionsExpanded, setComposerOptionsExpanded] = useStorage(
+    "playgroundComposerOptionsExpanded",
+    false
+  )
   const shouldCompactComposerTextarea =
     !composerFocusWithin &&
     !contextToolsOpen &&
@@ -3604,7 +3702,8 @@ export const PlaygroundForm = ({
       }
 
       const ancestorRect = ancestor.getBoundingClientRect()
-      const overflow = composerRect.bottom - (ancestorRect.bottom - bottomPadding)
+      const overflow =
+        composerRect.bottom - (ancestorRect.bottom - bottomPadding)
       if (overflow > 0) {
         ancestor.scrollTop += overflow
       }
@@ -3616,7 +3715,10 @@ export const PlaygroundForm = ({
       const allowsVerticalScroll = /(auto|scroll|overlay)/.test(
         `${style.overflowY} ${style.overflow}`
       )
-      if (allowsVerticalScroll && parent.scrollHeight > parent.clientHeight + 1) {
+      if (
+        allowsVerticalScroll &&
+        parent.scrollHeight > parent.clientHeight + 1
+      ) {
         adjustAncestor(parent)
       }
       parent = parent.parentElement
@@ -3782,8 +3884,7 @@ export const PlaygroundForm = ({
         voiceChatEnabled
           ? t("playground:voiceChat.toolbarStop", "Stop voice chat")
           : t("playground:voiceChat.toolbarStart", "Start voice chat")
-      }
-    >
+      }>
       <button
         type="button"
         onClick={handleVoiceChatToggle}
@@ -3796,8 +3897,7 @@ export const PlaygroundForm = ({
             : voiceChatEnabled && voiceChat.state !== "idle"
               ? "bg-primary/10 text-primary animate-pulse"
               : "hover:bg-surface2 text-text-muted"
-        }`}
-      >
+        }`}>
         <Headphones className="h-4 w-4" />
         {voiceChatEnabled && voiceChat.state !== "idle" && (
           <span className="text-xs">{voiceChatStatusLabel}</span>
@@ -3904,8 +4004,7 @@ export const PlaygroundForm = ({
   const rawRequestAttachedResearchPanel = attachedResearchContextDraft ? (
     <div
       data-testid="attached-research-context-panel"
-      className="space-y-3 rounded-md border border-border bg-surface px-3 py-3"
-    >
+      className="space-y-3 rounded-md border border-border bg-surface px-3 py-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-text">
@@ -3921,11 +4020,15 @@ export const PlaygroundForm = ({
         <div className="space-y-1 text-right text-[11px] text-text-muted">
           <div>
             {t("playground:tools.attachedResearchRunId", "Run ID")}:{" "}
-            <span className="font-mono">{attachedResearchContextDraft.run_id}</span>
+            <span className="font-mono">
+              {attachedResearchContextDraft.run_id}
+            </span>
           </div>
           <div>
             {t("playground:tools.attachedResearchAttachedAt", "Attached")}:{" "}
-            {new Date(attachedResearchContextDraft.attached_at).toLocaleString()}
+            {new Date(
+              attachedResearchContextDraft.attached_at
+            ).toLocaleString()}
           </div>
         </div>
       </div>
@@ -3997,496 +4100,640 @@ export const PlaygroundForm = ({
   return (
     <React.Profiler
       id="playground-form-root"
-      onRender={onComposerRenderProfile}
-    >
+      onRender={onComposerRenderProfile}>
       <div className="flex w-full flex-col items-center px-4 pb-6">
-      <div
-        data-checkwidemode={checkWideMode}
-        data-ui-mode={uiMode}
-        className="relative z-10 flex w-full max-w-[64rem] flex-col items-center justify-center gap-2 text-base data-[checkwidemode='true']:max-w-none">
-        <div className="relative flex w-full flex-row justify-center">
-          <div
-            ref={composerShellRef}
-            data-istemporary-chat={temporaryChat}
-            data-mobile-keyboard={
-              isMobileViewport
-                ? mobileComposerViewport.keyboardOpen
-                  ? "open"
-                  : "closed"
-                : "desktop"
-            }
-            onMouseEnter={actionBarHandlers.onMouseEnter}
-            onMouseLeave={actionBarHandlers.onMouseLeave}
-            onFocusCapture={actionBarHandlers.onFocusCapture}
-            onBlurCapture={actionBarHandlers.onBlurCapture}
-            style={
-              isMobileViewport
-                ? {
-                    scrollMarginBottom: `${Math.max(
-                      mobileComposerViewport.keyboardInsetPx,
-                      16
-                    )}px`,
-                    paddingBottom:
-                      "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)"
-                  }
-                : undefined
-            }
-            className={`relative w-full rounded-3xl border border-transparent bg-surface/95 p-3 text-text shadow-card backdrop-blur-lg transition-all duration-200 data-[istemporary-chat='true']:border-t-4 data-[istemporary-chat='true']:border-t-purple-500 data-[istemporary-chat='true']:border-dashed data-[istemporary-chat='true']:opacity-90 ${
-              !isConnectionReady ? "opacity-80" : ""
-            }`}>
-            {/* Attachments summary (collapsed context management) */}
-            {wrapComposerProfile(
-              "attachments-summary",
-              <AttachmentsSummary
-                image={form.values.image}
-                documents={selectedDocuments}
-                files={uploadedFiles}
-                onRemoveImage={() => form.setFieldValue("image", "")}
-                onRemoveDocument={removeDocument}
-                onClearDocuments={clearSelectedDocuments}
-                onRemoveFile={removeUploadedFile}
-                onClearFiles={clearUploadedFiles}
-                onOpenKnowledgePanel={() => openKnowledgePanel("context")}
-                readOnly
-              />
-            )}
-            {/* Link to Model Playground for Compare mode */}
-            <div>
-              <div className="flex w-full min-w-0 bg-transparent">
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault()
-                    stopListening()
-                    submitForm()
-                  }}
-                  className="flex w-full min-w-0 flex-col items-center">
-                  <input
-                    id="file-upload"
-                    name="file-upload"
-                    type="file"
-                    className="sr-only"
-                    ref={inputRef}
-                    accept="image/*"
-                    multiple={false}
-                    tabIndex={-1}
-                    aria-hidden="true"
-                    aria-label={t("playground:actions.attachImage", "Attach image") as string}
-                    onChange={onInputChange}
-                  />
-                  <input
-                    id="document-upload"
-                    name="document-upload"
-                    type="file"
-                    className="sr-only"
-                    ref={fileInputRef}
-                    accept=".pdf,.doc,.docx,.txt,.csv,.md,.markdown,text/markdown"
-                    multiple={false}
-                    tabIndex={-1}
-                    aria-hidden="true"
-                    aria-label={t("playground:actions.attachDocument", "Attach document") as string}
-                    onChange={onFileInputChange}
-                  />
+        <div
+          data-checkwidemode={checkWideMode}
+          data-ui-mode={uiMode}
+          className="relative z-10 flex w-full max-w-[64rem] flex-col items-center justify-center gap-2 text-base data-[checkwidemode='true']:max-w-none">
+          <div className="relative flex w-full flex-row justify-center">
+            <div
+              ref={composerShellRef}
+              data-istemporary-chat={temporaryChat}
+              data-mobile-keyboard={
+                isMobileViewport
+                  ? mobileComposerViewport.keyboardOpen
+                    ? "open"
+                    : "closed"
+                  : "desktop"
+              }
+              onMouseEnter={actionBarHandlers.onMouseEnter}
+              onMouseLeave={actionBarHandlers.onMouseLeave}
+              onFocusCapture={actionBarHandlers.onFocusCapture}
+              onBlurCapture={actionBarHandlers.onBlurCapture}
+              style={
+                isMobileViewport
+                  ? {
+                      scrollMarginBottom: `${Math.max(
+                        mobileComposerViewport.keyboardInsetPx,
+                        16
+                      )}px`,
+                      paddingBottom:
+                        "calc(env(safe-area-inset-bottom, 0px) + 0.75rem)"
+                    }
+                  : undefined
+              }
+              className={`relative w-full rounded-3xl border border-transparent bg-surface/95 p-3 text-text shadow-card backdrop-blur-lg transition-all duration-200 data-[istemporary-chat='true']:border-t-4 data-[istemporary-chat='true']:border-t-purple-500 data-[istemporary-chat='true']:border-dashed data-[istemporary-chat='true']:opacity-90 ${
+                !isConnectionReady ? "opacity-80" : ""
+              }`}>
+              {/* Attachments summary (collapsed context management) */}
+              {wrapComposerProfile(
+                "attachments-summary",
+                <AttachmentsSummary
+                  image={form.values.image}
+                  documents={selectedDocuments}
+                  files={uploadedFiles}
+                  onRemoveImage={() => form.setFieldValue("image", "")}
+                  onRemoveDocument={removeDocument}
+                  onClearDocuments={clearSelectedDocuments}
+                  onRemoveFile={removeUploadedFile}
+                  onClearFiles={clearUploadedFiles}
+                  onOpenKnowledgePanel={() => openKnowledgePanel("context")}
+                  readOnly
+                />
+              )}
+              {/* Link to Model Playground for Compare mode */}
+              <div>
+                <div className="flex w-full min-w-0 bg-transparent">
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      stopListening()
+                      submitForm()
+                    }}
+                    className="flex w-full min-w-0 flex-col items-center">
+                    <input
+                      id="file-upload"
+                      name="file-upload"
+                      type="file"
+                      className="sr-only"
+                      ref={inputRef}
+                      accept="image/*"
+                      multiple={false}
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      aria-label={
+                        t(
+                          "playground:actions.attachImage",
+                          "Attach image"
+                        ) as string
+                      }
+                      onChange={onInputChange}
+                    />
+                    <input
+                      id="document-upload"
+                      name="document-upload"
+                      type="file"
+                      className="sr-only"
+                      ref={fileInputRef}
+                      accept=".pdf,.doc,.docx,.txt,.csv,.md,.markdown,text/markdown"
+                      multiple={false}
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      aria-label={
+                        t(
+                          "playground:actions.attachDocument",
+                          "Attach document"
+                        ) as string
+                      }
+                      onChange={onFileInputChange}
+                    />
 
-                  <div
-                    className={`w-full flex flex-col px-2 ${
-                      !isConnectionReady
-                        ? "rounded-md border border-dashed border-border bg-surface2"
-                        : ""
-                    }`}>
-                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                      <Button
-                        onClick={openFollowUpResearchModal}
-                        disabled={!canLaunchFollowUpResearch || followUpResearchPending}
-                      >
-                        {t("playground:actions.followUpResearch", "Follow-up Research")}
-                      </Button>
-                    </div>
-                    {attachedResearchContext ? (
-                      <AttachedResearchContextChip
-                        context={attachedResearchContext}
-                        pinned={attachedResearchContextPinned}
-                        history={attachedResearchContextHistory}
-                        onPreview={openRawRequestModal}
-                        onRemove={() => onRemoveAttachedResearchContext?.()}
-                        onPin={() => onPinAttachedResearchContext?.()}
-                        onUnpin={() => onUnpinAttachedResearchContext?.()}
-                        onRestorePinned={() => onRestorePinnedResearchContext?.()}
-                        onPrepareResearchFollowUp={onPrepareResearchFollowUp}
-                        onPinHistory={onPinAttachedResearchContextHistory}
-                        onSelectHistory={onSelectAttachedResearchContextHistory}
-                      />
-                    ) : null}
-                    {!attachedResearchContext &&
-                    (attachedResearchContextPinned ||
-                      attachedResearchContextHistory.length > 0) ? (
-                      <div className="mb-2 flex flex-col gap-2">
-                        {attachedResearchContextPinned ? (
-                          <div
-                            data-testid="pinned-research-fallback-card"
-                            className="rounded-md border border-border bg-surface2 px-3 py-3 text-xs text-text"
-                          >
-                            <div className="flex flex-col gap-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="font-medium text-text-muted">
+                    <div
+                      className={`w-full flex flex-col px-2 ${
+                        !isConnectionReady
+                          ? "rounded-md border border-dashed border-border bg-surface2"
+                          : ""
+                      }`}>
+                      {showFollowUpResearchButton ? (
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <Button
+                            onClick={openFollowUpResearchModal}
+                            disabled={followUpResearchPending}>
+                            {t(
+                              "playground:actions.followUpResearch",
+                              "Follow-up Research"
+                            )}
+                          </Button>
+                        </div>
+                      ) : null}
+                      {attachedResearchContext ? (
+                        <AttachedResearchContextChip
+                          context={attachedResearchContext}
+                          pinned={attachedResearchContextPinned}
+                          history={attachedResearchContextHistory}
+                          onPreview={openRawRequestModal}
+                          onRemove={() => onRemoveAttachedResearchContext?.()}
+                          onPin={() => onPinAttachedResearchContext?.()}
+                          onUnpin={() => onUnpinAttachedResearchContext?.()}
+                          onRestorePinned={() =>
+                            onRestorePinnedResearchContext?.()
+                          }
+                          onPrepareResearchFollowUp={onPrepareResearchFollowUp}
+                          onPinHistory={onPinAttachedResearchContextHistory}
+                          onSelectHistory={
+                            onSelectAttachedResearchContextHistory
+                          }
+                        />
+                      ) : null}
+                      {!attachedResearchContext &&
+                      (attachedResearchContextPinned ||
+                        attachedResearchContextHistory.length > 0) ? (
+                        <div className="mb-2 flex flex-col gap-2">
+                          {attachedResearchContextPinned ? (
+                            <div
+                              data-testid="pinned-research-fallback-card"
+                              className="rounded-md border border-border bg-surface2 px-3 py-3 text-xs text-text">
+                              <div className="flex flex-col gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-medium text-text-muted">
+                                    {t(
+                                      "playground:composer.pinnedResearch",
+                                      "Pinned research"
+                                    )}
+                                  </span>
+                                  <span className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text">
+                                    {attachedResearchContextPinned.query}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-text-muted">
                                   {t(
-                                    "playground:composer.pinnedResearch",
-                                    "Pinned research"
+                                    "playground:composer.pinnedResearchFallbackDescription",
+                                    "This thread keeps this research as its default context."
                                   )}
-                                </span>
-                                <span className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text">
-                                  {attachedResearchContextPinned.query}
-                                </span>
-                              </div>
-                              <p className="text-[11px] text-text-muted">
-                                {t(
-                                  "playground:composer.pinnedResearchFallbackDescription",
-                                  "This thread keeps this research as its default context."
-                                )}
-                              </p>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => onRestorePinnedResearchContext?.()}
-                                  className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text hover:bg-surface3"
-                                >
-                                  {t("playground:actions.usePinnedResearchNow", "Use now")}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => onUnpinAttachedResearchContext?.()}
-                                  className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text hover:bg-surface3"
-                                >
-                                  {t("playground:actions.unpinResearchContext", "Unpin")}
-                                </button>
-                                <Link
-                                  to={attachedResearchContextPinned.research_url}
-                                  className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text hover:bg-surface3"
-                                >
-                                  {t("playground:actions.openInResearch", "Open in Research")}
-                                </Link>
-                                {onPrepareResearchFollowUp ? (
+                                </p>
+                                <div className="flex flex-wrap items-center gap-2">
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      setPendingAttachmentFollowUp({
-                                        run_id: attachedResearchContextPinned.run_id,
-                                        query: attachedResearchContextPinned.query
-                                      })
+                                      onRestorePinnedResearchContext?.()
                                     }
-                                    className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text hover:bg-surface3"
-                                  >
-                                    {t("playground:actions.followUp", "Follow up")}
+                                    className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text hover:bg-surface3">
+                                    {t(
+                                      "playground:actions.usePinnedResearchNow",
+                                      "Use now"
+                                    )}
                                   </button>
-                                ) : null}
-                              </div>
-                              {pendingAttachmentFollowUp?.run_id ===
-                              attachedResearchContextPinned.run_id ? (
-                                <div className="space-y-2 rounded border border-border bg-surface px-3 py-2 text-[11px] text-text">
-                                  <div className="font-medium">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      onUnpinAttachedResearchContext?.()
+                                    }
+                                    className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text hover:bg-surface3">
                                     {t(
-                                      "playground:actions.prepareFollowUpTitle",
-                                      "Prepare follow-up?"
+                                      "playground:actions.unpinResearchContext",
+                                      "Unpin"
                                     )}
-                                  </div>
-                                  <div className="text-text-muted">
+                                  </button>
+                                  <Link
+                                    to={
+                                      attachedResearchContextPinned.research_url
+                                    }
+                                    className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text hover:bg-surface3">
                                     {t(
-                                      "playground:actions.prepareFollowUpBody",
-                                      'This will use "{{query}}" and prefill a follow-up research prompt in the composer.',
-                                      { query: pendingAttachmentFollowUp.query }
+                                      "playground:actions.openInResearch",
+                                      "Open in Research"
                                     )}
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-2">
+                                  </Link>
+                                  {onPrepareResearchFollowUp ? (
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        onPrepareResearchFollowUp?.(
-                                          pendingAttachmentFollowUp
-                                        )
-                                        setPendingAttachmentFollowUp(null)
-                                      }}
-                                      className="rounded border border-border bg-surface2 px-2 py-0.5 text-[11px] text-text hover:bg-surface3"
-                                    >
+                                      onClick={() =>
+                                        setPendingAttachmentFollowUp({
+                                          run_id:
+                                            attachedResearchContextPinned.run_id,
+                                          query:
+                                            attachedResearchContextPinned.query
+                                        })
+                                      }
+                                      className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text hover:bg-surface3">
                                       {t(
-                                        "playground:actions.prepareFollowUp",
-                                        "Prepare follow-up"
+                                        "playground:actions.followUp",
+                                        "Follow up"
                                       )}
                                     </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setPendingAttachmentFollowUp(null)}
-                                      className="rounded border border-border bg-surface2 px-2 py-0.5 text-[11px] text-text hover:bg-surface3"
-                                    >
-                                      {t("common:cancel", "Cancel")}
-                                    </button>
-                                  </div>
+                                  ) : null}
                                 </div>
-                              ) : null}
-                            </div>
-                          </div>
-                        ) : null}
-                        {attachedResearchContextHistory.length > 0 ? (
-                          <div
-                            data-testid="pinned-research-history-block"
-                            className="rounded-md border border-border bg-surface2 px-3 py-3 text-xs text-text"
-                          >
-                            <div className="mb-2 font-medium text-text-muted">
-                              {t("playground:composer.recentResearch", "Recent research")}
-                            </div>
-                            <div className="flex flex-col gap-2">
-                              {attachedResearchContextHistory.map((entry) => (
-                                <div
-                                  key={entry.run_id}
-                                  className="rounded border border-border bg-surface px-3 py-2"
-                                >
-                                  <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <div className="min-w-0">
-                                      <div className="truncate font-medium text-text">
-                                        {entry.query}
-                                      </div>
-                                      <div className="truncate text-[11px] text-text-muted">
-                                        {entry.question}
-                                      </div>
+                                {pendingAttachmentFollowUp?.run_id ===
+                                attachedResearchContextPinned.run_id ? (
+                                  <div className="space-y-2 rounded border border-border bg-surface px-3 py-2 text-[11px] text-text">
+                                    <div className="font-medium">
+                                      {t(
+                                        "playground:actions.prepareFollowUpTitle",
+                                        "Prepare follow-up?"
+                                      )}
+                                    </div>
+                                    <div className="text-text-muted">
+                                      {t(
+                                        "playground:actions.prepareFollowUpBody",
+                                        'This will use "{{query}}" and prefill a follow-up research prompt in the composer.',
+                                        {
+                                          query: pendingAttachmentFollowUp.query
+                                        }
+                                      )}
                                     </div>
                                     <div className="flex flex-wrap items-center gap-2">
                                       <button
                                         type="button"
-                                        onClick={() =>
-                                          onSelectAttachedResearchContextHistory?.(entry)
-                                        }
-                                        className="rounded border border-border bg-surface2 px-2 py-0.5 text-[11px] text-text hover:bg-surface3"
-                                      >
-                                        {t("playground:actions.usePinnedResearchNow", "Use now")}
+                                        onClick={() => {
+                                          onPrepareResearchFollowUp?.(
+                                            pendingAttachmentFollowUp
+                                          )
+                                          setPendingAttachmentFollowUp(null)
+                                        }}
+                                        className="rounded border border-border bg-surface2 px-2 py-0.5 text-[11px] text-text hover:bg-surface3">
+                                        {t(
+                                          "playground:actions.prepareFollowUp",
+                                          "Prepare follow-up"
+                                        )}
                                       </button>
                                       <button
                                         type="button"
                                         onClick={() =>
-                                          onPinAttachedResearchContextHistory?.(entry)
+                                          setPendingAttachmentFollowUp(null)
                                         }
-                                        className="rounded border border-border bg-surface2 px-2 py-0.5 text-[11px] text-text hover:bg-surface3"
-                                      >
-                                        {t("playground:actions.pinResearchContext", "Pin")}
+                                        className="rounded border border-border bg-surface2 px-2 py-0.5 text-[11px] text-text hover:bg-surface3">
+                                        {t("common:cancel", "Cancel")}
                                       </button>
-                                      {onPrepareResearchFollowUp ? (
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setPendingAttachmentFollowUp({
-                                              run_id: entry.run_id,
-                                              query: entry.query
-                                            })
-                                          }
-                                          className="rounded border border-border bg-surface2 px-2 py-0.5 text-[11px] text-text hover:bg-surface3"
-                                        >
-                                          {t("playground:actions.followUp", "Follow up")}
-                                        </button>
-                                      ) : null}
                                     </div>
                                   </div>
-                                  {pendingAttachmentFollowUp?.run_id === entry.run_id ? (
-                                    <div className="mt-2 space-y-2 rounded border border-border bg-surface2 px-3 py-2 text-[11px] text-text">
-                                      <div className="font-medium">
-                                        {t(
-                                          "playground:actions.prepareFollowUpTitle",
-                                          "Prepare follow-up?"
-                                        )}
-                                      </div>
-                                      <div className="text-text-muted">
-                                        {t(
-                                          "playground:actions.prepareFollowUpBody",
-                                          'This will use "{{query}}" and prefill a follow-up research prompt in the composer.',
-                                          { query: pendingAttachmentFollowUp.query }
-                                        )}
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : null}
+                          {attachedResearchContextHistory.length > 0 ? (
+                            <div
+                              data-testid="pinned-research-history-block"
+                              className="rounded-md border border-border bg-surface2 px-3 py-3 text-xs text-text">
+                              <div className="mb-2 font-medium text-text-muted">
+                                {t(
+                                  "playground:composer.recentResearch",
+                                  "Recent research"
+                                )}
+                              </div>
+                              <div className="flex flex-col gap-2">
+                                {attachedResearchContextHistory.map((entry) => (
+                                  <div
+                                    key={entry.run_id}
+                                    className="rounded border border-border bg-surface px-3 py-2">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <div className="truncate font-medium text-text">
+                                          {entry.query}
+                                        </div>
+                                        <div className="truncate text-[11px] text-text-muted">
+                                          {entry.question}
+                                        </div>
                                       </div>
                                       <div className="flex flex-wrap items-center gap-2">
                                         <button
                                           type="button"
-                                          onClick={() => {
-                                            onPrepareResearchFollowUp?.(
-                                              pendingAttachmentFollowUp
+                                          onClick={() =>
+                                            onSelectAttachedResearchContextHistory?.(
+                                              entry
                                             )
-                                            setPendingAttachmentFollowUp(null)
-                                          }}
-                                          className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text hover:bg-surface3"
-                                        >
+                                          }
+                                          className="rounded border border-border bg-surface2 px-2 py-0.5 text-[11px] text-text hover:bg-surface3">
                                           {t(
-                                            "playground:actions.prepareFollowUp",
-                                            "Prepare follow-up"
+                                            "playground:actions.usePinnedResearchNow",
+                                            "Use now"
                                           )}
                                         </button>
                                         <button
                                           type="button"
-                                          onClick={() => setPendingAttachmentFollowUp(null)}
-                                          className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text hover:bg-surface3"
-                                        >
-                                          {t("common:cancel", "Cancel")}
+                                          onClick={() =>
+                                            onPinAttachedResearchContextHistory?.(
+                                              entry
+                                            )
+                                          }
+                                          className="rounded border border-border bg-surface2 px-2 py-0.5 text-[11px] text-text hover:bg-surface3">
+                                          {t(
+                                            "playground:actions.pinResearchContext",
+                                            "Pin"
+                                          )}
                                         </button>
+                                        {onPrepareResearchFollowUp ? (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setPendingAttachmentFollowUp({
+                                                run_id: entry.run_id,
+                                                query: entry.query
+                                              })
+                                            }
+                                            className="rounded border border-border bg-surface2 px-2 py-0.5 text-[11px] text-text hover:bg-surface3">
+                                            {t(
+                                              "playground:actions.followUp",
+                                              "Follow up"
+                                            )}
+                                          </button>
+                                        ) : null}
                                       </div>
                                     </div>
-                                  ) : null}
-                                </div>
-                              ))}
+                                    {pendingAttachmentFollowUp?.run_id ===
+                                    entry.run_id ? (
+                                      <div className="mt-2 space-y-2 rounded border border-border bg-surface2 px-3 py-2 text-[11px] text-text">
+                                        <div className="font-medium">
+                                          {t(
+                                            "playground:actions.prepareFollowUpTitle",
+                                            "Prepare follow-up?"
+                                          )}
+                                        </div>
+                                        <div className="text-text-muted">
+                                          {t(
+                                            "playground:actions.prepareFollowUpBody",
+                                            'This will use "{{query}}" and prefill a follow-up research prompt in the composer.',
+                                            {
+                                              query:
+                                                pendingAttachmentFollowUp.query
+                                            }
+                                          )}
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              onPrepareResearchFollowUp?.(
+                                                pendingAttachmentFollowUp
+                                              )
+                                              setPendingAttachmentFollowUp(null)
+                                            }}
+                                            className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text hover:bg-surface3">
+                                            {t(
+                                              "playground:actions.prepareFollowUp",
+                                              "Prepare follow-up"
+                                            )}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setPendingAttachmentFollowUp(null)
+                                            }
+                                            className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text hover:bg-surface3">
+                                            {t("common:cancel", "Cancel")}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <PlaygroundKnowledgeSection
-                      contextToolsOpen={contextToolsOpen}
-                      isConnectionReady={isConnectionReady}
-                      knowledgePanelTab={knowledgePanelTab}
-                      knowledgePanelTabRequestId={knowledgePanelTabRequestId}
-                      deferredComposerInput={deferredComposerInput}
-                      attachedImage={form.values.image}
-                      attachedTabs={selectedDocuments}
-                      availableTabs={availableTabs}
-                      attachedFiles={uploadedFiles}
-                      fileRetrievalEnabled={fileRetrievalEnabled}
-                      onInsert={handleKnowledgeInsert}
-                      onAsk={handleKnowledgeAsk}
-                      onOpenChange={handleKnowledgePanelOpenChange}
-                      onRemoveImage={handleKnowledgeRemoveImage}
-                      onRemoveTab={removeDocument}
-                      onAddTab={addDocument}
-                      onClearTabs={clearSelectedDocuments}
-                      onRefreshTabs={reloadTabs}
-                      onAddFile={handleKnowledgeAddFile}
-                      onRemoveFile={removeUploadedFile}
-                      onClearFiles={clearUploadedFiles}
-                      onFileRetrievalChange={setFileRetrievalEnabled}
-                      wrapComposerProfile={wrapComposerProfile}
-                      t={t}
-                    />
-                    {(() => {
-                      const replyTargetNode = isProMode && replyTarget ? (
-                        <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <CornerUpLeft className="h-3.5 w-3.5 text-text-subtle" />
-                            <span className="min-w-0 truncate">
-                              {replyLabel}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={clearReplyTarget}
-                            aria-label={t(
-                              "common:clearReply",
-                              "Clear reply target"
-                            )}
-                            title={t(
-                              "common:clearReply",
-                              "Clear reply target"
-                            ) as string}
-                            className="rounded p-1 text-text-subtle hover:bg-surface hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-                            <X className="h-3.5 w-3.5" aria-hidden="true" />
-                          </button>
+                          ) : null}
                         </div>
-                      ) : null
-
-                      const composerTextareaNode = (
-                        <div className="relative">
-                          {replyTargetNode}
-                          {wrapComposerProfile(
-                            "composer-textarea",
-                            <ComposerTextarea
-                              textareaRef={textareaRef}
-                              value={form.values.message}
-                              displayValue={messageDisplayValue}
-                              onChange={handleTextareaChange}
-                              onKeyDown={handleTextareaKeyDown}
-                              onPaste={handlePaste}
-                              onFocus={handleTextareaFocus}
-                              onSelect={handleTextareaSelect}
-                              onCompositionStart={handleCompositionStart}
-                              onCompositionEnd={handleCompositionEnd}
-                              onMouseDown={handleTextareaMouseDown}
-                              onMouseUp={handleTextareaMouseUp}
-                              placeholder={
-                                isConnectionReady
-                                  ? t(
-                                      "playground:composer.placeholderWithMentions",
-                                      "Type a message... (/ commands, @ mentions)"
-                                    )
-                                  : t(
-                                      "playground:composer.connectionPlaceholder",
-                                      "Connect to tldw to start chatting."
-                                    )
-                              }
-                              isProMode={isProMode}
-                              isMobile={isMobileViewport}
-                              isConnectionReady={isConnectionReady}
-                              isCollapsed={isMessageCollapsed}
-                              ariaExpanded={!isMessageCollapsed}
-                              compactWhenInactive={shouldCompactComposerTextarea}
-                              formInputProps={form.getInputProps("message")}
-                              showSlashMenu={showSlashMenu}
-                              slashCommands={filteredSlashCommands}
-                              slashActiveIndex={slashActiveIndex}
-                              onSlashSelect={handleSlashCommandSelect}
-                              onSlashActiveIndexChange={setSlashActiveIndex}
-                              slashEmptyLabel={t(
-                                "common:commandPalette.noResults",
-                                "No results found"
-                              )}
-                              showMentions={showMentions}
-                              filteredTabs={filteredTabs}
-                              mentionPosition={mentionPosition}
-                              onMentionSelect={handleMentionSelect}
-                              onMentionsClose={closeMentions}
-                              onMentionRefetch={handleMentionRefetch}
-                              onMentionsOpen={handleMentionsOpen}
-                              draftSaved={draftSaved}
-                            />
-                          )}
-                        </div>
-                      )
-
-                      const composerInlineMessagesNode = (
-                        <>
-                          {form.errors.message && (
-                            <div
-                              role="alert"
-                              aria-live="assertive"
-                              aria-atomic="true"
-                              className="flex items-center justify-between gap-2 px-2 py-1 text-xs text-danger animate-shake"
-                            >
-                              <div className="flex items-center gap-2">
-                                <svg className="h-3.5 w-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                                </svg>
-                                <span>{form.errors.message}</span>
+                      ) : null}
+                      <PlaygroundKnowledgeSection
+                        contextToolsOpen={contextToolsOpen}
+                        isConnectionReady={isConnectionReady}
+                        knowledgePanelTab={knowledgePanelTab}
+                        knowledgePanelTabRequestId={knowledgePanelTabRequestId}
+                        deferredComposerInput={deferredComposerInput}
+                        attachedImage={form.values.image}
+                        attachedTabs={selectedDocuments}
+                        availableTabs={availableTabs}
+                        attachedFiles={uploadedFiles}
+                        fileRetrievalEnabled={fileRetrievalEnabled}
+                        onInsert={handleKnowledgeInsert}
+                        onAsk={handleKnowledgeAsk}
+                        onOpenChange={handleKnowledgePanelOpenChange}
+                        onRemoveImage={handleKnowledgeRemoveImage}
+                        onRemoveTab={removeDocument}
+                        onAddTab={addDocument}
+                        onClearTabs={clearSelectedDocuments}
+                        onRefreshTabs={reloadTabs}
+                        onAddFile={handleKnowledgeAddFile}
+                        onRemoveFile={removeUploadedFile}
+                        onClearFiles={clearUploadedFiles}
+                        onFileRetrievalChange={setFileRetrievalEnabled}
+                        wrapComposerProfile={wrapComposerProfile}
+                        t={t}
+                      />
+                      {(() => {
+                        const replyTargetNode =
+                          isProMode && replyTarget ? (
+                            <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <CornerUpLeft className="h-3.5 w-3.5 text-text-subtle" />
+                                <span className="min-w-0 truncate">
+                                  {replyLabel}
+                                </span>
                               </div>
                               <button
                                 type="button"
-                                onClick={() => form.clearFieldError("message")}
-                                className="flex-shrink-0 text-danger hover:text-danger"
-                                aria-label={t("common:dismiss", "Dismiss") as string}
-                                title={t("common:dismiss", "Dismiss") as string}
-                              >
-                                <X className="h-3 w-3" />
+                                onClick={clearReplyTarget}
+                                aria-label={t(
+                                  "common:clearReply",
+                                  "Clear reply target"
+                                )}
+                                title={
+                                  t(
+                                    "common:clearReply",
+                                    "Clear reply target"
+                                  ) as string
+                                }
+                                className="rounded p-1 text-text-subtle hover:bg-surface hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+                                <X className="h-3.5 w-3.5" aria-hidden="true" />
                               </button>
                             </div>
-                          )}
-                          {!form.errors.message && isConnectionReady && !isSending && isProMode && (
-                            <div className="px-2 py-1 text-label text-text-subtle">
-                              {!selectedModel && !activeImageCommand ? (
-                                <span className="flex items-center gap-1">
-                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                  </svg>
-                                  {t("sidepanel:composer.hints.selectModel", "Select a model above to start chatting")}
-                                </span>
-                              ) : form.values.message.trim().length === 0 && form.values.image.length === 0 ? (
-                                <span>
-                                  {sendWhenEnter
-                                    ? t("sidepanel:composer.hints.typeAndEnter", "Type a message and press Enter to send")
-                                    : t("sidepanel:composer.hints.typeAndClick", "Type a message and click Send")}
-                                </span>
-                              ) : null}
+                          ) : null
+
+                        const composerTextareaNode = (
+                          <div className="relative">
+                            {replyTargetNode}
+                            <div className="flex items-end gap-2">
+                              <button
+                                type="button"
+                                data-testid="composer-options-toggle"
+                                aria-controls="composer-options-panel"
+                                aria-expanded={composerOptionsExpanded}
+                                aria-label={
+                                  composerOptionsExpanded
+                                    ? (t(
+                                        "playground:composer.hideOptions",
+                                        "Hide composer options"
+                                      ) as string)
+                                    : (t(
+                                        "playground:composer.showOptions",
+                                        "Show composer options"
+                                      ) as string)
+                                }
+                                title={
+                                  composerOptionsExpanded
+                                    ? (t(
+                                        "playground:composer.hideOptions",
+                                        "Hide composer options"
+                                      ) as string)
+                                    : (t(
+                                        "playground:composer.showOptions",
+                                        "Show composer options"
+                                      ) as string)
+                                }
+                                onClick={() =>
+                                  setComposerOptionsExpanded(
+                                    !composerOptionsExpanded
+                                  )
+                                }
+                                className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-surface/80 text-text-muted transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus/40 ${
+                                  composerOptionsExpanded
+                                    ? "border-primary/40 text-primaryStrong"
+                                    : ""
+                                }`}>
+                                <ChevronRight
+                                  className={`h-4 w-4 transition-transform ${
+                                    composerOptionsExpanded ? "rotate-90" : ""
+                                  }`}
+                                  aria-hidden="true"
+                                />
+                              </button>
+                              <div className="min-w-0 flex-1">
+                                {wrapComposerProfile(
+                                  "composer-textarea",
+                                  <ComposerTextarea
+                                    textareaRef={textareaRef}
+                                    value={form.values.message}
+                                    displayValue={messageDisplayValue}
+                                    onChange={handleTextareaChange}
+                                    onKeyDown={handleTextareaKeyDown}
+                                    onPaste={handlePaste}
+                                    onFocus={handleTextareaFocus}
+                                    onSelect={handleTextareaSelect}
+                                    onCompositionStart={handleCompositionStart}
+                                    onCompositionEnd={handleCompositionEnd}
+                                    onMouseDown={handleTextareaMouseDown}
+                                    onMouseUp={handleTextareaMouseUp}
+                                    placeholder={
+                                      isConnectionReady
+                                        ? t(
+                                            "playground:composer.placeholderWithMentions",
+                                            "Type a message... (/ commands, @ mentions)"
+                                          )
+                                        : t(
+                                            "playground:composer.connectionPlaceholder",
+                                            "Connect to tldw to start chatting."
+                                          )
+                                    }
+                                    isProMode={isProMode}
+                                    isMobile={isMobileViewport}
+                                    isConnectionReady={isConnectionReady}
+                                    isCollapsed={isMessageCollapsed}
+                                    ariaExpanded={!isMessageCollapsed}
+                                    compactWhenInactive={
+                                      shouldCompactComposerTextarea
+                                    }
+                                    formInputProps={form.getInputProps(
+                                      "message"
+                                    )}
+                                    showSlashMenu={showSlashMenu}
+                                    slashCommands={filteredSlashCommands}
+                                    slashActiveIndex={slashActiveIndex}
+                                    onSlashSelect={handleSlashCommandSelect}
+                                    onSlashActiveIndexChange={
+                                      setSlashActiveIndex
+                                    }
+                                    slashEmptyLabel={t(
+                                      "common:commandPalette.noResults",
+                                      "No results found"
+                                    )}
+                                    showMentions={showMentions}
+                                    filteredTabs={filteredTabs}
+                                    mentionPosition={mentionPosition}
+                                    onMentionSelect={handleMentionSelect}
+                                    onMentionsClose={closeMentions}
+                                    onMentionRefetch={handleMentionRefetch}
+                                    onMentionsOpen={handleMentionsOpen}
+                                    draftSaved={draftSaved}
+                                  />
+                                )}
+                              </div>
+                              <div
+                                data-testid="composer-inline-send-control"
+                                className="flex shrink-0 items-end self-end">
+                                {sendControl}
+                              </div>
                             </div>
-                          )}
-                        </>
-                      )
-                      /* Guarded top-level notice/modal contract:
+                          </div>
+                        )
+
+                        const composerInlineMessagesNode = (
+                          <>
+                            {form.errors.message && (
+                              <div
+                                role="alert"
+                                aria-live="assertive"
+                                aria-atomic="true"
+                                className="flex items-center justify-between gap-2 px-2 py-1 text-xs text-danger animate-shake">
+                                <div className="flex items-center gap-2">
+                                  <svg
+                                    className="h-3.5 w-3.5 flex-shrink-0"
+                                    fill="currentColor"
+                                    viewBox="0 0 20 20">
+                                    <path
+                                      fillRule="evenodd"
+                                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                                      clipRule="evenodd"
+                                    />
+                                  </svg>
+                                  <span>{form.errors.message}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    form.clearFieldError("message")
+                                  }
+                                  className="flex-shrink-0 text-danger hover:text-danger"
+                                  aria-label={
+                                    t("common:dismiss", "Dismiss") as string
+                                  }
+                                  title={
+                                    t("common:dismiss", "Dismiss") as string
+                                  }>
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            )}
+                            {!form.errors.message &&
+                              isConnectionReady &&
+                              !isSending &&
+                              isProMode && (
+                                <div className="px-2 py-1 text-label text-text-subtle">
+                                  {!selectedModel && !activeImageCommand ? (
+                                    <span className="flex items-center gap-1">
+                                      <svg
+                                        className="h-3 w-3"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24">
+                                        <path
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          strokeWidth={2}
+                                          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                        />
+                                      </svg>
+                                      {t(
+                                        "sidepanel:composer.hints.selectModel",
+                                        "Select a model above to start chatting"
+                                      )}
+                                    </span>
+                                  ) : form.values.message.trim().length === 0 &&
+                                    form.values.image.length === 0 ? (
+                                    <span>
+                                      {sendWhenEnter
+                                        ? t(
+                                            "sidepanel:composer.hints.typeAndEnter",
+                                            "Type a message and press Enter to send"
+                                          )
+                                        : t(
+                                            "sidepanel:composer.hints.typeAndClick",
+                                            "Type a message and click Send"
+                                          )}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              )}
+                          </>
+                        )
+                        /* Guarded top-level notice/modal contract:
                           Changed since last send:
                           playground:composer.providerDegraded
                           playground:composer.compareActivationTitle
@@ -4525,590 +4772,635 @@ export const PlaygroundForm = ({
                           imageGenerationRefine
                           playground:insights.modalTitle
                           playground:composer.startupTemplatePreviewTitle */
-                      const composerNoticesNode = (
-                        <PlaygroundComposerNotices
-                          modeAnnouncement={modeAnnouncement}
-                          characterPendingApply={characterPendingApply}
-                          selectedCharacterGreeting={selectedCharacterGreeting}
-                          selectedCharacterName={selectedCharacter?.name || null}
-                          compareModeActive={compareModeActive}
-                          compareSelectedModels={compareSelectedModels}
-                          compareSelectedModelLabels={compareSelectedModelLabels}
-                          compareNeedsMoreModels={compareNeedsMoreModels}
-                          compareSharedContextLabels={compareSharedContextLabels}
-                          compareInteroperabilityNotices={compareInteroperabilityNotices}
-                          noticesExpanded={noticesExpanded}
-                          setNoticesExpanded={setNoticesExpanded}
-                          contextDeltaLabels={contextDeltaLabels}
-                          contextConflictWarnings={contextConflictWarnings}
-                          visibleModelRecommendations={visibleModelRecommendations}
-                          sessionInsightsTotalTokens={sessionInsights.totals.totalTokens}
-                          jsonMode={Boolean(currentChatModelSettings.jsonMode)}
-                          isConnectionReady={isConnectionReady}
-                          connectionUxState={connectionUxState}
-                          isProMode={isProMode}
-                          selectedModel={selectedModel}
-                          systemPrompt={systemPrompt}
-                          selectedCharacter={selectedCharacter}
-                          ragPinnedResultsLength={ragPinnedResults.length}
-                          startupTemplateDraftName={startupTemplateDraftName}
-                          setStartupTemplateDraftName={setStartupTemplateDraftName}
-                          startupTemplates={startupTemplates}
-                          handleSaveStartupTemplate={handleSaveStartupTemplate}
-                          handleOpenStartupTemplatePreview={handleOpenStartupTemplatePreview}
-                          setOpenModelSettings={setOpenModelSettings}
-                          setOpenActorSettings={setOpenActorSettings}
-                          setMessageValue={setMessageValue}
-                          textAreaFocus={textAreaFocus}
-                          openModelApiSelector={openModelApiSelector}
-                          openSessionInsightsModal={openSessionInsightsModal}
-                          handleModelRecommendationAction={handleModelRecommendationAction}
-                          dismissModelRecommendation={dismissModelRecommendation}
-                          getModelRecommendationActionLabel={getModelRecommendationActionLabel}
-                          wrapComposerProfile={wrapComposerProfile}
-                          t={t}
-                        />
-                      )
-
-                      const composerToolbarNode = (
-                        <div
-                          aria-hidden={!actionBarVisible}
-                          className={`w-full transition-all duration-200 overflow-hidden ${actionBarVisibilityClass}`}
-                        >
-                          {wrapComposerProfile(
-                            "composer-toolbar",
-                            <ComposerToolbar
-                              isProMode={isProMode}
-                              isMobile={isMobileViewport}
-                              isConnectionReady={isConnectionReady}
-                              isSending={isSending}
-                              modeLauncherButton={modeLauncherButton}
-                              compareControl={compareControl}
-                              modelSelectButton={modelSelectButton}
-                              mcpControl={mcpControl}
-                              sendControl={sendControl}
-                              attachmentButton={attachmentButton}
-                              toolsButton={toolsButton}
-                              voiceChatButton={voiceChatButton}
-                              modelUsageBadge={modelUsageBadge}
-                              selectedSystemPrompt={selectedSystemPrompt}
-                              systemPrompt={systemPrompt}
-                              setSystemPrompt={setSystemPrompt}
-                              setSelectedSystemPrompt={setSelectedSystemPrompt}
-                              setSelectedQuickPrompt={setSelectedQuickPrompt}
-                              temporaryChat={temporaryChat}
-                              onToggleTemporaryChat={handleToggleTemporaryChat}
-                              privateChatLocked={privateChatLocked}
-                              isFireFoxPrivateMode={isFireFoxPrivateMode}
-                              persistenceTooltip={persistenceTooltip}
-                              contextToolsOpen={contextToolsOpen}
-                              onToggleKnowledgePanel={toggleKnowledgePanel}
-                              webSearch={webSearch}
-                              onToggleWebSearch={handleToggleWebSearch}
-                              hasWebSearch={!!capabilities?.hasWebSearch}
-                              onOpenModelSettings={handleOpenModelSettings}
-                              modelSummaryLabel={modelSummaryLabel}
-                              promptSummaryLabel={promptSummaryLabel}
-                              hasDictation={!!(browserSupportsSpeechRecognition || hasServerStt)}
-                              speechAvailable={speechAvailable}
-                              speechUsesServer={speechUsesServer}
-                              isListening={isListening}
-                              isServerDictating={isServerDictating}
-                              voiceChatEnabled={voiceChatEnabled}
-                              speechTooltip={speechTooltipText}
-                              onDictationToggle={handleDictationToggle}
-                              onTemplateSelect={handleTemplateSelect}
-                              selectedModel={selectedModel}
-                              resolvedProviderKey={resolvedProviderKey}
-                              messages={messages}
-                              selectedDocumentsCount={selectedDocuments.length}
-                              uploadedFilesCount={uploadedFiles.length}
-                              serverChatId={serverChatId}
-                              showServerPersistenceHint={showServerPersistenceHint}
-                              onDismissServerPersistenceHint={handleDismissServerPersistenceHint}
-                              onFocusConnectionCard={focusConnectionCard}
-                              contextItems={contextItems}
-                            />
-                          )}
-                        </div>
-                      )
-
-                      if (nextgenComposerEnabled) {
-                        const sharedNoticesSlot = (
-                          <>
-                            {composerInlineMessagesNode}
-                            {composerNoticesNode}
-                          </>
+                        const composerNoticesNode = (
+                          <PlaygroundComposerNotices
+                            modeAnnouncement={modeAnnouncement}
+                            characterPendingApply={characterPendingApply}
+                            selectedCharacterGreeting={
+                              selectedCharacterGreeting
+                            }
+                            selectedCharacterName={
+                              selectedCharacter?.name || null
+                            }
+                            compareModeActive={compareModeActive}
+                            compareSelectedModels={compareSelectedModels}
+                            compareSelectedModelLabels={
+                              compareSelectedModelLabels
+                            }
+                            compareNeedsMoreModels={compareNeedsMoreModels}
+                            compareSharedContextLabels={
+                              compareSharedContextLabels
+                            }
+                            compareInteroperabilityNotices={
+                              compareInteroperabilityNotices
+                            }
+                            noticesExpanded={noticesExpanded}
+                            setNoticesExpanded={setNoticesExpanded}
+                            contextDeltaLabels={contextDeltaLabels}
+                            contextConflictWarnings={contextConflictWarnings}
+                            visibleModelRecommendations={
+                              visibleModelRecommendations
+                            }
+                            sessionInsightsTotalTokens={
+                              sessionInsights.totals.totalTokens
+                            }
+                            jsonMode={Boolean(
+                              currentChatModelSettings.jsonMode
+                            )}
+                            isConnectionReady={isConnectionReady}
+                            connectionUxState={connectionUxState}
+                            isProMode={isProMode}
+                            selectedModel={selectedModel}
+                            systemPrompt={systemPrompt}
+                            selectedCharacter={selectedCharacter}
+                            ragPinnedResultsLength={ragPinnedResults.length}
+                            startupTemplateDraftName={startupTemplateDraftName}
+                            setStartupTemplateDraftName={
+                              setStartupTemplateDraftName
+                            }
+                            startupTemplates={startupTemplates}
+                            handleSaveStartupTemplate={
+                              handleSaveStartupTemplate
+                            }
+                            handleOpenStartupTemplatePreview={
+                              handleOpenStartupTemplatePreview
+                            }
+                            setOpenModelSettings={setOpenModelSettings}
+                            setOpenActorSettings={setOpenActorSettings}
+                            setMessageValue={setMessageValue}
+                            textAreaFocus={textAreaFocus}
+                            openModelApiSelector={openModelApiSelector}
+                            openSessionInsightsModal={openSessionInsightsModal}
+                            handleModelRecommendationAction={
+                              handleModelRecommendationAction
+                            }
+                            dismissModelRecommendation={
+                              dismissModelRecommendation
+                            }
+                            getModelRecommendationActionLabel={
+                              getModelRecommendationActionLabel
+                            }
+                            wrapComposerProfile={wrapComposerProfile}
+                            t={t}
+                          />
                         )
-                        const tokensProp =
-                          resolvedMaxContext > 0
-                            ? {
-                                used: conversationTokenCount,
-                                max: resolvedMaxContext,
-                              }
-                            : undefined
 
-                        // V3 brief panel + V5 facet row data sourced from the
-                        // same Playground state the legacy composer reads.
-                        // Click handlers route to the same actions the
-                        // legacy toolbar exposes — model picker, character
-                        // sheet, knowledge panel, web-search toggle.
-                        const briefFields: Array<{
-                          id: string
-                          fieldKey: string
-                          value: string
-                          active?: boolean
-                          onClick?: () => void
-                          "aria-label"?: string
-                        }> = [
-                          {
-                            id: "model",
-                            fieldKey: "mdl",
-                            value: selectedModel || "—",
-                            active: Boolean(selectedModel),
-                            onClick: handleOpenModelSettings,
-                            "aria-label": selectedModel
-                              ? `Change model (current: ${selectedModel})`
-                              : "Pick a model",
-                          },
-                          {
-                            id: "character",
-                            fieldKey: "chr",
-                            value: selectedCharacter?.name || "—",
-                            active: Boolean(selectedCharacter?.name),
-                            onClick: () => setOpenActorSettings(true),
-                            "aria-label": selectedCharacter?.name
-                              ? `Change character (current: ${selectedCharacter.name})`
-                              : "Pick a character",
-                          },
-                          {
-                            id: "sources",
-                            fieldKey: "src",
-                            value: String(
-                              selectedDocuments.length + uploadedFiles.length
-                            ),
-                            active:
-                              selectedDocuments.length + uploadedFiles.length > 0,
-                            onClick: () => toggleKnowledgePanel(),
-                            "aria-label": "Open knowledge panel",
-                          },
-                          {
-                            id: "web",
-                            fieldKey: "web",
-                            value: webSearch ? "on" : "off",
-                            active: webSearch,
-                            onClick: handleToggleWebSearch,
-                            "aria-label": webSearch
-                              ? "Turn web search off"
-                              : "Turn web search on",
-                          },
-                        ]
-                        const briefSections = [
-                          { id: "playground-brief", label: "Brief", fields: briefFields },
-                        ]
-
-                        const variantNode =
-                          nextgenComposerVariant === "v5" ? (
-                            <ChatComposer
-                              variant="v5"
-                              message={form.values.message}
-                              onMessageChange={(value) =>
-                                form.setFieldValue("message", value)
-                              }
-                              onSend={() => submitForm()}
-                              sending={isSending}
-                              stopStreaming={stopStreamingRequest}
-                              tokens={tokensProp}
-                              onPaletteTrigger={() => {
-                                // V5 design: ⌘K injects `/` into the
-                                // textarea, opening the existing
-                                // ComposerTextarea slash menu instead
-                                // of a separate palette surface.
-                                const current = form.values.message
-                                form.setFieldValue(
-                                  "message",
-                                  current.endsWith("/") ? current : `${current}/`
-                                )
-                                textareaRef.current?.focus()
-                              }}
-                              textareaSlot={composerTextareaNode}
-                              facetsSlot={composerToolbarNode}
-                              noticesSlot={sharedNoticesSlot}
-                            />
-                          ) : nextgenComposerVariant === "v3" ? (
-                            <ChatComposer
-                              variant="v3"
-                              message={form.values.message}
-                              onMessageChange={(value) =>
-                                form.setFieldValue("message", value)
-                              }
-                              onSend={() => submitForm()}
-                              sending={isSending}
-                              stopStreaming={stopStreamingRequest}
-                              tokens={tokensProp}
-                              briefSections={briefSections}
-                              textareaSlot={composerTextareaNode}
-                              bottomBarSlot={composerToolbarNode}
-                              noticesSlot={sharedNoticesSlot}
-                            />
-                          ) : (
-                            <ChatComposer
-                              variant="v1"
-                              message={form.values.message}
-                              onMessageChange={(value) =>
-                                form.setFieldValue("message", value)
-                              }
-                              onSend={() => submitForm()}
-                              sending={isSending}
-                              stopStreaming={stopStreamingRequest}
-                              tokens={tokensProp}
-                              textareaSlot={composerTextareaNode}
-                              bottomBarSlot={composerToolbarNode}
-                              noticesSlot={sharedNoticesSlot}
-                            />
-                          )
-
-                        return (
-                          <div data-testid="nextgen-composer-wrapper">
-                            {variantNode}
+                        const composerToolbarNode = (
+                          <div
+                            id="composer-options-panel"
+                            aria-hidden={!actionBarVisible}
+                            className={`w-full transition-all duration-200 overflow-hidden ${actionBarVisibilityClass}`}>
+                            {wrapComposerProfile(
+                              "composer-toolbar",
+                              <ComposerToolbar
+                                isProMode={isProMode}
+                                isMobile={isMobileViewport}
+                                isConnectionReady={isConnectionReady}
+                                isSending={isSending}
+                                optionsExpanded={composerOptionsExpanded}
+                                modeLauncherButton={modeLauncherButton}
+                                compareControl={compareControl}
+                                modelSelectButton={modelSelectButton}
+                                mcpControl={mcpControl}
+                                sendControl={sendControl}
+                                sendControlPlacement="external"
+                                attachmentButton={attachmentButton}
+                                toolsButton={toolsButton}
+                                voiceChatButton={voiceChatButton}
+                                modelUsageBadge={modelUsageBadge}
+                                selectedSystemPrompt={selectedSystemPrompt}
+                                systemPrompt={systemPrompt}
+                                setSystemPrompt={setSystemPrompt}
+                                setSelectedSystemPrompt={
+                                  setSelectedSystemPrompt
+                                }
+                                setSelectedQuickPrompt={setSelectedQuickPrompt}
+                                temporaryChat={temporaryChat}
+                                onToggleTemporaryChat={
+                                  handleToggleTemporaryChat
+                                }
+                                privateChatLocked={privateChatLocked}
+                                isFireFoxPrivateMode={isFireFoxPrivateMode}
+                                persistenceTooltip={persistenceTooltip}
+                                contextToolsOpen={contextToolsOpen}
+                                onToggleKnowledgePanel={toggleKnowledgePanel}
+                                webSearch={webSearch}
+                                onToggleWebSearch={handleToggleWebSearch}
+                                hasWebSearch={!!capabilities?.hasWebSearch}
+                                onOpenModelSettings={handleOpenModelSettings}
+                                modelSummaryLabel={modelSummaryLabel}
+                                promptSummaryLabel={promptSummaryLabel}
+                                hasDictation={
+                                  !!(
+                                    browserSupportsSpeechRecognition ||
+                                    hasServerStt
+                                  )
+                                }
+                                speechAvailable={speechAvailable}
+                                speechUsesServer={speechUsesServer}
+                                isListening={isListening}
+                                isServerDictating={isServerDictating}
+                                voiceChatEnabled={voiceChatEnabled}
+                                speechTooltip={speechTooltipText}
+                                onDictationToggle={handleDictationToggle}
+                                onTemplateSelect={handleTemplateSelect}
+                                selectedModel={selectedModel}
+                                resolvedProviderKey={resolvedProviderKey}
+                                messages={messages}
+                                selectedDocumentsCount={
+                                  selectedDocuments.length
+                                }
+                                uploadedFilesCount={uploadedFiles.length}
+                                serverChatId={serverChatId}
+                                showServerPersistenceHint={
+                                  showServerPersistenceHint
+                                }
+                                onDismissServerPersistenceHint={
+                                  handleDismissServerPersistenceHint
+                                }
+                                onFocusConnectionCard={focusConnectionCard}
+                                contextItems={contextItems}
+                              />
+                            )}
                           </div>
                         )
-                      }
 
-                      return (
-                        <>
-                          {composerTextareaNode}
-                          {composerInlineMessagesNode}
-                          {composerNoticesNode}
-                          {composerToolbarNode}
-                        </>
-                      )
-                    })()}
-                    {showConnectBanner && !isConnectionReady && (
-                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
-                        <p className="max-w-xs text-left">
-                          {t(
-                            "playground:composer.connectNotice",
-                            "Connect to your tldw server in Settings to send messages."
-                          )}
-                        </p>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Link
-                            to="/settings/tldw"
-                            className="text-xs font-medium text-warn underline hover:text-warn"
-                          >
-                            {t("settings:tldw.setupLink", "Set up server")}
-                          </Link>
-                          <Link
-                            to="/settings/health"
-                            className="text-xs font-medium text-warn underline hover:text-warn"
-                          >
+                        if (nextgenComposerEnabled) {
+                          const sharedNoticesSlot = (
+                            <>
+                              {composerInlineMessagesNode}
+                              {composerNoticesNode}
+                            </>
+                          )
+                          const tokensProp =
+                            resolvedMaxContext > 0
+                              ? {
+                                  used: conversationTokenCount,
+                                  max: resolvedMaxContext
+                                }
+                              : undefined
+
+                          // V3 brief panel + V5 facet row data sourced from the
+                          // same Playground state the legacy composer reads.
+                          // Click handlers route to the same actions the
+                          // legacy toolbar exposes — model picker, character
+                          // sheet, knowledge panel, web-search toggle.
+                          const briefFields: Array<{
+                            id: string
+                            fieldKey: string
+                            value: string
+                            active?: boolean
+                            onClick?: () => void
+                            "aria-label"?: string
+                          }> = [
+                            {
+                              id: "model",
+                              fieldKey: "mdl",
+                              value: selectedModel || "—",
+                              active: Boolean(selectedModel),
+                              onClick: handleOpenModelSettings,
+                              "aria-label": selectedModel
+                                ? `Change model (current: ${selectedModel})`
+                                : "Pick a model"
+                            },
+                            {
+                              id: "character",
+                              fieldKey: "chr",
+                              value: selectedCharacter?.name || "—",
+                              active: Boolean(selectedCharacter?.name),
+                              onClick: () => setOpenActorSettings(true),
+                              "aria-label": selectedCharacter?.name
+                                ? `Change character (current: ${selectedCharacter.name})`
+                                : "Pick a character"
+                            },
+                            {
+                              id: "sources",
+                              fieldKey: "src",
+                              value: String(
+                                selectedDocuments.length + uploadedFiles.length
+                              ),
+                              active:
+                                selectedDocuments.length +
+                                  uploadedFiles.length >
+                                0,
+                              onClick: () => toggleKnowledgePanel(),
+                              "aria-label": "Open knowledge panel"
+                            },
+                            {
+                              id: "web",
+                              fieldKey: "web",
+                              value: webSearch ? "on" : "off",
+                              active: webSearch,
+                              onClick: handleToggleWebSearch,
+                              "aria-label": webSearch
+                                ? "Turn web search off"
+                                : "Turn web search on"
+                            }
+                          ]
+                          const briefSections = [
+                            {
+                              id: "playground-brief",
+                              label: "Brief",
+                              fields: briefFields
+                            }
+                          ]
+
+                          const variantNode =
+                            nextgenComposerVariant === "v5" ? (
+                              <ChatComposer
+                                variant="v5"
+                                message={form.values.message}
+                                onMessageChange={(value) =>
+                                  form.setFieldValue("message", value)
+                                }
+                                onSend={() => submitForm()}
+                                sending={isSending}
+                                stopStreaming={stopStreamingRequest}
+                                tokens={tokensProp}
+                                onPaletteTrigger={() => {
+                                  // V5 design: ⌘K injects `/` into the
+                                  // textarea, opening the existing
+                                  // ComposerTextarea slash menu instead
+                                  // of a separate palette surface.
+                                  const current = form.values.message
+                                  form.setFieldValue(
+                                    "message",
+                                    current.endsWith("/")
+                                      ? current
+                                      : `${current}/`
+                                  )
+                                  textareaRef.current?.focus()
+                                }}
+                                textareaSlot={composerTextareaNode}
+                                facetsSlot={composerToolbarNode}
+                                noticesSlot={sharedNoticesSlot}
+                              />
+                            ) : nextgenComposerVariant === "v3" ? (
+                              <ChatComposer
+                                variant="v3"
+                                message={form.values.message}
+                                onMessageChange={(value) =>
+                                  form.setFieldValue("message", value)
+                                }
+                                onSend={() => submitForm()}
+                                sending={isSending}
+                                stopStreaming={stopStreamingRequest}
+                                tokens={tokensProp}
+                                briefSections={briefSections}
+                                textareaSlot={composerTextareaNode}
+                                bottomBarSlot={composerToolbarNode}
+                                noticesSlot={sharedNoticesSlot}
+                              />
+                            ) : (
+                              <ChatComposer
+                                variant="v1"
+                                message={form.values.message}
+                                onMessageChange={(value) =>
+                                  form.setFieldValue("message", value)
+                                }
+                                onSend={() => submitForm()}
+                                sending={isSending}
+                                stopStreaming={stopStreamingRequest}
+                                tokens={tokensProp}
+                                textareaSlot={composerTextareaNode}
+                                bottomBarSlot={composerToolbarNode}
+                                noticesSlot={sharedNoticesSlot}
+                              />
+                            )
+
+                          return (
+                            <div data-testid="nextgen-composer-wrapper">
+                              {variantNode}
+                            </div>
+                          )
+                        }
+
+                        return (
+                          <>
+                            {composerTextareaNode}
+                            {composerInlineMessagesNode}
+                            {composerNoticesNode}
+                            {composerToolbarNode}
+                          </>
+                        )
+                      })()}
+                      {showConnectBanner && !isConnectionReady && (
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
+                          <p className="max-w-xs text-left">
                             {t(
-                              "settings:healthSummary.diagnostics",
-                              "Health & diagnostics"
+                              "playground:composer.connectNotice",
+                              "Connect to your tldw server in Settings to send messages."
                             )}
-                          </Link>
-                          <button
-                            type="button"
-                            onClick={() => setShowConnectBanner(false)}
-                            className="inline-flex items-center rounded-full p-1 text-warn hover:bg-warn/10"
-                            aria-label={t("common:close", "Dismiss")}
-                            title={t("common:close", "Dismiss") as string}
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Link
+                              to="/settings/tldw"
+                              className="text-xs font-medium text-warn underline hover:text-warn">
+                              {t("settings:tldw.setupLink", "Set up server")}
+                            </Link>
+                            <Link
+                              to="/settings/health"
+                              className="text-xs font-medium text-warn underline hover:text-warn">
+                              {t(
+                                "settings:healthSummary.diagnostics",
+                                "Health & diagnostics"
+                              )}
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={() => setShowConnectBanner(false)}
+                              className="inline-flex items-center rounded-full p-1 text-warn hover:bg-warn/10"
+                              aria-label={t("common:close", "Dismiss")}
+                              title={t("common:close", "Dismiss") as string}>
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    <ChatQueuePanel
-                      queue={queuedMessages}
-                      isConnectionReady={isConnectionReady}
-                      isStreaming={isSending}
-                      onRunNext={handleRunNextQueuedRequest}
-                      onRunNow={handleRunQueuedRequest}
-                      onDelete={queuedRequestActions.remove}
-                      onMove={queuedRequestActions.move}
-                      onUpdate={queuedRequestActions.update}
-                      onClearAll={queuedRequestActions.clear}
-                      onOpenDiagnostics={() => navigate("/settings/health")}
-                      forceRunDisabledReason={cancelCurrentAndRunDisabledReason}
-                    />
-                  </div>
-                </form>
+                      )}
+                      <ChatQueuePanel
+                        queue={queuedMessages}
+                        isConnectionReady={isConnectionReady}
+                        isStreaming={isSending}
+                        onRunNext={handleRunNextQueuedRequest}
+                        onRunNow={handleRunQueuedRequest}
+                        onDelete={queuedRequestActions.remove}
+                        onMove={queuedRequestActions.move}
+                        onUpdate={queuedRequestActions.update}
+                        onClearAll={queuedRequestActions.clear}
+                        onOpenDiagnostics={() => navigate("/settings/health")}
+                        forceRunDisabledReason={
+                          cancelCurrentAndRunDisabledReason
+                        }
+                      />
+                    </div>
+                  </form>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
-      {imageGenerateModalOpen && (
-        <React.Suspense fallback={null}>
-          <LazyPlaygroundImageGenModal
-            open={imageGenerateModalOpen}
-            onClose={closeImageGenerateModal}
-            busy={imageGenerateBusy}
-            backend={imageGenerateBackend}
-            backendOptions={imageGenerateBackendOptions}
-            onBackendChange={setImageGenerateBackend}
-            onHydrateSettings={hydrateImageGenerateSettings}
-            promptMode={imageGeneratePromptMode}
-            onPromptModeChange={setImageGeneratePromptMode}
-            promptStrategies={imagePromptStrategies}
-            syncPolicy={imageGenerateSyncPolicy}
-            onSyncPolicyChange={setImageGenerateSyncPolicy}
-            syncChatMode={imageEventSyncChatMode}
-            onSyncChatModeChange={(next) =>
-              void updateChatSettings({ imageEventSyncMode: next })
-            }
-            syncGlobalDefault={imageEventSyncGlobalDefault}
-            onSyncGlobalDefaultChange={(next) =>
-              void setImageEventSyncGlobalDefault(next)
-            }
-            resolvedSyncMode={imageGenerateResolvedSyncMode}
-            prompt={imageGeneratePrompt}
-            onPromptChange={setImageGeneratePrompt}
-            contextBreakdown={imagePromptContextBreakdown}
-            onClearRefineState={clearImagePromptRefineState}
-            refineSubmitting={imagePromptRefineSubmitting}
-            refineBaseline={imagePromptRefineBaseline}
-            refineCandidate={imagePromptRefineCandidate}
-            refineModel={imagePromptRefineModel}
-            refineLatencyMs={imagePromptRefineLatencyMs}
-            refineDiff={imagePromptRefineDiff}
-            onCreateDraft={handleCreateImagePromptDraft}
-            onRefine={handleRefineImagePromptDraft}
-            onApplyRefined={applyRefinedImagePromptCandidate}
-            onRejectRefined={rejectRefinedImagePromptCandidate}
-            format={imageGenerateFormat}
-            onFormatChange={setImageGenerateFormat}
-            width={imageGenerateWidth}
-            onWidthChange={setImageGenerateWidth}
-            height={imageGenerateHeight}
-            onHeightChange={setImageGenerateHeight}
-            steps={imageGenerateSteps}
-            onStepsChange={setImageGenerateSteps}
-            cfgScale={imageGenerateCfgScale}
-            onCfgScaleChange={setImageGenerateCfgScale}
-            seed={imageGenerateSeed}
-            onSeedChange={setImageGenerateSeed}
-            sampler={imageGenerateSampler}
-            onSamplerChange={setImageGenerateSampler}
-            model={imageGenerateModel}
-            onModelChange={setImageGenerateModel}
-            negativePrompt={imageGenerateNegativePrompt}
-            onNegativePromptChange={setImageGenerateNegativePrompt}
-            extraParams={imageGenerateExtraParams}
-            onExtraParamsChange={setImageGenerateExtraParams}
-            referenceFileId={imageGenerateReferenceFileId}
-            onReferenceFileIdChange={setImageGenerateReferenceFileId}
-            referenceImageCandidates={referenceImageCandidates}
-            referenceImageCandidatesLoading={referenceImageCandidatesLoading}
-            submitting={imageGenerateSubmitting}
-            onSubmit={submitImageGenerateModal}
-            t={t}
-          />
-        </React.Suspense>
-      )}
-      <Modal
-        open={followUpResearchModalOpen}
-        onCancel={closeFollowUpResearchModal}
-        destroyOnHidden
-        title={t(
-          "playground:actions.followUpResearch",
-          "Follow-up Research"
-        )}
-        footer={
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button
-              onClick={closeFollowUpResearchModal}
-              disabled={followUpResearchPending}
-            >
-              {t("common:cancel", "Cancel")}
-            </Button>
-            <Button
-              type="primary"
-              onClick={() => {
-                void handleStartFollowUpResearch()
-              }}
-              disabled={!canLaunchFollowUpResearch || followUpResearchPending}
-              loading={followUpResearchPending}
-            >
-              {t("playground:actions.startResearch", "Start research")}
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-3">
-          <p className="text-sm text-text-muted">
-            {t(
-              "playground:actions.followUpResearchBody",
-              "Start a new linked research run from the current draft without sending a chat message."
-            )}
-          </p>
-          <div className="rounded-md border border-border bg-surface px-3 py-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-              {t("playground:actions.followUpResearchQuery", "Query")}
-            </div>
-            <div className="mt-1 text-sm text-text">
-              {followUpResearchDraftQuery}
-            </div>
-          </div>
-          {attachedResearchContext ? (
-            <Checkbox
-              checked={includeAttachedResearchAsBackground}
-              onChange={(event) =>
-                setIncludeAttachedResearchAsBackground(event.target.checked)
+        {imageGenerateModalOpen && (
+          <React.Suspense fallback={null}>
+            <LazyPlaygroundImageGenModal
+              open={imageGenerateModalOpen}
+              onClose={closeImageGenerateModal}
+              busy={imageGenerateBusy}
+              backend={imageGenerateBackend}
+              backendOptions={imageGenerateBackendOptions}
+              onBackendChange={setImageGenerateBackend}
+              onHydrateSettings={hydrateImageGenerateSettings}
+              promptMode={imageGeneratePromptMode}
+              onPromptModeChange={setImageGeneratePromptMode}
+              promptStrategies={imagePromptStrategies}
+              syncPolicy={imageGenerateSyncPolicy}
+              onSyncPolicyChange={setImageGenerateSyncPolicy}
+              syncChatMode={imageEventSyncChatMode}
+              onSyncChatModeChange={(next) =>
+                void updateChatSettings({ imageEventSyncMode: next })
               }
-              disabled={followUpResearchPending}
-            >
+              syncGlobalDefault={imageEventSyncGlobalDefault}
+              onSyncGlobalDefaultChange={(next) =>
+                void setImageEventSyncGlobalDefault(next)
+              }
+              resolvedSyncMode={imageGenerateResolvedSyncMode}
+              prompt={imageGeneratePrompt}
+              onPromptChange={setImageGeneratePrompt}
+              contextBreakdown={imagePromptContextBreakdown}
+              onClearRefineState={clearImagePromptRefineState}
+              refineSubmitting={imagePromptRefineSubmitting}
+              refineBaseline={imagePromptRefineBaseline}
+              refineCandidate={imagePromptRefineCandidate}
+              refineModel={imagePromptRefineModel}
+              refineLatencyMs={imagePromptRefineLatencyMs}
+              refineDiff={imagePromptRefineDiff}
+              onCreateDraft={handleCreateImagePromptDraft}
+              onRefine={handleRefineImagePromptDraft}
+              onApplyRefined={applyRefinedImagePromptCandidate}
+              onRejectRefined={rejectRefinedImagePromptCandidate}
+              format={imageGenerateFormat}
+              onFormatChange={setImageGenerateFormat}
+              width={imageGenerateWidth}
+              onWidthChange={setImageGenerateWidth}
+              height={imageGenerateHeight}
+              onHeightChange={setImageGenerateHeight}
+              steps={imageGenerateSteps}
+              onStepsChange={setImageGenerateSteps}
+              cfgScale={imageGenerateCfgScale}
+              onCfgScaleChange={setImageGenerateCfgScale}
+              seed={imageGenerateSeed}
+              onSeedChange={setImageGenerateSeed}
+              sampler={imageGenerateSampler}
+              onSamplerChange={setImageGenerateSampler}
+              model={imageGenerateModel}
+              onModelChange={setImageGenerateModel}
+              negativePrompt={imageGenerateNegativePrompt}
+              onNegativePromptChange={setImageGenerateNegativePrompt}
+              extraParams={imageGenerateExtraParams}
+              onExtraParamsChange={setImageGenerateExtraParams}
+              referenceFileId={imageGenerateReferenceFileId}
+              onReferenceFileIdChange={setImageGenerateReferenceFileId}
+              referenceImageCandidates={referenceImageCandidates}
+              referenceImageCandidatesLoading={referenceImageCandidatesLoading}
+              submitting={imageGenerateSubmitting}
+              onSubmit={submitImageGenerateModal}
+              t={t}
+            />
+          </React.Suspense>
+        )}
+        <Modal
+          open={followUpResearchModalOpen}
+          onCancel={closeFollowUpResearchModal}
+          destroyOnHidden
+          title={t("playground:actions.followUpResearch", "Follow-up Research")}
+          footer={
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                onClick={closeFollowUpResearchModal}
+                disabled={followUpResearchPending}>
+                {t("common:cancel", "Cancel")}
+              </Button>
+              <Button
+                type="primary"
+                onClick={() => {
+                  void handleStartFollowUpResearch()
+                }}
+                disabled={!canLaunchFollowUpResearch || followUpResearchPending}
+                loading={followUpResearchPending}>
+                {t("playground:actions.startResearch", "Start research")}
+              </Button>
+            </div>
+          }>
+          <div className="space-y-3">
+            <p className="text-sm text-text-muted">
               {t(
-                "playground:actions.followUpResearchUseAttachedBackground",
-                "Use attached research as background"
+                "playground:actions.followUpResearchBody",
+                "Start a new linked research run from the current draft without sending a chat message."
               )}
-            </Checkbox>
-          ) : null}
-        </div>
-      </Modal>
-      {rawRequestModalOpen && (
-        <React.Suspense fallback={null}>
-          <LazyPlaygroundRawRequestModal
-            open={rawRequestModalOpen}
-            onClose={() => setRawRequestModalOpen(false)}
-            snapshot={rawRequestSnapshot}
-            json={rawRequestJson}
-            onRefresh={refreshRawRequestSnapshot}
-            onCopy={copyRawRequestJson}
-            extraFooter={rawRequestModalFooterExtras}
-            beforeJson={rawRequestAttachedResearchPanel}
-            t={t}
+            </p>
+            <div className="rounded-md border border-border bg-surface px-3 py-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                {t("playground:actions.followUpResearchQuery", "Query")}
+              </div>
+              <div className="mt-1 text-sm text-text">
+                {followUpResearchDraftQuery}
+              </div>
+            </div>
+            {attachedResearchContext ? (
+              <Checkbox
+                checked={includeAttachedResearchAsBackground}
+                onChange={(event) =>
+                  setIncludeAttachedResearchAsBackground(event.target.checked)
+                }
+                disabled={followUpResearchPending}>
+                {t(
+                  "playground:actions.followUpResearchUseAttachedBackground",
+                  "Use attached research as background"
+                )}
+              </Checkbox>
+            ) : null}
+          </div>
+        </Modal>
+        {rawRequestModalOpen && (
+          <React.Suspense fallback={null}>
+            <LazyPlaygroundRawRequestModal
+              open={rawRequestModalOpen}
+              onClose={() => setRawRequestModalOpen(false)}
+              snapshot={rawRequestSnapshot}
+              json={rawRequestJson}
+              onRefresh={refreshRawRequestSnapshot}
+              onCopy={copyRawRequestJson}
+              extraFooter={rawRequestModalFooterExtras}
+              beforeJson={rawRequestAttachedResearchPanel}
+              t={t}
+            />
+          </React.Suspense>
+        )}
+        {startupTemplatePreview && (
+          <React.Suspense fallback={null}>
+            <LazyPlaygroundStartupTemplateModal
+              preview={startupTemplatePreview}
+              onClose={() => setStartupTemplatePreview(null)}
+              onDelete={handleDeleteStartupTemplate}
+              onApply={handleApplyStartupTemplate}
+              promptDescription={startupTemplatePromptDescription}
+              promptResolution={startupTemplatePromptResolution}
+              preset={startupTemplatePreset}
+              t={t}
+            />
+          </React.Suspense>
+        )}
+        {(contextWindowModalOpen || sessionInsightsOpen) && (
+          <React.Suspense fallback={null}>
+            <LazyPlaygroundContextWindowModal
+              contextWindowModalOpen={contextWindowModalOpen}
+              onCloseContextWindow={() => setContextWindowModalOpen(false)}
+              onSaveContextWindow={saveContextWindowSetting}
+              onResetContextWindow={resetContextWindowSetting}
+              contextWindowDraftValue={contextWindowDraftValue}
+              onContextWindowDraftChange={setContextWindowDraftValue}
+              resolvedMaxContext={resolvedMaxContext}
+              requestedContextWindowOverride={requestedContextWindowOverride}
+              modelContextLength={modelContextLength}
+              isContextWindowOverrideActive={isContextWindowOverrideActive}
+              isContextWindowOverrideClamped={isContextWindowOverrideClamped}
+              nonMessageContextPercent={nonMessageContextPercent}
+              showNonMessageContextWarning={showNonMessageContextWarning}
+              tokenBudgetRiskLabel={tokenBudgetRiskLabel}
+              tokenBudgetRisk={tokenBudgetRisk}
+              contextFootprintRows={contextFootprintRows}
+              formatContextWindowValue={formatContextWindowValue}
+              onClearPromptContext={clearPromptContext}
+              onClearPinnedSourceContext={clearPinnedSourceContext}
+              onClearHistoryContext={clearHistoryContext}
+              onCreateSummaryCheckpoint={insertSummaryCheckpointPrompt}
+              onReviewCharacterContext={() => setOpenActorSettings(true)}
+              onTrimLargestContextContributor={trimLargestContextContributor}
+              sessionInsightsOpen={sessionInsightsOpen}
+              onCloseSessionInsights={() => setSessionInsightsOpen(false)}
+              sessionInsights={sessionInsights}
+              t={t}
+            />
+          </React.Suspense>
+        )}
+        {mcpSettingsOpen && (
+          <React.Suspense fallback={null}>
+            <LazyPlaygroundMcpSettingsModal
+              open={mcpSettingsOpen}
+              onClose={() => setMcpSettingsOpen(false)}
+              hasMcp={hasMcp}
+              mcpStatusLabel={mcpCtrl.mcpStatusLabel}
+              catalogsLoading={mcpCatalogsLoading}
+              catalogGroups={mcpCtrl.catalogGroups}
+              catalogDraft={mcpCtrl.catalogDraft}
+              onCatalogDraftChange={mcpCtrl.setCatalogDraft}
+              onCatalogCommit={mcpCtrl.commitCatalog}
+              onCatalogSelect={mcpCtrl.handleCatalogSelect}
+              toolCatalogId={toolCatalogId}
+              onToolCatalogIdChange={setToolCatalogId}
+              toolCatalogStrict={toolCatalogStrict}
+              onToolCatalogStrictChange={setToolCatalogStrict}
+              moduleOptions={moduleOptions}
+              moduleOptionsLoading={moduleOptionsLoading}
+              toolModules={toolModules}
+              onModuleSelect={handleModuleSelect}
+              isSmallModel={isSmallModel}
+              t={t}
+            />
+          </React.Suspense>
+        )}
+        {openModelSettings && (
+          <React.Suspense fallback={null}>
+            <LazyCurrentChatModelSettings
+              open={openModelSettings}
+              setOpen={setOpenModelSettings}
+              isOCREnabled={useOCR}
+            />
+          </React.Suspense>
+        )}
+        {openActorSettings && (
+          <React.Suspense fallback={null}>
+            <LazyActorPopout
+              open={openActorSettings}
+              setOpen={setOpenActorSettings}
+            />
+          </React.Suspense>
+        )}
+        {documentGeneratorOpen && (
+          <React.Suspense fallback={null}>
+            <LazyDocumentGeneratorDrawer
+              open={documentGeneratorOpen}
+              onClose={() => {
+                setDocumentGeneratorOpen(false)
+                setDocumentGeneratorSeed({})
+              }}
+              conversationId={
+                documentGeneratorSeed?.conversationId ?? serverChatId ?? null
+              }
+              defaultModel={selectedModel || null}
+              seedMessage={documentGeneratorSeed?.message ?? null}
+              seedMessageId={documentGeneratorSeed?.messageId ?? null}
+            />
+          </React.Suspense>
+        )}
+        {voiceChatEnabled && voiceChat.state !== "idle" && (
+          <VoiceChatIndicator
+            state={voiceChat.state}
+            statusLabel={voiceChatStatusLabel}
+            onStop={handleVoiceChatToggle}
           />
-        </React.Suspense>
-      )}
-      {startupTemplatePreview && (
-        <React.Suspense fallback={null}>
-          <LazyPlaygroundStartupTemplateModal
-            preview={startupTemplatePreview}
-            onClose={() => setStartupTemplatePreview(null)}
-            onDelete={handleDeleteStartupTemplate}
-            onApply={handleApplyStartupTemplate}
-            promptDescription={startupTemplatePromptDescription}
-            promptResolution={startupTemplatePromptResolution}
-            preset={startupTemplatePreset}
-            t={t}
-          />
-        </React.Suspense>
-      )}
-      {(contextWindowModalOpen || sessionInsightsOpen) && (
-        <React.Suspense fallback={null}>
-          <LazyPlaygroundContextWindowModal
-            contextWindowModalOpen={contextWindowModalOpen}
-            onCloseContextWindow={() => setContextWindowModalOpen(false)}
-            onSaveContextWindow={saveContextWindowSetting}
-            onResetContextWindow={resetContextWindowSetting}
-            contextWindowDraftValue={contextWindowDraftValue}
-            onContextWindowDraftChange={setContextWindowDraftValue}
-            resolvedMaxContext={resolvedMaxContext}
-            requestedContextWindowOverride={requestedContextWindowOverride}
-            modelContextLength={modelContextLength}
-            isContextWindowOverrideActive={isContextWindowOverrideActive}
-            isContextWindowOverrideClamped={isContextWindowOverrideClamped}
-            nonMessageContextPercent={nonMessageContextPercent}
-            showNonMessageContextWarning={showNonMessageContextWarning}
-            tokenBudgetRiskLabel={tokenBudgetRiskLabel}
-            tokenBudgetRisk={tokenBudgetRisk}
-            contextFootprintRows={contextFootprintRows}
-            formatContextWindowValue={formatContextWindowValue}
-            onClearPromptContext={clearPromptContext}
-            onClearPinnedSourceContext={clearPinnedSourceContext}
-            onClearHistoryContext={clearHistoryContext}
-            onCreateSummaryCheckpoint={insertSummaryCheckpointPrompt}
-            onReviewCharacterContext={() => setOpenActorSettings(true)}
-            onTrimLargestContextContributor={trimLargestContextContributor}
-            sessionInsightsOpen={sessionInsightsOpen}
-            onCloseSessionInsights={() => setSessionInsightsOpen(false)}
-            sessionInsights={sessionInsights}
-            t={t}
-          />
-        </React.Suspense>
-      )}
-      {mcpSettingsOpen && (
-        <React.Suspense fallback={null}>
-          <LazyPlaygroundMcpSettingsModal
-            open={mcpSettingsOpen}
-            onClose={() => setMcpSettingsOpen(false)}
-            hasMcp={hasMcp}
-            mcpStatusLabel={mcpCtrl.mcpStatusLabel}
-            catalogsLoading={mcpCatalogsLoading}
-            catalogGroups={mcpCtrl.catalogGroups}
-            catalogDraft={mcpCtrl.catalogDraft}
-            onCatalogDraftChange={mcpCtrl.setCatalogDraft}
-            onCatalogCommit={mcpCtrl.commitCatalog}
-            onCatalogSelect={mcpCtrl.handleCatalogSelect}
-            toolCatalogId={toolCatalogId}
-            onToolCatalogIdChange={setToolCatalogId}
-            toolCatalogStrict={toolCatalogStrict}
-            onToolCatalogStrictChange={setToolCatalogStrict}
-            moduleOptions={moduleOptions}
-            moduleOptionsLoading={moduleOptionsLoading}
-            toolModules={toolModules}
-            onModuleSelect={handleModuleSelect}
-            isSmallModel={isSmallModel}
-            t={t}
-          />
-        </React.Suspense>
-      )}
-      {openModelSettings && (
-        <React.Suspense fallback={null}>
-          <LazyCurrentChatModelSettings
-            open={openModelSettings}
-            setOpen={setOpenModelSettings}
-            isOCREnabled={useOCR}
-          />
-        </React.Suspense>
-      )}
-      {openActorSettings && (
-        <React.Suspense fallback={null}>
-          <LazyActorPopout
-            open={openActorSettings}
-            setOpen={setOpenActorSettings}
-          />
-        </React.Suspense>
-      )}
-      {documentGeneratorOpen && (
-        <React.Suspense fallback={null}>
-          <LazyDocumentGeneratorDrawer
-            open={documentGeneratorOpen}
-            onClose={() => {
-              setDocumentGeneratorOpen(false)
-              setDocumentGeneratorSeed({})
-            }}
-            conversationId={
-              documentGeneratorSeed?.conversationId ?? serverChatId ?? null
-            }
-            defaultModel={selectedModel || null}
-            seedMessage={documentGeneratorSeed?.message ?? null}
-            seedMessageId={documentGeneratorSeed?.messageId ?? null}
-          />
-        </React.Suspense>
-      )}
-      {voiceChatEnabled && voiceChat.state !== "idle" && (
-        <VoiceChatIndicator
-          state={voiceChat.state}
-          statusLabel={voiceChatStatusLabel}
-          onStop={handleVoiceChatToggle}
-        />
-      )}
-      {voiceModeSelectorOpen && (
-        <React.Suspense fallback={null}>
-          <LazyVoiceModeSelector
-            open={voiceModeSelectorOpen}
-            onClose={() => setVoiceModeSelectorOpen(false)}
-            onSelectDictation={handleDictationToggle}
-            onSelectConversation={handleVoiceChatToggle}
-            dictationAvailable={speechAvailable}
-            conversationAvailable={voiceChatAvailable}
-          />
-        </React.Suspense>
-      )}
+        )}
+        {voiceModeSelectorOpen && (
+          <React.Suspense fallback={null}>
+            <LazyVoiceModeSelector
+              open={voiceModeSelectorOpen}
+              onClose={() => setVoiceModeSelectorOpen(false)}
+              onSelectDictation={handleDictationToggle}
+              onSelectConversation={handleVoiceChatToggle}
+              dictationAvailable={speechAvailable}
+              conversationAvailable={voiceChatAvailable}
+            />
+          </React.Suspense>
+        )}
       </div>
     </React.Profiler>
   )

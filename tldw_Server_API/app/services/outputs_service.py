@@ -46,6 +46,8 @@ _OUTPUTS_TEMPLATE_EXCEPTIONS = (
 DEFAULT_KITTEN_TTS_MODEL = "KittenML/kitten-tts-nano-0.8"
 DEFAULT_KITTEN_TTS_VOICE = "Bella"
 DEFAULT_KITTEN_TTS_PROVIDER = "kitten_tts"
+DEFAULT_OMNIVOICE_TTS_MODEL = "omnivoice"
+DEFAULT_OMNIVOICE_TTS_VOICE = "auto"
 
 
 def _normalize_template_syntax(template_str: str) -> str:
@@ -345,6 +347,12 @@ def _infer_output_tts_provider_from_model(model: str | None) -> str | None:
         return "kitten_tts"
     if normalized.startswith("kokoro"):
         return "kokoro"
+    if (
+        normalized.startswith("omnivoice")
+        or normalized.startswith("omni-voice")
+        or normalized.startswith("omni_voice")
+    ):
+        return "omnivoice"
     return None
 
 
@@ -381,6 +389,11 @@ async def _resolve_tts_generation_defaults(
         return DEFAULT_KITTEN_TTS_MODEL, resolved_voice, tpl_speed
 
     provider_hint = _infer_output_tts_provider_from_model(resolved_model)
+    if provider_hint == "omnivoice":
+        resolved_model = str(resolved_model)
+        voice_candidate = str(tts_voice).strip() if tts_voice is not None else ""
+        resolved_voice = voice_candidate or DEFAULT_OMNIVOICE_TTS_VOICE
+        return resolved_model, resolved_voice, tpl_speed
     if not explicit_model and provider_hint == "pocket_tts_cpp":
         if not await _is_pocket_tts_cpp_ready(resolved_voice):
             return DEFAULT_KITTEN_TTS_MODEL, DEFAULT_KITTEN_TTS_VOICE, tpl_speed
