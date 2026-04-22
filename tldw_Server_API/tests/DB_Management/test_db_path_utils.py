@@ -295,3 +295,28 @@ def test_require_trusted_database_parent_exists_rejects_missing_parent(monkeypat
             target_path,
             label="test database",
         )
+
+
+def test_require_trusted_database_parent_exists_accepts_symlink_alias_to_temp_root(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    real_temp_root = tmp_path / "private_tmp"
+    temp_alias = tmp_path / "var_alias"
+    project_root.mkdir()
+    real_temp_root.mkdir()
+    temp_alias.symlink_to(real_temp_root, target_is_directory=True)
+    (real_temp_root / "dbs").mkdir()
+
+    monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
+    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: True)
+    monkeypatch.setattr(db_path_utils.tempfile, "gettempdir", lambda: str(temp_alias))
+
+    resolved = db_path_utils.require_trusted_database_parent_exists(
+        temp_alias / "dbs" / "app.db",
+        label="test database",
+    )
+
+    _expect_equal(
+        resolved,
+        real_temp_root / "dbs" / "app.db",
+        "trusted temp parent check should accept canonicalized alias roots",
+    )

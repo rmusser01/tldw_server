@@ -109,7 +109,7 @@ The following design choices were explicitly confirmed during brainstorming:
   - do not introduce a second public backend name
 - GGUF runtime support in v1:
   - `remote + managed + cli`
-- `HUNYUAN_MODE=auto` preference:
+- `HUNYUAN_RUNTIME_FAMILY=auto` preference:
   - native family first
   - GGUF family second
 - Operator-facing config split:
@@ -331,7 +331,7 @@ Remote mode:
 
 - `HUNYUAN_LLAMACPP_HOST`
 - `HUNYUAN_LLAMACPP_PORT`
-- `HUNYUAN_LLAMACPP_MODEL_PATH`
+- `HUNYUAN_LLAMACPP_MODEL`
 - `HUNYUAN_LLAMACPP_USE_DATA_URL=true|false`
 - `HUNYUAN_LLAMACPP_TIMEOUT`
 - `HUNYUAN_LLAMACPP_TEMPERATURE`
@@ -343,15 +343,15 @@ Managed mode:
 - `HUNYUAN_LLAMACPP_HOST`
 - `HUNYUAN_LLAMACPP_PORT`
 - `HUNYUAN_LLAMACPP_MODEL_PATH`
-- `HUNYUAN_LLAMACPP_ARGV`
+- `HUNYUAN_LLAMACPP_SERVER_ARGV`
 - `HUNYUAN_LLAMACPP_STARTUP_TIMEOUT_SEC`
 
 CLI mode:
 
 - `HUNYUAN_LLAMACPP_MODEL_PATH`
-- `HUNYUAN_LLAMACPP_ARGV`
+- `HUNYUAN_LLAMACPP_CLI_ARGV`
 
-`HUNYUAN_LLAMACPP_ARGV` must be a JSON argv array and must continue to use safe placeholder replacement rather than shell interpolation.
+`HUNYUAN_LLAMACPP_SERVER_ARGV` and `HUNYUAN_LLAMACPP_CLI_ARGV` must be JSON argv arrays and must continue to use safe placeholder replacement rather than shell interpolation.
 
 ## Runtime Resolution
 
@@ -371,6 +371,18 @@ Important rule:
 
 This keeps behavior predictable and avoids hiding real runtime failures behind implicit cross-family fallbacks.
 
+Native-first family resolution must be stricter than the current broad `available()` heuristic used by the native Hunyuan backend. For family selection, "native available" should mean a configured native runtime, not merely that `transformers`, `torch`, and `PIL` are importable on the host.
+
+Recommended native-family readiness rules:
+
+- native `vllm` is family-available when `HUNYUAN_VLLM_URL` is configured
+- native `transformers` is family-available only when the operator has explicitly selected it, for example through:
+  - `HUNYUAN_MODE=transformers`
+  - or an explicit native-runtime opt-in variable added during implementation
+- if `HUNYUAN_MODE=auto`, the presence of importable native Python dependencies alone must not prevent GGUF family fallback
+
+This avoids a bad default where any machine with general ML dependencies installed would silently stay on native family and never use the configured GGUF runtime.
+
 ### Native-First Auto
 
 User-confirmed behavior is:
@@ -378,7 +390,7 @@ User-confirmed behavior is:
 - preserve current `hunyuan` semantics first
 - add GGUF as a fallback family
 
-That means a system with a valid `HUNYUAN_VLLM_URL` or usable native transformers stack should keep using native Hunyuan unless the operator explicitly selects `HUNYUAN_RUNTIME_FAMILY=llamacpp`.
+That means a system with a configured native runtime should keep using native Hunyuan unless the operator explicitly selects `HUNYUAN_RUNTIME_FAMILY=llamacpp`.
 
 ### GGUF Mode Resolution
 
@@ -389,7 +401,7 @@ Inside the GGUF family:
 - `cli`
 - `auto`
 
-should work the same way current `llamacpp` OCR does:
+should follow the same basic mode semantics as current `llamacpp` OCR:
 
 - explicit mode forces one mode
 - `auto` chooses the first configured and locally eligible mode
@@ -397,11 +409,11 @@ should work the same way current `llamacpp` OCR does:
 
 Recommended default order for GGUF family `auto`:
 
-1. `managed` if a managed profile is configured and allowed
-2. `remote` if a remote profile is configured
+1. `remote` if a remote profile is configured
+2. `managed` if a managed profile is configured and allowed
 3. `cli` if a CLI profile is configured
 
-This matches the existing OCR precedent that a server-owned reusable local runtime can be preferred when it is explicitly allowed.
+This is intentionally slightly safer than the current `llamacpp` OCR backend default. For a new Hunyuan GGUF namespace, preferring an already configured remote endpoint over auto-starting a local managed process reduces surprise for operators while still keeping managed mode available when they explicitly choose it or when remote is not configured.
 
 ## Prompt And Output Contract
 
@@ -462,29 +474,117 @@ This matches the broader OCR backend pattern already in the repo.
 
 `GET /api/v1/ocr/backends` should continue to expose `hunyuan` as a single backend entry, but with richer details.
 
-Recommended fields:
+Recommended top-level fields:
 
 - `runtime_family`
 - `configured_runtime_family`
-- `native_mode`
-- `llamacpp_mode`
 - `effective_mode`
 - `configured`
-- `auto_eligible`
-- `auto_high_quality_eligible`
-- `managed_configured`
-- `managed_running`
-- `allow_managed_start`
-- `url_configured`
-- `cli_configured`
 - `backend_concurrency_cap`
 - `prompt_preset`
+
+Recommended namespaced family fields:
+
+- `native`
+  - `mode`
+  - `configured`
+  - `url_configured`
+  - `transformers_configured`
+  - `model`
+  - `model_path`
+- `llamacpp`
+  - `mode`
+  - `configured`
+  - `auto_eligible`
+  - `auto_high_quality_eligible`
+  - `url_configured`
+  - `managed_configured`
+  - `managed_running`
+  - `allow_managed_start`
+  - `cli_configured`
+  - `model`
+  - `model_path`
+  - `backend_concurrency_cap`
+
+If nested family objects are awkward for the current endpoint contract, the fallback is explicit prefixes such as:
+
+- `native_url_configured`
+- `native_mode`
+- `llamacpp_url_configured`
+- `llamacpp_managed_configured`
+
+What should be avoided is a single ambiguous field such as `url_configured` once both families exist.
 
 Sanitization rules:
 
 - do not return secrets
 - do not return unsanitized argv arrays if they include sensitive data
 - do not expose internal-only values that are not useful to operators
+
+## Registry Auto-Eligibility
+
+The current OCR registry hardcodes auto-eligibility exceptions only for `llamacpp` and `chatllm`. That is not sufficient for this design because `hunyuan` remains a single public backend while gaining a second internal runtime family.
+
+The design therefore needs an explicit registry change rather than only new environment variables.
+
+### Recommended Registry Improvement
+
+Add an optional backend class hook for registry auto-selection, for example:
+
+- `auto_eligible(high_quality: bool) -> bool`
+
+Default behavior for backends that do not implement the hook:
+
+- `True`
+
+Registry behavior:
+
+- for explicit backend selection such as `ocr_backend=hunyuan`, bypass this hook exactly as current explicit selection bypasses backend auto-eligibility gates
+- for generic OCR registry `auto` and `auto_high_quality`, consult the backend hook instead of hardcoding backend-name checks
+
+This keeps the registry from accumulating more backend-name-specific conditionals and makes Hunyuan family-aware auto selection possible.
+
+### Hunyuan-Specific Auto-Eligibility Rules
+
+`HunyuanOCRBackend.auto_eligible(...)` should be family-aware:
+
+- if the resolved family is `native`, preserve current Hunyuan participation in generic OCR `auto` and `auto_high_quality`
+- if the resolved family is `llamacpp`, generic OCR `auto` participation requires `HUNYUAN_LLAMACPP_AUTO_ELIGIBLE=true`
+- if the resolved family is `llamacpp`, generic OCR `auto_high_quality` participation requires `HUNYUAN_LLAMACPP_AUTO_HIGH_QUALITY_ELIGIBLE=true`
+- if `HUNYUAN_RUNTIME_FAMILY=auto`, the hook should evaluate the same native-first family resolution used at execution time and apply the matching rule for the family that would actually satisfy availability
+
+This keeps three behaviors aligned:
+
+1. explicit `ocr_backend=hunyuan` always works if the backend is available
+2. native Hunyuan keeps current generic auto behavior
+3. GGUF Hunyuan does not unexpectedly start participating in generic OCR auto flows without an explicit operator opt-in
+
+## Coexistence With The Generic `llamacpp` Backend
+
+The repository already has a public generic OCR backend:
+
+- `ocr_backend=llamacpp`
+
+This design does not remove or replace it.
+
+The intended distinction after this change is:
+
+- `ocr_backend=hunyuan`
+  - model-specific backend semantics
+  - Hunyuan-specific prompt presets and structured-output normalization
+  - native Hunyuan family plus Hunyuan GGUF family
+- `ocr_backend=llamacpp`
+  - generic llama.cpp OCR backend
+  - not specific to Hunyuan
+  - remains appropriate for operators who want a model-agnostic llama.cpp OCR surface
+
+Operator guidance:
+
+- if you are running `ggml-org/HunyuanOCR-GGUF` and you want Hunyuan-specific semantics, configure and use `ocr_backend=hunyuan`
+- if you want a generic llama.cpp OCR surface independent of model-specific semantics, use `ocr_backend=llamacpp`
+- do not point both public backend surfaces at the same deployment unless you intentionally need both behaviors and understand that discovery output and generic OCR auto selection will treat them as separate backends
+
+This keeps the new Hunyuan GGUF support from turning into a de facto alias for the existing generic llama.cpp backend.
 
 ## PDF Pipeline Impact
 
@@ -573,14 +673,16 @@ Add or extend tests for:
 - prompt preset mapping for GGUF family
 - structured JSON parsing and fallback behavior
 - `describe()` output shape and sanitization
+- Hunyuan family-aware `auto_eligible(...)` behavior
 
 ### Registry Tests
 
 Add coverage proving:
 
 - `ocr_backend=hunyuan` remains a single backend name
-- GGUF family auto eligibility does not unexpectedly change generic `auto`
-- `auto_high_quality` participation is controlled by explicit Hunyuan GGUF eligibility flags
+- Hunyuan generic OCR `auto` participation remains unchanged for native family
+- Hunyuan GGUF family does not unexpectedly change generic OCR `auto`
+- `auto_high_quality` participation for Hunyuan GGUF is controlled by explicit Hunyuan GGUF eligibility flags
 
 ### Pipeline Tests
 

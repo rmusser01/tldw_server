@@ -1,6 +1,6 @@
-import React from "react"
-import { useTranslation } from "react-i18next"
-import { useNavigate } from "react-router-dom"
+import React from "react";
+import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import {
   MessageSquarePlus,
   HelpCircle,
@@ -8,231 +8,280 @@ import {
   GitBranch,
   UserCircle2,
   Search,
-  Microscope
-} from "lucide-react"
-import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
-import { useDemoMode } from "@/context/demo-mode"
-import { useIsConnected } from "@/hooks/useConnectionState"
-import { useHelpModal } from "@/store/tutorials"
-import { buildResearchLaunchPath } from "@/routes/route-paths"
-import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
+  Microscope,
+} from "lucide-react";
+import { useDemoMode } from "@/context/demo-mode";
+import { useIsConnected } from "@/hooks/useConnectionState";
+import { useHelpModal } from "@/store/tutorials";
+import { buildResearchLaunchPath } from "@/routes/route-paths";
+import { requestQuickIngestOpen } from "@/utils/quick-ingest-open";
+
+const actionButtonFocusClassName =
+  "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg";
 
 export const PlaygroundEmpty = () => {
-  const { t } = useTranslation(["playground", "common"])
-  const { demoEnabled } = useDemoMode()
-  const isConnected = useIsConnected()
-  const { open: openHelpModal } = useHelpModal()
-  const navigate = useNavigate()
+  const { t } = useTranslation(["playground", "common", "option"]);
+  const { demoEnabled } = useDemoMode();
+  const isConnected = useIsConnected();
+  const { open: openHelpModal } = useHelpModal();
+  const navigate = useNavigate();
 
   const dispatchStarter = React.useCallback(
     (mode: "general" | "compare" | "character" | "rag", prompt?: string) => {
       window.dispatchEvent(
         new CustomEvent("tldw:playground-starter-selected", {
-          detail: { mode }
-        })
-      )
+          detail: { mode },
+        }),
+      );
       window.dispatchEvent(
         new CustomEvent("tldw:playground-starter", {
           detail: {
             mode,
-            prompt
-          }
-        })
-      )
+            prompt,
+          },
+        }),
+      );
     },
-    []
-  )
+    [],
+  );
 
   const handleStartChat = React.useCallback(() => {
-    dispatchStarter("general")
-    window.dispatchEvent(new CustomEvent("tldw:focus-composer"))
-  }, [dispatchStarter])
+    dispatchStarter("general");
+    window.dispatchEvent(new CustomEvent("tldw:focus-composer"));
+  }, [dispatchStarter]);
 
   const handleOpenQuickIngest = React.useCallback(() => {
-    if (typeof window === "undefined") return
+    if (typeof window === "undefined") return;
     const trigger = document.querySelector<HTMLButtonElement>(
-      '[data-testid="open-quick-ingest"]'
-    )
+      '[data-testid="open-quick-ingest"]',
+    );
     if (trigger) {
-      trigger.click()
-      return
+      trigger.click();
+      return;
     }
-    requestQuickIngestOpen()
-  }, [])
-
-  const handleOpenHistoryRegion = React.useCallback(() => {
-    window.dispatchEvent(new CustomEvent("tldw:open-chat-sidebar"))
-  }, [])
-
-  const handleOpenKnowledgeRegion = React.useCallback(() => {
-    window.dispatchEvent(
-      new CustomEvent("tldw:open-knowledge-panel", {
-        detail: { tab: "search" }
-      })
-    )
-  }, [])
+    requestQuickIngestOpen();
+  }, []);
 
   const handleOpenDeepResearch = React.useCallback(() => {
-    navigate(buildResearchLaunchPath())
-  }, [navigate])
+    navigate(buildResearchLaunchPath());
+  }, [navigate]);
 
   const starterCards = React.useMemo(
     () => [
       {
         key: "general",
-        icon: <Sparkles className="h-4 w-4" />,
+        icon: Sparkles,
         title: t("playground:empty.starterGeneralTitle", "General chat"),
         description: t(
           "playground:empty.starterGeneralBody",
-          "Start with a single model and ask anything."
+          "Start with a single model and ask anything.",
         ),
-        action: () => dispatchStarter("general")
+        action: () => dispatchStarter("general"),
       },
       {
         key: "compare",
-        icon: <GitBranch className="h-4 w-4" />,
-        title: t("playground:empty.starterCompareTitle", "Compare AI models side-by-side"),
+        icon: GitBranch,
+        title: t(
+          "playground:empty.starterCompareTitle",
+          "Compare AI models side-by-side",
+        ),
         description: t(
           "playground:empty.starterCompareBody",
-          "Send the same question to multiple models and compare their answers."
+          "Send the same question to multiple models and compare their answers.",
         ),
-        action: () => dispatchStarter("compare")
+        action: () => dispatchStarter("compare"),
       },
       {
         key: "character",
-        icon: <UserCircle2 className="h-4 w-4" />,
-        title: t("playground:empty.starterCharacterTitle", "Chat as a character"),
+        icon: UserCircle2,
+        title: t(
+          "playground:empty.starterCharacterTitle",
+          "Chat as a character",
+        ),
         description: t(
           "playground:empty.starterCharacterBody",
-          "Pick a character persona and have the AI respond in their style."
+          "Pick a character persona and have the AI respond in their style.",
         ),
-        action: () => dispatchStarter("character")
+        action: () => dispatchStarter("character"),
       },
       {
         key: "rag",
-        icon: <Search className="h-4 w-4" />,
-        title: t("playground:empty.starterKnowledgeTitle", "Search your documents"),
+        icon: Search,
+        title: t(
+          "playground:empty.starterKnowledgeTitle",
+          "Search your documents",
+        ),
         description: t(
           "playground:empty.starterKnowledgeBody",
-          "Ask questions about your ingested content with cited answers."
+          "Ask questions about your ingested content with cited answers.",
         ),
-        action: () => dispatchStarter("rag")
+        action: () => dispatchStarter("rag"),
       },
       {
         key: "research",
-        icon: <Microscope className="h-4 w-4" />,
+        icon: Microscope,
         title: t("playground:empty.starterResearchTitle", "Deep research"),
         description: t(
           "playground:empty.starterResearchBody",
-          "Run a thorough, multi-step investigation with citations and checkpoints."
+          "Run a thorough, multi-step investigation with citations and checkpoints.",
         ),
-        action: handleOpenDeepResearch
-      }
+        action: handleOpenDeepResearch,
+      },
     ],
-    [dispatchStarter, handleOpenDeepResearch, t]
-  )
+    [dispatchStarter, handleOpenDeepResearch, t],
+  );
+
+  const description = demoEnabled ? (
+    t("playground:empty.demoDescription", {
+      defaultValue:
+        "You're in demo mode — try asking a question to see how the assistant responds. You can connect your own tldw server later.",
+    })
+  ) : !isConnected ? (
+    <>
+      <span>
+        {t("playground:empty.disconnectedDescription", {
+          defaultValue: "Connect to a tldw server to start chatting.",
+        })}
+      </span>
+      <button
+        type="button"
+        onClick={() => navigate("/settings/tldw")}
+        className={`inline-flex items-center text-sm font-medium text-primary transition hover:underline ${actionButtonFocusClassName}`}
+      >
+        {t("playground:empty.openSettings", {
+          defaultValue: "Open Settings",
+        })}
+      </button>
+    </>
+  ) : (
+    t("playground:empty.description", {
+      defaultValue:
+        "Experiment with different models, prompts, and knowledge sources here.",
+    })
+  );
 
   return (
-    <div className="mx-auto mt-10 max-w-xl px-4">
-      <FeatureEmptyState
-        icon={MessageSquarePlus}
-        title={t("playground:empty.title", {
-          defaultValue: "Start a new chat"
-        })}
-        description={
-          demoEnabled
-            ? t("playground:empty.demoDescription", {
-                defaultValue:
-                  "You're in demo mode — try asking a question to see how the assistant responds. You can connect your own tldw server later."
-              })
-            : !isConnected
-              ? (
-                  <>
-                    {t("playground:empty.disconnectedDescription", {
-                      defaultValue:
-                        "Connect to a tldw server to start chatting."
-                    })}
-                    <button
-                      type="button"
-                      onClick={() => navigate("/settings/tldw")}
-                      className="mt-2 block text-sm font-medium text-primary hover:underline"
-                    >
-                      {t("playground:empty.openSettings", {
-                        defaultValue: "Open Settings"
-                      })}
-                    </button>
-                  </>
-                )
-              : t("playground:empty.description", {
-                  defaultValue:
-                    "Experiment with different models, prompts, and knowledge sources here."
-                })
-        }
-        primaryActionLabel={t("playground:empty.primaryCta", {
-          defaultValue: "Start chatting"
-        })}
-        onPrimaryAction={handleStartChat}
-        secondaryActionLabel={t("option:header.quickIngest", "Quick Ingest")}
-        onSecondaryAction={handleOpenQuickIngest}
-        secondaryDisabled={false}
-      />
-      <div className="mt-6">
-        <p className="text-sm font-medium text-text-muted mb-2">
-          {t("playground:empty.starterTitle", "Start with a guided mode:")}
-        </p>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {starterCards.map((starter) => (
-            <button
-              key={starter.key}
-              type="button"
-              onClick={starter.action}
-              className="rounded-xl border border-border/60 bg-surface2/30 px-3 py-3 text-left transition-colors hover:border-primary/50 hover:bg-surface2"
-            >
-              <div className="flex items-center gap-2 text-text">
-                {starter.icon}
-                <span className="text-sm font-medium">{starter.title}</span>
+    <div className="mx-auto mt-10 max-w-5xl px-4">
+      <section
+        data-testid="playground-empty-shell"
+        className="mx-auto max-w-4xl rounded-[28px] border border-border/80 bg-surface/90 p-5 text-sm text-text shadow-card backdrop-blur sm:p-7"
+      >
+        <div className="flex flex-col gap-6">
+          <div className="space-y-4 text-center">
+            <div className="flex justify-center">
+              <div className="rounded-full border border-border/50 bg-surface2/80 p-3 shadow-sm">
+                <MessageSquarePlus
+                  className="h-8 w-8 text-text-subtle"
+                  aria-hidden="true"
+                />
               </div>
-              <p className="mt-1 text-xs text-text-muted">{starter.description}</p>
-            </button>
-          ))}
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-2xl font-semibold text-text">
+                {t("playground:empty.title", {
+                  defaultValue: "Start a new chat",
+                })}
+              </h2>
+              <div className="mx-auto flex max-w-2xl flex-col items-center gap-2 text-sm text-text-muted sm:text-base">
+                {description}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center gap-2.5">
+              <button
+                type="button"
+                onClick={handleStartChat}
+                className={`inline-flex items-center justify-center rounded-full bg-primary px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary-foreground transition hover:opacity-95 ${actionButtonFocusClassName}`}
+              >
+                {t("playground:empty.primaryCta", {
+                  defaultValue: "Start chatting",
+                })}
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenQuickIngest}
+                className={`inline-flex items-center justify-center rounded-full border border-border bg-surface px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-text transition hover:bg-surface2 ${actionButtonFocusClassName}`}
+              >
+                {t("option:header.quickIngest", "Quick Ingest")}
+              </button>
+            </div>
+          </div>
+
+          <div className="border-t border-border/60 pt-5">
+            <div className="flex flex-col gap-1 text-center sm:text-left">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+                {t("playground:empty.modeTitle", "Choose a mode")}
+              </p>
+              <p className="text-sm text-text-muted">
+                {t(
+                  "playground:empty.modeBody",
+                  "Pick any starting point. All five stay equally available from the first screen.",
+                )}
+              </p>
+            </div>
+
+            <div
+              data-testid="playground-empty-mode-deck"
+              className="mt-4 grid gap-3 sm:grid-cols-2"
+            >
+              {starterCards.map((starter) => {
+                const Icon = starter.icon;
+                return (
+                  <button
+                    key={starter.key}
+                    type="button"
+                    onClick={starter.action}
+                    className={`group flex min-h-[118px] flex-col rounded-2xl border border-border/60 bg-bg/20 px-4 py-4 text-left transition hover:border-primary/40 hover:bg-surface2/60 ${actionButtonFocusClassName}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="rounded-xl border border-border/50 bg-surface2/70 p-2 text-text-muted transition group-hover:text-text">
+                        <Icon className="h-4 w-4" aria-hidden="true" />
+                      </div>
+                      <div className="space-y-1">
+                        <span className="block text-base font-semibold text-text">
+                          {starter.title}
+                        </span>
+                        <p className="text-sm leading-6 text-text-muted">
+                          {starter.description}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="border-t border-border/60 pt-4">
+            <div className="flex flex-col items-center gap-3 text-center">
+              <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-text-muted">
+                <span>
+                  {t(
+                    "playground:empty.tipSlash",
+                    "Type / for commands like /search or /web",
+                  )}
+                </span>
+                <span>
+                  {t(
+                    "playground:empty.tipPrompt",
+                    "Set a system prompt to customize AI behavior",
+                  )}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={openHelpModal}
+                className={`inline-flex items-center gap-1.5 text-xs font-medium text-primary transition hover:underline ${actionButtonFocusClassName}`}
+              >
+                <HelpCircle className="h-3.5 w-3.5" />
+                {t("playground:empty.takeTour", "Take a quick tour")}
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-text-muted">
-        <span>{t("playground:empty.tipSlash", "Type / for commands like /search or /web")}</span>
-        <span>{t("playground:empty.tipPrompt", "Set a system prompt to customize AI behavior")}</span>
-      </div>
-
-      <div className="mt-3 text-center">
-        <button
-          type="button"
-          onClick={openHelpModal}
-          className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline transition"
-        >
-          <HelpCircle className="h-3.5 w-3.5" />
-          {t("playground:empty.takeTour", "Take a quick tour")}
-        </button>
-      </div>
-
-      <div className="mt-4 rounded-xl border border-border bg-surface2/20 p-4">
-        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-          {t("playground:empty.layoutGuideTitle", "Page layout")}
-        </p>
-        <p className="mt-1 text-sm text-text-muted">
-          {t("playground:empty.layoutGuideBody", "Chat history (left), conversation (center), message input (bottom), sources & tools (right).")}
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" onClick={handleOpenHistoryRegion} className="rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text">
-            {t("playground:empty.jumpHistory", "Open history")}
-          </button>
-          <button type="button" onClick={handleStartChat} className="rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text">
-            {t("playground:empty.jumpComposer", "Start typing")}
-          </button>
-          <button type="button" onClick={handleOpenKnowledgeRegion} className="rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text">
-            {t("playground:empty.jumpKnowledge", "Open sources & tools")}
-          </button>
-        </div>
-      </div>
+      </section>
     </div>
-  )
-}
+  );
+};

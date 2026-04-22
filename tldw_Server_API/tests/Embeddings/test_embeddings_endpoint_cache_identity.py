@@ -106,6 +106,26 @@ def test_embedding_cache_key_secret_raises_outside_tests(monkeypatch):
     mod._embedding_cache_key_secret.cache_clear()
 
 
+def test_embedding_cache_key_changes_when_secret_changes(monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as mod
+
+    mod._embedding_cache_key_secret.cache_clear()
+    monkeypatch.setattr(mod, "_is_test_context", lambda: False)
+
+    monkeypatch.setattr(mod, "derive_hmac_key", lambda: b"cache-secret-one")
+    first = mod.get_cache_key("cache me", "local_api", "test-model", backend_identity="http://backend/v1")
+
+    mod._embedding_cache_key_secret.cache_clear()
+    monkeypatch.setattr(mod, "derive_hmac_key", lambda: b"cache-secret-two")
+    second = mod.get_cache_key("cache me", "local_api", "test-model", backend_identity="http://backend/v1")
+
+    assert first != second
+    assert len(first) == 64
+    assert len(second) == 64
+
+    mod._embedding_cache_key_secret.cache_clear()
+
+
 @pytest.mark.asyncio
 async def test_local_api_url_participates_in_cache_identity(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as mod

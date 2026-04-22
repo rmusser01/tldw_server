@@ -186,6 +186,21 @@ def _path_is_within_trusted_roots(candidate: Path, trusted_roots: list[Path]) ->
     return any(_path_is_within_root(candidate, root) for root in trusted_roots)
 
 
+def _resolve_real_path_within_trusted_roots(
+    candidate_path: str | Path,
+    trusted_roots: list[Path],
+) -> Path:
+    candidate_real = os.path.realpath(str(candidate_path))
+    for root in trusted_roots:
+        root_real = os.path.realpath(str(root))
+        try:
+            if os.path.commonpath([root_real, candidate_real]) == root_real:
+                return Path(candidate_real)
+        except ValueError:
+            continue
+    raise InvalidStoragePathError("invalid_path")
+
+
 def resolve_trusted_database_path(
     db_path: str | Path,
     *,
@@ -210,24 +225,12 @@ def resolve_trusted_database_path(
         raise InvalidStoragePathError("invalid_path")
 
     if os.path.isabs(expanded_path):
-        normalized_absolute = os.path.normpath(expanded_path)
-        absolute_candidate = Path(normalized_absolute)
-        if not _path_is_within_trusted_roots(absolute_candidate, trusted_roots):
-            logger.warning("Rejected {} path outside trusted roots: {}", label, normalized_absolute)
-            raise InvalidStoragePathError("invalid_path")
-        if absolute_candidate.is_symlink():
-            logger.warning("Rejected {} symlink path outside trusted roots: {}", label, normalized_absolute)
-            raise InvalidStoragePathError("invalid_path")
         try:
-            candidate_resolved = absolute_candidate.resolve(strict=False)
+            return _resolve_real_path_within_trusted_roots(expanded_path, trusted_roots)
         except Exception as exc:
+            normalized_absolute = os.path.normpath(expanded_path)
+            logger.warning("Rejected {} path outside trusted roots: {}", label, normalized_absolute)
             raise InvalidStoragePathError("invalid_path") from exc
-
-        if _path_is_within_trusted_roots(candidate_resolved, trusted_roots):
-            return candidate_resolved
-
-        logger.warning("Rejected {} path outside trusted roots: {}", label, normalized_absolute)
-        raise InvalidStoragePathError("invalid_path")
 
     safe_candidate = safe_join(str(project_root), expanded_path)
     if safe_candidate is not None:
@@ -243,10 +246,7 @@ def _get_trusted_database_parent_dir(
     extra_roots: Optional[list[Path]] = None,
 ) -> Path:
     trusted_roots = _iter_trusted_database_roots(extra_roots=extra_roots)
-    parent_dir = resolved_db_path.parent
-    if not _path_is_within_trusted_roots(parent_dir, trusted_roots):
-        raise InvalidStoragePathError("invalid_path")
-    return parent_dir
+    return _resolve_real_path_within_trusted_roots(resolved_db_path.parent, trusted_roots)
 
 
 def ensure_trusted_database_parent_dir(
@@ -271,8 +271,20 @@ def require_trusted_database_parent_exists(
 ) -> Path:
     """Resolve a trusted database path and require its parent directory to exist."""
     resolved_db_path = resolve_trusted_database_path(db_path, label=label, extra_roots=extra_roots)
-    parent_dir = _get_trusted_database_parent_dir(resolved_db_path, extra_roots=extra_roots)
-    if not parent_dir.exists():
+    trusted_roots = _iter_trusted_database_roots(extra_roots=extra_roots)
+    parent_dir = os.path.realpath(str(resolved_db_path.parent))
+    parent_is_trusted = False
+    for root in trusted_roots:
+        root_real = os.path.realpath(str(root))
+        try:
+            if os.path.commonpath([root_real, parent_dir]) == root_real:
+                parent_is_trusted = True
+                break
+        except ValueError:
+            continue
+    if not parent_is_trusted:
+        raise InvalidStoragePathError("invalid_path")
+    if not os.path.isdir(parent_dir):
         raise ValueError(missing_parent_message or f"{label} parent directory must already exist")
     return resolved_db_path
 

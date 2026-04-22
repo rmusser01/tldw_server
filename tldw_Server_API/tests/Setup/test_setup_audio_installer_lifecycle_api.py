@@ -260,6 +260,46 @@ def test_admin_audio_provision_and_verify_accept_tts_choice(
     assert captured["verify_tts_choice"] == "kitten_tts"
 
 
+def test_setup_complete_accepts_direct_omnivoice_install_plan(monkeypatch):
+    install_calls = []
+
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "get_status_snapshot",
+        lambda: {"enabled": True, "setup_completed": False, "needs_setup": True},
+    )
+    monkeypatch.setattr(setup_endpoint.setup_manager, "mark_setup_completed", lambda _value: None)
+    monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        setup_endpoint,
+        "execute_install_plan",
+        lambda payload: install_calls.append(payload),
+    )
+
+    with _make_client() as client:
+        response = client.post(
+            "/api/v1/setup/complete",
+            json={
+                "disable_first_time_setup": False,
+                "install_plan": {
+                    "stt": [],
+                    "tts": [{"engine": "omnivoice"}],
+                    "embeddings": {"huggingface": [], "custom": [], "onnx": []},
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["install_plan_submitted"] is True
+    assert install_calls == [
+        {
+            "stt": [],
+            "tts": [{"engine": "omnivoice", "variants": []}],
+            "embeddings": {"huggingface": [], "custom": [], "onnx": []},
+        }
+    ]
+
+
 def test_admin_audio_provision_rejects_invalid_tts_choice_with_400(
     monkeypatch,
     _admin_audio_installer_setup,
