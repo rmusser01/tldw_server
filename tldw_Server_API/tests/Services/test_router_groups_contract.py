@@ -643,6 +643,21 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
         "tldw_Server_API.app.api.v1.endpoints.family_wizard",
         path="/family-wizard",
     )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.self_monitoring",
+        path="/self-monitoring/status",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.persona",
+        path="/persona/status",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.archetype_endpoints",
+        path="/archetypes",
+    )
 
     specs = list(iter_minimal_optional_router_specs())
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
@@ -758,6 +773,15 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
     assert by_first_path["/family-wizard"].prefix == "/api/v1/guardian"
     assert by_first_path["/family-wizard"].tags == ("guardian",)
     assert by_first_path["/family-wizard"].route_key == ""
+    assert by_first_path["/self-monitoring/status"].prefix == "/api/v1/self-monitoring"
+    assert by_first_path["/self-monitoring/status"].tags == ("self-monitoring",)
+    assert by_first_path["/self-monitoring/status"].route_key == ""
+    assert by_first_path["/persona/status"].prefix == "/api/v1/persona"
+    assert by_first_path["/persona/status"].tags == ("persona",)
+    assert by_first_path["/persona/status"].route_key == ""
+    assert by_first_path["/archetypes"].prefix == "/api/v1/persona/archetypes"
+    assert by_first_path["/archetypes"].tags == ("persona-archetypes",)
+    assert by_first_path["/archetypes"].route_key == ""
 
 
 def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1615,6 +1639,9 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "from tldw_Server_API.app.api.v1.endpoints.companion import router as companion_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.guardian_controls import router as guardian_controls_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.family_wizard import router as family_wizard_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.self_monitoring import router as self_monitoring_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.persona import router as persona_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.archetype_endpoints import router as archetype_router" not in source
     assert "app.include_router(llm_providers_router" not in source
     assert "app.include_router(mlx_router" not in source
     assert "app.include_router(vector_stores_router" not in source
@@ -1652,6 +1679,9 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "app.include_router(companion_router" not in source
     assert "app.include_router(guardian_controls_router" not in source
     assert "app.include_router(family_wizard_router" not in source
+    assert "app.include_router(self_monitoring_router" not in source
+    assert "app.include_router(persona_router" not in source
+    assert "app.include_router(archetype_router" not in source
     assert "Skipping llm_providers router in minimal test app" not in source
     assert "Skipping mlx router in minimal test app" not in source
     assert "Skipping vector-stores router in minimal test app" not in source
@@ -1687,6 +1717,9 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "Skipping personalization router in minimal test app" not in source
     assert "Skipping companion router in minimal test app" not in source
     assert "Skipping guardian controls router in minimal test app" not in source
+    assert "Skipping self-monitoring router in minimal test app" not in source
+    assert "Skipping persona router in minimal test app" not in source
+    assert "Skipping archetype router in minimal test app" not in source
 
 
 def test_main_source_does_not_inline_register_grouped_core_routers() -> None:

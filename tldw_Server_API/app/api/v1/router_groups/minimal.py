@@ -464,4 +464,37 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping guardian controls router in minimal test app: {e}")
 
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.self_monitoring import router as self_monitoring_router
+
+        specs.append(RouterSpec(
+            router=self_monitoring_router,
+            prefix=f"{API_V1_PREFIX}/self-monitoring",
+            tags=("self-monitoring",),
+        ))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Skipping self-monitoring router in minimal test app: {e}")
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.persona import router as persona_router
+
+        specs.append(RouterSpec(
+            router=persona_router,
+            prefix=f"{API_V1_PREFIX}/persona",
+            tags=("persona",),
+        ))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Skipping persona router in minimal test app: {e}")
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.archetype_endpoints import router as archetype_router
+
+        specs.append(RouterSpec(
+            router=archetype_router,
+            prefix=f"{API_V1_PREFIX}/persona/archetypes",
+            tags=("persona-archetypes",),
+        ))
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Skipping archetype router in minimal test app: {}", e)
+
     return specs

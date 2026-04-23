@@ -2557,27 +2557,6 @@ elif _MINIMAL_TEST_APP:
         app.include_router(email_router, prefix=f"{API_V1_PREFIX}/email", tags=["email"])
     except _IMPORT_EXCEPTIONS as _email_min_err:
         logger.debug(f"Skipping email router in minimal test app: {_email_min_err}")
-    # Self-monitoring (awareness notifications, crisis resources)
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.self_monitoring import router as self_monitoring_router
-
-        app.include_router(self_monitoring_router, prefix=f"{API_V1_PREFIX}/self-monitoring", tags=["self-monitoring"])
-    except _IMPORT_EXCEPTIONS as _selfmon_min_err:
-        logger.debug(f"Skipping self-monitoring router in minimal test app: {_selfmon_min_err}")
-    # Persona scaffold endpoints (catalog/session/WS) used by unit tests
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.persona import router as persona_router
-
-        app.include_router(persona_router, prefix=f"{API_V1_PREFIX}/persona", tags=["persona"])
-    except _IMPORT_EXCEPTIONS as _persona_min_err:
-        logger.debug(f"Skipping persona router in minimal test app: {_persona_min_err}")
-    # Archetype template endpoints (list / detail / preview)
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.archetype_endpoints import router as archetype_router
-
-        app.include_router(archetype_router, prefix=f"{API_V1_PREFIX}/persona/archetypes", tags=["persona-archetypes"])
-    except _IMPORT_EXCEPTIONS as _archetype_min_err:
-        logger.debug("Skipping archetype router in minimal test app: {}", _archetype_min_err)
     # Notes endpoints (health + CRUD)
     try:
         from tldw_Server_API.app.api.v1.endpoints.notes import router as notes_router
