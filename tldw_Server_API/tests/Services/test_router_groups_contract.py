@@ -613,6 +613,26 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
         "tldw_Server_API.app.api.v1.endpoints.notifications",
         path="/notifications",
     )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.chatbooks",
+        path="/chatbooks",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.sharing",
+        path="/sharing",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.personalization",
+        path="/personalization/profile",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.companion",
+        path="/companion/profile",
+    )
 
     specs = list(iter_minimal_optional_router_specs())
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
@@ -710,6 +730,18 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
     assert by_first_path["/notifications"].prefix == "/api/v1"
     assert by_first_path["/notifications"].tags == ("notifications",)
     assert by_first_path["/notifications"].route_key == ""
+    assert by_first_path["/chatbooks"].prefix == "/api/v1"
+    assert by_first_path["/chatbooks"].tags == ("chatbooks",)
+    assert by_first_path["/chatbooks"].route_key == ""
+    assert by_first_path["/sharing"].prefix == "/api/v1"
+    assert by_first_path["/sharing"].tags == ("sharing",)
+    assert by_first_path["/sharing"].route_key == ""
+    assert by_first_path["/personalization/profile"].prefix == "/api/v1/personalization"
+    assert by_first_path["/personalization/profile"].tags == ("personalization",)
+    assert by_first_path["/personalization/profile"].route_key == ""
+    assert by_first_path["/companion/profile"].prefix == "/api/v1/companion"
+    assert by_first_path["/companion/profile"].tags == ("companion",)
+    assert by_first_path["/companion/profile"].route_key == ""
 
 
 def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1483,8 +1515,6 @@ def test_main_source_delegates_full_app_router_imports_to_groups() -> None:
     minimal_only_imports = (
         "from tldw_Server_API.app.api.v1.endpoints.tools import router as tools_router",
         "from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import router as acp_router",
-        "from tldw_Server_API.app.api.v1.endpoints.chatbooks import router as chatbooks_router",
-        "from tldw_Server_API.app.api.v1.endpoints.sharing import router as sharing_router",
         "from tldw_Server_API.app.api.v1.endpoints.users import router as users_router",
         "from tldw_Server_API.app.api.v1.endpoints.writing import router as writing_router",
         "from tldw_Server_API.app.api.v1.endpoints.writing_manuscripts import router as manuscripts_router",
@@ -1563,6 +1593,10 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "from tldw_Server_API.app.api.v1.endpoints.scheduled_tasks_control_plane import (" not in source
     assert "router as scheduled_tasks_control_plane_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.notifications import router as notifications_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.chatbooks import router as chatbooks_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.sharing import router as sharing_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.personalization import router as personalization_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.companion import router as companion_router" not in source
     assert "app.include_router(llm_providers_router" not in source
     assert "app.include_router(mlx_router" not in source
     assert "app.include_router(vector_stores_router" not in source
@@ -1594,6 +1628,10 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "app.include_router(integrations_control_plane_router" not in source
     assert "app.include_router(scheduled_tasks_control_plane_router" not in source
     assert "app.include_router(notifications_router" not in source
+    assert "app.include_router(chatbooks_router" not in source
+    assert "app.include_router(sharing_router" not in source
+    assert "app.include_router(personalization_router" not in source
+    assert "app.include_router(companion_router" not in source
     assert "Skipping llm_providers router in minimal test app" not in source
     assert "Skipping mlx router in minimal test app" not in source
     assert "Skipping vector-stores router in minimal test app" not in source
@@ -1624,6 +1662,10 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "Skipping integrations control plane router in minimal test app" not in source
     assert "Skipping scheduled tasks control plane router in minimal test app" not in source
     assert "Skipping notifications router in minimal test app" not in source
+    assert "Skipping chatbooks router in minimal test app" not in source
+    assert "Skipping sharing router in minimal test app" not in source
+    assert "Skipping personalization router in minimal test app" not in source
+    assert "Skipping companion router in minimal test app" not in source
 
 
 def test_main_source_does_not_inline_register_grouped_core_routers() -> None:

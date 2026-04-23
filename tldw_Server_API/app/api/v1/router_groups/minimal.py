@@ -401,4 +401,48 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     except Exception as e:  # noqa: BLE001
         logger.debug("Skipping notifications router in minimal test app: {}", e)
 
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.chatbooks import router as chatbooks_router
+
+        specs.append(RouterSpec(
+            router=chatbooks_router,
+            prefix=f"{API_V1_PREFIX}",
+            tags=("chatbooks",),
+        ))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Skipping chatbooks router in minimal test app: {e}")
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.sharing import router as sharing_router
+
+        specs.append(RouterSpec(
+            router=sharing_router,
+            prefix=f"{API_V1_PREFIX}",
+            tags=("sharing",),
+        ))
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Skipping sharing router in minimal test app: {}", e)
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.personalization import router as personalization_router
+
+        specs.append(RouterSpec(
+            router=personalization_router,
+            prefix=f"{API_V1_PREFIX}/personalization",
+            tags=("personalization",),
+        ))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Skipping personalization router in minimal test app: {e}")
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.companion import router as companion_router
+
+        specs.append(RouterSpec(
+            router=companion_router,
+            prefix=f"{API_V1_PREFIX}/companion",
+            tags=("companion",),
+        ))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Skipping companion router in minimal test app: {e}")
+
     return specs

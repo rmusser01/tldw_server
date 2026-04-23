@@ -2557,33 +2557,6 @@ elif _MINIMAL_TEST_APP:
         app.include_router(email_router, prefix=f"{API_V1_PREFIX}/email", tags=["email"])
     except _IMPORT_EXCEPTIONS as _email_min_err:
         logger.debug(f"Skipping email router in minimal test app: {_email_min_err}")
-    # Chatbooks endpoints (export/import, jobs, download)
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chatbooks import router as chatbooks_router
-
-        app.include_router(chatbooks_router, prefix=f"{API_V1_PREFIX}", tags=["chatbooks"])
-    except _IMPORT_EXCEPTIONS as _chatbooks_min_err:
-        logger.debug(f"Skipping chatbooks router in minimal test app: {_chatbooks_min_err}")
-    # Sharing endpoints (workspace sharing, tokens, admin)
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.sharing import router as sharing_router
-
-        app.include_router(sharing_router, prefix=f"{API_V1_PREFIX}", tags=["sharing"])
-    except _IMPORT_EXCEPTIONS as _sharing_min_err:
-        logger.debug("Skipping sharing router in minimal test app: {}", _sharing_min_err)
-    # Personalization scaffold endpoints (opt-in/profile/memories) needed for unit tests
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.personalization import router as personalization_router
-
-        app.include_router(personalization_router, prefix=f"{API_V1_PREFIX}/personalization", tags=["personalization"])
-    except _IMPORT_EXCEPTIONS as _pers_min_err:
-        logger.debug(f"Skipping personalization router in minimal test app: {_pers_min_err}")
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.companion import router as companion_router
-
-        app.include_router(companion_router, prefix=f"{API_V1_PREFIX}/companion", tags=["companion"])
-    except _IMPORT_EXCEPTIONS as _companion_min_err:
-        logger.debug(f"Skipping companion router in minimal test app: {_companion_min_err}")
     # Guardian controls (parental/supervised account controls)
     try:
         from tldw_Server_API.app.api.v1.endpoints.guardian_controls import router as guardian_controls_router
