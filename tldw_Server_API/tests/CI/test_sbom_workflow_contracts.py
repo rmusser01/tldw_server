@@ -21,6 +21,8 @@ def test_sbom_workflow_supports_pyproject_dependency_source() -> None:
 
     assert 'gen_from_requirements "$repo_root/tldw_Server_API/requirements.txt"' in run_script
     assert 'gen_from_requirements "$repo_root/requirements.txt"' in run_script
+    assert 'cyclonedx-py requirements "$req_file" -o "$out_file"' in run_script
+    assert 'cyclonedx-py requirements -i "$req_file" -o "$out_file"' in run_script
     assert "gen_requirements_from_pyproject" in run_script
     assert "tomllib" in run_script
     assert '[project].dependencies' in run_script

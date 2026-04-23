@@ -57,6 +57,10 @@ jobs:
               if (cd "$req_dir" && cyclonedx-py requirements "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
                 return 0
               fi
+              echo "cyclonedx-py positional requirements failed; trying -i form"
+              if (cd "$req_dir" && cyclonedx-py requirements -i "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
+                return 0
+              fi
               echo "cyclonedx-py failed; will try fallbacks"
             fi
 
@@ -64,6 +68,10 @@ jobs:
             if python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('cyclonedx_py') else 1)" >/dev/null 2>&1; then
               echo "Using python -m cyclonedx_py"
               if (cd "$req_dir" && python -m cyclonedx_py requirements "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
+                return 0
+              fi
+              echo "python -m cyclonedx_py positional requirements failed; trying -i form"
+              if (cd "$req_dir" && python -m cyclonedx_py requirements -i "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
                 return 0
               fi
               echo "python -m cyclonedx_py failed; trying legacy CLI"
