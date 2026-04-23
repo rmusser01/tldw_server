@@ -445,4 +445,23 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping companion router in minimal test app: {e}")
 
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.family_wizard import router as family_wizard_router
+        from tldw_Server_API.app.api.v1.endpoints.guardian_controls import router as guardian_controls_router
+
+        specs.extend([
+            RouterSpec(
+                router=guardian_controls_router,
+                prefix=f"{API_V1_PREFIX}/guardian",
+                tags=("guardian",),
+            ),
+            RouterSpec(
+                router=family_wizard_router,
+                prefix=f"{API_V1_PREFIX}/guardian",
+                tags=("guardian",),
+            ),
+        ])
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Skipping guardian controls router in minimal test app: {e}")
+
     return specs

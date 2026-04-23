@@ -2557,15 +2557,6 @@ elif _MINIMAL_TEST_APP:
         app.include_router(email_router, prefix=f"{API_V1_PREFIX}/email", tags=["email"])
     except _IMPORT_EXCEPTIONS as _email_min_err:
         logger.debug(f"Skipping email router in minimal test app: {_email_min_err}")
-    # Guardian controls (parental/supervised account controls)
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.guardian_controls import router as guardian_controls_router
-        from tldw_Server_API.app.api.v1.endpoints.family_wizard import router as family_wizard_router
-
-        app.include_router(guardian_controls_router, prefix=f"{API_V1_PREFIX}/guardian", tags=["guardian"])
-        app.include_router(family_wizard_router, prefix=f"{API_V1_PREFIX}/guardian", tags=["guardian"])
-    except _IMPORT_EXCEPTIONS as _guard_min_err:
-        logger.debug(f"Skipping guardian controls router in minimal test app: {_guard_min_err}")
     # Self-monitoring (awareness notifications, crisis resources)
     try:
         from tldw_Server_API.app.api.v1.endpoints.self_monitoring import router as self_monitoring_router

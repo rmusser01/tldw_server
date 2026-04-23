@@ -633,6 +633,16 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
         "tldw_Server_API.app.api.v1.endpoints.companion",
         path="/companion/profile",
     )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.guardian_controls",
+        path="/controls",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.family_wizard",
+        path="/family-wizard",
+    )
 
     specs = list(iter_minimal_optional_router_specs())
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
@@ -742,6 +752,12 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
     assert by_first_path["/companion/profile"].prefix == "/api/v1/companion"
     assert by_first_path["/companion/profile"].tags == ("companion",)
     assert by_first_path["/companion/profile"].route_key == ""
+    assert by_first_path["/controls"].prefix == "/api/v1/guardian"
+    assert by_first_path["/controls"].tags == ("guardian",)
+    assert by_first_path["/controls"].route_key == ""
+    assert by_first_path["/family-wizard"].prefix == "/api/v1/guardian"
+    assert by_first_path["/family-wizard"].tags == ("guardian",)
+    assert by_first_path["/family-wizard"].route_key == ""
 
 
 def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1597,6 +1613,8 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "from tldw_Server_API.app.api.v1.endpoints.sharing import router as sharing_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.personalization import router as personalization_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.companion import router as companion_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.guardian_controls import router as guardian_controls_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.family_wizard import router as family_wizard_router" not in source
     assert "app.include_router(llm_providers_router" not in source
     assert "app.include_router(mlx_router" not in source
     assert "app.include_router(vector_stores_router" not in source
@@ -1632,6 +1650,8 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "app.include_router(sharing_router" not in source
     assert "app.include_router(personalization_router" not in source
     assert "app.include_router(companion_router" not in source
+    assert "app.include_router(guardian_controls_router" not in source
+    assert "app.include_router(family_wizard_router" not in source
     assert "Skipping llm_providers router in minimal test app" not in source
     assert "Skipping mlx router in minimal test app" not in source
     assert "Skipping vector-stores router in minimal test app" not in source
@@ -1666,6 +1686,7 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "Skipping sharing router in minimal test app" not in source
     assert "Skipping personalization router in minimal test app" not in source
     assert "Skipping companion router in minimal test app" not in source
+    assert "Skipping guardian controls router in minimal test app" not in source
 
 
 def test_main_source_does_not_inline_register_grouped_core_routers() -> None:
