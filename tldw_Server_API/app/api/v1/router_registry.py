@@ -37,9 +37,27 @@ def include_router_idempotent(
 
 
 def register_router_specs(app: FastAPI, specs: Iterable[RouterSpec]) -> int:
+    """Register router specs, respecting route_key gating via route_enabled()."""
+    from loguru import logger
+
     count = 0
     for spec in specs:
-        if include_router_idempotent(app, spec.router, prefix=spec.prefix, tags=spec.tags):
+        if spec.route_key:
+            try:
+                from tldw_Server_API.app.core.config import route_enabled
+
+                if not route_enabled(spec.route_key, default_stable=spec.default_stable):
+                    logger.info(f"Route disabled by policy: {spec.route_key}")
+                    continue
+            except Exception:  # noqa: BLE001
+                logger.debug(f"route_enabled failed for {spec.route_key}; including router by default")
+        try:
+            router = spec.resolve_router()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Skipping {spec.route_key or 'unnamed'} router: {e}")
+            continue
+
+        if include_router_idempotent(app, router, prefix=spec.prefix, tags=spec.tags):
             count += 1
     return count
 

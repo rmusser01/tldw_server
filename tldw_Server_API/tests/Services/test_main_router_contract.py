@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import builtins
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 from fastapi import APIRouter, FastAPI
@@ -93,3 +97,48 @@ def test_minimal_app_import_survives_setup_router_import_error(monkeypatch: pyte
         assert any(route.path == "/health" for route in imported_main.app.routes)
     finally:
         restore_app_main(existing_main)
+
+
+@pytest.mark.integration
+def test_app_import_outside_explicit_pytest_runtime_has_no_duplicate_routes(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    env = os.environ.copy()
+    env.update(
+        {
+            "AUTH_MODE": "single_user",
+            "SINGLE_USER_API_KEY": "test-api-key-12345",
+            "TEST_MODE": "true",
+            "MINIMAL_TEST_APP": "0",
+            "ULTRA_MINIMAL_APP": "0",
+            "USER_DB_BASE_DIR": str(tmp_path / "user_databases"),
+        }
+    )
+    env.pop("PYTEST_CURRENT_TEST", None)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import tldw_Server_API.app.main as main; "
+                "main._fail_on_duplicate_route_method_pairs("
+                "main.app, context='subprocess-import'"
+                "); "
+                "print('NO_DUPLICATES')"
+            ),
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        "Expected app import to succeed outside explicit pytest runtime without duplicate routes.\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
+    )
+    assert "NO_DUPLICATES" in result.stdout
