@@ -8,6 +8,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import RecipeM
 
 from .base import RecipeDefinition
 from .embeddings_retrieval import EmbeddingsRetrievalRecipe
+from .persona_dialogue_tree_robustness import PersonaDialogueTreeRobustnessRecipe
 from .rag_answer_quality import RAGAnswerQualityRecipe
 from .rag_retrieval_tuning import RAGRetrievalTuningRecipe
 from .summarization_quality import SummarizationQualityRecipe
@@ -30,6 +31,7 @@ def _default_builtin_recipes() -> tuple[RecipeDefinition, ...]:
         SummarizationQualityRecipe(),
         RAGRetrievalTuningRecipe(),
         RAGAnswerQualityRecipe(),
+        PersonaDialogueTreeRobustnessRecipe(),
     )
 
 
