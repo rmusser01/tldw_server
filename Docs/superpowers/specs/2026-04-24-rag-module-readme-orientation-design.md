@@ -37,6 +37,12 @@ Supporting docs may be linked but should not be rewritten as part of this task u
 - `tldw_Server_API/app/core/RAG/UNIFIED_PIPELINE_EXAMPLES.md`
 - `tldw_Server_API/app/core/RAG/rag_service/README.md`
 
+Important link caveat:
+
+- Some deeper RAG docs currently still contain stale functional-pipeline guidance. The README must not describe those docs as authoritative unless their current content is verified during implementation.
+- If a linked doc is useful but stale in places, the README should label it by its actual role, such as "legacy/migration context" or "API examples, verify against current schema", rather than presenting it as the source of truth.
+- When in doubt, prefer linking to current code files, `API_DOCUMENTATION.md`, `CAPABILITIES.md`, and `UNIFIED_PIPELINE_EXAMPLES.md` over stale broad guides.
+
 Out of scope:
 
 - Python behavior changes.
@@ -56,7 +62,7 @@ Why this is preferred:
 - Preserves the README as a fast entrypoint.
 - Avoids carrying forward stale examples and missing-doc links.
 - Keeps advanced RAG concepts discoverable without making the README a full manual.
-- Leaves canonical deep-dive and API details in dedicated docs.
+- Leaves deep-dive and API details in dedicated docs that are verified or clearly labeled by role.
 
 ### Alternative: Short orientation only
 
@@ -120,10 +126,12 @@ The updated README should be concise at the top and explicit about its role. It 
 6. `## Current Endpoints`
    - Summarize active RAG endpoints from `rag_unified.py` and `rag_health.py`.
    - Avoid brittle source line numbers.
+   - Group endpoints by purpose: primary search, convenience/search presets, batch/resume, feedback, capabilities/features, VLM helpers, and operational health/cache/metrics.
    - Point to API docs for full request and response examples.
 
 7. `## Configuration And Profiles`
    - Explain request-level options, `rag_profile`, environment/config defaults, and production adapter expectations at a high level.
+   - Distinguish public API `rag_profile` values from internal profile helper names if both are mentioned.
    - Link deeper config details instead of duplicating every knob.
 
 8. `## Testing`
@@ -136,7 +144,7 @@ The updated README should be concise at the top and explicit about its role. It 
    - Avoid long cURL examples and parameter catalogs that belong in API docs.
 
 10. `## Related Documentation`
-    - Link canonical deeper docs and examples.
+    - Link deeper docs and examples only with accurate role labels.
     - Make ownership clear so future contributors know where to edit.
 
 ## Accuracy Rules
@@ -145,10 +153,12 @@ The updated README should be concise at the top and explicit about its role. It 
 - Verify public request/response names from `rag_schemas_unified.py`.
 - Verify pipeline entrypoints from `unified_pipeline.py`.
 - Verify profile names and precedence behavior from `profiles.py` and endpoint handling.
+- Distinguish public request profiles accepted by `UnifiedRAGRequest` from additional internal profiles exposed by `profiles.py`.
 - Verify retrieval and vector-store terminology from retriever and vector-store modules.
 - Verify current test paths with `rg --files`.
 - Do not preserve source line references in the README; they drift quickly.
 - Do not link missing files such as `IMPLEMENTATION_STATUS.md` or `DEPRECATION_NOTICE.md` unless they exist when implementation happens.
+- Do not call a deeper RAG doc "canonical", "authoritative", or "source of truth" unless its current content is verified as current during the implementation pass.
 - Mention archived functional pipelines only as legacy context, not as active contributor guidance.
 - Omit, shorten, or label uncertain features instead of presenting them as guaranteed behavior.
 
@@ -170,13 +180,20 @@ Validation steps:
   - `DEPRECATION_NOTICE.md`
 - Review Markdown headings and local links for readability.
 
-No Bandit run is required because no Python code changes are planned.
+No Python code changes are planned. If the final project checklist requires a Bandit record anyway, run it from the project virtual environment against the nearest Python scope, for example:
+
+```bash
+source .venv/bin/activate
+python -m bandit -r tldw_Server_API/app/core/RAG -f json -o /tmp/bandit_rag_readme_orientation.json
+```
+
+Treat any findings as baseline unless they are in Python code changed by this task; this README update should not introduce Python security findings.
 
 ## Success Criteria
 
 - The README quickly orients contributors to the active unified RAG path.
 - Stale functional-pipeline guidance is removed or clearly marked as legacy context.
 - Missing-doc links and brittle line-number references are removed.
-- The README points API users and deep implementation readers to the right dedicated docs.
+- The README points API users and deep implementation readers to the right dedicated docs without presenting stale docs as authoritative.
 - The advanced appendix contains only concise, source-verified notes.
 - No unrelated dirty worktree files are modified.
