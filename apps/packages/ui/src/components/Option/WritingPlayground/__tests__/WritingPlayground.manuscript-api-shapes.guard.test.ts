@@ -12,12 +12,15 @@ const readWritingPlaygroundRootSource = (filename: string) =>
   fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "..", "services", filename), "utf8")
 
 describe("Writing playground manuscript API shape guards", () => {
-  it("uses direct array responses for agent and connection-web manuscript lookups", () => {
+  it("uses typed wrapper response fields for agent and connection-web manuscript lookups", () => {
     const aiAgentSource = readWritingPlaygroundSource("AIAgentTab.tsx")
     const connectionWebSource = readWritingPlaygroundModalSource("ConnectionWebModal.tsx")
 
-    expect(aiAgentSource).not.toContain("charsResp?.characters")
-    expect(aiAgentSource).not.toContain("worldResp?.items")
+    expect(aiAgentSource).toContain("const chars = charsResp.characters || []")
+    expect(aiAgentSource).toContain("const items = worldResp.items || []")
+    expect(connectionWebSource).toContain("const characters = charsData?.characters || []")
+    expect(connectionWebSource).toContain("const relationships = relsData?.relationships || []")
+    expect(connectionWebSource).toContain("const worldItems = worldData?.items || []")
     expect(connectionWebSource).not.toContain("charsData as any")
     expect(connectionWebSource).not.toContain("relsData as any")
     expect(connectionWebSource).not.toContain("worldData as any")
@@ -32,13 +35,16 @@ describe("Writing playground manuscript API shape guards", () => {
     expect(researchSource).toContain("resp.results")
   })
 
-  it("types manuscript service return values instead of leaving them implicit", () => {
+  it("types manuscript service return values with explicit wrapper contracts", () => {
     const serviceSource = readWritingPlaygroundRootSource("writing-playground.ts")
 
     expect(serviceSource).toContain("export type ManuscriptCharacterResponse")
-    expect(serviceSource).toContain("): Promise<ManuscriptCharacterResponse[]>")
-    expect(serviceSource).toContain("): Promise<ManuscriptWorldInfoResponse[]>")
-    expect(serviceSource).toContain("): Promise<ManuscriptRelationshipResponse[]>")
+    expect(serviceSource).toContain("export type ManuscriptCharacterListResponse")
+    expect(serviceSource).toContain("export type ManuscriptWorldInfoListResponse")
+    expect(serviceSource).toContain("export type ManuscriptRelationshipListResponse")
+    expect(serviceSource).toContain("): Promise<ManuscriptCharacterListResponse>")
+    expect(serviceSource).toContain("): Promise<ManuscriptWorldInfoListResponse>")
+    expect(serviceSource).toContain("): Promise<ManuscriptRelationshipListResponse>")
     expect(serviceSource).toContain("): Promise<ManuscriptResearchResponse>")
   })
 
