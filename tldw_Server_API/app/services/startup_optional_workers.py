@@ -1,0 +1,258 @@
+"""
+Optional worker startup helpers extracted from the application lifespan.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from dataclasses import dataclass
+from typing import Any
+
+from loguru import logger
+
+from tldw_Server_API.app.core.testing import env_flag_enabled as _env_flag_enabled
+
+_STARTUP_GUARD_EXCEPTIONS = (
+    AttributeError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+
+
+@dataclass
+class OptionalWorkerStartupHandles:
+    """Startup-owned optional worker handles that remain part of shutdown flow."""
+
+    jobs_metrics_reconcile_stop: Any | None = None
+    jobs_metrics_reconcile_task: Any | None = None
+    jobs_crypto_rotate_stop_event: Any | None = None
+    jobs_crypto_rotate_task: Any | None = None
+    jobs_webhooks_stop_event: Any | None = None
+    jobs_webhooks_task: Any | None = None
+    meetings_webhook_dlq_stop_event: Any | None = None
+    meetings_webhook_dlq_task: Any | None = None
+    workflows_dlq_stop_event: Any | None = None
+    workflows_dlq_task: Any | None = None
+    workflows_gc_stop_event: Any | None = None
+    workflows_gc_task: Any | None = None
+    workflows_maint_stop_event: Any | None = None
+    workflows_maint_task: Any | None = None
+    jobs_integrity_stop_event: Any | None = None
+    jobs_integrity_task: Any | None = None
+
+
+async def start_optional_workers() -> OptionalWorkerStartupHandles:
+    """Start optional stop-event workers and return the task/stop handles."""
+    jobs_metrics_reconcile_stop, jobs_metrics_reconcile_task = await _start_jobs_metrics_reconcile_worker()
+    jobs_crypto_rotate_stop_event, jobs_crypto_rotate_task = await _start_jobs_crypto_rotate_worker()
+    jobs_webhooks_stop_event, jobs_webhooks_task = await _start_jobs_webhooks_worker()
+    meetings_webhook_dlq_stop_event, meetings_webhook_dlq_task = await _start_meetings_webhook_dlq_worker()
+    workflows_dlq_stop_event, workflows_dlq_task = await _start_workflows_webhook_dlq_worker()
+    workflows_gc_stop_event, workflows_gc_task = await _start_workflows_artifact_gc_worker()
+    workflows_maint_stop_event, workflows_maint_task = await _start_workflows_db_maintenance_worker()
+    jobs_integrity_stop_event, jobs_integrity_task = await _start_jobs_integrity_sweeper()
+    return OptionalWorkerStartupHandles(
+        jobs_metrics_reconcile_stop=jobs_metrics_reconcile_stop,
+        jobs_metrics_reconcile_task=jobs_metrics_reconcile_task,
+        jobs_crypto_rotate_stop_event=jobs_crypto_rotate_stop_event,
+        jobs_crypto_rotate_task=jobs_crypto_rotate_task,
+        jobs_webhooks_stop_event=jobs_webhooks_stop_event,
+        jobs_webhooks_task=jobs_webhooks_task,
+        meetings_webhook_dlq_stop_event=meetings_webhook_dlq_stop_event,
+        meetings_webhook_dlq_task=meetings_webhook_dlq_task,
+        workflows_dlq_stop_event=workflows_dlq_stop_event,
+        workflows_dlq_task=workflows_dlq_task,
+        workflows_gc_stop_event=workflows_gc_stop_event,
+        workflows_gc_task=workflows_gc_task,
+        workflows_maint_stop_event=workflows_maint_stop_event,
+        workflows_maint_task=workflows_maint_task,
+        jobs_integrity_stop_event=jobs_integrity_stop_event,
+        jobs_integrity_task=jobs_integrity_task,
+    )
+
+
+def _make_event() -> Any:
+    return asyncio.Event()
+
+
+def _create_task(awaitable: Any) -> Any:
+    return asyncio.create_task(awaitable)
+
+
+async def _start_jobs_metrics_reconcile_worker() -> tuple[Any | None, Any | None]:
+    try:
+        if not _env_flag_enabled("JOBS_METRICS_RECONCILE_ENABLE"):
+            logger.info("Jobs metrics reconcile worker disabled by flag (JOBS_METRICS_RECONCILE_ENABLE)")
+            return None, None
+        stop_event = _make_event()
+        task = _create_task(_run_jobs_metrics_reconcile_service(stop_event))
+        logger.info("Jobs metrics reconcile worker started with explicit stop_event signal")
+        return stop_event, task
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning(f"Failed to start Jobs metrics reconcile worker: {exc}")
+        return None, None
+
+
+async def _start_jobs_crypto_rotate_worker() -> tuple[Any | None, Any | None]:
+    try:
+        if not _env_flag_enabled("JOBS_CRYPTO_ROTATE_SERVICE_ENABLED"):
+            logger.info("Jobs crypto rotate worker disabled by flag")
+            return None, None
+        stop_event = _make_event()
+        task = _create_task(_run_jobs_crypto_rotate_service(stop_event))
+        logger.info("Jobs crypto rotate worker started with explicit stop_event signal")
+        return stop_event, task
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning(f"Failed to start Jobs crypto rotate worker: {exc}")
+        return None, None
+
+
+async def _start_jobs_webhooks_worker() -> tuple[Any | None, Any | None]:
+    try:
+        if not _env_flag_enabled("JOBS_WEBHOOKS_ENABLED") or not os.getenv("JOBS_WEBHOOKS_URL"):
+            logger.info("Jobs webhooks worker disabled by flag or missing URL")
+            return None, None
+        stop_event = _make_event()
+        task = _create_task(_run_jobs_webhooks_worker_service(stop_event))
+        logger.info("Jobs webhooks worker started with explicit stop_event signal")
+        return stop_event, task
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning(f"Failed to start Jobs webhooks worker: {exc}")
+        return None, None
+
+
+async def _start_meetings_webhook_dlq_worker() -> tuple[Any | None, Any | None]:
+    try:
+        if not _env_flag_enabled("MEETINGS_WEBHOOK_DLQ_ENABLED"):
+            logger.info("Meetings webhook DLQ worker disabled by flag")
+            return None, None
+        stop_event = _make_event()
+        task = _create_task(_run_meetings_webhook_dlq_worker_service(stop_event))
+        logger.info("Meetings webhook DLQ worker started with explicit stop_event signal")
+        return stop_event, task
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning(f"Failed to start Meetings webhook DLQ worker: {exc}")
+        return None, None
+
+
+async def _start_workflows_webhook_dlq_worker() -> tuple[Any | None, Any | None]:
+    try:
+        if not _env_flag_enabled("WORKFLOWS_WEBHOOK_DLQ_ENABLED"):
+            logger.info("Workflows webhook DLQ worker disabled by flag")
+            return None, None
+        stop_event = _make_event()
+        task = _create_task(_run_workflows_webhook_dlq_worker_service(stop_event))
+        logger.info("Workflows webhook DLQ worker started with explicit stop_event signal")
+        return stop_event, task
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning(f"Failed to start Workflows webhook DLQ worker: {exc}")
+        return None, None
+
+
+async def _start_workflows_artifact_gc_worker() -> tuple[Any | None, Any | None]:
+    try:
+        if not _env_flag_enabled("WORKFLOWS_ARTIFACT_GC_ENABLED"):
+            logger.info("Workflows artifact GC worker disabled by flag")
+            return None, None
+        stop_event = _make_event()
+        task = _create_task(_run_workflows_artifact_gc_worker_service(stop_event))
+        logger.info("Workflows artifact GC worker started with explicit stop_event signal")
+        return stop_event, task
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning(f"Failed to start Workflows artifact GC worker: {exc}")
+        return None, None
+
+
+async def _start_workflows_db_maintenance_worker() -> tuple[Any | None, Any | None]:
+    try:
+        if not _env_flag_enabled("WORKFLOWS_DB_MAINTENANCE_ENABLED"):
+            logger.info("Workflows DB maintenance worker disabled by flag")
+            return None, None
+        stop_event = _make_event()
+        task = _create_task(_run_workflows_db_maintenance_worker_service(stop_event))
+        logger.info("Workflows DB maintenance worker started with explicit stop_event signal")
+        return stop_event, task
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning(f"Failed to start Workflows DB maintenance worker: {exc}")
+        return None, None
+
+
+async def _start_jobs_integrity_sweeper() -> tuple[Any | None, Any | None]:
+    try:
+        if not _env_flag_enabled("JOBS_INTEGRITY_SWEEP_ENABLED"):
+            logger.info("Jobs integrity sweeper disabled by flag")
+            return None, None
+        stop_event = _make_event()
+        task = _create_task(_run_jobs_integrity_sweeper_service(stop_event))
+        logger.info("Jobs integrity sweeper started with explicit stop_event signal")
+        return stop_event, task
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning(f"Failed to start Jobs integrity sweeper: {exc}")
+        return None, None
+
+
+def _run_jobs_metrics_reconcile_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.jobs_metrics_service import (
+        run_jobs_metrics_reconcile as _run_jobs_reconcile,
+    )
+
+    return _run_jobs_reconcile(stop_event)
+
+
+def _run_jobs_crypto_rotate_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.jobs_crypto_rotate_service import (
+        run_jobs_crypto_rotate as _run_jobs_crypto,
+    )
+
+    return _run_jobs_crypto(stop_event)
+
+
+def _run_jobs_webhooks_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.jobs_webhooks_service import (
+        run_jobs_webhooks_worker as _run_jobs_webhooks,
+    )
+
+    return _run_jobs_webhooks(stop_event)
+
+
+def _run_meetings_webhook_dlq_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.meetings_webhook_dlq_service import (
+        run_meetings_webhook_dlq_worker as _run_meetings_dlq,
+    )
+
+    return _run_meetings_dlq(stop_event)
+
+
+def _run_workflows_webhook_dlq_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.workflows_webhook_dlq_service import (
+        run_workflows_webhook_dlq_worker as _run_wf_dlq,
+    )
+
+    return _run_wf_dlq(stop_event)
+
+
+def _run_workflows_artifact_gc_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.workflows_artifact_gc_service import (
+        run_workflows_artifact_gc_worker as _run_wf_gc,
+    )
+
+    return _run_wf_gc(stop_event)
+
+
+def _run_workflows_db_maintenance_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.workflows_db_maintenance import (
+        run_workflows_db_maintenance as _run_wf_maint,
+    )
+
+    return _run_wf_maint(stop_event)
+
+
+def _run_jobs_integrity_sweeper_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.jobs_integrity_service import (
+        run_jobs_integrity_sweeper as _run_jobs_integrity,
+    )
+
+    return _run_jobs_integrity(stop_event)

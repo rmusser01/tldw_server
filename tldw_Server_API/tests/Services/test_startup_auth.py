@@ -1,0 +1,164 @@
+from __future__ import annotations
+
+import importlib
+import sys
+from types import ModuleType, SimpleNamespace
+
+import pytest
+
+
+pytestmark = pytest.mark.unit
+
+
+def _install_module(
+    monkeypatch: pytest.MonkeyPatch,
+    module_name: str,
+    **attributes: object,
+) -> ModuleType:
+    module = ModuleType(module_name)
+    for key, value in attributes.items():
+        setattr(module, key, value)
+    monkeypatch.setitem(sys.modules, module_name, module)
+    return module
+
+
+def _import_startup_auth() -> ModuleType:
+    sys.modules.pop("tldw_Server_API.app.services.startup_auth", None)
+    return importlib.import_module("tldw_Server_API.app.services.startup_auth")
+
+
+@pytest.mark.asyncio
+async def test_init_auth_services_runs_sqlite_startup_chain(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[object] = []
+    db_pool = SimpleNamespace()
+
+    async def _fake_get_db_pool():
+        calls.append("get_db_pool")
+        return db_pool
+
+    async def _fake_ensure_schema():
+        calls.append("ensure_schema")
+
+    async def _fake_seed():
+        calls.append("seed")
+
+    async def _fake_refresh(pool):
+        calls.append(("refresh", pool))
+
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.database",
+        get_db_pool=_fake_get_db_pool,
+    )
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.initialize",
+        ensure_authnz_schema_ready_once=_fake_ensure_schema,
+        ensure_single_user_rbac_seed_if_needed=_fake_seed,
+    )
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.llm_provider_overrides",
+        refresh_llm_provider_overrides=_fake_refresh,
+    )
+
+    startup_auth = _import_startup_auth()
+
+    result = await startup_auth.init_auth_services()
+
+    assert result is db_pool
+    assert calls == [
+        "get_db_pool",
+        "ensure_schema",
+        "seed",
+        ("refresh", db_pool),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_init_auth_services_runs_pg_extras_when_pool_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_pool = SimpleNamespace(pool=object())
+    pg_calls: list[str] = []
+
+    async def _fake_get_db_pool():
+        return db_pool
+
+    async def _fake_noop():
+        return None
+
+    async def _fake_refresh(_pool):
+        return None
+
+    def _make_pg_ensure(label: str):
+        async def _ensure(_pool):
+            pg_calls.append(label)
+            return True
+
+        return _ensure
+
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.database",
+        get_db_pool=_fake_get_db_pool,
+    )
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.initialize",
+        ensure_authnz_schema_ready_once=_fake_noop,
+        ensure_single_user_rbac_seed_if_needed=_fake_noop,
+    )
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.llm_provider_overrides",
+        refresh_llm_provider_overrides=_fake_refresh,
+    )
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.pg_migrations_extra",
+        ensure_authnz_core_tables_pg=_make_pg_ensure("authnz_core"),
+        ensure_generated_files_table_pg=_make_pg_ensure("generated_files"),
+        ensure_tool_catalogs_tables_pg=_make_pg_ensure("tool_catalogs"),
+        ensure_privilege_snapshots_table_pg=_make_pg_ensure("privilege_snapshots"),
+        ensure_api_keys_tables_pg=_make_pg_ensure("api_keys"),
+        ensure_usage_tables_pg=_make_pg_ensure("usage"),
+        ensure_virtual_key_counters_pg=_make_pg_ensure("virtual_key_counters"),
+        ensure_llm_provider_overrides_pg=_make_pg_ensure("provider_overrides"),
+    )
+
+    startup_auth = _import_startup_auth()
+
+    result = await startup_auth.init_auth_services()
+
+    assert result is db_pool
+    assert pg_calls == [
+        "authnz_core",
+        "generated_files",
+        "tool_catalogs",
+        "privilege_snapshots",
+        "api_keys",
+        "usage",
+        "virtual_key_counters",
+        "provider_overrides",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_init_auth_services_returns_none_when_db_pool_init_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _failing_get_db_pool():
+        raise RuntimeError("db boom")
+
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.database",
+        get_db_pool=_failing_get_db_pool,
+    )
+
+    startup_auth = _import_startup_auth()
+
+    result = await startup_auth.init_auth_services()
+
+    assert result is None
