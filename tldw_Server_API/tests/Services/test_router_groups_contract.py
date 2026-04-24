@@ -454,6 +454,33 @@ def test_iter_minimal_test_router_specs_populates_expected_specs(monkeypatch: py
     assert by_first_path["/workspaces"].tags == ("workspaces",)
 
 
+def test_iter_minimal_test_router_specs_includes_health_and_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_test_router_specs
+
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.health",
+        path="/health",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.auth",
+        path="/auth/login",
+    )
+
+    specs = list(iter_minimal_test_router_specs())
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+
+    assert by_first_path["/health"].prefix == "/api/v1"
+    assert by_first_path["/health"].tags == ("health",)
+    assert by_first_path["/health"].route_key == ""
+    assert by_first_path["/auth/login"].prefix == "/api/v1"
+    assert by_first_path["/auth/login"].tags == ("authentication",)
+    assert by_first_path["/auth/login"].route_key == ""
+
+
 def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_optional_router_specs
 
@@ -466,6 +493,28 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
         monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.mlx",
         path="/mlx/health",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.messages",
+        path="/messages/send",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.messages",
+        attr_name="public_router",
+        path="/messages/public/send",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.llamacpp",
+        path="/llamacpp/completions",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.llamacpp",
+        attr_name="public_router",
+        path="/llamacpp/public/completions",
     )
     _install_fake_router_module(
         monkeypatch,
@@ -620,6 +669,31 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
     )
     _install_fake_router_module(
         monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.workflows",
+        path="/api/v1/workflows",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.chat_workflows",
+        path="/api/v1/chat-workflows",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.scheduler_workflows",
+        path="/api/v1/scheduler/workflows",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified",
+        path="/evaluations",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.monitoring",
+        path="/monitoring/status",
+    )
+    _install_fake_router_module(
+        monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.sharing",
         path="/sharing",
     )
@@ -658,6 +732,212 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
         "tldw_Server_API.app.api.v1.endpoints.archetype_endpoints",
         path="/archetypes",
     )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.notes",
+        path="/notes",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.web_clipper",
+        path="/web-clipper",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.skills",
+        path="/skills",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.translate",
+        path="/translate",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.slides",
+        path="/slides",
+    )
+    for module_suffix, path in (
+        ("kanban_boards", "/boards"),
+        ("kanban_lists", "/lists"),
+        ("kanban_cards", "/cards"),
+        ("kanban_labels", "/labels"),
+        ("kanban_checklists", "/checklists"),
+        ("kanban_comments", "/comments"),
+        ("kanban_search", "/search"),
+        ("kanban_links", "/links"),
+        ("kanban_workflow", "/workflow"),
+    ):
+        _install_fake_router_module(
+            monkeypatch,
+            f"tldw_Server_API.app.api.v1.endpoints.kanban.{module_suffix}",
+            path=path,
+        )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.flashcards",
+        path="/flashcards",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.quizzes",
+        path="/quizzes",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.study_suggestions",
+        path="/study-suggestions",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.writing",
+        path="/writing",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.writing_manuscripts",
+        path="/writing/manuscripts",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.email",
+        path="/email/search",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.jobs_admin",
+        path="/jobs/health",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.audit",
+        path="/audit/events",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.config_info",
+        path="/documentation/info",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.config_admin",
+        path="/config/effective",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.admin",
+        path="/admin/status",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.admin.admin_byok",
+        path="/keys/shared",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.orgs",
+        path="/orgs",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.org_invites",
+        path="/orgs/invites",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.resource_governor",
+        path="/resource-governor/status",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.users",
+        path="/users/me",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.user_keys",
+        path="/users/keys",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.shared_keys_scoped",
+        path="/organizations/shared-keys",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint",
+        path="/mcp/status",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.mcp_catalogs_manage",
+        path="/mcp/catalogs",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.mcp_hub_management",
+        path="/mcp/hub",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.privileges",
+        path="/privileges",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.tools",
+        path="/tools",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol",
+        path="/acp/run",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.acp_schedules",
+        path="/acp/schedules",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.acp_triggers",
+        path="/acp/triggers",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.acp_permissions",
+        path="/acp/permissions",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.acp_multiplex",
+        path="/acp/multiplex",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.agent_orchestration",
+        path="/agent-orchestration",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.setup",
+        path="/setup/status",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.metrics",
+        path="/metrics/text",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.authnz_debug",
+        path="/authnz-debug/status",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.sandbox",
+        path="/sandbox/status",
+    )
 
     specs = list(iter_minimal_optional_router_specs())
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
@@ -668,6 +948,18 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
     assert by_first_path["/mlx/health"].prefix == "/api/v1"
     assert by_first_path["/mlx/health"].tags == ("llm",)
     assert by_first_path["/mlx/health"].route_key == ""
+    assert by_first_path["/messages/send"].prefix == "/api/v1"
+    assert by_first_path["/messages/send"].tags == ("messages",)
+    assert by_first_path["/messages/send"].route_key == ""
+    assert by_first_path["/messages/public/send"].prefix == ""
+    assert by_first_path["/messages/public/send"].tags == ("messages",)
+    assert by_first_path["/messages/public/send"].route_key == ""
+    assert by_first_path["/llamacpp/completions"].prefix == "/api/v1"
+    assert by_first_path["/llamacpp/completions"].tags == ("llamacpp",)
+    assert by_first_path["/llamacpp/completions"].route_key == ""
+    assert by_first_path["/llamacpp/public/completions"].prefix == ""
+    assert by_first_path["/llamacpp/public/completions"].tags == ("llamacpp",)
+    assert by_first_path["/llamacpp/public/completions"].route_key == ""
     assert by_first_path["/vector_stores"].prefix == "/api/v1"
     assert by_first_path["/vector_stores"].tags == ("vector-stores",)
     assert by_first_path["/vector_stores"].route_key == ""
@@ -758,6 +1050,21 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
     assert by_first_path["/chatbooks"].prefix == "/api/v1"
     assert by_first_path["/chatbooks"].tags == ("chatbooks",)
     assert by_first_path["/chatbooks"].route_key == ""
+    assert by_first_path["/api/v1/workflows"].prefix == ""
+    assert by_first_path["/api/v1/workflows"].tags == ("workflows",)
+    assert by_first_path["/api/v1/workflows"].route_key == ""
+    assert by_first_path["/api/v1/chat-workflows"].prefix == ""
+    assert by_first_path["/api/v1/chat-workflows"].tags == ("chat-workflows",)
+    assert by_first_path["/api/v1/chat-workflows"].route_key == ""
+    assert by_first_path["/api/v1/scheduler/workflows"].prefix == ""
+    assert by_first_path["/api/v1/scheduler/workflows"].tags == ("scheduler",)
+    assert by_first_path["/api/v1/scheduler/workflows"].route_key == ""
+    assert by_first_path["/evaluations"].prefix == "/api/v1"
+    assert by_first_path["/evaluations"].tags == ("evaluations",)
+    assert by_first_path["/evaluations"].route_key == "evaluations"
+    assert by_first_path["/monitoring/status"].prefix == "/api/v1"
+    assert by_first_path["/monitoring/status"].tags == ("monitoring",)
+    assert by_first_path["/monitoring/status"].route_key == "monitoring"
     assert by_first_path["/sharing"].prefix == "/api/v1"
     assert by_first_path["/sharing"].tags == ("sharing",)
     assert by_first_path["/sharing"].route_key == ""
@@ -782,6 +1089,266 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
     assert by_first_path["/archetypes"].prefix == "/api/v1/persona/archetypes"
     assert by_first_path["/archetypes"].tags == ("persona-archetypes",)
     assert by_first_path["/archetypes"].route_key == ""
+    assert by_first_path["/notes"].prefix == "/api/v1/notes"
+    assert by_first_path["/notes"].tags == ("notes",)
+    assert by_first_path["/notes"].route_key == ""
+    assert by_first_path["/web-clipper"].prefix == "/api/v1/web-clipper"
+    assert by_first_path["/web-clipper"].tags == ("web-clipper",)
+    assert by_first_path["/web-clipper"].route_key == ""
+    assert by_first_path["/skills"].prefix == "/api/v1/skills"
+    assert by_first_path["/skills"].tags == ("skills",)
+    assert by_first_path["/skills"].route_key == ""
+    assert by_first_path["/translate"].prefix == "/api/v1"
+    assert by_first_path["/translate"].tags == ("translation",)
+    assert by_first_path["/translate"].route_key == ""
+    assert by_first_path["/slides"].prefix == "/api/v1"
+    assert by_first_path["/slides"].tags == ("slides",)
+    assert by_first_path["/slides"].route_key == ""
+    kanban_specs = [spec for spec in specs if spec.route_key == "kanban"]
+    assert len(kanban_specs) == 9
+    assert {
+        (_first_router_path(spec.router), spec.prefix, spec.tags)
+        for spec in kanban_specs
+    } == {
+        ("/boards", "/api/v1/kanban", ("kanban",)),
+        ("/lists", "/api/v1/kanban", ("kanban",)),
+        ("/cards", "/api/v1/kanban", ("kanban",)),
+        ("/labels", "/api/v1/kanban", ("kanban",)),
+        ("/checklists", "/api/v1/kanban", ("kanban",)),
+        ("/comments", "/api/v1/kanban", ("kanban",)),
+        ("/search", "/api/v1/kanban", ("kanban",)),
+        ("/links", "/api/v1/kanban", ("kanban",)),
+        ("/workflow", "/api/v1/kanban", ("kanban",)),
+    }
+    assert by_first_path["/flashcards"].prefix == "/api/v1"
+    assert by_first_path["/flashcards"].tags == ("flashcards",)
+    assert by_first_path["/flashcards"].route_key == ""
+    assert by_first_path["/quizzes"].prefix == "/api/v1"
+    assert by_first_path["/quizzes"].tags == ("quizzes",)
+    assert by_first_path["/quizzes"].route_key == ""
+    assert by_first_path["/study-suggestions"].prefix == "/api/v1"
+    assert by_first_path["/study-suggestions"].tags == ("study-suggestions",)
+    assert by_first_path["/study-suggestions"].route_key == ""
+    assert by_first_path["/writing"].prefix == "/api/v1/writing"
+    assert by_first_path["/writing"].tags == ("writing",)
+    assert by_first_path["/writing"].route_key == ""
+    assert by_first_path["/writing/manuscripts"].prefix == "/api/v1/writing/manuscripts"
+    assert by_first_path["/writing/manuscripts"].tags == ("manuscripts",)
+    assert by_first_path["/writing/manuscripts"].route_key == ""
+    assert by_first_path["/email/search"].prefix == "/api/v1/email"
+    assert by_first_path["/email/search"].tags == ("email",)
+    assert by_first_path["/email/search"].route_key == ""
+    assert by_first_path["/jobs/health"].prefix == "/api/v1"
+    assert by_first_path["/jobs/health"].tags == ("jobs",)
+    assert by_first_path["/jobs/health"].route_key == ""
+    assert by_first_path["/audit/events"].prefix == "/api/v1"
+    assert by_first_path["/audit/events"].tags == ("audit",)
+    assert by_first_path["/audit/events"].route_key == ""
+    assert by_first_path["/documentation/info"].prefix == "/api/v1"
+    assert by_first_path["/documentation/info"].tags == ("config",)
+    assert by_first_path["/documentation/info"].route_key == ""
+    assert by_first_path["/config/effective"].prefix == "/api/v1"
+    assert by_first_path["/config/effective"].tags == ("config", "admin")
+    assert by_first_path["/config/effective"].route_key == ""
+    assert by_first_path["/admin/status"].prefix == "/api/v1"
+    assert by_first_path["/admin/status"].tags == ("admin",)
+    assert by_first_path["/admin/status"].route_key == ""
+    assert by_first_path["/orgs"].prefix == "/api/v1"
+    assert by_first_path["/orgs"].tags == ("organizations",)
+    assert by_first_path["/orgs"].route_key == ""
+    assert by_first_path["/orgs/invites"].prefix == "/api/v1"
+    assert by_first_path["/orgs/invites"].tags == ("invites",)
+    assert by_first_path["/orgs/invites"].route_key == ""
+    assert by_first_path["/resource-governor/status"].prefix == "/api/v1"
+    assert by_first_path["/resource-governor/status"].tags == ("resource-governor",)
+    assert by_first_path["/resource-governor/status"].route_key == ""
+    assert by_first_path["/users/me"].prefix == "/api/v1"
+    assert by_first_path["/users/me"].tags == ("users",)
+    assert by_first_path["/users/me"].route_key == ""
+    assert by_first_path["/users/keys"].prefix == "/api/v1"
+    assert by_first_path["/users/keys"].tags == ("users",)
+    assert by_first_path["/users/keys"].route_key == ""
+    assert by_first_path["/organizations/shared-keys"].prefix == "/api/v1"
+    assert by_first_path["/organizations/shared-keys"].tags == ("organizations",)
+    assert by_first_path["/organizations/shared-keys"].route_key == ""
+    assert by_first_path["/mcp/status"].prefix == "/api/v1"
+    assert by_first_path["/mcp/status"].tags == ("mcp-unified",)
+    assert by_first_path["/mcp/status"].route_key == ""
+    assert by_first_path["/mcp/catalogs"].prefix == "/api/v1"
+    assert by_first_path["/mcp/catalogs"].tags == ("mcp-catalogs",)
+    assert by_first_path["/mcp/catalogs"].route_key == ""
+    assert by_first_path["/mcp/hub"].prefix == "/api/v1"
+    assert by_first_path["/mcp/hub"].tags == ("mcp-hub",)
+    assert by_first_path["/mcp/hub"].route_key == ""
+    assert by_first_path["/privileges"].prefix == "/api/v1"
+    assert by_first_path["/privileges"].tags == ("privileges",)
+    assert by_first_path["/privileges"].route_key == ""
+    assert by_first_path["/tools"].prefix == "/api/v1"
+    assert by_first_path["/tools"].tags == ("tools",)
+    assert by_first_path["/tools"].route_key == ""
+    assert by_first_path["/acp/run"].prefix == "/api/v1"
+    assert by_first_path["/acp/run"].tags == ("acp",)
+    assert by_first_path["/acp/run"].route_key == ""
+    assert by_first_path["/acp/schedules"].prefix == "/api/v1"
+    assert by_first_path["/acp/schedules"].tags == ("acp-schedules",)
+    assert by_first_path["/acp/schedules"].route_key == ""
+    assert by_first_path["/acp/triggers"].prefix == "/api/v1"
+    assert by_first_path["/acp/triggers"].tags == ("acp-triggers",)
+    assert by_first_path["/acp/triggers"].route_key == ""
+    assert by_first_path["/acp/permissions"].prefix == "/api/v1"
+    assert by_first_path["/acp/permissions"].tags == ("acp-permissions",)
+    assert by_first_path["/acp/permissions"].route_key == ""
+    assert by_first_path["/acp/multiplex"].prefix == "/api/v1"
+    assert by_first_path["/acp/multiplex"].tags == ("acp-multiplex",)
+    assert by_first_path["/acp/multiplex"].route_key == ""
+    assert by_first_path["/agent-orchestration"].prefix == "/api/v1"
+    assert by_first_path["/agent-orchestration"].tags == ("agent-orchestration",)
+    assert by_first_path["/agent-orchestration"].route_key == ""
+    assert by_first_path["/setup/status"].prefix == "/api/v1"
+    assert by_first_path["/setup/status"].tags == ("setup",)
+    assert by_first_path["/setup/status"].route_key == ""
+    assert by_first_path["/metrics/text"].prefix == "/api/v1"
+    assert by_first_path["/metrics/text"].tags == ("metrics",)
+    assert by_first_path["/metrics/text"].route_key == ""
+    assert by_first_path["/authnz-debug/status"].prefix == "/api/v1"
+    assert by_first_path["/authnz-debug/status"].tags == ("authnz-debug",)
+    assert by_first_path["/authnz-debug/status"].route_key == ""
+    assert by_first_path["/sandbox/status"].prefix == "/api/v1"
+    assert by_first_path["/sandbox/status"].tags == ("sandbox",)
+    assert by_first_path["/sandbox/status"].route_key == ""
+
+
+def test_iter_minimal_optional_router_specs_falls_back_to_admin_byok_when_admin_router_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_optional_router_specs
+
+    admin_package = ModuleType("tldw_Server_API.app.api.v1.endpoints.admin")
+    admin_package.__path__ = []  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "tldw_Server_API.app.api.v1.endpoints.admin", admin_package)
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.admin.admin_byok",
+        path="/keys/shared",
+    )
+
+    specs = list(iter_minimal_optional_router_specs())
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+
+    assert "/admin/status" not in by_first_path
+    assert by_first_path["/keys/shared"].prefix == "/api/v1/admin"
+    assert by_first_path["/keys/shared"].tags == ("admin",)
+    assert by_first_path["/keys/shared"].route_key == ""
+
+
+def test_iter_minimal_optional_router_specs_includes_audio_jobs_when_opted_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_optional_router_specs
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_audio_jobs")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO_JOBS", "1")
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs",
+        path="/jobs",
+    )
+
+    specs = list(iter_minimal_optional_router_specs())
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+
+    assert by_first_path["/jobs"].prefix == "/api/v1/audio"
+    assert by_first_path["/jobs"].tags == ("audio-jobs",)
+    assert by_first_path["/jobs"].route_key == "audio-jobs"
+
+
+def test_iter_minimal_optional_router_specs_includes_media_audio_when_opted_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_optional_router_specs
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_media_audio")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.media",
+        path="/media/list",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.audio.audio",
+        path="/transcriptions",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.audio.audio",
+        attr_name="ws_router",
+        path="/stream/transcribe",
+    )
+
+    specs = list(iter_minimal_optional_router_specs())
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+
+    assert by_first_path["/media/list"].prefix == "/api/v1/media"
+    assert by_first_path["/media/list"].tags == ("media",)
+    assert by_first_path["/media/list"].route_key == "media"
+    assert by_first_path["/transcriptions"].prefix == "/api/v1/audio"
+    assert by_first_path["/transcriptions"].tags == ("audio",)
+    assert by_first_path["/transcriptions"].route_key == "audio"
+    assert by_first_path["/stream/transcribe"].prefix == "/api/v1/audio"
+    assert by_first_path["/stream/transcribe"].tags == ("audio-ws",)
+    assert by_first_path["/stream/transcribe"].route_key == "audio-websocket"
+
+
+def test_iter_minimal_optional_router_specs_skips_audio_during_pytest_without_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_optional_router_specs
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_media_audio")
+    monkeypatch.delenv("MINIMAL_TEST_INCLUDE_AUDIO", raising=False)
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.media",
+        path="/media/list",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.audio.audio",
+        path="/transcriptions",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.audio.audio",
+        attr_name="ws_router",
+        path="/stream/transcribe",
+    )
+
+    specs = list(iter_minimal_optional_router_specs())
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+
+    assert by_first_path["/media/list"].prefix == "/api/v1/media"
+    assert "/transcriptions" not in by_first_path
+    assert "/stream/transcribe" not in by_first_path
+
+
+def test_iter_minimal_optional_router_specs_skips_audio_jobs_during_pytest_without_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_optional_router_specs
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_audio_jobs")
+    monkeypatch.delenv("MINIMAL_TEST_INCLUDE_AUDIO_JOBS", raising=False)
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs",
+        path="/jobs",
+    )
+
+    specs = list(iter_minimal_optional_router_specs())
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+
+    assert "/jobs" not in by_first_path
 
 
 def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1552,21 +2119,28 @@ def test_main_source_does_not_keep_unused_route_include_helper() -> None:
 
 def test_main_source_delegates_full_app_router_imports_to_groups() -> None:
     source = _main_source_text()
-    minimal_only_imports = (
-        "from tldw_Server_API.app.api.v1.endpoints.tools import router as tools_router",
-        "from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import router as acp_router",
-        "from tldw_Server_API.app.api.v1.endpoints.users import router as users_router",
-        "from tldw_Server_API.app.api.v1.endpoints.writing import router as writing_router",
-        "from tldw_Server_API.app.api.v1.endpoints.writing_manuscripts import router as manuscripts_router",
-    )
-
-    for import_line in minimal_only_imports:
-        assert source.count(import_line) == 1
     assert "from tldw_Server_API.app.api.v1.endpoints.sync import router as sync_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.web_scraping import router as web_scraping_router" not in source
     assert "Tools endpoints unavailable at import time; deferring" not in source
     assert "ACP endpoints unavailable at import time; deferring" not in source
     assert "Users endpoints unavailable at import time; deferring" not in source
+
+
+def test_main_source_no_longer_keeps_minimal_users_import_stub() -> None:
+    source = _main_source_text()
+
+    assert "from tldw_Server_API.app.api.v1.endpoints.users import router as users_router" not in source
+    assert "_ = users_router" not in source
+    assert "Skipping users router in minimal test app" not in source
+
+
+def test_main_source_no_longer_keeps_minimal_tools_acp_import_stubs() -> None:
+    source = _main_source_text()
+
+    assert "from tldw_Server_API.app.api.v1.endpoints.tools import router as tools_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import router as acp_router" not in source
+    assert "tools_router = None" not in source
+    assert "acp_router = None" not in source
 
 
 def test_main_source_delegates_minimal_research_chat_character_routers_to_group() -> None:
@@ -1590,6 +2164,19 @@ def test_main_source_delegates_minimal_research_chat_character_routers_to_group(
     assert "include_router_idempotent(app, chat_router" not in source
     assert "include_router_idempotent(app, character_router" not in source
     assert "include_router_idempotent(app, workspaces_router" not in source
+
+
+def test_main_source_delegates_minimal_health_auth_routers_to_group() -> None:
+    source = _main_source_text()
+
+    assert "iter_minimal_test_router_specs()" in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.auth import router as auth_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.health import router as health_router" not in source
+    assert 'app.include_router(auth_router, prefix=f"{API_V1_PREFIX}", tags=["authentication"])' not in source
+    assert 'health_router, prefix=f"{API_V1_PREFIX}", tags=["health"]' not in source
+    assert "Auth router consolidated: endpoints/auth.py (minimal test app)" not in source
+    assert "Skipping health router in minimal test app" not in source
+    assert "Skipping auth router in minimal test app" not in source
 
 
 def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
@@ -1642,6 +2229,38 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "from tldw_Server_API.app.api.v1.endpoints.self_monitoring import router as self_monitoring_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.persona import router as persona_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.archetype_endpoints import router as archetype_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.notes import router as notes_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.web_clipper import router as web_clipper_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.skills import router as skills_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.translate import router as translate_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.slides import router as slides_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_boards import router as kanban_boards_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_workflow import router as kanban_workflow_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.flashcards import router as flashcards_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.quizzes import router as quizzes_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.study_suggestions import (" not in source
+    assert "router as study_suggestions_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.writing import router as writing_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.writing_manuscripts import router as manuscripts_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.email import router as email_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.jobs_admin import router as jobs_admin_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.audit import router as audit_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.config_info import router as config_info_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.config_admin import router as config_admin_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.user_keys import router as user_keys_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.shared_keys_scoped import router as shared_keys_scoped_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import router as mcp_unified_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.mcp_catalogs_manage import router as mcp_catalogs_manage_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.mcp_hub_management import router as mcp_hub_management_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.privileges import router as privileges_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.acp_schedules import router as acp_schedules_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.acp_triggers import router as acp_triggers_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.acp_permissions import router as acp_permissions_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.acp_multiplex import router as acp_multiplex_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.agent_orchestration import router as orch_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.metrics import router as metrics_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.authnz_debug import router as authnz_debug_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.sandbox import router as sandbox_router" not in source
     assert "app.include_router(llm_providers_router" not in source
     assert "app.include_router(mlx_router" not in source
     assert "app.include_router(vector_stores_router" not in source
@@ -1682,6 +2301,67 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "app.include_router(self_monitoring_router" not in source
     assert "app.include_router(persona_router" not in source
     assert "app.include_router(archetype_router" not in source
+    assert "app.include_router(notes_router" not in source
+    assert "app.include_router(web_clipper_router" not in source
+    assert "app.include_router(skills_router" not in source
+    assert "app.include_router(translate_router" not in source
+    assert "app.include_router(slides_router" not in source
+    assert "app.include_router(kanban_boards_router" not in source
+    assert "app.include_router(kanban_workflow_router" not in source
+    assert "app.include_router(flashcards_router" not in source
+    assert "app.include_router(quizzes_router" not in source
+    assert "app.include_router(study_suggestions_router" not in source
+    assert "app.include_router(writing_router" not in source
+    assert "app.include_router(manuscripts_router" not in source
+    assert "app.include_router(email_router" not in source
+    assert "app.include_router(jobs_admin_router" not in source
+    assert "app.include_router(audit_router" not in source
+    assert "app.include_router(config_info_router" not in source
+    assert "app.include_router(config_admin_router" not in source
+    assert "app.include_router(users_router" not in source
+    assert "app.include_router(user_keys_router" not in source
+    assert "app.include_router(shared_keys_scoped_router" not in source
+    assert "app.include_router(mcp_unified_router" not in source
+    assert "app.include_router(mcp_catalogs_manage_router" not in source
+    assert "app.include_router(mcp_hub_management_router" not in source
+    assert "app.include_router(privileges_router" not in source
+    assert "app.include_router(tools_router" not in source
+    assert "app.include_router(acp_router" not in source
+    assert "app.include_router(acp_schedules_router" not in source
+    assert "app.include_router(acp_triggers_router" not in source
+    assert "app.include_router(acp_permissions_router" not in source
+    assert "app.include_router(acp_multiplex_router" not in source
+    assert "app.include_router(orch_router" not in source
+    assert "app.include_router(setup_router" not in source
+    assert "app.include_router(metrics_router" not in source
+    assert "app.include_router(authnz_debug_router" not in source
+    assert "app.include_router(sandbox_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.workflows import router as _wf_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.chat_workflows import (" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.scheduler_workflows import router as _sch_wf_router" not in source
+    assert 'app.include_router(_wf_router, prefix="", tags=["workflows"])' not in source
+    assert 'app.include_router(_chat_wf_router, prefix="", tags=["chat-workflows"])' not in source
+    assert 'app.include_router(_sch_wf_router, prefix="", tags=["scheduler"])' not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import (" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.monitoring import router as _monitoring_router" not in source
+    assert 'app.include_router(_evaluations_router, prefix=f"{API_V1_PREFIX}", tags=["evaluations"])' not in source
+    assert 'app.include_router(_monitoring_router, prefix=f"{API_V1_PREFIX}", tags=["monitoring"])' not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.llamacpp import (" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.messages import (" not in source
+    assert "app.include_router(llamacpp_router" not in source
+    assert "app.include_router(llamacpp_public_router" not in source
+    assert "app.include_router(messages_router" not in source
+    assert "app.include_router(messages_public_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.admin import router as admin_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.admin.admin_byok import (" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.orgs import router as orgs_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.org_invites import router as org_invites_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.resource_governor import router as resource_governor_router" not in source
+    assert "app.include_router(admin_router" not in source
+    assert "app.include_router(admin_byok_router" not in source
+    assert "app.include_router(orgs_router" not in source
+    assert "app.include_router(org_invites_router" not in source
+    assert "app.include_router(resource_governor_router" not in source
     assert "Skipping llm_providers router in minimal test app" not in source
     assert "Skipping mlx router in minimal test app" not in source
     assert "Skipping vector-stores router in minimal test app" not in source
@@ -1720,6 +2400,81 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "Skipping self-monitoring router in minimal test app" not in source
     assert "Skipping persona router in minimal test app" not in source
     assert "Skipping archetype router in minimal test app" not in source
+    assert "Skipping notes router in minimal test app" not in source
+    assert "Skipping web clipper router in minimal test app" not in source
+    assert "Skipping skills router in minimal test app" not in source
+    assert "Skipping translate router in minimal test app" not in source
+    assert "Skipping slides router in minimal test app" not in source
+    assert "Skipping kanban router in minimal test app" not in source
+    assert "Skipping flashcards router in minimal test app" not in source
+    assert "Skipping quizzes router in minimal test app" not in source
+    assert "Skipping study_suggestions router in minimal test app" not in source
+    assert "Skipping writing router in minimal test app" not in source
+    assert "Skipping manuscripts router in minimal test app" not in source
+    assert "Skipping email router in minimal test app" not in source
+    assert "Skipping jobs_admin router in minimal test app" not in source
+    assert "Skipping audit router in minimal test app" not in source
+    assert "Skipping config_info router in minimal test app" not in source
+    assert "Skipping config_admin router in minimal test app" not in source
+    assert "Skipping BYOK/shared keys routers in minimal test app" not in source
+    assert "Skipping MCP unified router in minimal test app" not in source
+    assert "Skipping MCP catalogs router in minimal test app" not in source
+    assert "Skipping MCP hub router in minimal test app" not in source
+    assert "Skipping privileges router in minimal test app" not in source
+    assert "Skipping tools router in minimal test app" not in source
+    assert "Skipping ACP router in minimal test app" not in source
+    assert "Skipping ACP schedules router in minimal test app" not in source
+    assert "Skipping ACP triggers router in minimal test app" not in source
+    assert "Skipping ACP permissions router in minimal test app" not in source
+    assert "Skipping ACP multiplex router in minimal test app" not in source
+    assert "Skipping orchestration router in minimal test app" not in source
+    assert "Skipping setup router in minimal test app" not in source
+    assert "Skipping metrics router in minimal test app" not in source
+    assert "Skipping authnz_debug router in tests" not in source
+    assert "Skipping sandbox router in minimal test app" not in source
+    assert "Skipping workflows router in minimal test app" not in source
+    assert "Skipping chat workflows router in minimal test app" not in source
+    assert "Skipping scheduler workflows router in minimal test app" not in source
+    assert "Skipping evaluations routers in minimal test app" not in source
+    assert "Skipping monitoring router in minimal test app" not in source
+    assert "Skipping llamacpp router in minimal test app" not in source
+    assert "Skipping admin router include in minimal test app" not in source
+    assert "Skipping admin BYOK router in minimal test app" not in source
+    assert "Skipping orgs router in minimal test app" not in source
+    assert "Skipping org_invites router in minimal test app" not in source
+    assert "Skipping resource_governor router in minimal test app" not in source
+
+
+def test_main_source_delegates_minimal_audio_jobs_router_to_group() -> None:
+    source = _main_source_text()
+
+    assert "iter_minimal_optional_router_specs()" in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs import router as audio_jobs_router" not in source
+    assert 'app.include_router(audio_jobs_router, prefix=f"{API_V1_PREFIX}/audio", tags=["audio-jobs"])' not in source
+    assert 'route_enabled("audio-jobs")' not in source
+    assert "MINIMAL_TEST_INCLUDE_AUDIO_JOBS" not in source
+    assert "Skipping audio-jobs router in minimal test app" not in source
+    assert "Route disabled by policy: audio-jobs (minimal test app)" not in source
+
+
+def test_main_source_delegates_minimal_media_audio_routers_to_group() -> None:
+    source = _main_source_text()
+
+    assert "iter_minimal_optional_router_specs()" in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.audio.audio import ws_router as audio_ws_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.media import router as media_router" not in source
+    assert 'app.include_router(audio_router, prefix=f"{API_V1_PREFIX}/audio", tags=["audio"])' not in source
+    assert 'app.include_router(audio_ws_router, prefix=f"{API_V1_PREFIX}/audio", tags=["audio-ws"])' not in source
+    assert 'app.include_router(media_router, prefix=f"{API_V1_PREFIX}/media", tags=["media"])' not in source
+    assert 'route_enabled("audio")' not in source
+    assert 'route_enabled("audio-websocket")' not in source
+    assert 'route_enabled("media")' not in source
+    assert "MINIMAL_TEST_INCLUDE_AUDIO" not in source
+    assert "Skipping audio routers in minimal test app" not in source
+    assert "Route disabled by policy: audio/audio-websocket (minimal test app)" not in source
+    assert "Skipping media router in minimal test app" not in source
+    assert "Route disabled by policy: media (minimal test app)" not in source
 
 
 def test_main_source_does_not_inline_register_grouped_core_routers() -> None:
@@ -1844,7 +2599,6 @@ def test_main_source_does_not_inline_register_grouped_content_routers() -> None:
     assert "from tldw_Server_API.app.api.v1.endpoints.characters_endpoint import router as character_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.chat import (" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.chat_loop import (" not in source
-    assert source.count("from tldw_Server_API.app.api.v1.endpoints.metrics import router as metrics_router") == 1
     assert "ingestion_sources_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.web_scraping import" not in source
     assert "_reading_router" not in source
@@ -1857,8 +2611,8 @@ def test_main_source_does_not_inline_register_grouped_content_routers() -> None:
     assert '_include_if_enabled("audio", audio_router' not in source
     assert '_include_if_enabled("audio-jobs", audio_jobs_router' not in source
     assert '_include_if_enabled(\n            "audio-websocket", audio_ws_router' not in source
-    assert source.count("from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import") == 1
-    assert source.count('app.include_router(_evaluations_router, prefix=f"{API_V1_PREFIX}", tags=["evaluations"])') == 1
+    assert "from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import" not in source
+    assert 'app.include_router(_evaluations_router, prefix=f"{API_V1_PREFIX}", tags=["evaluations"])' not in source
     assert "Route gating error for evaluations; skipping import" not in source
     assert 'route_enabled("ocr")' not in source
     assert "endpoints.ocr import router as _ocr_router" not in source
