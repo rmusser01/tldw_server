@@ -1,6 +1,5 @@
 # Minimal Alertmanager config that works out of the box without SMTP.
-# Sends alerts to the built-in webhook endpoint at http://host.docker.internal:9095/webhook.
-# Copy and edit this file if you need a different webhook destination.
+# Sends alerts to a webhook endpoint (configurable via ALERTMANAGER_WEBHOOK_URL).
 #
 # For email or Slack alerting, override with the full config:
 #   ALERTMANAGER_CONFIG=../../Docs/Operations/monitoring/alertmanager_email_webhook.yml

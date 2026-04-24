@@ -1,5 +1,7 @@
 import { ChatHistory } from "@/store"
 
+export * from "./archetype"
+
 export type BotResponse = {
     bot: {
         text: string

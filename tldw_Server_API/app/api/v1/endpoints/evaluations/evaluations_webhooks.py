@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
+    get_evaluation_identity,
     get_eval_request_user,
     sanitize_error_message,
     verify_api_key,
@@ -24,9 +25,6 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     get_unified_evaluation_service_for_user,
-)
-from tldw_Server_API.app.core.Evaluations.webhook_identity import (
-    webhook_user_id_from_user,
 )
 from tldw_Server_API.app.core.Evaluations.webhook_manager import (
     WebhookEvent,
@@ -57,7 +55,7 @@ _WEBHOOK_ENDPOINT_EXCEPTIONS = (
 )
 
 
-def _get_webhook_manager_for_user(user_id: int) -> WebhookManager:
+def _get_webhook_manager_for_user(user_id: int | str) -> WebhookManager:
     # In tests, always route through the lazy proxy so patched methods
     # are honored and no real DB access is attempted.
     try:
@@ -104,12 +102,13 @@ def _normalize_webhook_status_record(record: dict[str, Any]) -> dict[str, Any]:
 @webhooks_router.post("/webhooks", response_model=WebhookRegistrationResponse)
 async def register_webhook(
     request: WebhookRegistrationRequest,
-    user_id: str = Depends(verify_api_key),
+    _user_ctx: str = Depends(verify_api_key),
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        wm = _get_webhook_manager_for_user(current_user.id)
-        webhook_user_id = webhook_user_id_from_user(current_user)
+        identity = get_evaluation_identity(current_user)
+        wm = _get_webhook_manager_for_user(identity.user_scope)
+        webhook_user_id = identity.webhook_user_id
         url = str(request.url)
         events = [WebhookEvent(e.value) if not isinstance(e, WebhookEvent) else e for e in request.events]
         _res = wm.register_webhook(
@@ -135,12 +134,13 @@ async def register_webhook(
 
 @webhooks_router.get("/webhooks", response_model=list[WebhookStatusResponse])
 async def list_webhooks(
-    user_id: str = Depends(verify_api_key),
+    _user_ctx: str = Depends(verify_api_key),
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        wm = _get_webhook_manager_for_user(current_user.id)
-        webhook_user_id = webhook_user_id_from_user(current_user)
+        identity = get_evaluation_identity(current_user)
+        wm = _get_webhook_manager_for_user(identity.user_scope)
+        webhook_user_id = identity.webhook_user_id
         _res = wm.get_webhook_status(user_id=webhook_user_id)
         try:
             records = await _res if inspect.isawaitable(_res) else _res
@@ -159,12 +159,13 @@ async def list_webhooks(
 @webhooks_router.delete("/webhooks")
 async def unregister_webhook(
     url: str,
-    user_id: str = Depends(verify_api_key),
+    _user_ctx: str = Depends(verify_api_key),
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        wm = _get_webhook_manager_for_user(current_user.id)
-        webhook_user_id = webhook_user_id_from_user(current_user)
+        identity = get_evaluation_identity(current_user)
+        wm = _get_webhook_manager_for_user(identity.user_scope)
+        webhook_user_id = identity.webhook_user_id
         _res = wm.unregister_webhook(webhook_user_id, url)
         try:
             if inspect.isawaitable(_res):
@@ -183,12 +184,13 @@ async def unregister_webhook(
 @webhooks_router.post("/webhooks/test", response_model=WebhookTestResponse)
 async def test_webhook(
     payload: WebhookTestRequest,
-    user_id: str = Depends(verify_api_key),
+    _user_ctx: str = Depends(verify_api_key),
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        wm = _get_webhook_manager_for_user(current_user.id)
-        webhook_user_id = webhook_user_id_from_user(current_user)
+        identity = get_evaluation_identity(current_user)
+        wm = _get_webhook_manager_for_user(identity.user_scope)
+        webhook_user_id = identity.webhook_user_id
         _res = wm.test_webhook(user_id=webhook_user_id, url=str(payload.url))
         try:
             result = await _res if inspect.isawaitable(_res) else _res

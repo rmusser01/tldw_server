@@ -182,7 +182,8 @@ describe("WorldBooksManager bulk operations stage-1 selection UX", () => {
   it("shows the contextual action bar only after at least one row is selected", async () => {
     render(<WorldBooksManager />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    fireEvent.click(screen.getByText("Arcana"))
     const keywordsHeader = await screen.findByRole("columnheader", { name: "Keywords" })
     expect(screen.queryByText("1 selected")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Enable" })).not.toBeInTheDocument()
@@ -199,7 +200,8 @@ describe("WorldBooksManager bulk operations stage-1 selection UX", () => {
   it("supports select-all escalation and clear selection", async () => {
     render(<WorldBooksManager />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    fireEvent.click(screen.getByText("Arcana"))
     const keywordsHeader = await screen.findByRole("columnheader", { name: "Keywords" })
 
     const tableWrapper = keywordsHeader.closest(".ant-table-wrapper")
@@ -223,7 +225,8 @@ describe("WorldBooksManager bulk operations stage-1 selection UX", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
     const keywordsHeader = await screen.findByRole("columnheader", { name: "Keywords" })
 
     const tableWrapper = keywordsHeader.closest(".ant-table-wrapper")

@@ -1,4 +1,9 @@
 import { bgRequest } from "@/services/background-proxy"
+import {
+  completedIngestJobIndicatesFailure,
+  extractCompletedIngestJobError,
+  extractCompletedIngestJobTerminalData,
+} from "@/services/tldw/ingest-job-results"
 import type {
   PersistedQuickIngestTracking,
   ReattachedQuickIngestJob,
@@ -67,23 +72,34 @@ const interruptedSnapshot = (
 const normalizeJobStatus = (value: unknown): string =>
   String(value || "").trim().toLowerCase()
 
+const isLogicalFailure = (job: ReattachedQuickIngestJob): boolean =>
+  FAILED_JOB_STATUSES.has(job.status) ||
+  (job.status === "completed" && completedIngestJobIndicatesFailure(job.result))
+
 const buildJobSnapshot = (
   jobId: number,
   response: { data?: any },
   sourceItemId?: string
 ): ReattachedQuickIngestJob => {
   const status = normalizeJobStatus(response.data?.status)
+  const terminalData =
+    status === "completed"
+      ? extractCompletedIngestJobTerminalData(response.data)
+      : undefined
   const error =
     status === "cancelled"
       ? String(response.data?.cancellation_reason || "Cancelled by user.").trim()
       : FAILED_JOB_STATUSES.has(status)
         ? String(response.data?.error_message || `Ingest ${status}`).trim()
+        : status === "completed" && completedIngestJobIndicatesFailure(response.data)
+          ? extractCompletedIngestJobError(response.data) ||
+            "Ingest completed with an error result."
         : undefined
 
   return {
     jobId,
     status,
-    result: status === "completed" ? response.data?.result || response.data : undefined,
+    result: terminalData,
     error: error || undefined,
     sourceItemId: sourceItemId || undefined,
   }
@@ -97,9 +113,11 @@ const deriveLifecycle = (
     return "processing"
   }
 
-  const completedCount = jobs.filter((job) => job.status === "completed").length
+  const completedCount = jobs.filter(
+    (job) => job.status === "completed" && !isLogicalFailure(job)
+  ).length
   const cancelledCount = jobs.filter((job) => job.status === "cancelled").length
-  const failedCount = jobs.filter((job) => FAILED_JOB_STATUSES.has(job.status)).length
+  const failedCount = jobs.filter((job) => isLogicalFailure(job)).length
 
   if (completedCount === jobs.length) return "completed"
   if (cancelledCount === jobs.length) return "cancelled"

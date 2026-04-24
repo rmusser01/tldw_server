@@ -1,6 +1,7 @@
-import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
+import React from "react"
 import { describe, expect, it, vi } from "vitest"
+
 import { ComposerToolbar } from "../ComposerToolbar"
 
 vi.mock("react-i18next", () => ({
@@ -31,7 +32,13 @@ vi.mock("@/components/Layouts/ConnectionStatus", () => ({
 }))
 
 vi.mock("@/components/Common/Button", () => ({
-  Button: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
+  Button: ({
+    children,
+    onClick
+  }: {
+    children: React.ReactNode
+    onClick?: () => void
+  }) => (
     <button type="button" onClick={onClick}>
       {children}
     </button>
@@ -112,6 +119,23 @@ const createProps = (
 })
 
 describe("ComposerToolbar web search", () => {
+  it("hides the options panel when rendered collapsed for external send placement", () => {
+    render(
+      <ComposerToolbar
+        {...({
+          ...createProps(),
+          optionsExpanded: false,
+          sendControlPlacement: "external"
+        } as any)}
+      />
+    )
+
+    const panel = screen.getByTestId("composer-options-panel")
+    expect(panel.className).toBe("mt-2 flex flex-col gap-1")
+    expect(screen.queryByText("Model selector")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
+  })
+
   it("uses casual focus-first layout by default", () => {
     render(<ComposerToolbar {...createProps()} />)
 
@@ -126,15 +150,19 @@ describe("ComposerToolbar web search", () => {
       screen.getByTestId("composer-casual-model-selector-chip")
     ).toBeInTheDocument()
     expect(screen.queryByTestId("composer-session-status-chip")).toBeNull()
-    expect(screen.getByTestId("composer-casual-persistence-chip")).toHaveTextContent("Saved")
+    expect(
+      screen.getByTestId("composer-casual-persistence-chip")
+    ).toHaveTextContent("Saved")
     expect(
       screen
         .getByTestId("composer-casual-advanced-chip")
         .closest('[data-testid="composer-context-strip"]')
     ).not.toBeNull()
-    expect(screen.queryByTestId("composer-casual-runtime-context-chip")).toBeNull()
+    expect(
+      screen.queryByTestId("composer-casual-runtime-context-chip")
+    ).toBeNull()
     expect(screen.queryByTestId("web-search-toggle")).toBeNull()
-    expect(screen.queryByText("MCP")).toBeNull()
+    expect(screen.getByText("MCP")).toBeInTheDocument()
     expect(screen.getByTestId("prompt-select")).toBeInTheDocument()
     expect(screen.getByTestId("character-select")).toBeInTheDocument()
   })
@@ -157,7 +185,7 @@ describe("ComposerToolbar web search", () => {
     ).toBeNull()
   })
 
-  it("keeps Modes at the far left of the casual controls row", () => {
+  it("keeps Modes first and MCP immediately to its right in the casual controls row", () => {
     render(
       <ComposerToolbar
         {...createProps({
@@ -170,9 +198,11 @@ describe("ComposerToolbar web search", () => {
       '[data-playground-toolbar-row="actions"]'
     )
     expect(actionsRow).not.toBeNull()
-    const firstButton = actionsRow?.querySelector("button")
-    expect(firstButton).not.toBeNull()
-    expect(firstButton).toHaveTextContent("Modes")
+    const buttons = actionsRow?.querySelectorAll("button")
+    expect(buttons?.[0]).not.toBeNull()
+    expect(buttons?.[0]).toHaveTextContent("Modes")
+    expect(buttons?.[1]).not.toBeNull()
+    expect(buttons?.[1]).toHaveTextContent("MCP")
   })
 
   it("places voice chat, attachment, and send controls in the casual middle actions row", () => {
@@ -184,7 +214,9 @@ describe("ComposerToolbar web search", () => {
       />
     )
 
-    const voiceButton = screen.getByRole("button", { name: "Start voice chat" })
+    const voiceButton = screen.getByRole("button", {
+      name: "Start voice chat"
+    })
     const attachmentButton = screen.getByRole("button", { name: "Attach" })
     const sendButton = screen.getByRole("button", { name: "Send" })
     expect(
@@ -207,13 +239,50 @@ describe("ComposerToolbar web search", () => {
     ).toBeNull()
   })
 
+  it("keeps advanced controls below the casual actions row", () => {
+    render(<ComposerToolbar {...createProps()} />)
+
+    const actionsRow = document.querySelector<HTMLElement>(
+      '[data-playground-toolbar-row="actions"]'
+    )
+    const contextStrip = screen.getByTestId("composer-context-strip")
+    fireEvent.click(screen.getByTestId("composer-casual-advanced-chip"))
+    const advancedRow = screen.getByTestId(
+      "composer-casual-advanced-controls-row"
+    )
+
+    expect(actionsRow).not.toBeNull()
+    expect(contextStrip.compareDocumentPosition(actionsRow as Node)).toBe(
+      Node.DOCUMENT_POSITION_PRECEDING
+    )
+    expect(advancedRow.compareDocumentPosition(actionsRow as Node)).toBe(
+      Node.DOCUMENT_POSITION_PRECEDING
+    )
+    expect(advancedRow.compareDocumentPosition(contextStrip)).toBe(
+      Node.DOCUMENT_POSITION_PRECEDING
+    )
+  })
+
+  it("places Advanced controls immediately to the right of Saved in the casual context strip", () => {
+    render(<ComposerToolbar {...createProps()} />)
+
+    const contextStrip = screen.getByTestId("composer-context-strip")
+    const contextButtons = contextStrip.querySelectorAll("button")
+    const savedButton = screen.getByTestId("composer-casual-persistence-chip")
+    const advancedButton = screen.getByTestId("composer-casual-advanced-chip")
+
+    const savedIndex = Array.from(contextButtons).indexOf(savedButton)
+    const advancedIndex = Array.from(contextButtons).indexOf(advancedButton)
+
+    expect(savedIndex).toBeGreaterThanOrEqual(0)
+    expect(advancedIndex).toBe(savedIndex + 1)
+  })
+
   it("renders a deep research launch control in the casual actions row when provided", () => {
     render(
       <ComposerToolbar
         {...createProps({
-          researchLaunchButton: (
-            <button type="button">Deep Research</button>
-          )
+          researchLaunchButton: <button type="button">Deep Research</button>
         })}
       />
     )
@@ -258,21 +327,29 @@ describe("ComposerToolbar web search", () => {
     expect(actionsRow?.className).not.toContain("flex-wrap")
   })
 
-  it("reveals MCP controls when casual advanced controls are expanded", () => {
+  it("keeps MCP in the casual actions row when advanced controls are expanded", () => {
     render(<ComposerToolbar {...createProps()} />)
 
-    fireEvent.click(
-      screen.getByTestId("composer-casual-advanced-chip")
-    )
+    fireEvent.click(screen.getByTestId("composer-casual-advanced-chip"))
 
-    expect(screen.getByText("MCP")).toBeInTheDocument()
+    const mcpButton = screen.getByRole("button", { name: "MCP" })
     expect(screen.getByTestId("prompt-select")).toBeInTheDocument()
     expect(screen.getByTestId("character-select")).toBeInTheDocument()
     expect(
-      screen.getByTestId("prompt-select").closest('[data-playground-toolbar-row="actions"]')
+      mcpButton.closest('[data-playground-toolbar-row="actions"]')
     ).not.toBeNull()
     expect(
-      screen.getByTestId("character-select").closest('[data-playground-toolbar-row="actions"]')
+      mcpButton.closest('[data-playground-toolbar-row="advanced"]')
+    ).toBeNull()
+    expect(
+      screen
+        .getByTestId("prompt-select")
+        .closest('[data-playground-toolbar-row="actions"]')
+    ).not.toBeNull()
+    expect(
+      screen
+        .getByTestId("character-select")
+        .closest('[data-playground-toolbar-row="actions"]')
     ).not.toBeNull()
     expect(
       screen.getAllByRole("button", { name: "Chat Settings" })
@@ -280,7 +357,9 @@ describe("ComposerToolbar web search", () => {
     expect(
       screen.getByTestId("composer-formatting-guide-toggle")
     ).toBeInTheDocument()
-    const advancedRow = screen.getByTestId("composer-casual-advanced-controls-row")
+    const advancedRow = screen.getByTestId(
+      "composer-casual-advanced-controls-row"
+    )
     expect(advancedRow.className).toContain("flex-nowrap")
     expect(advancedRow.className).toContain("overflow-x-auto")
     expect(advancedRow.className).not.toContain("flex-wrap")
@@ -302,10 +381,14 @@ describe("ComposerToolbar web search", () => {
     render(<ComposerToolbar {...createProps({ isProMode: true })} />)
 
     expect(screen.getByTestId("composer-pro-context-panel")).toBeInTheDocument()
-    expect(screen.getByTestId("composer-pro-generation-panel")).toBeInTheDocument()
+    expect(
+      screen.getByTestId("composer-pro-generation-panel")
+    ).toBeInTheDocument()
     expect(screen.getByText("MCP")).toBeInTheDocument()
     expect(screen.getByTestId("prompt-select")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Advanced controls" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Advanced controls" })
+    ).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Advanced controls" }))
     expect(
       screen.getByTestId("composer-formatting-guide-toggle")
@@ -402,12 +485,12 @@ describe("ComposerToolbar web search", () => {
 
     expect(onSessionStatusClick).toHaveBeenCalledTimes(1)
     expect(onRiskClick).toHaveBeenCalledTimes(1)
-    expect(screen.getByTestId("composer-session-status-chip")).toHaveTextContent(
-      "Session status"
-    )
-    expect(screen.getByTestId("composer-session-status-chip")).toHaveTextContent(
-      "Degraded"
-    )
+    expect(
+      screen.getByTestId("composer-session-status-chip")
+    ).toHaveTextContent("Session status")
+    expect(
+      screen.getByTestId("composer-session-status-chip")
+    ).toHaveTextContent("Degraded")
     expect(screen.getByText("Medium risk")).toBeInTheDocument()
   })
 
@@ -452,9 +535,9 @@ describe("ComposerToolbar web search", () => {
       />
     )
 
-    expect(screen.getByTestId("composer-session-status-chip")).toHaveTextContent(
-      "Offline"
-    )
+    expect(
+      screen.getByTestId("composer-session-status-chip")
+    ).toHaveTextContent("Offline")
 
     rerender(
       <ComposerToolbar
@@ -465,9 +548,9 @@ describe("ComposerToolbar web search", () => {
       />
     )
 
-    expect(screen.getByTestId("composer-session-status-chip")).toHaveTextContent(
-      "Offline"
-    )
+    expect(
+      screen.getByTestId("composer-session-status-chip")
+    ).toHaveTextContent("Offline")
   })
 
   it("uses a bottom persistence chip to toggle saved vs temporary", () => {

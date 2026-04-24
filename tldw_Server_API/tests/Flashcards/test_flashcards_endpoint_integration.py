@@ -252,6 +252,119 @@ def test_deck_workspace_id_contract_and_scope_filters(
     assert any(item["id"] == deck_id for item in general_list.json())
 
 
+def test_create_deck_returns_review_prompt_side(client_with_flashcards_db: TestClient):
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={
+            "name": "Biology Reverse Recall",
+            "review_prompt_side": "back",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["review_prompt_side"] == "back"
+
+
+def test_create_deck_rejects_null_review_prompt_side(client_with_flashcards_db: TestClient):
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={
+            "name": "Null Orientation Deck",
+            "review_prompt_side": None,
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_deck_undelete_preserves_review_prompt_side(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={
+            "name": "Restorable Deck",
+            "review_prompt_side": "back",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert create_response.status_code == 200
+    deck_id = create_response.json()["id"]
+
+    flashcards_db.soft_delete_deck_by_id(deck_id)
+
+    resurrected_id = flashcards_db.add_deck("Restorable Deck")
+    assert resurrected_id == deck_id
+
+    resurrected = flashcards_db.get_deck(deck_id)
+    assert resurrected is not None
+    assert resurrected["deleted"] == 0
+    assert resurrected["review_prompt_side"] == "back"
+
+
+def test_create_deck_undelete_preserves_orientation_unless_explicit_front_override(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={
+            "name": "Orientation API Deck",
+            "review_prompt_side": "back",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert create_response.status_code == 200
+    deck_id = create_response.json()["id"]
+    flashcards_db.soft_delete_deck_by_id(deck_id)
+
+    omitted_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Orientation API Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert omitted_response.status_code == 200
+    assert omitted_response.json()["review_prompt_side"] == "back"
+
+    flashcards_db.soft_delete_deck_by_id(deck_id)
+
+    explicit_front_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={
+            "name": "Orientation API Deck",
+            "review_prompt_side": "front",
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert explicit_front_response.status_code == 200
+    assert explicit_front_response.json()["review_prompt_side"] == "front"
+
+
+def test_update_deck_rejects_null_review_prompt_side(client_with_flashcards_db: TestClient):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Patch Null Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+
+    update_response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/decks/{create_response.json()['id']}",
+        json={
+            "review_prompt_side": None,
+            "expected_version": create_response.json()["version"],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert update_response.status_code == 422
+
+
 def test_deck_endpoints_reject_unknown_workspace_ids(
     client_with_flashcards_db: TestClient,
 ):

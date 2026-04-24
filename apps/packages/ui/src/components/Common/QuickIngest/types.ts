@@ -282,6 +282,8 @@ export type WizardResultItem = ResultItem & {
   mediaId?: string | number | null
   /** Title extracted or assigned during processing. */
   title?: string | null
+  /** Non-error informational message (e.g., "Already exists in library"). */
+  message?: string
 }
 
 /**

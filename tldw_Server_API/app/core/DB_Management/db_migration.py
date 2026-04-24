@@ -732,27 +732,53 @@ class DatabaseMigrator:
         issues = []
         applied = self.get_applied_migrations()
         available = {m.version: m for m in self.load_migrations()}
+        applied_versions = {migration_record["version"] for migration_record in applied}
+
+        if available:
+            available_versions = sorted(available)
+            expected_versions = range(available_versions[0], available_versions[-1] + 1)
+            missing_versions = [
+                version
+                for version in expected_versions
+                if version not in available and version not in applied_versions
+            ]
+
+            for version in missing_versions:
+                issues.append(
+                    {
+                        "version": version,
+                        "issue": "migration_version_gap",
+                        "message": (
+                            f"Migration file for version {version} "
+                            "is missing from the available set"
+                        ),
+                    }
+                )
 
         for migration_record in applied:
             version = migration_record["version"]
 
             if version not in available:
-                issues.append({
-                    "version": version,
-                    "issue": "migration_file_missing",
-                    "message": f"Migration file for version {version} not found"
-                })
+                issues.append(
+                    {
+                        "version": version,
+                        "issue": "migration_file_missing",
+                        "message": f"Migration file for version {version} not found",
+                    }
+                )
                 continue
 
             migration = available[version]
             if migration.checksum != migration_record["checksum"]:
-                issues.append({
-                    "version": version,
-                    "issue": "checksum_mismatch",
-                    "message": f"Checksum mismatch for migration {version}",
-                    "expected": migration.checksum,
-                    "actual": migration_record["checksum"]
-                })
+                issues.append(
+                    {
+                        "version": version,
+                        "issue": "checksum_mismatch",
+                        "message": f"Checksum mismatch for migration {version}",
+                        "expected": migration.checksum,
+                        "actual": migration_record["checksum"],
+                    }
+                )
 
         return issues
 

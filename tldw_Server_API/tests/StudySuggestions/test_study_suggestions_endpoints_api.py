@@ -258,13 +258,30 @@ def test_refresh_enqueues_job_for_existing_snapshot(
 
     assert refresh.status_code == 202  # nosec B101
     assert refresh.json()["job"]["status"] == "queued"  # nosec B101
-
     job = _jobs_manager(jobs_db_path).get_job(int(refresh.json()["job"]["id"]))
     assert job is not None  # nosec B101
     assert job["domain"] == jobs_mod.STUDY_SUGGESTIONS_DOMAIN  # nosec B101
     assert job["job_type"] == jobs_mod.STUDY_SUGGESTIONS_REFRESH_JOB_TYPE  # nosec B101
     assert int(job["payload"]["snapshot_id"]) == snapshot_id  # nosec B101
     assert int(job["payload"]["anchor_id"]) == 101  # nosec B101
+
+
+def test_refresh_maps_job_manager_validation_errors_to_http_400(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    snapshot_id = _create_snapshot(db)
+
+    def fail_create_job(self, *args, **kwargs):  # noqa: ANN001, ARG001
+        raise ValueError("invalid refresh request")
+
+    monkeypatch.setattr(JobManager, "create_job", fail_create_job)
+
+    refresh = client.post(f"/api/v1/study-suggestions/snapshots/{snapshot_id}/refresh", json={})
+
+    assert refresh.status_code == 400  # nosec B101
+    assert refresh.json()["detail"] == "invalid refresh request"  # nosec B101
 
 
 def test_live_evidence_permission_failures_degrade_to_source_unavailable(
@@ -387,6 +404,8 @@ def test_snapshot_actions_open_existing_generation_link_when_fingerprint_matches
     db: CharactersRAGDB,
 ):
     _endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
+    ancestor_quiz_id = db.create_quiz(name="Ancestor Quiz", source_bundle_json=[])
+    unrelated_quiz_id = db.create_quiz(name="Unrelated Quiz", source_bundle_json=[])
     snapshot_id = db.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
@@ -395,8 +414,20 @@ def test_snapshot_actions_open_existing_generation_link_when_fingerprint_matches
         suggestion_type="study_suggestions",
         payload_json={
             "topics": [
-                {"id": "topic-1", "display_label": " Renal Basics ", "selected": True},
-                {"id": "topic-2", "display_label": "Acid Base", "selected": True},
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "canonical_label": "kidney functions",
+                    "display_label": " Renal Basics ",
+                    "selected": True,
+                },
+                {
+                    "id": "topic-2",
+                    "topic_key": "renal:acid-base",
+                    "canonical_label": "acid base",
+                    "display_label": "Acid Base",
+                    "selected": True,
+                },
             ]
         },
     )
@@ -404,7 +435,7 @@ def test_snapshot_actions_open_existing_generation_link_when_fingerprint_matches
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
-        selected_topics=["acid base", "renal basics"],
+        selected_topics=["renal:acid-base", "renal:kidney-functions"],
         action_kind="follow_up_quiz",
         generator_version="v1",
     )
@@ -412,7 +443,39 @@ def test_snapshot_actions_open_existing_generation_link_when_fingerprint_matches
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
-        target_id="quiz-55",
+        target_id=str(ancestor_quiz_id),
+        selection_fingerprint=fingerprint,
+    )
+    unrelated_snapshot_id = db.create_suggestion_snapshot(
+        service="quiz",
+        activity_type="quiz_attempt",
+        anchor_type="quiz_attempt",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "canonical_label": "kidney functions",
+                    "display_label": " Renal Basics ",
+                    "selected": True,
+                },
+                {
+                    "id": "topic-2",
+                    "topic_key": "renal:acid-base",
+                    "canonical_label": "acid base",
+                    "display_label": "Acid Base",
+                    "selected": True,
+                },
+            ]
+        },
+    )
+    db.create_suggestion_generation_link(
+        snapshot_id=unrelated_snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        target_id=str(unrelated_quiz_id),
         selection_fingerprint=fingerprint,
     )
 
@@ -430,7 +493,7 @@ def test_snapshot_actions_open_existing_generation_link_when_fingerprint_matches
 
     assert response.status_code == 200  # nosec B101
     assert response.json()["disposition"] == "opened_existing"  # nosec B101
-    assert response.json()["target_id"] == "quiz-55"  # nosec B101
+    assert response.json()["target_id"] == str(ancestor_quiz_id)  # nosec B101
     assert response.json()["selection_fingerprint"] == fingerprint  # nosec B101
 
 
@@ -448,8 +511,20 @@ def test_snapshot_actions_use_selected_topic_edits_and_manual_labels_for_generat
         suggestion_type="study_suggestions",
         payload_json={
             "topics": [
-                {"id": "topic-1", "display_label": "Renal Basics", "selected": True},
-                {"id": "topic-2", "display_label": "Acid Base", "selected": True},
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:basics",
+                    "canonical_label": "renal basics",
+                    "display_label": "Renal Basics",
+                    "selected": True,
+                },
+                {
+                    "id": "topic-2",
+                    "topic_key": "renal:acid-base",
+                    "canonical_label": "acid base",
+                    "display_label": "Acid Base",
+                    "selected": True,
+                },
             ]
         },
     )
@@ -459,7 +534,7 @@ def test_snapshot_actions_use_selected_topic_edits_and_manual_labels_for_generat
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
-        selected_topics=expected_topics,
+        selected_topics=["electrolyte ladder", "renal:acid-base"],
         action_kind="follow_up_quiz",
         generator_version="v2",
     )
@@ -820,3 +895,935 @@ def test_snapshot_actions_return_conflict_when_matching_generation_is_already_re
 
     assert response.status_code == 409  # nosec B101
     assert "already in progress" in response.json()["detail"].lower()  # nosec B101
+
+
+def test_snapshot_actions_use_snapshot_semantics_for_fingerprint_and_edit_labels_for_generation(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, _actions_mod = _load_modules()
+    snapshot_id = db.create_suggestion_snapshot(
+        service="quiz",
+        activity_type="quiz_attempt",
+        anchor_type="quiz_attempt",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "normalization_version": "norm-v2",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+    )
+
+    expected_fingerprint = "semantic-fingerprint"
+
+    def fake_build_selection_fingerprint(
+        *,
+        snapshot_id: int,
+        target_service: str,
+        target_type: str,
+        selected_topics,
+        action_kind: str,
+        generator_version: str | None = None,
+        normalization_version: str | None = None,
+        include_normalization_version: bool = True,
+    ) -> str:
+        assert snapshot_id == snapshot_id_value  # nosec B101
+        assert target_service == "quiz"  # nosec B101
+        assert target_type == "quiz"  # nosec B101
+        assert list(selected_topics) == ["renal:kidney-functions"]  # nosec B101
+        assert action_kind == "follow_up_quiz"  # nosec B101
+        assert generator_version == "v2"  # nosec B101
+        assert normalization_version == "norm-v2"  # nosec B101
+        assert include_normalization_version in {True, False}  # nosec B101
+        return expected_fingerprint
+
+    snapshot_id_value = snapshot_id
+    monkeypatch.setattr(endpoints_mod, "build_selection_fingerprint", fake_build_selection_fingerprint)
+
+    async def fake_dispatch_action(*, note_db, snapshot_row, request_body, media_db=None):
+        assert int(snapshot_row["id"]) == snapshot_id  # nosec B101
+        assert request_body["selected_topics"] == ["renal remix"]  # nosec B101
+        assert request_body["selected_topic_edits"] == [{"id": "topic-1", "label": "Renal Remix"}]  # nosec B101
+        return {
+            "target_service": "quiz",
+            "target_type": "quiz",
+            "target_id": "quiz-77",
+        }
+
+    monkeypatch.setattr(endpoints_mod, "_dispatch_follow_up_action", fake_dispatch_action)
+
+    response = client.post(
+        f"/api/v1/study-suggestions/snapshots/{snapshot_id}/actions",
+        json={
+            "target_service": "quiz",
+            "target_type": "quiz",
+            "action_kind": "follow_up_quiz",
+            "selected_topic_ids": ["topic-1"],
+            "selected_topic_edits": [{"id": "topic-1", "label": "Renal Remix"}],
+            "manual_topic_labels": [],
+            "has_explicit_selection": True,
+            "generator_version": "v2",
+            "force_regenerate": True,
+        },
+    )
+
+    assert response.status_code == 200  # nosec B101
+    assert response.json()["disposition"] == "generated"  # nosec B101
+    assert response.json()["selection_fingerprint"] == expected_fingerprint  # nosec B101
+
+
+def test_snapshot_actions_reopen_existing_links_written_before_normalization_version_fingerprints(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
+    existing_quiz_id = db.create_quiz(name="Existing Quiz", source_bundle_json=[])
+    snapshot_id = db.create_suggestion_snapshot(
+        service="quiz",
+        activity_type="quiz_attempt",
+        anchor_type="quiz_attempt",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "normalization_version": "norm-v2",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+    )
+    legacy_fingerprint = (
+        f"snapshot_id={snapshot_id}|target_service=quiz|target_type=quiz|"
+        "topics=renal:kidney-functions|action_kind=follow_up_quiz|generator_version=v1"
+    )
+    db.create_suggestion_generation_link(
+        snapshot_id=snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        target_id=str(existing_quiz_id),
+        selection_fingerprint=legacy_fingerprint,
+    )
+
+    async def fake_dispatch_action(*, note_db, snapshot_row, request_body, media_db=None):
+        assert int(snapshot_row["id"]) == snapshot_id  # nosec B101
+        return {
+            "target_service": "quiz",
+            "target_type": "quiz",
+            "target_id": "quiz-generated",
+        }
+
+    monkeypatch.setattr(endpoints_mod, "_dispatch_follow_up_action", fake_dispatch_action)
+
+    response = client.post(
+        f"/api/v1/study-suggestions/snapshots/{snapshot_id}/actions",
+        json={
+            "target_service": "quiz",
+            "target_type": "quiz",
+            "action_kind": "follow_up_quiz",
+            "selected_topic_ids": ["topic-1"],
+            "generator_version": "v1",
+            "force_regenerate": False,
+        },
+    )
+
+    expected_fingerprint = actions_mod.build_selection_fingerprint(
+        snapshot_id=snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        selected_topics=["renal:kidney-functions"],
+        action_kind="follow_up_quiz",
+        generator_version="v1",
+        normalization_version="norm-v2",
+    )
+
+    assert response.status_code == 200  # nosec B101
+    assert response.json()["disposition"] == "opened_existing"  # nosec B101
+    assert response.json()["target_id"] == str(existing_quiz_id)  # nosec B101
+    assert response.json()["selection_fingerprint"] == expected_fingerprint  # nosec B101
+
+
+def test_snapshot_actions_prefer_live_legacy_links_when_stale_current_fingerprint_rows_exist(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
+    live_deck_id = db.add_deck("Live Deck", "desc")
+    stale_deck_id = db.add_deck("Stale Deck", "desc")
+    db.soft_delete_deck_by_id(stale_deck_id)
+    snapshot_id = db.create_suggestion_snapshot(
+        service="flashcards",
+        activity_type="flashcard_review_session",
+        anchor_type="flashcard_review_session",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "normalization_version": "norm-v2",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+    )
+    current_fingerprint = actions_mod.build_selection_fingerprint(
+        snapshot_id=snapshot_id,
+        target_service="flashcards",
+        target_type="deck",
+        selected_topics=["renal:kidney-functions"],
+        action_kind="follow_up_flashcards",
+        generator_version="v1",
+        normalization_version="norm-v2",
+    )
+    legacy_fingerprint = actions_mod.build_selection_fingerprint(
+        snapshot_id=snapshot_id,
+        target_service="flashcards",
+        target_type="deck",
+        selected_topics=["renal:kidney-functions"],
+        action_kind="follow_up_flashcards",
+        generator_version="v1",
+        normalization_version="norm-v2",
+        include_normalization_version=False,
+    )
+    db.create_suggestion_generation_link(
+        snapshot_id=snapshot_id,
+        target_service="flashcards",
+        target_type="deck",
+        target_id=str(stale_deck_id),
+        selection_fingerprint=current_fingerprint,
+    )
+    db.create_suggestion_generation_link(
+        snapshot_id=snapshot_id,
+        target_service="flashcards",
+        target_type="deck",
+        target_id=str(live_deck_id),
+        selection_fingerprint=legacy_fingerprint,
+    )
+
+    async def fake_dispatch_action(*, note_db, snapshot_row, request_body, media_db=None):
+        assert int(snapshot_row["id"]) == snapshot_id  # nosec B101
+        return {
+            "target_service": "flashcards",
+            "target_type": "deck",
+            "target_id": "deck-generated",
+        }
+
+    monkeypatch.setattr(endpoints_mod, "_dispatch_follow_up_action", fake_dispatch_action)
+
+    response = client.post(
+        f"/api/v1/study-suggestions/snapshots/{snapshot_id}/actions",
+        json={
+            "target_service": "flashcards",
+            "target_type": "deck",
+            "action_kind": "follow_up_flashcards",
+            "selected_topic_ids": ["topic-1"],
+            "generator_version": "v1",
+            "force_regenerate": False,
+        },
+    )
+
+    assert response.status_code == 200  # nosec B101
+    assert response.json()["disposition"] == "opened_existing"  # nosec B101
+    assert response.json()["target_id"] == str(live_deck_id)  # nosec B101
+    assert response.json()["selection_fingerprint"] == current_fingerprint  # nosec B101
+
+
+def test_snapshot_actions_reserve_conflict_rechecks_live_legacy_links_before_opening_existing(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
+    live_deck_id = db.add_deck("Live Deck", "desc")
+    stale_deck_id = db.add_deck("Stale Deck", "desc")
+    db.soft_delete_deck_by_id(stale_deck_id)
+    snapshot_id = db.create_suggestion_snapshot(
+        service="flashcards",
+        activity_type="flashcard_review_session",
+        anchor_type="flashcard_review_session",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "normalization_version": "norm-v2",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+    )
+    current_fingerprint = actions_mod.build_selection_fingerprint(
+        snapshot_id=snapshot_id,
+        target_service="flashcards",
+        target_type="deck",
+        selected_topics=["renal:kidney-functions"],
+        action_kind="follow_up_flashcards",
+        generator_version="v1",
+        normalization_version="norm-v2",
+    )
+    legacy_fingerprint = actions_mod.build_selection_fingerprint(
+        snapshot_id=snapshot_id,
+        target_service="flashcards",
+        target_type="deck",
+        selected_topics=["renal:kidney-functions"],
+        action_kind="follow_up_flashcards",
+        generator_version="v1",
+        normalization_version="norm-v2",
+        include_normalization_version=False,
+    )
+    db.create_suggestion_generation_link(
+        snapshot_id=snapshot_id,
+        target_service="flashcards",
+        target_type="deck",
+        target_id=str(stale_deck_id),
+        selection_fingerprint=current_fingerprint,
+    )
+    db.create_suggestion_generation_link(
+        snapshot_id=snapshot_id,
+        target_service="flashcards",
+        target_type="deck",
+        target_id=str(live_deck_id),
+        selection_fingerprint=legacy_fingerprint,
+    )
+
+    def fake_reserve_generation_link(*args, **kwargs):
+        raise RuntimeError("simulated reservation race")
+
+    async def fake_dispatch_action(*, note_db, snapshot_row, request_body, media_db=None):
+        assert int(snapshot_row["id"]) == snapshot_id  # nosec B101
+        return {
+            "target_service": "flashcards",
+            "target_type": "deck",
+            "target_id": "deck-generated",
+        }
+
+    monkeypatch.setattr(endpoints_mod, "reserve_generation_link", fake_reserve_generation_link)
+    monkeypatch.setattr(endpoints_mod, "_dispatch_follow_up_action", fake_dispatch_action)
+
+    response = client.post(
+        f"/api/v1/study-suggestions/snapshots/{snapshot_id}/actions",
+        json={
+            "target_service": "flashcards",
+            "target_type": "deck",
+            "action_kind": "follow_up_flashcards",
+            "selected_topic_ids": ["topic-1"],
+            "generator_version": "v1",
+            "force_regenerate": False,
+        },
+    )
+
+    assert response.status_code == 200  # nosec B101
+    assert response.json()["disposition"] == "opened_existing"  # nosec B101
+    assert response.json()["target_id"] == str(live_deck_id)  # nosec B101
+    assert response.json()["selection_fingerprint"] == current_fingerprint  # nosec B101
+
+
+def test_snapshot_actions_reopen_refreshed_ancestor_link_without_writing_child_alias_rows(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
+    ancestor_quiz_id = db.create_quiz(name="Ancestor Quiz", source_bundle_json=[])
+    unrelated_quiz_id = db.create_quiz(name="Unrelated Quiz", source_bundle_json=[])
+    original_snapshot_id = db.create_suggestion_snapshot(
+        service="quiz",
+        activity_type="quiz_attempt",
+        anchor_type="quiz_attempt",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "normalization_version": "norm-v2",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+    )
+    fingerprint = actions_mod.build_selection_fingerprint(
+        snapshot_id=original_snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        selected_topics=["renal:kidney-functions"],
+        action_kind="follow_up_quiz",
+        generator_version="v1",
+        normalization_version="norm-v2",
+    )
+    db.create_suggestion_generation_link(
+        snapshot_id=original_snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        target_id=str(ancestor_quiz_id),
+        selection_fingerprint=fingerprint,
+    )
+    unrelated_snapshot_id = db.create_suggestion_snapshot(
+        service="quiz",
+        activity_type="quiz_attempt",
+        anchor_type="quiz_attempt",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "normalization_version": "norm-v2",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+    )
+    db.create_suggestion_generation_link(
+        snapshot_id=unrelated_snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        target_id=str(unrelated_quiz_id),
+        selection_fingerprint=fingerprint,
+    )
+    child_snapshot_id = db.create_suggestion_snapshot(
+        service="quiz",
+        activity_type="quiz_attempt",
+        anchor_type="quiz_attempt",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "normalization_version": "norm-v2",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+        refreshed_from_snapshot_id=original_snapshot_id,
+    )
+
+    async def fake_dispatch_action(*, note_db, snapshot_row, request_body, media_db=None):
+        assert int(snapshot_row["id"]) == child_snapshot_id  # nosec B101
+        return {
+            "target_service": "quiz",
+            "target_type": "quiz",
+            "target_id": "quiz-generated",
+        }
+
+    monkeypatch.setattr(endpoints_mod, "_dispatch_follow_up_action", fake_dispatch_action)
+
+    response = client.post(
+        f"/api/v1/study-suggestions/snapshots/{child_snapshot_id}/actions",
+        json={
+            "target_service": "quiz",
+            "target_type": "quiz",
+            "action_kind": "follow_up_quiz",
+            "selected_topic_ids": ["topic-1"],
+            "generator_version": "v1",
+            "force_regenerate": False,
+        },
+    )
+
+    assert response.status_code == 200  # nosec B101
+    assert response.json()["disposition"] == "opened_existing"  # nosec B101
+    assert response.json()["target_id"] == str(ancestor_quiz_id)  # nosec B101
+    expected_child_fingerprint = actions_mod.build_selection_fingerprint(
+        snapshot_id=child_snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        selected_topics=["renal:kidney-functions"],
+        action_kind="follow_up_quiz",
+        generator_version="v1",
+        normalization_version="norm-v2",
+    )
+    assert response.json()["selection_fingerprint"] == expected_child_fingerprint  # nosec B101
+
+    child_link = db.execute_query(
+        """
+        SELECT COUNT(*) AS count
+          FROM suggestion_generation_links
+         WHERE snapshot_id = ? AND deleted = 0
+        """,
+        (child_snapshot_id,),
+    ).fetchone()
+    assert int(child_link["count"]) == 0  # nosec B101
+
+
+def test_snapshot_actions_reopen_refreshed_ancestor_links_written_before_normalization_version_fingerprints(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
+    ancestor_quiz_id = db.create_quiz(name="Ancestor Quiz", source_bundle_json=[])
+    original_snapshot_id = db.create_suggestion_snapshot(
+        service="quiz",
+        activity_type="quiz_attempt",
+        anchor_type="quiz_attempt",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "normalization_version": "norm-v2",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+    )
+    legacy_fingerprint = (
+        f"snapshot_id={original_snapshot_id}|target_service=quiz|target_type=quiz|"
+        "topics=renal:kidney-functions|action_kind=follow_up_quiz|generator_version=v1"
+    )
+    db.create_suggestion_generation_link(
+        snapshot_id=original_snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        target_id=str(ancestor_quiz_id),
+        selection_fingerprint=legacy_fingerprint,
+    )
+    child_snapshot_id = db.create_suggestion_snapshot(
+        service="quiz",
+        activity_type="quiz_attempt",
+        anchor_type="quiz_attempt",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "normalization_version": "norm-v2",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+        refreshed_from_snapshot_id=original_snapshot_id,
+    )
+
+    async def fake_dispatch_action(*, note_db, snapshot_row, request_body, media_db=None):
+        assert int(snapshot_row["id"]) == child_snapshot_id  # nosec B101
+        return {
+            "target_service": "quiz",
+            "target_type": "quiz",
+            "target_id": "quiz-generated",
+        }
+
+    monkeypatch.setattr(endpoints_mod, "_dispatch_follow_up_action", fake_dispatch_action)
+
+    response = client.post(
+        f"/api/v1/study-suggestions/snapshots/{child_snapshot_id}/actions",
+        json={
+            "target_service": "quiz",
+            "target_type": "quiz",
+            "action_kind": "follow_up_quiz",
+            "selected_topic_ids": ["topic-1"],
+            "generator_version": "v1",
+            "force_regenerate": False,
+        },
+    )
+
+    expected_fingerprint = actions_mod.build_selection_fingerprint(
+        snapshot_id=child_snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        selected_topics=["renal:kidney-functions"],
+        action_kind="follow_up_quiz",
+        generator_version="v1",
+        normalization_version="norm-v2",
+    )
+
+    assert response.status_code == 200  # nosec B101
+    assert response.json()["disposition"] == "opened_existing"  # nosec B101
+    assert response.json()["target_id"] == str(ancestor_quiz_id)  # nosec B101
+    assert response.json()["selection_fingerprint"] == expected_fingerprint  # nosec B101
+
+
+def test_snapshot_actions_ignore_deleted_targets_when_reopening_existing_links(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
+    deck_id = db.add_deck("Session Deck", "desc")
+    snapshot_id = db.create_suggestion_snapshot(
+        service="flashcards",
+        activity_type="flashcard_review_session",
+        anchor_type="flashcard_review_session",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+    )
+    fingerprint = actions_mod.build_selection_fingerprint(
+        snapshot_id=snapshot_id,
+        target_service="flashcards",
+        target_type="deck",
+        selected_topics=["renal:kidney-functions"],
+        action_kind="follow_up_flashcards",
+        generator_version="v1",
+    )
+    db.create_suggestion_generation_link(
+        snapshot_id=snapshot_id,
+        target_service="flashcards",
+        target_type="deck",
+        target_id=str(deck_id),
+        selection_fingerprint=fingerprint,
+    )
+    db.soft_delete_deck_by_id(deck_id)
+
+    monkeypatch.setattr(endpoints_mod, "build_selection_fingerprint", lambda **_: fingerprint)
+
+    async def fake_dispatch_action(*, note_db, snapshot_row, request_body, media_db=None):
+        assert int(snapshot_row["id"]) == snapshot_id  # nosec B101
+        return {
+            "target_service": "flashcards",
+            "target_type": "deck",
+            "target_id": "deck-999",
+        }
+
+    monkeypatch.setattr(endpoints_mod, "_dispatch_follow_up_action", fake_dispatch_action)
+
+    response = client.post(
+        f"/api/v1/study-suggestions/snapshots/{snapshot_id}/actions",
+        json={
+            "target_service": "flashcards",
+            "target_type": "deck",
+            "action_kind": "follow_up_flashcards",
+            "selected_topic_ids": ["topic-1"],
+            "generator_version": "v1",
+            "force_regenerate": False,
+        },
+    )
+
+    assert response.status_code == 200  # nosec B101
+    assert response.json()["disposition"] == "generated"  # nosec B101
+    assert response.json()["target_id"] == "deck-999"  # nosec B101
+    active_link = db.execute_query(
+        """
+        SELECT COUNT(*) AS count
+          FROM suggestion_generation_links
+         WHERE snapshot_id = ? AND deleted = 0
+        """,
+        (snapshot_id,),
+    ).fetchone()
+    assert int(active_link["count"]) == 1  # nosec B101
+
+
+def test_snapshot_actions_ignore_deleted_ancestor_targets_in_refreshed_lineage_lookup(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
+    deleted_deck_id = db.add_deck("Deleted Ancestor Deck", "desc")
+    original_snapshot_id = db.create_suggestion_snapshot(
+        service="flashcards",
+        activity_type="flashcard_review_session",
+        anchor_type="flashcard_review_session",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "normalization_version": "norm-v2",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+    )
+    fingerprint = actions_mod.build_selection_fingerprint(
+        snapshot_id=original_snapshot_id,
+        target_service="flashcards",
+        target_type="deck",
+        selected_topics=["renal:kidney-functions"],
+        action_kind="follow_up_flashcards",
+        generator_version="v1",
+        normalization_version="norm-v2",
+    )
+    db.create_suggestion_generation_link(
+        snapshot_id=original_snapshot_id,
+        target_service="flashcards",
+        target_type="deck",
+        target_id=str(deleted_deck_id),
+        selection_fingerprint=fingerprint,
+    )
+    db.soft_delete_deck_by_id(deleted_deck_id)
+    child_snapshot_id = db.create_suggestion_snapshot(
+        service="flashcards",
+        activity_type="flashcard_review_session",
+        anchor_type="flashcard_review_session",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "normalization_version": "norm-v2",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+        refreshed_from_snapshot_id=original_snapshot_id,
+    )
+
+    monkeypatch.setattr(endpoints_mod, "build_selection_fingerprint", lambda **_: fingerprint)
+
+    async def fake_dispatch_action(*, note_db, snapshot_row, request_body, media_db=None):
+        assert int(snapshot_row["id"]) == child_snapshot_id  # nosec B101
+        return {
+            "target_service": "flashcards",
+            "target_type": "deck",
+            "target_id": "deck-1234",
+        }
+
+    monkeypatch.setattr(endpoints_mod, "_dispatch_follow_up_action", fake_dispatch_action)
+
+    response = client.post(
+        f"/api/v1/study-suggestions/snapshots/{child_snapshot_id}/actions",
+        json={
+            "target_service": "flashcards",
+            "target_type": "deck",
+            "action_kind": "follow_up_flashcards",
+            "selected_topic_ids": ["topic-1"],
+            "generator_version": "v1",
+            "force_regenerate": False,
+        },
+    )
+
+    assert response.status_code == 200  # nosec B101
+    assert response.json()["disposition"] == "generated"  # nosec B101
+    assert response.json()["target_id"] == "deck-1234"  # nosec B101
+
+
+def test_snapshot_actions_generate_new_output_for_refreshed_ancestor_requests_with_manual_topic_labels(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
+    ancestor_quiz_id = db.create_quiz(name="Ancestor Quiz", source_bundle_json=[])
+    original_snapshot_id = db.create_suggestion_snapshot(
+        service="quiz",
+        activity_type="quiz_attempt",
+        anchor_type="quiz_attempt",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "normalization_version": "norm-v2",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+    )
+    fingerprint = actions_mod.build_selection_fingerprint(
+        snapshot_id=original_snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        selected_topics=["electrolyte ladder", "renal:kidney-functions"],
+        action_kind="follow_up_quiz",
+        generator_version="v1",
+        normalization_version="norm-v2",
+    )
+    db.create_suggestion_generation_link(
+        snapshot_id=original_snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        target_id=str(ancestor_quiz_id),
+        selection_fingerprint=fingerprint,
+    )
+    child_snapshot_id = db.create_suggestion_snapshot(
+        service="quiz",
+        activity_type="quiz_attempt",
+        anchor_type="quiz_attempt",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "normalization_version": "norm-v2",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+        refreshed_from_snapshot_id=original_snapshot_id,
+    )
+
+    async def fake_dispatch_action(*, note_db, snapshot_row, request_body, media_db=None):
+        assert int(snapshot_row["id"]) == child_snapshot_id  # nosec B101
+        return {
+            "target_service": "quiz",
+            "target_type": "quiz",
+            "target_id": "quiz-generated",
+        }
+
+    monkeypatch.setattr(endpoints_mod, "_dispatch_follow_up_action", fake_dispatch_action)
+
+    response = client.post(
+        f"/api/v1/study-suggestions/snapshots/{child_snapshot_id}/actions",
+        json={
+            "target_service": "quiz",
+            "target_type": "quiz",
+            "action_kind": "follow_up_quiz",
+            "selected_topic_ids": ["topic-1"],
+            "manual_topic_labels": [" Electrolyte Ladder "],
+            "generator_version": "v1",
+            "force_regenerate": False,
+        },
+    )
+
+    expected_fingerprint = actions_mod.build_selection_fingerprint(
+        snapshot_id=child_snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        selected_topics=["electrolyte ladder", "renal:kidney-functions"],
+        action_kind="follow_up_quiz",
+        generator_version="v1",
+        normalization_version="norm-v2",
+    )
+
+    assert response.status_code == 200  # nosec B101
+    assert response.json()["disposition"] == "generated"  # nosec B101
+    assert response.json()["target_id"] == "quiz-generated"  # nosec B101
+    assert response.json()["selection_fingerprint"] == expected_fingerprint  # nosec B101
+
+
+def test_snapshot_actions_force_regenerate_replaces_active_direct_link(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
+    existing_quiz_id = db.create_quiz(name="Existing Quiz", source_bundle_json=[])
+    snapshot_id = db.create_suggestion_snapshot(
+        service="quiz",
+        activity_type="quiz_attempt",
+        anchor_type="quiz_attempt",
+        anchor_id=101,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "topic_key": "renal:kidney-functions",
+                    "canonical_label": "kidney functions",
+                    "display_label": "Kidney Functions",
+                    "selected": True,
+                }
+            ]
+        },
+    )
+    fingerprint = actions_mod.build_selection_fingerprint(
+        snapshot_id=snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        selected_topics=["renal:kidney-functions"],
+        action_kind="follow_up_quiz",
+        generator_version="v1",
+    )
+    db.create_suggestion_generation_link(
+        snapshot_id=snapshot_id,
+        target_service="quiz",
+        target_type="quiz",
+        target_id=str(existing_quiz_id),
+        selection_fingerprint=fingerprint,
+    )
+
+    monkeypatch.setattr(endpoints_mod, "build_selection_fingerprint", lambda **_: fingerprint)
+
+    async def fake_dispatch_action(*, note_db, snapshot_row, request_body, media_db=None):
+        assert int(snapshot_row["id"]) == snapshot_id  # nosec B101
+        assert request_body["force_regenerate"] is True  # nosec B101
+        return {
+            "target_service": "quiz",
+            "target_type": "quiz",
+            "target_id": "quiz-99",
+        }
+
+    monkeypatch.setattr(endpoints_mod, "_dispatch_follow_up_action", fake_dispatch_action)
+
+    response = client.post(
+        f"/api/v1/study-suggestions/snapshots/{snapshot_id}/actions",
+        json={
+            "target_service": "quiz",
+            "target_type": "quiz",
+            "action_kind": "follow_up_quiz",
+            "selected_topic_ids": ["topic-1"],
+            "generator_version": "v1",
+            "force_regenerate": True,
+        },
+    )
+
+    assert response.status_code == 200  # nosec B101
+    assert response.json()["disposition"] == "generated"  # nosec B101
+    assert response.json()["target_id"] == "quiz-99"  # nosec B101
+    active_links = db.execute_query(
+        """
+        SELECT COUNT(*) AS count
+          FROM suggestion_generation_links
+         WHERE snapshot_id = ? AND selection_fingerprint = ? AND deleted = 0
+        """,
+        (snapshot_id, fingerprint),
+    ).fetchone()
+    assert int(active_links["count"]) == 1  # nosec B101

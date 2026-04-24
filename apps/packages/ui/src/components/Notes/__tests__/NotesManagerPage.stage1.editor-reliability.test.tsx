@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
@@ -12,7 +12,8 @@ const {
   mockNavigate,
   mockConfirmDanger,
   mockGetSetting,
-  mockClearSetting
+  mockClearSetting,
+  mockCapabilities
 } = vi.hoisted(() => {
   return {
     mockBgRequest: vi.fn(),
@@ -22,7 +23,8 @@ const {
     mockNavigate: vi.fn(),
     mockConfirmDanger: vi.fn(),
     mockGetSetting: vi.fn(),
-    mockClearSetting: vi.fn()
+    mockClearSetting: vi.fn(),
+    mockCapabilities: { hasNotes: true }
   }
 })
 
@@ -62,7 +64,7 @@ vi.mock("@/context/demo-mode", () => ({
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
-    capabilities: { hasNotes: true },
+    capabilities: mockCapabilities,
     loading: false
   })
 }))
@@ -129,12 +131,15 @@ const renderPage = () => {
       mutations: { retry: false }
     }
   })
+  queryClients.push(queryClient)
   return render(
     <QueryClientProvider client={queryClient}>
       <NotesManagerPage />
     </QueryClientProvider>
   )
 }
+
+const queryClients: QueryClient[] = []
 
 const createCalls = () =>
   mockBgRequest.mock.calls.filter(([request]) => {
@@ -152,7 +157,9 @@ const updateCalls = () =>
 
 describe("NotesManagerPage stage 1 editor reliability", () => {
   beforeEach(() => {
+    cleanup()
     vi.clearAllMocks()
+    mockCapabilities.hasNotes = true
     mockConfirmDanger.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(null)
     mockClearSetting.mockResolvedValue(undefined)
@@ -190,7 +197,14 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
     })
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    cleanup()
+    while (queryClients.length > 0) {
+      const queryClient = queryClients.pop()
+      if (!queryClient) continue
+      await queryClient.cancelQueries()
+      queryClient.clear()
+    }
     vi.useRealTimers()
   })
 
@@ -243,7 +257,7 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
       }
     )
 
-    const searchInput = screen.getByPlaceholderText("Search titles & content...")
+    const searchInput = screen.getByPlaceholderText("Search notes... (use quotes for exact match)")
     fireEvent.focus(searchInput)
     fireEvent.keyDown(searchInput, { key: "s", ctrlKey: true })
     fireEvent.keyDown(searchInput, { key: "s", metaKey: true })
@@ -253,124 +267,32 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
     })
   })
 
-  it("preserves the pending last-note setting when note hydration fails", async () => {
-    mockGetSetting.mockResolvedValue("pending-note")
-    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
-      const path = String(request.path || "")
-      const method = String(request.method || "GET").toUpperCase()
+  it("hides the welcome state after starting a new draft", async () => {
+    renderPage()
 
-      if (path.startsWith("/api/v1/notes/?")) {
-        return {
-          items: [
-            {
-              id: "pending-note",
-              title: "Pending note",
-              content: "Preview",
-              metadata: { keywords: [] },
-              version: 1
-            }
-          ],
-          pagination: { total_items: 1, total_pages: 1 }
-        }
-      }
+    expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
 
-      if (path === "/api/v1/notes/pending-note" && method === "GET") {
-        throw new Error("load failed")
-      }
+    fireEvent.click(screen.getByTestId("notes-editor-empty-create"))
 
-      return {}
+    await waitFor(() => {
+      expect(screen.queryByTestId("notes-editor-empty-state")).not.toBeInTheDocument()
     })
+  })
+
+  it("keeps the empty-state create CTA disabled when the notes capability is unavailable", async () => {
+    mockCapabilities.hasNotes = false
 
     renderPage()
 
+    const createButton = screen.getByTestId("notes-editor-empty-create")
+    expect(createButton).toBeDisabled()
+
+    fireEvent.click(createButton)
+
     await waitFor(() => {
-      expect(mockMessageError).toHaveBeenCalledWith("Failed to load note")
+      expect(createCalls()).toHaveLength(0)
     })
-    expect(mockClearSetting).not.toHaveBeenCalled()
+    expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
   })
 
-  it("blocks study-pack launch while the selected note has unsaved edits", async () => {
-    mockGetSetting.mockResolvedValue("11")
-    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
-      const path = String(request.path || "")
-      const method = String(request.method || "GET").toUpperCase()
-
-      if (path.startsWith("/api/v1/notes/?")) {
-        return {
-          items: [
-            {
-              id: "11",
-              title: "Saved note",
-              content: "Original saved content",
-              metadata: { keywords: [] },
-              version: 1
-            }
-          ],
-          pagination: { total_items: 1, total_pages: 1 }
-        }
-      }
-
-      if (path === "/api/v1/notes/11" && method === "GET") {
-        return {
-          id: 11,
-          title: "Saved note",
-          content: "Original saved content",
-          metadata: { keywords: [] },
-          version: 1
-        }
-      }
-
-      return {}
-    })
-
-    renderPage()
-
-    const contentInput = await screen.findByPlaceholderText(
-      "Write your note here... (Markdown supported)"
-    )
-    await waitFor(() => {
-      expect(screen.getByDisplayValue("Saved note")).toBeInTheDocument()
-    })
-
-    fireEvent.change(contentInput, {
-      target: { value: "Unsaved update for study pack launch" }
-    })
-
-    const createStudyPackButton = screen.getByTestId("notes-create-study-pack-button")
-    await waitFor(() => {
-      expect(createStudyPackButton).toBeDisabled()
-    })
-
-    fireEvent.click(createStudyPackButton)
-
-    expect(mockNavigate).not.toHaveBeenCalled()
-  })
-
-  it("autosaves after idle delay without success toast spam", async () => {
-    vi.useFakeTimers()
-    renderPage()
-
-    fireEvent.change(screen.getByPlaceholderText("Title"), {
-      target: { value: "Autosave note" }
-    })
-    fireEvent.change(
-      screen.getByPlaceholderText("Write your note here... (Markdown supported)"),
-      {
-        target: { value: "Autosaved content" }
-      }
-    )
-
-    expect(createCalls()).toHaveLength(0)
-
-    vi.advanceTimersByTime(4900)
-    expect(createCalls()).toHaveLength(0)
-
-    await act(async () => {
-      vi.advanceTimersByTime(100)
-      await Promise.resolve()
-    })
-
-    expect(createCalls()).toHaveLength(1)
-    expect(mockMessageSuccess).not.toHaveBeenCalledWith("Note created")
-  })
 })

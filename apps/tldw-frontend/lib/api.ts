@@ -1,6 +1,6 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import { addRequestHistory } from '@web/lib/history';
-import { getApiBearer, getApiKey } from '@web/lib/authStorage';
+import { getApiBearer, getApiKey, hasEnvApiAuth } from '@web/lib/authStorage';
 import { buildApiBaseUrl, resolvePublicApiOrigin } from '@web/lib/api-base';
 import { captureSessionIdFromHeaders, getOrCreateSessionId, SESSION_HEADER_NAME } from '@web/lib/session';
 import type { AxiosConfigWithMetadata, ApiErrorResponse } from '@web/types/common';
@@ -53,6 +53,39 @@ export function shouldIncludeBrowserCredentials(): boolean {
   }
 
   return true;
+}
+
+const normalizePathname = (pathname: string): string => {
+  const trimmed = pathname.trim();
+  if (!trimmed) return "/";
+  if (trimmed === "/") return "/";
+  return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+}
+
+export function shouldRedirectUnauthorizedToLogin(pathname?: string): boolean {
+  const resolvedPath =
+    typeof pathname === "string"
+      ? normalizePathname(pathname)
+      : typeof window !== "undefined"
+        ? normalizePathname(window.location.pathname || "/")
+        : "/";
+
+  if (
+    resolvedPath === "/login" ||
+    resolvedPath === "/setup" ||
+    resolvedPath === "/signup" ||
+    resolvedPath === "/settings" ||
+    resolvedPath.startsWith("/settings/") ||
+    resolvedPath.startsWith("/auth/")
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+export function hasEnvAuthConfigured(): boolean {
+  return hasEnvApiAuth();
 }
 
 function resolveDefaultApiBaseUrl(): string {
@@ -180,9 +213,14 @@ api.interceptors.response.use(
         localStorage.removeItem('access_token');
         localStorage.removeItem('user');
         // Redirect to login only if not using env-based API auth
-        const hasEnvAuth = !!(process.env.NEXT_PUBLIC_X_API_KEY || process.env.NEXT_PUBLIC_API_BEARER);
         const hasStoredAuth = !!(getApiKey() || getApiBearer());
-        if (!hasEnvAuth && !hasStoredAuth) window.location.href = '/login';
+        if (
+          !hasEnvAuthConfigured() &&
+          !hasStoredAuth &&
+          shouldRedirectUnauthorizedToLogin(window.location.pathname)
+        ) {
+          window.location.href = '/login';
+        }
       }
     }
     if (status === 403) {

@@ -114,17 +114,31 @@ export function usePromptUtilities(deps: UsePromptUtilitiesDeps) {
     [data]
   )
 
-  return {
-    confirmDanger,
-    guardPrivateMode,
-    getPromptKeywords,
-    getPromptTexts,
-    getPromptType,
-    getPromptModifiedAt,
-    getPromptUsageCount,
-    getPromptLastUsedAt,
-    formatRelativePromptTime,
-    getPromptRecordById,
-    isFireFoxPrivateMode
-  }
+  return React.useMemo(
+    () => ({
+      confirmDanger,
+      guardPrivateMode,
+      getPromptKeywords,
+      getPromptTexts,
+      getPromptType,
+      getPromptModifiedAt,
+      getPromptUsageCount,
+      getPromptLastUsedAt,
+      formatRelativePromptTime,
+      getPromptRecordById,
+      isFireFoxPrivateMode
+    }),
+    [
+      confirmDanger,
+      guardPrivateMode,
+      getPromptKeywords,
+      getPromptTexts,
+      getPromptType,
+      getPromptModifiedAt,
+      getPromptUsageCount,
+      getPromptLastUsedAt,
+      formatRelativePromptTime,
+      getPromptRecordById
+    ]
+  )
 }

@@ -1,12 +1,15 @@
 /**
  * World Books Workflow E2E Tests
  *
- * Tests the complete world book lifecycle:
- * - Create / Edit / Delete world books (with undo)
- * - Manage entries (single, bulk add, bulk operations)
- * - Character attachment / detachment
- * - Import / Export
- * - Statistics
+ * Tests the complete world book lifecycle with the two-panel layout:
+ * - Create world book (modal, unchanged)
+ * - Select row → detail panel opens with Entries tab
+ * - Edit via Settings tab in detail panel (no more edit modal)
+ * - Delete via overflow menu on the row
+ * - Manage entries via detail panel Entries tab
+ * - Character attachment via detail panel Attachments tab
+ * - Import / Export via toolbar Tools dropdown
+ * - Statistics via detail panel Stats tab
  *
  * Run: npx playwright test e2e/workflows/world-books.spec.ts
  */
@@ -33,7 +36,7 @@ test.describe("World Books Workflow", () => {
   // ═════════════════════════════════════════════════════════════════════
 
   test.describe("Create World Book", () => {
-    test("should navigate to world books page and render table", async ({
+    test("should navigate to world books page and render layout", async ({
       authedPage,
       diagnostics
     }) => {
@@ -44,7 +47,7 @@ test.describe("World Books Workflow", () => {
       await assertNoCriticalErrors(diagnostics)
     })
 
-    test("should create a new world book", async ({
+    test("should create a new world book and show it in the list", async ({
       authedPage,
       serverInfo,
       diagnostics
@@ -63,20 +66,44 @@ test.describe("World Books Workflow", () => {
 
       expect(apiResult.status).toBeLessThan(300)
 
-      // Verify row appears
+      // Verify row appears in the list panel
       const row = await wbPage.findWorldBookRow(name)
       await expect(row).toBeVisible({ timeout: 10_000 })
+
+      await assertNoCriticalErrors(diagnostics)
+    })
+
+    test("should select a created world book and show detail panel", async ({
+      authedPage,
+      serverInfo,
+      diagnostics
+    }) => {
+      skipIfServerUnavailable(serverInfo)
+      wbPage = new WorldBooksPage(authedPage)
+      await wbPage.goto()
+      await wbPage.waitForReady()
+
+      const name = `${testPrefix}-select`
+      await wbPage.createWorldBook(name, "E2E test world book for selection")
+      await expect(await wbPage.findWorldBookRow(name)).toBeVisible({ timeout: 10_000 })
+
+      // Click the row to select it
+      await wbPage.selectWorldBookRow(name)
+
+      // Verify detail panel shows the world book name and Entries tab
+      await wbPage.expectDetailPanelTitle(name)
+      await wbPage.expectDetailTabActive("Entries")
 
       await assertNoCriticalErrors(diagnostics)
     })
   })
 
   // ═════════════════════════════════════════════════════════════════════
-  // 2.2  Edit World Book
+  // 2.2  Edit World Book (via Settings tab)
   // ═════════════════════════════════════════════════════════════════════
 
   test.describe("Edit World Book", () => {
-    test("should edit a world book description", async ({
+    test("should edit a world book description via Settings tab", async ({
       authedPage,
       serverInfo,
       diagnostics
@@ -92,30 +119,26 @@ test.describe("World Books Workflow", () => {
         timeout: 10_000
       })
 
-      // Open edit
-      await wbPage.clickEditOnRow(name)
+      // Open the Settings tab in the detail panel
+      await wbPage.openSettingsTab(name)
 
       // Change description
-      const modal = authedPage.getByRole("dialog", { name: /edit world book/i })
-      const descInput = modal.getByRole("textbox").nth(1)
-      await descInput.fill("Updated description via E2E")
+      await wbPage.fillSettingsDescription("Updated description via E2E")
 
       // Submit
       const [apiResult] = await Promise.all([
         wbPage.waitForApiCall(/\/api\/v1\/characters\/world-books\/\d+/, "PUT"),
-        wbPage.submitWorldBookForm(/edit world book/i)
+        wbPage.submitSettingsForm()
       ])
 
       expect(apiResult.status).toBeLessThan(300)
-
-      await modal.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {})
 
       await assertNoCriticalErrors(diagnostics)
     })
   })
 
   // ═════════════════════════════════════════════════════════════════════
-  // 2.3  Manage Entries
+  // 2.3  Manage Entries (via detail panel Entries tab)
   // ═════════════════════════════════════════════════════════════════════
 
   test.describe("Manage Entries", () => {
@@ -135,22 +158,26 @@ test.describe("World Books Workflow", () => {
         timeout: 10_000
       })
 
-      // Open entries
-      await wbPage.clickEntriesOnRow(name)
+      // Open the Entries tab in the detail panel
+      await wbPage.openEntriesTab(name)
 
       // Add entry
       await wbPage.fillEntryForm("dragon, fire", "Dragons breathe fire", 50)
-      await wbPage.submitEntry()
+      const [entryResult] = await Promise.all([
+        wbPage.waitForApiCall(/\/api\/v1\/characters\/world-books\/\d+\/entries$/, "POST"),
+        wbPage.submitEntry()
+      ])
+      expect(entryResult.status).toBeLessThan(300)
 
       // Verify entry count
       await expect
-        .poll(async () => wbPage.getEntryCount(), { timeout: 15_000 })
+        .poll(async () => wbPage.getEntryCount(), { timeout: 30_000 })
         .toBeGreaterThanOrEqual(1)
 
       await assertNoCriticalErrors(diagnostics)
     })
 
-    test("should support bulk entry add mode", async ({
+    test("should surface bulk add failures in bulk mode", async ({
       authedPage,
       serverInfo,
       diagnostics
@@ -160,40 +187,47 @@ test.describe("World Books Workflow", () => {
       await wbPage.goto()
       await wbPage.waitForReady()
 
+      await authedPage.route(/\/api\/v1\/characters\/world-books\/\d+\/entries$/, async (route) => {
+        await route.fulfill({
+          status: 429,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "rate_limited" })
+        })
+      })
+
       const name = `${testPrefix}-bulk`
       await wbPage.createWorldBook(name, "For bulk entry tests")
       await expect(await wbPage.findWorldBookRow(name)).toBeVisible({
         timeout: 10_000
       })
 
-      await wbPage.clickEntriesOnRow(name)
+      // Open the Entries tab in the detail panel
+      await wbPage.openEntriesTab(name)
 
       // Toggle bulk mode
-      try {
-        await wbPage.toggleBulkAddMode()
+      await wbPage.toggleBulkAddMode()
 
-        // Fill bulk text using -> separator
-        await wbPage.fillBulkText("elf, forest -> Elves live in ancient forests\nwizard, magic -> Wizards wield powerful magic")
+      // Fill bulk text using -> separator
+      await wbPage.fillBulkText("elf, forest -> Elves live in ancient forests")
 
-        // Submit
-        await wbPage.submitEntry()
-        await expect
-          .poll(async () => wbPage.getEntryCount(), { timeout: 15_000 })
-          .toBeGreaterThanOrEqual(2)
-      } catch {
-        // Bulk mode may not be available
-      }
+      // Submit
+      await wbPage.submitEntry()
+
+      const panel = wbPage.detailPanel()
+      await expect(panel.getByText("Parsed entries: 1")).toBeVisible({ timeout: 10_000 })
+      await expect(panel.getByText(/failed entries \(1\)/i)).toBeVisible({ timeout: 10_000 })
+      await expect(panel.getByText(/line 1/i)).toBeVisible({ timeout: 10_000 })
 
       await assertNoCriticalErrors(diagnostics)
     })
   })
 
   // ═════════════════════════════════════════════════════════════════════
-  // 2.4  Attach to Characters
+  // 2.4  Attach to Characters (via detail panel Attachments tab)
   // ═════════════════════════════════════════════════════════════════════
 
   test.describe("Attach to Characters", () => {
-    test("should open attachment modal for a world book", async ({
+    test("should open Attachments tab for a world book", async ({
       authedPage,
       serverInfo,
       diagnostics
@@ -209,19 +243,21 @@ test.describe("World Books Workflow", () => {
         timeout: 10_000
       })
 
-      try {
-        await wbPage.clickLinkOnRow(name)
-        const attachModal = authedPage.getByRole("dialog", { name: /quick attach/i })
-        await expect(attachModal).toBeVisible({ timeout: 10_000 })
-        await expect(attachModal.getByRole("button", { name: /attach character/i })).toBeVisible()
-      } catch {
-        // Link button may use different label
-      }
+      await wbPage.openAttachmentsTab(name)
+      await wbPage.expectDetailTabActive("Attachments")
+
+      const panel = wbPage.detailPanel()
+      await expect(panel.getByRole("heading", { name: /attached characters/i })).toBeVisible({
+        timeout: 10_000
+      })
+      await expect(panel.getByText(/no characters attached\./i)).toBeVisible({
+        timeout: 10_000
+      })
 
       await assertNoCriticalErrors(diagnostics)
     })
 
-    test("should open relationship matrix view", async ({
+    test("should open relationship matrix via Tools dropdown", async ({
       authedPage,
       serverInfo,
       diagnostics
@@ -231,25 +267,27 @@ test.describe("World Books Workflow", () => {
       await wbPage.goto()
       await wbPage.waitForReady()
 
-      try {
-        await wbPage.clickRelationshipMatrix()
-        // Matrix modal should open
-        const matrixModal = authedPage.locator(".ant-modal")
-        await expect(matrixModal).toBeVisible({ timeout: 10_000 })
-      } catch {
-        // Matrix button may not be available
-      }
+      const name = `${testPrefix}-matrix`
+      await wbPage.createWorldBook(name, "For matrix tests")
+      await expect(await wbPage.findWorldBookRow(name)).toBeVisible({
+        timeout: 10_000
+      })
+
+      await wbPage.clickRelationshipMatrix()
+      await expect(
+        authedPage.getByText(/(?:list|matrix) view active \(\d+ characters\)\./i)
+      ).toBeVisible({ timeout: 10_000 })
 
       await assertNoCriticalErrors(diagnostics)
     })
   })
 
   // ═════════════════════════════════════════════════════════════════════
-  // 2.5  Delete World Book (with undo)
+  // 2.5  Delete World Book (via overflow menu)
   // ═════════════════════════════════════════════════════════════════════
 
   test.describe("Delete World Book", () => {
-    test("should delete a world book with confirmation", async ({
+    test("should delete a world book via overflow menu with confirmation", async ({
       authedPage,
       serverInfo,
       diagnostics
@@ -264,11 +302,14 @@ test.describe("World Books Workflow", () => {
       const row = await wbPage.findWorldBookRow(name)
       await expect(row).toBeVisible({ timeout: 10_000 })
 
-      // Delete
+      // Delete via the overflow menu
       await wbPage.clickDeleteOnRow(name)
       await wbPage.confirmDeletion()
 
+      await expect(wbPage.pendingDeleteBanner()).toBeVisible({ timeout: 10_000 })
+      await expect(row.getByText(/pending delete/i)).toBeVisible({ timeout: 10_000 })
       await expect(row).toBeHidden({ timeout: 20_000 })
+      await expect(wbPage.pendingDeleteBanner()).toBeHidden({ timeout: 20_000 })
 
       await assertNoCriticalErrors(diagnostics)
     })
@@ -288,28 +329,29 @@ test.describe("World Books Workflow", () => {
       const row = await wbPage.findWorldBookRow(name)
       await expect(row).toBeVisible({ timeout: 10_000 })
 
-      // Delete
+      // Delete via the overflow menu
       await wbPage.clickDeleteOnRow(name)
       await wbPage.confirmDeletion()
 
-      // Try to click undo
-      try {
-        await wbPage.clickUndoDelete()
-        await expect(row).toBeVisible({ timeout: 5_000 })
-      } catch {
-        // Undo may not be available for all delete patterns
-      }
+      await expect(wbPage.pendingDeleteBanner()).toBeVisible({ timeout: 10_000 })
+      await expect(row.getByText(/pending delete/i)).toBeVisible({ timeout: 10_000 })
+
+      await wbPage.cancelPendingDelete()
+
+      await expect(wbPage.pendingDeleteBanner()).toBeHidden({ timeout: 10_000 })
+      await expect(row).toBeVisible({ timeout: 10_000 })
+      await expect(row.getByText(/pending delete/i)).toBeHidden({ timeout: 10_000 })
 
       await assertNoCriticalErrors(diagnostics)
     })
   })
 
   // ═════════════════════════════════════════════════════════════════════
-  // 2.6  Import / Export
+  // 2.6  Import / Export (via Tools dropdown and overflow menu)
   // ═════════════════════════════════════════════════════════════════════
 
   test.describe("Import / Export", () => {
-    test("should export a world book as JSON", async ({
+    test("should export a world book via overflow menu", async ({
       authedPage,
       serverInfo,
       diagnostics
@@ -327,7 +369,7 @@ test.describe("World Books Workflow", () => {
 
       const [apiResult] = await Promise.all([
         wbPage.waitForApiCall(/\/api\/v1\/characters\/world-books\/\d+\/export/, "GET"),
-        wbPage.clickExport(name)
+        wbPage.clickExportOnRow(name)
       ])
 
       expect(apiResult.status).toBe(200)
@@ -335,7 +377,7 @@ test.describe("World Books Workflow", () => {
       await assertNoCriticalErrors(diagnostics)
     })
 
-    test("should open import modal", async ({
+    test("should open import modal via Tools dropdown", async ({
       authedPage,
       diagnostics
     }) => {
@@ -353,11 +395,11 @@ test.describe("World Books Workflow", () => {
   })
 
   // ═════════════════════════════════════════════════════════════════════
-  // 2.7  Statistics
+  // 2.7  Statistics (via detail panel Stats tab)
   // ═════════════════════════════════════════════════════════════════════
 
   test.describe("Statistics", () => {
-    test("should display world book statistics", async ({
+    test("should display world book statistics in Stats tab", async ({
       authedPage,
       serverInfo,
       diagnostics
@@ -373,23 +415,78 @@ test.describe("World Books Workflow", () => {
         timeout: 10_000
       })
 
-      try {
-        const [apiResult] = await Promise.all([
-          wbPage.waitForApiCall(/\/api\/v1\/characters\/world-books\/\d+\/statistics/, "GET"),
-          wbPage.clickStats(name)
+      await wbPage.openStatsTab(name)
+      await wbPage.expectDetailTabActive("Stats")
+
+      const content = await wbPage.getStatsTabContent()
+      expect(content).toContain("Entries")
+
+      await assertNoCriticalErrors(diagnostics)
+    })
+  })
+
+  // ═════════════════════════════════════════════════════════════════════
+  // 2.8  Full Create → View → Edit → Delete Flow
+  // ═════════════════════════════════════════════════════════════════════
+
+  test.describe("Full Lifecycle", () => {
+    test("should create, select, edit, and delete a world book", async ({
+      authedPage,
+      serverInfo,
+      diagnostics
+    }) => {
+      skipIfServerUnavailable(serverInfo)
+      wbPage = new WorldBooksPage(authedPage)
+      await wbPage.goto()
+      await wbPage.waitForReady()
+
+      const name = `${testPrefix}-lifecycle`
+
+      // 1. Create via modal (unchanged)
+      await wbPage.createWorldBook(name, "Lifecycle test")
+      const row = await wbPage.findWorldBookRow(name)
+      await expect(row).toBeVisible({ timeout: 10_000 })
+
+      // 2. Click the row to select it in the list panel
+      await wbPage.selectWorldBookRow(name)
+
+      // 3. Verify detail panel shows name and default Entries tab
+      await wbPage.expectDetailPanelTitle(name)
+      await wbPage.expectDetailTabActive("Entries")
+
+      // 4. Click Settings tab to edit
+      await wbPage.clickDetailTab("Settings")
+
+      // 5. Update description and save
+      let putResult: { status: number; body: any } | null = null
+      for (let attempt = 1; attempt <= 4; attempt += 1) {
+        await wbPage.fillSettingsDescription("Updated lifecycle description")
+        ;[putResult] = await Promise.all([
+          wbPage.waitForApiCall(/\/api\/v1\/characters\/world-books\/\d+/, "PUT"),
+          wbPage.submitSettingsForm()
         ])
 
-        expect(apiResult.status).toBe(200)
+        if (putResult.status < 300) {
+          break
+        }
 
-        // Stats modal should show data
-        const content = await wbPage.getStatsModalContent()
-        expect(content).toBeTruthy()
+        if (putResult.status !== 429 || attempt === 4) {
+          expect(putResult.status).toBeLessThan(300)
+        }
 
-        // Should contain typical stats fields
-        expect(content.toLowerCase()).toMatch(/entries|keywords|priority|tokens/)
-      } catch {
-        // Stats button may not be available
+        await authedPage.waitForTimeout(1_000 * attempt)
       }
+
+      await authedPage.reload({ waitUntil: "domcontentloaded" })
+      await wbPage.waitForReady()
+      const refreshedRow = await wbPage.findWorldBookRow(name)
+      await expect(refreshedRow).toBeVisible({ timeout: 30_000 })
+
+      // 6. Delete via overflow menu on the row
+      await wbPage.clickDeleteOnRow(name)
+      await wbPage.confirmDeletion()
+      await expect(wbPage.pendingDeleteBanner()).toBeVisible({ timeout: 10_000 })
+      await expect(refreshedRow).toBeHidden({ timeout: 20_000 })
 
       await assertNoCriticalErrors(diagnostics)
     })

@@ -75,6 +75,7 @@ vi.mock("../tabs", () => ({
     </div>
   ),
   ImportExportTab: () => <div data-testid="mock-transfer-tab">Import / Export panel</div>,
+  TemplatesTab: () => <div data-testid="mock-templates-tab">Templates panel</div>,
   SchedulerTab: (props: {
     onDirtyChange?: (dirty: boolean) => void
     discardSignal?: number
@@ -191,6 +192,7 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByText("Study")).toBeInTheDocument()
     expect(screen.getByText("Manage")).toBeInTheDocument()
     expect(screen.getByText("Import / Export")).toBeInTheDocument()
+    expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.getByText("Scheduler")).toBeInTheDocument()
   })
 
@@ -201,6 +203,27 @@ describe("FlashcardsManager consistency standards", () => {
     render(<FlashcardsManager />)
 
     expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
+    expect(screen.getByText("Templates")).toBeInTheDocument()
+    expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
+  })
+
+  it("routes template deep-links to the Templates tab", () => {
+    window.history.replaceState({}, "", "/flashcards?tab=templates")
+
+    render(<FlashcardsManager />)
+
+    expect(screen.getByText("Templates")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-templates-tab")).toBeInTheDocument()
+  })
+
+  it("keeps the Templates tab reachable when no decks exist", () => {
+    mocks.decks = []
+    window.history.replaceState({}, "", "/flashcards?tab=templates")
+
+    render(<FlashcardsManager />)
+
+    expect(screen.getByText("Templates")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-templates-tab")).toBeInTheDocument()
     expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
   })
 

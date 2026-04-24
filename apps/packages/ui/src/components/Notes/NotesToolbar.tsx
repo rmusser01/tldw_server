@@ -88,7 +88,7 @@ const NotesToolbar: React.FC<NotesToolbarProps> = ({
             mode="tags"
             allowClear
             placeholder={t('option:notesSearch.keywordsPlaceholder', {
-              defaultValue: 'Filter by keyword'
+              defaultValue: 'Filter by tag'
             })}
             className="min-w-[12rem] w-full pl-2"
             value={keywordTokens}

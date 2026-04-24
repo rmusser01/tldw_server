@@ -236,6 +236,8 @@ def get_config_value(
     return parser.get(section, key, fallback=default)
 
 
+ACTUAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+
 _INGESTION_SOURCE_ALLOWED_ROOT_SECTION = "Files"
 _INGESTION_SOURCE_ALLOWED_ROOT_KEY = "ingestion_source_allowed_roots"
 _INGESTION_SOURCE_ALLOWED_ROOT_ENV_KEYS = (
@@ -714,10 +716,6 @@ def load_settings():
         This function may load .env files, consult on-disk config files, emit startup warnings, and create filesystem directories (for the main SQLite database and the user data base directory) as needed.
     """
 
-    # Determine Actual Project Root based on the location of this file
-    # config.py is in project_root/tldw_server_api/app/core/config.py
-    # ACTUAL_PROJECT_ROOT will be /project_root/
-    ACTUAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
     _log_info(f"Determined ACTUAL_PROJECT_ROOT for database paths: {ACTUAL_PROJECT_ROOT}")
 
     # Ensure .env files are loaded before reading any environment variables
@@ -2331,6 +2329,36 @@ def rag_low_confidence_behavior(default: str = "continue") -> str:
             v = default
     s = str(v).strip().lower()
     return s if s in ("continue", "ask", "decline") else default
+
+
+def web_outbound_policy_mode(default: str = "compat") -> str:
+    """Return the web outbound-policy mode with env-over-config precedence.
+
+    Accepted values are ``compat`` and ``strict``. Invalid or missing values
+    fall back to ``default``.
+    """
+    v = os.getenv("WEB_OUTBOUND_POLICY_MODE")
+    if v is None:
+        try:
+            cp = load_comprehensive_config()
+            v = default
+            if cp:
+                has_section = getattr(cp, "has_section", None)
+                for section_name in ("Web-Scraper", "Web-Scraping"):
+                    if callable(has_section) and not has_section(section_name):
+                        continue
+                    candidate = cp.get(
+                        section_name,
+                        "web_outbound_policy_mode",
+                        fallback=None,
+                    )
+                    if candidate is not None and str(candidate).strip():
+                        v = candidate
+                        break
+        except _CONFIG_NONCRITICAL_EXCEPTIONS:
+            v = default
+    s = str(v).strip().lower()
+    return s if s in ("compat", "strict") else default
 
 
 def rag_agentic_cache_backend(default: str = "memory") -> str:
@@ -4352,6 +4380,7 @@ def load_and_log_configs():
         web_scraper_respect_robots = _as_bool(
             _env_or_cfg('WEB_SCRAPER_RESPECT_ROBOTS', 'Web-Scraper', 'web_scraper_respect_robots', 'true'), True
         )
+        web_outbound_policy_mode_value = web_outbound_policy_mode()
         # Optional scorers configuration
         web_crawl_enable_keyword = _as_bool(
             _env_or_cfg('WEB_CRAWL_ENABLE_KEYWORD_SCORER', 'Web-Scraper', 'web_crawl_enable_keyword_scorer', 'false'), False
@@ -5024,6 +5053,7 @@ def load_and_log_configs():
             'web_crawl_allowed_domains': web_crawl_allowed_domains,
             'web_crawl_blocked_domains': web_crawl_blocked_domains,
             'web_scraper_respect_robots': web_scraper_respect_robots,
+            'web_outbound_policy_mode': web_outbound_policy_mode_value,
             # Scorers
             'web_crawl_enable_keyword_scorer': web_crawl_enable_keyword,
             'web_crawl_keywords': web_crawl_keywords,
@@ -5306,6 +5336,72 @@ def clear_config_cache() -> None:
     default_api_endpoint = "openai"
     object.__setattr__(settings, "_data", None)
     object.__setattr__(loaded_config_data, "_data", None)
+# ---------------------------------------------------------------------------
+# Startup config validation
+# ---------------------------------------------------------------------------
+
+_PLACEHOLDER_LITERALS = frozenset({
+    "FIXME", "TODO", "TBD", "CHANGE_ME", "CHANGE-ME",
+    "PLACEHOLDER", "NONE", "NULL", "N/A", "NA",
+})
+
+
+def validate_config() -> list[str]:
+    """Validate the loaded configuration and return a list of warnings.
+
+    Call this during lifespan startup. Warnings are logged but do not
+    prevent startup. Returns the list so tests can assert on it.
+    """
+    warnings: list[str] = []
+    cfg = dict(loaded_config_data)
+
+    def _iter_scalar_values(prefix: str, value: Any):
+        if isinstance(value, MutableMapping):
+            for key, child in value.items():
+                child_prefix = f"{prefix}.{key}" if prefix else str(key)
+                yield from _iter_scalar_values(child_prefix, child)
+            return
+        if isinstance(value, list | tuple):
+            for index, child in enumerate(value):
+                child_prefix = f"{prefix}[{index}]"
+                yield from _iter_scalar_values(child_prefix, child)
+            return
+        yield prefix, value
+
+    validation_values = dict(_iter_scalar_values("", cfg))
+    validation_values.update({
+        "Database.pg_connection_string": get_config_value("Database", "pg_connection_string", default=""),
+        "Image-Generation.swarmui_base_url": get_config_value("Image-Generation", "swarmui_base_url", default=""),
+    })
+
+    # Check for placeholder values in any config key
+    for key, value in validation_values.items():
+        if isinstance(value, str) and value.strip().upper() in _PLACEHOLDER_LITERALS:
+            msg = f"Config key '{key}' has placeholder value '{value}' — set a real value or leave empty"
+            warnings.append(msg)
+
+    # Check critical URL values parse correctly
+    url_rules = {
+        "embedding_config.embedding_api_url": ("http://", "https://"),
+        "Database.pg_connection_string": ("postgres://", "postgresql://", "postgres+", "postgresql+"),
+        "Image-Generation.swarmui_base_url": ("http://", "https://"),
+    }
+    for key, allowed_prefixes in url_rules.items():
+        val = validation_values.get(key, "")
+        if val and not isinstance(val, str):
+            warnings.append(f"Config key '{key}' should be a string, got {type(val).__name__}")
+        elif isinstance(val, str) and val and not val.startswith(allowed_prefixes):
+            warnings.append(f"Config key '{key}' has unexpected URL scheme")
+
+    for w in warnings:
+        logger.warning("Config validation: {}", w)
+
+    if not warnings:
+        logger.info("Config validation passed — no issues found")
+
+    return warnings
+
+
 # --- Optional: Export individual variables if needed for backward compatibility (less recommended) ---
 # SINGLE_USER_MODE = settings["SINGLE_USER_MODE"]
 # SINGLE_USER_FIXED_ID = settings["SINGLE_USER_FIXED_ID"]

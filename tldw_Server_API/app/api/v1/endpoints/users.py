@@ -68,6 +68,7 @@ from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
+from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
 from tldw_Server_API.app.core.UserProfiles.update_service import UserProfileUpdateService
@@ -809,13 +810,23 @@ async def create_api_key(
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
     api_mgr = await get_api_key_manager()
-    result = await api_mgr.create_api_key(
-        user_id=user_id,
-        name=payload.name,
-        description=payload.description,
-        scope=payload.scope,
-        expires_in_days=payload.expires_in_days,
-    )
+    try:
+        result = await api_mgr.create_api_key(
+            user_id=user_id,
+            name=payload.name,
+            description=payload.description,
+            scope=payload.scope,
+            expires_in_days=payload.expires_in_days,
+            actor_user_id=_principal_user_id(principal),
+            actor_subject=principal.subject,
+            actor_kind=principal.kind,
+            actor_roles=list(principal.roles or []),
+        )
+    except MandatoryAuditWriteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Mandatory audit persistence unavailable",
+        ) from exc
     return APIKeyCreateResponse(**result)
 
 
@@ -851,21 +862,31 @@ async def create_virtual_api_key(
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
     api_mgr = await get_api_key_manager()
-    result = await api_mgr.create_virtual_key(
-        user_id=user_id,
-        name=payload.name,
-        description=payload.description,
-        expires_in_days=payload.expires_in_days,
-        allowed_endpoints=payload.allowed_endpoints,
-        budget_day_tokens=payload.budget_day_tokens,
-        budget_month_tokens=payload.budget_month_tokens,
-        budget_day_usd=payload.budget_day_usd,
-        budget_month_usd=payload.budget_month_usd,
-        allowed_methods=payload.allowed_methods,
-        allowed_paths=payload.allowed_paths,
-        max_calls=payload.max_calls,
-        max_runs=payload.max_runs,
-    )
+    try:
+        result = await api_mgr.create_virtual_key(
+            user_id=user_id,
+            name=payload.name,
+            description=payload.description,
+            expires_in_days=payload.expires_in_days,
+            allowed_endpoints=payload.allowed_endpoints,
+            budget_day_tokens=payload.budget_day_tokens,
+            budget_month_tokens=payload.budget_month_tokens,
+            budget_day_usd=payload.budget_day_usd,
+            budget_month_usd=payload.budget_month_usd,
+            allowed_methods=payload.allowed_methods,
+            allowed_paths=payload.allowed_paths,
+            max_calls=payload.max_calls,
+            max_runs=payload.max_runs,
+            actor_user_id=_principal_user_id(principal),
+            actor_subject=principal.subject,
+            actor_kind=principal.kind,
+            actor_roles=list(principal.roles or []),
+        )
+    except MandatoryAuditWriteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Mandatory audit persistence unavailable",
+        ) from exc
     return APIKeyCreateResponse(**result)
 
 
@@ -884,11 +905,21 @@ async def rotate_api_key(
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
     api_mgr = await get_api_key_manager()
-    result = await api_mgr.rotate_api_key(
-        key_id=key_id,
-        user_id=user_id,
-        expires_in_days=payload.expires_in_days,
-    )
+    try:
+        result = await api_mgr.rotate_api_key(
+            key_id=key_id,
+            user_id=user_id,
+            expires_in_days=payload.expires_in_days,
+            actor_user_id=_principal_user_id(principal),
+            actor_subject=principal.subject,
+            actor_kind=principal.kind,
+            actor_roles=list(principal.roles or []),
+        )
+    except MandatoryAuditWriteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Mandatory audit persistence unavailable",
+        ) from exc
     return APIKeyCreateResponse(**result)
 
 
@@ -906,7 +937,20 @@ async def revoke_api_key(
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
     api_mgr = await get_api_key_manager()
-    success = await api_mgr.revoke_api_key(key_id=key_id, user_id=user_id)
+    try:
+        success = await api_mgr.revoke_api_key(
+            key_id=key_id,
+            user_id=user_id,
+            actor_user_id=_principal_user_id(principal),
+            actor_subject=principal.subject,
+            actor_kind=principal.kind,
+            actor_roles=list(principal.roles or []),
+        )
+    except MandatoryAuditWriteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Mandatory audit persistence unavailable",
+        ) from exc
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
     return MessageResponse(message="API key revoked")

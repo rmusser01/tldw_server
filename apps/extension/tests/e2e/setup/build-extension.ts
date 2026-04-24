@@ -94,27 +94,37 @@ export default async function globalSetup() {
     }
   }
 
-  // Build the extension once before running tests
-  // Prefer npm (bun may be unavailable in some environments)
-  try {
-    execSync('npm run build:chrome', {
-      stdio: 'inherit',
-      cwd: projectRoot
-    })
-  } catch {
-    try {
-      // Fallback: use wxt directly
-      execSync('cross-env TARGET=chrome wxt build', {
-        stdio: 'inherit',
-        cwd: projectRoot
-      })
-    } catch {
-      // Last resort: bun (if present)
-      execSync('bun run build:chrome', {
-        stdio: 'inherit',
-        cwd: projectRoot
-      })
+  const buildCommands: Array<{ command: string; env?: NodeJS.ProcessEnv }> = [
+    { command: 'npm run build:chrome:prod' },
+    { command: 'bun run build:chrome:prod' },
+    {
+      command: 'node scripts/build-with-profile.mjs --browser=chrome',
+      env: { ...process.env, TLDW_BUILD_PROFILE: 'production' }
     }
+  ]
+
+  const attemptFailures: Array<{ command: string; error: unknown }> = []
+  for (const { command, env } of buildCommands) {
+    try {
+      execSync(command, {
+        stdio: 'inherit',
+        cwd: projectRoot,
+        env
+      })
+      attemptFailures.length = 0
+      break
+    } catch (error) {
+      attemptFailures.push({ command, error })
+    }
+  }
+
+  if (attemptFailures.length > 0) {
+    throw new AggregateError(
+      attemptFailures.map(({ command, error }) =>
+        new Error(`Build attempt failed: ${command}`, { cause: error as Error })
+      ),
+      'All extension build attempts failed.'
+    )
   }
 
   applyTestHostPermissions(projectRoot)

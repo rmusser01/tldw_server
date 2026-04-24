@@ -23,7 +23,7 @@ from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
-    resolve_trusted_database_path,
+    require_trusted_database_parent_exists,
 )
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
@@ -62,20 +62,16 @@ class PersonalizationDB:
 
     def __init__(self, db_path: str | Path) -> None:
         try:
-            resolved_path = resolve_trusted_database_path(
+            resolved_path = require_trusted_database_parent_exists(
                 db_path,
                 label="personalization database",
+                missing_parent_message="PersonalizationDB parent directory must already exist",
             )
         except InvalidStoragePathError as exc:
             raise ValueError("PersonalizationDB path must stay within trusted database roots") from exc
         self.db_path = str(resolved_path)
         self._lock = threading.RLock()
-        try:
-            self._ensure_schema()
-        except sqlite3.OperationalError as exc:
-            if "unable to open database file" in str(exc).lower():
-                raise ValueError("PersonalizationDB parent directory must already exist") from exc
-            raise
+        self._ensure_schema()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10, isolation_level=None)

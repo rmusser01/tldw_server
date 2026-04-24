@@ -15,6 +15,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     check_evaluation_rate_limit,
     enforce_heavy_evaluations_admin,
+    get_evaluation_identity,
     get_eval_request_user,
     verify_api_key,
 )
@@ -47,6 +48,7 @@ from tldw_Server_API.app.core.Evaluations.embeddings_abtest_service import (
     run_abtest_full,
     validate_abtest_policy,
 )
+from tldw_Server_API.app.core.Evaluations.run_state import normalize_run_status
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     get_unified_evaluation_service_for_user,
 )
@@ -74,6 +76,31 @@ _EMB_ABTEST_NONCRITICAL_EXCEPTIONS = (
 )
 
 
+def _parse_abtest_stats(row: dict[str, object] | None) -> dict[str, object]:
+    if not row:
+        return {}
+    raw_stats = row.get("stats_json")
+    if isinstance(raw_stats, dict):
+        return raw_stats
+    if raw_stats is None:
+        return {}
+    try:
+        parsed = json.loads(str(raw_stats))
+    except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _abtest_status_response(test_id: str, row: dict[str, object] | None) -> EmbeddingsABTestStatusResponse:
+    stats = _parse_abtest_stats(row)
+    progress = stats.get("progress")
+    return EmbeddingsABTestStatusResponse(
+        test_id=test_id,
+        status=normalize_run_status(row.get("status") if row else None),
+        progress=progress if isinstance(progress, dict) else None,
+    )
+
+
 @abtest_router.post(
     "/embeddings/abtest",
     response_model=EmbeddingsABTestCreateResponse,
@@ -87,11 +114,12 @@ async def create_embeddings_abtest(
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     response: Response = None,
 ):
-    svc = get_unified_evaluation_service_for_user(current_user.id)
+    identity = get_evaluation_identity(current_user)
+    svc = get_unified_evaluation_service_for_user(identity.user_scope)
     db = svc.db
     if idempotency_key:
         try:
-            existing_id = db.lookup_idempotency("emb_abtest", idempotency_key, user_ctx)
+            existing_id = db.lookup_idempotency("emb_abtest", idempotency_key, identity.created_by)
             if existing_id:
                 logger.info(f"A/B test idempotent hit: {existing_id}")
                 if response is not None:
@@ -114,7 +142,7 @@ async def create_embeddings_abtest(
         validate_abtest_policy(cfg, user=current_user)
     except EmbeddingsABTestPolicyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-    test_id = db.create_abtest(name=payload.name, config=cfg.model_dump(), created_by=user_ctx)
+    test_id = db.create_abtest(name=payload.name, config=cfg.model_dump(), created_by=identity.created_by)
     for idx, arm in enumerate(payload.config.arms):
         db.upsert_abtest_arm(
             test_id=test_id,
@@ -125,16 +153,16 @@ async def create_embeddings_abtest(
             status='pending',
         )
     db.insert_abtest_queries(test_id, [q.model_dump() for q in payload.config.queries])
-    logger.info(f"A/B test created: {test_id} by {user_ctx}")
+    logger.info(f"A/B test created: {test_id} by {identity.created_by}")
     log_evaluation_created(
-        user_id=str(current_user.id),
+        user_id=identity.user_scope,
         eval_id=test_id,
         name=payload.name,
         eval_type="embeddings_abtest",
     )
     try:
         if idempotency_key:
-            db.record_idempotency("emb_abtest", idempotency_key, test_id, user_ctx)
+            db.record_idempotency("emb_abtest", idempotency_key, test_id, identity.created_by)
     except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS:
         pass
     return EmbeddingsABTestCreateResponse(test_id=test_id, status='created')
@@ -157,13 +185,15 @@ async def run_embeddings_abtest(
     response: Response = None,
 ):
     enforce_heavy_evaluations_admin(principal)
-    svc = get_unified_evaluation_service_for_user(current_user.id)
+    identity = get_evaluation_identity(current_user)
+    svc = get_unified_evaluation_service_for_user(identity.user_scope)
     db = svc.db
-    if not db.get_abtest(test_id, created_by=user_ctx):
+    row = db.get_abtest(test_id, created_by=identity.created_by)
+    if not row:
         raise HTTPException(status_code=404, detail="abtest not found")
     if idempotency_key:
         try:
-            prior = db.lookup_idempotency("emb_abtest_run", idempotency_key, user_ctx)
+            prior = db.lookup_idempotency("emb_abtest_run", idempotency_key, identity.created_by)
             if prior:
                 logger.info(f"A/B test run idempotent hit: {test_id}")
                 if response is not None:
@@ -172,7 +202,7 @@ async def run_embeddings_abtest(
                         response.headers["Idempotency-Key"] = idempotency_key
                     except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS:
                         pass
-                return EmbeddingsABTestStatusResponse(test_id=test_id, status='running', progress={"phase": 0.05})
+                return _abtest_status_response(test_id, row)
         except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS:
             pass
     from tldw_Server_API.app.api.v1.schemas.embeddings_abtest_schemas import ABTestChunking
@@ -188,7 +218,7 @@ async def run_embeddings_abtest(
                 test_id,
                 'failed',
                 stats_json={"error": str(exc), "policy": exc.details, "status_code": exc.status_code},
-                created_by=user_ctx,
+                created_by=identity.created_by,
             )
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
@@ -202,28 +232,38 @@ async def run_embeddings_abtest(
     if testing:
         logger.info(f"A/B test running synchronously in TESTING mode: {test_id}")
         with contextlib.suppress(_EMB_ABTEST_NONCRITICAL_EXCEPTIONS):
-            db.set_abtest_status(test_id, 'running', stats_json={"progress": {"phase": 0.01}}, created_by=user_ctx)
+            db.set_abtest_status(
+                test_id,
+                'running',
+                stats_json={"progress": {"phase": 0.01}},
+                created_by=identity.created_by,
+            )
         log_run_started(
-            user_id=str(current_user.id),
+            user_id=identity.user_scope,
             run_id=str(test_id),
             eval_id=test_id,
             target_model="embeddings_abtest",
         )
         run_error: Optional[Exception] = None
         try:
-            await run_abtest_full(db, cfg, test_id, str(current_user.id), media_db)
+            await run_abtest_full(db, cfg, test_id, identity.user_scope, media_db)
         except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS as _e:
             run_error = _e
             with contextlib.suppress(_EMB_ABTEST_NONCRITICAL_EXCEPTIONS):
                 logger.warning(f"A/B test synchronous run failed: {_e}")
         try:
             if idempotency_key:
-                db.record_idempotency("emb_abtest_run", idempotency_key, test_id, user_ctx)
+                db.record_idempotency("emb_abtest_run", idempotency_key, test_id, identity.created_by)
         except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS:
             pass
         if run_error is not None:
             with contextlib.suppress(_EMB_ABTEST_NONCRITICAL_EXCEPTIONS):
-                db.set_abtest_status(test_id, 'failed', stats_json={"error": str(run_error)}, created_by=user_ctx)
+                db.set_abtest_status(
+                    test_id,
+                    'failed',
+                    stats_json={"error": str(run_error)},
+                    created_by=identity.created_by,
+                )
             return EmbeddingsABTestStatusResponse(test_id=test_id, status='failed', progress={"phase": 0.0})
         return EmbeddingsABTestStatusResponse(test_id=test_id, status='completed', progress={"phase": 1.0})
 
@@ -232,14 +272,14 @@ async def run_embeddings_abtest(
         job_payload = {
             "test_id": test_id,
             "config": cfg.model_dump(),
-            "user_id": str(current_user.id),
+            "user_id": identity.user_scope,
         }
         job_row = jm.create_job(
             domain=ABTEST_JOBS_DOMAIN,
             queue=abtest_jobs_queue(),
             job_type=ABTEST_JOBS_JOB_TYPE,
             payload=job_payload,
-            owner_user_id=str(current_user.id),
+            owner_user_id=identity.user_scope,
             priority=5,
             max_retries=3,
             idempotency_key=abtest_jobs_idempotency_key(test_id, idempotency_key),
@@ -250,10 +290,10 @@ async def run_embeddings_abtest(
                 test_id,
                 'running',
                 stats_json={"progress": {"phase": 0.01}, "job_id": job_ref},
-                created_by=user_ctx,
+                created_by=identity.created_by,
             )
         log_run_started(
-            user_id=str(current_user.id),
+            user_id=identity.user_scope,
             run_id=str(job_ref or test_id),
             eval_id=test_id,
             target_model="embeddings_abtest",
@@ -265,7 +305,7 @@ async def run_embeddings_abtest(
     logger.info(f"A/B test enqueued via Jobs: {test_id}")
     try:
         if idempotency_key:
-            db.record_idempotency("emb_abtest_run", idempotency_key, test_id, user_ctx)
+            db.record_idempotency("emb_abtest_run", idempotency_key, test_id, identity.created_by)
     except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS:
         pass
     return EmbeddingsABTestStatusResponse(test_id=test_id, status='running', progress={"phase": 0.05})
@@ -278,18 +318,19 @@ async def get_embeddings_abtest_status(
     _: None = Depends(check_evaluation_rate_limit),
     current_user: User = Depends(get_eval_request_user),  # noqa: B008
 ):
-    svc = get_unified_evaluation_service_for_user(current_user.id)
-    row = svc.db.get_abtest(test_id, created_by=user_ctx)
+    identity = get_evaluation_identity(current_user)
+    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    row = svc.db.get_abtest(test_id, created_by=identity.created_by)
     if not row:
         raise HTTPException(status_code=404, detail="abtest not found")
-    status_val = row.get('status', 'pending')
+    status_val = normalize_run_status(row.get('status'))
     aggregates = {}
     try:
         stats_json = json.loads(row.get('stats_json') or '{}')
         aggregates = stats_json.get('aggregates') or {}
     except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS:
         aggregates = {}
-    arms_rows = svc.db.get_abtest_arms(test_id, created_by=user_ctx)
+    arms_rows = svc.db.get_abtest_arms(test_id, created_by=identity.created_by)
     arms = []
     for ar in arms_rows:
         metrics = aggregates.get(ar['arm_id']) or {}
@@ -353,19 +394,25 @@ async def get_embeddings_abtest_results(
                 continue
         return out
 
-    svc = get_unified_evaluation_service_for_user(current_user.id)
-    rows, total = svc.db.list_abtest_results(test_id, limit=page_size, offset=(page-1)*page_size, created_by=user_ctx)
-    row = svc.db.get_abtest(test_id, created_by=user_ctx)
+    identity = get_evaluation_identity(current_user)
+    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    rows, total = svc.db.list_abtest_results(
+        test_id,
+        limit=page_size,
+        offset=(page-1)*page_size,
+        created_by=identity.created_by,
+    )
+    row = svc.db.get_abtest(test_id, created_by=identity.created_by)
     if not row:
         raise HTTPException(status_code=404, detail="abtest not found")
-    status_val = row.get('status', 'pending')
+    status_val = normalize_run_status(row.get('status'))
     aggregates = {}
     try:
         stats_json = json.loads(row.get('stats_json') or '{}')
         aggregates = stats_json.get('aggregates') or {}
     except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS:
         aggregates = {}
-    arms_rows = svc.db.get_abtest_arms(test_id, created_by=user_ctx)
+    arms_rows = svc.db.get_abtest_arms(test_id, created_by=identity.created_by)
     arms = []
     for ar in arms_rows:
         metrics = aggregates.get(ar['arm_id']) or {}
@@ -422,6 +469,9 @@ async def get_embeddings_abtest_significance(
     _: None = Depends(check_evaluation_rate_limit),
     current_user: User = Depends(get_eval_request_user),  # noqa: B008
 ):
-    svc = get_unified_evaluation_service_for_user(current_user.id)
-    _ = svc.db.get_abtest(test_id, created_by=user_ctx) or (_ for _ in ()).throw(HTTPException(404, "abtest not found"))
+    identity = get_evaluation_identity(current_user)
+    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    abtest = svc.db.get_abtest(test_id, created_by=identity.created_by)
+    if abtest is None:
+        raise HTTPException(404, "abtest not found")
     return compute_significance(svc.db, test_id, metric=metric)

@@ -80,11 +80,11 @@ jobs:
 
       - name: Build Chrome extension
         working-directory: apps/extension
-        run: bun run build:chrome
+        run: bun run build:chrome:prod
 
       - name: Install Playwright Chromium
         working-directory: apps/extension
-        run: bunx playwright install chromium
+        run: bunx playwright install --with-deps chromium
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg

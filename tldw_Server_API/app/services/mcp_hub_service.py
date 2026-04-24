@@ -285,7 +285,10 @@ class McpHubService:
         normalized = Path(safe_candidate)
         if str(normalized) in {normalized.anchor, "/"}:
             raise BadRequestError("absolute_root must not be the filesystem root")
-        allowed_roots = _allowed_shared_workspace_roots()
+        allowed_roots = tuple(
+            root.expanduser().resolve(strict=False)
+            for root in _allowed_shared_workspace_roots()
+        )
         if allowed_roots and not any(
             normalized == root or normalized.is_relative_to(root)
             for root in allowed_roots

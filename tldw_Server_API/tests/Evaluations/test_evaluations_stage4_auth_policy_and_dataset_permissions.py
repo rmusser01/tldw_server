@@ -92,8 +92,15 @@ def test_dataset_routes_require_read_vs_manage_permissions(monkeypatch):
             _ = (limit, offset, created_by)
             return [stored_datasets["ds_1"]], False
 
-        def get_dataset(self, dataset_id, created_by):
-            _ = created_by
+        def get_dataset(
+            self,
+            dataset_id,
+            created_by,
+            include_samples=True,
+            sample_limit=None,
+            sample_offset=0,
+        ):
+            _ = (created_by, include_samples, sample_limit, sample_offset)
             return stored_datasets.get(dataset_id)
 
     class _Service:

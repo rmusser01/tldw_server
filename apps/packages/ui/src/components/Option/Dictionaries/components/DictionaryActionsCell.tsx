@@ -40,6 +40,12 @@ export const DictionaryActionsCell: React.FC<DictionaryActionsCellProps> = ({
   onDuplicate,
   onDelete
 }) => {
+  const overflowButtonRef = React.useRef<HTMLButtonElement | null>(null)
+
+  const focusOverflowTrigger = React.useCallback(() => {
+    overflowButtonRef.current?.focus()
+  }, [])
+
   return (
     <div className="flex gap-2 items-center">
       <Tooltip title="Edit dictionary">
@@ -93,6 +99,7 @@ export const DictionaryActionsCell: React.FC<DictionaryActionsCellProps> = ({
             onClick: ({ key }) => {
               switch (String(key)) {
                 case "assign":
+                  focusOverflowTrigger()
                   onOpenQuickAssign(record)
                   return
                 case "json":
@@ -102,6 +109,7 @@ export const DictionaryActionsCell: React.FC<DictionaryActionsCellProps> = ({
                   onExportMarkdown(record)
                   return
                 case "stats":
+                  focusOverflowTrigger()
                   onOpenStats(record)
                   return
                 case "versions":
@@ -121,6 +129,7 @@ export const DictionaryActionsCell: React.FC<DictionaryActionsCellProps> = ({
           placement="bottomRight"
         >
           <Button
+            ref={overflowButtonRef}
             type="text"
             size="small"
             icon={<MoreHorizontal className="w-4 h-4" />}

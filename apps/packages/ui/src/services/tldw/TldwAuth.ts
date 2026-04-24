@@ -228,10 +228,16 @@ export class TldwAuthService {
       headers: { 'Content-Type': 'application/json' },
       body: { refresh_token: config.refreshToken }
     })
-    
-    // Update access token
+
+    const latestConfig = await tldwClient.getConfig()
+
+    // Persist rotated refresh tokens; the backend rotates them by default.
     await tldwClient.updateConfig({
-      accessToken: tokens.access_token
+      accessToken: tokens.access_token,
+      refreshToken:
+        tokens.refresh_token ||
+        latestConfig?.refreshToken ||
+        config.refreshToken
     })
 
     // Set up auto-refresh if expires_in is provided

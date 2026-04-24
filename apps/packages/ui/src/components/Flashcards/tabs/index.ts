@@ -1,4 +1,5 @@
 export * from "./ReviewTab"
 export * from "./ManageTab"
 export * from "./ImportExportTab"
+export * from "./TemplatesTab"
 export * from "./SchedulerTab"

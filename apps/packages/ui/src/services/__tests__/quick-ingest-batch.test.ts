@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   runtimeId: undefined as string | undefined,
+  manifestVersion: 3,
   sendMessage: vi.fn(),
   bgRequest: vi.fn(),
   bgUpload: vi.fn()
@@ -13,6 +14,9 @@ vi.mock("wxt/browser", () => ({
       get id() {
         return mocks.runtimeId
       },
+      getManifest: () => ({
+        manifest_version: mocks.manifestVersion
+      }),
       sendMessage: (...args: unknown[]) => mocks.sendMessage(...args)
     }
   }
@@ -29,12 +33,14 @@ import {
   startQuickIngestSession,
   submitQuickIngestBatch
 } from "@/services/tldw/quick-ingest-batch"
+import { DUPLICATE_SKIP_MESSAGE } from "@/components/Common/QuickIngest/constants"
 
 describe("submitQuickIngestBatch", () => {
   beforeEach(() => {
     __resetQuickIngestRuntimeHealthForTests()
     vi.useRealTimers()
     mocks.runtimeId = undefined
+    mocks.manifestVersion = 3
     mocks.sendMessage.mockReset()
     mocks.bgRequest.mockReset()
     mocks.bgUpload.mockReset()
@@ -93,6 +99,95 @@ describe("submitQuickIngestBatch", () => {
     expect(result.results?.[0]).toMatchObject({
       id: "entry-1",
       status: "ok"
+    })
+  })
+
+  it("marks duplicate remote file uploads as skipped with guidance", async () => {
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-duplicate-file",
+      jobs: [{ id: 303 }]
+    })
+    mocks.bgRequest.mockResolvedValue({
+      ok: true,
+      data: {
+        status: "completed",
+        result: {
+          media_id: "m-duplicate-file",
+          db_message: "Media 'existing.pdf' already exists. Overwrite not enabled."
+        }
+      }
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [],
+      files: [
+        {
+          id: "file-duplicate-1",
+          name: "existing.pdf",
+          type: "application/pdf",
+          data: [1, 2, 3]
+        }
+      ],
+      storeRemote: true,
+      processOnly: false,
+      common: {
+        perform_analysis: true,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {}
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.results?.[0]).toMatchObject({
+      id: "file-duplicate-1",
+      status: "ok",
+      outcome: "skipped",
+      fileName: "existing.pdf",
+      message: DUPLICATE_SKIP_MESSAGE
+    })
+  })
+
+  it("surfaces completed ingest jobs with backend error payloads as failed results", async () => {
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-completed-error",
+      jobs: [{ id: 909 }]
+    })
+    mocks.bgRequest.mockResolvedValue({
+      ok: true,
+      data: {
+        status: "completed",
+        result: {
+          status: "Error",
+          error: "File preparation/download failed: Port not allowed: 3000"
+        }
+      }
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "entry-completed-error",
+          url: "http://127.0.0.1:3000/e2e/quick-ingest-source.html",
+          type: "document"
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      common: {
+        perform_analysis: true,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {}
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.results?.[0]).toMatchObject({
+      id: "entry-completed-error",
+      status: "error",
+      error: "File preparation/download failed: Port not allowed: 3000"
     })
   })
 
@@ -254,6 +349,62 @@ describe("submitQuickIngestBatch", () => {
     )
   })
 
+  it("forces direct transport for direct-session submits and polls when runtime messaging exists", async () => {
+    mocks.runtimeId = "ext-runtime-1"
+
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-direct-transport",
+      jobs: [{ id: 818 }]
+    })
+    mocks.bgRequest.mockResolvedValue({
+      ok: true,
+      data: {
+        status: "completed",
+        result: { media_id: "m-direct-transport" }
+      }
+    })
+
+    await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "entry-direct-transport",
+          url: "https://example.com/direct-transport",
+          type: "document"
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      __quickIngestSessionId: "qi-direct-transport",
+      common: {
+        perform_analysis: true,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {}
+    })
+
+    expect(mocks.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tldw:quick-ingest-batch"
+      })
+    )
+    expect(mocks.bgUpload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/jobs",
+        preferDirect: true
+      })
+    )
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/jobs/818",
+        method: "GET",
+        returnResponse: true,
+        preferDirect: true
+      })
+    )
+  })
+
   it("tracks only submitted direct items when later queue items fail before job creation", async () => {
     const onTrackingMetadata = vi.fn()
 
@@ -358,7 +509,8 @@ describe("submitQuickIngestBatch", () => {
       expect(mocks.bgRequest).toHaveBeenCalledWith(
         expect.objectContaining({
           path: "/api/v1/media/ingest/jobs/777",
-          method: "GET"
+          method: "GET",
+          preferDirect: true
         })
       )
     })
@@ -375,7 +527,8 @@ describe("submitQuickIngestBatch", () => {
         path: expect.stringContaining(
           "/api/v1/media/ingest/jobs/cancel?batch_id=batch-direct-cancel"
         ),
-        method: "POST"
+        method: "POST",
+        preferDirect: true
       })
     )
     expect(runResult.results?.[0]).toMatchObject({
@@ -546,7 +699,8 @@ describe("submitQuickIngestBatch", () => {
     expect(mocks.bgUpload).toHaveBeenCalledWith(
       expect.objectContaining({
         path: "/api/v1/media/ingest/jobs",
-        method: "POST"
+        method: "POST",
+        preferDirect: true
       })
     )
     expect(result.results?.[0]).toMatchObject({
@@ -701,14 +855,8 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
-  it("starts a quick ingest session via extension transport and returns session id ack", async () => {
+  it("returns a direct session ack for mv3 extension pages", async () => {
     mocks.runtimeId = "ext-1"
-    mocks.sendMessage
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({
-      ok: true,
-      sessionId: "qi-session-123"
-      })
 
     const ack = await startQuickIngestSession({
       entries: [
@@ -729,30 +877,15 @@ describe("submitQuickIngestBatch", () => {
       advancedValues: {}
     })
 
-    expect(mocks.sendMessage).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        type: "tldw:ping"
-      })
-    )
-    expect(mocks.sendMessage).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        type: "tldw:quick-ingest/start",
-        payload: expect.objectContaining({
-          entries: expect.any(Array)
-        })
-      })
-    )
-    expect(ack).toEqual({
-      ok: true,
-      sessionId: "qi-session-123"
-    })
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(ack.ok).toBe(true)
+    expect(ack.sessionId).toMatch(/^qi-direct-/)
   })
 
   it("returns a direct session ack when runtime ping preflight times out", async () => {
     vi.useFakeTimers()
     mocks.runtimeId = "ext-1"
+    mocks.manifestVersion = 2
     mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))
 
     const ackPromise = startQuickIngestSession({
@@ -786,8 +919,80 @@ describe("submitQuickIngestBatch", () => {
     expect(ack.sessionId).toMatch(/^qi-direct-/)
   })
 
+  it("bypasses background batch orchestration for explicit direct sessions", async () => {
+    mocks.runtimeId = "ext-1"
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-direct-explicit",
+      jobs: [{ id: 818 }]
+    })
+    mocks.bgRequest.mockResolvedValue({
+      ok: true,
+      data: {
+        status: "completed",
+        result: { media_id: "m-direct-explicit" }
+      }
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "entry-direct-explicit",
+          url: "https://example.com/direct-explicit",
+          type: "document"
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      __quickIngestSessionId: "qi-direct-explicit",
+      common: {
+        perform_analysis: true,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {}
+    })
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.bgUpload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/ingest/jobs",
+        method: "POST"
+      })
+    )
+    expect(result.results?.[0]).toMatchObject({
+      id: "entry-direct-explicit",
+      status: "ok"
+    })
+  })
+
+  it("cancels direct sessions without routing through background session runtime", async () => {
+    mocks.runtimeId = "ext-1"
+
+    const response = await cancelQuickIngestSession({
+      sessionId: "qi-direct-active",
+      reason: "user_cancelled",
+      tracking: {
+        mode: "webui-direct",
+        batchIds: ["batch-direct-cancel"],
+        batchId: "batch-direct-cancel"
+      }
+    } as any)
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: expect.stringContaining("batch_id=batch-direct-cancel"),
+        method: "POST",
+        preferDirect: true
+      })
+    )
+    expect(response).toEqual({ ok: true })
+  })
+
   it("sends explicit cancel message with session id", async () => {
     mocks.runtimeId = "ext-1"
+    mocks.manifestVersion = 2
     mocks.sendMessage.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({
       ok: true
     })
@@ -831,13 +1036,15 @@ describe("submitQuickIngestBatch", () => {
     expect(mocks.bgRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         path: expect.stringContaining("batch_id=batch-restore-1"),
-        method: "POST"
+        method: "POST",
+        preferDirect: true
       })
     )
     expect(mocks.bgRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         path: expect.stringContaining("batch_id=batch-restore-2"),
-        method: "POST"
+        method: "POST",
+        preferDirect: true
       })
     )
   })

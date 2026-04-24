@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..config_schema import ExternalMCPServerConfig, ExternalTransportType
 from .base import (
+    adapter_supports_runtime_auth,
     BrokeredExternalCredential,
     ExternalMCPTransportAdapter,
     ExternalToolCallResult,
@@ -28,6 +29,7 @@ __all__ = [
     "ExternalToolCallResult",
     "ExternalToolDefinition",
     "BrokeredExternalCredential",
+    "adapter_supports_runtime_auth",
     "StdioExternalMCPAdapter",
     "WebSocketExternalMCPAdapter",
     "build_transport_adapter",

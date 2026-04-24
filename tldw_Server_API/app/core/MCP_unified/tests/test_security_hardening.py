@@ -161,6 +161,27 @@ async def test_ws_invalid_authnz_token_allows_api_key(monkeypatch):
         assert "Authentication failed" not in (ws.close_args[1] or "")
 
 
+@pytest.mark.asyncio
+async def test_ws_unexpected_mcp_jwt_verifier_error_is_not_masked():
+    server = MCPServer()
+    server.config.ws_allowed_origins = ["*"]
+    server.config.ws_auth_required = True
+
+    def _boom(_token: str):
+        raise RuntimeError("verifier exploded")
+
+    server.jwt_manager.verify_token = _boom  # type: ignore[assignment]
+    ws = FakeWebSocket(
+        headers={
+            "origin": "https://any.com",
+            "Authorization": "Bearer opaque-token",
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="verifier exploded"):
+        await server.handle_websocket(ws, client_id="c5")
+
+
 
 @pytest.mark.asyncio
 async def test_rbac_denies_unmapped_permissions(monkeypatch):

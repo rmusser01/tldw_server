@@ -195,7 +195,9 @@ describe("WorldBooksManager attachment stage-4 quick attach IA", () => {
       const user = userEvent.setup()
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Quick attach characters" }))
+      // Open overflow menu then click Quick Attach Characters
+      await user.click(screen.getByRole("button", { name: "More actions for Arcana" }))
+      await user.click(await screen.findByText("Quick Attach Characters"))
 
       expect(await screen.findByText("Quick attach: Arcana")).toBeInTheDocument()
       expect(screen.getByText("Currently attached")).toBeInTheDocument()
@@ -212,7 +214,9 @@ describe("WorldBooksManager attachment stage-4 quick attach IA", () => {
       const user = userEvent.setup()
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Quick attach characters" }))
+      // Open overflow menu then click Quick Attach Characters
+      await user.click(screen.getByRole("button", { name: "More actions for Arcana" }))
+      await user.click(await screen.findByText("Quick Attach Characters"))
       expect(await screen.findByText("Quick attach: Arcana")).toBeInTheDocument()
 
       await user.click(screen.getByRole("button", { name: "Open full attachment matrix" }))

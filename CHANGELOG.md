@@ -10,26 +10,34 @@ and this project adheres to Some kind of Versioning
 
 ### Added
 
-- **Writing Suite Phases 2-4** — Expanded manuscript tooling with characters, world info, plot and research management, AI analysis and visualization, agent chat, and live feedback via mood detection and Echo Chamber. (PRs #999, #1001, #1002)
-- **Persona Buddy Track-a-Plan Backend** — Completed the backend flow for persona buddy planning/tracking so the companion workflow can persist and coordinate plan progress. (PR #949)
-- **Persona-Routed Onboarding** — Added persona-guided onboarding with filtered navigation, guided task flows, and extension promotion hooks. (PR #1000)
-- **Mission Control Home and Storage Quotas** — Added progressive-unlock Mission Control home flows plus storage quota warnings. (PR #1004)
-- **Browser Web Clipper** — Added browser-based web clipping support for capturing pages into the research workflow. (PR #1005)
-- **Study Suggestions Engine** — Added study suggestions for quiz and flashcard workflows. (PR #1014)
-- **Sandbox and ACP Improvements** — Expanded the sandbox and ACP stack with a broader competitive-improvements pass across execution ergonomics and runtime polish. (PR #1023)
-- **OCR Backend Expansion** — Added `llama.cpp` and `chatllm` OCR backends. (PR #1038)
-
 ### Changed
-
-- **Theme System Expansion** — Extended the shared theme system with adjustable typography, shape, layout, and component variants. (PR #1021)
-- **GHCR Release Documentation** — Updated CI gate and release-checklist documentation for the GHCR publishing flow. (PR #1003)
 
 ### Fixed
 
-- **FTUE Follow-Through** — Addressed additional first-time-user experience issues across `/chat`, `/monitoring`, and `/watchlists`. (PR #1009)
-- **UX Audit Remediation** — Fixed Nielsen-style heuristic audit issues across chat, knowledge, workspace, and character flows. (PR #1039)
-
 ### Removed
+
+
+## [0.1.31] - 2026-04-19
+
+### Added
+
+- **Onboarding, Artifact Profiling, And Scion Foundations** — Added branch-aware artifact profiles, a first-run assistant setup wizard with archetype templates, and Scion-inspired backend improvements spanning template handling, policy conditions, and request multiplexing. (PRs #1070, #1075, #1076)
+- **Flashcard Templates And Study Suggestions v2** — Added flashcard templates and review orientation, plus deterministic v2 study-suggestion grounding with canonical topic keys, richer evidence metadata, lineage-aware reuse, review-session aggregates, and matching backend/frontend support. (PRs #1069, #1093)
+
+### Changed
+
+- **Audit-Driven UX Refresh Across Core Workspaces** — Notes, prompts, dictionaries, and World Books all received audit-driven UX follow-through covering labels, dialogs, disclosure, keyboard/help affordances, ARIA cleanup, remaining NNG issues, structural refactors, and cross-workspace search improvements. (PRs #1041, #1052, #1054, #1057, #1071, #1073, #1077)
+- **Release Documentation And Review Artifacts** — Refreshed the README/version narrative and added review/remediation planning artifacts to support the broader audit and hardening wave. (PRs #1061, #1065, #1066)
+- **Dependency And CI Baseline Refresh** — Updated GitHub Actions artifact/pages/codecov actions, refreshed regex and multiple Python dependency groups, moved the extension toolchain forward with a Vite bump, and lifted several backend/runtime package baselines including `langdetect`, `python-multipart`, and `opentelemetry-distro`. (PRs #1017, #1018, #1019, #1020, #1040, #1079, #1080, #1081, #1082, #1083, #1084, #1085, #1086)
+- **Security, Isolation, And Runtime Contracts** — Tightened shared SQLite backend ownership, strict-audit durability, MCP unified workspace/persona isolation and concurrency handling, external server/media fallbacks, Docker packaging contracts, and ACP/storage-path safety. (PRs #1059, #1064, #1067, #1078)
+
+### Fixed
+
+- **Character, Persona, And Upload Reliability** — Remediated character full-stack findings, hardened persona archetype loading against malformed YAML, and improved duplicate-media upload feedback. (PRs #1056, #1068, #1088)
+- **WebUI Stream, Abort, And Persistence Stability** — Stabilized WebUI auth/persistence notifications, surfaced chat stream timeout and abort failures correctly, and hardened abort handling plus ingest DB messaging. (PRs #1063, #1089, #1090)
+- **Web Scraping Ingest Safety** — Closed out ingest review issues and hardened outbound web-scraping policy enforcement. (PRs #1058, #1095)
+- **First-Run Assistant Follow-Through** — Addressed post-merge issues in the first-run assistant rollout after the initial wizard landed. (PRs #1087, #1091)
+- **Wave Hardening For Bootstrap, Lifecycle, And Shutdown** — Completed wave-based hardening across data/bootstrap safety, character lifecycle and evaluations reliability, and final evaluations shutdown behavior. (PRs #1092, #1094, #1100)
 
 
 ## [0.1.30] - 2026-04-04

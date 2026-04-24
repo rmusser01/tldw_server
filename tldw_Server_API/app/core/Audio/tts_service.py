@@ -59,6 +59,8 @@ def _infer_tts_provider_from_model(model: Optional[str]) -> Optional[str]:
         return "neutts"
     if m.startswith("eleven"):
         return "elevenlabs"
+    if m.startswith("omnivoice") or m.startswith("omni-voice") or m.startswith("omni_voice"):
+        return "omnivoice"
     if m.startswith("index_tts") or m.startswith("indextts"):
         return "index_tts"
     if m.startswith("supertonic2") or m.startswith("supertonic-2") or m.startswith("tts-supertonic2"):
@@ -177,6 +179,16 @@ def _sanitize_speech_request(
         validator = TTSInputValidator({"strict_validation": tts_config.strict_validation})
 
         provider_hint = _infer_tts_provider_from_model(getattr(request_data, "model", None))
+        fields_set = getattr(request_data, "model_fields_set", None)
+        if fields_set is None:
+            fields_set = getattr(request_data, "__pydantic_fields_set__", None)
+        if fields_set is None:
+            fields_set = getattr(request_data, "__fields_set__", set())
+        voice_was_supplied = "voice" in set(fields_set or ())
+        if not voice_was_supplied and provider_hint == "omnivoice":
+            # OmniVoice must default to the provider-specific public API voice,
+            # regardless of any configured global default voice.
+            request_data.voice = "auto"
         sanitized_text = validator.sanitize_text(request_data.input, provider=provider_hint)
         if not sanitized_text or len(sanitized_text.strip()) == 0:
             raise TTSValidationError(

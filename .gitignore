@@ -403,3 +403,4 @@ Dockerfiles/Monitoring/secrets/
 /admin-ui/.next
 /.playwright-cli
 /output
+/apps/tldw-frontend/output

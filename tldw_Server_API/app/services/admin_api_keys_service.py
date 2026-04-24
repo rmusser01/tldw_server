@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.schemas.api_key_schemas import (
     APIKeyUpdateRequest,
 )
 from tldw_Server_API.app.api.v1.schemas.org_team_schemas import VirtualKeyCreateRequest
+from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.services import admin_scope_service
@@ -31,6 +32,34 @@ _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
+
+
+def _principal_actor_user_id(principal: Any) -> int | None:
+    raw_user_id = getattr(principal, "user_id", None)
+    if raw_user_id is None:
+        return None
+    try:
+        return int(raw_user_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _principal_actor_roles(principal: Any) -> list[str]:
+    raw_roles = getattr(principal, "roles", None)
+    if not raw_roles:
+        return []
+    if isinstance(raw_roles, (list, tuple, set)):
+        return [str(role) for role in raw_roles]
+    return [str(raw_roles)]
+
+
+def _principal_actor_kwargs(principal: Any) -> dict[str, Any]:
+    return {
+        "actor_user_id": _principal_actor_user_id(principal),
+        "actor_subject": getattr(principal, "subject", None),
+        "actor_kind": getattr(principal, "kind", None),
+        "actor_roles": _principal_actor_roles(principal),
+    }
 
 
 async def list_user_api_keys(
@@ -65,10 +94,14 @@ async def create_user_api_key(
             description=request.description,
             scope=request.scope,
             expires_in_days=request.expires_in_days,
+            **_principal_actor_kwargs(principal),
         )
         return APIKeyCreateResponse(**result)
     except HTTPException:
         raise
+    except MandatoryAuditWriteError as e:
+        logger.error(f"Admin mandatory audit write failed while creating API key for user {user_id}: {e}")
+        raise HTTPException(status_code=503, detail="Mandatory audit persistence unavailable") from e
     except _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Admin failed to create API key for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to create API key") from e
@@ -87,10 +120,14 @@ async def rotate_user_api_key(
             key_id=key_id,
             user_id=user_id,
             expires_in_days=request.expires_in_days,
+            **_principal_actor_kwargs(principal),
         )
         return APIKeyCreateResponse(**result)
     except HTTPException:
         raise
+    except MandatoryAuditWriteError as e:
+        logger.error(f"Admin mandatory audit write failed while rotating API key {key_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=503, detail="Mandatory audit persistence unavailable") from e
     except _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Admin failed to rotate API key {key_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to rotate API key") from e
@@ -104,12 +141,19 @@ async def revoke_user_api_key(
     try:
         await admin_scope_service.enforce_admin_user_scope(principal, user_id, require_hierarchy=True)
         api_mgr = await get_api_key_manager()
-        success = await api_mgr.revoke_api_key(key_id=key_id, user_id=user_id)
+        success = await api_mgr.revoke_api_key(
+            key_id=key_id,
+            user_id=user_id,
+            **_principal_actor_kwargs(principal),
+        )
         if not success:
             raise HTTPException(status_code=404, detail="API key not found")
         return {"message": "API key revoked", "user_id": user_id, "key_id": key_id}
     except HTTPException:
         raise
+    except MandatoryAuditWriteError as e:
+        logger.error(f"Admin mandatory audit write failed while revoking API key {key_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=503, detail="Mandatory audit persistence unavailable") from e
     except _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Admin failed to revoke API key {key_id} for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to revoke API key") from e
@@ -180,10 +224,14 @@ async def create_virtual_key(
             allowed_paths=payload.allowed_paths,
             max_calls=payload.max_calls,
             max_runs=payload.max_runs,
+            **_principal_actor_kwargs(principal),
         )
         return result
     except HTTPException:
         raise
+    except MandatoryAuditWriteError as e:
+        logger.error(f"Admin mandatory audit write failed while creating virtual key for user {user_id}: {e}")
+        raise HTTPException(status_code=503, detail="Mandatory audit persistence unavailable") from e
     except _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Admin failed to create virtual key for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to create virtual key") from e

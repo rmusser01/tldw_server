@@ -69,6 +69,12 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
 - Configuration & AuthNZ
   - Rate limits: `evaluations_auth.check_evaluation_rate_limit`; per-user limits + `GET /rate-limits`
   - RBAC: `rbac_rate_limit`, `require_token_scope` on sensitive endpoints; admin checks for A/B runs and cleanup
+  - Canonical identity: route and Jobs code should derive one `EvaluationIdentity` via `get_evaluation_identity()` / `evaluations_identity_from_user()` and then use:
+    - `user_scope` for per-user service binding and DB path selection
+    - `created_by` for ownership filters and idempotency rows
+    - `rate_limit_subject` for limiter keys
+    - `webhook_user_id` for webhook manager ownership
+  - Never use the raw `verify_api_key` return value as an ownership, limiter, or storage-routing subject; it is an auth artifact, not the canonical evaluations identity.
   - Endpoint access policy:
     - `GET /api/v1/evaluations/health` is public.
     - `GET /api/v1/evaluations/metrics` requires authenticated `EVALS_READ`.

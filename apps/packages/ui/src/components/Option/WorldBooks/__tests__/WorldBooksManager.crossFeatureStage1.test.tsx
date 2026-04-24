@@ -190,18 +190,19 @@ describe("WorldBooksManager cross-feature integration stage-1", () => {
   })
 
   it(
-    "adds character deep links in attached-character popover and quick-attach modal",
+    "adds character deep links in quick-attach modal and detail-panel attachments tab",
     async () => {
       const user = userEvent.setup()
       render(<WorldBooksManager />)
 
-      expect(screen.getByText("Open to load")).toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: "More actions for Arcana" }))
+      await user.click(await screen.findByRole("menuitem", { name: "Quick Attach Characters" }))
 
-      await user.click(screen.getByRole("button", { name: "Quick attach characters" }))
       const quickAttachTitle = await screen.findByText("Quick attach: Arcana")
       const quickAttachModal = quickAttachTitle.closest(".ant-modal") as HTMLElement | null
       expect(quickAttachModal).not.toBeNull()
-      const quickAttachCharacterLink = await within(quickAttachModal as HTMLElement).findByRole("link", {
+
+      const quickAttachCharacterLink = within(quickAttachModal as HTMLElement).getByRole("link", {
         name: "Open character Alice"
       })
       expect(quickAttachCharacterLink).toHaveAttribute(
@@ -209,18 +210,14 @@ describe("WorldBooksManager cross-feature integration stage-1", () => {
         "/characters?from=world-books&focusCharacterId=1&focusWorldBookId=1"
       )
 
-      await user.click(
-        await screen.findByRole("button", {
-          name: "View attached characters for Arcana (1)"
-        })
-      )
-      const attachedCharactersTitle = await screen.findByText("Attached Characters")
-      const attachedCharactersPopover = attachedCharactersTitle.closest(".ant-popover") as HTMLElement | null
-      expect(attachedCharactersPopover).not.toBeNull()
-      const popoverCharacterLink = within(attachedCharactersPopover as HTMLElement).getByRole("link", {
+      await user.click(screen.getByText("Arcana"))
+      const detailPanel = await screen.findByRole("main", { name: "World book detail" })
+      await user.click(within(detailPanel).getByRole("tab", { name: "Attachments" }))
+
+      const attachmentsCharacterLink = within(detailPanel).getByRole("link", {
         name: "Open character Alice"
       })
-      expect(popoverCharacterLink).toHaveAttribute(
+      expect(attachmentsCharacterLink).toHaveAttribute(
         "href",
         "/characters?from=world-books&focusCharacterId=1&focusWorldBookId=1"
       )

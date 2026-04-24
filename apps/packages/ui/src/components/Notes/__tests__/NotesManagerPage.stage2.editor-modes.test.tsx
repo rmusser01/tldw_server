@@ -234,4 +234,21 @@ describe("NotesManagerPage stage 2 editor modes", () => {
       expect(height).toBeLessThan(500)
     })
   })
+
+  it("ignores editor-mode shortcuts while typing in the search input", async () => {
+    renderPage()
+
+    const textareaPlaceholder = "Write your note here... (Markdown supported)"
+    const textarea = screen.getByPlaceholderText(textareaPlaceholder)
+    fireEvent.change(textarea, { target: { value: "## Heading\n\ncontent" } })
+
+    const searchInput = screen.getByPlaceholderText(
+      "Search notes... (use quotes for exact match)"
+    )
+    fireEvent.focus(searchInput)
+    fireEvent.keyDown(searchInput, { key: "p", ctrlKey: true, shiftKey: true })
+
+    expect(screen.getByPlaceholderText(textareaPlaceholder)).toBeInTheDocument()
+    expect(screen.queryByText("Preview (Markdown + LaTeX)")).not.toBeInTheDocument()
+  })
 })

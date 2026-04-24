@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -92,7 +93,7 @@ async def handle_backup_schedule_job(
     }
 
 
-async def run_admin_backup_jobs_worker() -> None:
+async def run_admin_backup_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
     worker_id = (os.getenv("ADMIN_BACKUP_JOBS_WORKER_ID") or f"admin-backup-{os.getpid()}").strip()
     cfg = WorkerConfig(
         domain=BACKUP_SCHEDULE_DOMAIN,
@@ -101,14 +102,33 @@ async def run_admin_backup_jobs_worker() -> None:
     )
     jm = JobManager()
     sdk = WorkerSDK(jm, cfg)
+    stop_task: asyncio.Task[None] | None = None
+    if stop_event is not None:
+        async def _watch_stop() -> None:
+            await stop_event.wait()
+            sdk.stop()
+
+        stop_task = asyncio.create_task(
+            _watch_stop(),
+            name="admin_backup_jobs_worker_stop_watch",
+        )
     logger.info("Admin backup Jobs worker starting: queue={} worker_id={}", cfg.queue, worker_id)
-    await sdk.run(handler=handle_backup_schedule_job)
+    try:
+        await sdk.run(handler=handle_backup_schedule_job)
+    finally:
+        if stop_task is not None:
+            stop_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stop_task
 
 
-async def start_admin_backup_jobs_worker() -> asyncio.Task | None:
+async def start_admin_backup_jobs_worker(stop_event: asyncio.Event | None = None) -> asyncio.Task | None:
     if not env_flag_enabled("ADMIN_BACKUP_JOBS_WORKER_ENABLED"):
         return None
-    return asyncio.create_task(run_admin_backup_jobs_worker(), name="admin_backup_jobs_worker")
+    return asyncio.create_task(
+        run_admin_backup_jobs_worker(stop_event),
+        name="admin_backup_jobs_worker",
+    )
 
 
 __all__ = [

@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Evaluations.config_manager import (
     get_rate_limit_config,
 )
+from tldw_Server_API.app.core.Evaluations.identity import canonical_evaluations_user_scope
 from tldw_Server_API.app.core.testing import is_test_mode
 
 # Narrowed exception tuple for BLE001 fixes
@@ -843,7 +844,7 @@ _user_rate_limiter_instances: dict = {}
 _user_rate_limiter_lock: Optional[threading.Lock] = None
 
 
-def get_user_rate_limiter_for_user(user_id: int) -> UserRateLimiter:
+def get_user_rate_limiter_for_user(user_id: str | int) -> UserRateLimiter:
     """Return a UserRateLimiter bound to the user's evaluations DB."""
     # In test environments, fall back to legacy global instance for compatibility with existing tests/mocks
     try:
@@ -856,12 +857,26 @@ def get_user_rate_limiter_for_user(user_id: int) -> UserRateLimiter:
     if _user_rate_limiter_lock is None:
         _user_rate_limiter_lock = threading.Lock()
     with _user_rate_limiter_lock:
-        inst = _user_rate_limiter_instances.get(user_id)
+        uid_key = canonical_evaluations_user_scope(user_id)
+        inst = _user_rate_limiter_instances.get(uid_key)
         if inst is not None:
             return inst
-        db_path = str(DatabasePaths.get_evaluations_db_path(int(user_id)))
+        legacy_numeric_key: int | None = None
+        try:
+            legacy_numeric_key = int(uid_key)
+        except _USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS:
+            legacy_numeric_key = None
+        # Temporary migration path: older in-process callers cached limiters under
+        # numeric user ids before canonical string scopes landed. Remove this branch
+        # after all callers and long-lived workers have restarted on string scopes.
+        if legacy_numeric_key is not None:
+            inst = _user_rate_limiter_instances.get(legacy_numeric_key)
+            if inst is not None:
+                _user_rate_limiter_instances[uid_key] = inst
+                return inst
+        db_path = str(DatabasePaths.get_evaluations_db_path(uid_key))
         inst = UserRateLimiter(db_path=db_path)
-        _user_rate_limiter_instances[user_id] = inst
+        _user_rate_limiter_instances[uid_key] = inst
         return inst
 
 

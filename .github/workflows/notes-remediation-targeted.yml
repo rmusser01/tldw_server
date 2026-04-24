@@ -68,6 +68,7 @@ jobs:
         run: |
           bunx vitest run \
             src/components/Notes/__tests__/NotesManagerPage.stage1.editor-reliability.test.tsx \
+            src/components/Notes/__tests__/NotesManagerPage.stage1.editor-reliability-followup.test.tsx \
             src/components/Notes/__tests__/NotesManagerPage.stage11.search-filtering.test.tsx \
             src/components/Notes/__tests__/NotesManagerPage.stage32.delete-undo.test.tsx \
             src/components/Notes/__tests__/NotesManagerPage.stage39.organization-model.test.tsx \

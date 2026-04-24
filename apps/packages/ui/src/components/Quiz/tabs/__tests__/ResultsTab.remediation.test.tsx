@@ -555,6 +555,8 @@ describe("ResultsTab remediation panel", () => {
     fireEvent.change(screen.getByTestId("quiz-remediation-new-deck-name"), {
       target: { value: "Missed Questions Deck" }
     })
+    fireEvent.mouseDown(screen.getByTestId("deck-study-defaults-review-prompt-side"))
+    fireEvent.click(await screen.findByText("Back first"))
     fireEvent.click(screen.getByTestId("deck-scheduler-editor-preset-fast_acquisition"))
     fireEvent.click(screen.getByRole("button", { name: /^create flashcards$/i }))
 
@@ -564,6 +566,7 @@ describe("ResultsTab remediation panel", () => {
         request: {
           question_ids: [13],
           create_deck_name: "Missed Questions Deck",
+          create_deck_review_prompt_side: "back",
           create_deck_scheduler_type: "sm2_plus",
           create_deck_scheduler_settings: {
             sm2_plus: {

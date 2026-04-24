@@ -15,6 +15,7 @@ from .transports import (
     BrokeredExternalCredential,
     ExternalMCPTransportAdapter,
     ExternalToolCallResult,
+    adapter_supports_runtime_auth,
     build_transport_adapter,
 )
 
@@ -436,13 +437,16 @@ class ExternalServerManager:
         telemetry.call_attempts += 1
         started_at = time.perf_counter()
         try:
+            call_kwargs: dict[str, Any] = {"context": context}
+            supports_runtime_auth = adapter_supports_runtime_auth(adapter)
+            if supports_runtime_auth:
+                call_kwargs["runtime_auth"] = runtime_auth
             result = await adapter.call_tool(
                 upstream_tool_name,
                 call_args,
-                context=context,
-                runtime_auth=runtime_auth,
+                **call_kwargs,
             )
-            if runtime_auth is not None:
+            if runtime_auth is not None and supports_runtime_auth:
                 metadata = dict(result.metadata or {})
                 metadata.update(self._public_runtime_auth_metadata(runtime_auth))
                 metadata["credential_injection"] = self._summarize_runtime_auth(runtime_auth)

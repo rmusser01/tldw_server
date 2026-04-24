@@ -87,38 +87,38 @@ export function CharacterWorldTab({ isOnline }: CharacterWorldTabProps) {
   // ── Mutations ──
   const addCharMutation = useMutation({
     mutationFn: (name: string) => createManuscriptCharacter(activeProjectId!, { name }),
-    onSuccess: (_data, name) => {
+    onSuccess: (_response, name) => {
       queryClient.invalidateQueries({ queryKey: ["manuscript-characters", activeProjectId] })
-      setNewCharName((current) => current === name ? "" : current)
+      setNewCharName((current) => current.trim() === name ? "" : current)
     },
     onError: (err: Error) => {
       console.debug("[CharacterWorldTab] Failed to create character", err)
-      message.error(err.message || "Failed to create character")
+      void message.error("Failed to create character")
     },
   })
 
   const addWorldMutation = useMutation({
     mutationFn: ({ name, kind }: { name: string; kind: string }) =>
       createManuscriptWorldInfo(activeProjectId!, { name, kind }),
-    onSuccess: (_data, variables) => {
+    onSuccess: (_response, variables) => {
       queryClient.invalidateQueries({ queryKey: ["manuscript-world-info", activeProjectId] })
-      setNewWorldName((current) => current === variables.name ? "" : current)
+      setNewWorldName((current) => current.trim() === variables.name ? "" : current)
     },
     onError: (err: Error) => {
       console.debug("[CharacterWorldTab] Failed to create world info", err)
-      message.error(err.message || "Failed to create world info")
+      void message.error("Failed to create world info")
     },
   })
 
   const addPlotMutation = useMutation({
     mutationFn: (title: string) => createManuscriptPlotLine(activeProjectId!, { title }),
-    onSuccess: (_data, title) => {
+    onSuccess: (_response, title) => {
       queryClient.invalidateQueries({ queryKey: ["manuscript-plot-lines", activeProjectId] })
-      setNewPlotTitle((current) => current === title ? "" : current)
+      setNewPlotTitle((current) => current.trim() === title ? "" : current)
     },
     onError: (err: Error) => {
       console.debug("[CharacterWorldTab] Failed to create plot line", err)
-      message.error(err.message || "Failed to create plot line")
+      void message.error("Failed to create plot line")
     },
   })
 
@@ -146,7 +146,6 @@ export function CharacterWorldTab({ isOnline }: CharacterWorldTabProps) {
             <Input
               size="small"
               placeholder="Character name..."
-              aria-label="New character name"
               value={newCharName}
               onChange={(e) => setNewCharName(e.target.value)}
               onPressEnter={() => isOnline && newCharName.trim() && !addCharMutation.isPending && addCharMutation.mutate(newCharName.trim())}
@@ -155,7 +154,6 @@ export function CharacterWorldTab({ isOnline }: CharacterWorldTabProps) {
               size="small"
               type="primary"
               icon={<Plus className="h-3 w-3" />}
-              aria-label="Add character"
               disabled={!newCharName.trim() || !isOnline}
               loading={addCharMutation.isPending}
               onClick={() => isOnline && addCharMutation.mutate(newCharName.trim())}
@@ -191,13 +189,11 @@ export function CharacterWorldTab({ isOnline }: CharacterWorldTabProps) {
               value={newWorldKind}
               onChange={setNewWorldKind}
               options={Object.entries(KIND_LABELS).map(([k, v]) => ({ value: k, label: v }))}
-              aria-label="World info kind"
               className="!w-24"
             />
             <Input
               size="small"
               placeholder="Entry name..."
-              aria-label="New world info entry name"
               value={newWorldName}
               onChange={(e) => setNewWorldName(e.target.value)}
               onPressEnter={() => isOnline && newWorldName.trim() && !addWorldMutation.isPending && addWorldMutation.mutate({ name: newWorldName.trim(), kind: newWorldKind })}
@@ -207,7 +203,6 @@ export function CharacterWorldTab({ isOnline }: CharacterWorldTabProps) {
               size="small"
               type="primary"
               icon={<Plus className="h-3 w-3" />}
-              aria-label="Add world info entry"
               disabled={!newWorldName.trim() || !isOnline}
               loading={addWorldMutation.isPending}
               onClick={() => isOnline && addWorldMutation.mutate({ name: newWorldName.trim(), kind: newWorldKind })}
@@ -241,7 +236,6 @@ export function CharacterWorldTab({ isOnline }: CharacterWorldTabProps) {
               <Input
                 size="small"
                 placeholder="Plot line title..."
-                aria-label="New plot line title"
                 value={newPlotTitle}
                 onChange={(e) => setNewPlotTitle(e.target.value)}
                 onPressEnter={() => isOnline && newPlotTitle.trim() && !addPlotMutation.isPending && addPlotMutation.mutate(newPlotTitle.trim())}
@@ -250,7 +244,6 @@ export function CharacterWorldTab({ isOnline }: CharacterWorldTabProps) {
                 size="small"
                 type="primary"
                 icon={<Plus className="h-3 w-3" />}
-                aria-label="Add plot line"
                 disabled={!newPlotTitle.trim() || !isOnline}
                 loading={addPlotMutation.isPending}
                 onClick={() => isOnline && addPlotMutation.mutate(newPlotTitle.trim())}

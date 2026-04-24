@@ -197,9 +197,11 @@ enable = tools, jobs, acp
 runner_command = go
 runner_args = ["run", "./cmd/tldw-agent-acp"]
 runner_cwd = ../tldw-agent
-runner_env = HOME=/absolute/path/to/tldw_Server_API/Config_Files/acp_runner_home,PYTHONUNBUFFERED=1
+runner_env = HOME=./acp_runner_home,PYTHONUNBUFFERED=1
 startup_timeout_ms = 10000
 ```
+
+Relative `HOME` values in `runner_env` are resolved against `tldw_Server_API/Config_Files`, so the checked-in example stays portable across machines.
 
 ### Environment Overrides
 

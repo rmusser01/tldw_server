@@ -2,7 +2,7 @@
  * Page Object for Workspace Playground workflow coverage
  */
 import { type Locator, type Page, expect } from "@playwright/test"
-import { waitForConnection } from "../helpers"
+import { dispatchKeyboardShortcut, waitForConnection } from "../helpers"
 
 type WorkspaceSeedSource = {
   mediaId: number
@@ -26,7 +26,10 @@ export class WorkspacePlaygroundPage {
   constructor(page: Page) {
     this.page = page
     this.headerTitle = page.locator("header h1").first()
-    this.workspacesButton = page.getByRole("button", { name: /workspaces/i })
+    this.workspacesButton = page
+      .getByTestId("workspace-workspaces-button")
+      .or(page.getByRole("button", { name: /workspaces/i }))
+      .first()
     this.sourcesPanel = page.locator("#workspace-sources-panel")
     this.chatPanel = page.locator("#workspace-main-content")
     this.studioPanel = page.locator("#workspace-studio-panel")
@@ -180,13 +183,23 @@ export class WorkspacePlaygroundPage {
 
   async openGlobalSearchWithShortcut(): Promise<void> {
     await this.page.locator("body").click()
-    await this.page.keyboard.press("Control+k")
-    if (!(await this.globalSearchInput.isVisible().catch(() => false))) {
-      await expect(this.globalSearchModal).toBeVisible({ timeout: 2_000 }).catch(() => {})
-    }
-    if (!(await this.globalSearchInput.isVisible().catch(() => false))) {
-      await this.page.keyboard.press("Meta+k")
-    }
+    await expect
+      .poll(
+        async () => {
+          await dispatchKeyboardShortcut(this.page, { key: "k", ctrlKey: true })
+          if (await this.globalSearchInput.isVisible().catch(() => false)) {
+            return true
+          }
+
+          await dispatchKeyboardShortcut(this.page, { key: "k", metaKey: true })
+          return await this.globalSearchInput.isVisible().catch(() => false)
+        },
+        {
+          timeout: 10_000,
+          message: "Expected Cmd/Ctrl+K to open the workspace global search"
+        }
+      )
+      .toBe(true)
     await expect(this.globalSearchModal).toBeVisible({ timeout: 10_000 })
     await expect(this.globalSearchInput).toBeVisible({ timeout: 10_000 })
   }

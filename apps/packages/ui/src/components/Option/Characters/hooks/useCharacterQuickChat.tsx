@@ -9,7 +9,7 @@ import { useNavigate } from "react-router-dom"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { focusComposer } from "@/hooks/useComposerFocus"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
-import { validateAndCreateImageDataUrl } from "@/utils/image-utils"
+import { buildCharacterSelectionPayload } from "../utils"
 
 type CharacterQuickChatMessage = {
   id: string
@@ -34,25 +34,6 @@ const resolveCharacterNumericId = (record: any): number | null => {
   return parsed
 }
 
-const buildCharacterSelectionPayload = (record: any) => ({
-  id: record.id || record.slug || record.name,
-  name: record.name || record.title || record.slug,
-  system_prompt:
-    record.system_prompt ||
-    record.systemPrompt ||
-    record.instructions ||
-    "",
-  greeting:
-    record.greeting ||
-    record.first_message ||
-    record.greet ||
-    "",
-  avatar_url:
-    record.avatar_url ||
-    validateAndCreateImageDataUrl(record.image_base64) ||
-    ""
-})
-
 export interface UseCharacterQuickChatDeps {
   /** i18n translator */
   t: (key: string, opts?: Record<string, any>) => string
@@ -71,6 +52,10 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
     setMessages,
     setHistoryId,
     setServerChatId,
+    setServerChatCharacterId,
+    setServerChatAssistantKind,
+    setServerChatAssistantId,
+    setServerChatMetaLoaded,
     setServerChatState,
     setServerChatTopic,
     setServerChatClusterId,
@@ -82,6 +67,10 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
       setMessages: state.setMessages,
       setHistoryId: state.setHistoryId,
       setServerChatId: state.setServerChatId,
+      setServerChatCharacterId: state.setServerChatCharacterId,
+      setServerChatAssistantKind: state.setServerChatAssistantKind,
+      setServerChatAssistantId: state.setServerChatAssistantId,
+      setServerChatMetaLoaded: state.setServerChatMetaLoaded,
       setServerChatState: state.setServerChatState,
       setServerChatTopic: state.setServerChatTopic,
       setServerChatClusterId: state.setServerChatClusterId,
@@ -289,9 +278,15 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
       sources: [],
       images: []
     }))
+    const normalizedAssistantId =
+      characterSelection.id == null ? null : String(characterSelection.id)
 
     setHistoryId(null)
     setServerChatId(quickChatSessionId)
+    setServerChatCharacterId(normalizedAssistantId)
+    setServerChatAssistantKind("character")
+    setServerChatAssistantId(normalizedAssistantId)
+    setServerChatMetaLoaded(false)
     setServerChatState("in-progress")
     setServerChatTopic(null)
     setServerChatClusterId(null)
@@ -315,9 +310,13 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
     setHistoryId,
     setMessages,
     setSelectedCharacter,
+    setServerChatAssistantId,
+    setServerChatAssistantKind,
+    setServerChatCharacterId,
     setServerChatClusterId,
     setServerChatExternalRef,
     setServerChatId,
+    setServerChatMetaLoaded,
     setServerChatSource,
     setServerChatState,
     setServerChatTopic,

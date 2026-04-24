@@ -180,6 +180,23 @@ def test_resolve_trusted_database_path_anchors_relative_paths_to_project_root(mo
     )
 
 
+def test_resolve_trusted_database_path_accepts_absolute_path_inside_project_root(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    db_dir = project_root / "Databases"
+    db_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
+    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+
+    resolved = db_path_utils.resolve_trusted_database_path(db_dir / "absolute.db")
+
+    _expect_equal(
+        resolved,
+        db_dir / "absolute.db",
+        "absolute trusted DB paths should be accepted when they stay inside trusted roots",
+    )
+
+
 def test_resolve_trusted_database_path_rejects_symlink_escape(monkeypatch, tmp_path):
     project_root = tmp_path / "project"
     trusted_dir = project_root / "Databases"
@@ -194,3 +211,112 @@ def test_resolve_trusted_database_path_rejects_symlink_escape(monkeypatch, tmp_p
 
     with pytest.raises(InvalidStoragePathError):
         db_path_utils.resolve_trusted_database_path(trusted_dir / "escape" / "users.db")
+
+
+def test_resolve_trusted_database_path_rejects_symlinked_database_file(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    trusted_dir = project_root / "Databases"
+    outside_dir = tmp_path / "outside"
+    project_root.mkdir()
+    trusted_dir.mkdir()
+    outside_dir.mkdir()
+
+    outside_db = outside_dir / "users.db"
+    outside_db.write_text("outside", encoding="utf-8")
+    (trusted_dir / "users.db").symlink_to(outside_db)
+
+    monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
+    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+
+    with pytest.raises(InvalidStoragePathError):
+        db_path_utils.resolve_trusted_database_path(trusted_dir / "users.db")
+
+
+def test_resolve_trusted_database_path_accepts_symlink_alias_to_temp_root(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    real_temp_root = tmp_path / "private_tmp"
+    temp_alias = tmp_path / "var_alias"
+    project_root.mkdir()
+    real_temp_root.mkdir()
+    temp_alias.symlink_to(real_temp_root, target_is_directory=True)
+
+    monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
+    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: True)
+    monkeypatch.setattr(db_path_utils.tempfile, "gettempdir", lambda: str(temp_alias))
+
+    resolved = db_path_utils.resolve_trusted_database_path(temp_alias / "dbs" / "app.db")
+
+    _expect_equal(
+        resolved,
+        real_temp_root / "dbs" / "app.db",
+        "trusted temp paths should be compared using canonicalized paths",
+    )
+
+
+def test_resolve_trusted_database_path_rejects_unresolved_home_prefix(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
+    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    with pytest.raises(InvalidStoragePathError):
+        db_path_utils.resolve_trusted_database_path("~missing-user/app.db")
+
+
+def test_ensure_trusted_database_parent_dir_creates_missing_parent(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    target_path = project_root / "Databases" / "nested" / "app.db"
+
+    monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
+    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+
+    resolved = db_path_utils.ensure_trusted_database_parent_dir(
+        target_path,
+        label="test database",
+    )
+
+    _expect_equal(resolved, target_path, "trusted parent dir helper should preserve the resolved DB path")
+    _expect_true(target_path.parent.exists(), "trusted parent dir helper should create the parent directory")
+
+
+def test_require_trusted_database_parent_exists_rejects_missing_parent(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    target_path = project_root / "Databases" / "missing" / "app.db"
+
+    monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
+    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+
+    with pytest.raises(ValueError, match="parent directory must already exist"):
+        db_path_utils.require_trusted_database_parent_exists(
+            target_path,
+            label="test database",
+        )
+
+
+def test_require_trusted_database_parent_exists_accepts_symlink_alias_to_temp_root(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    real_temp_root = tmp_path / "private_tmp"
+    temp_alias = tmp_path / "var_alias"
+    project_root.mkdir()
+    real_temp_root.mkdir()
+    temp_alias.symlink_to(real_temp_root, target_is_directory=True)
+    (real_temp_root / "dbs").mkdir()
+
+    monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
+    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: True)
+    monkeypatch.setattr(db_path_utils.tempfile, "gettempdir", lambda: str(temp_alias))
+
+    resolved = db_path_utils.require_trusted_database_parent_exists(
+        temp_alias / "dbs" / "app.db",
+        label="test database",
+    )
+
+    _expect_equal(
+        resolved,
+        real_temp_root / "dbs" / "app.db",
+        "trusted temp parent check should accept canonicalized alias roots",
+    )

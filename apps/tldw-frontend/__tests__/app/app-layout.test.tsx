@@ -2,6 +2,18 @@ import React from "react"
 import { act, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 
+vi.mock("@web/lib/i18n-web", () => ({}))
+
+vi.mock("wxt/browser", () => ({
+  browser: {
+    storage: {
+      local: {
+        get: vi.fn(async () => ({}))
+      }
+    }
+  }
+}))
+
 import App from "@web/pages/_app"
 
 const mockRouter = {
@@ -42,6 +54,18 @@ vi.mock("next/dynamic", () => ({
 
 vi.mock("@web/components/AppProviders", () => ({
   AppProviders: ({ children }: { children: React.ReactNode }) => <>{children}</>
+}))
+
+vi.mock("@web/components/networking/ServerReadinessGate", () => ({
+  ServerReadinessGate: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="server-readiness-gate">{children}</div>
+  )
+}))
+
+vi.mock("@/components/PersonaGarden/FirstRunGate", () => ({
+  FirstRunGate: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="first-run-gate">{children}</div>
+  )
 }))
 
 vi.mock("@web/lib/configured-auth-state", () => ({
@@ -88,12 +112,16 @@ afterAll(() => {
 describe("App layout routing", () => {
   it("wraps non-login routes with OptionLayout", async () => {
     renderApp("/media")
+    expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
+    expect(screen.getByTestId("first-run-gate")).toBeInTheDocument()
     expect(await screen.findByTestId("option-layout")).toBeInTheDocument()
     expect(screen.getByTestId("page-content")).toBeInTheDocument()
   })
 
-  it("skips OptionLayout for /login", () => {
+  it("skips OptionLayout for /login but keeps ServerReadinessGate mounted", () => {
     renderApp("/login")
+    expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
+    expect(screen.queryByTestId("first-run-gate")).toBeNull()
     expect(screen.queryByTestId("option-layout")).toBeNull()
     expect(screen.getByTestId("page-content")).toBeInTheDocument()
   })
@@ -112,6 +140,8 @@ describe("App layout routing", () => {
 
     renderApp("/settings/tldw")
     const layout = await screen.findByTestId("option-layout")
+    expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
+    expect(screen.queryByTestId("first-run-gate")).toBeNull()
     await waitFor(() => {
       expect(layout).toHaveAttribute("data-hide-header", "false")
     })

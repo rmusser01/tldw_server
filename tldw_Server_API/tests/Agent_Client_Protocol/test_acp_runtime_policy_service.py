@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -38,7 +40,7 @@ async def test_build_snapshot_uses_normalized_context_and_profile_hints():
         user_id=42,
         agent_type="codex",
         name="Policy Session",
-        cwd="/tmp/project",
+        cwd="/workspace/project",
         usage=SessionTokenUsage(),
         mcp_servers=[{"name": "filesystem", "type": "stdio"}],
         persona_id="persona-1",
@@ -113,3 +115,41 @@ async def test_build_snapshot_fingerprint_changes_when_effective_policy_changes(
 
     assert first.policy_snapshot_fingerprint != second.policy_snapshot_fingerprint
 
+
+@pytest.mark.asyncio
+async def test_build_snapshot_logs_and_falls_back_when_db_template_resolution_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.core.Agent_Client_Protocol.templates as templates_module
+    import tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB as sessions_db_module
+    import tldw_Server_API.app.services.acp_runtime_policy_service as runtime_policy_service_module
+    from tldw_Server_API.app.services.acp_runtime_policy_service import ACPRuntimePolicyService
+
+    session = SessionRecord(
+        session_id="session-3",
+        user_id=1,
+        usage=SessionTokenUsage(),
+    )
+    resolver = _StubPolicyResolver([{"policy_document": {}, "sources": [], "provenance": []}])
+    service = ACPRuntimePolicyService(policy_resolver=resolver)
+    log_exception = MagicMock()
+
+    def _raise_resolution_error(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("db template lookup failed")
+
+    monkeypatch.setattr(templates_module, "resolve_for_session", _raise_resolution_error)
+    monkeypatch.setattr(sessions_db_module, "ACPSessionsDB", lambda: object())
+    monkeypatch.setattr(
+        runtime_policy_service_module,
+        "logger",
+        SimpleNamespace(exception=log_exception),
+    )
+
+    snapshot = await service.build_snapshot(
+        session_record=session,
+        user_id=1,
+        template_name="lockdown",
+    )
+
+    assert snapshot.resolved_policy_document["tool_tier_overrides"] == {"*": "individual"}
+    assert log_exception.call_count == 1

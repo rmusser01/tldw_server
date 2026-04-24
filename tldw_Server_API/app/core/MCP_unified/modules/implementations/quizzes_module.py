@@ -323,15 +323,7 @@ class QuizzesModule(BaseModule):
             if not isinstance(quiz_id, int) or quiz_id < 1:
                 raise ValueError("quiz_id must be a positive integer")
         elif tool_name == "quizzes.create":
-            name = arguments.get("name")
-            if not isinstance(name, str) or not (1 <= len(name.strip()) <= 256):
-                raise ValueError("name must be 1..256 chars")
-            desc = arguments.get("description")
-            if desc is not None and (not isinstance(desc, str) or len(desc) > 2000):
-                raise ValueError("description must be <= 2000 chars")
-            passing = arguments.get("passing_score")
-            if passing is not None and (not isinstance(passing, int) or passing < 0 or passing > 100):
-                raise ValueError("passing_score must be 0..100")
+            self._validate_quiz_payload(arguments, require_name=True)
         elif tool_name == "quizzes.update":
             quiz_id = arguments.get("quiz_id")
             if not isinstance(quiz_id, int) or quiz_id < 1:
@@ -354,41 +346,7 @@ class QuizzesModule(BaseModule):
             quiz_id = arguments.get("quiz_id")
             if not isinstance(quiz_id, int) or quiz_id < 1:
                 raise ValueError("quiz_id must be a positive integer")
-            qtype = arguments.get("question_type")
-            if qtype not in {"multiple_choice", "multi_select", "true_false", "fill_blank"}:
-                raise ValueError("question_type must be multiple_choice, multi_select, true_false, or fill_blank")
-            qtext = arguments.get("question_text")
-            if not isinstance(qtext, str) or not (1 <= len(qtext.strip()) <= 5000):
-                raise ValueError("question_text must be 1..5000 chars")
-            if qtype == "multiple_choice":
-                opts = arguments.get("options")
-                if not isinstance(opts, list) or len(opts) < 2:
-                    raise ValueError("multiple_choice requires at least 2 options")
-                ans = arguments.get("correct_answer")
-                if not isinstance(ans, int) or ans < 0 or ans >= len(opts):
-                    raise ValueError("correct_answer must be valid option index")
-            elif qtype == "multi_select":
-                opts = arguments.get("options")
-                if not isinstance(opts, list) or len(opts) < 2:
-                    raise ValueError("multi_select requires at least 2 options")
-                ans = arguments.get("correct_answer")
-                if not isinstance(ans, list) or len(ans) == 0:
-                    raise ValueError("correct_answer must be a non-empty index list for multi_select questions")
-                if not all(isinstance(entry, int) and 0 <= entry < len(opts) for entry in ans):
-                    raise ValueError("correct_answer entries must be valid option indices for multi_select")
-            elif qtype == "true_false":
-                ans = arguments.get("correct_answer")
-                if isinstance(ans, str):
-                    if ans.lower() not in {"true", "false"}:
-                        raise ValueError("correct_answer must be 'true' or 'false'")
-                elif isinstance(ans, bool):
-                    pass
-                else:
-                    raise ValueError("correct_answer must be true/false for true_false questions")
-            elif qtype == "fill_blank":
-                ans = arguments.get("correct_answer")
-                if not isinstance(ans, str) or not ans.strip():
-                    raise ValueError("correct_answer must be a non-empty string for fill_blank")
+            self._validate_question_payload(arguments, require_core_fields=True)
         elif tool_name == "quizzes.questions.update":
             qid = arguments.get("question_id")
             if not isinstance(qid, int) or qid < 1:
@@ -434,6 +392,102 @@ class QuizzesModule(BaseModule):
             provider = arguments.get("provider")
             if provider is not None and (not isinstance(provider, str) or not provider.strip()):
                 raise ValueError("provider must be a non-empty string")
+
+    def _validate_quiz_payload(self, quiz: dict[str, Any], *, require_name: bool = False) -> None:
+        if "name" in quiz:
+            name = quiz.get("name")
+            if not isinstance(name, str) or not (1 <= len(name.strip()) <= 256):
+                raise ValueError("name must be 1..256 chars")
+        elif require_name:
+            raise ValueError("name must be 1..256 chars")
+
+        description = quiz.get("description")
+        if description is not None and (not isinstance(description, str) or len(description) > 2000):
+            raise ValueError("description must be <= 2000 chars")
+
+        workspace_tag = quiz.get("workspace_tag")
+        if workspace_tag is not None and (not isinstance(workspace_tag, str) or len(workspace_tag) > 64):
+            raise ValueError("workspace_tag must be <= 64 chars")
+
+        time_limit_seconds = quiz.get("time_limit_seconds")
+        if time_limit_seconds is not None and (
+            isinstance(time_limit_seconds, bool)
+            or not isinstance(time_limit_seconds, int)
+            or time_limit_seconds < 0
+        ):
+            raise ValueError("time_limit_seconds must be a non-negative integer")
+
+        passing_score = quiz.get("passing_score")
+        if passing_score is not None and (not isinstance(passing_score, int) or passing_score < 0 or passing_score > 100):
+            raise ValueError("passing_score must be 0..100")
+
+    def _validate_question_payload(self, question: dict[str, Any], *, require_core_fields: bool = False) -> None:
+        qtype = question.get("question_type")
+        valid_types = {"multiple_choice", "multi_select", "true_false", "fill_blank"}
+        if "question_type" in question:
+            if qtype not in valid_types:
+                raise ValueError("question_type must be multiple_choice, multi_select, true_false, or fill_blank")
+        elif require_core_fields:
+            raise ValueError("question_type must be multiple_choice, multi_select, true_false, or fill_blank")
+
+        if "question_text" in question:
+            qtext = question.get("question_text")
+            if not isinstance(qtext, str) or not (1 <= len(qtext.strip()) <= 5000):
+                raise ValueError("question_text must be 1..5000 chars")
+        elif require_core_fields:
+            raise ValueError("question_text must be 1..5000 chars")
+
+        if qtype == "multiple_choice":
+            opts = question.get("options")
+            if not isinstance(opts, list) or len(opts) < 2:
+                raise ValueError("multiple_choice requires at least 2 options")
+            ans = question.get("correct_answer")
+            if not isinstance(ans, int) or ans < 0 or ans >= len(opts):
+                raise ValueError("correct_answer must be valid option index")
+        elif qtype == "multi_select":
+            opts = question.get("options")
+            if not isinstance(opts, list) or len(opts) < 2:
+                raise ValueError("multi_select requires at least 2 options")
+            ans = question.get("correct_answer")
+            if not isinstance(ans, list) or len(ans) == 0:
+                raise ValueError("correct_answer must be a non-empty index list for multi_select questions")
+            if not all(isinstance(entry, int) and 0 <= entry < len(opts) for entry in ans):
+                raise ValueError("correct_answer entries must be valid option indices for multi_select")
+        elif qtype == "true_false":
+            ans = question.get("correct_answer")
+            if isinstance(ans, str):
+                if ans.lower() not in {"true", "false"}:
+                    raise ValueError("correct_answer must be 'true' or 'false'")
+            elif isinstance(ans, bool):
+                pass
+            else:
+                raise ValueError("correct_answer must be true/false for true_false questions")
+        elif qtype == "fill_blank":
+            ans = question.get("correct_answer")
+            if not isinstance(ans, str) or not ans.strip():
+                raise ValueError("correct_answer must be a non-empty string for fill_blank")
+
+        points = question.get("points")
+        if points is not None and (not isinstance(points, int) or points < 1):
+            raise ValueError("points must be a positive integer")
+
+        order_index = question.get("order_index")
+        if order_index is not None and (not isinstance(order_index, int) or order_index < 0):
+            raise ValueError("order_index must be a non-negative integer")
+
+    def _cleanup_generated_quiz(self, db: CharactersRAGDB, quiz_id: int, *, reason: str) -> bool:
+        try:
+            deleted = db.delete_quiz(quiz_id, hard_delete=True)
+        except Exception as exc:
+            logger.error(
+                f"Exception during cleanup of generated quiz {quiz_id} after {reason}: {exc}",
+                exc_info=True,
+            )
+            return False
+        if not deleted:
+            logger.error(f"Failed to clean up generated quiz {quiz_id} after {reason}")
+            return False
+        return True
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any = None) -> Any:
         args = self.sanitize_input(arguments)
@@ -554,6 +608,7 @@ class QuizzesModule(BaseModule):
     def _create_quiz_sync(self, context: Any, args: dict[str, Any]) -> dict[str, Any]:
         db = self._open_db(context)
         try:
+            self._validate_quiz_payload(args, require_name=True)
             quiz_id = db.create_quiz(
                 name=args.get("name"),
                 description=args.get("description"),
@@ -578,8 +633,14 @@ class QuizzesModule(BaseModule):
         db = self._open_db(context)
         try:
             quiz_id = args.get("quiz_id")
-            updates = args.get("updates", {})
+            updates = dict(args.get("updates", {}))
             expected_version = args.get("expected_version")
+            existing = db.get_quiz(quiz_id, include_deleted=False)
+            if not existing:
+                raise ValueError(f"Quiz not found or version conflict: {quiz_id}")
+            merged = dict(existing)
+            merged.update(updates)
+            self._validate_quiz_payload(merged)
             if expected_version is not None:
                 updates["expected_version"] = expected_version
             success = db.update_quiz(
@@ -668,6 +729,7 @@ class QuizzesModule(BaseModule):
     def _create_question_sync(self, context: Any, args: dict[str, Any]) -> dict[str, Any]:
         db = self._open_db(context)
         try:
+            self._validate_question_payload(args, require_core_fields=True)
             question_id = db.create_question(
                 quiz_id=args.get("quiz_id"),
                 question_type=args.get("question_type"),
@@ -697,8 +759,14 @@ class QuizzesModule(BaseModule):
         db = self._open_db(context)
         try:
             question_id = args.get("question_id")
-            updates = args.get("updates", {})
+            updates = dict(args.get("updates", {}))
             expected_version = args.get("expected_version")
+            existing = db.get_question(question_id, include_deleted=False)
+            if not existing:
+                raise ValueError(f"Question not found or version conflict: {question_id}")
+            merged = dict(existing)
+            merged.update(updates)
+            self._validate_question_payload(merged)
             if expected_version is not None:
                 updates["expected_version"] = expected_version
             success = db.update_question(
@@ -1024,6 +1092,17 @@ Return ONLY the JSON array, no other text."""
         db = self._open_db(context)
         try:
             client_id = self._get_client_id(context)
+            valid_questions: list[dict[str, Any]] = []
+            for i, q in enumerate(questions_data):
+                try:
+                    self._validate_question_payload(q, require_core_fields=True)
+                    valid_questions.append(q)
+                except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as e:
+                    logger.warning(f"Failed to validate generated question {i}: {e}")
+
+            if not valid_questions:
+                raise ValueError("Failed to generate quiz: no valid questions were created")
+
             quiz_id = db.create_quiz(
                 name=name,
                 description=f"AI-generated quiz from media {media_id}",
@@ -1032,22 +1111,38 @@ Return ONLY the JSON array, no other text."""
             )
 
             created_questions = []
-            for i, q in enumerate(questions_data):
-                try:
-                    qid = db.create_question(
-                        quiz_id=quiz_id,
-                        question_type=q.get("question_type", "multiple_choice"),
-                        question_text=q.get("question_text"),
-                        correct_answer=q.get("correct_answer"),
-                        options=q.get("options"),
-                        explanation=q.get("explanation"),
-                        points=q.get("points", 1),
-                        order_index=i,
-                        client_id=client_id,
-                    )
-                    created_questions.append(qid)
-                except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as e:
-                    logger.warning(f"Failed to create question {i}: {e}")
+            try:
+                for i, q in enumerate(valid_questions):
+                    try:
+                        qid = db.create_question(
+                            quiz_id=quiz_id,
+                            question_type=q.get("question_type", "multiple_choice"),
+                            question_text=q.get("question_text"),
+                            correct_answer=q.get("correct_answer"),
+                            options=q.get("options"),
+                            explanation=q.get("explanation"),
+                            points=q.get("points", 1),
+                            order_index=i,
+                            client_id=client_id,
+                        )
+                        created_questions.append(qid)
+                    except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as e:
+                        logger.warning(f"Failed to create question {i}: {e}")
+            except Exception:
+                self._cleanup_generated_quiz(
+                    db,
+                    quiz_id,
+                    reason="unexpected question persistence failure",
+                )
+                raise
+
+            if not created_questions:
+                self._cleanup_generated_quiz(
+                    db,
+                    quiz_id,
+                    reason="question persistence failure",
+                )
+                raise ValueError("Failed to generate quiz: no valid questions were created")
 
             quiz = db.get_quiz(quiz_id)
             return {

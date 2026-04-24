@@ -92,6 +92,7 @@ describe("useCreateDeckMutation", () => {
       id: 9,
       name: "Biology Basics",
       description: null,
+      review_prompt_side: "back",
       deleted: false,
       client_id: "test-client",
       version: 1,
@@ -110,6 +111,7 @@ describe("useCreateDeckMutation", () => {
       await result.current.mutateAsync({
         name: "  Biology Basics  ",
         description: "  Intro deck  ",
+        review_prompt_side: "back",
         scheduler_settings: schedulerEnvelope
       })
     })
@@ -117,6 +119,7 @@ describe("useCreateDeckMutation", () => {
     expect(createDeck).toHaveBeenCalledWith({
       name: "Biology Basics",
       description: "Intro deck",
+      review_prompt_side: "back",
       scheduler_settings: schedulerEnvelope
     })
   })

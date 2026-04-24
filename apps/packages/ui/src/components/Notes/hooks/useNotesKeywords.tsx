@@ -311,7 +311,7 @@ export function useNotesKeywords(deps: UseNotesKeywordsDeps) {
       setKeywordNoteCountByKey(nextCounts)
       return nextItems
     } catch (error: any) {
-      message.error(String(error?.message || 'Could not load keyword management data'))
+      message.error(String(error?.message || 'Could not load tag management data'))
       return [] as KeywordManagementItem[]
     } finally {
       setKeywordManagerLoading(false)
@@ -367,8 +367,8 @@ export function useNotesKeywords(deps: UseNotesKeywordsDeps) {
     async (item: KeywordManagementItem) => {
       if (keywordManagerActionLoading) return
       const ok = await confirmDanger({
-        title: 'Delete keyword?',
-        content: `Delete keyword "${item.keyword}"?`,
+        title: 'Delete tag?',
+        content: `Delete tag "${item.keyword}"?`,
         okText: 'Delete',
         cancelText: 'Cancel'
       })
@@ -383,16 +383,16 @@ export function useNotesKeywords(deps: UseNotesKeywordsDeps) {
             'expected-version': String(item.version)
           }
         })
-        message.success(`Deleted keyword "${item.keyword}"`)
+        message.success(`Deleted tag "${item.keyword}"`)
         await refreshKeywordDataAfterManagement()
       } catch (error: any) {
         const statusCode = getRequestStatusCode(error)
         if (statusCode === 404 || statusCode === 409) {
-          message.warning('Keyword changed on the server. Reloaded keyword list.')
+          message.warning('Tag changed on the server. Reloaded tag list.')
           await loadKeywordManagementItems()
           return
         }
-        message.error(String(error?.message || 'Could not delete keyword'))
+        message.error(String(error?.message || 'Could not delete tag'))
       } finally {
         setKeywordManagerActionLoading(false)
       }
@@ -411,7 +411,7 @@ export function useNotesKeywords(deps: UseNotesKeywordsDeps) {
     if (!keywordRenameDraft || keywordManagerActionLoading) return
     const nextKeyword = keywordRenameDraft.nextKeyword.trim()
     if (!nextKeyword) {
-      message.warning('Enter a keyword name')
+      message.warning('Enter a tag name')
       return
     }
     if (nextKeyword.toLowerCase() === keywordRenameDraft.currentKeyword.toLowerCase()) {
@@ -433,17 +433,17 @@ export function useNotesKeywords(deps: UseNotesKeywordsDeps) {
         }
       })
       setKeywordRenameDraft(null)
-      message.success(`Renamed keyword to "${String(renamed?.keyword || nextKeyword)}"`)
+      message.success(`Renamed tag to "${String(renamed?.keyword || nextKeyword)}"`)
       await refreshKeywordDataAfterManagement()
     } catch (error: any) {
       const statusCode = getRequestStatusCode(error)
       if (statusCode === 404 || statusCode === 409) {
-        message.warning('Keyword rename conflict. Reloaded keyword list.')
+        message.warning('Tag rename conflict. Reloaded tag list.')
         setKeywordRenameDraft(null)
         await loadKeywordManagementItems()
         return
       }
-      message.error(String(error?.message || 'Could not rename keyword'))
+      message.error(String(error?.message || 'Could not rename tag'))
     } finally {
       setKeywordManagerActionLoading(false)
     }
@@ -459,7 +459,7 @@ export function useNotesKeywords(deps: UseNotesKeywordsDeps) {
   const submitKeywordMerge = React.useCallback(async () => {
     if (!keywordMergeDraft || keywordManagerActionLoading) return
     if (keywordMergeDraft.targetKeywordId == null) {
-      message.warning('Select a target keyword')
+      message.warning('Select a target tag')
       return
     }
 
@@ -467,7 +467,7 @@ export function useNotesKeywords(deps: UseNotesKeywordsDeps) {
       (item) => item.id === keywordMergeDraft.targetKeywordId
     )
     if (!target) {
-      message.warning('Target keyword no longer exists. Reloaded keyword list.')
+      message.warning('Target tag no longer exists. Reloaded tag list.')
       await loadKeywordManagementItems()
       return
     }
@@ -492,12 +492,12 @@ export function useNotesKeywords(deps: UseNotesKeywordsDeps) {
     } catch (error: any) {
       const statusCode = getRequestStatusCode(error)
       if (statusCode === 404 || statusCode === 409) {
-        message.warning('Keyword merge conflict. Reloaded keyword list.')
+        message.warning('Tag merge conflict. Reloaded tag list.')
         setKeywordMergeDraft(null)
         await loadKeywordManagementItems()
         return
       }
-      message.error(String(error?.message || 'Could not merge keywords'))
+      message.error(String(error?.message || 'Could not merge tags'))
     } finally {
       setKeywordManagerActionLoading(false)
     }
@@ -533,7 +533,7 @@ export function useNotesKeywords(deps: UseNotesKeywordsDeps) {
     if (selectedSuggestions.length === 0) {
       message.warning(
         t('option:notesSearch.assistKeywordsSelectAtLeastOne', {
-          defaultValue: 'Select at least one suggested keyword to apply.'
+          defaultValue: 'Select at least one suggested tag to apply.'
         })
       )
       return
@@ -561,7 +561,7 @@ export function useNotesKeywords(deps: UseNotesKeywordsDeps) {
     closeKeywordSuggestionModal()
     message.success(
       t('option:notesSearch.assistKeywordsApplied', {
-        defaultValue: 'Applied suggested keywords.'
+        defaultValue: 'Applied suggested tags.'
       })
     )
   }, [

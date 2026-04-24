@@ -655,7 +655,7 @@ async def test_audio_chat_ws_v2_resume_drains_buffered_audio_fifo_before_commit(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_audio_chat_ws_v2_resume_does_not_auto_commit_buffered_audio(
+async def test_audio_chat_ws_v2_resume_auto_commits_buffered_audio_when_vad_triggers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _enable_chat_ws_control_v2(monkeypatch)
@@ -699,8 +699,9 @@ async def test_audio_chat_ws_v2_resume_does_not_auto_commit_buffered_audio(
     await audio.websocket_audio_chat_stream(ws, token=None)
 
     assert [msg.get("text") for msg in ws.sent_json if msg.get("type") == "partial"] == ["one", "two"]
-    assert not [msg for msg in ws.sent_json if msg.get("type") == "full_transcript"]
-    assert not [msg for msg in ws.sent_json if msg.get("type") == "llm_message"]
+    full_transcripts = [msg for msg in ws.sent_json if msg.get("type") == "full_transcript"]
+    assert full_transcripts[0].get("text") == "one|two"
+    assert [msg for msg in ws.sent_json if msg.get("type") == "llm_message"]
 
 
 @pytest.mark.integration

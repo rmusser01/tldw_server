@@ -11,13 +11,14 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
-from .flashcard_adapter import build_flashcard_suggestion_context
+from .flashcard_adapter import build_flashcard_suggestion_context, extract_flashcard_suggestion_evidence
 from .jobs import (
     STUDY_SUGGESTIONS_DOMAIN,
     STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
     study_suggestions_jobs_queue,
 )
-from .quiz_adapter import build_quiz_suggestion_context
+from .quiz_adapter import build_quiz_suggestion_context, extract_quiz_suggestion_evidence
+from .topic_aliases import DEFAULT_NAMESPACE, NORMALIZATION_VERSION, topic_key_for
 from .topic_pipeline import rank_suggestion_topics, resolve_topic_candidates
 
 
@@ -33,122 +34,48 @@ def _titleize_label(label: str) -> str:
     return " ".join(word.capitalize() for word in words)
 
 
-def _unique_preserve(values: Iterable[object]) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for value in values:
-        text = _safe_text(value)
-        if not text:
-            continue
-        key = text.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        ordered.append(text)
-    return ordered
-
-
-def _unique_sources(values: Iterable[Mapping[str, Any]]) -> list[dict[str, str]]:
-    seen: set[tuple[str, str, str | None]] = set()
-    ordered: list[dict[str, str]] = []
-    for value in values:
-        source_type = _safe_text(value.get("source_type"))
-        source_id = _safe_text(value.get("source_id"))
-        label = _safe_text(value.get("label"))
-        if not source_type or not source_id:
-            continue
-        key = (source_type.casefold(), source_id.casefold(), label.casefold() if label else None)
-        if key in seen:
-            continue
-        seen.add(key)
-        item = {
-            "source_type": source_type,
-            "source_id": source_id,
-        }
-        if label:
-            item["label"] = label
-        ordered.append(item)
-    return ordered
-
-
-def _normalize_citation_source(citation: Mapping[str, Any]) -> dict[str, str] | None:
-    source_type = _safe_text(citation.get("source_type"))
-    source_id = _safe_text(citation.get("source_id"))
-    label = _safe_text(citation.get("label"))
-    if not source_type or not source_id:
-        return None
-    source: dict[str, str] = {
-        "source_type": source_type,
-        "source_id": source_id,
+def _fallback_topic_item(
+    *,
+    index: int,
+    display_label: str,
+    status: str = "candidate",
+    selected: bool = False,
+) -> dict[str, Any]:
+    canonical_label = str(display_label or "review").strip().lower() or "review"
+    return {
+        "id": f"topic-{index}",
+        "display_label": _titleize_label(display_label),
+        "type": "derived",
+        "status": status,
+        "selected": selected,
+        "topic_key": topic_key_for(DEFAULT_NAMESPACE, canonical_label),
+        "normalization_version": NORMALIZATION_VERSION,
+        "canonical_label": canonical_label,
+        "evidence_reasons": ["derived_label"],
+        "source_count": 0,
     }
-    if label:
-        source["label"] = label
-    return source
-
-
-def _extract_quiz_labels(
-    attempt: Mapping[str, Any],
-) -> tuple[list[str], list[str], list[str], list[str], list[str], list[dict[str, str]]]:
-    questions = attempt.get("questions") or []
-    answers = attempt.get("answers") or []
-    answers_by_question_id = {
-        int(answer["question_id"]): answer
-        for answer in answers
-        if isinstance(answer, Mapping) and answer.get("question_id") is not None
-    }
-
-    source_labels: list[str] = []
-    tag_labels: list[str] = []
-    weakness_labels: list[str] = []
-    adjacent_labels: list[str] = []
-    source_bundle: list[dict[str, str]] = []
-
-    for question in questions:
-        if not isinstance(question, Mapping):
-            continue
-        question_id = question.get("id")
-        answer = answers_by_question_id.get(int(question_id)) if question_id is not None else None
-        question_tags = [tag for tag in (question.get("tags") or []) if _safe_text(tag)]
-        citations = [item for item in (question.get("source_citations") or []) if isinstance(item, Mapping)]
-        citation_labels = [_safe_text(citation.get("label")) for citation in citations]
-        citation_labels = [label for label in citation_labels if label]
-
-        tag_labels.extend(question_tags)
-        source_labels.extend(citation_labels)
-        for citation in citations:
-            source = _normalize_citation_source(citation)
-            if source:
-                source_bundle.append(source)
-
-        is_incorrect = bool(answer) and answer.get("is_correct") is False
-        target = weakness_labels if is_incorrect else adjacent_labels
-        target.extend(question_tags)
-        target.extend(citation_labels)
-
-    derived_labels = []
-    if not source_labels and not tag_labels:
-        incorrect_count = sum(1 for answer in answers if isinstance(answer, Mapping) and answer.get("is_correct") is False)
-        derived_labels.append("missed questions" if incorrect_count else "review")
-
-    return (
-        _unique_preserve(source_labels),
-        _unique_preserve(tag_labels),
-        _unique_preserve(derived_labels),
-        _unique_preserve(weakness_labels),
-        _unique_preserve(adjacent_labels),
-        _unique_sources(source_bundle),
-    )
 
 
 def _find_quiz_topic_source(
-    canonical_label: str,
+    topic_labels: Iterable[str],
     source_bundle: list[dict[str, str]],
+    *,
+    allow_fallback: bool = True,
 ) -> dict[str, str] | None:
+    """Return the source bundle item whose label matches any known topic label."""
+
+    matchable_labels = {
+        label.casefold()
+        for label in topic_labels
+        if isinstance(label, str) and label.strip()
+    }
     for source in source_bundle:
         source_label = _safe_text(source.get("label"))
-        if source_label and source_label.casefold() == canonical_label.casefold():
+        if source_label and source_label.casefold() in matchable_labels:
             return source
-    return source_bundle[0] if source_bundle else None
+    if allow_fallback and source_bundle:
+        return source_bundle[0]
+    return None
 
 
 def _build_quiz_snapshot_payload(note_db: CharactersRAGDB, anchor_id: int) -> tuple[str, str, dict[str, Any]]:
@@ -166,7 +93,7 @@ def _build_quiz_snapshot_payload(note_db: CharactersRAGDB, anchor_id: int) -> tu
         }
         for answer in answers
     ]
-    source_labels, tag_labels, derived_labels, weakness_labels, adjacent_labels, source_bundle = _extract_quiz_labels(attempt)
+    evidence = extract_quiz_suggestion_evidence(attempt)
     context = build_quiz_suggestion_context(
         quiz_attempt={
             "id": int(attempt["id"]),
@@ -177,22 +104,26 @@ def _build_quiz_snapshot_payload(note_db: CharactersRAGDB, anchor_id: int) -> tu
             "total_questions": len(questions),
             "question_results": question_results,
         },
-        source_bundle=source_bundle,
+        source_bundle=evidence["source_bundle"],
     )
     candidates = resolve_topic_candidates(
-        source_labels=source_labels,
-        tag_labels=tag_labels,
-        derived_labels=derived_labels,
+        source_labels=evidence["source_labels"],
+        tag_labels=evidence["tag_labels"],
+        derived_labels=evidence["derived_labels"],
     )
     ranked_topics = rank_suggestion_topics(
         candidates,
-        weakness_labels=weakness_labels,
-        adjacent_labels=adjacent_labels,
-        exploratory_labels=derived_labels,
+        weakness_labels=evidence["weakness_labels"],
+        adjacent_labels=evidence["adjacent_labels"],
+        exploratory_labels=evidence["derived_labels"],
     )
     topics: list[dict[str, Any]] = []
     for index, topic in enumerate(ranked_topics[:6], start=1):
-        source = _find_quiz_topic_source(topic.canonical_label, context.source_bundle)
+        source = _find_quiz_topic_source(
+            [*topic.raw_labels, topic.canonical_label, topic.semantic_label],
+            context.source_bundle,
+            allow_fallback=False,
+        )
         raw_label = topic.raw_labels[0] if topic.raw_labels else topic.canonical_label
         item: dict[str, Any] = {
             "id": f"topic-{index}",
@@ -200,6 +131,11 @@ def _build_quiz_snapshot_payload(note_db: CharactersRAGDB, anchor_id: int) -> tu
             "type": topic.evidence_class,
             "status": topic.rank_reason,
             "selected": topic.rank_reason == "weakness",
+            "topic_key": topic.topic_key,
+            "normalization_version": topic.normalization_version,
+            "canonical_label": topic.canonical_label,
+            "evidence_reasons": list(topic.evidence_reasons),
+            "source_count": topic.source_count,
         }
         if source:
             item["source_type"] = source["source_type"]
@@ -207,15 +143,7 @@ def _build_quiz_snapshot_payload(note_db: CharactersRAGDB, anchor_id: int) -> tu
         topics.append(item)
 
     if not topics:
-        topics.append(
-            {
-                "id": "topic-1",
-                "display_label": "Review",
-                "type": "derived",
-                "status": "candidate",
-                "selected": False,
-            }
-        )
+        topics.append(_fallback_topic_item(index=1, display_label="Review"))
 
     payload = {
         "summary": {
@@ -232,54 +160,76 @@ def _build_quiz_snapshot_payload(note_db: CharactersRAGDB, anchor_id: int) -> tu
 
 
 def _build_flashcard_snapshot_payload(note_db: CharactersRAGDB, anchor_id: int) -> tuple[str, str, dict[str, Any]]:
-    session = note_db.get_flashcard_review_session(int(anchor_id))
-    if not session:
+    session_rollup = note_db.get_flashcard_review_session_rollup(int(anchor_id))
+    if not session_rollup:
         raise ConflictError("Flashcard review session not found", entity="flashcard_review_sessions", identifier=anchor_id)  # noqa: TRY003
 
-    context = build_flashcard_suggestion_context(
-        {
-            **session,
-            "cards_reviewed": 0,
-            "correct_count": 0,
-            "source_bundle": [],
-        }
-    )
-    derived_labels = []
-    if session.get("tag_filter"):
-        derived_labels.append(str(session["tag_filter"]))
-    if session.get("deck_id"):
-        deck = note_db.get_deck(int(session["deck_id"]))
+    provenance: dict[str, Any] = {
+        "source_bundle": session_rollup.get("source_bundle") or [],
+    }
+    if session_rollup.get("study_pack_id") is not None:
+        provenance["study_pack_id"] = session_rollup.get("study_pack_id")
+        study_pack = note_db.get_study_pack(int(session_rollup["study_pack_id"]))
+        if study_pack:
+            provenance["study_pack"] = study_pack
+    if session_rollup.get("deck_id") is not None:
+        deck = note_db.get_deck(int(session_rollup["deck_id"]))
         if deck and deck.get("name"):
-            derived_labels.append(str(deck["name"]))
-    if not derived_labels:
-        derived_labels.append("spaced repetition")
+            provenance["deck_name"] = str(deck["name"])
+    reviewed_cards = note_db.get_flashcard_reviewed_cards(int(anchor_id))
+    if reviewed_cards:
+        provenance["reviewed_cards"] = reviewed_cards
+
+    context = build_flashcard_suggestion_context(
+        session_rollup,
+        provenance=provenance,
+    )
+    evidence = extract_flashcard_suggestion_evidence(
+        session_rollup,
+        provenance=provenance,
+    )
 
     candidates = resolve_topic_candidates(
-        source_labels=[],
-        tag_labels=[session["tag_filter"]] if session.get("tag_filter") else [],
-        derived_labels=derived_labels,
+        source_labels=evidence["source_labels"],
+        tag_labels=evidence["tag_labels"],
+        derived_labels=evidence["derived_labels"],
     )
     ranked_topics = rank_suggestion_topics(
         candidates,
-        weakness_labels=[],
-        adjacent_labels=[session["tag_filter"]] if session.get("tag_filter") else [],
-        exploratory_labels=derived_labels,
+        weakness_labels=evidence["weakness_labels"],
+        adjacent_labels=evidence["adjacent_labels"],
+        exploratory_labels=evidence["derived_labels"],
     )
-    topics = [
-        {
+    topics: list[dict[str, Any]] = []
+    for index, topic in enumerate(ranked_topics[:4], start=1):
+        source = _find_quiz_topic_source(
+            [*topic.raw_labels, topic.canonical_label, topic.semantic_label],
+            evidence["source_bundle"],
+            allow_fallback=False,
+        )
+        item: dict[str, Any] = {
             "id": f"topic-{index}",
             "display_label": _titleize_label(topic.raw_labels[0] if topic.raw_labels else topic.canonical_label),
             "type": topic.evidence_class,
             "status": topic.rank_reason,
             "selected": topic.rank_reason == "adjacent",
+            "topic_key": topic.topic_key,
+            "normalization_version": topic.normalization_version,
+            "canonical_label": topic.canonical_label,
+            "evidence_reasons": list(topic.evidence_reasons),
+            "source_count": topic.source_count,
         }
-        for index, topic in enumerate(ranked_topics[:4], start=1)
-    ]
+        if source:
+            item["source_type"] = source["source_type"]
+            item["source_id"] = source["source_id"]
+        topics.append(item)
+    if not topics:
+        topics.append(_fallback_topic_item(index=1, display_label="Spaced repetition", status="exploratory"))
     payload = {
         "summary": {
             "deck_id": context.summary_metrics.get("deck_id"),
-            "correct_count": 0,
-            "total_count": 0,
+            "correct_count": int(context.summary_metrics.get("correct_count") or 0),
+            "total_count": int(context.summary_metrics.get("cards_reviewed") or 0),
         },
         "counts": {
             "topic_count": len(topics),

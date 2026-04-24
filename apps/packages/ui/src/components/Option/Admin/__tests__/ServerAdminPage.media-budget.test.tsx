@@ -1,6 +1,6 @@
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import ServerAdminPage from "../ServerAdminPage"
 
 const apiMock = vi.hoisted(() => ({
@@ -163,13 +163,14 @@ describe("ServerAdminPage media budget diagnostics", () => {
 
     render(<ServerAdminPage />)
 
-    expect(
-      await screen.findByText(
-        "System statistics took longer than 10 seconds. Retry to try again."
-      )
-    ).toBeTruthy()
+    const timeoutMessage = await screen.findByText(
+      "System statistics took longer than 10 seconds. Retry to try again."
+    )
+    expect(timeoutMessage).toBeTruthy()
 
-    const retryButton = screen.getAllByRole("button", { name: "Retry" })[0]
+    const retryButton = within(
+      timeoutMessage.closest(".ant-alert") as HTMLElement
+    ).getByRole("button", { name: "Retry" })
     fireEvent.click(retryButton)
 
     await waitFor(() => {

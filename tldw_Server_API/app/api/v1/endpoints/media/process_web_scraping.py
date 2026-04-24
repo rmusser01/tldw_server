@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import contextlib
-from typing import Any
+import inspect
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
@@ -14,14 +16,33 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
-from tldw_Server_API.app.api.v1.endpoints import media as media_mod
 from tldw_Server_API.app.api.v1.schemas.media_request_models import WebScrapingRequest
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
-from tldw_Server_API.app.services.web_scraping_service import (
-    process_web_scraping_task,
-)
+from tldw_Server_API.app.services.web_scraping_service import process_web_scraping_task
 
 router = APIRouter()
+
+WebScrapingTask = Callable[..., Awaitable[Any]]
+
+
+def _resolve_process_web_scraping_task() -> WebScrapingTask:
+    """Return the active web scraping task, honoring the media shim when patched."""
+    # Compatibility shim: older integration tests monkeypatch
+    # media.process_web_scraping_task at package scope.
+    from tldw_Server_API.app.api.v1.endpoints import media as media_mod
+
+    shim_task = getattr(media_mod, "process_web_scraping_task", None)
+    if callable(shim_task) and (
+        inspect.iscoroutinefunction(shim_task)
+        or inspect.iscoroutinefunction(getattr(shim_task, "__call__", None))
+    ):
+        return cast(WebScrapingTask, shim_task)
+    if shim_task is not None:
+        logger.warning(
+            "Ignoring non-async media.process_web_scraping_task shim: {}",
+            shim_task,
+        )
+    return process_web_scraping_task
 
 
 @router.post(
@@ -43,9 +64,8 @@ async def process_web_scraping_endpoint(
     then either store ephemeral or persist in DB.
 
     This is the modular implementation of `/process-web-scraping`, mirroring
-    the legacy behavior while routing through the `media` package and using
-    direct media/service task resolution so tests can patch
-    `media.process_web_scraping_task`.
+    the legacy behavior while routing through a local resolver seam so tests
+    can patch deterministic task resolution.
     """
     try:
         # Usage logging is best-effort; never fail the request.
@@ -60,9 +80,7 @@ async def process_web_scraping_endpoint(
                 },
             )
 
-        # Resolve the scraping task from media first so tests can monkeypatch
-        # `media.process_web_scraping_task` without a separate shim module.
-        task = getattr(media_mod, "process_web_scraping_task", process_web_scraping_task)
+        task = _resolve_process_web_scraping_task()
 
         result = await task(
             scrape_method=payload.scrape_method,

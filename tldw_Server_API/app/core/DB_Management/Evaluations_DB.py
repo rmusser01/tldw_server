@@ -12,6 +12,7 @@ import json
 import importlib.util
 import os
 import sqlite3
+import threading
 import uuid
 from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
@@ -38,7 +39,10 @@ from tldw_Server_API.app.core.DB_Management.backends.query_utils import (
     prepare_backend_many_statement,
     prepare_backend_statement,
 )
-from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend
+from tldw_Server_API.app.core.DB_Management.content_backend import (
+    backend_target_key,
+    get_content_backend,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
 _EVAL_DB_NONCRITICAL_EXCEPTIONS = (
@@ -208,6 +212,8 @@ class _EvaluationsBackendConnection:
 class EvaluationsDatabase:
     """Database manager for evaluations system (SQLite or PostgreSQL)."""
 
+    _bootstrapped_backend_targets: set[str] = set()
+
     def __init__(self, db_path: Optional[str], *, backend: Optional[DatabaseBackend] = None):
         # Default to per-user evaluations DB path when not provided
         if not db_path:
@@ -218,15 +224,12 @@ class EvaluationsDatabase:
                 db_path = "Databases/evaluations.db"
         self.db_path = db_path
         # Resolve backend (content backend by default)
-        self.backend: Optional[DatabaseBackend] = backend
-        if self.backend is None:
-            try:
-                cfg = load_comprehensive_config()
-                self.backend = get_content_backend(cfg)
-            except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
-                self.backend = None
-
-        self.backend_type: BackendType = self.backend.backend_type if self.backend else BackendType.SQLITE
+        self._backend: Optional[DatabaseBackend] = backend
+        self._uses_shared_content_backend = False
+        self._local = threading.local()
+        self._backend_refresh_suspended = False
+        if self._backend is None:
+            self._backend, self._uses_shared_content_backend = self._resolve_backend()
 
         self._abtest_store = None
 
@@ -234,7 +237,9 @@ class EvaluationsDatabase:
             self._initialize_database()
             self._apply_migrations()
         else:
-            self._initialize_database_postgres()
+            if self._backend is None:
+                raise RuntimeError("Evaluations backend is not configured")
+            self._ensure_bootstrap_for_backend(self._backend)
         self._init_abtest_store()
 
     @contextmanager
@@ -256,12 +261,88 @@ class EvaluationsDatabase:
 
         if self.backend is None:
             raise RuntimeError("Evaluations backend is not configured")
-        raw = self.backend.get_pool().get_connection()
+        backend = self.backend
+        raw = backend.get_pool().get_connection()
+        previous_backend = getattr(self._local, "backend_pin", None)
+        self._local.backend_pin = backend
         try:
             yield _EvaluationsBackendConnection(self, raw)
         finally:
             with suppress(_EVAL_DB_NONCRITICAL_EXCEPTIONS):
-                self.backend.get_pool().return_connection(raw)
+                backend.get_pool().return_connection(raw)
+            if previous_backend is None:
+                with suppress(AttributeError):
+                    del self._local.backend_pin
+            else:
+                self._local.backend_pin = previous_backend
+
+    @property
+    def backend(self) -> Optional[DatabaseBackend]:
+        pinned_backend = getattr(self._local, "backend_pin", None)
+        if pinned_backend is not None:
+            return pinned_backend
+        if not self._uses_shared_content_backend:
+            return self._backend
+        if self._backend_refresh_suspended:
+            return self._backend
+        current_key = self._backend_target_key(self._backend)
+        refreshed_backend, uses_shared_backend = self._resolve_backend()
+        self._uses_shared_content_backend = uses_shared_backend
+        self._backend = refreshed_backend
+        refreshed_key = self._backend_target_key(refreshed_backend)
+        if (
+            uses_shared_backend
+            and refreshed_backend is not None
+            and refreshed_backend.backend_type == BackendType.POSTGRESQL
+            and refreshed_key != current_key
+        ):
+            self._ensure_bootstrap_for_backend(refreshed_backend)
+            self._abtest_store = None
+            self._init_abtest_store()
+        return self._backend
+
+    @property
+    def backend_type(self) -> BackendType:
+        backend = self.backend
+        return backend.backend_type if backend else BackendType.SQLITE
+
+    def _resolve_backend(self) -> tuple[Optional[DatabaseBackend], bool]:
+        try:
+            cfg = load_comprehensive_config()
+        except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
+            return None, False
+
+        try:
+            backend = get_content_backend(cfg)
+        except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
+            return None, False
+        if backend is None:
+            return None, False
+        return backend, backend.backend_type == BackendType.POSTGRESQL
+
+    def _backend_target_key(self, backend: Optional[DatabaseBackend]) -> str | None:
+        return backend_target_key(backend)
+
+    def _mark_backend_bootstrapped(self, backend: Optional[DatabaseBackend]) -> None:
+        key = self._backend_target_key(backend)
+        if key:
+            type(self)._bootstrapped_backend_targets.add(key)
+
+    def _ensure_bootstrap_for_backend(self, backend: DatabaseBackend) -> None:
+        if backend.backend_type != BackendType.POSTGRESQL:
+            return
+        key = self._backend_target_key(backend)
+        if key in type(self)._bootstrapped_backend_targets:
+            return
+        previous_suspend = self._backend_refresh_suspended
+        self._backend_refresh_suspended = True
+        try:
+            self._backend = backend
+            self._initialize_database_postgres()
+        finally:
+            self._backend_refresh_suspended = previous_suspend
+        if key:
+            type(self)._bootstrapped_backend_targets.add(key)
 
     # --- Backend helpers ---
     def _prepare_backend_statement(self, query: str, params: Optional[Any] = None) -> tuple[str, Optional[Any]]:

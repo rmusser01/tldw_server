@@ -90,6 +90,7 @@ const biologyDeck = {
   id: 1,
   name: "Biology",
   description: "Cells",
+  review_prompt_side: "front",
   deleted: false,
   client_id: "test",
   version: 2,
@@ -102,6 +103,7 @@ const chemistryDeck = {
   id: 2,
   name: "Chemistry",
   description: "Atoms",
+  review_prompt_side: "back",
   deleted: false,
   client_id: "test",
   version: 5,
@@ -145,9 +147,19 @@ describe("SchedulerTab editor", () => {
   })
 
   it("applies presets, copies another deck, and resets to defaults", async () => {
+    updateDeckMock
+      .mockResolvedValueOnce({
+        ...biologyDeck,
+        version: 3,
+        review_prompt_side: "back",
+        scheduler_settings: chemistrySettings
+      })
+
     render(<SchedulerTab isActive />)
 
     expect(screen.getByTestId("deck-scheduler-editor-field-new-steps")).toHaveValue("1, 10")
+    fireEvent.mouseDown(screen.getByLabelText("Review prompt side"))
+    fireEvent.click(screen.getByText("Back first"))
 
     fireEvent.click(screen.getByRole("button", { name: /fast acquisition/i }))
     expect(screen.getByTestId("deck-scheduler-editor-field-new-steps")).toHaveValue("1, 5, 15")
@@ -158,9 +170,25 @@ describe("SchedulerTab editor", () => {
     fireEvent.click(screen.getByRole("button", { name: /copy settings/i }))
     expect(screen.getByTestId("deck-scheduler-editor-field-new-steps")).toHaveValue("2, 20")
 
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+    await waitFor(() =>
+      expect(updateDeckMock).toHaveBeenCalledWith({
+        deckId: 1,
+        update: {
+          review_prompt_side: "back",
+          scheduler_type: "sm2_plus",
+          scheduler_settings: chemistrySettings,
+          expected_version: 2
+        }
+      })
+    )
+
     fireEvent.click(screen.getByTestId("deck-scheduler-editor-reset"))
     expect(screen.getByTestId("deck-scheduler-editor-field-new-steps")).toHaveValue("1, 10")
     expect(screen.getByTestId("deck-scheduler-editor-field-leech-threshold")).toHaveValue("8")
+    expect(screen.getByTestId("deck-study-defaults-review-prompt-side")).toHaveTextContent(
+      "Back first"
+    )
   })
 
   it("blocks save when client validation fails", async () => {
@@ -179,6 +207,7 @@ describe("SchedulerTab editor", () => {
     updateDeckMock.mockResolvedValue({
       ...biologyDeck,
       version: 3,
+      review_prompt_side: "front",
       scheduler_settings: {
         ...biologySettings,
         sm2_plus: {
@@ -199,6 +228,7 @@ describe("SchedulerTab editor", () => {
       expect(updateDeckMock).toHaveBeenCalledWith({
         deckId: 1,
         update: {
+          review_prompt_side: "front",
           scheduler_type: "sm2_plus",
           scheduler_settings: {
             sm2_plus: {
@@ -220,6 +250,36 @@ describe("SchedulerTab editor", () => {
     )
 
     expect(screen.getByText(/all changes saved/i)).toBeInTheDocument()
+  })
+
+  it("saves review prompt side changes with optimistic locking", async () => {
+    updateDeckMock.mockResolvedValue({
+      ...biologyDeck,
+      version: 3,
+      review_prompt_side: "back"
+    })
+
+    render(<SchedulerTab isActive />)
+
+    fireEvent.mouseDown(screen.getByLabelText("Review prompt side"))
+    fireEvent.click(screen.getByText("Back first"))
+
+    expect(screen.getByText(/unsaved changes/i)).toBeInTheDocument()
+    expect(screen.queryByText(/all changes saved/i)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+
+    await waitFor(() =>
+      expect(updateDeckMock).toHaveBeenCalledWith({
+        deckId: 1,
+        update: {
+          review_prompt_side: "back",
+          scheduler_type: "sm2_plus",
+          scheduler_settings: biologySettings,
+          expected_version: 2
+        }
+      })
+    )
   })
 
   it("offers reload and reapply actions after a version conflict", async () => {

@@ -193,30 +193,16 @@ describe("WorldBooksManager entry drawer stage-1 behavior", () => {
     vi.clearAllMocks()
   })
 
-  it("uses responsive drawer sizing for desktop and mobile", async () => {
-    const user = userEvent.setup()
-    render(<WorldBooksManager />)
-
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
-    await waitFor(() => {
-      const drawer = document.querySelector(".ant-drawer-content-wrapper")
-      expect(drawer).toHaveStyle("width: 60vw")
-    })
-
-    await user.click(screen.getByLabelText("Close"))
-    mockBreakpoints.md = false
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
-    await waitFor(() => {
-      const drawer = document.querySelector(".ant-drawer-content-wrapper")
-      expect(drawer).toHaveStyle("width: 100%")
-    })
-  }, 30000)
+  it.skip("uses responsive drawer sizing for desktop and mobile - SKIP: entries moved from drawer to detail panel", () => {
+    // Drawer replaced by detail panel in two-panel layout
+  })
 
   it("virtualizes large entry lists and preserves selection/edit actions", async () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
     const keywordsHeader = await screen.findByRole("columnheader", { name: "Keywords" })
 
     const rows = document.querySelectorAll("tbody tr")

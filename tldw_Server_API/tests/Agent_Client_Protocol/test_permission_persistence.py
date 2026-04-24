@@ -465,6 +465,8 @@ class TestPermissionDecisionsDB:
         assert tmp_db.list_permission_decisions(user_id=1) == []
 
     def test_schema_version_is_9(self, tmp_db):
+        from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import _SCHEMA_VERSION
+
         conn = tmp_db._get_conn()
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 9
+        assert version == _SCHEMA_VERSION

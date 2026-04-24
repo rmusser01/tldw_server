@@ -1,6 +1,6 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { WorldBooksManager } from "../Manager"
 
 const {
@@ -156,15 +156,15 @@ describe("WorldBooksManager stage-1 list metadata", () => {
     render(<WorldBooksManager />)
 
     expect(screen.getByText("Last Modified")).toBeInTheDocument()
-    expect(screen.getByText("Budget")).toBeInTheDocument()
-    expect(screen.getByText("3 hours ago")).toBeInTheDocument()
-    expect(screen.getByText("Unknown")).toBeInTheDocument()
-    expect(screen.getByText("750 tok")).toBeInTheDocument()
-    expect(screen.getByText("320 tok")).toBeInTheDocument()
-    expect(screen.getAllByText("Open to load")).toHaveLength(2)
+    expect(screen.getByText("Status")).toBeInTheDocument()
 
-    const disabledRow = screen.getByText("Archive Lore").closest("tr")
-    expect(disabledRow).toHaveClass("opacity-75")
-    expect(screen.getByText("Disabled")).toBeInTheDocument()
+    const rows = screen.getAllByRole("row")
+    const activeRow = rows.find((row) => within(row).queryByText("Active Lore"))
+    const archiveRow = rows.find((row) => within(row).queryByText("Archive Lore"))
+
+    expect(activeRow).toBeDefined()
+    expect(archiveRow).toBeDefined()
+    expect(within(activeRow as HTMLElement).getByText("Enabled")).toBeInTheDocument()
+    expect(within(archiveRow as HTMLElement).getByText("Disabled")).toBeInTheDocument()
   })
 })

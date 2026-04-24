@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 
 
 DEFAULT_GENERATOR_VERSION = "v1"
+LEGACY_NORMALIZATION_VERSION = "legacy"
 PENDING_GENERATION_TARGET_PREFIX = "pending:"
 FOLLOW_UP_ACTION_CONTRACTS = {
     "follow_up_quiz": {
@@ -38,6 +39,65 @@ def normalize_selected_topics(selected_topics: Iterable[object]) -> list[str]:
     return sorted(normalized)
 
 
+def _iter_snapshot_topics(snapshot_row: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    payload = snapshot_row.get("payload_json") or {}
+    topics = payload.get("topics") if isinstance(payload, Mapping) else []
+    return [topic for topic in topics if isinstance(topic, Mapping)] if isinstance(topics, list) else []
+
+
+def _iter_selected_snapshot_topics(
+    snapshot_row: Mapping[str, Any],
+    *,
+    selected_topic_ids: Iterable[object],
+    has_explicit_selection: bool = False,
+) -> list[Mapping[str, Any]]:
+    topics = _iter_snapshot_topics(snapshot_row)
+    selected_ids = {str(topic_id).strip() for topic_id in selected_topic_ids if str(topic_id).strip()}
+    use_default_selected = not has_explicit_selection and not selected_ids
+
+    selected_topics: list[Mapping[str, Any]] = []
+    for topic in topics:
+        topic_id = str(topic.get("id") or "").strip()
+        if use_default_selected:
+            if not bool(topic.get("selected")):
+                continue
+        elif topic_id not in selected_ids:
+            continue
+        selected_topics.append(topic)
+    return selected_topics
+
+
+def _resolve_topic_semantic_key(topic: Mapping[str, Any]) -> str:
+    for field_name in ("topic_key", "canonical_label", "display_label"):
+        value = str(topic.get(field_name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _topic_identity_tokens(topic: Mapping[str, Any]) -> frozenset[str]:
+    identities = {
+        normalized
+        for field_name in ("topic_key", "canonical_label", "display_label")
+        if (normalized := _normalize_text(topic.get(field_name)))
+    }
+    return frozenset(identities)
+
+
+def _resolve_normalization_version_values(values: Iterable[object]) -> str:
+    normalized = normalize_selected_topics(values)
+    return ",".join(normalized) if normalized else LEGACY_NORMALIZATION_VERSION
+
+
+def _resolve_snapshot_normalization_version(snapshot_row: Mapping[str, Any]) -> str:
+    versions = [
+        str(topic.get("normalization_version") or "").strip()
+        for topic in _iter_snapshot_topics(snapshot_row)
+        if str(topic.get("normalization_version") or "").strip()
+    ]
+    return _resolve_normalization_version_values(versions)
+
+
 def build_selection_fingerprint(
     *,
     snapshot_id: int,
@@ -46,21 +106,27 @@ def build_selection_fingerprint(
     selected_topics: Iterable[object],
     action_kind: str,
     generator_version: str | None = None,
+    normalization_version: str | None = None,
+    include_normalization_version: bool = True,
 ) -> str:
     """Build a stable, human-readable fingerprint for one follow-up action selection."""
 
     normalized_topics = normalize_selected_topics(selected_topics)
     resolved_generator_version = _normalize_text(generator_version or DEFAULT_GENERATOR_VERSION) or DEFAULT_GENERATOR_VERSION
-    return "|".join(
-        (
-            f"snapshot_id={int(snapshot_id)}",
-            f"target_service={_normalize_text(target_service)}",
-            f"target_type={_normalize_text(target_type)}",
-            f"topics={','.join(normalized_topics)}",
-            f"action_kind={_normalize_text(action_kind)}",
-            f"generator_version={resolved_generator_version}",
-        )
+    resolved_normalization_version = _resolve_normalization_version_values(
+        [normalization_version] if normalization_version is not None else []
     )
+    components = [
+        f"snapshot_id={int(snapshot_id)}",
+        f"target_service={_normalize_text(target_service)}",
+        f"target_type={_normalize_text(target_type)}",
+        f"topics={','.join(normalized_topics)}",
+        f"action_kind={_normalize_text(action_kind)}",
+        f"generator_version={resolved_generator_version}",
+    ]
+    if include_normalization_version:
+        components.append(f"normalization_version={resolved_normalization_version}")
+    return "|".join(components)
 
 
 def canonicalize_follow_up_action(
@@ -103,9 +169,6 @@ def resolve_selected_topic_labels(
 ) -> list[str]:
     """Resolve requested topic ids into display labels from the frozen snapshot payload."""
 
-    payload = snapshot_row.get("payload_json") or {}
-    topics = payload.get("topics") if isinstance(payload, Mapping) else []
-    selected_ids = {str(topic_id).strip() for topic_id in selected_topic_ids if str(topic_id).strip()}
     edit_labels: dict[str, str] = {}
     for item in selected_topic_edits or []:
         if not isinstance(item, Mapping):
@@ -115,22 +178,134 @@ def resolve_selected_topic_labels(
         if topic_id and topic_label:
             edit_labels[topic_id] = topic_label
     manual_labels = normalize_selected_topics(manual_topic_labels or [])
-    use_default_selected = not has_explicit_selection and not selected_ids
     labels: list[str] = []
-    for topic in topics if isinstance(topics, list) else []:
-        if not isinstance(topic, Mapping):
-            continue
+    for topic in _iter_selected_snapshot_topics(
+        snapshot_row,
+        selected_topic_ids=selected_topic_ids,
+        has_explicit_selection=has_explicit_selection,
+    ):
         topic_id = str(topic.get("id") or "").strip()
-        if use_default_selected:
-            if not bool(topic.get("selected")):
-                continue
-        elif topic_id and topic_id not in selected_ids:
-            continue
         label = edit_labels.get(topic_id) or str(topic.get("display_label") or "").strip()
         if label:
             labels.append(label)
     labels.extend(manual_labels)
     return normalize_selected_topics(labels)
+
+
+def resolve_selected_topic_semantic_keys(
+    snapshot_row: Mapping[str, Any],
+    *,
+    selected_topic_ids: Iterable[object],
+    manual_topic_labels: Iterable[object] | None = None,
+    has_explicit_selection: bool = False,
+) -> list[str]:
+    """Resolve selected snapshot rows into semantic keys for fingerprinting."""
+
+    manual_labels = normalize_selected_topics(manual_topic_labels or [])
+    semantic_keys: list[str] = []
+    for topic in _iter_selected_snapshot_topics(
+        snapshot_row,
+        selected_topic_ids=selected_topic_ids,
+        has_explicit_selection=has_explicit_selection,
+    ):
+        semantic_key = _resolve_topic_semantic_key(topic)
+        if semantic_key:
+            semantic_keys.append(semantic_key)
+    semantic_keys.extend(manual_labels)
+    return normalize_selected_topics(semantic_keys)
+
+
+def resolve_selected_topic_normalization_version(
+    snapshot_row: Mapping[str, Any],
+    *,
+    selected_topic_ids: Iterable[object],
+    has_explicit_selection: bool = False,
+) -> str:
+    """Resolve the deterministic normalization-version contract for one selection."""
+
+    selected_versions = [
+        str(topic.get("normalization_version") or "").strip()
+        for topic in _iter_selected_snapshot_topics(
+            snapshot_row,
+            selected_topic_ids=selected_topic_ids,
+            has_explicit_selection=has_explicit_selection,
+        )
+        if str(topic.get("normalization_version") or "").strip()
+    ]
+    if selected_versions:
+        return _resolve_normalization_version_values(selected_versions)
+    return _resolve_snapshot_normalization_version(snapshot_row)
+
+
+def resolve_selected_topic_identity_groups(
+    snapshot_row: Mapping[str, Any],
+    *,
+    selected_topic_ids: Iterable[object],
+    has_explicit_selection: bool = False,
+) -> list[frozenset[str]]:
+    """Return comparable per-topic identity groups for refreshed-lineage matching."""
+
+    identity_groups: list[frozenset[str]] = []
+    for topic in _iter_selected_snapshot_topics(
+        snapshot_row,
+        selected_topic_ids=selected_topic_ids,
+        has_explicit_selection=has_explicit_selection,
+    ):
+        identities = _topic_identity_tokens(topic)
+        if identities:
+            identity_groups.append(identities)
+    return identity_groups
+
+
+def resolve_lineage_equivalent_topic_selection(
+    snapshot_row: Mapping[str, Any],
+    *,
+    requested_identity_groups: Iterable[Iterable[object]],
+) -> tuple[list[str], str] | None:
+    """Map the current semantic selection onto one ancestor snapshot's native topic identity."""
+
+    normalized_groups: list[frozenset[str]] = []
+    for group in requested_identity_groups:
+        normalized_group = normalize_selected_topics(group)
+        if normalized_group:
+            normalized_groups.append(frozenset(normalized_group))
+    if not normalized_groups:
+        return None
+
+    topics = _iter_snapshot_topics(snapshot_row)
+    matched_semantic_keys: list[str] = []
+    matched_versions: list[str] = []
+    used_topic_indexes: set[int] = set()
+
+    for identity_group in normalized_groups:
+        matched_index: int | None = None
+        for index, topic in enumerate(topics):
+            if index in used_topic_indexes:
+                continue
+            if _topic_identity_tokens(topic) & identity_group:
+                matched_index = index
+                break
+        if matched_index is None:
+            return None
+
+        matched_topic = topics[matched_index]
+        used_topic_indexes.add(matched_index)
+        semantic_key = _resolve_topic_semantic_key(matched_topic)
+        if semantic_key:
+            matched_semantic_keys.append(semantic_key)
+        normalization_version = str(matched_topic.get("normalization_version") or "").strip()
+        if normalization_version:
+            matched_versions.append(normalization_version)
+
+    if len(matched_semantic_keys) != len(normalized_groups):
+        return None
+
+    return (
+        normalize_selected_topics(matched_semantic_keys),
+        _resolve_normalization_version_values(matched_versions)
+        if matched_versions
+        else _resolve_snapshot_normalization_version(snapshot_row),
+    )
 
 
 def _titleize_label(value: object) -> str:
@@ -393,6 +568,7 @@ def soft_delete_deck(note_db: CharactersRAGDB, *, deck_id: int) -> None:
 __all__ = [
     "DEFAULT_GENERATOR_VERSION",
     "FOLLOW_UP_ACTION_CONTRACTS",
+    "LEGACY_NORMALIZATION_VERSION",
     "PENDING_GENERATION_TARGET_PREFIX",
     "build_flashcard_generation_payload",
     "build_follow_up_flashcard_deck_name",
@@ -406,6 +582,10 @@ __all__ = [
     "normalize_selected_topics",
     "release_generation_link_reservation",
     "reserve_generation_link",
+    "resolve_lineage_equivalent_topic_selection",
     "resolve_selected_topic_labels",
+    "resolve_selected_topic_identity_groups",
+    "resolve_selected_topic_normalization_version",
+    "resolve_selected_topic_semantic_keys",
     "soft_delete_deck",
 ]

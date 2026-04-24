@@ -8,6 +8,7 @@ shared DatabaseBackend abstraction.
 from __future__ import annotations
 
 import os
+import weakref
 from configparser import ConfigParser
 from dataclasses import dataclass
 
@@ -153,18 +154,36 @@ def load_content_db_settings(config: ConfigParser) -> ContentDatabaseSettings:
     )
 
 
+def backend_target_key(backend: DatabaseBackend | None) -> str | None:
+    """Return a stable identifier for a backend target across wrapper instances."""
+    if backend is None:
+        return None
+
+    config = getattr(backend, "config", None)
+    if backend.backend_type == BackendType.POSTGRESQL:
+        if config and getattr(config, "connection_string", None):
+            return str(config.connection_string)
+        if config:
+            host = getattr(config, "pg_host", None) or "localhost"
+            port = getattr(config, "pg_port", None) or 5432
+            database = getattr(config, "pg_database", None) or "<postgres>"
+            return f"{host}:{port}/{database}"
+        return f"postgres:{id(backend)}"
+
+    if config and getattr(config, "sqlite_path", None):
+        return str(config.sqlite_path)
+    return f"sqlite:{id(backend)}"
+
+
 _cached_backend = None
 _cached_backend_signature: tuple | None = None
+_retired_backend_finalizers: dict[int, weakref.finalize] = {}
 try:
-    from threading import RLock, Thread
+    from threading import RLock
+
     _cache_lock = RLock()
 except Exception:  # pragma: no cover
     _cache_lock = None  # type: ignore
-
-# Grace period (seconds) before closing a superseded backend pool.  This gives
-# in-flight requests that already hold a reference to the old backend time to
-# finish before its connection pool is torn down.
-_EVICTION_GRACE_SECONDS: float = 5.0
 
 
 def _close_backend_pool(backend: DatabaseBackend | None) -> None:
@@ -179,34 +198,69 @@ def _close_backend_pool(backend: DatabaseBackend | None) -> None:
         logger.warning("Failed to close superseded content backend pool: {}", exc)
 
 
-def _schedule_deferred_close(backend) -> None:
-    """Close *backend* after a short grace period in a background thread.
-
-    Instead of closing the pool immediately (which races with in-flight
-    callers that already obtained a reference), we wait
-    ``_EVICTION_GRACE_SECONDS`` before tearing it down.  The thread is
-    daemonic so it won't block interpreter shutdown.
-    """
+def _retire_backend_pool(backend: DatabaseBackend | None) -> None:
+    """Close a superseded backend only after active references release it."""
     if backend is None:
         return
 
-    import time
+    backend_id = id(backend)
 
-    def _deferred() -> None:
-        time.sleep(_EVICTION_GRACE_SECONDS)
-        _close_backend_pool(backend)
+    try:
+        pool = backend.get_pool()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to retire superseded content backend pool: {}", exc)
+        return
 
-    t = Thread(target=_deferred, daemon=True)
-    t.start()
+    def _close_retired_pool() -> None:
+        try:
+            pool.close_all()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to close retired content backend pool: {}", exc)
+        finally:
+            if _cache_lock is not None:
+                with _cache_lock:
+                    _retired_backend_finalizers.pop(backend_id, None)
+            else:
+                _retired_backend_finalizers.pop(backend_id, None)
+
+    if _cache_lock is not None:
+        with _cache_lock:
+            existing_finalizer = _retired_backend_finalizers.get(backend_id)
+            if existing_finalizer is not None and existing_finalizer.alive:
+                return
+            try:
+                _retired_backend_finalizers[backend_id] = weakref.finalize(
+                    backend,
+                    _close_retired_pool,
+                )
+            except TypeError:
+                _close_retired_pool()
+        return
+
+    existing_finalizer = _retired_backend_finalizers.get(backend_id)
+    if existing_finalizer is not None and existing_finalizer.alive:
+        return
+    try:
+        _retired_backend_finalizers[backend_id] = weakref.finalize(
+            backend,
+            _close_retired_pool,
+        )
+    except TypeError:
+        _close_retired_pool()
 
 
 def clear_cached_backend() -> None:
-    """Clear and close the currently cached shared content backend.
+    """Clear and retire the currently cached shared content backend.
 
     Acquires ``_cache_lock`` to avoid racing with concurrent
-    ``get_content_backend()`` calls that also mutate the cache.  The actual
-    pool close is deferred so that in-flight users of the old backend are
-    not disrupted.
+    ``get_content_backend()`` calls that also mutate the cache. The previous
+    backend is retired after being removed from the cache so future callers
+    cannot observe stale cached state while in-flight borrowers finish cleanly.
+
+    This is a controlled reconfiguration hook for tests, startup, and
+    admin-driven reloads. Consumers are expected to refresh shared PostgreSQL
+    backends between operations; callers should not rotate the cache while an
+    active operation is still holding a concrete backend reference.
     """
     global _cached_backend, _cached_backend_signature
 
@@ -220,7 +274,7 @@ def clear_cached_backend() -> None:
         _cached_backend = None
         _cached_backend_signature = None
 
-    _schedule_deferred_close(old_backend)
+    _retire_backend_pool(old_backend)
 
 
 def get_content_backend(config: ConfigParser):
@@ -259,10 +313,11 @@ def get_content_backend(config: ConfigParser):
             backend = DatabaseBackendFactory.create_backend(settings.database_config)
             _cached_backend = backend
             _cached_backend_signature = signature
-        # Deferred close *outside* the lock so the grace-period sleep does
-        # not block other cache operations.
+        # Retire the superseded backend after the cache update so callers no
+        # longer retrieve it from shared state, while existing borrowers can
+        # finish on their captured backend instance.
         if old_backend is not None and old_backend is not backend:
-            _schedule_deferred_close(old_backend)
+            _retire_backend_pool(old_backend)
         return backend
 
     # Fallback without lock (environments without threading)
@@ -273,5 +328,5 @@ def get_content_backend(config: ConfigParser):
     _cached_backend = backend
     _cached_backend_signature = signature
     if old_backend is not None and old_backend is not backend:
-        _schedule_deferred_close(old_backend)
+        _retire_backend_pool(old_backend)
     return backend

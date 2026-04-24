@@ -3,18 +3,16 @@ Tests for transparent compressed dump opening in MediaWiki importer.
 Verifies that .xml, .xml.gz, and .xml.bz2 are read as UTF-8 text.
 """
 
-import sys
-from pathlib import Path
-import gzip
 import bz2
+import gzip
+from pathlib import Path
 
 import pytest
 from typing import Optional
 
-# Add the parent directory to the path for imports (so 'app' is importable)
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from app.core.Ingestion_Media_Processing.MediaWiki.Media_Wiki import _open_dump_file_text
+from tldw_Server_API.app.core.Ingestion_Media_Processing.MediaWiki.Media_Wiki import (
+    _open_dump_file_text,
+)
 
 
 @pytest.mark.unit

@@ -35,7 +35,6 @@ _WEBHOOK_CLIENT_ERROR_CODES = frozenset(
         "verification_failed",
         "signature_invalid",
         "rate_limit_exceeded",
-        "secret_decryption_failed",
     }
 )
 
@@ -139,15 +138,23 @@ def _get_trigger_manager():
 def _sanitize_webhook_error_detail(result: dict[str, Any]) -> tuple[int, dict[str, str]]:
     status_value = str(result.get("status") or "error")
     raw_error = str(result.get("error") or "").strip()
-    error_code = raw_error if raw_error in _WEBHOOK_CLIENT_ERROR_CODES else "internal_error"
-    status_code = _WEBHOOK_ERROR_STATUS.get(error_code, 400 if status_value == "rejected" else 503)
+    if raw_error in _WEBHOOK_CLIENT_ERROR_CODES:
+        error_code = raw_error
+        status_code = _WEBHOOK_ERROR_STATUS.get(
+            error_code,
+            400 if status_value == "rejected" else 503,
+        )
+    else:
+        error_code = "internal_error"
+        status_code = 503
     return status_code, {"status": status_value, "error": error_code}
 
 
-def _sanitize_webhook_success_result(result: dict[str, Any]) -> dict[str, str]:
+def _sanitize_webhook_success_result(result: dict[str, Any]) -> dict[str, str | None]:
+    """Return the minimal public success payload for accepted webhooks."""
     return {
         "status": "accepted",
-        "task_id": str(result.get("task_id") or ""),
+        "task_id": str(result.get("task_id") or "").strip() or None,
     }
 
 

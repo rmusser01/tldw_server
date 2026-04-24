@@ -16,7 +16,10 @@ export type StudySuggestionStatusResponse = {
 
 export type StudySuggestionSnapshotTopic = {
   id: string
-  display_label: string
+  display_label?: string | null
+  topic_key?: string | null
+  canonical_label?: string | null
+  evidence_reasons?: string[] | null
   type?: string | null
   status?: string | null
   selected?: boolean | null

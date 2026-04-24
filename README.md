@@ -102,10 +102,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 
 ## Current Status
 
-Latest release:
-- 0.1.28 (2026-03-15) Beta status - expect rough edges;
-  * please report issues.
-- See `CHANGELOG.md` for release history.
+Current release line:
+- `0.1.31` Beta status. Expect rough edges and please report issues.
+- Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
+- The `dev` branch currently contains additional unreleased work beyond `0.1.31`; see [CHANGELOG.md](CHANGELOG.md) for branch-level detail and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -139,17 +139,27 @@ Latest release:
 
 ## What's New (in the last few releases)
 
-- FastAPI-first backend with OpenAI-compatible Chat, Audio (STT/TTS + voice catalog), Embeddings, and Evals APIs
-- Unified RAG + Evaluations modules (hybrid BM25 + vector with re-ranking; unified metrics)
-- Expanded audio stack: multi-provider TTS/STT, streaming, and audio jobs queue
-- MCP Unified module with JWT/RBAC, tool execution APIs, WebSockets, and metrics
-- Next.js WebUI and Admin UI (primary web client)
-- Research & ingestion upgrades: OCR, web search + academic search, connectors, outputs/artifacts, watchlists/workflows
-- Reminder tasks + in-app notifications inbox, including realtime SSE stream and snooze actions
-- Strict OpenAI compatibility mode for local/self-hosted providers
-- PostgreSQL content mode + backup/restore helpers; Prometheus/Grafana monitoring + admin usage reporting
+Recently shipped:
+- Evaluations Recipe Framework for guided retrieval tuning, answer-quality runs, and recipe-first eval workflows.
+- MCP Virtual CLI plus follow-on hardening for governed, workspace-bounded command execution.
+- Writing Suite Phase 1 with manuscript CRUD, TipTap editor surfaces, tree/focus mode, and reorder support.
+- Study Packs Phase 1 for jobs-backed study-material generation and remediation handoffs.
+- Container snapshot publishing to GHCR with a unified `container-build-check` rollup job.
+- FTUE / FTUX expansion across onboarding, LLM setup, chat, watchlists, MCP Hub, moderation, quiz, and flashcards.
+- Deep Research with jobs-backed runs, SSE progress, checkpoint review, and chat handoffs.
+- Shared workspace cloning plus "Shared With Me" flows and privilege-aware sharing rules.
+- Companion Home dashboard, notifications surfaces, and integrations / scheduled-task management.
+- MCP Hub governance pack management and broader ACP workspace discovery/health support.
+- Audio installer and bundle follow-through, including curated `kitten_tts` and `pocket_tts_cpp` paths.
 
-See: `Docs/Published/RELEASE_NOTES.md` for detailed release notes.
+Currently landing on `dev` (post-`0.1.31` branch work):
+- Writing Suite Phases 2-4 with characters, world info, plot/research tools, AI analysis, agent chat, and live writing feedback.
+- Persona-routed onboarding, Mission Control home flows, and storage quota warnings.
+- Browser web clipper support for capturing pages into the research workflow.
+- Study suggestions for quiz and flashcard workflows.
+- Additional sandbox / ACP ergonomics and `llama.cpp` / `chatllm` OCR backend expansion.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
 
 ## Privacy & Security
 
@@ -861,8 +871,7 @@ Examples
 │   ├── cli/                      # CLI entry points
 │   ├── Config_Files/             # config.txt, example YAMLs, migration helpers
 │   ├── Databases/                # Default DBs (runtime data; some are gitignored)
-│   ├── tests/                    # Pytest suite
-│   └── requirements.txt          # Legacy pin set (prefer pyproject extras)
+│   └── tests/                    # Pytest suite
 ├── admin-ui/                     # Admin dashboard
 ├── apps/tldw-frontend/                # Next.js WebUI (primary web client)
 ├── Docs/                         # Documentation (API, Development, RAG, AuthNZ, TTS, etc.)

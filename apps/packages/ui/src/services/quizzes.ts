@@ -4,6 +4,7 @@ import { createResourceClient } from "@/services/resource-client"
 import type {
   DeckSchedulerSettingsEnvelope,
   DeckSchedulerType,
+  DeckReviewPromptSide,
   StudyAssistantContextResponse,
   StudyAssistantRespondRequest,
   StudyAssistantRespondResponse
@@ -261,6 +262,7 @@ export type QuizRemediationConvertRequest = {
   question_ids: number[]
   target_deck_id?: number | null
   create_deck_name?: string | null
+  create_deck_review_prompt_side?: DeckReviewPromptSide
   create_deck_scheduler_type?: DeckSchedulerType | null
   create_deck_scheduler_settings?: DeckSchedulerSettingsEnvelope | null
   replace_active?: boolean

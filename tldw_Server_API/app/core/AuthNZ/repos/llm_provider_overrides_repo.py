@@ -16,9 +16,27 @@ class AuthnzLLMProviderOverridesRepo:
 
     db_pool: DatabasePool
 
+    async def _initialize_db_pool_if_needed(self) -> None:
+        """Ensure lazy DatabasePool instances decide their backend before schema checks."""
+        initialize = getattr(self.db_pool, "initialize", None)
+        if not callable(initialize):
+            return
+
+        if getattr(self.db_pool, "pool", None) is not None:
+            return
+
+        if getattr(self.db_pool, "db_path", None) is not None and getattr(
+            self.db_pool, "_initialized", None
+        ) is not False:
+            return
+
+        await initialize()
+
     async def ensure_tables(self) -> None:
         """Ensure llm_provider_overrides schema exists."""
         try:
+            await self._initialize_db_pool_if_needed()
+
             if getattr(self.db_pool, "pool", None) is not None:
                 from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
                     ensure_llm_provider_overrides_pg,

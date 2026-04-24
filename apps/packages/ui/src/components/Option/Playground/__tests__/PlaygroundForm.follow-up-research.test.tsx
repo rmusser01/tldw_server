@@ -907,7 +907,7 @@ describe("PlaygroundForm follow-up research", () => {
     playgroundFormMessageOptionState.value.temporaryChat = false
   })
 
-  it("keeps follow-up research disabled for empty drafts", () => {
+  it("hides follow-up research for empty drafts", () => {
     render(
       <PlaygroundForm
         droppedFiles={[]}
@@ -916,11 +916,11 @@ describe("PlaygroundForm follow-up research", () => {
     )
 
     expect(
-      screen.getByRole("button", { name: "Follow-up Research" })
-    ).toBeDisabled()
+      screen.queryByRole("button", { name: "Follow-up Research" })
+    ).not.toBeInTheDocument()
   })
 
-  it("keeps follow-up research disabled for temporary chats", () => {
+  it("hides follow-up research for temporary chats", () => {
     playgroundFormMessageOptionState.value.temporaryChat = true
 
     render(
@@ -931,8 +931,8 @@ describe("PlaygroundForm follow-up research", () => {
     )
 
     expect(
-      screen.getByRole("button", { name: "Follow-up Research" })
-    ).toBeDisabled()
+      screen.queryByRole("button", { name: "Follow-up Research" })
+    ).not.toBeInTheDocument()
   })
 
   it("opens the follow-up confirmation surface for a saved chat with attached background", async () => {
@@ -964,7 +964,7 @@ describe("PlaygroundForm follow-up research", () => {
     ).toBeEnabled()
   })
 
-  it("hides the attached-background toggle when no research context is attached", async () => {
+  it("hides follow-up research when no research context is attached", async () => {
     const user = userEvent.setup()
     render(<PlaygroundForm droppedFiles={[]} attachedResearchContext={null} />)
 
@@ -972,18 +972,10 @@ describe("PlaygroundForm follow-up research", () => {
       screen.getByTestId("composer-textarea"),
       "Investigate battery recycling"
     )
-    await user.click(
-      screen.getByRole("button", { name: "Follow-up Research" })
-    )
 
     expect(
-      screen.queryByRole("checkbox", {
-        name: "Use attached research as background"
-      })
+      screen.queryByRole("button", { name: "Follow-up Research" })
     ).not.toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: "Start research" })
-    ).toBeEnabled()
   })
 
   it("starts follow-up research once with bounded attached background", async () => {

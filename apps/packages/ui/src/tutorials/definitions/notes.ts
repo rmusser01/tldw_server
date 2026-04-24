@@ -41,7 +41,7 @@ const notesBasics: TutorialDefinition = {
       titleFallback: "Sort and Filter",
       contentKey: "tutorials:notes.basics.filtersContent",
       contentFallback:
-        "Sort by date/title and use notebook/keyword filters to narrow your working set.",
+        "Sort by date/title and use saved filter or tag filters to narrow your working set.",
       placement: "bottom"
     },
     {
@@ -60,6 +60,33 @@ const notesBasics: TutorialDefinition = {
       contentKey: "tutorials:notes.basics.saveContent",
       contentFallback:
         "Save updates, duplicate notes, export content, and run helper actions from the header.",
+      placement: "bottom"
+    },
+    {
+      target: '[data-testid="notes-keywords-editor"]',
+      titleKey: "tutorials:notes.basics.tagsTitle",
+      titleFallback: "Tags",
+      contentKey: "tutorials:notes.basics.tagsContent",
+      contentFallback:
+        "Add tags to organize your notes. Use the filter in the sidebar to find notes by tag.",
+      placement: "bottom"
+    },
+    {
+      target: '[data-testid="notes-section-connections"]',
+      titleKey: "tutorials:notes.basics.connectionsTitle",
+      titleFallback: "Note Connections",
+      contentKey: "tutorials:notes.basics.connectionsContent",
+      contentFallback:
+        "See how notes relate to each other. Type [[ in a note to create a link, or add manual connections here.",
+      placement: "left"
+    },
+    {
+      target: '[data-testid="notes-section-organize"]',
+      titleKey: "tutorials:notes.basics.organizeTitle",
+      titleFallback: "Collections and Filters",
+      contentKey: "tutorials:notes.basics.organizeContent",
+      contentFallback:
+        "Group notes into collections, or save tag filters for quick access to related notes.",
       placement: "bottom"
     }
   ]

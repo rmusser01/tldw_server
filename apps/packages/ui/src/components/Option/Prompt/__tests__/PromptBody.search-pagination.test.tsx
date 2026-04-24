@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { notification } from "antd"
-import { MemoryRouter, useLocation } from "react-router-dom"
+import { MemoryRouter, useLocation, useSearchParams } from "react-router-dom"
 import { PromptBody } from "../index"
 
 const state = vi.hoisted(() => ({
@@ -340,6 +340,20 @@ vi.mock("../PromptActionsMenu", () => ({
       >
         quick test
       </button>
+      <button
+        type="button"
+        data-testid={`mock-share-link-${props?.promptId || "unknown"}`}
+        onClick={() => props?.onShareLink?.()}
+      >
+        share link
+      </button>
+      <button
+        type="button"
+        data-testid={`mock-view-history-${props?.promptId || "unknown"}`}
+        onClick={() => props?.onViewHistory?.()}
+      >
+        view history
+      </button>
     </div>
   )
 }))
@@ -360,12 +374,24 @@ vi.mock("../Studio/StudioTabContainer", () => ({
   StudioTabContainer: () => <div data-testid="mock-studio-tab-container" />
 }))
 
+vi.mock("../Studio/Prompts/VersionHistoryDrawer", () => ({
+  VersionHistoryDrawer: (props: any) =>
+    props.open ? (
+      <div data-testid="mock-version-history-drawer">
+        {String(props.promptId ?? "no-prompt")}
+      </div>
+    ) : null
+}))
+
 const LocationProbe = () => {
   const location = useLocation()
   return <div data-testid="prompt-location-search">{location.search}</div>
 }
 
-const renderPromptBody = (initialEntries: string[] = ["/prompts"]) => {
+const renderPromptBody = (
+  initialEntries: string[] = ["/prompts"],
+  extraChildren?: React.ReactNode
+) => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -378,6 +404,7 @@ const renderPromptBody = (initialEntries: string[] = ["/prompts"]) => {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>
+        {extraChildren}
         <LocationProbe />
         <PromptBody />
       </MemoryRouter>
@@ -1062,6 +1089,44 @@ describe("PromptBody server search and pagination", () => {
     expect(promptStudioStore.setExecutePlaygroundOpen).toHaveBeenCalledWith(true)
   })
 
+  it("copies a share link from custom prompt actions for synced prompts", async () => {
+    const writeText = vi.fn(async () => undefined)
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    })
+
+    renderPromptBody()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("3")
+    })
+
+    fireEvent.click(screen.getByTestId("mock-share-link-local-1"))
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledTimes(1)
+    })
+    const copiedUrl = writeText.mock.calls[0]?.[0] as string
+    expect(copiedUrl).toContain("prompt=101")
+    expect(copiedUrl).toContain("source=studio")
+  })
+
+  it("opens version history in place from custom prompt actions", async () => {
+    renderPromptBody()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("3")
+    })
+
+    fireEvent.click(screen.getByTestId("mock-view-history-local-1"))
+
+    expect(screen.getByTestId("mock-version-history-drawer")).toHaveTextContent(
+      "101"
+    )
+    expect(mocks.navigate).not.toHaveBeenCalled()
+  })
+
   it("opens the edit drawer from prompt deep-link query parameter", async () => {
     state.prompts = [
       {
@@ -1120,6 +1185,100 @@ describe("PromptBody server search and pagination", () => {
     )
   })
 
+  it("handles later shared prompt deep-links after the first link is cleared", async () => {
+    const importedFirst = {
+      id: "imported-101",
+      name: "Imported Shared Prompt 101",
+      title: "Imported Shared Prompt 101",
+      content: "imported content 101",
+      is_system: false,
+      createdAt: 200,
+      serverId: 101,
+      keywords: []
+    }
+    const importedSecond = {
+      id: "imported-202",
+      name: "Imported Shared Prompt 202",
+      title: "Imported Shared Prompt 202",
+      content: "imported content 202",
+      is_system: false,
+      createdAt: 201,
+      serverId: 202,
+      keywords: []
+    }
+
+    const PromptLinkControls = () => {
+      const [, setSearchParams] = useSearchParams()
+      return (
+        <button
+          type="button"
+          data-testid="set-shared-prompt-202"
+          onClick={() => {
+            const next = new URLSearchParams()
+            next.set("prompt", "202")
+            next.set("source", "studio")
+            setSearchParams(next)
+          }}
+        >
+          open shared prompt 202
+        </button>
+      )
+    }
+
+    state.prompts = []
+    mocks.getAllPrompts.mockImplementation(async () => state.prompts)
+    mocks.pullFromStudio.mockImplementation(async (serverId?: string | number) => {
+      if (serverId === 101) {
+        state.prompts = [importedFirst]
+        return {
+          success: true,
+          localId: importedFirst.id,
+          syncStatus: "synced"
+        }
+      }
+
+      if (serverId === 202) {
+        state.prompts = [importedFirst, importedSecond]
+        return {
+          success: true,
+          localId: importedSecond.id,
+          syncStatus: "synced"
+        }
+      }
+
+      return {
+        success: false,
+        error: "unexpected prompt id",
+        syncStatus: "local"
+      }
+    })
+
+    renderPromptBody(
+      ["/prompts?prompt=101&source=studio"],
+      <PromptLinkControls />
+    )
+
+    await waitFor(() => {
+      expect(mocks.pullFromStudio).toHaveBeenCalledWith(101)
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-prompt-drawer")).toHaveTextContent(
+        "Imported Shared Prompt 101"
+      )
+    })
+
+    fireEvent.click(screen.getByTestId("set-shared-prompt-202"))
+
+    await waitFor(() => {
+      expect(mocks.pullFromStudio).toHaveBeenNthCalledWith(2, 202)
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-prompt-drawer")).toHaveTextContent(
+        "Imported Shared Prompt 202"
+      )
+    })
+  })
+
   it("warns when a shared prompt deep-link cannot be pulled from server", async () => {
     const warningSpy = vi.spyOn(notification, "warning")
     mocks.getAllPrompts.mockResolvedValue([])
@@ -1141,6 +1300,37 @@ describe("PromptBody server search and pagination", () => {
     await waitFor(() => {
       expect(screen.getByTestId("prompt-location-search").textContent).toBe("")
     })
+    warningSpy.mockRestore()
+  })
+
+  it("warns when a shared prompt import succeeds but local refresh fails", async () => {
+    const warningSpy = vi.spyOn(notification, "warning")
+    mocks.getAllPrompts
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error("refresh failed"))
+    mocks.pullFromStudio.mockResolvedValue({
+      success: true,
+      localId: "imported-1",
+      syncStatus: "synced"
+    })
+
+    renderPromptBody(["/prompts?prompt=101&source=studio"])
+
+    await waitFor(() => {
+      expect(mocks.pullFromStudio).toHaveBeenCalledWith(101)
+    })
+    await waitFor(() => {
+      expect(warningSpy).toHaveBeenCalled()
+    })
+
+    const latestWarning = warningSpy.mock.calls.at(-1)?.[0] as
+      | { message?: string; description?: string }
+      | undefined
+    expect(latestWarning?.message).toBe("Prompt imported but couldn't be opened")
+    expect(latestWarning?.description).toBe(
+      "The shared prompt was imported, but local prompts could not be refreshed. Refresh the page and try again."
+    )
+    expect(screen.queryByTestId("mock-prompt-drawer")).not.toBeInTheDocument()
     warningSpy.mockRestore()
   })
 

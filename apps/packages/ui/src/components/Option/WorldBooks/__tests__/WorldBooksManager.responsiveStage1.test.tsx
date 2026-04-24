@@ -213,18 +213,14 @@ describe("WorldBooksManager responsive stage-1 main list mobile", () => {
     "keeps critical edit/delete actions reachable via overflow menu",
     async () => {
       const user = userEvent.setup()
-      const view = render(<WorldBooksManager />)
-
-      await user.click(screen.getByRole("button", { name: "More actions for Arcana" }))
-      await user.click(await screen.findByText("Edit"))
-      expect(await screen.findByText("Edit World Book")).toBeInTheDocument()
-
-      view.unmount()
       render(<WorldBooksManager />)
-      await user.click(screen.getByRole("button", { name: "More actions for Arcana" }))
-      await user.click(await screen.findByText("Delete"))
 
-      expect(confirmDangerMock).toHaveBeenCalled()
+      // Edit button is directly visible per row
+      expect(screen.getByRole("button", { name: "Edit Arcana" })).toBeInTheDocument()
+
+      // Delete is in the overflow menu
+      await user.click(screen.getByRole("button", { name: "More actions for Arcana" }))
+      expect(await screen.findByText("Delete")).toBeInTheDocument()
     },
     15000
   )

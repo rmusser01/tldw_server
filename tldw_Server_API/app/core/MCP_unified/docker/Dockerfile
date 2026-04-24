@@ -32,7 +32,7 @@ FROM python:3.11-slim
 
 # Security: Run as non-root user
 RUN useradd -m -u 1000 -s /bin/bash mcp && \
-    mkdir -p /app /data/databases /data/logs /data/cache && \
+    mkdir -p /app /data/databases /data/logs /data/cache /data/media /data/transcripts && \
     chown -R mcp:mcp /app /data
 
 # Install runtime dependencies
@@ -51,14 +51,6 @@ WORKDIR /app
 
 # Copy application code
 COPY --chown=mcp:mcp tldw_Server_API/app /app
-
-# Create necessary directories
-RUN mkdir -p \
-    /data/databases \
-    /data/logs \
-    /data/cache \
-    /data/media \
-    /data/transcripts
 
 # Environment variables (defaults - override in deployment)
 ENV PYTHONPATH=/app \
@@ -88,10 +80,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 USER mcp
 
 # Entry point script
-COPY --chown=mcp:mcp docker/entrypoint.sh /entrypoint.sh
+COPY --chown=mcp:mcp tldw_Server_API/app/core/MCP_unified/docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
 
 # Default command
-CMD ["uvicorn", "core.MCP_unified.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

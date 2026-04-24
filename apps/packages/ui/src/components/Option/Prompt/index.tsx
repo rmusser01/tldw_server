@@ -111,6 +111,11 @@ const StudioTabContainer = React.lazy(() =>
     default: module.StudioTabContainer
   }))
 )
+const VersionHistoryDrawer = React.lazy(() =>
+  import("./Studio/Prompts/VersionHistoryDrawer").then((module) => ({
+    default: module.VersionHistoryDrawer
+  }))
+)
 
 type SegmentType = "custom" | "copilot" | "studio" | "trash"
 
@@ -212,8 +217,8 @@ export const PromptBody = () => {
   // Get initial segment from URL param
   const initialSegment = getSegmentFromParam(searchParams.get("tab"))
 
-  // Track if we've processed the initial prompt deep-link
-  const deepLinkProcessedRef = useRef(false)
+  // Track the last processed prompt deep-link so later prompt links still work.
+  const lastProcessedPromptIdRef = useRef<string | null>(null)
 
   // Handle ?project= filter for showing prompts from a specific project
   const projectFilter = searchParams.get("project")
@@ -251,6 +256,8 @@ export const PromptBody = () => {
   const [trashSearchText, setTrashSearchText] = useState("")
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [savedView, setSavedView] = useState<PromptSavedView>("all")
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false)
+  const [historyPromptId, setHistoryPromptId] = useState<number | null>(null)
   const { presets: filterPresets, savePreset: saveFilterPreset, deletePreset: deleteFilterPreset } = useFilterPresets()
   const { shouldShow: shouldShowHint, dismiss: dismissHint, markShown: markHintShown } = useContextualHints()
 
@@ -371,6 +378,8 @@ export const PromptBody = () => {
     selectedSegment, setSelectedSegment,
     hasStudio
   } = interactions
+  const selectedSegmentRef = useRef(selectedSegment)
+  selectedSegmentRef.current = selectedSegment
 
   // --- Effects ---
 
@@ -460,8 +469,14 @@ export const PromptBody = () => {
   // Handle ?prompt= deep-link for opening a specific prompt
   useEffect(() => {
     const promptId = searchParams.get("prompt")
-    if (!promptId || deepLinkProcessedRef.current) return
+    if (!promptId) {
+      lastProcessedPromptIdRef.current = null
+      return
+    }
+    if (lastProcessedPromptIdRef.current === promptId) return
     if (status !== "success" || !Array.isArray(data)) return
+
+    const source = searchParams.get("source")
 
     const clearPromptParam = () => {
       const newParams = new URLSearchParams(searchParams)
@@ -502,7 +517,7 @@ export const PromptBody = () => {
       })
     }
 
-    deepLinkProcessedRef.current = true
+    lastProcessedPromptIdRef.current = promptId
 
     // First try local prompt IDs.
     const localPromptRecord = data.find((p: any) => p.id === promptId)
@@ -511,7 +526,6 @@ export const PromptBody = () => {
       return
     }
 
-    const source = searchParams.get("source")
     const parsedServerPromptId = Number(promptId)
     const isServerPromptLink =
       Number.isInteger(parsedServerPromptId) &&
@@ -539,8 +553,18 @@ export const PromptBody = () => {
       })
     }
 
+    const notifyImportedButUnavailable = (description: string) => {
+      notification.warning({
+        message: t("managePrompts.notification.sharedPromptImportedUnavailable", {
+          defaultValue: "Prompt imported but couldn't be opened"
+        }),
+        description
+      })
+    }
+
     if (isOnline && isServerPromptLink) {
       clearPromptParam()
+      const segmentAtStart = selectedSegmentRef.current
       void (async () => {
         const syncResult = await pullFromStudio(parsedServerPromptId)
         if (!syncResult.success) {
@@ -566,37 +590,41 @@ export const PromptBody = () => {
               item?.serverId === parsedServerPromptId
           )
           if (!importedPrompt) {
-            notification.warning({
-              message: t("managePrompts.notification.promptNotFound", {
-                defaultValue: "Prompt not found"
-              }),
-              description: t("managePrompts.notification.sharedPromptImportMissing", {
+            notifyImportedButUnavailable(
+              t("managePrompts.notification.sharedPromptImportedMissingLocalDesc", {
                 defaultValue:
-                  "The shared prompt was fetched, but could not be loaded locally."
+                  "The shared prompt was imported, but it could not be located in local prompts yet. Refresh and try again."
+              })
+            )
+            return
+          }
+
+          if (selectedSegmentRef.current !== segmentAtStart) {
+            notification.info({
+              message: t("managePrompts.notification.sharedPromptImported", {
+                defaultValue: "Shared prompt imported"
+              }),
+              description: t("managePrompts.notification.sharedPromptSegmentChanged", {
+                defaultValue:
+                  "The prompt was imported but you navigated away. Switch back to the Custom tab to view it."
               })
             })
             return
           }
+
           notification.success({
             message: t("managePrompts.notification.sharedPromptImported", {
               defaultValue: "Shared prompt imported"
-            }),
-            description: t("managePrompts.notification.sharedPromptImportedDesc", {
-              defaultValue:
-                "The prompt was pulled from the server and opened in your workspace."
             })
           })
           openPromptDrawer(importedPrompt)
         } catch {
-          notification.warning({
-            message: t("managePrompts.notification.promptNotFound", {
-              defaultValue: "Prompt not found"
-            }),
-            description: t("managePrompts.notification.sharedPromptImportMissing", {
+          notifyImportedButUnavailable(
+            t("managePrompts.notification.sharedPromptImportedRefreshFailedDesc", {
               defaultValue:
-                "The shared prompt was fetched, but could not be loaded locally."
+                "The shared prompt was imported, but local prompts could not be refreshed. Refresh the page and try again."
             })
-          })
+          )
         }
       })()
       return
@@ -604,7 +632,6 @@ export const PromptBody = () => {
 
     clearPromptParam()
     if (!isOnline && isServerPromptLink) {
-      deepLinkProcessedRef.current = true
       notification.warning({
         message: t("managePrompts.notification.promptNotFound", {
           defaultValue: "Prompt not found"
@@ -945,6 +972,14 @@ export const PromptBody = () => {
             row.serverId && promptRecord
               ? () => {
                   void copyPromptShareLink(promptRecord)
+                }
+              : undefined
+          }
+          onViewHistory={
+            row.serverId
+              ? () => {
+                  setHistoryPromptId(row.serverId as number)
+                  setHistoryDrawerOpen(true)
                 }
               : undefined
           }
@@ -2447,6 +2482,14 @@ export const PromptBody = () => {
       {renderPromptFullPageEditor()}
 
       {renderPromptInspectorPanel()}
+
+      <Suspense fallback={null}>
+        <VersionHistoryDrawer
+          open={historyDrawerOpen}
+          promptId={historyPromptId}
+          onClose={() => setHistoryDrawerOpen(false)}
+        />
+      </Suspense>
 
       <Modal
         title={t("managePrompts.modal.editTitle")}

@@ -7,6 +7,7 @@ import {
   defaultLightShadows,
   defaultDarkShadows,
 } from "./defaults"
+import { primerTheme } from "./primer-preset"
 
 /**
  * Default theme — matches the existing CSS custom properties in tailwind-shared.css.
@@ -304,6 +305,7 @@ const rosePineTheme: ThemeDefinition = {
 
 const PRESETS: ThemeDefinition[] = [
   defaultTheme,
+  primerTheme,
   solarizedTheme,
   nordTheme,
   highContrastTheme,

@@ -17,7 +17,7 @@ interface ShortcutGroup {
 interface KeyboardShortcutsModalProps {
   open: boolean
   onClose: () => void
-  activeTab: "review" | "cards" | "import" | "scheduler"
+  activeTab: "review" | "cards" | "import" | "scheduler" | "templates"
 }
 
 export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({

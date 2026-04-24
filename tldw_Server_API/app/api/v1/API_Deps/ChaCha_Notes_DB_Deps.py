@@ -41,6 +41,7 @@ _CHACHA_EXECUTOR_SHUTDOWN: bool = False
 _CHACHA_EXECUTOR_LOCK = threading.Lock()
 _CHACHA_EXECUTOR_MAX_WORKERS = max(1, int(os.getenv("CHACHA_EXECUTOR_MAX_WORKERS", "4")))
 _CHACHA_WATCHDOG_SECS = float(os.getenv("CHACHA_INIT_WATCHDOG_SECS", "5"))
+_CHACHA_SHUTDOWN_INIT_ERROR_DETAIL = "ChaChaNotes shutdown in progress"
 _CHACHA_HEALTH_LOCK = threading.Lock()
 _CHACHA_HEALTH: dict[str, Any] = {
     "init_attempts": 0,
@@ -188,6 +189,10 @@ _chacha_default_char_futures_lock = threading.Lock()
 #######################################################################################################################
 
 # --- Helper Functions ---
+
+
+class _ChaChaInitializationAborted(RuntimeError):
+    """Internal sentinel used to wake blocked waiters during shutdown."""
 
 
 def _get_chacha_db_path_for_user(user_id: int) -> Path:
@@ -408,6 +413,11 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
         if cached_instance is not None:
             return cached_instance
         if init_error is not None:
+            if isinstance(init_error, _ChaChaInitializationAborted):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=str(init_error),
+                ) from init_error
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Could not initialize character & notes database for user: {init_error}",
@@ -554,6 +564,8 @@ async def get_chacha_db_for_owner(owner_user_id: int) -> CharactersRAGDB:
 
 def close_all_chacha_db_instances():
     """Closes all cached ChaChaNotesDB connections. Useful for application shutdown."""
+    pending_init_events: list[threading.Event] = []
+    pending_shutdown_errors: dict[str, Exception] = {}
     with _chacha_db_lock:
         logger.info(f"Closing all cached ChaChaNotesDB instances ({len(_chacha_db_instances)})...")
         for user_id, db_instance in list(_chacha_db_instances.items()):
@@ -562,9 +574,18 @@ def close_all_chacha_db_instances():
                 logger.info(f"Closed ChaChaNotesDB instance for user {user_id}.")
             except (CharactersRAGDBError, OSError, RuntimeError, ValueError, TypeError) as e:
                 logger.error(f"Error closing ChaChaNotesDB instance for user {user_id}: {e}", exc_info=True)
+        pending_init_events = list(_chacha_db_init_events.values())
+        pending_shutdown_errors = {
+            cache_key: _ChaChaInitializationAborted(_CHACHA_SHUTDOWN_INIT_ERROR_DETAIL)
+            for cache_key in _chacha_db_init_events
+        }
         _chacha_db_instances.clear()
+        _chacha_db_init_events.clear()
         _chacha_db_init_errors.clear()
+        _chacha_db_init_errors.update(pending_shutdown_errors)
         logger.info("All ChaChaNotesDB instances closed and cache cleared.")
+    for init_event in pending_init_events:
+        init_event.set()
 
 
 async def _drain_default_character_tasks(timeout: float = 5.0) -> None:

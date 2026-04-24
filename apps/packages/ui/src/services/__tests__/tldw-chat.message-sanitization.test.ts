@@ -299,6 +299,161 @@ describe("TldwChatService message sanitization", () => {
     })
   })
 
+  it("maps thrown aborts caused by startup timeout to the timeout error", async () => {
+    vi.useFakeTimers()
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://localhost:8000",
+      authMode: "single-user",
+      chatRequestTimeoutMs: 50,
+      chatStartupTimeoutMs: 50,
+      chatStreamIdleTimeoutMs: 500
+    })
+    mocks.streamChatCompletion.mockImplementation(
+      async function* (
+        _request: unknown,
+        options?: { signal?: AbortSignal }
+      ) {
+        let seq = 0
+        while (true) {
+          await new Promise((resolve) => setTimeout(resolve, 20))
+          if (options?.signal?.aborted) {
+            const abortError = new Error("The operation was aborted.")
+            abortError.name = "AbortError"
+            throw abortError
+          }
+          seq += 1
+          yield {
+            event: "run_started",
+            run_id: "run_abort",
+            seq,
+            data: {}
+          }
+        }
+      }
+    )
+
+    const service = new TldwChatService()
+    const streamRun = (async () => {
+      const tokens: string[] = []
+      for await (const token of service.streamMessage(
+        [{ role: "user", content: "why did the stream abort?" }],
+        { model: "gpt-test" }
+      )) {
+        tokens.push(token)
+      }
+      return tokens
+    })()
+    const settled = streamRun.then(
+      (value) => ({ status: "resolved" as const, value }),
+      (error) => ({ status: "rejected" as const, error })
+    )
+
+    await vi.advanceTimersByTimeAsync(80)
+
+    await expect(settled).resolves.toMatchObject({
+      status: "rejected",
+      error: {
+        message: "Stream completion failed",
+        cause: expect.objectContaining({
+          message: expect.stringContaining("visible output")
+        })
+      }
+    })
+  })
+
+  it("detects nested abort causes during stream cancellation", async () => {
+    vi.useFakeTimers()
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://localhost:8000",
+      authMode: "single-user",
+      chatRequestTimeoutMs: 500,
+      chatStartupTimeoutMs: 500,
+      chatStreamIdleTimeoutMs: 500
+    })
+    mocks.streamChatCompletion.mockImplementation(
+      async function* (
+        _request: unknown,
+        options?: { signal?: AbortSignal }
+      ) {
+        yield {
+          event: "run_started",
+          run_id: "run_nested_abort",
+          seq: 1,
+          data: {}
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        if (options?.signal?.aborted) {
+          const abortError = new Error("The operation was aborted.")
+          abortError.name = "AbortError"
+          const wrappedAbort = new Error("inner wrapper", { cause: abortError })
+          throw new Error("outer wrapper", { cause: wrappedAbort })
+        }
+      }
+    )
+
+    const service = new TldwChatService()
+    const streamRun = (async () => {
+      const tokens: string[] = []
+      for await (const token of service.streamMessage(
+        [{ role: "user", content: "cancel with nested abort" }],
+        { model: "gpt-test" }
+      )) {
+        tokens.push(token)
+      }
+      return tokens
+    })()
+    const settled = streamRun.then(
+      (value) => ({ status: "resolved" as const, value }),
+      (error) => ({ status: "rejected" as const, error })
+    )
+
+    await vi.advanceTimersByTimeAsync(5)
+    service.cancelStream()
+    await vi.advanceTimersByTimeAsync(40)
+
+    await expect(settled).resolves.toMatchObject({
+      status: "rejected",
+      error: {
+        name: "AbortError",
+        message: expect.stringContaining("aborted")
+      }
+    })
+  })
+
+  it("rejects with AbortError when the stream exits cleanly after cancellation", async () => {
+    mocks.streamChatCompletion.mockImplementation(
+      async function* (
+        _request: unknown,
+        options?: { signal?: AbortSignal }
+      ) {
+        yield {
+          choices: [{ index: 0, delta: { content: "hello" }, finish_reason: null }]
+        }
+        while (!options?.signal?.aborted) {
+          await new Promise((resolve) => setTimeout(resolve, 5))
+        }
+      }
+    )
+
+    const service = new TldwChatService()
+    const streamRun = (async () => {
+      const tokens: string[] = []
+      for await (const token of service.streamMessage(
+        [{ role: "user", content: "stop after one token" }],
+        { model: "gpt-test" }
+      )) {
+        tokens.push(token)
+        service.cancelStream()
+      }
+      return tokens
+    })()
+
+    await expect(streamRun).rejects.toMatchObject({
+      name: "AbortError",
+      message: expect.stringMatching(/abort/i)
+    })
+  })
+
   it("uses dedicated startup timeout instead of chat request timeout", async () => {
     vi.useFakeTimers()
     mocks.getConfig.mockResolvedValue({

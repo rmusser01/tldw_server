@@ -1,34 +1,26 @@
-import os
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig, create_tool_definition
 from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_registry
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
+from tldw_Server_API.app.core.MCP_unified.tests.support import (
+    build_mcp_admin_auth_override,
+    build_mcp_test_client,
+    reset_mcp_test_state,
+)
 
 
-def _setup_env():
-    os.environ["TEST_MODE"] = "true"
-    os.environ["AUTH_MODE"] = "single_user"
-    os.environ["SINGLE_USER_API_KEY"] = "test-api-key-1234567890"
-    os.environ["SINGLE_USER_FIXED_ID"] = "1"
-    os.environ["MCP_JWT_SECRET"] = "x" * 64
-    os.environ["MCP_API_KEY_SALT"] = "s" * 64
-    os.environ["MCP_TRUST_X_FORWARDED"] = "1"
-    os.environ["MCP_ALLOWED_IPS"] = ""
-    os.environ["MCP_CLIENT_CERT_REQUIRED"] = "false"
-    # Reset config/IP controller caches to pick up env
-    try:
-        from tldw_Server_API.app.core.MCP_unified.config import get_config as _gc
-        _gc.cache_clear()  # type: ignore[attr-defined]
-    except Exception:
-        _ = None
-    try:
-        from tldw_Server_API.app.core.MCP_unified.security.ip_filter import get_ip_access_controller as _gip
-        _gip.cache_clear()  # type: ignore[attr-defined]
-    except Exception:
-        _ = None
+def _setup_env(monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-1234567890")
+    monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
+    monkeypatch.setenv("MCP_JWT_SECRET", "x" * 64)
+    monkeypatch.setenv("MCP_API_KEY_SALT", "s" * 64)
+    monkeypatch.setenv("MCP_TRUST_X_FORWARDED", "1")
+    monkeypatch.setenv("MCP_ALLOWED_IPS", "")
+    monkeypatch.setenv("MCP_CLIENT_CERT_REQUIRED", "false")
+    reset_mcp_test_state()
 
 
 class StubWriteModule(BaseModule):
@@ -64,45 +56,17 @@ class StubWriteModule(BaseModule):
         return "ok"
 
 
-@pytest.fixture(scope="module")
-def client():
-    _setup_env()
-    from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import router as mcp_router
-    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
-    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-    from fastapi import Request, HTTPException, status
-    app = FastAPI()
-    app.include_router(mcp_router, prefix="/api/v1")
-
-    async def _fake_get_auth_principal(request: Request) -> AuthPrincipal:  # type: ignore[override]
-        auth = request.headers.get("Authorization")
-        x_api_key = request.headers.get("X-API-KEY")
-        if not auth and not x_api_key:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication required",
-            )
-        return AuthPrincipal(
-            kind="user",
-            user_id=1,
-            api_key_id=None,
-            subject=None,
-            token_type="access",
-            jti=None,
-            roles=["admin"],
-            permissions=["system.logs"],
-            is_admin=True,
-            org_ids=[],
-            team_ids=[],
-        )
-
-    app.dependency_overrides[auth_deps.get_auth_principal] = _fake_get_auth_principal
-    with TestClient(app) as c:
+@pytest.fixture
+def client(monkeypatch):
+    _setup_env(monkeypatch)
+    with build_mcp_test_client(
+        auth_principal_override=build_mcp_admin_auth_override(),
+    ) as c:
         yield c
 
 
 @pytest.mark.asyncio
-async def test_prometheus_exports_validation_counters(client: TestClient):
+async def test_prometheus_exports_validation_counters(client):
     # Relax IP guard dynamically for testclient
     from tldw_Server_API.app.core.MCP_unified.security.ip_filter import get_ip_access_controller
     try:
@@ -138,9 +102,10 @@ async def test_prometheus_exports_validation_counters(client: TestClient):
         json=bad,
         headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": "127.0.0.1"},
     )
-    assert r1.status_code == 200
+    assert r1.status_code == 200  # nosec B101
     body1 = r1.json()
-    assert isinstance(body1, dict) and body1.get("error") is not None
+    assert isinstance(body1, dict)  # nosec B101
+    assert body1.get("error") is not None  # nosec B101
 
     # Scrape Prometheus metrics with auth
     r2 = client.get(
@@ -150,11 +115,11 @@ async def test_prometheus_exports_validation_counters(client: TestClient):
             "Authorization": f"Bearer {token}",
         },
     )
-    assert r2.status_code == 200
+    assert r2.status_code == 200  # nosec B101
     text = r2.text
     # Expect either schema or validator invalid counter present for our tool
-    assert "mcp_tool_invalid_params_total" in text
-    assert "tool=\"delete_item\"" in text
+    assert "mcp_tool_invalid_params_total" in text  # nosec B101
+    assert "tool=\"delete_item\"" in text  # nosec B101
 
 
 class StubWriteNoValidator(BaseModule):
@@ -186,7 +151,7 @@ class StubWriteNoValidator(BaseModule):
 
 
 @pytest.mark.asyncio
-async def test_prometheus_validator_missing_counter(client: TestClient):
+async def test_prometheus_validator_missing_counter(client):
     # Relax IP guard dynamically for testclient
     from tldw_Server_API.app.core.MCP_unified.security.ip_filter import get_ip_access_controller
     try:
@@ -221,9 +186,10 @@ async def test_prometheus_validator_missing_counter(client: TestClient):
         json=good,
         headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": "127.0.0.1"},
     )
-    assert r1.status_code == 200
+    assert r1.status_code == 200  # nosec B101
     body1 = r1.json()
-    assert isinstance(body1, dict) and body1.get("error") is not None
+    assert isinstance(body1, dict)  # nosec B101
+    assert body1.get("error") is not None  # nosec B101
 
     # Scrape metrics and assert validator-missing counter appears
     r2 = client.get(
@@ -233,7 +199,7 @@ async def test_prometheus_validator_missing_counter(client: TestClient):
             "Authorization": f"Bearer {token}",
         },
     )
-    assert r2.status_code == 200
+    assert r2.status_code == 200  # nosec B101
     text = r2.text
-    assert "mcp_tool_validator_missing_total" in text
-    assert "tool=\"delete_item2\"" in text
+    assert "mcp_tool_validator_missing_total" in text  # nosec B101
+    assert "tool=\"delete_item2\"" in text  # nosec B101

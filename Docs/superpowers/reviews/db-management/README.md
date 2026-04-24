@@ -8,6 +8,8 @@ Stage order:
 3. [`Docs/superpowers/reviews/db-management/2026-04-07-stage3-paths-tenancy-migrations-backups.md`](./2026-04-07-stage3-paths-tenancy-migrations-backups.md)
 4. [`Docs/superpowers/reviews/db-management/2026-04-07-stage4-media-db-and-representative-helpers.md`](./2026-04-07-stage4-media-db-and-representative-helpers.md)
 5. [`Docs/superpowers/reviews/db-management/2026-04-07-stage5-test-gaps-and-synthesis.md`](./2026-04-07-stage5-test-gaps-and-synthesis.md)
+6. [`Docs/superpowers/reviews/db-management/2026-04-15-rebaseline.md`](./2026-04-15-rebaseline.md)
+   - Current-tree rebaseline for Wave 1; identifies already-closed April findings and the remaining live cache-contract failure.
 
 Rules for using these reports:
 - Write findings before remediation ideas.

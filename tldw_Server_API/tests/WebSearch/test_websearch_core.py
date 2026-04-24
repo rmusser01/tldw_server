@@ -177,6 +177,83 @@ def test_search_web_brave_builds_expected_request(monkeypatch: pytest.MonkeyPatc
     assert captured["params"]["exclude_sites"] == "example.com,test.com"
 
 
+def test_search_web_brave_blocks_with_shared_policy_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
+        WebOutboundPolicyDecision,
+    )
+
+    monkeypatch.setattr(
+        web_search,
+        "decide_web_outbound_policy_sync",
+        lambda *args, **kwargs: WebOutboundPolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="deny_test",
+            stage=kwargs.get("stage", "provider_request"),
+            source=kwargs.get("source", "websearch_brave"),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        web_search,
+        "brave_http_get",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("provider HTTP call should not run when outbound policy blocks")
+        ),
+    )
+    monkeypatch.setattr(
+        web_search,
+        "get_loaded_config",
+        lambda: {"search_engines": {"brave_search_ai_api_key": "ai-key"}},
+    )
+
+    with pytest.raises(ValueError, match="Blocked by outbound policy: deny_test"):
+        web_search.search_web_brave(
+            search_term="capital of france",
+            country="US",
+            search_lang="en",
+            ui_lang="en",
+            result_count=5,
+        )
+
+
+def test_perform_websearch_duckduckgo_surfaces_policy_denial(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
+        WebOutboundPolicyDecision,
+    )
+
+    monkeypatch.setattr(
+        web_search,
+        "decide_web_outbound_policy_sync",
+        lambda *args, **kwargs: WebOutboundPolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="deny_test",
+            stage=kwargs.get("stage", "provider_request"),
+            source=kwargs.get("source", "websearch_duckduckgo_html"),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        web_search,
+        "fetch",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("provider fetch should not run when outbound policy blocks")
+        ),
+    )
+
+    result = web_search.perform_websearch(
+        "duckduckgo",
+        "capital of france",
+        "US",
+        "en",
+        "en",
+        5,
+    )
+
+    assert result["processing_error"] == "Error performing web search: Blocked by outbound policy: deny_test"
+
+
 def test_generate_and_search_propagates_searx_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: Dict[str, Any] = {}
 
@@ -879,7 +956,7 @@ def test_search_web_duckduckgo_raises_on_egress_denied(
         lambda _url: SimpleNamespace(allowed=False, reason="blocked"),
     )
 
-    with pytest.raises(ValueError, match="Egress denied"):
+    with pytest.raises(ValueError, match="Blocked by outbound policy: blocked"):
         web_search.search_web_duckduckgo("capital of france")
 
 

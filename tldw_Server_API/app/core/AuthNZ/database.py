@@ -19,6 +19,7 @@ import asyncpg
 from fastapi import HTTPException
 from loguru import logger
 
+from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
     DatabaseError,
@@ -568,6 +569,8 @@ class DatabasePool:
             except HTTPException:
                 # Re-raise HTTP exceptions unchanged
                 raise
+            except MandatoryAuditWriteError:
+                raise
             except (DuplicateUserError, WeakPasswordError, InvalidRegistrationCodeError, RegistrationError, DuplicateOrganizationError, DuplicateTeamError, DuplicateRoleError, DuplicatePermissionError):
                 # Re-raise registration exceptions unchanged
                 raise
@@ -612,6 +615,8 @@ class DatabasePool:
                 raise TransactionError("SQLite transaction", str(e)) from e
             except HTTPException:
                 # Re-raise HTTP exceptions unchanged
+                raise
+            except MandatoryAuditWriteError:
                 raise
             except (DuplicateUserError, WeakPasswordError, InvalidRegistrationCodeError, RegistrationError, DuplicateOrganizationError, DuplicateTeamError, DuplicateRoleError, DuplicatePermissionError):
                 # Re-raise registration exceptions unchanged

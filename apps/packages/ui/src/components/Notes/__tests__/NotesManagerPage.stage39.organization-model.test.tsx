@@ -14,7 +14,8 @@ const {
   mockConfirmDanger,
   mockGetSetting,
   mockSetSetting,
-  mockClearSetting
+  mockClearSetting,
+  mockPromptModal
 } = vi.hoisted(() => ({
   mockBgRequest: vi.fn(),
   mockMessageSuccess: vi.fn(),
@@ -25,8 +26,14 @@ const {
   mockConfirmDanger: vi.fn(),
   mockGetSetting: vi.fn(),
   mockSetSetting: vi.fn(),
-  mockClearSetting: vi.fn()
+  mockClearSetting: vi.fn(),
+  mockPromptModal: vi.fn()
 }))
+
+vi.mock("@/components/Notes/notes-manager-utils", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/notes-manager-utils")>()
+  return { ...actual, promptModal: mockPromptModal }
+})
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -285,6 +292,12 @@ describe("NotesManagerPage stage 39 organization model", () => {
     seededServerNotebooks = [{ id: 11, name: "Research", keywords: ["research", "ml"] }]
     renderPage()
 
+    // Open the nested Organize section (collapsed by default)
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-section-organize-toggle")).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByTestId("notes-section-organize-toggle"))
+
     await waitFor(() => {
       expect(screen.getByTestId("notes-notebook-select")).toBeInTheDocument()
     })
@@ -312,15 +325,21 @@ describe("NotesManagerPage stage 39 organization model", () => {
     })
 
     expect(screen.getByTestId("notes-active-filter-summary-details")).toHaveTextContent(
-      "Smart collection: Research"
+      "Saved filter: Research"
     )
   })
 
   it("saves current keyword filters as a notebook and persists it", async () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Research Notebook")
+    mockPromptModal.mockResolvedValue("Research Notebook")
     renderPage()
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse keywords" }))
+    // Open the nested Organize section (collapsed by default)
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-section-organize-toggle")).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByTestId("notes-section-organize-toggle"))
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
     const modalBody = await screen.findByTestId("notes-keyword-picker-modal")
     const pickerDialog =
       (modalBody.closest(".ant-modal") as HTMLElement | null) ??
@@ -334,7 +353,7 @@ describe("NotesManagerPage stage 39 organization model", () => {
     fireEvent.click(screen.getByTestId("notes-save-notebook"))
 
     await waitFor(() => {
-      expect(mockMessageSuccess).toHaveBeenCalledWith('Saved smart collection "Research Notebook"')
+      expect(mockMessageSuccess).toHaveBeenCalledWith('Saved filter "Research Notebook"')
     })
 
     expect(mockBgRequest).toHaveBeenCalledWith(
@@ -353,10 +372,9 @@ describe("NotesManagerPage stage 39 organization model", () => {
     })
     expect(notebookPersistCall).toBeTruthy()
     expect(screen.getByTestId("notes-active-filter-summary-details")).toHaveTextContent(
-      "Smart collection: Research Notebook"
+      "Saved filter: Research Notebook"
     )
 
-    promptSpy.mockRestore()
   }, 10000)
 
   it("renders timeline view groups for date-based browsing", async () => {
@@ -380,5 +398,12 @@ describe("NotesManagerPage stage 39 organization model", () => {
         })
       )
     })
+  })
+
+  it("renders keyboard-focusable help buttons for organize and tags guidance", async () => {
+    renderPage()
+
+    expect(await screen.findByRole("button", { name: "Organize help" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Tags help" })).toBeInTheDocument()
   })
 })

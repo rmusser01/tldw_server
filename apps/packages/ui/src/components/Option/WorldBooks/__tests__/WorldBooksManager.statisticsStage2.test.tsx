@@ -181,7 +181,9 @@ describe("WorldBooksManager statistics stage-2 budget utilization", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "View world book statistics" }))
+    // Open overflow menu then click Statistics
+    await user.click(screen.getByRole("button", { name: "More actions for Arcana" }))
+    await user.click(await screen.findByText("Statistics"))
 
     await waitFor(() => {
       expect(screen.getByText("140/100 (140.0%)")).toBeInTheDocument()
@@ -210,7 +212,9 @@ describe("WorldBooksManager statistics stage-2 budget utilization", () => {
     } as any)
 
     render(<WorldBooksManager />)
-    await user.click(screen.getByRole("button", { name: "View world book statistics" }))
+    // Open overflow menu then click Statistics
+    await user.click(screen.getByRole("button", { name: "More actions for Arcana" }))
+    await user.click(await screen.findByText("Statistics"))
 
     await waitFor(() => {
       expect(screen.getByText("Estimated using cl100k_base.")).toBeInTheDocument()

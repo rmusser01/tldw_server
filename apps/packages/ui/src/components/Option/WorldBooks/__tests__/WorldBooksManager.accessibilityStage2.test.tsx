@@ -203,7 +203,7 @@ describe("WorldBooksManager accessibility stage-2 semantics", () => {
     render(<WorldBooksManager />)
 
     await user.click(screen.getByRole("button", { name: "New World Book" }))
-    const advancedSummary = await screen.findByText("Advanced Settings")
+    const advancedSummary = await screen.findByText("Matching & Budget")
 
     expect(advancedSummary).toHaveAttribute("aria-expanded", "false")
     await user.click(advancedSummary)
@@ -216,7 +216,8 @@ describe("WorldBooksManager accessibility stage-2 semantics", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
     const matchingSummary = await screen.findByText("Matching Options")
     expect(matchingSummary).toHaveAttribute("aria-expanded", "false")
 
@@ -239,10 +240,8 @@ describe("WorldBooksManager accessibility stage-2 semantics", () => {
   it("keeps icon-only action controls explicitly labeled", async () => {
     render(<WorldBooksManager />)
 
-    expect(await screen.findByRole("button", { name: "Edit world book" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Delete world book" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Duplicate world book" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Export world book" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "View world book statistics" })).toBeInTheDocument()
+    // New two-panel layout: Edit button + More actions overflow per row
+    expect(await screen.findByRole("button", { name: "Edit Arcana" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "More actions for Arcana" })).toBeInTheDocument()
   })
 })

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 from json import JSONDecodeError
 import os
@@ -490,7 +491,7 @@ async def handle_byok_validation_job(
     }
 
 
-async def run_admin_byok_validation_jobs_worker() -> None:
+async def run_admin_byok_validation_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
     """Run the WorkerSDK loop for authoritative BYOK validation jobs."""
     worker_id = (
         os.getenv("ADMIN_BYOK_VALIDATION_JOBS_WORKER_ID") or f"admin-byok-validation-{os.getpid()}"
@@ -502,20 +503,38 @@ async def run_admin_byok_validation_jobs_worker() -> None:
     )
     jm = JobManager()
     sdk = WorkerSDK(jm, cfg)
+    stop_task: asyncio.Task[None] | None = None
+    if stop_event is not None:
+        async def _watch_stop() -> None:
+            await stop_event.wait()
+            sdk.stop()
+
+        stop_task = asyncio.create_task(
+            _watch_stop(),
+            name="admin_byok_validation_jobs_worker_stop_watch",
+        )
     logger.info(
         "Admin BYOK validation Jobs worker starting: queue={} worker_id={}",
         cfg.queue,
         worker_id,
     )
-    await sdk.run(handler=handle_byok_validation_job)
+    try:
+        await sdk.run(handler=handle_byok_validation_job)
+    finally:
+        if stop_task is not None:
+            stop_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stop_task
 
 
-async def start_admin_byok_validation_jobs_worker() -> asyncio.Task | None:
+async def start_admin_byok_validation_jobs_worker(
+    stop_event: asyncio.Event | None = None,
+) -> asyncio.Task | None:
     """Start the BYOK validation Jobs worker when explicitly enabled."""
     if not byok_validation_worker_enabled():
         return None
     return asyncio.create_task(
-        run_admin_byok_validation_jobs_worker(),
+        run_admin_byok_validation_jobs_worker(stop_event),
         name="admin_byok_validation_jobs_worker",
     )
 

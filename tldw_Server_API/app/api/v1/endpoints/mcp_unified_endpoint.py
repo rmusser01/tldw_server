@@ -49,6 +49,7 @@ from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import TokenData, get
 from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_collector
 from tldw_Server_API.app.core.MCP_unified.security.request_guards import enforce_http_security
 from tldw_Server_API.app.core.MCP_unified.server import _is_authnz_access_token
+from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
 from tldw_Server_API.app.core.feature_flags import is_mcp_hub_policy_enforcement_enabled
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 from tldw_Server_API.app.services import admin_tool_catalog_service
@@ -1593,6 +1594,166 @@ async def health_check(
         )
 
     return {"status": "healthy"}
+
+
+# ---------------------------------------------------------------------------
+# Catalog endpoints
+# ---------------------------------------------------------------------------
+
+
+class MCPConnectionTestRequest(BaseModel):
+    """Request body for testing connectivity to an external MCP server."""
+
+    url: str
+    auth_type: str = "none"
+    secret: str | None = None
+    auth_key_name: str | None = None
+
+
+class MCPConnectionTestResponse(BaseModel):
+    """Response for an MCP server connection test."""
+
+    reachable: bool
+    tools_discovered: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
+@router.get("/catalog")
+async def list_mcp_catalog(
+    archetype_key: str | None = None,
+    _guard: None = Depends(enforce_http_security),
+):
+    """Return the curated external MCP server catalog."""
+    from tldw_Server_API.app.core.MCP_unified.catalog_loader import list_catalog_entries
+
+    return list_catalog_entries(archetype_key=archetype_key)
+
+
+def _is_private_ip(host: str) -> bool:
+    """Return True if *host* resolves to a non-public IP address."""
+    import socket
+
+    try:
+        resolved = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for _family, _type, _proto, _canonname, sockaddr in resolved:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+                or ip.is_unspecified
+                or not ip.is_global
+            ):
+                return True
+    except (socket.gaierror, ValueError):
+        return True  # fail closed: unresolvable hosts are rejected
+    return False
+
+
+def _canonicalize_catalog_probe_url(url: str) -> str | None:
+    from urllib.parse import urlsplit, urlunsplit
+
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return None
+
+    scheme = (parsed.scheme or "").lower()
+    hostname = (parsed.hostname or "").lower()
+    if scheme not in ("http", "https") or not hostname or parsed.username or parsed.password:
+        return None
+
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+
+    default_port = 443 if scheme == "https" else 80
+    netloc = hostname if port in (None, default_port) else f"{hostname}:{port}"
+    normalized_path = (parsed.path or "").rstrip("/")
+    return urlunsplit((scheme, netloc, normalized_path, "", ""))
+
+
+def _resolve_catalog_probe_url(url: str) -> str | None:
+    from tldw_Server_API.app.core.MCP_unified.catalog_loader import list_catalog_entries
+
+    candidate = _canonicalize_catalog_probe_url(url)
+    if candidate is None:
+        return None
+
+    for entry in list_catalog_entries():
+        allowed = _canonicalize_catalog_probe_url(entry.url_template)
+        if allowed and allowed == candidate:
+            return allowed
+    return None
+
+
+async def _probe_mcp_connection(url: str, headers: dict[str, str]) -> None:
+    from tldw_Server_API.app.core.http_client import _get_httpx_async_client
+
+    http = _get_httpx_async_client()
+    resp = await http.get(url, headers=headers, timeout=10.0)
+    resp.raise_for_status()
+
+
+@router.post("/catalog/test-connection", response_model=MCPConnectionTestResponse)
+async def check_mcp_connection(
+    req: MCPConnectionTestRequest,
+    _guard: None = Depends(enforce_http_security),
+):
+    """Test connectivity to an external MCP server URL.
+
+    Currently validates reachability only. The ``tools_discovered`` field
+    is reserved for a future enhancement that will parse the MCP server's
+    tool listing response.
+    """
+    from urllib.parse import urlparse
+
+    catalog_probe_url = _resolve_catalog_probe_url(req.url)
+    if catalog_probe_url is None:
+        return MCPConnectionTestResponse(
+            reachable=False,
+            error="URL must match a curated MCP catalog entry",
+        )
+
+    parsed = urlparse(catalog_probe_url)
+    if parsed.scheme not in ("http", "https"):
+        return MCPConnectionTestResponse(
+            reachable=False, error="Only http and https URLs are allowed"
+        )
+
+    supported_auth_types = {"none", "bearer", "api_key"}
+    if req.auth_type not in supported_auth_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported auth_type: {req.auth_type}",
+        )
+
+    # SSRF protection: reject private/reserved IP ranges.
+    hostname = parsed.hostname or ""
+    if not hostname or _is_private_ip(hostname):
+        return MCPConnectionTestResponse(
+            reachable=False, error="Cannot connect to private or reserved addresses"
+        )
+    assert_url_safe(catalog_probe_url)
+
+    headers: dict[str, str] = {}
+    if req.auth_type == "bearer" and req.secret:
+        headers["Authorization"] = f"Bearer {req.secret}"
+    elif req.auth_type == "api_key" and req.secret:
+        headers[req.auth_key_name or "X-API-Key"] = req.secret
+    try:
+        await _probe_mcp_connection(catalog_probe_url, headers)
+        return MCPConnectionTestResponse(reachable=True)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.opt(exception=True).warning(
+            "MCP connection test failed for {}", req.url
+        )
+        return MCPConnectionTestResponse(reachable=False, error="Connection failed")
 
 
 # OpenAPI documentation customization

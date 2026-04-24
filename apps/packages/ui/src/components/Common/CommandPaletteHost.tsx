@@ -1,8 +1,17 @@
-import React, { Suspense, lazy, useCallback, useEffect, useState } from "react"
+import React, {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState
+} from "react"
 import { useLocation } from "react-router-dom"
 
 import { useShortcut } from "@/hooks/useKeyboardShortcuts"
 import { WORKSPACE_PLAYGROUND_PATH } from "@/routes/route-paths"
+import { usePromptPaletteCommands } from "@/components/Option/Prompt/usePromptPaletteCommands"
 
 import type { CommandPaletteProps } from "./CommandPalette"
 
@@ -10,22 +19,47 @@ const CommandPalette = lazy(() =>
   import("./CommandPalette").then((m) => ({ default: m.CommandPalette }))
 )
 
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect
+
 type CommandPaletteHostProps = {
   commandPaletteProps?: CommandPaletteProps
+  includePromptCommands?: boolean
 }
 
 export const CommandPaletteHost = ({
-  commandPaletteProps
+  commandPaletteProps,
+  includePromptCommands = false
 }: CommandPaletteHostProps) => {
   const location = useLocation()
   const shortcutEnabled = location.pathname !== WORKSPACE_PLAYGROUND_PATH
   const [hasMountedPalette, setHasMountedPalette] = useState(false)
   const [openSignal, setOpenSignal] = useState(0)
+  const [promptQuery, setPromptQuery] = useState("")
+  const promptPaletteCommands = usePromptPaletteCommands(
+    promptQuery,
+    includePromptCommands
+  )
 
   const openPalette = useCallback(() => {
     setHasMountedPalette(true)
     setOpenSignal((current) => current + 1)
   }, [])
+
+  const mergedCommandPaletteProps = useMemo<CommandPaletteProps>(
+    () => ({
+      ...commandPaletteProps,
+      additionalCommands: [
+        ...(commandPaletteProps?.additionalCommands ?? []),
+        ...promptPaletteCommands
+      ],
+      onQueryChange: (query: string) => {
+        setPromptQuery(query)
+        commandPaletteProps?.onQueryChange?.(query)
+      }
+    }),
+    [commandPaletteProps, promptPaletteCommands]
+  )
 
   useShortcut(
     {
@@ -51,7 +85,7 @@ export const CommandPaletteHost = ({
     [openPalette, shortcutEnabled]
   )
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     window.addEventListener("tldw:open-command-palette", openPalette)
     return () => {
       window.removeEventListener("tldw:open-command-palette", openPalette)
@@ -65,7 +99,7 @@ export const CommandPaletteHost = ({
   return (
     <Suspense fallback={null}>
       <CommandPalette
-        {...commandPaletteProps}
+        {...mergedCommandPaletteProps}
         openSignal={openSignal}
         registerGlobalOpenShortcut={false}
         listenForOpenEvents={false}

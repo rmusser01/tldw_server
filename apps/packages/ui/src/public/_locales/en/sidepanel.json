@@ -621,16 +621,19 @@
     "message": "All"
   },
   "rag_sources_media": {
-    "message": "Media"
+    "message": "Documents & Media"
   },
   "rag_sources_notes": {
     "message": "Notes"
   },
   "rag_sources_characters": {
-    "message": "Characters"
+    "message": "Story Characters"
   },
   "rag_sources_chats": {
-    "message": "Chats"
+    "message": "Conversations"
+  },
+  "rag_sources_kanban": {
+    "message": "Task Boards"
   },
   "rag_preset": {
     "message": "Preset"

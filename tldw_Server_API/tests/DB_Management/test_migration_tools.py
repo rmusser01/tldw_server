@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any, List, Tuple
@@ -195,3 +196,30 @@ def test_sync_sequences_escapes_single_quote_literals() -> None:
     sql = sequence_sql[0]
     assert "pg_get_serial_sequence('odd''name', 'id''name')" in sql
     assert 'MAX("id\'name") FROM "odd\'name"' in sql
+
+
+def test_migrate_sqlite_to_postgres_does_not_log_sensitive_label(
+    monkeypatch: pytest.MonkeyPatch,
+    sqlite_db: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    stub_backend = _StubBackend()
+
+    def fake_create_backend(config: DatabaseConfig) -> _StubBackend:
+        return stub_backend
+
+    monkeypatch.setattr(migration_tools.DatabaseBackendFactory, "create_backend", fake_create_backend)
+
+    config = DatabaseConfig(backend_type=BackendType.POSTGRESQL)
+    sensitive_label = "postgresql://alice:super-secret@example.test/app"
+
+    with caplog.at_level(logging.DEBUG, logger=migration_tools.logger.name):
+        migration_tools.migrate_sqlite_to_postgres(
+            sqlite_db,
+            config,
+            batch_size=10,
+            label=sensitive_label,
+        )
+
+    assert sensitive_label not in caplog.text
+    assert "super-secret" not in caplog.text

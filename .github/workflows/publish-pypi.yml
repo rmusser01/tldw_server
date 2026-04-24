@@ -58,7 +58,7 @@ jobs:
       name: testpypi
     steps:
       - name: Download dist artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pypi-dist
           path: dist
@@ -80,7 +80,7 @@ jobs:
       name: pypi
     steps:
       - name: Download dist artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pypi-dist
           path: dist

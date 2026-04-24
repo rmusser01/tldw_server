@@ -1,4 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import React, {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useCallback,
+  useMemo
+} from "react"
 import { createPortal } from "react-dom"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
@@ -33,6 +40,9 @@ import { searchSettings } from "@/data/settings-index"
 import { cn } from "@/libs/utils"
 
 type CommandShortcut = { key: string; modifiers: ShortcutModifier[] }
+
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect
 
 const buildShortcut = (
   key: string,
@@ -148,7 +158,7 @@ export function CommandPalette({
     allowInInput: true,
   })
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (!listenForOpenEvents) {
       return
     }

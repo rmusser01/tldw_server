@@ -12,6 +12,56 @@ from tldw_Server_API.app.api.v1.schemas.study_packs import (
 
 
 DeckSchedulerType = Literal["sm2_plus", "fsrs"]
+DeckReviewPromptSide = Literal["front", "back"]
+FlashcardTemplateModelType = Literal["basic", "basic_reverse", "cloze"]
+FlashcardTemplateFieldTarget = Literal["front_template", "back_template", "notes_template", "extra_template"]
+
+
+def _strip_required_string(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _strip_optional_string(value: Any) -> Any:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return value
+
+
+def _normalize_flashcard_template_placeholder_payload(data: Any) -> Any:
+    if not isinstance(data, dict):
+        return data
+    normalized = dict(data)
+    if "key" in normalized:
+        normalized["key"] = _strip_required_string(normalized.get("key"))
+    if "label" in normalized:
+        normalized["label"] = _strip_required_string(normalized.get("label"))
+    if "help_text" in normalized:
+        normalized["help_text"] = _strip_optional_string(normalized.get("help_text"))
+    if "default_value" in normalized:
+        normalized["default_value"] = _strip_optional_string(normalized.get("default_value"))
+    return normalized
+
+
+def _normalize_flashcard_template_payload(data: Any) -> Any:
+    if not isinstance(data, dict):
+        return data
+    normalized = dict(data)
+    if "name" in normalized:
+        normalized["name"] = _strip_required_string(normalized.get("name"))
+    if "front_template" in normalized:
+        normalized["front_template"] = _strip_required_string(normalized.get("front_template"))
+    for field_name in ("back_template", "notes_template", "extra_template"):
+        if field_name in normalized:
+            normalized[field_name] = _strip_optional_string(normalized.get(field_name))
+    if isinstance(normalized.get("placeholder_definitions"), list):
+        normalized["placeholder_definitions"] = [
+            _normalize_flashcard_template_placeholder_payload(item)
+            for item in normalized["placeholder_definitions"]
+        ]
+    return normalized
 
 
 class DeckSchedulerSettings(BaseModel):
@@ -49,6 +99,7 @@ class DeckCreate(BaseModel):
     name: str = Field(..., description="Deck name (unique)")
     description: Optional[str] = Field(None, description="Deck description")
     workspace_id: Optional[str] = Field(None, description="Canonical owning workspace ID; null means general scope")
+    review_prompt_side: DeckReviewPromptSide = "front"
     scheduler_type: DeckSchedulerType = "sm2_plus"
     scheduler_settings: Optional[DeckSchedulerSettingsEnvelope] = None
 
@@ -65,6 +116,7 @@ class DeckUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     workspace_id: Optional[str] = None
+    review_prompt_side: Optional[DeckReviewPromptSide] = None
     scheduler_type: Optional[DeckSchedulerType] = None
     scheduler_settings: Optional[DeckSchedulerSettingsEnvelope] = None
     expected_version: Optional[int] = Field(None, ge=1)
@@ -77,12 +129,19 @@ class DeckUpdate(BaseModel):
             data["scheduler_settings"] = _coerce_scheduler_settings_envelope(data.get("scheduler_settings"))
         return data
 
+    @model_validator(mode="after")
+    def _reject_explicit_null_review_prompt_side(self) -> "DeckUpdate":
+        if "review_prompt_side" in self.model_fields_set and self.review_prompt_side is None:
+            raise ValueError("review_prompt_side cannot be null")
+        return self
+
 
 class Deck(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
     workspace_id: Optional[str] = None
+    review_prompt_side: DeckReviewPromptSide = "front"
     created_at: Optional[str] = None
     last_modified: Optional[str] = None
     deleted: bool
@@ -107,6 +166,86 @@ class Deck(BaseModel):
             except Exception:
                 data["scheduler_settings"] = DeckSchedulerSettingsEnvelope().model_dump()
         return data
+
+
+class FlashcardTemplatePlaceholderDefinition(BaseModel):
+    """Describes a named placeholder that can populate one or more template scaffold fields."""
+
+    @model_validator(mode="before")
+    def _normalize_definition_fields(cls, data: Any) -> Any:
+        return _normalize_flashcard_template_placeholder_payload(data)
+
+    key: str = Field(..., min_length=1, description="Placeholder token name without braces")
+    label: str = Field(..., min_length=1)
+    help_text: Optional[str] = None
+    default_value: Optional[str] = None
+    required: bool = False
+    targets: list[FlashcardTemplateFieldTarget] = Field(..., min_length=1)
+
+
+class FlashcardTemplateCreate(BaseModel):
+    """Payload for creating a reusable flashcard authoring template."""
+
+    @model_validator(mode="before")
+    def _normalize_template_fields(cls, data: Any) -> Any:
+        return _normalize_flashcard_template_payload(data)
+
+    name: str = Field(..., min_length=1)
+    model_type: FlashcardTemplateModelType = "basic"
+    front_template: str = Field(..., min_length=1)
+    back_template: Optional[str] = None
+    notes_template: Optional[str] = None
+    extra_template: Optional[str] = None
+    placeholder_definitions: list[FlashcardTemplatePlaceholderDefinition] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_scaffold_requirements(self) -> "FlashcardTemplateCreate":
+        if self.model_type in ("basic", "basic_reverse") and not str(self.back_template or "").strip():
+            raise ValueError("back_template is required for basic and basic_reverse templates")
+        return self
+
+
+class FlashcardTemplateUpdate(BaseModel):
+    """Partial payload for updating an existing flashcard authoring template."""
+
+    @model_validator(mode="before")
+    def _normalize_template_fields(cls, data: Any) -> Any:
+        return _normalize_flashcard_template_payload(data)
+
+    name: Optional[str] = Field(None, min_length=1)
+    model_type: Optional[FlashcardTemplateModelType] = None
+    front_template: Optional[str] = None
+    back_template: Optional[str] = None
+    notes_template: Optional[str] = None
+    extra_template: Optional[str] = None
+    placeholder_definitions: Optional[list[FlashcardTemplatePlaceholderDefinition]] = None
+    expected_version: Optional[int] = Field(None, ge=1)
+
+
+class FlashcardTemplate(BaseModel):
+    """Stored flashcard authoring template returned by the API."""
+
+    id: int
+    name: str
+    model_type: FlashcardTemplateModelType
+    front_template: str
+    back_template: Optional[str] = None
+    notes_template: Optional[str] = None
+    extra_template: Optional[str] = None
+    placeholder_definitions: list[FlashcardTemplatePlaceholderDefinition] = Field(default_factory=list)
+    created_at: Optional[str] = None
+    last_modified: Optional[str] = None
+    deleted: bool
+    client_id: str
+    version: int
+
+
+class FlashcardTemplateListResponse(BaseModel):
+    """Response envelope for listing flashcard authoring templates."""
+
+    items: list[FlashcardTemplate]
+    count: int
+    total: int | None = None
 
 
 class FlashcardReviewIntervalPreviews(BaseModel):

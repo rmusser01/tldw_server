@@ -3,7 +3,10 @@
 //   - tldw_server2 OpenAPI: /openapi.json
 //   - Notes/media ingestion section: /docs-static/Design/Media_Ingestion.md (if available)
 // Last synchronized: 2025-12-13 from tldw_server v0.1.0 (Body_add_media_api_v1_media_add_post)
-// Run `bun verify:openapi` to check for field-name drift against media ingest submit schemas
+// Run `bun run verify:openapi` from `apps/packages/ui` to check for field-name drift
+// against media ingest submit schemas. The verifier prefers
+// `apps/extension/openapi.json`; if that snapshot is absent, it derives the
+// spec from the checked-out backend using the project Python environment.
 // (`/api/v1/media/ingest/jobs` primary, `/api/v1/media/add` legacy).
 
 export const MEDIA_ADD_SCHEMA_FALLBACK_VERSION = "0.1.0"

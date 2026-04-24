@@ -161,13 +161,47 @@ def _parse_env(raw: str | None) -> dict[str, str]:
     return env
 
 
+def _resolve_runner_env_paths(
+    raw_env: dict[str, str],
+    *,
+    resolve_relative_home: bool = True,
+) -> dict[str, str]:
+    """Normalize ACP runner env paths that are config-relative by convention."""
+    if not raw_env:
+        return {}
+
+    env = dict(raw_env)
+    home = env.get("HOME")
+    if not resolve_relative_home or not home:
+        return env
+
+    home = home.strip()
+    if not home or os.path.isabs(home):
+        return env
+
+    config_dir = _get_config_file_dir()
+    resolved_home = os.path.normpath(os.path.join(config_dir, home))
+    env["HOME"] = resolved_home
+    logger.debug(
+        "ACP runner_env HOME resolved: '{}' -> '{}' (config dir: {})",
+        home,
+        resolved_home,
+        config_dir,
+    )
+    return env
+
+
 def load_acp_runner_config() -> ACPRunnerConfig:
     section = get_config_section("ACP")
     binary_path = os.getenv("ACP_RUNNER_BINARY_PATH") or section.get("runner_binary_path")
     command = os.getenv("ACP_RUNNER_COMMAND") or section.get("runner_command", "")
     args_raw = os.getenv("ACP_RUNNER_ARGS") or section.get("runner_args", "")
-    env_raw = os.getenv("ACP_RUNNER_ENV") or section.get("runner_env", "")
-    cwd = os.getenv("ACP_RUNNER_CWD") or section.get("runner_cwd")
+    env_override = os.getenv("ACP_RUNNER_ENV")
+    has_env_override = env_override is not None
+    env_raw = env_override if has_env_override else section.get("runner_env", "")
+    cwd_override = os.getenv("ACP_RUNNER_CWD")
+    has_cwd_override = cwd_override is not None
+    cwd = cwd_override if has_cwd_override else section.get("runner_cwd")
 
     # If binary_path is set, use it as the command directly (shortcut)
     if binary_path and not command:
@@ -184,11 +218,15 @@ def load_acp_runner_config() -> ACPRunnerConfig:
             timeout_sec = float(timeout_raw) / 1000.0
 
     resolved_cwd = _resolve_cwd(str(cwd) if cwd else None)
+    runner_env = _resolve_runner_env_paths(
+        _parse_env(env_raw),
+        resolve_relative_home=not has_env_override,
+    )
 
     return ACPRunnerConfig(
         command=str(command or ""),
         args=_parse_args(args_raw),
-        env=_parse_env(env_raw),
+        env=runner_env,
         cwd=resolved_cwd,
         startup_timeout_sec=timeout_sec,
         binary_path=str(binary_path) if binary_path else None,

@@ -97,6 +97,58 @@ const hasReasoningProgress = (chunk: unknown): boolean => {
 const hasVisibleAssistantProgress = (chunk: unknown): boolean =>
   extractTokenFromChunk(chunk).length > 0 || hasReasoningProgress(chunk)
 
+const readErrorMessage = (error: unknown, fallback = "Aborted"): string => {
+  const seen = new Set<unknown>()
+  let current: unknown = error
+  let firstMessage: string | null = null
+
+  while (current && !seen.has(current)) {
+    seen.add(current)
+    if (current instanceof Error && current.message) {
+      firstMessage ??= current.message
+      if (current.name === "AbortError") return current.message
+      if (current.message.toLowerCase().includes("abort")) return current.message
+    }
+    current = (current as { cause?: unknown } | null)?.cause
+  }
+
+  return firstMessage ?? fallback
+}
+
+const isAbortLikeError = (error: unknown): boolean => {
+  const seen = new Set<unknown>()
+  let current: unknown = error
+
+  while (current && !seen.has(current)) {
+    seen.add(current)
+    if (current instanceof Error) {
+      if (current.name === "AbortError") return true
+      if (current.message.toLowerCase().includes("abort")) return true
+    }
+    current = (current as { cause?: unknown } | null)?.cause
+  }
+  return false
+}
+
+const createAbortError = (message = "Aborted"): Error => {
+  const abortError = new Error(message)
+  abortError.name = "AbortError"
+  return abortError
+}
+
+const resolveStreamTimeoutError = (
+  reason: "startup" | "idle" | null,
+  sawVisibleProgress: boolean
+): Error | null => {
+  if (reason === "startup" && !sawVisibleProgress) {
+    return new Error("Chat response timed out before any visible output arrived.")
+  }
+  if (reason === "idle") {
+    return new Error("Chat response stalled after visible output began.")
+  }
+  return null
+}
+
 const sanitizeUserContent = (
   content: string | ChatCompletionContentPart[]
 ): string | ChatCompletionContentPart[] | null => {
@@ -563,33 +615,51 @@ export class TldwChatService {
 
       try {
         armStartupTimer()
-        for await (const chunk of stream) {
-          if (hasVisibleAssistantProgress(chunk)) {
-            sawVisibleProgress = true
-            clearStartupTimer()
-            resetIdleTimer()
-          }
+        try {
+          for await (const chunk of stream) {
+            if (hasVisibleAssistantProgress(chunk)) {
+              sawVisibleProgress = true
+              clearStartupTimer()
+              resetIdleTimer()
+            }
 
-          // Check if stream was cancelled
-          if (controller?.signal.aborted) {
-            break
-          }
+            // Check if stream was cancelled
+            if (controller?.signal.aborted) {
+              break
+            }
 
-          // Call the onChunk callback if provided
-          if (onChunk) {
-            onChunk(chunk)
-          }
+            // Call the onChunk callback if provided
+            if (onChunk) {
+              onChunk(chunk)
+            }
 
-          const token = extractTokenFromChunk(chunk)
-          if (token) {
-            yield token
+            const token = extractTokenFromChunk(chunk)
+            if (token) {
+              yield token
+            }
           }
+        } catch (error) {
+          const timeoutError = resolveStreamTimeoutError(
+            timeoutReason,
+            sawVisibleProgress
+          )
+          if (timeoutError) {
+            throw timeoutError
+          }
+          if (controller?.signal.aborted && isAbortLikeError(error)) {
+            throw createAbortError(readErrorMessage(error))
+          }
+          throw error
         }
-        if (timeoutReason === "startup" && !sawVisibleProgress) {
-          throw new Error("Chat response timed out before any visible output arrived.")
+        const timeoutError = resolveStreamTimeoutError(
+          timeoutReason,
+          sawVisibleProgress
+        )
+        if (timeoutError) {
+          throw timeoutError
         }
-        if (timeoutReason === "idle") {
-          throw new Error("Chat response stalled after visible output began.")
+        if (controller?.signal.aborted) {
+          throw createAbortError()
         }
       } finally {
         clearIdleTimer()
@@ -597,6 +667,9 @@ export class TldwChatService {
       }
     } catch (error) {
       console.error('Stream completion failed:', error)
+      if (isAbortLikeError(error)) {
+        throw createAbortError(readErrorMessage(error))
+      }
       throw new Error('Stream completion failed', { cause: error })
     } finally {
       this.currentController = null

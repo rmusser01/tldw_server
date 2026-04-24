@@ -2,7 +2,7 @@
  * Page Object for KnowledgeQA (RAG Search) workflow
  */
 import { type Page, type Locator, expect } from "@playwright/test"
-import { waitForAppShell, waitForConnection } from "../helpers"
+import { dispatchKeyboardShortcut, waitForAppShell, waitForConnection } from "../helpers"
 
 export class KnowledgeQAPage {
   readonly page: Page
@@ -255,7 +255,7 @@ export class KnowledgeQAPage {
   // ── Keyboard Shortcuts ──────────────────────────────────────────────
 
   async pressNewSearch(): Promise<void> {
-    await this.page.keyboard.press("Meta+k")
+    await dispatchKeyboardShortcut(this.page, { key: "k", ctrlKey: true })
   }
 
   async pressSlashToFocus(): Promise<void> {

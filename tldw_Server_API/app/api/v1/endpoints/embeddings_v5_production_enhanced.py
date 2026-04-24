@@ -1204,6 +1204,10 @@ def count_tokens(text: str, model_name: str) -> int:
         logger.warning(f"Token counting failed: {e}, estimating")
         return len(text) // 4
 
+
+_EMBEDDING_CACHE_KEY_PBKDF2_ITERATIONS = 10_000
+
+
 def get_cache_key(
     text: str,
     provider: str,
@@ -1218,6 +1222,8 @@ def get_cache_key(
     if backend_identity:
         key_parts.append(backend_identity)
     key_string = "|".join(key_parts)
+    # Cache inputs may contain low-entropy secrets (for example pasted passwords), so
+    # derive the deterministic cache key with a password-safe KDF rather than a direct digest.
     return hashlib.pbkdf2_hmac(
         "sha256",
         key_string.encode("utf-8"),
@@ -1227,17 +1233,16 @@ def get_cache_key(
     ).hex()
 
 
-_EMBEDDING_CACHE_KEY_PBKDF2_ITERATIONS = 2048
-
-
 @lru_cache(maxsize=1)
 def _embedding_cache_key_secret() -> bytes:
     """Return a stable keyed-hash secret for embedding cache partitioning."""
     try:
         return derive_hmac_key()
-    except Exception:
-        # Keep cache keys deterministic in dev/test even when AuthNZ secrets are absent.
-        return b"tldw_embeddings_cache_hmac_fallback"
+    except ValueError:
+        if _is_test_context():
+            # Keep cache keys deterministic in test contexts when AuthNZ secrets are absent.
+            return b"tldw_embeddings_cache_hmac_fallback"
+        raise
 
 
 _SENSITIVE_QUERY_KEYS = frozenset({

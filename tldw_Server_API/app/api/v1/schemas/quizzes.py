@@ -4,6 +4,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .flashcards import (
+    DeckReviewPromptSide,
     DeckSchedulerSettingsEnvelope,
     DeckSchedulerType,
     _coerce_scheduler_settings_envelope,
@@ -233,9 +234,19 @@ class QuizRemediationConvertRequest(BaseModel):
     question_ids: list[int] = Field(..., min_length=1)
     target_deck_id: Optional[int] = Field(None, ge=1)
     create_deck_name: Optional[str] = None
+    create_deck_review_prompt_side: DeckReviewPromptSide = "front"
     create_deck_scheduler_type: Optional[DeckSchedulerType] = None
     create_deck_scheduler_settings: Optional[DeckSchedulerSettingsEnvelope] = None
     replace_active: bool = False
+
+    @model_validator(mode="after")
+    def _reject_explicit_null_create_deck_review_prompt_side(self) -> "QuizRemediationConvertRequest":
+        if (
+            "create_deck_review_prompt_side" in self.model_fields_set
+            and self.create_deck_review_prompt_side is None
+        ):
+            raise ValueError("create_deck_review_prompt_side cannot be null")
+        return self
 
     @model_validator(mode="before")
     def normalize_scheduler_settings(cls, data):
@@ -253,6 +264,8 @@ class QuizRemediationConvertRequest(BaseModel):
         has_create_deck = bool((self.create_deck_name or "").strip())
         if has_target_deck == has_create_deck:
             raise ValueError("Provide exactly one of target_deck_id or create_deck_name")
+        if "create_deck_review_prompt_side" in self.model_fields_set and not has_create_deck:
+            raise ValueError("create_deck review orientation requires create_deck_name")
         if (self.create_deck_scheduler_settings is not None or self.create_deck_scheduler_type is not None) and not has_create_deck:
             raise ValueError("create_deck scheduler options require create_deck_name")
         return self

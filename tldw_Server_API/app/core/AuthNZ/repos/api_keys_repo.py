@@ -16,6 +16,18 @@ from tldw_Server_API.app.core.AuthNZ.database import (
 )
 
 
+def _affected_row_count(result: Any) -> int:
+    """Normalize SQLite cursor/asyncpg status values to an affected-row count."""
+    rowcount = getattr(result, "rowcount", None)
+    if isinstance(rowcount, int):
+        return rowcount
+    if isinstance(result, str):
+        parts = result.strip().split()
+        if parts and parts[-1].isdigit():
+            return int(parts[-1])
+    return 0
+
+
 @dataclass
 class AuthnzApiKeysRepo:
     """
@@ -199,10 +211,28 @@ class AuthnzApiKeysRepo:
             logger.error(f"AuthnzApiKeysRepo.fetch_active_by_key_id failed: {exc}")
             raise
 
-    async def fetch_key_for_user(self, key_id: int, user_id: int) -> dict[str, Any] | None:
+    async def fetch_key_for_user(
+        self,
+        key_id: int,
+        user_id: int,
+        *,
+        conn: Any | None = None,
+    ) -> dict[str, Any] | None:
         """Fetch a specific key row for a user (id + user_id match)."""
         try:
-            if getattr(self.db_pool, "pool", None) is not None:
+            if conn is not None and self._is_postgres_backend():
+                row = await conn.fetchrow(
+                    "SELECT * FROM api_keys WHERE id = $1 AND user_id = $2",
+                    key_id,
+                    user_id,
+                )
+            elif conn is not None:
+                cursor = await conn.execute(
+                    "SELECT * FROM api_keys WHERE id = ? AND user_id = ?",
+                    (key_id, user_id),
+                )
+                row = await cursor.fetchone()
+            elif getattr(self.db_pool, "pool", None) is not None:
                 row = await self.db_pool.fetchone(
                     "SELECT * FROM api_keys WHERE id = $1 AND user_id = $2",
                     key_id,
@@ -432,6 +462,7 @@ class AuthnzApiKeysRepo:
         rate_limit: int | None,
         allowed_ips: list[str] | None,
         metadata: dict[str, Any] | None,
+        conn: Any | None = None,
     ) -> int:
         """
         Insert a new API key row and return its id.
@@ -440,23 +471,61 @@ class AuthnzApiKeysRepo:
         while centralizing dialect-specific SQL in the repository layer.
         """
         try:
-            async with self.db_pool.transaction() as conn:
-                if self._is_postgres_backend():
-                    expires_at_param = expires_at
-                    if (
-                        isinstance(expires_at_param, datetime)
-                        and expires_at_param.tzinfo is not None
-                    ):
-                        expires_at_param = expires_at_param.astimezone(timezone.utc).replace(tzinfo=None)
-                    key_id = await conn.fetchval(
-                        """
-                        INSERT INTO api_keys (
-                            user_id, key_hash, key_id, key_prefix, name, description,
-                            scope, expires_at, rate_limit, allowed_ips, metadata
-                        )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-                        RETURNING id
-                        """,
+            if conn is None:
+                async with self.db_pool.transaction() as txn:
+                    return await self.create_api_key_row(
+                        user_id=user_id,
+                        key_hash=key_hash,
+                        key_identifier=key_identifier,
+                        key_prefix=key_prefix,
+                        name=name,
+                        description=description,
+                        scope=scope,
+                        expires_at=expires_at,
+                        rate_limit=rate_limit,
+                        allowed_ips=allowed_ips,
+                        metadata=metadata,
+                        conn=txn,
+                    )
+
+            if self._is_postgres_backend():
+                expires_at_param = expires_at
+                if (
+                    isinstance(expires_at_param, datetime)
+                    and expires_at_param.tzinfo is not None
+                ):
+                    expires_at_param = expires_at_param.astimezone(timezone.utc).replace(tzinfo=None)
+                key_id = await conn.fetchval(
+                    """
+                    INSERT INTO api_keys (
+                        user_id, key_hash, key_id, key_prefix, name, description,
+                        scope, expires_at, rate_limit, allowed_ips, metadata
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    RETURNING id
+                    """,
+                    user_id,
+                    key_hash,
+                    key_identifier,
+                    key_prefix,
+                    name,
+                    description,
+                    scope,
+                    expires_at_param,
+                    rate_limit,
+                    json.dumps(allowed_ips) if allowed_ips else None,
+                    json.dumps(metadata) if metadata else None,
+                )
+            else:
+                cursor = await conn.execute(
+                    """
+                    INSERT INTO api_keys (
+                        user_id, key_hash, key_id, key_prefix, name, description,
+                        scope, expires_at, rate_limit, allowed_ips, metadata
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
                         user_id,
                         key_hash,
                         key_identifier,
@@ -464,35 +533,13 @@ class AuthnzApiKeysRepo:
                         name,
                         description,
                         scope,
-                        expires_at_param,
+                        expires_at.isoformat() if expires_at else None,
                         rate_limit,
                         json.dumps(allowed_ips) if allowed_ips else None,
                         json.dumps(metadata) if metadata else None,
-                    )
-                else:
-                    cursor = await conn.execute(
-                        """
-                        INSERT INTO api_keys (
-                            user_id, key_hash, key_id, key_prefix, name, description,
-                            scope, expires_at, rate_limit, allowed_ips, metadata
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            user_id,
-                            key_hash,
-                            key_identifier,
-                            key_prefix,
-                            name,
-                            description,
-                            scope,
-                            expires_at.isoformat() if expires_at else None,
-                            rate_limit,
-                            json.dumps(allowed_ips) if allowed_ips else None,
-                            json.dumps(metadata) if metadata else None,
-                        ),
-                    )
-                    key_id = getattr(cursor, "lastrowid", None)
+                    ),
+                )
+                key_id = getattr(cursor, "lastrowid", None)
 
             return int(key_id)
         except Exception as exc:  # pragma: no cover - surfaced via higher layers
@@ -524,6 +571,7 @@ class AuthnzApiKeysRepo:
         allowed_paths: list[str] | None,
         max_calls: int | None,
         max_runs: int | None,
+        conn: Any | None = None,
     ) -> int:
         """
         Insert a new virtual API key row and return its id.
@@ -546,128 +594,77 @@ class AuthnzApiKeysRepo:
 
             scope_value = str(scope).strip().lower() if scope else "read"
 
-            async with self.db_pool.transaction() as conn:
-                if self._is_postgres_backend():
-                    _endpoints = (
-                        json.dumps(allowed_endpoints)
-                        if allowed_endpoints is not None
-                        else None
+            if conn is None:
+                async with self.db_pool.transaction() as txn:
+                    return await self.create_virtual_key_row(
+                        user_id=user_id,
+                        key_hash=key_hash,
+                        key_identifier=key_identifier,
+                        key_prefix=key_prefix,
+                        name=name,
+                        description=description,
+                        expires_at=expires_at,
+                        org_id=org_id,
+                        team_id=team_id,
+                        scope=scope,
+                        allowed_endpoints=allowed_endpoints,
+                        allowed_providers=allowed_providers,
+                        allowed_models=allowed_models,
+                        budget_day_tokens=budget_day_tokens,
+                        budget_month_tokens=budget_month_tokens,
+                        budget_day_usd=budget_day_usd,
+                        budget_month_usd=budget_month_usd,
+                        parent_key_id=parent_key_id,
+                        allowed_methods=allowed_methods,
+                        allowed_paths=allowed_paths,
+                        max_calls=max_calls,
+                        max_runs=max_runs,
+                        conn=txn,
                     )
-                    _providers = (
-                        json.dumps(allowed_providers)
-                        if allowed_providers is not None
-                        else None
+
+            if self._is_postgres_backend():
+                _endpoints = (
+                    json.dumps(allowed_endpoints)
+                    if allowed_endpoints is not None
+                    else None
+                )
+                _providers = (
+                    json.dumps(allowed_providers)
+                    if allowed_providers is not None
+                    else None
+                )
+                _models = (
+                    json.dumps(allowed_models)
+                    if allowed_models is not None
+                    else None
+                )
+                _metadata = json.dumps(meta_dict) if meta_dict else None
+                expires_at_param = expires_at
+                if (
+                    isinstance(expires_at_param, datetime)
+                    and expires_at_param.tzinfo is not None
+                ):
+                    expires_at_param = expires_at_param.astimezone(timezone.utc).replace(tzinfo=None)
+
+                try:
+                    col_type = await conn.fetchval(
+                        """
+                        SELECT data_type FROM information_schema.columns
+                        WHERE table_name = 'api_keys' AND column_name = 'llm_allowed_endpoints'
+                        """
                     )
-                    _models = (
-                        json.dumps(allowed_models)
-                        if allowed_models is not None
-                        else None
+                except (AttributeError, LookupError) as exc:
+                    logger.debug(
+                        "AuthnzApiKeysRepo.create_virtual_key_row: column type "
+                        "detection for api_keys.llm_allowed_endpoints failed; "
+                        "treating as non-JSONB: {}",
+                        exc,
                     )
-                    _metadata = json.dumps(meta_dict) if meta_dict else None
-                    expires_at_param = expires_at
-                    if (
-                        isinstance(expires_at_param, datetime)
-                        and expires_at_param.tzinfo is not None
-                    ):
-                        expires_at_param = expires_at_param.astimezone(timezone.utc).replace(tzinfo=None)
+                    col_type = None
+                is_jsonb = isinstance(col_type, str) and ("json" in col_type.lower())
 
-                    # Detect column types to choose JSONB cast or plain text insert.
-                    # Use narrow exception handling so unexpected driver errors surface.
-                    try:
-                        col_type = await conn.fetchval(
-                            """
-                            SELECT data_type FROM information_schema.columns
-                            WHERE table_name = 'api_keys' AND column_name = 'llm_allowed_endpoints'
-                            """
-                        )
-                    except (AttributeError, LookupError) as exc:
-                        logger.debug(
-                            "AuthnzApiKeysRepo.create_virtual_key_row: column type "
-                            "detection for api_keys.llm_allowed_endpoints failed; "
-                            "treating as non-JSONB: {}",
-                            exc,
-                        )
-                        col_type = None
-                    is_jsonb = isinstance(col_type, str) and ("json" in col_type.lower())
-
-                    if is_jsonb:
-                        key_id = await conn.fetchval(
-                            """
-                            INSERT INTO api_keys (
-                                user_id, key_hash, key_id, key_prefix, name, description, scope, status, expires_at,
-                                is_virtual, parent_key_id, org_id, team_id,
-                                llm_budget_day_tokens, llm_budget_month_tokens,
-                                llm_budget_day_usd, llm_budget_month_usd,
-                                llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models,
-                                metadata
-                            ) VALUES (
-                                $1,$2,$3,$4,$5,$6,$7,'active',$8,
-                                TRUE,$9,$10,$11,
-                                $12,$13,$14,$15,$16::jsonb,$17::jsonb,$18::jsonb,
-                                ($19)::jsonb
-                            ) RETURNING id
-                            """,
-                            user_id,
-                            key_hash,
-                            key_identifier,
-                            key_prefix,
-                            name,
-                            description,
-                            scope_value,
-                            expires_at_param,
-                            parent_key_id,
-                            org_id,
-                            team_id,
-                            budget_day_tokens,
-                            budget_month_tokens,
-                            budget_day_usd,
-                            budget_month_usd,
-                            _endpoints,
-                            _providers,
-                            _models,
-                            _metadata,
-                        )
-                    else:
-                        key_id = await conn.fetchval(
-                            """
-                            INSERT INTO api_keys (
-                                user_id, key_hash, key_id, key_prefix, name, description, scope, status, expires_at,
-                                is_virtual, parent_key_id, org_id, team_id,
-                                llm_budget_day_tokens, llm_budget_month_tokens,
-                                llm_budget_day_usd, llm_budget_month_usd,
-                                llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models,
-                                metadata
-                            ) VALUES (
-                                $1,$2,$3,$4,$5,$6,$7,'active',$8,
-                                TRUE,$9,$10,$11,
-                                $12,$13,$14,$15,$16,$17,$18,
-                                $19
-                            ) RETURNING id
-                            """,
-                            user_id,
-                            key_hash,
-                            key_identifier,
-                            key_prefix,
-                            name,
-                            description,
-                            scope_value,
-                            expires_at_param,
-                            parent_key_id,
-                            org_id,
-                            team_id,
-                            budget_day_tokens,
-                            budget_month_tokens,
-                            budget_day_usd,
-                            budget_month_usd,
-                            _endpoints,
-                            _providers,
-                            _models,
-                            _metadata,
-                        )
-                else:
-                    _metadata = json.dumps(meta_dict) if meta_dict else None
-
-                    cursor = await conn.execute(
+                if is_jsonb:
+                    key_id = await conn.fetchval(
                         """
                         INSERT INTO api_keys (
                             user_id, key_hash, key_id, key_prefix, name, description, scope, status, expires_at,
@@ -676,37 +673,259 @@ class AuthnzApiKeysRepo:
                             llm_budget_day_usd, llm_budget_month_usd,
                             llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models,
                             metadata
-                        ) VALUES (?,?,?,?,?,?,?,'active',?,
-                            1,?,?,?,?,?,?,?,?,?,?,?
-                        )
+                        ) VALUES (
+                            $1,$2,$3,$4,$5,$6,$7,'active',$8,
+                            TRUE,$9,$10,$11,
+                            $12,$13,$14,$15,$16::jsonb,$17::jsonb,$18::jsonb,
+                            ($19)::jsonb
+                        ) RETURNING id
                         """,
-                        (
-                            user_id,
-                            key_hash,
-                            key_identifier,
-                            key_prefix,
-                            name,
-                            description,
-                            scope_value,
-                            expires_at.isoformat() if expires_at else None,
-                            parent_key_id,
-                            org_id,
-                            team_id,
-                            budget_day_tokens,
-                            budget_month_tokens,
-                            budget_day_usd,
-                            budget_month_usd,
-                            (json.dumps(allowed_endpoints) if allowed_endpoints else None),
-                            (json.dumps(allowed_providers) if allowed_providers else None),
-                            (json.dumps(allowed_models) if allowed_models else None),
-                            _metadata,
-                        ),
+                        user_id,
+                        key_hash,
+                        key_identifier,
+                        key_prefix,
+                        name,
+                        description,
+                        scope_value,
+                        expires_at_param,
+                        parent_key_id,
+                        org_id,
+                        team_id,
+                        budget_day_tokens,
+                        budget_month_tokens,
+                        budget_day_usd,
+                        budget_month_usd,
+                        _endpoints,
+                        _providers,
+                        _models,
+                        _metadata,
                     )
-                    key_id = getattr(cursor, "lastrowid", None)
+                else:
+                    key_id = await conn.fetchval(
+                        """
+                        INSERT INTO api_keys (
+                            user_id, key_hash, key_id, key_prefix, name, description, scope, status, expires_at,
+                            is_virtual, parent_key_id, org_id, team_id,
+                            llm_budget_day_tokens, llm_budget_month_tokens,
+                            llm_budget_day_usd, llm_budget_month_usd,
+                            llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models,
+                            metadata
+                        ) VALUES (
+                            $1,$2,$3,$4,$5,$6,$7,'active',$8,
+                            TRUE,$9,$10,$11,
+                            $12,$13,$14,$15,$16,$17,$18,
+                            $19
+                        ) RETURNING id
+                        """,
+                        user_id,
+                        key_hash,
+                        key_identifier,
+                        key_prefix,
+                        name,
+                        description,
+                        scope_value,
+                        expires_at_param,
+                        parent_key_id,
+                        org_id,
+                        team_id,
+                        budget_day_tokens,
+                        budget_month_tokens,
+                        budget_day_usd,
+                        budget_month_usd,
+                        _endpoints,
+                        _providers,
+                        _models,
+                        _metadata,
+                    )
+            else:
+                _metadata = json.dumps(meta_dict) if meta_dict else None
+
+                cursor = await conn.execute(
+                    """
+                    INSERT INTO api_keys (
+                        user_id, key_hash, key_id, key_prefix, name, description, scope, status, expires_at,
+                        is_virtual, parent_key_id, org_id, team_id,
+                        llm_budget_day_tokens, llm_budget_month_tokens,
+                        llm_budget_day_usd, llm_budget_month_usd,
+                        llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models,
+                        metadata
+                    ) VALUES (?,?,?,?,?,?,?,'active',?,
+                        1,?,?,?,?,?,?,?,?,?,?,?
+                    )
+                    """,
+                    (
+                        user_id,
+                        key_hash,
+                        key_identifier,
+                        key_prefix,
+                        name,
+                        description,
+                        scope_value,
+                        expires_at.isoformat() if expires_at else None,
+                        parent_key_id,
+                        org_id,
+                        team_id,
+                        budget_day_tokens,
+                        budget_month_tokens,
+                        budget_day_usd,
+                        budget_month_usd,
+                        (json.dumps(allowed_endpoints) if allowed_endpoints else None),
+                        (json.dumps(allowed_providers) if allowed_providers else None),
+                        (json.dumps(allowed_models) if allowed_models else None),
+                        _metadata,
+                    ),
+                )
+                key_id = getattr(cursor, "lastrowid", None)
 
             return int(key_id)
         except Exception as exc:  # pragma: no cover - surfaced via higher layers
             logger.error(f"AuthnzApiKeysRepo.create_virtual_key_row failed: {exc}")
+            raise
+
+    async def delete_api_key_for_user(
+        self,
+        *,
+        key_id: int,
+        user_id: int,
+    ) -> bool:
+        """Delete a user-owned API key row, used for compensating rollback."""
+        try:
+            async with self.db_pool.transaction() as conn:
+                if self._is_postgres_backend():
+                    result = await conn.execute(
+                        "DELETE FROM api_keys WHERE id = $1 AND user_id = $2",
+                        key_id,
+                        user_id,
+                    )
+                    return _affected_row_count(result) > 0
+
+                cursor = await conn.execute(
+                    "DELETE FROM api_keys WHERE id = ? AND user_id = ?",
+                    (key_id, user_id),
+                )
+                return _affected_row_count(cursor) > 0
+        except Exception as exc:  # pragma: no cover - surfaced via higher layers
+            logger.error(f"AuthnzApiKeysRepo.delete_api_key_for_user failed: {exc}")
+            raise
+
+    async def rollback_key_rotation(
+        self,
+        *,
+        user_id: int,
+        old_key_id: int,
+        new_key_id: int,
+        active_status: str,
+        rotated_status: str,
+    ) -> bool:
+        """Restore the old key to active state and delete the new rotated key."""
+        try:
+            async with self.db_pool.transaction() as conn:
+                if self._is_postgres_backend():
+                    restore_result = await conn.execute(
+                        """
+                        UPDATE api_keys
+                        SET status = $1,
+                            rotated_to = NULL,
+                            revoked_at = NULL,
+                            revoked_by = NULL,
+                            revoke_reason = NULL
+                        WHERE id = $2 AND user_id = $3 AND status = $4 AND rotated_to = $5
+                        """,
+                        active_status,
+                        old_key_id,
+                        user_id,
+                        rotated_status,
+                        new_key_id,
+                    )
+                    delete_result = await conn.execute(
+                        """
+                        DELETE FROM api_keys
+                        WHERE id = $1 AND user_id = $2 AND rotated_from = $3
+                        """,
+                        new_key_id,
+                        user_id,
+                        old_key_id,
+                    )
+                    return (
+                        _affected_row_count(restore_result) > 0
+                        and _affected_row_count(delete_result) > 0
+                    )
+
+                restore_cursor = await conn.execute(
+                    """
+                    UPDATE api_keys
+                    SET status = ?,
+                        rotated_to = NULL,
+                        revoked_at = NULL,
+                        revoked_by = NULL,
+                        revoke_reason = NULL
+                    WHERE id = ? AND user_id = ? AND status = ? AND rotated_to = ?
+                    """,
+                    (
+                        active_status,
+                        old_key_id,
+                        user_id,
+                        rotated_status,
+                        new_key_id,
+                    ),
+                )
+                delete_cursor = await conn.execute(
+                    """
+                    DELETE FROM api_keys
+                    WHERE id = ? AND user_id = ? AND rotated_from = ?
+                    """,
+                    (new_key_id, user_id, old_key_id),
+                )
+                return (
+                    _affected_row_count(restore_cursor) > 0
+                    and _affected_row_count(delete_cursor) > 0
+                )
+        except Exception as exc:  # pragma: no cover - surfaced via higher layers
+            logger.error(f"AuthnzApiKeysRepo.rollback_key_rotation failed: {exc}")
+            raise
+
+    async def restore_revoked_api_key(
+        self,
+        *,
+        key_id: int,
+        user_id: int,
+        active_status: str,
+        revoked_status: str,
+    ) -> bool:
+        """Restore a revoked key to active state for compensating rollback."""
+        try:
+            async with self.db_pool.transaction() as conn:
+                if self._is_postgres_backend():
+                    result = await conn.execute(
+                        """
+                        UPDATE api_keys
+                        SET status = $1,
+                            revoked_at = NULL,
+                            revoked_by = NULL,
+                            revoke_reason = NULL
+                        WHERE id = $2 AND user_id = $3 AND status = $4
+                        """,
+                        active_status,
+                        key_id,
+                        user_id,
+                        revoked_status,
+                    )
+                    return _affected_row_count(result) > 0
+
+                cursor = await conn.execute(
+                    """
+                    UPDATE api_keys
+                    SET status = ?,
+                        revoked_at = NULL,
+                        revoked_by = NULL,
+                        revoke_reason = NULL
+                    WHERE id = ? AND user_id = ? AND status = ?
+                    """,
+                    (active_status, key_id, user_id, revoked_status),
+                )
+                return _affected_row_count(cursor) > 0
+        except Exception as exc:  # pragma: no cover - surfaced via higher layers
+            logger.error(f"AuthnzApiKeysRepo.restore_revoked_api_key failed: {exc}")
             raise
 
     async def mark_rotated(
@@ -789,9 +1008,11 @@ class AuthnzApiKeysRepo:
         new_rate_limit: int | None,
         new_allowed_ips: list[str] | None,
         new_metadata: dict[str, Any] | None,
+        active_status: str,
         rotated_status: str,
         reason: str,
         revoked_at: datetime,
+        conn: Any | None = None,
     ) -> int:
         """
         Atomically create a new API key and mark the old one as rotated.
@@ -807,26 +1028,94 @@ class AuthnzApiKeysRepo:
             Exception: If any part of the rotation fails (entire transaction rolls back).
         """
         try:
-            async with self.db_pool.transaction() as conn:
-                if self._is_postgres_backend():
-                    # PostgreSQL path
-                    expires_at_param = new_expires_at
-                    if (
-                        isinstance(expires_at_param, datetime)
-                        and expires_at_param.tzinfo is not None
-                    ):
-                        expires_at_param = expires_at_param.astimezone(timezone.utc).replace(tzinfo=None)
+            if conn is None:
+                async with self.db_pool.transaction() as txn:
+                    return await self.rotate_key_atomic(
+                        user_id=user_id,
+                        old_key_id=old_key_id,
+                        new_key_hash=new_key_hash,
+                        new_key_identifier=new_key_identifier,
+                        new_key_prefix=new_key_prefix,
+                        new_name=new_name,
+                        new_description=new_description,
+                        new_scope=new_scope,
+                        new_expires_at=new_expires_at,
+                        new_rate_limit=new_rate_limit,
+                        new_allowed_ips=new_allowed_ips,
+                        new_metadata=new_metadata,
+                        active_status=active_status,
+                        rotated_status=rotated_status,
+                        reason=reason,
+                        revoked_at=revoked_at,
+                        conn=txn,
+                    )
 
-                    # Create new key
-                    new_key_id = await conn.fetchval(
-                        """
-                        INSERT INTO api_keys (
-                            user_id, key_hash, key_id, key_prefix, name, description,
-                            scope, expires_at, rate_limit, allowed_ips, metadata
-                        )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-                        RETURNING id
-                        """,
+            if self._is_postgres_backend():
+                expires_at_param = new_expires_at
+                if (
+                    isinstance(expires_at_param, datetime)
+                    and expires_at_param.tzinfo is not None
+                ):
+                    expires_at_param = expires_at_param.astimezone(timezone.utc).replace(tzinfo=None)
+
+                new_key_id = await conn.fetchval(
+                    """
+                    INSERT INTO api_keys (
+                        user_id, key_hash, key_id, key_prefix, name, description,
+                        scope, expires_at, rate_limit, allowed_ips, metadata
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    RETURNING id
+                    """,
+                    user_id,
+                    new_key_hash,
+                    new_key_identifier,
+                    new_key_prefix,
+                    new_name,
+                    new_description,
+                    new_scope,
+                    expires_at_param,
+                    new_rate_limit,
+                    json.dumps(new_allowed_ips) if new_allowed_ips else None,
+                    json.dumps(new_metadata) if new_metadata else None,
+                )
+
+                norm_revoked_at = revoked_at
+                if isinstance(norm_revoked_at, datetime) and norm_revoked_at.tzinfo is not None:
+                    norm_revoked_at = norm_revoked_at.astimezone(timezone.utc).replace(tzinfo=None)
+
+                old_update_result = await conn.execute(
+                    """
+                    UPDATE api_keys
+                    SET status = $1, rotated_to = $2, revoked_at = $3,
+                        revoke_reason = $4
+                    WHERE id = $5 AND user_id = $6 AND status = $7
+                    """,
+                    rotated_status,
+                    new_key_id,
+                    norm_revoked_at,
+                    reason,
+                    old_key_id,
+                    user_id,
+                    active_status,
+                )
+                if _affected_row_count(old_update_result) == 0:
+                    raise ValueError("API key not found or inactive")
+                await conn.execute(
+                    "UPDATE api_keys SET rotated_from = $1 WHERE id = $2",
+                    old_key_id,
+                    new_key_id,
+                )
+            else:
+                cursor = await conn.execute(
+                    """
+                    INSERT INTO api_keys (
+                        user_id, key_hash, key_id, key_prefix, name, description,
+                        scope, expires_at, rate_limit, allowed_ips, metadata
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
                         user_id,
                         new_key_hash,
                         new_key_identifier,
@@ -834,83 +1123,39 @@ class AuthnzApiKeysRepo:
                         new_name,
                         new_description,
                         new_scope,
-                        expires_at_param,
+                        new_expires_at.isoformat() if new_expires_at else None,
                         new_rate_limit,
                         json.dumps(new_allowed_ips) if new_allowed_ips else None,
                         json.dumps(new_metadata) if new_metadata else None,
-                    )
+                    ),
+                )
+                new_key_id = getattr(cursor, "lastrowid", None)
 
-                    # Mark old key as rotated
-                    norm_revoked_at = revoked_at
-                    if isinstance(norm_revoked_at, datetime) and norm_revoked_at.tzinfo is not None:
-                        norm_revoked_at = norm_revoked_at.astimezone(timezone.utc).replace(tzinfo=None)
-
-                    await conn.execute(
-                        """
-                        UPDATE api_keys
-                        SET status = $1, rotated_to = $2, revoked_at = $3,
-                            revoke_reason = $4
-                        WHERE id = $5
-                        """,
+                old_update_cursor = await conn.execute(
+                    """
+                    UPDATE api_keys
+                    SET status = ?, rotated_to = ?, revoked_at = ?,
+                        revoke_reason = ?
+                    WHERE id = ? AND user_id = ? AND status = ?
+                    """,
+                    (
                         rotated_status,
                         new_key_id,
-                        norm_revoked_at,
+                        revoked_at.isoformat(),
                         reason,
                         old_key_id,
-                    )
-                    await conn.execute(
-                        "UPDATE api_keys SET rotated_from = $1 WHERE id = $2",
-                        old_key_id,
-                        new_key_id,
-                    )
-                else:
-                    # SQLite path
-                    cursor = await conn.execute(
-                        """
-                        INSERT INTO api_keys (
-                            user_id, key_hash, key_id, key_prefix, name, description,
-                            scope, expires_at, rate_limit, allowed_ips, metadata
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            user_id,
-                            new_key_hash,
-                            new_key_identifier,
-                            new_key_prefix,
-                            new_name,
-                            new_description,
-                            new_scope,
-                            new_expires_at.isoformat() if new_expires_at else None,
-                            new_rate_limit,
-                            json.dumps(new_allowed_ips) if new_allowed_ips else None,
-                            json.dumps(new_metadata) if new_metadata else None,
-                        ),
-                    )
-                    new_key_id = getattr(cursor, "lastrowid", None)
+                        user_id,
+                        active_status,
+                    ),
+                )
+                if _affected_row_count(old_update_cursor) == 0:
+                    raise ValueError("API key not found or inactive")
+                await conn.execute(
+                    "UPDATE api_keys SET rotated_from = ? WHERE id = ?",
+                    (old_key_id, new_key_id),
+                )
 
-                    # Mark old key as rotated
-                    await conn.execute(
-                        """
-                        UPDATE api_keys
-                        SET status = ?, rotated_to = ?, revoked_at = ?,
-                            revoke_reason = ?
-                        WHERE id = ?
-                        """,
-                        (
-                            rotated_status,
-                            new_key_id,
-                            revoked_at.isoformat(),
-                            reason,
-                            old_key_id,
-                        ),
-                    )
-                    await conn.execute(
-                        "UPDATE api_keys SET rotated_from = ? WHERE id = ?",
-                        (old_key_id, new_key_id),
-                    )
-
-                return int(new_key_id)
+            return int(new_key_id)
         except Exception as exc:
             logger.error(f"AuthnzApiKeysRepo.rotate_key_atomic failed: {exc}")
             raise
@@ -924,6 +1169,7 @@ class AuthnzApiKeysRepo:
         active_status: str,
         reason: str,
         revoked_at: datetime,
+        conn: Any | None = None,
     ) -> bool:
         """
         Revoke an API key owned by the given user.
@@ -931,47 +1177,58 @@ class AuthnzApiKeysRepo:
         Returns True when a row was updated (key existed and was active), False otherwise.
         """
         try:
-            async with self.db_pool.transaction() as conn:
-                if self._is_postgres_backend():
-                    norm_revoked_at = revoked_at
-                    if isinstance(norm_revoked_at, datetime) and norm_revoked_at.tzinfo is not None:
-                        norm_revoked_at = norm_revoked_at.astimezone(timezone.utc).replace(tzinfo=None)
-                    result = await conn.execute(
-                        """
-                        UPDATE api_keys
-                        SET status = $1, revoked_at = $2, revoked_by = $3,
-                            revoke_reason = $4
-                        WHERE id = $5 AND user_id = $6 AND status = $7
-                        """,
-                        revoked_status,
-                        norm_revoked_at,
-                        user_id,
-                        reason,
-                        key_id,
-                        user_id,
-                        active_status,
+            if conn is None:
+                async with self.db_pool.transaction() as txn:
+                    return await self.revoke_api_key_for_user(
+                        key_id=key_id,
+                        user_id=user_id,
+                        revoked_status=revoked_status,
+                        active_status=active_status,
+                        reason=reason,
+                        revoked_at=revoked_at,
+                        conn=txn,
                     )
-                    # asyncpg returns a status string like "UPDATE <n>"
-                    normalized = str(result).strip().upper()
-                    return normalized != "UPDATE 0"
-                cursor = await conn.execute(
+
+            if self._is_postgres_backend():
+                norm_revoked_at = revoked_at
+                if isinstance(norm_revoked_at, datetime) and norm_revoked_at.tzinfo is not None:
+                    norm_revoked_at = norm_revoked_at.astimezone(timezone.utc).replace(tzinfo=None)
+                result = await conn.execute(
                     """
                     UPDATE api_keys
-                    SET status = ?, revoked_at = ?, revoked_by = ?,
-                        revoke_reason = ?
-                    WHERE id = ? AND user_id = ? AND status = ?
+                    SET status = $1, revoked_at = $2, revoked_by = $3,
+                        revoke_reason = $4
+                    WHERE id = $5 AND user_id = $6 AND status = $7
                     """,
-                    (
-                        revoked_status,
-                        revoked_at.isoformat(),
-                        user_id,
-                        reason,
-                        key_id,
-                        user_id,
-                        active_status,
-                    ),
+                    revoked_status,
+                    norm_revoked_at,
+                    user_id,
+                    reason,
+                    key_id,
+                    user_id,
+                    active_status,
                 )
-                return getattr(cursor, "rowcount", 0) > 0
+                normalized = str(result).strip().upper()
+                return normalized != "UPDATE 0"
+
+            cursor = await conn.execute(
+                """
+                UPDATE api_keys
+                SET status = ?, revoked_at = ?, revoked_by = ?,
+                    revoke_reason = ?
+                WHERE id = ? AND user_id = ? AND status = ?
+                """,
+                (
+                    revoked_status,
+                    revoked_at.isoformat(),
+                    user_id,
+                    reason,
+                    key_id,
+                    user_id,
+                    active_status,
+                ),
+            )
+            return getattr(cursor, "rowcount", 0) > 0
         except Exception as exc:  # pragma: no cover - surfaced via higher layers
             logger.error(f"AuthnzApiKeysRepo.revoke_api_key_for_user failed: {exc}")
             raise

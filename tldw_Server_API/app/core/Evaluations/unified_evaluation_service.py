@@ -64,11 +64,16 @@ from tldw_Server_API.app.core.Evaluations.audit_adapter import (
     log_run_started_async,
 )
 from tldw_Server_API.app.core.Evaluations.circuit_breaker import CircuitBreaker
+from tldw_Server_API.app.core.Evaluations.identity import canonical_evaluations_user_scope
 
 # Import support services
 from tldw_Server_API.app.core.Evaluations.metrics_advanced import advanced_metrics
 from tldw_Server_API.app.core.Evaluations.persona_telemetry_metrics import (
     get_persona_telemetry_metrics_summary,
+)
+from tldw_Server_API.app.core.Evaluations.run_state import (
+    can_transition_run_status,
+    normalize_run_status,
 )
 
 # Import evaluation engines
@@ -457,15 +462,26 @@ class UnifiedEvaluationService:
             if not evaluation:
                 raise ValueError(f"Evaluation {eval_id} not found")
 
-            # Create run record
+            run_id = f"run_{uuid.uuid4().hex[:12]}"
+
+            # Unified audit (mandatory)
+            await log_run_started_async(
+                user_id=created_by,
+                run_id=run_id,
+                eval_id=eval_id,
+                target_model=target_model,
+            )
+
+            # Create run record after mandatory audit persistence succeeds
             run_id = self.db.create_run(
                 eval_id=eval_id,
                 target_model=target_model,
                 config=config or {},
-                webhook_url=webhook_url
+                webhook_url=webhook_url,
+                run_id=run_id,
             )
 
-            # Send webhook for run started
+            # Send webhook for run started after the durable run row exists
             if webhook_url and self.enable_webhooks and self.webhook_manager:
                 effective_webhook_user = webhook_user_id_from_value(webhook_user_id) or webhook_user_id_from_value(created_by) or created_by
                 await self.webhook_manager.send_webhook(
@@ -490,7 +506,7 @@ class UnifiedEvaluationService:
                 "created_by": created_by,
             }
 
-            # Start async evaluation
+            # Start async evaluation only after the mandatory audit and row persistence succeed
             asyncio.create_task(
                 self._run_evaluation_async(
                     run_id=run_id,
@@ -500,9 +516,6 @@ class UnifiedEvaluationService:
                     webhook_user_id=webhook_user_id,
                 )
             )
-
-            # Unified audit (mandatory)
-            await log_run_started_async(user_id=created_by, run_id=run_id, eval_id=eval_id, target_model=target_model)
 
             # Return run info
             run = self.db.get_run(run_id)
@@ -552,8 +565,17 @@ class UnifiedEvaluationService:
 
         except asyncio.CancelledError:
             # Cancellation path: persist cancelled status and notify listeners
-            self.db.update_run_status(run_id, "cancelled")
-            if eval_config.get("webhook_url") and self.enable_webhooks and getattr(self, "webhook_manager", None):
+            run = self.db.get_run(run_id, created_by=created_by)
+            current_status = normalize_run_status(run.get("status") if run else None)
+            transitioned_to_cancelled = can_transition_run_status(current_status, "cancelled")
+            if transitioned_to_cancelled:
+                self.db.update_run_status(run_id, "cancelled")
+            if (
+                transitioned_to_cancelled
+                and eval_config.get("webhook_url")
+                and self.enable_webhooks
+                and getattr(self, "webhook_manager", None)
+            ):
                 effective_webhook_user = webhook_user_id_from_value(webhook_user_id) or webhook_user_id_from_value(created_by) or created_by
                 await self.webhook_manager.send_webhook(
                     user_id=effective_webhook_user,
@@ -616,14 +638,23 @@ class UnifiedEvaluationService:
     async def cancel_run(self, run_id: str, cancelled_by: str = "system", *, created_by: Optional[str] = None) -> bool:
         """Cancel a running evaluation"""
         try:
-            if created_by:
-                run = self.db.get_run(run_id, created_by=created_by)
-                if not run:
-                    return False
+            run = self.db.get_run(run_id, created_by=created_by) if created_by else self.db.get_run(run_id)
+            if not run:
+                return False
+
+            current_status = normalize_run_status(run.get("status") if isinstance(run, dict) else None)
+            task_was_registered = run_id in getattr(self.runner, "running_tasks", {})
+
             # Try to cancel via runner
             success = self.runner.cancel_run(run_id)
+            task_cleaned_up = task_was_registered and run_id not in getattr(self.runner, "running_tasks", {})
+
+            if task_cleaned_up and not success:
+                return True
 
             if not success:
+                if not can_transition_run_status(current_status, "cancelled"):
+                    return False
                 # Update status directly if not in runner
                 self.db.update_run_status(run_id, "cancelled")
 
@@ -1539,7 +1570,7 @@ except ImportError:  # pragma: no cover - stdlib guard
     OrderedDict = dict  # type: ignore
 
 _MAX_SERVICE_INSTANCES = 128
-_service_instances_by_user: "OrderedDict[int, UnifiedEvaluationService]" = OrderedDict()  # type: ignore[name-defined]
+_service_instances_by_user: "OrderedDict[str, UnifiedEvaluationService]" = OrderedDict()  # type: ignore[name-defined]
 
 
 def get_unified_evaluation_service(db_path: Optional[str] = None) -> UnifiedEvaluationService:
@@ -1562,11 +1593,11 @@ def get_unified_evaluation_service(db_path: Optional[str] = None) -> UnifiedEval
     return _service_instance
 
 
-def get_unified_evaluation_service_for_user(user_id: int) -> UnifiedEvaluationService:
+def get_unified_evaluation_service_for_user(user_id: str | int) -> UnifiedEvaluationService:
     """Get or create a per-user unified evaluation service bound to that user's DB.
 
-    Accepts either int or str user IDs; coerces to int when possible so caches
-    built by tests using integer keys are hit even if a string ID is supplied.
+    Uses the canonical evaluations user scope so tenant-style string ids bind to
+    their own per-user DB instead of falling back to the default single-user DB.
     """
     # Lazy init lock to avoid import-time issues
     global _service_instances_lock
@@ -1575,15 +1606,12 @@ def get_unified_evaluation_service_for_user(user_id: int) -> UnifiedEvaluationSe
         _service_instances_lock = _threading.Lock()
 
     with _service_instances_lock:
-        # Normalize user id for cache key
+        uid_key = canonical_evaluations_user_scope(user_id)
+        legacy_numeric_key: int | None = None
         try:
-            uid_key = int(user_id)  # type: ignore[arg-type]
+            legacy_numeric_key = int(uid_key)
         except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
-            try:
-                from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths as _DP
-                uid_key = int(_DP.get_single_user_id())
-            except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
-                uid_key = 1
+            legacy_numeric_key = None
         # Return existing and mark as recently used
         if uid_key in _service_instances_by_user:
             svc = _service_instances_by_user.pop(uid_key)
@@ -1596,6 +1624,13 @@ def get_unified_evaluation_service_for_user(user_id: int) -> UnifiedEvaluationSe
                     svc = UnifiedEvaluationService(db_path=override_path)
             except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
                 pass
+            _service_instances_by_user[uid_key] = svc
+            return svc
+        # Temporary migration path: older in-process callers cached services under numeric
+        # user ids before canonical string scopes landed. Remove this branch after all
+        # callers and long-lived workers have been restarted on the string-scope contract.
+        if legacy_numeric_key is not None and legacy_numeric_key in _service_instances_by_user:  # type: ignore[operator]
+            svc = _service_instances_by_user.pop(legacy_numeric_key)  # type: ignore[arg-type]
             _service_instances_by_user[uid_key] = svc
             return svc
 
