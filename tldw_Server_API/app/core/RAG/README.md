@@ -37,7 +37,7 @@ Adjacent paths share the same module boundary. `POST /api/v1/rag/batch` uses `Un
 
 ## Module Map
 
-- `API_DOCUMENTATION.md`: local endpoint/parameter reference.
+- `API_DOCUMENTATION.md`: in-module pointer to the maintained API reference in `Docs/API-related/RAG_API_Documentation.md`.
 - `CAPABILITIES.md`: feature discovery and capability summary.
 - `UNIFIED_PIPELINE_EXAMPLES.md`: request and pipeline examples to verify against current schema.
 - `exceptions.py`: RAG-specific exception types.
@@ -91,7 +91,7 @@ ChromaDB is the default vector store adapter. PGVector is conditional on optiona
 
 ## Testing
 
-For this README, verify the heading structure and rerun the stale-reference check from the task before committing. The heading check should show only the orientation sections in this file.
+For this README, verify the heading structure and confirm no retired RAG guides, old router names, or superseded pipeline names are referenced before committing. The heading check should show only the orientation sections in this file.
 
 For RAG code changes, activate the project virtual environment first:
 
