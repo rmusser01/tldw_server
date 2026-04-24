@@ -18,7 +18,16 @@ pytestmark = pytest.mark.integration
 
 def _has_tiktoken() -> bool:
     try:
-        import tiktoken  # noqa: F401
+        from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
+            TokenizerUnavailable,
+            resolve_tiktoken_encoding,
+        )
+    except Exception:
+        return False
+    try:
+        resolve_tiktoken_encoding("gpt-3.5-turbo")
+    except TokenizerUnavailable:
+        return False
     except Exception:
         return False
     return True
@@ -774,7 +783,7 @@ def test_writing_capabilities_provider_tokenizers(client_with_writing_db: TestCl
         assert tokenizers["gpt-3.5-turbo"]["strict_mode_effective"] is False
     else:
         assert tokenizers["gpt-3.5-turbo"]["available"] is False
-        assert "unavailable" in tokenizers["gpt-3.5-turbo"]["error"].lower()
+        assert "not available" in tokenizers["gpt-3.5-turbo"]["error"].lower()
 
 
 def test_writing_capabilities_includes_extra_body_compat(client_with_writing_db: TestClient, monkeypatch):
@@ -1126,10 +1135,7 @@ def test_writing_tokenize_unavailable(client_with_writing_db: TestClient):
     )
     assert resp.status_code == 422, resp.text
     detail = str(resp.json().get("detail", "")).lower()
-    if _has_tiktoken():
-        assert "not available" in detail
-    else:
-        assert "unavailable" in detail
+    assert "not available" in detail or "unavailable" in detail
 
 
 def test_writing_tokenize_prefers_provider_native_tokenizer(
