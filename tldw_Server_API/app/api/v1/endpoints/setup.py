@@ -13,7 +13,6 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from loguru import logger
-from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
@@ -26,12 +25,22 @@ from tldw_Server_API.app.api.v1.API_Deps.setup_deps import (
     require_shared_audio_installer_access,
 )
 from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
+    AssistantQuestion,
     AudioBundleOperationResponse,
+    AudioBundleProvisionRequest,
+    AudioBundleVerificationRequest,
+    AudioPackExportRequest,
     AudioPackExportResponse,
+    AudioPackImportRequest,
     AudioPackImportResponse,
     AudioReadinessResetResponse,
     AudioRecommendationsResponse,
+    ConfigUpdates,
+    OmniVoiceSetupActionRequest,
+    OmniVoiceSetupActionResponse,
+    OmniVoiceSetupStatusResponse,
     SetupAssistantResponse,
+    SetupCompleteRequest,
     SetupCompleteResponse,
     SetupConfigUpdateResponse,
     SetupInstallStatusResponse,
@@ -45,10 +54,8 @@ from tldw_Server_API.app.core.Setup import audio_pack_service
 from tldw_Server_API.app.core.Setup import audio_profile_service
 from tldw_Server_API.app.core.Setup import audio_readiness_store
 from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
-    DEFAULT_AUDIO_RESOURCE_PROFILE,
     get_audio_bundle_catalog,
 )
-from tldw_Server_API.app.core.Setup.install_schema import InstallPlan
 from tldw_Server_API.app.core.Setup.install_manager import execute_install_plan
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 from tldw_Server_API.app.services.auth_service import mark_user_verified
@@ -63,27 +70,6 @@ _SUSPICIOUS_SETUP_DETAIL_RE = re.compile(
     re.IGNORECASE,
 )
 _SANITIZED_SETUP_DETAIL_MESSAGE = "Internal setup diagnostics were suppressed."
-
-
-class ConfigUpdates(BaseModel):
-    updates: dict[str, dict[str, Any]] = Field(
-        ..., description="Mapping of section -> key/value pairs to persist in config.txt"
-    )
-
-
-class SetupCompleteRequest(BaseModel):
-    disable_first_time_setup: bool | None = Field(
-        False,
-        description="If true, flips enable_first_time_setup to false so the screen stays hidden",
-    )
-    install_plan: InstallPlan | None = Field(
-        None,
-        description="Backend installation instructions to execute after setup completes.",
-    )
-
-
-class AssistantQuestion(BaseModel):
-    question: str = Field(..., min_length=1, description="Natural language question for the setup assistant")
 
 
 def _sanitize_setup_payload(value: Any) -> Any:
@@ -103,61 +89,6 @@ def _sanitize_setup_payload(value: Any) -> Any:
             sanitized[key] = _sanitize_setup_payload(item)
         return sanitized
     return value
-
-
-class AudioBundleProvisionRequest(BaseModel):
-    bundle_id: str = Field(..., min_length=1, description="Curated audio bundle identifier to provision.")
-    resource_profile: str = Field(
-        DEFAULT_AUDIO_RESOURCE_PROFILE,
-        min_length=1,
-        description="Selected resource profile within the curated audio bundle.",
-    )
-    safe_rerun: bool = Field(
-        False,
-        description="If true, skip bundle installation only when all expected install steps were previously completed.",
-    )
-    tts_choice: str | None = Field(
-        None,
-        description="Optional curated TTS choice for profiles that expose multiple curated TTS engines.",
-    )
-
-
-class AudioBundleVerificationRequest(BaseModel):
-    bundle_id: str = Field(..., min_length=1, description="Curated audio bundle identifier to verify.")
-    resource_profile: str = Field(
-        DEFAULT_AUDIO_RESOURCE_PROFILE,
-        min_length=1,
-        description="Selected resource profile within the curated audio bundle.",
-    )
-    tts_choice: str | None = Field(
-        None,
-        description="Optional curated TTS choice for profiles that expose multiple curated TTS engines.",
-    )
-
-
-class AudioPackExportRequest(BaseModel):
-    bundle_id: str = Field(..., min_length=1, description="Curated audio bundle identifier to export.")
-    resource_profile: str = Field(
-        DEFAULT_AUDIO_RESOURCE_PROFILE,
-        min_length=1,
-        description="Selected resource profile within the curated audio bundle.",
-    )
-    pack_name: str | None = Field(
-        None,
-        description="Optional filename-friendly pack name for the generated audio pack manifest.",
-    )
-    pack_path: str | None = Field(
-        None,
-        description="Optional path to write the generated audio pack manifest.",
-    )
-    tts_choice: str | None = Field(
-        None,
-        description="Optional curated TTS choice for profiles that expose multiple curated TTS engines.",
-    )
-
-
-class AudioPackImportRequest(BaseModel):
-    pack_path: str = Field(..., min_length=1, description="Filesystem path to an audio pack manifest JSON file.")
 
 
 async def require_admin_and_system_configure(
@@ -181,13 +112,28 @@ async def require_admin_and_system_configure(
     return principal
 
 
-def _audio_pack_compatibility(machine_profile: audio_profile_service.MachineProfile) -> dict[str, str]:
+def _audio_pack_compatibility(
+    machine_profile: audio_profile_service.MachineProfile | dict[str, Any],
+) -> dict[str, str]:
     """Project machine-profile data into the portable manifest compatibility shape."""
+    if isinstance(machine_profile, dict):
+        platform = machine_profile["platform"]
+        arch = machine_profile["arch"]
+    else:
+        platform = machine_profile.platform
+        arch = machine_profile.arch
+
     return {
-        "platform": machine_profile.platform,
-        "arch": machine_profile.arch,
+        "platform": platform,
+        "arch": arch,
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
     }
+
+
+def _sanitize_setup_error_detail(*, detail: str, fallback: str) -> str:
+    """Return a user-facing validation detail when safe, otherwise the generic fallback."""
+    sanitized = _sanitize_setup_payload(detail)
+    return fallback if sanitized == _SANITIZED_SETUP_DETAIL_MESSAGE else sanitized
 
 
 def _normalize_audio_pack_name(pack_name: str) -> str:
@@ -373,10 +319,13 @@ async def _execute_audio_bundle_provision(
             tts_choice=payload.tts_choice,
             safe_rerun=payload.safe_rerun,
         )
-    except ValueError:
+    except ValueError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            detail=INVALID_AUDIO_BUNDLE_REQUEST_DETAIL,
+            detail=_sanitize_setup_error_detail(
+                detail=str(exc),
+                fallback=INVALID_AUDIO_BUNDLE_REQUEST_DETAIL,
+            ),
         ) from None
     except KeyError:
         raise HTTPException(
@@ -410,16 +359,91 @@ async def _execute_audio_bundle_verification(
             resource_profile=payload.resource_profile,
             tts_choice=payload.tts_choice,
         )
-    except ValueError:
+    except ValueError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            detail=INVALID_AUDIO_BUNDLE_REQUEST_DETAIL,
+            detail=_sanitize_setup_error_detail(
+                detail=str(exc),
+                fallback=INVALID_AUDIO_BUNDLE_REQUEST_DETAIL,
+            ),
         ) from None
     except KeyError:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             detail=AUDIO_BUNDLE_NOT_FOUND_DETAIL,
         ) from None
+
+
+async def _get_omnivoice_setup_status(
+    *,
+    allow_completed_when_disabled: bool = False,
+) -> dict[str, Any]:
+    _ensure_audio_installer_available(allow_completed_when_disabled=allow_completed_when_disabled)
+    return await asyncio.to_thread(install_manager.get_omnivoice_setup_status)
+
+
+async def _execute_omnivoice_setup_action(
+    payload: OmniVoiceSetupActionRequest,
+    *,
+    allow_completed_when_disabled: bool = False,
+) -> dict[str, Any]:
+    _ensure_audio_installer_available(allow_completed_when_disabled=allow_completed_when_disabled)
+
+    try:
+        if payload.action == "predownload":
+            return await asyncio.to_thread(install_manager.predownload_omnivoice_assets)
+        return await install_manager.warmup_omnivoice_sidecar_async()
+    except install_manager.DownloadBlockedError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_sanitize_setup_error_detail(
+                detail=str(exc),
+                fallback="OmniVoice downloads are currently unavailable.",
+            ),
+        ) from None
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=_sanitize_setup_error_detail(
+                detail=str(exc),
+                fallback="Invalid OmniVoice setup action.",
+            ),
+        ) from None
+    except RuntimeError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_sanitize_setup_error_detail(
+                detail=str(exc),
+                fallback="OmniVoice setup action failed.",
+            ),
+        ) from None
+
+
+@router.get(
+    "/audio/providers/omnivoice/status",
+    openapi_extra={"security": []},
+    response_model=OmniVoiceSetupStatusResponse,
+)
+async def get_local_omnivoice_setup_status(
+    _guard: None = Depends(require_local_setup_access),
+) -> OmniVoiceSetupStatusResponse:
+    """Return OmniVoice runtime/install status for the local setup flow."""
+
+    return await _get_omnivoice_setup_status()
+
+
+@router.post(
+    "/audio/providers/omnivoice/action",
+    openapi_extra={"security": []},
+    response_model=OmniVoiceSetupActionResponse,
+)
+async def run_local_omnivoice_setup_action(
+    payload: OmniVoiceSetupActionRequest,
+    _guard: None = Depends(require_local_setup_access),
+) -> OmniVoiceSetupActionResponse:
+    """Execute an OmniVoice setup action for the local setup flow."""
+
+    return await _execute_omnivoice_setup_action(payload)
 
 
 @router.get("/admin/install-status")
@@ -470,6 +494,34 @@ async def verify_admin_audio_bundle(
     return _sanitize_setup_payload(result)
 
 
+@router.get(
+    "/admin/audio/providers/omnivoice/status",
+    response_model=OmniVoiceSetupStatusResponse,
+)
+async def get_admin_omnivoice_setup_status(
+    _guard: None = Depends(require_shared_audio_installer_access),
+) -> OmniVoiceSetupStatusResponse:
+    """Return OmniVoice runtime/install status for the shared admin installer UI."""
+
+    return await _get_omnivoice_setup_status(allow_completed_when_disabled=True)
+
+
+@router.post(
+    "/admin/audio/providers/omnivoice/action",
+    response_model=OmniVoiceSetupActionResponse,
+)
+async def run_admin_omnivoice_setup_action(
+    payload: OmniVoiceSetupActionRequest,
+    _guard: None = Depends(require_shared_audio_installer_access),
+) -> OmniVoiceSetupActionResponse:
+    """Execute an OmniVoice setup action for the shared admin installer UI."""
+
+    return await _execute_omnivoice_setup_action(
+        payload,
+        allow_completed_when_disabled=True,
+    )
+
+
 @router.post("/audio/packs/export", openapi_extra={"security": []}, response_model=AudioPackExportResponse)
 async def export_audio_pack(
     payload: AudioPackExportRequest,
@@ -504,10 +556,13 @@ async def export_audio_pack(
                 installed_assets=readiness.get("installed_asset_manifests"),
                 compatibility=compatibility,
             )
-    except ValueError:
+    except ValueError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            detail=INVALID_AUDIO_PACK_EXPORT_REQUEST_DETAIL,
+            detail=_sanitize_setup_error_detail(
+                detail=str(exc),
+                fallback=INVALID_AUDIO_PACK_EXPORT_REQUEST_DETAIL,
+            ),
         ) from None
     except KeyError:
         raise HTTPException(

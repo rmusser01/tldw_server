@@ -2574,7 +2574,8 @@ class TTSServiceV2:
                 return await factory.registry.get_adapter(provider_enum)
 
         # Get adapter by model name
-        model_provider = factory.get_provider_for_model(model)
+        provider_resolver = getattr(factory, "get_provider_for_model", None)
+        model_provider = provider_resolver(model) if callable(provider_resolver) else None
         if model_provider == TTSProvider.OMNIVOICE:
             return await factory.registry.create_adapter_with_overrides(
                 model_provider,

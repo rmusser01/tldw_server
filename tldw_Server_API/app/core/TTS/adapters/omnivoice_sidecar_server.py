@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import gc
 import ipaddress
 import os
+import threading
 import wave
 from io import BytesIO
 from pathlib import Path
+from typing import Any, Callable, Protocol
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 
@@ -14,6 +18,34 @@ from .omnivoice_sidecar_protocol import (
     OmniVoiceSynthesizeResponse,
     X_TLDW_SIDECAR_TOKEN_HEADER,
 )
+
+
+class OmniVoiceRuntimeError(RuntimeError):
+    """Raised for expected OmniVoice runtime load or synthesis failures."""
+
+
+class OmniVoiceRuntime(Protocol):
+    """Runtime contract used by the internal sidecar app."""
+
+    runtime_mode: str
+
+    def health(self) -> OmniVoiceHealthResponse:
+        """Return sidecar process and model readiness state."""
+
+    def warmup(self) -> OmniVoiceHealthResponse:
+        """Warm the runtime if supported and return current readiness."""
+
+    def reload(self) -> OmniVoiceHealthResponse:
+        """Reload the runtime if supported and return current readiness."""
+
+    def shutdown(self) -> OmniVoiceHealthResponse:
+        """Prepare the runtime for shutdown and return current readiness."""
+
+    def synthesize(
+        self,
+        request: OmniVoiceSynthesizeRequest,
+    ) -> tuple[bytes, OmniVoiceSynthesizeResponse]:
+        """Generate audio bytes and response metadata for a request."""
 
 
 def validate_loopback_host(host: str | None) -> str:
@@ -43,9 +75,233 @@ def _build_silent_wav(*, sample_rate: int = 24000, channels: int = 1, sample_wid
     return buffer.getvalue()
 
 
-def create_app(*, sidecar_token: str) -> FastAPI:
+class StubOmniVoiceRuntime:
+    """Explicit test/development runtime that returns valid silent WAV bytes."""
+
+    runtime_mode = "stub"
+
+    def health(self) -> OmniVoiceHealthResponse:
+        return OmniVoiceHealthResponse(
+            runtime_mode=self.runtime_mode,
+            model_loaded=False,
+            model_ready=True,
+        )
+
+    def warmup(self) -> OmniVoiceHealthResponse:
+        return self.health()
+
+    def reload(self) -> OmniVoiceHealthResponse:
+        return self.health()
+
+    def shutdown(self) -> OmniVoiceHealthResponse:
+        return self.health().model_copy(update={"status": "shutting-down", "ready": False})
+
+    def synthesize(
+        self,
+        request: OmniVoiceSynthesizeRequest,
+    ) -> tuple[bytes, OmniVoiceSynthesizeResponse]:
+        metadata = OmniVoiceSynthesizeResponse(sample_rate=request.sample_rate, mode=request.mode)
+        audio_bytes = _build_silent_wav(sample_rate=request.sample_rate, channels=metadata.channels)
+        return audio_bytes, metadata
+
+
+class RealOmniVoiceRuntime:
+    """Lazy OmniVoice runtime isolated inside the sidecar process."""
+
+    DEFAULT_MODEL_ID = "k2-fsa/OmniVoice"
+    runtime_mode = "real"
+
+    def __init__(
+        self,
+        *,
+        model_id: str = DEFAULT_MODEL_ID,
+        device: str | None = None,
+        dtype: str | None = None,
+        model_loader: Callable[..., Any] | None = None,
+        wav_writer: Callable[[BytesIO, Any, int], None] | None = None,
+    ) -> None:
+        self.model_id = model_id
+        self.device = device
+        self.dtype = dtype
+        self._model_loader = model_loader or self._default_model_loader
+        self._wav_writer = wav_writer or self._default_wav_writer
+        self._model: Any | None = None
+        self._last_error: str | None = None
+        self._lock = threading.Lock()
+
+    def health(self) -> OmniVoiceHealthResponse:
+        model_loaded = self._model is not None
+        return OmniVoiceHealthResponse(
+            runtime_mode=self.runtime_mode,
+            model_loaded=model_loaded,
+            model_ready=model_loaded and self._last_error is None,
+            last_error=self._last_error,
+        )
+
+    def warmup(self) -> OmniVoiceHealthResponse:
+        with self._lock:
+            self._load_model_locked()
+            return self._health_locked()
+
+    def reload(self) -> OmniVoiceHealthResponse:
+        with self._lock:
+            self._model = None
+            self._last_error = None
+            self._load_model_locked()
+            return self._health_locked()
+
+    def shutdown(self) -> OmniVoiceHealthResponse:
+        with self._lock:
+            self._model = None
+            gc.collect()
+            return OmniVoiceHealthResponse(
+                status="shutting-down",
+                ready=False,
+                runtime_mode=self.runtime_mode,
+                model_loaded=False,
+                model_ready=False,
+                last_error=self._last_error,
+            )
+
+    def synthesize(
+        self,
+        request: OmniVoiceSynthesizeRequest,
+    ) -> tuple[bytes, OmniVoiceSynthesizeResponse]:
+        with self._lock:
+            model = self._load_model_locked()
+            generate_kwargs = self._build_generate_kwargs(request)
+            try:
+                generated_audio = model.generate(**generate_kwargs)
+                audio = generated_audio[0] if isinstance(generated_audio, (list, tuple)) else generated_audio
+                sample_rate = int(getattr(model, "sampling_rate", request.sample_rate) or request.sample_rate)
+                buffer = BytesIO()
+                self._wav_writer(buffer, audio, sample_rate)
+            except OmniVoiceRuntimeError:
+                raise
+            except Exception as exc:
+                self._last_error = f"OmniVoice generation failed: {exc}"
+                raise OmniVoiceRuntimeError(self._last_error) from exc
+
+            self._last_error = None
+            metadata = OmniVoiceSynthesizeResponse(sample_rate=sample_rate, mode=request.mode)
+            return buffer.getvalue(), metadata
+
+    def _health_locked(self) -> OmniVoiceHealthResponse:
+        model_loaded = self._model is not None
+        return OmniVoiceHealthResponse(
+            runtime_mode=self.runtime_mode,
+            model_loaded=model_loaded,
+            model_ready=model_loaded and self._last_error is None,
+            last_error=self._last_error,
+        )
+
+    def _load_model_locked(self) -> Any:
+        if self._model is not None:
+            return self._model
+
+        resolved_device = self.device or self._detect_device()
+        resolved_dtype = self.dtype or self._default_dtype_for_device(resolved_device)
+        try:
+            self._model = self._model_loader(
+                model_id=self.model_id,
+                device=resolved_device,
+                dtype=resolved_dtype,
+            )
+        except OmniVoiceRuntimeError as exc:
+            self._last_error = str(exc)
+            raise
+        except Exception as exc:
+            self._last_error = f"OmniVoice model load failed: {exc}"
+            raise OmniVoiceRuntimeError(self._last_error) from exc
+        self._last_error = None
+        return self._model
+
+    @staticmethod
+    def _build_generate_kwargs(request: OmniVoiceSynthesizeRequest) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"text": request.text}
+        if request.language:
+            kwargs["language"] = request.language
+        if request.instruct:
+            kwargs["instruct"] = request.instruct
+        if request.duration is not None:
+            kwargs["duration"] = request.duration
+        if request.speed is not None:
+            kwargs["speed"] = request.speed
+        if request.mode == "clone":
+            kwargs["ref_audio"] = request.reference_audio_path
+            kwargs["ref_text"] = request.reference_text
+        kwargs.update(request.generation_params)
+        return kwargs
+
+    @staticmethod
+    def _default_dtype_for_device(device: str) -> str:
+        normalized = device.lower()
+        if normalized.startswith("cuda") or normalized == "mps":
+            return "float16"
+        return "float32"
+
+    @staticmethod
+    def _detect_device() -> str:
+        try:
+            import torch
+        except Exception as exc:
+            raise OmniVoiceRuntimeError(f"OmniVoice runtime dependency missing: torch ({exc})") from exc
+
+        if torch.cuda.is_available():
+            return "cuda:0"
+        mps_backend = getattr(getattr(torch, "backends", None), "mps", None)
+        if mps_backend is not None and mps_backend.is_available():
+            return "mps"
+        return "cpu"
+
+    @staticmethod
+    def _resolve_torch_dtype(torch_module: Any, dtype: str) -> Any:
+        dtype_name = dtype.strip().lower()
+        dtype_value = getattr(torch_module, dtype_name, None)
+        if dtype_value is None:
+            raise OmniVoiceRuntimeError(f"Unsupported OmniVoice dtype: {dtype}")
+        return dtype_value
+
+    @classmethod
+    def _default_model_loader(cls, *, model_id: str, device: str, dtype: str) -> Any:
+        try:
+            import torch
+            from omnivoice import OmniVoice
+        except Exception as exc:
+            raise OmniVoiceRuntimeError(f"OmniVoice runtime dependency missing: {exc}") from exc
+
+        torch_dtype = cls._resolve_torch_dtype(torch, dtype)
+        try:
+            return OmniVoice.from_pretrained(model_id, device_map=device, dtype=torch_dtype)
+        except Exception as exc:
+            raise OmniVoiceRuntimeError(f"OmniVoice model load failed: {exc}") from exc
+
+    @staticmethod
+    def _default_wav_writer(buffer: BytesIO, audio: Any, sample_rate: int) -> None:
+        try:
+            import soundfile as sf
+        except Exception as exc:
+            raise OmniVoiceRuntimeError(f"OmniVoice runtime dependency missing: soundfile ({exc})") from exc
+
+        try:
+            sf.write(buffer, audio, sample_rate, format="WAV")
+        except Exception as exc:
+            raise OmniVoiceRuntimeError(f"OmniVoice WAV encoding failed: {exc}") from exc
+
+
+def create_app(*, sidecar_token: str, runtime: OmniVoiceRuntime | None = None) -> FastAPI:
     """Create the narrow internal OmniVoice sidecar app."""
     app = FastAPI(title="OmniVoice Sidecar", version="0.1.0")
+    sidecar_runtime = runtime or StubOmniVoiceRuntime()
+    app.state.omnivoice_runtime = sidecar_runtime
+    app.state.uvicorn_server = None
+
+    def _request_shutdown() -> None:
+        server = getattr(app.state, "uvicorn_server", None)
+        if server is not None:
+            server.should_exit = True
+
+    app.state.request_shutdown = _request_shutdown
 
     async def require_sidecar_token(
         supplied_token: str | None = Header(default=None, alias=X_TLDW_SIDECAR_TOKEN_HEADER),
@@ -58,19 +314,21 @@ def create_app(*, sidecar_token: str) -> FastAPI:
 
     @app.get("/health", response_model=OmniVoiceHealthResponse)
     async def health(_: None = Depends(require_sidecar_token)) -> OmniVoiceHealthResponse:
-        return OmniVoiceHealthResponse()
+        return sidecar_runtime.health()
 
     @app.post("/control/warmup", response_model=OmniVoiceHealthResponse)
     async def warmup(_: None = Depends(require_sidecar_token)) -> OmniVoiceHealthResponse:
-        return OmniVoiceHealthResponse()
+        return await asyncio.to_thread(sidecar_runtime.warmup)
 
     @app.post("/control/reload", response_model=OmniVoiceHealthResponse)
     async def reload_runtime(_: None = Depends(require_sidecar_token)) -> OmniVoiceHealthResponse:
-        return OmniVoiceHealthResponse()
+        return await asyncio.to_thread(sidecar_runtime.reload)
 
     @app.post("/control/shutdown", response_model=OmniVoiceHealthResponse)
     async def shutdown(_: None = Depends(require_sidecar_token)) -> OmniVoiceHealthResponse:
-        return OmniVoiceHealthResponse(status="shutting-down", ready=False)
+        result = await asyncio.to_thread(sidecar_runtime.shutdown)
+        app.state.request_shutdown()
+        return result
 
     @app.post("/v1/synthesize")
     async def synthesize(
@@ -89,8 +347,13 @@ def create_app(*, sidecar_token: str) -> FastAPI:
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="Clone reference audio path does not exist",
                 )
-        metadata = OmniVoiceSynthesizeResponse(sample_rate=request.sample_rate, mode=request.mode)
-        audio_bytes = _build_silent_wav(sample_rate=request.sample_rate, channels=metadata.channels)
+        try:
+            audio_bytes, metadata = await asyncio.to_thread(sidecar_runtime.synthesize, request)
+        except OmniVoiceRuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            ) from exc
         return Response(
             content=audio_bytes,
             media_type=metadata.content_type,
@@ -108,7 +371,18 @@ def create_app(*, sidecar_token: str) -> FastAPI:
 
 def _load_app_from_env() -> FastAPI:
     token = os.environ["OMNIVOICE_SIDECAR_TOKEN"]
-    return create_app(sidecar_token=token)
+    runtime_mode = os.environ.get("OMNIVOICE_RUNTIME_MODE", "stub").strip().lower()
+    if runtime_mode == "stub":
+        runtime: OmniVoiceRuntime = StubOmniVoiceRuntime()
+    elif runtime_mode == "real":
+        runtime = RealOmniVoiceRuntime(
+            model_id=(os.environ.get("OMNIVOICE_MODEL") or RealOmniVoiceRuntime.DEFAULT_MODEL_ID).strip(),
+            device=(os.environ.get("OMNIVOICE_DEVICE") or "").strip() or None,
+            dtype=(os.environ.get("OMNIVOICE_DTYPE") or "").strip() or None,
+        )
+    else:
+        raise RuntimeError("OMNIVOICE_RUNTIME_MODE must be 'stub' or 'real'")
+    return create_app(sidecar_token=token, runtime=runtime)
 
 
 app = _load_app_from_env() if os.environ.get("OMNIVOICE_SIDECAR_TOKEN") else None
@@ -121,4 +395,6 @@ if __name__ == "__main__":  # pragma: no cover - runtime entrypoint
     port = int(os.environ.get("OMNIVOICE_SIDECAR_PORT", "8039"))
     if app is None:
         raise RuntimeError("OMNIVOICE_SIDECAR_TOKEN is required")
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning"))
+    app.state.uvicorn_server = server
+    server.run()

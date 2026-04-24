@@ -224,9 +224,18 @@ If you want to prefetch assets during setup instead of waiting for first synthes
 
 OmniVoice uses a managed sidecar process with its own virtual environment under `models/omnivoice_sidecar`.
 
+Focused user docs:
+
+- `Docs/STT-TTS/OMNIVOICE_TTS_SETUP.md`
+- `Docs/STT-TTS/OMNIVOICE_TTS_USER_GUIDE.md`
+
 - Installer: `python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py`
+- Full inference install: add `--install-inference-deps` to install OmniVoice editable source with its dependency set; without it, the installer keeps the sidecar runtime minimal and real synthesis will fail with a dependency-focused error until the inference dependencies are installed.
+- Model assets: `--install-inference-deps` does not pre-download `k2-fsa/OmniVoice`; first warmup or generation downloads model assets through Hugging Face unless they are already cached.
 - Preferred local source checkout: `../OmniVoice`
 - Runtime layout: `.venv`, `runtime`, and `logs` under `models/omnivoice_sidecar`
+- Runtime mode: `extra_params.runtime_mode: "real"` uses the OmniVoice Python API; `"stub"` is only for test/development smoke checks.
+- Default OmniVoice model id: `extra_params.model_id: "k2-fsa/OmniVoice"`
 - Provider requests that explicitly resolve to OmniVoice and omit `voice` normalize to `auto`
 - The sidecar supervisor consumes the configured interpreter path so the dedicated installer-created runtime is the one that launches
 
