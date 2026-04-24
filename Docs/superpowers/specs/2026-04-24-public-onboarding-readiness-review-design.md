@@ -70,6 +70,8 @@ A profile is only considered successful if the user can reach all of the followi
 - understand and complete enough audio setup to verify STT and TTS behavior
 - know what is optional versus required
 
+The final synthesis should still produce one overall public-readiness verdict, but it should report `core onboarding readiness` and `audio onboarding readiness` separately inside that verdict. This keeps the audio requirement in scope without letting audio complexity erase whether the non-audio onboarding path is otherwise understandable.
+
 ## Current State
 
 Initial review of the current onboarding surface shows several characteristics that make a strict public-readiness pass necessary:
@@ -139,7 +141,56 @@ All three public profiles should be measured with the same rubric:
 
 This keeps the review comparable and prevents one profile from getting a softer standard than another.
 
-### 4. Use a strict but limited severity model
+### 4. Define a platform evidence model
+
+The review should make platform coverage explicit instead of implying equal execution depth everywhere.
+
+For each profile and milestone, evidence should be tagged as one of:
+
+- `Executed`
+  - directly run and observed in the current environment
+- `Docs-validated`
+  - not run end-to-end on that platform, but the written path was checked for completeness and internal consistency
+- `Probable risk`
+  - not fully run, but the documented path shows a likely failure or confusion pattern
+- `Unverified`
+  - not meaningfully validated and should not support a strong claim
+
+This is especially important because the review is holding macOS, Windows/WSL, and Linux documentation to the same clarity standard while hands-on runtime depth may differ by platform.
+
+### 5. Define a golden path for each public profile
+
+To avoid inconsistent walkthrough depth, each profile should have one primary first-value path:
+
+- `Docker single-user + WebUI`
+  - setup
+  - open WebUI
+  - configure provider
+  - complete first chat
+  - ingest one item
+  - search or retrieve it
+  - complete first audio verification through the documented path
+- `Docker multi-user + Postgres`
+  - setup
+  - create the first admin user
+  - authenticate successfully
+  - configure provider
+  - complete one authenticated first-value action through the shortest documented path
+  - ingest one item
+  - search or retrieve it
+  - complete first audio verification through the documented path
+- `Local single-user`
+  - setup
+  - start the API cleanly
+  - configure provider
+  - complete first chat or API success
+  - ingest one item
+  - search or retrieve it
+  - complete first audio verification through the documented path
+
+If a profile offers multiple plausible first-value branches, the review should follow the shortest documented branch first and treat any need to invent a better path as a finding.
+
+### 6. Use a strict but limited severity model
 
 Findings should be limited to issues that matter for public-sharing readiness:
 
@@ -150,7 +201,7 @@ Findings should be limited to issues that matter for public-sharing readiness:
 
 Minor friction should still be recorded in walkthrough notes, but it should not drive the public-readiness verdict unless it forms a broader pattern.
 
-### 5. Make findings traceable to a concrete journey
+### 7. Make findings traceable to a concrete journey
 
 Every reported issue must connect to a real onboarding consequence:
 
@@ -189,6 +240,7 @@ The review should produce two linked output types:
 - `Prioritized findings report`
   - grouped by profile and cross-cutting onboarding issues
   - findings ordered by severity and public-readiness impact
+  - each finding tagged as `docs`, `runtime`, or `cross-layer`
   - each finding includes source step, user inference, outcome, and recommended priority
 - `Walkthrough notes`
   - step-by-step logs for each profile
@@ -197,8 +249,15 @@ The review should produce two linked output types:
   - what happened in practice
   - what unstated knowledge was needed
 
+The static audit should also produce one lightweight comparison artifact:
+
+- `Onboarding contract matrix`
+  - profile-by-profile view of prerequisites, auth setup, first-value path, ingest path, audio path, and explicit verification step
+  - used to compare what the README, profile guides, `/setup`, and audio docs promise versus what the walkthroughs actually support
+
 Recommended artifact layout:
 
+- `Docs/superpowers/reviews/public-onboarding-readiness/2026-04-24-contract-matrix.md`
 - `Docs/superpowers/reviews/public-onboarding-readiness/2026-04-24-docker-single-user-walkthrough.md`
 - `Docs/superpowers/reviews/public-onboarding-readiness/2026-04-24-docker-multi-user-walkthrough.md`
 - `Docs/superpowers/reviews/public-onboarding-readiness/2026-04-24-local-single-user-walkthrough.md`
@@ -233,6 +292,13 @@ This review design is successful if it produces a final synthesis that can answe
 - Which of the three public profiles is safest to recommend today?
 - Which blockers or confusion traps must be fixed first?
 - Which profiles or sub-flows should be deprioritized or hidden until improved?
+
+The final synthesis should include:
+
+- one overall public-readiness verdict
+- one per-profile verdict
+- a separate cross-profile `audio onboarding readiness` summary
+- a platform evidence table showing where conclusions come from executed validation versus doc-only validation
 
 The final recommendation should use one of three verdicts:
 
