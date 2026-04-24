@@ -48,16 +48,18 @@ Inside `rag_service/`, start with `unified_pipeline.py` for orchestration, `data
 
 ## Common Contributor Tasks
 
-- Change public request or response fields in `rag_schemas_unified.py`, then update endpoint tests and API docs.
-- Change route behavior in `rag_unified.py` or `rag_health.py`; keep transport, dependency, and response-mapping logic at the endpoint boundary.
-- Add or change retrieval sources in `rag_service/database_retrievers.py` and the source registry, then update capability/discovery output and tests.
-- Add vector backend support under `rag_service/vector_stores/` by implementing the shared adapter contract and registering the adapter in the factory.
-- Tune built-in presets in `rag_service/profiles.py`; verify endpoint profile application still preserves explicit request fields.
-- Add generation, citation, guardrail, or reranking behavior inside the relevant `rag_service/` module and surface controls through schema fields or profile defaults when they are public.
+- Add retrieval behavior: `rag_service/database_retrievers.py` and the source registry, then update discovery output and tests.
+- Add vector-store support: `rag_service/vector_stores/` by implementing the shared adapter contract and registering the adapter in the factory.
+- Adjust profiles/defaults: `rag_service/profiles.py` plus endpoint payload handling in `rag_unified.py`.
+- Adjust request/response contract: `rag_schemas_unified.py` and endpoint response mapping.
+- Adjust reranking: `rag_service/advanced_reranking.py`.
+- Adjust generation/streaming: `rag_service/generation.py`, `rag_service/response_writer.py`, and `POST /api/v1/rag/search/stream`.
+- Adjust guardrails/citations/claims: `guardrails.py`, `citations.py`, `claims.py`, `faithfulness.py`, and related tests.
+- Adjust route behavior in `rag_unified.py` or `rag_health.py`; keep transport, dependency, and response conversion at the endpoint boundary.
 
 ## Current Endpoints
 
-Unified query routes:
+Search and generation routes:
 
 - `POST /api/v1/rag/search`: primary unified RAG search.
 - `POST /api/v1/rag/search/stream`: NDJSON streaming search for generated answers.
@@ -65,16 +67,25 @@ Unified query routes:
 - `POST /api/v1/rag/batch/resume/{checkpoint_id}`: resume a checkpointed batch run.
 - `GET /api/v1/rag/simple`: lightweight convenience search.
 - `GET /api/v1/rag/advanced`: convenience search with common advanced options enabled.
+
+Discovery routes:
+
 - `GET /api/v1/rag/capabilities`: runtime capability, default, and limit discovery.
 - `GET /api/v1/rag/features`: feature groups and related request parameter names.
 - `GET /api/v1/rag/vlm/backends`: VLM/table-processing backend availability.
+
+Feedback and experimentation routes:
+
 - `POST /api/v1/rag/feedback/implicit`: implicit interaction feedback capture.
 - `POST /api/v1/rag/ablate`: compare retrieval/generation variants for one query.
-- `GET /api/v1/rag/health/simple`: lightweight unified-pipeline health check.
 
-Health and operations routes under the same prefix:
+Health routes:
 
 - `GET /api/v1/rag/health`, `GET /api/v1/rag/health/live`, `GET /api/v1/rag/health/ready`
+- `GET /api/v1/rag/health/simple`: lightweight unified-pipeline health check.
+
+Operations routes:
+
 - `GET /api/v1/rag/cache/stats`, `POST /api/v1/rag/cache/clear`, `GET /api/v1/rag/cache/warm`
 - `GET /api/v1/rag/metrics/summary`, `GET /api/v1/rag/costs/summary`, `GET /api/v1/rag/batch/jobs`
 - `POST /api/v1/rag/quality-gate`, `POST /api/v1/rag/baseline/save`, `GET /api/v1/rag/regression/check`, `POST /api/v1/rag/regression/check`
@@ -85,7 +96,9 @@ Configuration enters through request fields, profile defaults, and application s
 
 Public `search_mode` values are `fts`, `vector`, and `hybrid`. Public request `sources` are `media_db`, `notes`, `characters`, `chats`, `kanban`, and `sql`.
 
-Request-time `rag_profile` currently accepts `fast`, `balanced`, and `accuracy`. Lower-level profile helpers also define `production`, `research`, and `cheap`; exposing those through the public request model is an API compatibility decision, not just a profile-file edit.
+Public request `rag_profile` values are `fast`, `balanced`, and `accuracy`. `rag_service/profiles.py` also contains internal helper profiles such as `production`, `research`, and `cheap`; do not assume they are accepted directly by `UnifiedRAGRequest`.
+
+Explicit request fields override profile defaults. `index_namespace` can be set directly or via `corpus`; endpoint payload handling maps the alias before calling the pipeline. Production deployments should prefer injected DB adapters and resolved per-user paths over raw fallback assumptions.
 
 ChromaDB is the default vector store adapter. PGVector is conditional on optional import and configuration. Treat other declared vector-store types as unavailable until an adapter is implemented, registered, and tested.
 
@@ -102,6 +115,17 @@ source .venv/bin/activate
 Focused RAG test entry points:
 
 ```bash
+source .venv/bin/activate
+python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_rag_request_schema_profiles.py -v
+python -m pytest tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py -v
+python -m pytest tldw_Server_API/tests/RAG_NEW/integration/test_rag_health_endpoints.py -v
+python -m pytest tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py -v
+python -m pytest tldw_Server_API/tests/RAG/test_rag_sources_sql_validation.py -v
+```
+
+Broader RAG suites:
+
+```bash
 python -m pytest tldw_Server_API/tests/RAG_NEW/unit -v
 python -m pytest tldw_Server_API/tests/RAG_NEW/integration -v
 python -m pytest tldw_Server_API/tests/RAG -v
@@ -114,6 +138,12 @@ Use narrower tests while iterating: schema/profile tests for request changes, re
 `strategy` currently selects between `standard` and `agentic` request handling. The agentic branch builds a query-time synthetic chunk path, while the default path builds explicit pipeline kwargs and calls `unified_rag_pipeline()`.
 
 Streaming search requires `enable_generation=true`; the endpoint rejects streaming requests without generation enabled. Batch search and batch resume use the batch schema/checkpoint path rather than requiring clients to loop over single-search calls.
+
+Vector search depends on embeddings and vector-store availability. Hybrid search can still use FTS when vector retrieval is unavailable or disabled.
+
+Citation, hard-citation, claim, numeric fidelity, and post-verification features may abstain or ask for clarification when evidence is weak. Reranking options carry cost and latency tradeoffs; `two_tier` reranking is quality-oriented because it combines a fast pass with LLM scoring.
+
+Multi-tenant or production usage should avoid assumptions about raw SQL fallbacks and should preserve user and tenant scoping through injected adapters, paths, and permissions.
 
 The public source values are normalized before retrieval. `characters` and `chats` are separate public source values but currently share the character-card/ChaChaNotes-backed retrieval path. Do not advertise additional public sources unless normalization, retriever wiring, discovery output, and tests are all updated.
 
