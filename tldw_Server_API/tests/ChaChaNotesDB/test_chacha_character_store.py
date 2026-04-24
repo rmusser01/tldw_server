@@ -1,5 +1,9 @@
 """Tests for the extracted CharacterStore."""
 
+import ast
+import inspect
+from pathlib import Path
+
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -13,6 +17,40 @@ from tldw_Server_API.app.core.DB_Management.chacha.character_store import Charac
 pytestmark = pytest.mark.unit
 
 
+_DELEGATED_CHARACTER_METHODS = {
+    "add_character_card",
+    "get_character_card_by_id",
+    "get_character_card_by_name",
+    "list_character_cards",
+    "query_character_cards",
+    "_normalize_character_tags_for_operation",
+    "_apply_character_tag_operation_to_list",
+    "manage_character_tags",
+    "update_character_card",
+    "soft_delete_character_card",
+    "restore_character_card",
+    "search_character_cards",
+    "search_character_cards_by_tags",
+    "_check_json_support",
+    "_search_cards_by_tags_json",
+    "_search_cards_by_tags_fallback",
+}
+
+
+def _class_method_names(class_obj: type[object]) -> set[str]:
+    source_path = Path(inspect.getsourcefile(class_obj) or "")
+    assert source_path.exists()
+    tree = ast.parse(source_path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_obj.__name__:
+            return {
+                item.name
+                for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+    raise AssertionError(f"Class {class_obj.__name__} not found in {source_path}")
+
+
 @pytest.fixture()
 def db(tmp_path):
     return CharactersRAGDB(
@@ -24,6 +62,22 @@ def db(tmp_path):
 @pytest.fixture()
 def store(db):
     return CharacterStore(db)
+
+
+def test_character_store_owns_delegated_methods_without_monolith_duplicates(db, monkeypatch):
+    class_method_names = _class_method_names(CharactersRAGDB)
+    assert _DELEGATED_CHARACTER_METHODS.isdisjoint(class_method_names)
+
+    captured: dict[str, object] = {}
+
+    def _fake_add_character_card(card_data):
+        captured["card_data"] = card_data
+        return 987
+
+    monkeypatch.setattr(db.character_store, "add_character_card", _fake_add_character_card)
+
+    assert db.add_character_card({"name": "Delegated Character"}) == 987
+    assert captured["card_data"] == {"name": "Delegated Character"}
 
 
 class TestCharacterStoreAdd:

@@ -1,4 +1,7 @@
 from datetime import datetime, timedelta, timezone
+import ast
+import inspect
+from pathlib import Path
 
 import pytest
 
@@ -6,6 +9,51 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 
 
 pytestmark = pytest.mark.unit
+
+
+_DELEGATED_CONVERSATION_METHODS = {
+    "_ensure_conversation_settings_table",
+    "upsert_conversation_settings",
+    "get_conversation_settings",
+    "_normalize_conversation_state",
+    "_normalize_conversation_character_scope",
+    "_conversation_character_scope_clause",
+    "_conversation_deleted_scope_clause",
+    "_normalize_scope",
+    "_normalize_conversation_assistant_identity",
+    "add_conversation",
+    "get_conversation_by_id",
+    "get_conversations_for_character",
+    "count_conversations_for_user",
+    "count_conversations_for_user_by_character",
+    "get_conversations_for_user",
+    "get_conversations_for_user_and_character",
+    "get_conversation_cluster",
+    "update_conversation",
+    "soft_delete_conversation",
+    "restore_conversation",
+    "hard_delete_conversation",
+    "search_conversations_by_title",
+    "_normalize_conversation_search_order",
+    "_build_conversation_search_filters",
+    "_conversation_deleted_text_search_clause",
+    "search_conversations",
+    "search_conversations_page",
+}
+
+
+def _class_method_names(class_obj: type[object]) -> set[str]:
+    source_path = Path(inspect.getsourcefile(class_obj) or "")
+    assert source_path.exists()
+    tree = ast.parse(source_path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_obj.__name__:
+            return {
+                item.name
+                for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+    raise AssertionError(f"Class {class_obj.__name__} not found in {source_path}")
 
 
 @pytest.fixture()
@@ -17,6 +65,11 @@ def db(tmp_path):
     instance.add_character_card({"name": "Conversation Store Character"})
     instance.upsert_workspace("ws-store", "Conversation Store Workspace")
     return instance
+
+
+def test_conversation_store_owns_delegated_methods_without_monolith_duplicates(db):
+    class_method_names = _class_method_names(CharactersRAGDB)
+    assert _DELEGATED_CONVERSATION_METHODS.isdisjoint(class_method_names)
 
 
 def test_conversation_store_roundtrip_preserves_scope_and_settings(db):

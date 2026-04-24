@@ -1,5 +1,9 @@
 """Tests for the extracted KeywordStore."""
 
+import ast
+import inspect
+from pathlib import Path
+
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -10,6 +14,41 @@ from tldw_Server_API.app.core.DB_Management.chacha.keyword_store import KeywordS
 
 
 pytestmark = pytest.mark.unit
+
+
+_DELEGATED_KEYWORD_METHODS = {
+    "add_keyword",
+    "get_keyword_by_id",
+    "get_keyword_by_text",
+    "list_keywords",
+    "count_keywords",
+    "search_keywords",
+    "add_keyword_collection",
+    "get_keyword_collection_by_id",
+    "list_keyword_collections",
+    "rename_keyword",
+    "merge_keywords",
+    "link_conversation_to_keyword",
+    "link_collection_to_keyword",
+    "get_keywords_for_conversation",
+    "get_notes_for_keyword",
+    "get_collections_for_keyword",
+    "unlink_conversation_from_keyword",
+}
+
+
+def _class_method_names(class_obj: type[object]) -> set[str]:
+    source_path = Path(inspect.getsourcefile(class_obj) or "")
+    assert source_path.exists()
+    tree = ast.parse(source_path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_obj.__name__:
+            return {
+                item.name
+                for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+    raise AssertionError(f"Class {class_obj.__name__} not found in {source_path}")
 
 
 @pytest.fixture()
@@ -23,6 +62,22 @@ def db(tmp_path):
 @pytest.fixture()
 def store(db):
     return KeywordStore(db)
+
+
+def test_keyword_store_owns_delegated_methods_without_monolith_duplicates(db, monkeypatch):
+    class_method_names = _class_method_names(CharactersRAGDB)
+    assert _DELEGATED_KEYWORD_METHODS.isdisjoint(class_method_names)
+
+    captured: dict[str, object] = {}
+
+    def _fake_add_keyword(keyword_text):
+        captured["keyword_text"] = keyword_text
+        return 1234
+
+    monkeypatch.setattr(db.keyword_store, "add_keyword", _fake_add_keyword)
+
+    assert db.add_keyword("delegated-keyword") == 1234
+    assert captured["keyword_text"] == "delegated-keyword"
 
 
 class TestKeywordStoreAdd:

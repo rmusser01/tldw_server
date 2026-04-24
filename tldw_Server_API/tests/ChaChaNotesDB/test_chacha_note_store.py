@@ -1,5 +1,9 @@
 """Tests for the extracted NoteStore."""
 
+import ast
+import inspect
+from pathlib import Path
+
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -7,6 +11,43 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
 
 
 pytestmark = pytest.mark.unit
+
+
+_DELEGATED_NOTE_METHODS = {
+    "add_note",
+    "get_note_by_id",
+    "list_notes",
+    "count_notes",
+    "update_note",
+    "soft_delete_note",
+    "restore_note",
+    "list_deleted_notes",
+    "search_notes",
+    "link_note_to_keyword",
+    "get_notes_batch",
+    "get_all_note_ids_for_graph",
+    "get_note_tag_edges",
+    "count_user_notes",
+    "count_notes_per_tag",
+    "get_note_source_info",
+    "get_keywords_for_note",
+    "get_keywords_for_notes",
+    "get_note_counts_for_keywords",
+}
+
+
+def _class_method_names(class_obj: type[object]) -> set[str]:
+    source_path = Path(inspect.getsourcefile(class_obj) or "")
+    assert source_path.exists()
+    tree = ast.parse(source_path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_obj.__name__:
+            return {
+                item.name
+                for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+    raise AssertionError(f"Class {class_obj.__name__} not found in {source_path}")
 
 
 @pytest.fixture()
@@ -20,6 +61,24 @@ def db(tmp_path):
 @pytest.fixture()
 def store(db):
     return NoteStore(db)
+
+
+def test_note_store_owns_delegated_methods_without_monolith_duplicates(db, monkeypatch):
+    class_method_names = _class_method_names(CharactersRAGDB)
+    assert _DELEGATED_NOTE_METHODS.isdisjoint(class_method_names)
+
+    captured: dict[str, object] = {}
+
+    def _fake_add_note(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return "note-from-store"
+
+    monkeypatch.setattr(db.note_store, "add_note", _fake_add_note)
+
+    assert db.add_note(title="Delegated Note", content="delegated body") == "note-from-store"
+    assert captured["args"] == ()
+    assert captured["kwargs"] == {"title": "Delegated Note", "content": "delegated body"}
 
 
 class TestNoteStoreAdd:

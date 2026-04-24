@@ -1,3 +1,7 @@
+import ast
+import inspect
+from pathlib import Path
+
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -5,6 +9,48 @@ from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageS
 
 
 pytestmark = pytest.mark.unit
+
+
+_DELEGATED_MESSAGE_METHODS = {
+    "add_message",
+    "_insert_message_images",
+    "get_message_images",
+    "get_message_conversation_id",
+    "get_message_by_id",
+    "get_messages_for_conversation",
+    "count_root_messages_for_conversation",
+    "get_root_messages_for_conversation",
+    "get_messages_for_conversation_by_parent_ids",
+    "has_system_message_for_conversation",
+    "update_message",
+    "soft_delete_message",
+    "search_messages_by_content",
+    "add_message_metadata",
+    "get_message_metadata",
+    "get_message_metadata_map",
+    "set_message_metadata_extra",
+    "set_message_rag_context",
+    "get_message_rag_context",
+    "get_messages_with_rag_context",
+    "count_messages_for_conversation",
+    "count_messages_for_conversations",
+    "get_latest_message_for_conversation",
+    "count_messages_since",
+}
+
+
+def _class_method_names(class_obj: type[object]) -> set[str]:
+    source_path = Path(inspect.getsourcefile(class_obj) or "")
+    assert source_path.exists()
+    tree = ast.parse(source_path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_obj.__name__:
+            return {
+                item.name
+                for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+    raise AssertionError(f"Class {class_obj.__name__} not found in {source_path}")
 
 
 @pytest.fixture()
@@ -24,6 +70,26 @@ def db(tmp_path):
         "db": instance,
         "store": MessageStore(instance),
         "conversation_id": conversation_id,
+    }
+
+
+def test_message_store_owns_delegated_methods_without_monolith_duplicates(db, monkeypatch):
+    class_method_names = _class_method_names(CharactersRAGDB)
+    assert _DELEGATED_MESSAGE_METHODS.isdisjoint(class_method_names)
+
+    captured: dict[str, object] = {}
+
+    def _fake_add_message(msg_data):
+        captured["msg_data"] = msg_data
+        return "message-from-store"
+
+    monkeypatch.setattr(db["db"].message_store, "add_message", _fake_add_message)
+
+    assert db["db"].add_message({"conversation_id": db["conversation_id"], "sender": "user", "content": "hi"}) == "message-from-store"
+    assert captured["msg_data"] == {
+        "conversation_id": db["conversation_id"],
+        "sender": "user",
+        "content": "hi",
     }
 
 
