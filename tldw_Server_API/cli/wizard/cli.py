@@ -477,10 +477,20 @@ def init(
             existing_key = env_utils.generate_single_user_api_key()
         updates["SINGLE_USER_API_KEY"] = existing_key
     if auth_mode == "multi_user":
-        db_url = updates.get("DATABASE_URL") or _resolve_database_url(
-            env_path,
-            prefer_env_file=env_file is not None,
+        uses_structured_postgres = bool(
+            setup_profile and profile_utils.profile_uses_structured_postgres(setup_profile)
         )
+        if uses_structured_postgres:
+            db_url = profile_utils.build_postgres_database_url(
+                user=updates.get("POSTGRES_USER") or "tldw_user",
+                password=updates.get("POSTGRES_PASSWORD") or "",
+                db=updates.get("POSTGRES_DB") or "tldw_users",
+            )
+        else:
+            db_url = updates.get("DATABASE_URL") or _resolve_database_url(
+                env_path,
+                prefer_env_file=env_file is not None,
+            )
         if not db_url:
             result = {
                 "command": "init",
@@ -503,7 +513,8 @@ def init(
             _emit(result, json_out)
             raise typer.Exit(2)
         validation_action = {"validate_database_url": {"present": True, "valid": True, "reason": None}}
-        updates["DATABASE_URL"] = db_url
+        if not uses_structured_postgres:
+            updates["DATABASE_URL"] = db_url
         cmd = [sys.executable, "-m", "tldw_Server_API.app.core.AuthNZ.initialize"]
         if setup_profile and setup_profile.docker:
             initializer_action = {

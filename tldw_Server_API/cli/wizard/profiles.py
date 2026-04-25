@@ -134,7 +134,18 @@ def _existing_or_generated(existing_env: Mapping[str, str], key: str, generator:
     return generator()
 
 
-def _postgres_url(*, user: str, password: str, db: str, host: str = "postgres", port: str = "5432") -> str:
+def profile_uses_structured_postgres(profile: SetupProfile) -> bool:
+    return profile.docker and profile.includes_postgres
+
+
+def build_postgres_database_url(
+    *,
+    user: str,
+    password: str,
+    db: str,
+    host: str = "postgres",
+    port: str = "5432",
+) -> str:
     return (
         f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}"
         f"@{host}:{port}/{quote(db, safe='')}"
@@ -162,12 +173,16 @@ def build_profile_env(
     postgres_user = existing_env.get("POSTGRES_USER") or "tldw_user"
     postgres_db = existing_env.get("POSTGRES_DB") or "tldw_users"
     postgres_password = _existing_or_generated(existing_env, "POSTGRES_PASSWORD", _postgres_password)
-    database_url = _postgres_url(user=postgres_user, password=postgres_password, db=postgres_db)
     values["POSTGRES_USER"] = postgres_user
     values["POSTGRES_DB"] = postgres_db
     values["POSTGRES_PASSWORD"] = postgres_password
-    values["DATABASE_URL"] = database_url
-    values["JOBS_DB_URL"] = database_url
+    if profile_uses_structured_postgres(profile):
+        values["DATABASE_URL"] = ""
+        values["JOBS_DB_URL"] = ""
+    else:
+        database_url = build_postgres_database_url(user=postgres_user, password=postgres_password, db=postgres_db)
+        values["DATABASE_URL"] = database_url
+        values["JOBS_DB_URL"] = database_url
     values["JWT_SECRET_KEY"] = _existing_or_generated(existing_env, "JWT_SECRET_KEY", _secret_token)
     values["SESSION_ENCRYPTION_KEY"] = _existing_or_generated(existing_env, "SESSION_ENCRYPTION_KEY", _fernet_key)
     values["MCP_JWT_SECRET"] = _existing_or_generated(existing_env, "MCP_JWT_SECRET", _secret_token)

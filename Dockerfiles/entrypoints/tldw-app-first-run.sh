@@ -31,20 +31,6 @@ is_invalid_key() {
   [ "${#key}" -lt 16 ]
 }
 
-env_file_has_nonempty_key() {
-  key="$1"
-  [ -f "$ENV_FILE" ] || return 1
-  awk -v k="$key" '
-    $0 ~ ("^[[:space:]]*(export[[:space:]]+)?" k "[[:space:]]*=") {
-      value = $0
-      sub(/^[^=]*=/, "", value)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-      if (value != "" && value != "\"\"") found = 1
-    }
-    END { exit found ? 0 : 1 }
-  ' "$ENV_FILE"
-}
-
 derive_postgres_database_url() {
   python - <<'PY'
 import os
@@ -178,11 +164,6 @@ EOF
   echo "[entrypoint] Created $ENV_FILE with generated SINGLE_USER_API_KEY."
 }
 
-env_file_had_database_url=0
-if env_file_has_nonempty_key "DATABASE_URL"; then
-  env_file_had_database_url=1
-fi
-
 ensure_env_file
 
 set -a
@@ -204,15 +185,18 @@ if [ -n "$incoming_jobs_db_url" ]; then
 fi
 
 AUTH_MODE="${AUTH_MODE:-single_user}"
+database_url_derived=0
+jobs_db_url_derived=0
 if [ "$AUTH_MODE" = "multi_user" ] && \
   [ -z "$incoming_database_url" ] && \
-  [ "$env_file_had_database_url" = "0" ] && \
   [ -n "${POSTGRES_PASSWORD:-}" ]; then
   DATABASE_URL="$(derive_postgres_database_url)"
+  database_url_derived=1
 fi
 DATABASE_URL="${DATABASE_URL:-sqlite:///./Databases/users.db}"
-if [ "$AUTH_MODE" = "multi_user" ] && [ -z "${JOBS_DB_URL:-}" ]; then
+if [ "$AUTH_MODE" = "multi_user" ] && [ -z "$incoming_jobs_db_url" ]; then
   JOBS_DB_URL="$DATABASE_URL"
+  jobs_db_url_derived=1
 fi
 export DATABASE_URL
 if [ -n "${JOBS_DB_URL:-}" ]; then
@@ -223,8 +207,10 @@ fi
 AUTH_MARKER_FILE="${AUTH_MARKER_DIR}/.authnz_initialized_${AUTH_MODE}"
 
 upsert_env "AUTH_MODE" "$AUTH_MODE"
-upsert_env "DATABASE_URL" "$DATABASE_URL"
-if [ -n "${JOBS_DB_URL:-}" ]; then
+if [ "$database_url_derived" = "0" ]; then
+  upsert_env "DATABASE_URL" "$DATABASE_URL"
+fi
+if [ -n "${JOBS_DB_URL:-}" ] && [ "$jobs_db_url_derived" = "0" ]; then
   upsert_env "JOBS_DB_URL" "$JOBS_DB_URL"
 fi
 

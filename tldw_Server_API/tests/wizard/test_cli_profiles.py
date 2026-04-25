@@ -84,8 +84,6 @@ def test_multi_user_defaults_include_required_secrets() -> None:
 
     for key in (
         "AUTH_MODE",
-        "DATABASE_URL",
-        "JOBS_DB_URL",
         "POSTGRES_DB",
         "POSTGRES_USER",
         "POSTGRES_PASSWORD",
@@ -100,12 +98,11 @@ def test_multi_user_defaults_include_required_secrets() -> None:
     ):
         assert defaults[key]
     assert defaults["AUTH_MODE"] == "multi_user"
-    assert defaults["DATABASE_URL"].startswith("postgresql://")
+    assert defaults["DATABASE_URL"] == ""
+    assert defaults["JOBS_DB_URL"] == ""
     assert defaults["POSTGRES_USER"] == "tldw_user"
     assert defaults["POSTGRES_DB"] == "tldw_users"
     assert "TestPassword123!" not in "\n".join(defaults.values())
-    assert defaults["POSTGRES_PASSWORD"] in defaults["DATABASE_URL"]
-    assert defaults["JOBS_DB_URL"] == defaults["DATABASE_URL"]
 
 
 def test_multi_user_defaults_preserve_existing_postgres_credentials() -> None:
@@ -119,29 +116,24 @@ def test_multi_user_defaults_preserve_existing_postgres_credentials() -> None:
         },
     )
 
-    expected_url = "postgresql://custom_user:ExistingPostgresPassword1%21@postgres:5432/custom_db"
     assert defaults["POSTGRES_USER"] == "custom_user"
     assert defaults["POSTGRES_PASSWORD"] == pg_value
     assert defaults["POSTGRES_DB"] == "custom_db"
-    assert defaults["DATABASE_URL"] == expected_url
-    assert defaults["JOBS_DB_URL"] == expected_url
+    assert defaults["DATABASE_URL"] == ""
+    assert defaults["JOBS_DB_URL"] == ""
 
 
 def test_multi_user_defaults_url_quote_reserved_postgres_credentials() -> None:
     pg_value = _literal("abc", "@def", ":ghi", "/with", "#chars", "%")
-    defaults = profiles.build_profile_env(
-        profile=profiles.normalize_profile("docker-multi-postgres"),
-        existing_env={
-            "POSTGRES_USER": "custom:user",
-            "POSTGRES_PASSWORD": pg_value,
-            "POSTGRES_DB": "custom/db #1",
-        },
-    )
-
     expected_url = "postgresql://custom%3Auser:abc%40def%3Aghi%2Fwith%23chars%25@postgres:5432/custom%2Fdb%20%231"
-    assert defaults["POSTGRES_PASSWORD"] == pg_value
-    assert defaults["DATABASE_URL"] == expected_url
-    assert defaults["JOBS_DB_URL"] == expected_url
+    assert (
+        profiles.build_postgres_database_url(
+            user="custom:user",
+            password=pg_value,
+            db="custom/db #1",
+        )
+        == expected_url
+    )
 
 
 def test_multi_user_session_key_is_fernet_compatible() -> None:
@@ -255,7 +247,8 @@ def test_init_multi_user_profile_masks_admin_password_in_dry_run(
     assert_action_field(actions, "set_env", "ADMIN_USERNAME", "admin")
     assert str(set_env["ADMIN_PASSWORD"]).startswith("*")
     assert str(set_env["POSTGRES_PASSWORD"]).startswith("*")
-    assert "postgresql://tldw_user:********@postgres:5432/tldw_users" == set_env["DATABASE_URL"]
+    assert set_env["DATABASE_URL"] == ""
+    assert set_env["JOBS_DB_URL"] == ""
 
 
 def test_init_multi_user_profile_reads_admin_env_and_masks_password(
@@ -341,5 +334,50 @@ def test_init_docker_multi_profile_defers_initializer_for_yes(
     assert "inside the container" in initializer["reason"]
     written_env = profiles.env_utils.load_env(env_path)
     assert written_env["POSTGRES_PASSWORD"]
-    assert written_env["POSTGRES_PASSWORD"] in written_env["DATABASE_URL"]
-    assert written_env["JOBS_DB_URL"] == written_env["DATABASE_URL"]
+    assert written_env["DATABASE_URL"] == ""
+    assert written_env["JOBS_DB_URL"] == ""
+
+
+def test_init_docker_multi_profile_clears_stale_database_urls(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    env_path = tmp_path / "custom.env"
+    (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
+    (repo / "pyproject.toml").write_text("[project]\nname='tldw-server'\n", encoding="utf-8")
+    env_path.write_text(
+        "DATABASE_URL=postgresql://old:stale@postgres:5432/old\n"
+        "JOBS_DB_URL=postgresql://old:stale@postgres:5432/old\n",
+        encoding="utf-8",
+    )
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("docker profile must not run local AuthNZ initializer")
+
+    monkeypatch.setattr("tldw_Server_API.cli.wizard.cli.subprocess.run", fail_run)
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "--install-dir",
+            str(repo),
+            "--profile",
+            "docker-multi-postgres",
+            "--env-file",
+            str(env_path),
+            "--admin-username",
+            "admin",
+            "--admin-password",
+            _literal("CorrectHorse", "BatteryStaple", "1!"),
+            "--yes",
+            "--no-format",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    written_env = profiles.env_utils.load_env(env_path)
+    assert written_env["POSTGRES_PASSWORD"]
+    assert written_env["DATABASE_URL"] == ""
+    assert written_env["JOBS_DB_URL"] == ""

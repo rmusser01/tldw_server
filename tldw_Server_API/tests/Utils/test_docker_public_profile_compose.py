@@ -336,7 +336,27 @@ def test_dockerignore_excludes_public_setup_env_secrets() -> None:
     for expected in (
         ".env",
         ".env.*",
+        ".ENV",
+        ".ENV.*",
         "tldw_Server_API/Config_Files/.env",
         "tldw_Server_API/Config_Files/.env.*",
+        "tldw_Server_API/Config_Files/.ENV",
+        "tldw_Server_API/Config_Files/.ENV.*",
     ):
         _require(expected in patterns, f".dockerignore should exclude {expected} from image build context")
+
+
+def test_multi_user_entrypoint_does_not_persist_derived_database_urls() -> None:
+    script = Path("Dockerfiles/entrypoints/tldw-app-first-run.sh").read_text(encoding="utf-8")
+
+    for expected in (
+        "database_url_derived=1",
+        "jobs_db_url_derived=1",
+        '[ "$database_url_derived" = "0" ]',
+        '[ "$jobs_db_url_derived" = "0" ]',
+    ):
+        _require(expected in script, f"entrypoint should track non-persistent derived URL state with {expected}")
+    _require(
+        '[ "$env_file_had_database_url" = "0" ]' not in script,
+        "entrypoint should not let stale env-file DATABASE_URL block structured Postgres derivation",
+    )
