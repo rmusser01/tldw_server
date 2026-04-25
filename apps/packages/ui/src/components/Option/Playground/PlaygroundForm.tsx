@@ -4647,7 +4647,32 @@ export const PlaygroundForm = ({
                               </div>
                               <div
                                 data-testid="composer-inline-send-control"
-                                className="flex shrink-0 items-end self-end">
+                                className="flex shrink-0 items-end self-end gap-2">
+                                <Tooltip
+                                  title={t(
+                                    "playground:actions.attachImage",
+                                    "Attach image"
+                                  )}>
+                                  <button
+                                    type="button"
+                                    onClick={handleImageUpload}
+                                    data-testid="composer-inline-attach-image"
+                                    className="inline-flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-2xl border border-border/70 bg-surface/80 text-text-muted transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus/40"
+                                    aria-label={
+                                      t(
+                                        "playground:actions.attachImage",
+                                        "Attach image"
+                                      ) as string
+                                    }
+                                    title={
+                                      t(
+                                        "playground:actions.attachImage",
+                                        "Attach image"
+                                      ) as string
+                                    }>
+                                    <ImageIcon className="h-4 w-4" aria-hidden="true" />
+                                  </button>
+                                </Tooltip>
                                 {sendControl}
                               </div>
                             </div>
