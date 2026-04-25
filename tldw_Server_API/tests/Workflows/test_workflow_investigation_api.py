@@ -47,6 +47,7 @@ if "transformers" not in sys.modules:
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_RUNS_READ
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 
 
@@ -119,7 +120,7 @@ def _seed_failed_run(db: WorkflowsDatabase) -> str:
         status="running",
         inputs={"config": {"url": "https://example.invalid/hook"}},
     )
-    db.update_step_attempt(step_run_id=step_run_id, attempt=2)
+    db.update_step_attempt(step_run_id=step_run_id, attempt=7)
     attempt1 = db.create_step_attempt(
         tenant_id="default",
         run_id=run_id,
@@ -363,6 +364,7 @@ def test_investigation_endpoint_returns_primary_failure(client_with_investigatio
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["primary_failure"]["reason_code_core"] == "transient_network_error"
+    assert data["failed_step"]["attempt_count"] == 2
     assert data["failed_step"]["step_id"] == "s1"
     assert data["recommended_actions"]
     assert data["primary_failure"]["internal_detail"]["event_count"] >= 3
@@ -436,6 +438,7 @@ def test_investigation_redacts_operator_detail_for_non_admin(client_with_investi
         is_admin=False,
         tenant_id="default",
         roles=["user"],
+        permissions=[WORKFLOWS_RUNS_READ],
     )
 
     resp = client.get(f"/api/v1/workflows/runs/{run_id}/investigation")

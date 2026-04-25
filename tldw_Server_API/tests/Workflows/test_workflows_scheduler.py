@@ -9,6 +9,9 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.main import app as fastapi_app
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import (
+    WorkflowSchedule,
+)
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
@@ -172,6 +175,104 @@ def test_get_tolerates_default_and_user_db_lookup_errors(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_load_all_discovers_non_default_tenant_schedules(monkeypatch, tmp_path):
+    svc = workflows_scheduler_mod._WFRecurringScheduler()
+    loaded: list[tuple[str, int | None]] = []
+    schedule = WorkflowSchedule(
+        id="sched-tenant-a",
+        tenant_id="tenant-a",
+        user_id="1",
+        workflow_id=None,
+        name="Tenant A schedule",
+        cron="*/5 * * * *",
+        timezone="UTC",
+        inputs_json="{}",
+        run_mode="async",
+        validation_mode="block",
+        enabled=True,
+        require_online=False,
+        concurrency_mode="skip",
+        misfire_grace_sec=60,
+        coalesce=True,
+        jitter_sec=0,
+        acp_config_json=None,
+        last_run_at=None,
+        next_run_at=None,
+        last_status=None,
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+
+    class _StubDB:
+        def list_schedules(self, **kwargs):
+            raise AssertionError(f"tenant-filtered schedule lookup should not be used during scheduler bootstrap: {kwargs}")
+
+        def list_all_schedules(self, **kwargs):
+            return [schedule]
+
+    (tmp_path / "1").mkdir()
+    monkeypatch.setattr(
+        workflows_scheduler_mod.DatabasePaths,
+        "get_user_db_base_dir",
+        lambda: tmp_path,
+    )
+    monkeypatch.setattr(svc, "_get_db", lambda uid: _StubDB())
+    monkeypatch.setattr(svc, "_add_job", lambda schedule_obj, user_id=None: loaded.append((schedule_obj.id, user_id)))
+
+    await svc._load_all()  # type: ignore[attr-defined]
+
+    assert loaded == [("sched-tenant-a", 1)]
+
+
+@pytest.mark.asyncio
+async def test_load_all_uses_schedule_owner_when_shared_backend_returns_duplicates(monkeypatch, tmp_path):
+    svc = workflows_scheduler_mod._WFRecurringScheduler()
+    loaded: list[tuple[str, int | None]] = []
+    schedule = WorkflowSchedule(
+        id="sched-shared",
+        tenant_id="default",
+        user_id="77",
+        workflow_id=None,
+        name="Shared schedule",
+        cron="*/5 * * * *",
+        timezone="UTC",
+        inputs_json="{}",
+        run_mode="async",
+        validation_mode="block",
+        enabled=True,
+        require_online=False,
+        concurrency_mode="skip",
+        misfire_grace_sec=60,
+        coalesce=True,
+        jitter_sec=0,
+        acp_config_json=None,
+        last_run_at=None,
+        next_run_at=None,
+        last_status=None,
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+
+    class _SharedDB:
+        def list_all_schedules(self, **kwargs):
+            return [schedule]
+
+    (tmp_path / "1").mkdir()
+    (tmp_path / "77").mkdir()
+    monkeypatch.setattr(
+        workflows_scheduler_mod.DatabasePaths,
+        "get_user_db_base_dir",
+        lambda: tmp_path,
+    )
+    monkeypatch.setattr(svc, "_get_db", lambda uid: _SharedDB())
+    monkeypatch.setattr(svc, "_add_job", lambda schedule_obj, user_id=None: loaded.append((schedule_obj.id, user_id)))
+
+    await svc._load_all()  # type: ignore[attr-defined]
+
+    assert loaded == [("sched-shared", 77)]
+
+
+@pytest.mark.asyncio
 async def test_history_updates_on_fire(monkeypatch):
     # Start service directly without TestClient overhead for this unit test
     svc = get_workflows_scheduler()
@@ -210,6 +311,92 @@ async def test_history_updates_on_fire(monkeypatch):
     assert s.last_status in ("pending", "queued", "error", "running")
 
     await svc.stop()
+
+
+@pytest.mark.asyncio
+async def test_run_schedule_routes_watchlist_backed_schedules_to_watchlists_queue(monkeypatch):
+    svc = get_workflows_scheduler()
+    await svc.start()
+    sid = svc.create(
+        tenant_id="default",
+        user_id="1",
+        workflow_id=None,
+        name="watchlist-fire",
+        cron="*/5 * * * *",
+        timezone="UTC",
+        inputs={"watchlist_job_id": 7},
+        run_mode="async",
+        validation_mode="block",
+        enabled=True,
+        concurrency_mode="skip",
+        misfire_grace_sec=60,
+        coalesce=True,
+    )
+
+    captured: dict[str, Any] = {}
+
+    class _StubScheduler:
+        async def submit(self, *args: Any, **kwargs: Any) -> str:
+            captured["handler"] = kwargs.get("handler")
+            captured["queue_name"] = kwargs.get("queue_name")
+            captured["payload"] = kwargs.get("payload")
+            return "task-watchlist-fire"
+
+    svc._core_scheduler = _StubScheduler()  # type: ignore[attr-defined]
+
+    await svc._run_schedule(sid)  # type: ignore[attr-defined]
+
+    assert captured["handler"] == "watchlist_run"
+    assert captured["queue_name"] == "watchlists"
+    assert captured["payload"]["inputs"]["watchlist_job_id"] == 7
+
+    await svc.stop()
+
+
+def test_run_now_routes_watchlist_backed_schedules_to_watchlists_queue(client_admin, monkeypatch):
+    client, svc = client_admin
+    sid = svc.create(
+        tenant_id="default",
+        user_id="1",
+        workflow_id=None,
+        name="watchlist-now",
+        cron="*/5 * * * *",
+        timezone="UTC",
+        inputs={"watchlist_job_id": 42},
+        run_mode="async",
+        validation_mode="block",
+        enabled=True,
+        concurrency_mode="skip",
+        misfire_grace_sec=60,
+        coalesce=True,
+    )
+
+    captured: dict[str, Any] = {}
+
+    class _StubScheduler:
+        async def submit(self, handler: str, *args: Any, **kwargs: Any) -> str:
+            captured["handler"] = handler
+            captured["payload"] = kwargs.get("payload")
+            captured["queue_name"] = kwargs.get("queue_name")
+            captured["metadata"] = kwargs.get("metadata")
+            return "task-watchlist-now"
+
+    async def _get_global_scheduler_stub():
+        return _StubScheduler()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.scheduler_workflows.get_global_scheduler",
+        _get_global_scheduler_stub,
+    )
+
+    response = client.post(f"/api/v1/scheduler/workflows/{sid}/run-now")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"task_id": "task-watchlist-now"}
+    assert captured["handler"] == "watchlist_run"
+    assert captured["queue_name"] == "watchlists"
+    assert captured["payload"]["inputs"]["watchlist_job_id"] == 42
+    assert captured["metadata"] == {"user_id": "1"}
 
 
 @pytest.mark.asyncio

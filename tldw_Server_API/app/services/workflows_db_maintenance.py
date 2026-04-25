@@ -67,17 +67,8 @@ async def run_workflows_db_maintenance(stop_event: asyncio.Event) -> None:
                 # Optional manual VACUUM ANALYZE - autovacuum normally covers this
                 if _env_bool("WORKFLOWS_POSTGRES_VACUUM", False):
                     try:
-                        with db.backend.transaction() as conn:  # type: ignore[union-attr]
-                            for table in (
-                                "workflows",
-                                "workflow_runs",
-                                "workflow_events",
-                                "workflow_step_runs",
-                                "workflow_artifacts",
-                                "workflow_webhook_dlq",
-                            ):
-                                db._execute_backend(f"VACUUM (ANALYZE) {db.backend.escape_identifier(table)}", connection=conn)
-                        logger.info("Workflows DB maintenance: VACUUM (ANALYZE) completed for Postgres tables")
+                        db.backend.vacuum()  # type: ignore[union-attr]
+                        logger.info("Workflows DB maintenance: VACUUM ANALYZE completed for Postgres backend")
                     except _WORKFLOWS_DB_MAINTENANCE_NONCRITICAL_EXCEPTIONS as e:
                         logger.warning(f"Workflows DB maintenance: Postgres VACUUM failed: {e}")
             else:

@@ -101,3 +101,57 @@ async def test_dlq_worker_backoff_and_delivery(monkeypatch, tmp_path):
     # Ensure DLQ is drained after successful retry
     rows2 = db.list_webhook_dlq_due(limit=10)
     assert not rows2, f"Expected DLQ to be empty, found: {rows2}"
+
+
+@pytest.mark.asyncio
+async def test_dlq_worker_stops_retrying_after_max_attempts(monkeypatch, tmp_path):
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    db.enqueue_webhook_dlq(
+        tenant_id="default",
+        run_id="run-max-attempts",
+        url="https://post.test/hook",
+        body={"ok": True},
+        last_error="init",
+    )
+    rows = db.list_webhook_dlq_all(limit=10)
+    assert rows, "expected DLQ seed row"
+    dlq_id = rows[0]["id"]
+    db.update_webhook_dlq_failure(
+        dlq_id=dlq_id,
+        last_error="retryable",
+        next_attempt_at_iso=None,
+        attempts=1,
+    )
+
+    monkeypatch.setenv("WORKFLOWS_WEBHOOK_ALLOWLIST", "post.test")
+    monkeypatch.setenv("WORKFLOWS_WEBHOOK_DLQ_INTERVAL_SEC", "1")
+    monkeypatch.setenv("WORKFLOWS_WEBHOOK_DLQ_BATCH", "10")
+    monkeypatch.setenv("WORKFLOWS_WEBHOOK_DLQ_TIMEOUT_SEC", "1")
+    monkeypatch.setenv("WORKFLOWS_WEBHOOK_DLQ_MAX_ATTEMPTS", "1")
+
+    monkeypatch.setattr(dlq_mod, "create_workflows_database", lambda backend=None: db)
+    monkeypatch.setattr(dlq_mod, "get_content_backend_instance", lambda: None)
+
+    calls = {"count": 0}
+
+    async def _fake_afetch(*args, **kwargs):  # noqa: ANN003
+        calls["count"] += 1
+        raise AssertionError("delivery should not be attempted after max attempts")
+
+    monkeypatch.setattr(dlq_mod, "afetch", _fake_afetch)
+
+    stop = asyncio.Event()
+    task = asyncio.create_task(dlq_mod.run_workflows_webhook_dlq_worker(stop))
+    await asyncio.sleep(0.2)
+    stop.set()
+    try:
+        await asyncio.wait_for(task, timeout=2)
+    except asyncio.TimeoutError:
+        task.cancel()
+
+    assert calls["count"] == 0
+    due_rows = db.list_webhook_dlq_due(limit=10)
+    assert not due_rows
+    all_rows = db.list_webhook_dlq_all(limit=10)
+    assert all_rows
+    assert "max_attempts" in str(all_rows[0].get("last_error", "")).lower()

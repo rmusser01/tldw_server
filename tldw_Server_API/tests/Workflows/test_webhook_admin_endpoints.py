@@ -65,3 +65,103 @@ def test_dlq_list_and_replay_simulated(monkeypatch, auth_headers):
         assert r2.status_code == 200
         assert r2.json().get("ok") is True
     app.dependency_overrides.clear()
+
+
+def test_dlq_replay_appends_delivery_event(monkeypatch, auth_headers, tmp_path):
+    db_for_app = WorkflowsDatabase(str(tmp_path / "wf.db"))
+
+    async def override_user():
+        return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
+
+    async def override_principal(request: Request):  # type: ignore[override]
+        principal = AuthPrincipal(
+            kind="user",
+            user_id=1,
+            api_key_id=None,
+            subject="tester",
+            token_type="access",
+            jti=None,
+            roles=["admin"],
+            permissions=["workflows.runs.control"],
+            is_admin=True,
+            org_ids=[],
+            team_ids=[],
+        )
+        try:
+            request.state.auth = AuthContext(
+                principal=principal,
+                ip=None,
+                user_agent=None,
+                request_id=None,
+            )
+        except Exception:
+            _ = None
+        return principal
+
+    def override_db():
+        return db_for_app
+
+    app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[get_auth_principal] = override_principal
+    app.dependency_overrides[wf_mod._get_db] = override_db
+
+    workflow_id = db_for_app.create_definition(
+        tenant_id="default",
+        name="replay-workflow",
+        version=1,
+        owner_id="1",
+        visibility="private",
+        description=None,
+        tags=[],
+        definition={"name": "replay", "version": 1, "steps": []},
+    )
+    run_id = "wf-dlq-event-run"
+    db_for_app.create_run(
+        run_id=run_id,
+        tenant_id="default",
+        user_id="1",
+        inputs={},
+        workflow_id=workflow_id,
+        definition_version=1,
+        definition_snapshot={"name": "replay", "version": 1, "steps": []},
+    )
+    db_for_app.enqueue_webhook_dlq(
+        tenant_id="default",
+        run_id=run_id,
+        url="https://example.com/hook",
+        body={"ok": True},
+        last_error="init",
+    )
+
+    class _DummyResp:
+        status_code = 200
+
+        async def aclose(self):
+            return None
+
+    async def _fake_http_afetch(**kwargs):  # noqa: ANN003
+        return _DummyResp()
+
+    monkeypatch.setattr(wf_mod, "_http_afetch", _fake_http_afetch)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Security.egress.is_webhook_url_allowed_for_tenant",
+        lambda url, tenant_id: True,
+        raising=True,
+    )
+
+    with TestClient(app, headers=auth_headers) as client:
+        resp = client.get("/api/v1/workflows/webhooks/dlq?limit=10")
+        assert resp.status_code == 200
+        dlq_id = resp.json()["items"][0]["id"]
+        replay_resp = client.post(f"/api/v1/workflows/webhooks/dlq/{dlq_id}/replay")
+        assert replay_resp.status_code == 200, replay_resp.text
+        assert replay_resp.json()["ok"] is True
+
+    events = db_for_app.get_events(run_id)
+    delivery_events = [e for e in events if e.get("event_type") == "webhook_delivery"]
+    assert delivery_events, "Expected replay to append a webhook_delivery event"
+    payload = delivery_events[-1].get("payload_json") or {}
+    assert payload.get("status") == "delivered"
+    assert payload.get("source") == "dlq_replay"
+
+    app.dependency_overrides.clear()

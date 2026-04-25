@@ -219,7 +219,7 @@ def _serialize_step(
         "name": step_run.get("name"),
         "type": step_run.get("type"),
         "status": step_run.get("status"),
-        "attempt_count": int(step_run.get("attempt") or len(attempts) or 0),
+        "attempt_count": len(attempts),
         "started_at": step_run.get("started_at"),
         "ended_at": step_run.get("ended_at"),
         "error": step_run.get("error"),
