@@ -36,6 +36,9 @@ def test_ensure_env_updates_and_backs_up(tmp_path):
     assert result.backup_path is not None
     assert result.backup_path.exists()
     assert result.backup_path.read_text(encoding="utf-8") == original
+    if os.name != "nt":
+        backup_mode = stat.S_IMODE(result.backup_path.stat().st_mode)
+        assert backup_mode == 0o600
 
 
 def test_mask_env_values():

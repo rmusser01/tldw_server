@@ -81,7 +81,7 @@ For host-visible storage instead, see the `docker-compose.host-storage.yml` vari
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-export ADMIN_USERNAME=admin
+export ADMIN_USERNAME=tldw-admin
 export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
 make setup-docker-multi
 make start-docker-multi

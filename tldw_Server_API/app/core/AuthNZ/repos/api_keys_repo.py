@@ -340,35 +340,91 @@ class AuthnzApiKeysRepo:
         async with self.db_pool.transaction() as conn:
             try:
                 if self._is_postgres_backend():
-                    # PostgreSQL: upsert on key_hash
-                    await conn.execute(
-                        """
-                        INSERT INTO api_keys (
-                            user_id, key_hash, key_id, key_prefix, name, description,
+                    # New-format keys have salted hashes; use their stable key_id
+                    # for idempotency when available.
+                    if key_identifier:
+                        result = await conn.execute(
+                            """
+                            UPDATE api_keys
+                            SET user_id = $1,
+                                key_hash = $2,
+                                key_prefix = $3,
+                                name = $4,
+                                description = $5,
+                                scope = $6,
+                                status = 'active',
+                                is_virtual = $7
+                            WHERE key_id = $8
+                            """,
+                            user_id,
+                            key_hash,
+                            key_prefix,
+                            name,
+                            description,
+                            scope,
+                            bool(is_virtual),
+                            key_identifier,
+                        )
+                    else:
+                        result = await conn.execute(
+                            """
+                            UPDATE api_keys
+                            SET user_id = $1,
+                                key_id = $2,
+                                key_prefix = $3,
+                                name = $4,
+                                description = $5,
+                                scope = $6,
+                                status = 'active',
+                                is_virtual = $7
+                            WHERE key_hash = $8
+                            """,
+                            user_id,
+                            key_identifier,
+                            key_prefix,
+                            name,
+                            description,
+                            scope,
+                            bool(is_virtual),
+                            key_hash,
+                        )
+                    if _affected_row_count(result) == 0:
+                        await conn.execute(
+                            """
+                            INSERT INTO api_keys (
+                                user_id, key_hash, key_id, key_prefix, name, description,
+                                scope, status, is_virtual
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8)
+                            """,
+                            user_id,
+                            key_hash,
+                            key_identifier,
+                            key_prefix,
+                            name,
+                            description,
+                            scope,
+                            bool(is_virtual),
+                        )
+                else:
+                    # SQLite: emulate upsert by stable key_id when present.
+                    if key_identifier:
+                        query = """
+                        INSERT OR REPLACE INTO api_keys (
+                            id, user_id, key_hash, key_id, key_prefix, name, description,
                             scope, status, is_virtual
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8)
-                        ON CONFLICT (key_hash) DO UPDATE SET
-                            user_id = EXCLUDED.user_id,
-                            key_id = EXCLUDED.key_id,
-                            key_prefix = EXCLUDED.key_prefix,
-                            scope = EXCLUDED.scope,
-                            status = EXCLUDED.status,
-                            is_virtual = EXCLUDED.is_virtual
-                        """,
-                        user_id,
-                        key_hash,
-                        key_identifier,
-                        key_prefix,
-                        name,
-                        description,
-                        scope,
-                        bool(is_virtual),
-                    )
-                else:
-                    # SQLite: emulate upsert by key_hash
-                    await conn.execute(
+                        VALUES (
+                            COALESCE(
+                                (SELECT id FROM api_keys WHERE key_id = ?),
+                                COALESCE((SELECT MAX(id) FROM api_keys), 0) + 1
+                            ),
+                            ?, ?, ?, ?, ?, ?, ?, 'active', ?
+                        )
                         """
+                        lookup_param = key_identifier
+                    else:
+                        query = """
                         INSERT OR REPLACE INTO api_keys (
                             id, user_id, key_hash, key_id, key_prefix, name, description,
                             scope, status, is_virtual
@@ -380,9 +436,12 @@ class AuthnzApiKeysRepo:
                             ),
                             ?, ?, ?, ?, ?, ?, ?, 'active', ?
                         )
-                        """,
+                        """
+                        lookup_param = key_hash
+                    await conn.execute(
+                        query,
                         (
-                            key_hash,
+                            lookup_param,
                             user_id,
                             key_hash,
                             key_identifier,

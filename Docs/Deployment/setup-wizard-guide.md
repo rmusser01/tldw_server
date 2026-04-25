@@ -27,7 +27,7 @@ The public onboarding docs present three peer profiles. Use one profile end-to-e
 For Docker multi-user prepare, keep the generated variables in the same shell so later login checks can reuse them:
 
 ```bash
-export ADMIN_USERNAME=admin
+export ADMIN_USERNAME=tldw-admin
 export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
 make setup-docker-multi
 ```

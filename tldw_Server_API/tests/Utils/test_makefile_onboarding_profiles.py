@@ -121,6 +121,17 @@ def test_start_local_single_uses_plain_uvicorn_without_reload() -> None:
     _require("--reload" not in block, "start-local-single should not use --reload")
 
 
+def test_start_local_single_exports_selected_env_file_to_server() -> None:
+    """Local start should pass the same env file selected during setup/verify."""
+    text = _read_makefile()
+    block = _target_block(text, "start-local-single")
+
+    _require(
+        'TLDW_ENV_FILE="$(TLDW_ENV_FILE)"' in block,
+        "start-local-single should export TLDW_ENV_FILE for app config loading",
+    )
+
+
 def test_install_local_does_not_start_local_server() -> None:
     """Local install should install dependencies only, without chaining startup."""
     text = _read_makefile()

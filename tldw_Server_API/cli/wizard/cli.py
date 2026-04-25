@@ -23,7 +23,6 @@ from . import profiles as profile_utils
 from .utils import detect as detect_utils
 from .utils import env as env_utils
 from .utils import files as files_utils
-from .utils import format as format_utils
 from .utils import git as git_utils
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="tldw_server setup wizard CLI")
@@ -38,6 +37,7 @@ _WIZARD_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
     subprocess.SubprocessError,
 )
+_ENV_GITIGNORE_ENTRIES = [".env", ".env.*.bak", ".env.local", "wizard.log"]
 
 
 def _emit(result: dict[str, Any], use_json: bool) -> None:
@@ -436,7 +436,7 @@ def init(
     actions = []
     if not env_path.exists():
         actions.append({"create": str(env_path)})
-    actions.append({"ensure_gitignore": [".env", ".env.local", "wizard.log"]})
+    actions.append({"ensure_gitignore": _ENV_GITIGNORE_ENTRIES})
 
     uses_structured_postgres = bool(
         setup_profile and profile_utils.profile_uses_structured_postgres(setup_profile)
@@ -444,15 +444,27 @@ def init(
     existing_env = env_utils.load_env(env_path, raw_values=uses_structured_postgres)
     updates: dict[str, str | None] = {}
     if setup_profile:
-        updates.update(
-            profile_utils.build_profile_env(
-                profile=setup_profile,
-                existing_env=existing_env,
-                admin_username=admin_username or os.getenv("ADMIN_USERNAME"),
-                admin_password=admin_password or os.getenv("ADMIN_PASSWORD"),
-                admin_email=admin_email or os.getenv("ADMIN_EMAIL"),
+        requested_admin_username = admin_username or os.getenv("ADMIN_USERNAME")
+        try:
+            updates.update(
+                profile_utils.build_profile_env(
+                    profile=setup_profile,
+                    existing_env=existing_env,
+                    admin_username=requested_admin_username,
+                    admin_password=admin_password or os.getenv("ADMIN_PASSWORD"),
+                    admin_email=admin_email or os.getenv("ADMIN_EMAIL"),
+                )
             )
-        )
+        except ValueError as exc:
+            result = {
+                "command": "init",
+                "status": "error",
+                "facts": facts,
+                "actions": [{"admin_username": {"valid": False, "reason": str(exc)}}],
+                "notes": [str(exc)],
+            }
+            _emit(result, json_out)
+            raise typer.Exit(2) from exc
         auth_mode = updates["AUTH_MODE"]
     else:
         if env_file is not None:
@@ -464,7 +476,9 @@ def init(
     if auth_mode:
         updates["AUTH_MODE"] = auth_mode
     if auth_mode == "single_user":
-        if env_file is not None:
+        if setup_profile and updates.get("SINGLE_USER_API_KEY"):
+            existing_key = updates["SINGLE_USER_API_KEY"]
+        elif env_file is not None:
             existing_key = (
                 existing_env.get("SINGLE_USER_API_KEY")
                 or os.getenv("SINGLE_USER_API_KEY")
@@ -569,7 +583,7 @@ def init(
     )
 
     # Ensure .gitignore entries
-    files_utils.ensure_gitignore(base / ".gitignore", entries=[".env", ".env.local", "wizard.log"])
+    files_utils.ensure_gitignore(base / ".gitignore", entries=_ENV_GITIGNORE_ENTRIES)
 
     if updates:
         actions.append({"set_env": env_utils.mask_env_values({k: v for k, v in updates.items() if v is not None})})
@@ -577,15 +591,6 @@ def init(
         actions.append(validation_action)
     if initializer_action:
         actions.append({"authnz_initializer": initializer_action})
-
-    # Optional formatting (scaffold: only runs if tools present and in git repo)
-    if not no_format and facts["git"]:
-        try:
-            changed = git_utils.changed_or_untracked_files(base)
-            if changed:
-                format_utils.maybe_format(changed)
-        except _WIZARD_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"format step skipped: {e}")
 
     result = {
         "command": "init",
@@ -1385,6 +1390,8 @@ def format(
                 if dry_run:
                     actions["would_format"] = changed
                 else:
+                    from .utils import format as format_utils
+
                     format_utils.maybe_format(changed)
                     actions["formatted"] = changed
             except _WIZARD_NONCRITICAL_EXCEPTIONS as e:
@@ -1492,7 +1499,7 @@ def doctor(
         actions.append({"env": env_action})
 
     gitignore_path = Path.cwd() / ".gitignore"
-    desired_entries = [".env", ".env.local", "wizard.log"]
+    desired_entries = _ENV_GITIGNORE_ENTRIES
     existing_lines = gitignore_path.read_text(encoding="utf-8").splitlines() if gitignore_path.exists() else []
     existing_set = {line.strip() for line in existing_lines if line.strip()}
     missing_entries = [entry for entry in desired_entries if entry not in existing_set]

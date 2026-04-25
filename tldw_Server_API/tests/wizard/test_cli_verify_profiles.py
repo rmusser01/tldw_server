@@ -221,6 +221,58 @@ def test_first_value_matching_search_results_pass(monkeypatch) -> None:
     assert result["details"]["search"]["matched"] is True
 
 
+def test_first_value_metadata_search_result_fetches_detail_for_content(monkeypatch) -> None:
+    seen_paths: list[str] = []
+
+    def fake_request(method, _base_url, path, **_kwargs):
+        seen_paths.append(path)
+        if path == "/api/v1/media/add":
+            return {
+                "url": "http://127.0.0.1:8000/api/v1/media/add",
+                "status_code": 200,
+                "ok": True,
+                "body": {"id": 1},
+            }
+        if path == "/api/v1/media/search":
+            return {
+                "url": "http://127.0.0.1:8000/api/v1/media/search",
+                "status_code": 200,
+                "ok": True,
+                "body": {
+                    "results": [
+                        {
+                            "id": 1,
+                            "title": "tldw onboarding verification",
+                            "url": "/api/v1/media/1",
+                            "type": "document",
+                        }
+                    ]
+                },
+            }
+        if path == "/api/v1/media/1":
+            return {
+                "url": "http://127.0.0.1:8000/api/v1/media/1",
+                "status_code": 200,
+                "ok": True,
+                "body": {
+                    "content": {
+                        "text": "contains tldw-onboarding-verification-unique",
+                    }
+                },
+            }
+        raise AssertionError(f"unexpected request {method} {path}")
+
+    monkeypatch.setattr(profile_verify, "_request", fake_request)
+
+    result = profile_verify._first_value_check("http://127.0.0.1:8000", {}, 5.0)
+
+    assert result["ok"] is True
+    assert result["search"] == "ok"
+    assert result["details"]["search"]["matched"] is True
+    assert result["details"]["detail"]["ok"] is True
+    assert "/api/v1/media/1" in seen_paths
+
+
 def test_first_value_title_only_search_results_fail(monkeypatch) -> None:
     def fake_request(method, _base_url, path, **_kwargs):
         if path == "/api/v1/media/add":

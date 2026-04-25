@@ -384,7 +384,7 @@ async def get_quickstart_redirect():
         # 2/3) Config file
         if not url:
             try:
-                cfg = load_comprehensive_config()
+                cfg = config_mod.load_comprehensive_config()
                 if cfg.has_section('UI') and cfg.has_option('UI', 'quickstart_url'):
                     url = cfg.get('UI', 'quickstart_url').strip()
                 elif cfg.has_section('Docs') and cfg.has_option('Docs', 'quickstart_url'):
@@ -757,8 +757,8 @@ async def _validate_provider_http(
             err_type = err_body.get("error", {}).get("type", "")
             if err_type in ("invalid_request_error", "overloaded_error"):
                 return True, None
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"Anthropic provider validation response was not JSON: {exc}")
         return True, None
     if resp.status_code in (401, 403):
         return False, f"Authentication failed (HTTP {resp.status_code})"

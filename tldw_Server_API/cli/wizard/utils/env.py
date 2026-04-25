@@ -104,6 +104,7 @@ def _backup_env(path: Path, content: str) -> Path:
         backup = path.with_name(f"{path.name}.{timestamp}.{counter}.bak")
         counter += 1
     atomic_write(backup, content)
+    _chmod_600(backup)
     return backup
 
 

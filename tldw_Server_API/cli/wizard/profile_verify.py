@@ -126,6 +126,46 @@ def _search_body_has_sample(body: Any) -> bool:
     return contains_sample(body)
 
 
+def _search_result_items(body: Any) -> list[dict[str, Any]]:
+    if not isinstance(body, dict):
+        return []
+    for key in ("results", "items"):
+        values = body.get(key)
+        if isinstance(values, list):
+            return [item for item in values if isinstance(item, dict)]
+    return []
+
+
+def _media_detail_path(result: dict[str, Any]) -> str | None:
+    url = result.get("url")
+    if isinstance(url, str) and url.startswith("/api/v1/media/"):
+        return url
+    media_id = result.get("id")
+    if isinstance(media_id, int):
+        return f"/api/v1/media/{media_id}"
+    if isinstance(media_id, str) and media_id.isdecimal():
+        return f"/api/v1/media/{media_id}"
+    return None
+
+
+def _detail_body_has_sample(
+    base_url: str,
+    headers: dict[str, str],
+    timeout: float,
+    search_body: Any,
+) -> tuple[bool, dict[str, Any] | None]:
+    for item in _search_result_items(search_body)[:3]:
+        path = _media_detail_path(item)
+        if not path:
+            continue
+        detail = _request("GET", base_url, path, headers=headers, timeout=timeout)
+        summary = _response_summary(detail)
+        if detail.get("ok") and _search_body_has_sample(detail.get("body")):
+            return True, summary
+        return False, summary
+    return False, None
+
+
 def _headers_for_profile(profile: SetupProfile, env_values: dict[str, str]) -> dict[str, str]:
     if profile.auth_mode != "single_user":
         return {}
@@ -259,13 +299,19 @@ def _first_value_check(base_url: str, headers: dict[str, str], timeout: float) -
         timeout=timeout,
     )
     matched = bool(search.get("ok") and _search_body_has_sample(search.get("body")))
+    detail_summary = None
+    if not matched and search.get("ok"):
+        matched, detail_summary = _detail_body_has_sample(base_url, headers, timeout, search.get("body"))
     search_summary = _response_summary(search)
     search_summary["matched"] = matched
+    details = {"ingest": _response_summary(ingest), "search": search_summary}
+    if detail_summary is not None:
+        details["detail"] = detail_summary
     return {
         "ingest": "ok" if ingest.get("ok") else "error",
         "search": "ok" if matched else "error",
         "ok": bool(ingest.get("ok") and matched),
-        "details": {"ingest": _response_summary(ingest), "search": search_summary},
+        "details": details,
     }
 
 

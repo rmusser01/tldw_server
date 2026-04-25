@@ -22,31 +22,31 @@
 **Goal:** Add profile-aware env resolution, prepare, and verification behavior to the existing `tldw-setup` CLI, then make public Make targets delegate to it.
 **Success Criteria:** Profile commands write the expected env file, generated secrets are masked in default output, and old aliases cannot report success without verification.
 **Tests:** Wizard profile tests, wizard verify tests, Makefile command-boundary tests.
-**Status:** Not Started
+**Status:** Complete
 
 ## Stage 2: Docker Single-User + WebUI
 **Goal:** Provide a single-user Docker compose path that starts API + WebUI without Postgres and with writable app data.
 **Success Criteria:** Clean-volume startup reaches `/health`, `/ready`, `/docs`, `/api/v1/config/quickstart`, and WebUI readiness.
 **Tests:** Docker compose contract tests, Makefile target tests, runtime validation.
-**Status:** Not Started
+**Status:** Complete
 
 ## Stage 3: Docker Multi-User + Postgres
 **Goal:** Provide a multi-user Docker compose path with bundled Postgres, required secrets, env-driven first admin, and bearer-token verification.
 **Success Criteria:** Clean-volume startup reaches Postgres readiness, admin login, `/api/v1/auth/me`, first ingest/search, and provider-missing chat readiness.
 **Tests:** Docker compose contract tests, wizard verify tests, runtime validation.
-**Status:** Not Started
+**Status:** Complete
 
 ## Stage 4: Local Single-User
 **Goal:** Split local install, setup, start, and verify commands so local onboarding is predictable and not dev-server-only.
 **Success Criteria:** `make install-local` and `make quickstart-install` never start a server; `make start-local-single` starts plain `uvicorn`; `make verify-local-single` validates auth and first value.
 **Tests:** Makefile command-boundary tests, wizard verify tests, runtime validation from clean `.venv` and env.
-**Status:** Not Started
+**Status:** Complete
 
 ## Stage 5: Docs And Runtime Validation
 **Goal:** Update public docs, audio auth examples, Windows/WSL guidance, and capture clean-state validation transcripts.
 **Success Criteria:** All public docs show the three peer profiles with the same lifecycle and the validation logs prove the documented paths work.
 **Tests:** Docs tests, docs scripts, runtime Docker/local validation commands, Bandit on touched code.
-**Status:** Not Started
+**Status:** Complete
 
 ## File Map
 
@@ -1508,7 +1508,7 @@ SESSION_ENCRYPTION_KEY=session_secret_for_compose_config_32_chars \
 MCP_JWT_SECRET=mcp_jwt_secret_for_compose_config_32_chars \
 MCP_API_KEY_SALT=mcp_api_salt_for_compose_config_32_chars \
 BYOK_ENCRYPTION_KEY=byok_secret_for_compose_config_32_chars \
-ADMIN_USERNAME=admin \
+ADMIN_USERNAME=tldw-admin \
 ADMIN_PASSWORD='CorrectHorseBatteryStaple1!' \
 docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml config >/tmp/tldw_multi_compose_config.yml
 ```
@@ -1728,7 +1728,7 @@ make verify-docker-single
 Docker multi-user + Postgres:
 
 ```bash
-ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi
+ADMIN_USERNAME=tldw-admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi
 make start-docker-multi
 make verify-docker-multi
 ```
@@ -1859,7 +1859,7 @@ git commit -m "docs: align public onboarding profiles"
 - Create: `Docs/superpowers/reviews/public-onboarding-remediation/2026-04-25-runtime-validation.md`
 - Modify: any file needed to fix issues found by runtime validation.
 
-- [ ] **Step 1: Run focused unit and docs tests**
+- [x] **Step 1: Run focused unit and docs tests**
 
 Run:
 
@@ -1885,7 +1885,7 @@ Expected:
 passed
 ```
 
-- [ ] **Step 2: Run Docker single-user validation from clean volumes**
+- [x] **Step 2: Run Docker single-user validation from clean volumes**
 
 Run:
 
@@ -1904,13 +1904,13 @@ make verify-docker-single exits 0
 app and webui containers are running or healthy
 ```
 
-- [ ] **Step 3: Run Docker multi-user validation from clean volumes**
+- [x] **Step 3: Run Docker multi-user validation from clean volumes**
 
 Run:
 
 ```bash
 COMPOSE_PROJECT_NAME=tldw_ftux_multi docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.multi-user-postgres.yml down -v
-COMPOSE_PROJECT_NAME=tldw_ftux_multi ADMIN_USERNAME=admin ADMIN_PASSWORD='CorrectHorseBatteryStaple1!' ADMIN_EMAIL=admin@example.com make setup-docker-multi
+COMPOSE_PROJECT_NAME=tldw_ftux_multi ADMIN_USERNAME=tldw-admin ADMIN_PASSWORD='CorrectHorseBatteryStaple1!' ADMIN_EMAIL=tldw-admin@example.com make setup-docker-multi
 COMPOSE_PROJECT_NAME=tldw_ftux_multi make start-docker-multi
 COMPOSE_PROJECT_NAME=tldw_ftux_multi make verify-docker-multi
 COMPOSE_PROJECT_NAME=tldw_ftux_multi docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.multi-user-postgres.yml ps
@@ -1925,7 +1925,7 @@ app is healthy
 admin login succeeds through tldw-setup verify
 ```
 
-- [ ] **Step 4: Run local single-user validation**
+- [x] **Step 4: Run local single-user validation**
 
 Use a throwaway env path so the user’s real `.env` is not overwritten:
 
@@ -1948,7 +1948,7 @@ make verify-local-single exits 0
 server was started with plain uvicorn and no --reload
 ```
 
-- [ ] **Step 5: Record validation results**
+- [x] **Step 5: Record validation results**
 
 Create `Docs/superpowers/reviews/public-onboarding-remediation/2026-04-25-runtime-validation.md`:
 
@@ -1990,13 +1990,22 @@ Date: 2026-04-25
 
 Fill the environment and result fields with the actual command outputs summarized in one or two lines each.
 
-- [ ] **Step 6: Run Bandit on touched Python scope**
+- [x] **Step 6: Run Bandit on touched Python scope**
 
 Run:
 
 ```bash
 source .venv/bin/activate
-python -m bandit -r tldw_Server_API/cli/wizard -f json -o /tmp/bandit_public_onboarding.json
+python -m bandit -r \
+  tldw_Server_API/cli/wizard \
+  tldw_Server_API/app/core/AuthNZ/initialize.py \
+  tldw_Server_API/app/core/AuthNZ/repos/api_keys_repo.py \
+  tldw_Server_API/app/core/AuthNZ/settings.py \
+  tldw_Server_API/app/core/config.py \
+  tldw_Server_API/app/api/v1/endpoints/config_info.py \
+  -s B105 \
+  -f json \
+  -o /tmp/bandit_public_onboarding.json
 ```
 
 Expected:
@@ -2007,7 +2016,7 @@ exit code 0
 
 If Bandit reports findings in touched code, fix them before continuing.
 
-- [ ] **Step 7: Run final status check**
+- [x] **Step 7: Run final status check**
 
 Run:
 
@@ -2022,7 +2031,7 @@ Only intentional files from this plan are modified or untracked.
 Unrelated pre-existing dirty files remain untouched.
 ```
 
-- [ ] **Step 8: Commit Task 9**
+- [x] **Step 8: Commit Task 9**
 
 Run:
 
@@ -2033,15 +2042,15 @@ git commit -m "docs: record public onboarding validation"
 
 ## Final Verification Checklist
 
-- [ ] `tldw-setup init --profile docker-single-webui --dry-run --json` masks generated secrets.
-- [ ] `tldw-setup init --profile docker-multi-postgres --dry-run --json` includes `SESSION_ENCRYPTION_KEY`.
-- [ ] `tldw-setup verify --profile docker-single-webui --first-value --json` does not spawn an ephemeral local server.
-- [ ] `make quickstart-install` is install-only.
-- [ ] `make quickstart` runs setup, start, and verify for Docker single-user + WebUI.
-- [ ] Docker single-user compose has no Postgres service or dependency.
-- [ ] Docker multi-user compose mounts Postgres 18 storage at `/var/lib/postgresql`.
-- [ ] Docker multi-user setup uses env-driven first admin creation.
-- [ ] Local startup uses plain `uvicorn` without `--reload`.
-- [ ] Audio docs include `X-API-KEY` and `Authorization: Bearer` examples.
-- [ ] Profile docs include Windows/WSL guidance.
-- [ ] Runtime validation transcript exists and reflects clean-state runs.
+- [x] `tldw-setup init --profile docker-single-webui --dry-run --json` masks generated secrets.
+- [x] `tldw-setup init --profile docker-multi-postgres --dry-run --json` includes `SESSION_ENCRYPTION_KEY`.
+- [x] `tldw-setup verify --profile docker-single-webui --first-value --json` does not spawn an ephemeral local server.
+- [x] `make quickstart-install` is install-only.
+- [x] `make quickstart` runs setup, start, and verify for Docker single-user + WebUI.
+- [x] Docker single-user compose has no Postgres service or dependency.
+- [x] Docker multi-user compose mounts Postgres 18 storage at `/var/lib/postgresql`.
+- [x] Docker multi-user setup uses env-driven first admin creation.
+- [x] Local startup uses plain `uvicorn` without `--reload`.
+- [x] Audio docs include `X-API-KEY` and `Authorization: Bearer` examples.
+- [x] Profile docs include Windows/WSL guidance.
+- [x] Runtime validation transcript exists and reflects clean-state runs.

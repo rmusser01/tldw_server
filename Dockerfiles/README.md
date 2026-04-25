@@ -18,7 +18,7 @@ This folder contains the base Compose stack for tldw_server, optional overlays, 
   - First start in `single_user` mode auto-generates a secure `SINGLE_USER_API_KEY` if missing/placeholder and runs `AuthNZ.initialize --non-interactive` only when `/app/Databases/.authnz_initialized_single_user` is absent in the attached Docker volume.
   - If that marker exists in the volume, AuthNZ initialization is skipped on container restart; it runs again only if the volume is replaced or the marker is removed.
 - Start (multi-user, Postgres users DB):
-  - `export ADMIN_USERNAME=admin`
+  - `export ADMIN_USERNAME=tldw-admin`
   - `export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"`
   - `make setup-docker-multi`
   - `make start-docker-multi`

@@ -10,6 +10,8 @@ from urllib.parse import quote
 
 from cryptography.fernet import Fernet
 
+from tldw_Server_API.app.core.AuthNZ.api_key_crypto import parse_api_key
+from tldw_Server_API.app.core.AuthNZ.username_utils import normalize_admin_username
 from tldw_Server_API.cli.wizard.utils import env as env_utils
 
 
@@ -109,6 +111,10 @@ def _is_valid_fernet_key(value: str) -> bool:
     return True
 
 
+def _is_valid_single_user_api_key(value: str) -> bool:
+    return parse_api_key(value) is not None
+
+
 def _byok_key() -> str:
     return base64.urlsafe_b64encode(os.urandom(32)).decode("ascii")
 
@@ -128,6 +134,8 @@ def _is_placeholder(value: str | None) -> bool:
 def _existing_or_generated(existing_env: Mapping[str, str], key: str, generator: Callable[[], str]) -> str:
     value = existing_env.get(key)
     if not _is_placeholder(value):
+        if key == "SINGLE_USER_API_KEY" and not _is_valid_single_user_api_key(value):
+            return generator()
         if key == "SESSION_ENCRYPTION_KEY" and not _is_valid_fernet_key(value):
             return generator()
         return value
@@ -186,7 +194,7 @@ def build_profile_env(
     values["MCP_API_KEY_SALT"] = _existing_or_generated(existing_env, "MCP_API_KEY_SALT", _secret_token)
     values["BYOK_ENCRYPTION_KEY"] = _existing_or_generated(existing_env, "BYOK_ENCRYPTION_KEY", _byok_key)
     if admin_username:
-        values["ADMIN_USERNAME"] = admin_username
+        values["ADMIN_USERNAME"] = normalize_admin_username(admin_username)
     if admin_password:
         values["ADMIN_PASSWORD"] = admin_password
     if admin_email:

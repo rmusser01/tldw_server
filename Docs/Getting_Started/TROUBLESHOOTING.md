@@ -302,12 +302,12 @@ The server auto-creates per-user subdirectories on first use.
 **Fix:**
 1. Run the `create_admin` CLI to create (or reset) the admin user:
    ```bash
-   python -m tldw_Server_API.app.core.AuthNZ.create_admin --username admin --password <new-password>
+   python -m tldw_Server_API.app.core.AuthNZ.create_admin --username tldw-admin --password <new-password>
    ```
 2. Or in Docker:
    ```bash
    docker compose exec app python -m tldw_Server_API.app.core.AuthNZ.create_admin \
-     --username admin --password <new-password>
+     --username tldw-admin --password <new-password>
    ```
 
 ### 26. JWT tokens rejected after server restart

@@ -246,7 +246,7 @@ make start-docker-single
 make verify-docker-single
 
 # Docker multi-user + Postgres:
-export ADMIN_USERNAME=admin
+export ADMIN_USERNAME=tldw-admin
 export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
 make setup-docker-multi
 make start-docker-multi
@@ -332,7 +332,7 @@ Docker multi-user + Postgres:
 ```powershell
 # from repo root
 if (!(Test-Path "tldw_Server_API/Config_Files/.env")) { Copy-Item "tldw_Server_API/Config_Files/.env.example" "tldw_Server_API/Config_Files/.env" }
-$env:ADMIN_USERNAME="admin"
+$env:ADMIN_USERNAME="tldw-admin"
 $env:ADMIN_PASSWORD = py -3.12 -c "import secrets; print(secrets.token_urlsafe(24))"
 # Run the tldw-setup init command from the multi-user profile guide first.
 $env:TLDW_ENV_FILE=(Resolve-Path "tldw_Server_API/Config_Files/.env").Path

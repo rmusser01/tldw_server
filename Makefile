@@ -160,7 +160,7 @@ setup-local-single: setup-wizard-tools
 
 start-local-single:
 	@echo "[start-local-single] Starting API at $(TLDW_BASE_URL)"
-	$(VENV_PYTHON) -m uvicorn tldw_Server_API.app.main:app --host 127.0.0.1 --port 8000
+	TLDW_ENV_FILE="$(TLDW_ENV_FILE)" $(VENV_PYTHON) -m uvicorn tldw_Server_API.app.main:app --host 127.0.0.1 --port 8000
 
 verify-local-single: setup-wizard-tools
 	@$(TLDW_SETUP) verify --profile local-single --env-file "$(TLDW_ENV_FILE)" --base-url "$(TLDW_BASE_URL)" --first-value

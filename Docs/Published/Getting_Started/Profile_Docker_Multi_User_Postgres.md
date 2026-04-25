@@ -16,7 +16,7 @@ Prerequisites:
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-export ADMIN_USERNAME=admin
+export ADMIN_USERNAME=tldw-admin
 export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
 make setup-docker-multi
 ```
@@ -24,7 +24,7 @@ make setup-docker-multi
 PowerShell / no-`make` equivalent:
 
 ```powershell
-$env:ADMIN_USERNAME="admin"
+$env:ADMIN_USERNAME="tldw-admin"
 $env:ADMIN_PASSWORD = py -3.12 -c "import secrets; print(secrets.token_urlsafe(24))"
 py -3.12 -m venv .setup-venv
 .\.setup-venv\Scripts\python -m pip install --upgrade pip setuptools wheel

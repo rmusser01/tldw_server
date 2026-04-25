@@ -98,6 +98,7 @@ _CONFIG_SOURCE_METADATA: dict[str, Any] = {
 # True are buffered and flushed once initialization completes.
 _LOGGER_READY = False
 _STARTUP_LOG_BUFFER: list[tuple[str, str, dict[str, Any]]] = []
+_ENV_FILE_ENV_VAR = "TLDW_ENV_FILE"
 
 
 def _buffered_log(level: str, message: str, **kwargs: Any) -> None:
@@ -134,6 +135,62 @@ def _flush_startup_logs() -> None:
     _STARTUP_LOG_BUFFER = []
 
 
+def _resolve_path(path: Path) -> Path:
+    try:
+        return path.expanduser().resolve()
+    except _CONFIG_NONCRITICAL_EXCEPTIONS:
+        return path.expanduser()
+
+
+def get_tldw_env_file_path() -> Path | None:
+    """Return the explicit runtime .env path selected by TLDW_ENV_FILE."""
+    raw_path = os.getenv(_ENV_FILE_ENV_VAR)
+    if not raw_path or not raw_path.strip():
+        return None
+    return _resolve_path(Path(raw_path.strip()))
+
+
+def _candidate_env_paths(project_root: Path, repo_root: Path | None = None) -> list[Path]:
+    """Return .env candidates in load precedence order.
+
+    `TLDW_ENV_FILE` is an explicit user/runtime selection. It must be loaded
+    before canonical repo paths because python-dotenv uses override=False.
+    """
+    candidates: list[Path] = []
+    explicit_env_file = get_tldw_env_file_path()
+    if explicit_env_file:
+        candidates.append(explicit_env_file)
+
+    candidates.extend(
+        [
+            project_root / 'Config_Files' / '.env',
+            project_root / 'Config_Files' / '.ENV',
+            project_root / '.env',
+            project_root / '.ENV',
+        ]
+    )
+    if repo_root is not None:
+        candidates.extend(
+            [
+                repo_root / 'Config_Files' / '.env',
+                repo_root / 'Config_Files' / '.ENV',
+                repo_root / '.env',
+                repo_root / '.ENV',
+            ]
+        )
+
+    resolved_candidates: list[Path] = []
+    seen: set[str] = set()
+    for path in candidates:
+        resolved = _resolve_path(path)
+        key = str(resolved)
+        if key in seen:
+            continue
+        resolved_candidates.append(resolved)
+        seen.add(key)
+    return resolved_candidates
+
+
 def _load_env_files_early() -> None:
     """Load .env files before any environment reads.
 
@@ -144,12 +201,10 @@ def _load_env_files_early() -> None:
     try:
         current_file_path = Path(__file__).resolve()
         project_root = current_file_path.parent.parent.parent
-        candidate_env_paths = [
-            project_root / 'Config_Files' / '.env',
-            project_root / 'Config_Files' / '.ENV',
-            project_root / '.env',
-            project_root / '.ENV',
-        ]
+        candidate_env_paths = _candidate_env_paths(
+            project_root,
+            project_root.parent,
+        )
         loaded_any = False
         for p in candidate_env_paths:
             try:
@@ -1985,18 +2040,9 @@ def load_comprehensive_config():
     project_root = current_file_path.parent.parent.parent
 
     # Load .env/.ENV files if they exist (API keys should be here).
-    # Prefer Config_Files/.env (canonical) before root-level fallbacks.
+    # Prefer TLDW_ENV_FILE when set, then canonical repo paths before fallbacks.
     repo_root = project_root.parent
-    candidate_env_paths = [
-        project_root / 'Config_Files' / '.env',
-        project_root / 'Config_Files' / '.ENV',
-        project_root / '.env',
-        project_root / '.ENV',
-        repo_root / 'Config_Files' / '.env',
-        repo_root / 'Config_Files' / '.ENV',
-        repo_root / '.env',
-        repo_root / '.ENV',
-    ]
+    candidate_env_paths = _candidate_env_paths(project_root, repo_root)
     loaded_any_env = False
     for p in candidate_env_paths:
         try:
