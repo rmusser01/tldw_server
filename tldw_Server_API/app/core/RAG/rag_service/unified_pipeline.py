@@ -1104,17 +1104,6 @@ def build_retrieval_only_result(
     )
 
 
-def _callable_accepts_keyword(fn: Callable[..., Any], keyword: str) -> bool:
-    try:
-        parameters = inspect.signature(fn).parameters
-    except (TypeError, ValueError):
-        return True
-    return keyword in parameters or any(
-        parameter.kind is inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters.values()
-    )
-
-
 _CANONICAL_SOURCE_TO_DATASOURCE: dict[str, DataSource] = {
     "media_db": DataSource.MEDIA_DB,
     "notes": DataSource.NOTES,
@@ -1604,6 +1593,11 @@ async def unified_rag_pipeline(
     if retrieval_plan is None:
         retrieval_plan = build_retrieval_plan(resolved_request)
 
+    def _resolve_effective_enable_generation() -> bool:
+        return bool((resolved_request.payload or {}).get("enable_generation", enable_generation))
+
+    effective_enable_generation = _resolve_effective_enable_generation()
+
     retrieval_query = query
     retrieval_sources = sources
     retrieval_search_mode = search_mode
@@ -1654,6 +1648,14 @@ async def unified_rag_pipeline(
             return replace(retrieval_plan, query=query_text)
         except TypeError:
             return retrieval_plan
+
+    def _sync_effective_query(new_query: str) -> None:
+        nonlocal query, retrieval_query, retrieval_plan
+        query = str(new_query)
+        retrieval_query = query
+        resolved_request.query = query
+        resolved_request.payload["query"] = query
+        retrieval_plan = replace(retrieval_plan, query=query)
 
     # Basic input validation (short-circuit before heavier setup)
     if not isinstance(query, str) or not query.strip():
@@ -2017,7 +2019,7 @@ async def unified_rag_pipeline(
         effective_pre_clarify = (
             enable_pre_retrieval_clarification
             if enable_pre_retrieval_clarification is not None
-            else bool(enable_generation)
+            else effective_enable_generation
         )
         if effective_pre_clarify and assess_query_for_clarification is not None:
             clarification_start = time.time()
@@ -2060,7 +2062,7 @@ async def unified_rag_pipeline(
                 if corrected != query:
                     result.metadata["original_query"] = query
                     result.metadata["corrected_query"] = corrected
-                    query = corrected
+                    _sync_effective_query(corrected)
                 result.timings["spell_check"] = time.time() - spell_start
             else:
                 result.errors.append("Spell check module not available")
@@ -2198,7 +2200,7 @@ async def unified_rag_pipeline(
                 # Apply reformulated query
                 if _classification.standalone_query and _classification.standalone_query != query:
                     result.metadata["reformulated_query"] = _classification.standalone_query
-                    query = _classification.standalone_query
+                    _sync_effective_query(_classification.standalone_query)
                     logger.debug(f"Query reformulated to: {query[:100]}")
 
                 # Route web fallback based on classification
@@ -2262,7 +2264,7 @@ async def unified_rag_pipeline(
                 )
                 if reformulated and reformulated != query:
                     result.metadata["reformulated_query"] = reformulated
-                    query = reformulated
+                    _sync_effective_query(reformulated)
                 result.timings["query_reformulation"] = time.time() - _ref_start
             except Exception as _ref_exc:
                 logger.warning(f"Query reformulation failed: {_ref_exc!r}")
@@ -5194,7 +5196,9 @@ async def unified_rag_pipeline(
         except (AttributeError, TypeError, ValueError):
             gated_generation = False
 
-        if not enable_generation:
+        effective_enable_generation = _resolve_effective_enable_generation()
+
+        if not effective_enable_generation:
             retrieval_only_result = build_retrieval_only_result(
                 resolved_request=resolved_request,
                 retrieval_plan=retrieval_plan,
@@ -5211,7 +5215,7 @@ async def unified_rag_pipeline(
             result.documents = list(retrieval_only_result.documents)
             result.metadata.update(dict(retrieval_only_result.metadata or {}))
 
-        if enable_generation and not gated_generation and not result.cache_hit:
+        if effective_enable_generation and not gated_generation and not result.cache_hit:
             generation_start = time.time()
             try:
                 # --- OTEL: generation span ---
@@ -5428,9 +5432,6 @@ async def unified_rag_pipeline(
                             "generate_answer_fn": _generate_standard_answer,
                             "generation_context": context,
                         }
-                        if not _callable_accepts_keyword(execute_generation_phase, "retrieval_plan"):
-                            generation_phase_kwargs.pop("retrieval_plan")
-
                         generation_result = await execute_generation_phase(**generation_phase_kwargs)
                         if isinstance(generation_result, dict):
                             return coordinate_standard_result_evidence(
@@ -5513,7 +5514,7 @@ async def unified_rag_pipeline(
                 if _otel_cm_gen is not None:
                     with contextlib.suppress(AttributeError, RuntimeError, TypeError, ValueError):
                         _otel_cm_gen.__exit__(None, None, None)
-        elif enable_generation and gated_generation:
+        elif effective_enable_generation and gated_generation:
             # Record a metadata entry and bump a metric for observability
             result.metadata.setdefault("generation_gate", {})
             result.metadata["generation_gate"].update({

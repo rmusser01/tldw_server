@@ -179,7 +179,6 @@ async def test_unified_pipeline_coordinates_retrieval_only_result(monkeypatch):
         sources=list(plan.sources),
         top_k=plan.top_k,
         search_mode=plan.search_mode,
-        enable_generation=False,
         enable_reranking=False,
         resolved_request=resolved,
         retrieval_plan=plan,
@@ -194,3 +193,80 @@ async def test_unified_pipeline_coordinates_retrieval_only_result(monkeypatch):
     assert seen["coordinator_resolved"] is resolved
     assert seen["coordinator_plan"] is plan
     assert seen["coordinator_result"].metadata["retrieval_plan"]["top_k"] == plan.top_k
+
+
+@pytest.mark.asyncio
+async def test_unified_pipeline_threads_effective_query_to_generation(monkeypatch):
+    resolved = _resolved_request()
+    plan = _retrieval_plan()
+    seen = {}
+
+    async def fake_classify_and_reformulate(**kwargs):
+        seen["classifier_query"] = kwargs["query"]
+        return SimpleNamespace(
+            standalone_query="effective reformulated query",
+            skip_search=False,
+            search_local_db=True,
+            search_web=False,
+            search_academic=False,
+            search_discussions=False,
+            detected_intent="question",
+            confidence=0.9,
+            reasoning="test reformulation",
+        )
+
+    async def fake_retrieval_phase(**kwargs):
+        seen["retrieval_resolved"] = kwargs["resolved_request"]
+        seen["retrieval_plan"] = kwargs["retrieval_plan"]
+        return SimpleNamespace(
+            documents=[SimpleNamespace(id="doc-1", content="effective query evidence")],
+            metadata={"retrieval": "ok"},
+        )
+
+    async def fake_generation_phase(**kwargs):
+        seen["generation_resolved"] = kwargs["resolved_request"]
+        seen["generation_plan"] = kwargs["retrieval_plan"]
+        return {
+            "answer": "effective answer",
+            "sources": [],
+            "metadata": {},
+        }
+
+    class FakeAnswerGenerator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(
+        unified_pipeline,
+        "classify_and_reformulate",
+        fake_classify_and_reformulate,
+    )
+    monkeypatch.setattr(unified_pipeline, "execute_retrieval_phase", fake_retrieval_phase)
+    monkeypatch.setattr(unified_pipeline, "execute_generation_phase", fake_generation_phase)
+    monkeypatch.setattr(unified_pipeline, "AnswerGenerator", FakeAnswerGenerator)
+    monkeypatch.setattr(
+        unified_pipeline,
+        "coordinate_standard_result_evidence",
+        lambda result, resolved_request, *, retrieval_plan=None, coordinator=None: result,
+    )
+
+    result = await unified_pipeline.unified_rag_pipeline(
+        query=resolved.query,
+        sources=list(plan.sources),
+        top_k=plan.top_k,
+        search_mode=plan.search_mode,
+        enable_generation=True,
+        enable_query_classification=True,
+        enable_reranking=False,
+        resolved_request=resolved,
+        retrieval_plan=plan,
+    )
+
+    assert result["answer"] == "effective answer"
+    assert seen["classifier_query"] == "What changed?"
+    assert seen["retrieval_resolved"] is resolved
+    assert seen["generation_resolved"] is resolved
+    assert seen["generation_resolved"].query == "effective reformulated query"
+    assert seen["generation_resolved"].payload["query"] == "effective reformulated query"
+    assert seen["retrieval_plan"].query == "effective reformulated query"
+    assert seen["generation_plan"].query == "effective reformulated query"

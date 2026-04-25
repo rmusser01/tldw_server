@@ -161,8 +161,16 @@ async def test_standard_generation_routes_through_generation_executor(monkeypatc
 
     captured: dict[str, object] = {}
 
-    async def fake_execute_generation_phase(*, resolved_request, derived_evidence, generate_answer_fn, generation_context):
+    async def fake_execute_generation_phase(
+        *,
+        resolved_request,
+        retrieval_plan,
+        derived_evidence,
+        generate_answer_fn,
+        generation_context,
+    ):
         captured["resolved_request"] = resolved_request
+        captured["retrieval_plan"] = retrieval_plan
         captured["derived_evidence"] = derived_evidence
         captured["generate_answer_fn"] = generate_answer_fn
         captured["generation_context"] = generation_context
@@ -195,6 +203,7 @@ async def test_standard_generation_routes_through_generation_executor(monkeypatc
     assert getattr(resolved_request, "query", None) == "Use executor path"
     assert getattr(resolved_request, "payload", {}).get("generation_prompt") == "concise"
     assert getattr(resolved_request, "payload", {}).get("max_generation_tokens") == 64
+    assert captured.get("retrieval_plan") is not None
     assert derived_evidence is not None
     assert len(getattr(derived_evidence, "documents", [])) == 2
     assert captured.get("generation_context") == "First doc with content\n\nSecond doc with content"
@@ -210,7 +219,15 @@ async def test_generation_keeps_full_retrieval_set_when_executor_returns_smaller
     monkeypatch.setattr(up, "MultiDatabaseRetriever", ManyDocRetriever)
     monkeypatch.setattr(up, "AnswerGenerator", FakeAnswerGenerator)
 
-    async def fake_execute_generation_phase(*, resolved_request, derived_evidence, generate_answer_fn, generation_context):
+    async def fake_execute_generation_phase(
+        *,
+        resolved_request,
+        retrieval_plan,
+        derived_evidence,
+        generate_answer_fn,
+        generation_context,
+    ):
+        assert retrieval_plan is not None
         assert generation_context == "Document 0\n\nDocument 1\n\nDocument 2\n\nDocument 3\n\nDocument 4"
         return RAGResult(
             documents=list(derived_evidence.documents[:5]),
