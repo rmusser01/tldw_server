@@ -18,7 +18,9 @@ This folder contains the base Compose stack for tldw_server, optional overlays, 
   - First start in `single_user` mode auto-generates a secure `SINGLE_USER_API_KEY` if missing/placeholder and runs `AuthNZ.initialize --non-interactive` only when `/app/Databases/.authnz_initialized_single_user` is absent in the attached Docker volume.
   - If that marker exists in the volume, AuthNZ initialization is skipped on container restart; it runs again only if the volume is replaced or the marker is removed.
 - Start (multi-user, Postgres users DB):
-  - `ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi`
+  - `export ADMIN_USERNAME=admin`
+  - `export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"`
+  - `make setup-docker-multi`
   - `make start-docker-multi`
   - `make verify-docker-multi`
 - Logs and status:
@@ -53,10 +55,11 @@ This folder contains the base Compose stack for tldw_server, optional overlays, 
   - Mount `Samples/Nginx/nginx.conf` and your certs.
 
 - Postgres (basic standalone): `Dockerfiles/docker-compose.postgres.yml`
-  - Start a standalone Postgres you can point `DATABASE_URL` to.
-  - Example:
-    - `export DATABASE_URL=postgresql://tldw_user:TestPassword123!@localhost:5432/tldw_users`
-    - `docker compose -f Dockerfiles/docker-compose.postgres.yml up -d`
+  - Start standalone Postgres for advanced/custom stacks.
+  - Public multi-user profile overrides belong in `tldw_Server_API/Config_Files/.env`:
+    - `TLDW_DATABASE_URL_OVERRIDE=postgresql://tldw_user:generated-password@localhost:5432/tldw_users`
+    - `TLDW_JOBS_DB_URL_OVERRIDE=postgresql://tldw_user:generated-password@localhost:5432/tldw_jobs`
+  - Start the helper database with `docker compose -f Dockerfiles/docker-compose.postgres.yml up -d`.
 
 - Postgres + pgvector + pgbouncer (dev): `Dockerfiles/docker-compose.pg.yml`
   - `docker compose -f Dockerfiles/docker-compose.pg.yml up -d`
@@ -112,8 +115,8 @@ For the full CI/CD pipeline details (workflow triggers, tagging conventions, att
 ## Troubleshooting
 
 - Health checks: `app` responds on `/ready`; `postgres`/`redis` include health checks.
-- If the app fails waiting for DB, verify `DATABASE_URL` and Postgres readiness.
+- If the app fails waiting for DB, check Postgres readiness; for public multi-user external DB overrides, verify `TLDW_DATABASE_URL_OVERRIDE` and `TLDW_JOBS_DB_URL_OVERRIDE`.
 - `single_user` quickstart bootstraps a strong `SINGLE_USER_API_KEY` (when missing/placeholder) and performs one-time AuthNZ initialization based on the marker file `/app/Databases/.authnz_initialized_single_user` stored in the attached volume.
 - Initialization is skipped when that marker already exists, and will re-run only after volume replacement or marker removal (force re-init by deleting the marker, or by reinitializing the auth DB and clearing the marker).
-- For `multi_user`, run AuthNZ initialization manually to create your admin account.
+- For the public `multi_user` profile, the first admin is bootstrapped from `ADMIN_USERNAME` / `ADMIN_PASSWORD` during `make setup-docker-multi` and first container start; manual AuthNZ/admin initialization is for advanced/custom flows only.
 - View full logs: `docker compose ... logs -f`

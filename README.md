@@ -88,7 +88,7 @@ Good fit for:
 | Profile | Best for | Prepare | Start | Verify |
 |---------|----------|---------|-------|--------|
 | [Docker single-user + WebUI](Docs/Getting_Started/Profile_Docker_Single_User.md) | Most users (recommended) | `make setup-docker-single` | `make start-docker-single` | `make verify-docker-single` |
-| [Docker multi-user + Postgres](Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md) | Teams, public deployments | `ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi` | `make start-docker-multi` | `make verify-docker-multi` |
+| [Docker multi-user + Postgres](Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md) | Teams, public deployments | Export generated `ADMIN_USERNAME` / `ADMIN_PASSWORD`, then `make setup-docker-multi` | `make start-docker-multi` | `make verify-docker-multi` |
 | [Local single-user](Docs/Getting_Started/Profile_Local_Single_User.md) | Development, debugging | `make install-local` then `make setup-local-single` | `make start-local-single` | `make verify-local-single` |
 
 `make quickstart` remains the shortest Docker single-user + WebUI alias. It runs setup, start, and verification for the first profile.
@@ -231,7 +231,7 @@ Choose one public setup profile:
 | Profile | Prepare | Start | Verify |
 |------|---------|-------|--------|
 | Docker single-user + WebUI | `make setup-docker-single` | `make start-docker-single` | `make verify-docker-single` |
-| Docker multi-user + Postgres | `ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi` | `make start-docker-multi` | `make verify-docker-multi` |
+| Docker multi-user + Postgres | Export generated `ADMIN_USERNAME` / `ADMIN_PASSWORD`, then `make setup-docker-multi` | `make start-docker-multi` | `make verify-docker-multi` |
 | Local single-user | `make install-local` then `make setup-local-single` | `make start-local-single` | `make verify-local-single` |
 
 ```bash
@@ -246,7 +246,9 @@ make start-docker-single
 make verify-docker-single
 
 # Docker multi-user + Postgres:
-ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi
+export ADMIN_USERNAME=admin
+export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+make setup-docker-multi
 make start-docker-multi
 make verify-docker-multi
 
@@ -331,7 +333,7 @@ Docker multi-user + Postgres:
 # from repo root
 if (!(Test-Path "tldw_Server_API/Config_Files/.env")) { Copy-Item "tldw_Server_API/Config_Files/.env.example" "tldw_Server_API/Config_Files/.env" }
 $env:ADMIN_USERNAME="admin"
-$env:ADMIN_PASSWORD="replace-with-a-long-password"
+$env:ADMIN_PASSWORD = py -3.12 -c "import secrets; print(secrets.token_urlsafe(24))"
 # Run the tldw-setup init command from the multi-user profile guide first.
 $env:TLDW_ENV_FILE=(Resolve-Path "tldw_Server_API/Config_Files/.env").Path
 docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --build

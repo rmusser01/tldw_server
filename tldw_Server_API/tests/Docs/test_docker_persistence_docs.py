@@ -45,3 +45,18 @@ def test_docker_single_user_profile_documents_named_volumes_and_overlay() -> Non
             snippet in text,
             f"Docker single-user profile should mention {snippet}",
         )
+
+
+def test_dockerfiles_readme_documents_public_multi_user_admin_bootstrap() -> None:
+    """Docker docs should not tell public multi-user users to create admins manually."""
+    text = Path("Dockerfiles/README.md").read_text(encoding="utf-8")
+
+    _require(
+        "ADMIN_USERNAME" in text and "ADMIN_PASSWORD" in text,
+        "Dockerfiles README should document env-driven first admin bootstrap",
+    )
+    _require(
+        "For `multi_user`, run AuthNZ initialization manually to create your admin account"
+        not in text,
+        "Dockerfiles README should not use stale manual AuthNZ init wording",
+    )

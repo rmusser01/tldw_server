@@ -26,8 +26,14 @@ def test_each_profile_has_required_sections() -> None:
     ]
     for guide in guides:
         text = Path(guide).read_text(encoding="utf-8")
+        positions = []
         for heading in REQUIRED:
             _require(heading in text, f"{guide} missing required heading: {heading}")
+            positions.append(text.index(heading))
+        _require(
+            positions == sorted(positions),
+            f"{guide} should present lifecycle headings in order",
+        )
         _require(
             "First-Time Audio Setup: CPU Systems" in text,
             f"{guide} should point to the CPU audio guide",

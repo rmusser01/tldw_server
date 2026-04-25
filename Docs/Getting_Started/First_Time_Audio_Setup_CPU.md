@@ -282,11 +282,31 @@ docker compose --env-file tldw_Server_API/Config_Files/.env \
 
 Do not stop at `/health`. Verify one real TTS request and one real STT request.
 
+Choose one reusable auth header before running the commands.
+
+Single-user auth mode:
+
+```bash
+AUTH_HEADER=(-H "X-API-KEY: $SINGLE_USER_API_KEY")
+```
+
+Multi-user auth mode:
+
+```bash
+JWT=$(
+  curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/login \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=$ADMIN_USERNAME" \
+    -d "password=$ADMIN_PASSWORD" | jq -r '.access_token'
+)
+AUTH_HEADER=(-H "Authorization: Bearer $JWT")
+```
+
 ### 4A. Confirm TTS health
 
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/audio/health \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY"
+  "${AUTH_HEADER[@]}"
 ```
 
 What you want to see:
@@ -296,25 +316,9 @@ What you want to see:
 
 ### 4B. Confirm the Supertonic voice catalog
 
-Single-user auth mode uses `X-API-KEY`:
-
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/audio/voices/catalog \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" | jq '.supertonic'
-```
-
-Multi-user auth mode uses a login token:
-
-```bash
-JWT=$(
-  curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/login \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "username=$ADMIN_USERNAME" \
-    -d "password=$ADMIN_PASSWORD" | jq -r '.access_token'
-)
-
-curl -sS http://127.0.0.1:8000/api/v1/audio/voices/catalog \
-  -H "Authorization: Bearer $JWT" | jq '.supertonic'
+  "${AUTH_HEADER[@]}" | jq '.supertonic'
 ```
 
 You should see voices such as `supertonic_m1` and `supertonic_f1`.
@@ -323,7 +327,7 @@ You should see voices such as `supertonic_m1` and `supertonic_f1`.
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/speech \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" \
+  "${AUTH_HEADER[@]}" \
   -H "Content-Type: application/json" \
   -d '{
         "model": "tts-supertonic-1",
@@ -339,7 +343,7 @@ curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/speech \
 
 ```bash
 curl -sS "http://127.0.0.1:8000/api/v1/audio/transcriptions/health?model=parakeet-onnx" \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY"
+  "${AUTH_HEADER[@]}"
 ```
 
 What you want to see:
@@ -352,7 +356,7 @@ What you want to see:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/transcriptions \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" \
+  "${AUTH_HEADER[@]}" \
   -F "file=@cpu_audio_smoke.wav" \
   -F "model=parakeet-onnx"
 ```

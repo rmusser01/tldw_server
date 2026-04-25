@@ -16,14 +16,16 @@ Prerequisites:
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi
+export ADMIN_USERNAME=admin
+export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+make setup-docker-multi
 ```
 
 PowerShell / no-`make` equivalent:
 
 ```powershell
 $env:ADMIN_USERNAME="admin"
-$env:ADMIN_PASSWORD="replace-with-a-long-password"
+$env:ADMIN_PASSWORD = py -3.12 -c "import secrets; print(secrets.token_urlsafe(24))"
 py -3.12 -m venv .setup-venv
 .\.setup-venv\Scripts\python -m pip install --upgrade pip setuptools wheel
 .\.setup-venv\Scripts\python -m pip install "typer>=0.12.0" "loguru>=0.7.0" "httpx>=0.24.0" "python-dotenv>=1.0.0" "cryptography>=41.0.0"
@@ -78,21 +80,13 @@ curl -sS http://127.0.0.1:8000/api/v1/config/quickstart
 
 ## First Value
 
-Log in as the first admin and call an authenticated endpoint:
+Run the provider-independent first-value ingest/search check. `make verify-docker-multi` logs in with the generated admin credentials, posts a small Markdown document to `/api/v1/media/add`, then searches for `tldw-onboarding-verification-unique` through `/api/v1/media/search`.
 
 ```bash
-JWT=$(
-  curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/login \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "username=$ADMIN_USERNAME" \
-    -d "password=$ADMIN_PASSWORD" | jq -r '.access_token'
-)
-
-curl -sS http://127.0.0.1:8000/api/v1/auth/me \
-  -H "Authorization: Bearer $JWT"
+make verify-docker-multi
 ```
 
-If no LLM provider is configured yet, verify auth and health first, then add provider keys to `tldw_Server_API/Config_Files/.env`.
+If the first-value check fails, confirm `ADMIN_USERNAME` and `ADMIN_PASSWORD` are still exported in the shell running verification.
 
 ## Audio Path
 
@@ -107,7 +101,7 @@ After this profile is running, continue with one of:
 
 - If Docker is not reachable on Windows, start Docker Desktop and run the documented commands from WSL2.
 - If setup fails, confirm both `ADMIN_USERNAME` and `ADMIN_PASSWORD` are set in the shell that runs setup.
-- If startup fails, verify `DATABASE_URL` in `tldw_Server_API/Config_Files/.env` points to the bundled `postgres` service or to a reachable external database.
+- If startup fails, check the bundled `postgres` service logs and only inspect `TLDW_DATABASE_URL_OVERRIDE` / `TLDW_JOBS_DB_URL_OVERRIDE` if you intentionally configured external databases.
 - If login fails, check app logs with `docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml logs --tail=200 app`.
 - If port `8000` is already in use, stop the conflicting process or change the host port mapping in the compose file.
 - If you need a full reset, stop the stack and remove volumes with `docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml down -v`.
@@ -120,5 +114,9 @@ After this profile is running, continue with one of:
     docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml \
     -f Dockerfiles/docker-compose.webui.yml up -d --wait
   ```
-- Use an external Postgres instance by setting `DATABASE_URL` to your database before `make start-docker-multi`.
+- Advanced external Postgres: keep the public bundled Postgres default unless you already operate Postgres. To use external auth/jobs databases, set these in `tldw_Server_API/Config_Files/.env` before `make start-docker-multi`:
+  ```bash
+  TLDW_DATABASE_URL_OVERRIDE=postgresql://your_user:your_pass@your-host:5432/tldw_users
+  TLDW_JOBS_DB_URL_OVERRIDE=postgresql://your_user:your_pass@your-host:5432/tldw_jobs
+  ```
 - Follow `Docs/User_Guides/Server/Multi-User_Postgres_Setup.md` for production hardening, account policy, and operational details.

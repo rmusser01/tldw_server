@@ -269,21 +269,15 @@ Restart the server after changes.
 
 Verify the accelerated lane you intended, then verify real TTS and STT.
 
-### 4A. TTS health and voice catalog
+Choose one reusable auth header before running the commands.
+
+Single-user auth mode:
 
 ```bash
-curl -sS http://127.0.0.1:8000/api/v1/audio/health \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY"
+AUTH_HEADER=(-H "X-API-KEY: $SINGLE_USER_API_KEY")
 ```
 
-Single-user auth mode uses `X-API-KEY` for the voice catalog:
-
-```bash
-curl -sS http://127.0.0.1:8000/api/v1/audio/voices/catalog \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" | jq '.supertonic'
-```
-
-Multi-user auth mode uses a login token:
+Multi-user auth mode:
 
 ```bash
 JWT=$(
@@ -292,16 +286,26 @@ JWT=$(
     -d "username=$ADMIN_USERNAME" \
     -d "password=$ADMIN_PASSWORD" | jq -r '.access_token'
 )
+AUTH_HEADER=(-H "Authorization: Bearer $JWT")
+```
 
+### 4A. TTS health and voice catalog
+
+```bash
+curl -sS http://127.0.0.1:8000/api/v1/audio/health \
+  "${AUTH_HEADER[@]}"
+```
+
+```bash
 curl -sS http://127.0.0.1:8000/api/v1/audio/voices/catalog \
-  -H "Authorization: Bearer $JWT" | jq '.supertonic'
+  "${AUTH_HEADER[@]}" | jq '.supertonic'
 ```
 
 ### 4B. Generate a short test file with TTS
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/speech \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" \
+  "${AUTH_HEADER[@]}" \
   -H "Content-Type: application/json" \
   -d '{
         "model": "tts-supertonic-1",
@@ -327,7 +331,7 @@ STT readiness:
 
 ```bash
 curl -sS "http://127.0.0.1:8000/api/v1/audio/transcriptions/health?model=whisper-1&warm=true" \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY"
+  "${AUTH_HEADER[@]}"
 ```
 
 You want to see Whisper reported as usable and warm initialization succeeding.
@@ -338,7 +342,7 @@ STT readiness:
 
 ```bash
 curl -sS "http://127.0.0.1:8000/api/v1/audio/transcriptions/health?model=parakeet-mlx" \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY"
+  "${AUTH_HEADER[@]}"
 ```
 
 You want to see:
@@ -353,7 +357,7 @@ You want to see:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/transcriptions \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" \
+  "${AUTH_HEADER[@]}" \
   -F "file=@accelerated_audio_smoke.wav" \
   -F "model=whisper-1"
 ```
@@ -362,7 +366,7 @@ curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/transcriptions \
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/transcriptions \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" \
+  "${AUTH_HEADER[@]}" \
   -F "file=@accelerated_audio_smoke.wav" \
   -F "model=parakeet-mlx"
 ```

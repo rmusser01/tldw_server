@@ -14,7 +14,7 @@ Canonical base profiles:
    - Start: `make start-docker-single`
    - Verify: `make verify-docker-single`
 2. [Docker multi-user + Postgres](./Profile_Docker_Multi_User_Postgres.md)
-   - Prepare: `ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi`
+   - Prepare: export generated `ADMIN_USERNAME` / `ADMIN_PASSWORD`, then `make setup-docker-multi`
    - Start: `make start-docker-multi`
    - Verify: `make verify-docker-multi`
 3. [Local single-user](./Profile_Local_Single_User.md)
@@ -22,6 +22,14 @@ Canonical base profiles:
    - Prepare: `make setup-local-single`
    - Start: `make start-local-single`
    - Verify: `make verify-local-single`
+
+Generated multi-user admin bootstrap:
+
+```bash
+export ADMIN_USERNAME=admin
+export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+make setup-docker-multi
+```
 
 Optional add-ons:
 

@@ -85,18 +85,13 @@ curl -sS http://127.0.0.1:8080 > /dev/null && echo "webui-ok"
 
 ## First Value
 
-Open the WebUI at http://127.0.0.1:8080 or make a direct API call:
+Open the WebUI at http://127.0.0.1:8080, or run the provider-independent first-value ingest/search verification. The verify command posts a small Markdown document to `/api/v1/media/add`, then searches for `tldw-onboarding-verification-unique` through `/api/v1/media/search`.
 
 ```bash
-API_KEY=$(grep '^SINGLE_USER_API_KEY=' tldw_Server_API/Config_Files/.env | cut -d= -f2-)
-
-curl -sS http://127.0.0.1:8000/api/v1/chat/completions \
-  -H "X-API-KEY: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hello from Docker single-user."}], "stream": false}'
+make verify-docker-single
 ```
 
-If no LLM provider is configured yet, the server should still be healthy and verification should explain which provider settings are missing.
+This does not require an LLM provider key. Add provider keys to `tldw_Server_API/Config_Files/.env` later when you are ready to use chat or hosted model features.
 
 ## Audio Path
 

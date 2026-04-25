@@ -207,11 +207,13 @@ make verify-docker-single</code></pre>
         <div class="code-block">
           <div class="code-header">
             <span>Docker multi-user + Postgres</span>
-            <button class="copy-btn" data-code="git clone https://github.com/rmusser01/tldw_server.git&#10;cd tldw_server&#10;ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi&#10;make start-docker-multi&#10;make verify-docker-multi" aria-label="Copy Docker multi-user profile commands">Copy</button>
+            <button class="copy-btn" data-code="git clone https://github.com/rmusser01/tldw_server.git&#10;cd tldw_server&#10;export ADMIN_USERNAME=admin&#10;export ADMIN_PASSWORD=&quot;$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')&quot;&#10;make setup-docker-multi&#10;make start-docker-multi&#10;make verify-docker-multi" aria-label="Copy Docker multi-user profile commands">Copy</button>
           </div>
           <pre><code>git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi
+export ADMIN_USERNAME=admin
+export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+make setup-docker-multi
 make start-docker-multi
 make verify-docker-multi</code></pre>
         </div>

@@ -81,7 +81,9 @@ For host-visible storage instead, see the `docker-compose.host-storage.yml` vari
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi
+export ADMIN_USERNAME=admin
+export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+make setup-docker-multi
 make start-docker-multi
 make verify-docker-multi
 ```
@@ -96,7 +98,7 @@ make verify-docker-multi
 
 ### Next: create the first admin user
 
-Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` before `make setup-docker-multi` to create the first admin automatically. To verify the login manually:
+Set `ADMIN_USERNAME` and the generated `ADMIN_PASSWORD` before `make setup-docker-multi` to create the first admin automatically. Keep the variables in the same shell so the manual login example can reuse them:
 
 ```bash
 JWT=$(
@@ -114,10 +116,11 @@ For full details see `Docs/User_Guides/Server/Multi-User_Postgres_Setup.md`.
 
 ### External Postgres
 
-To use your own Postgres instead of the bundled container, point `DATABASE_URL` to your instance:
+The public profile uses the bundled Postgres service by default. Advanced operators who already run Postgres can set the override URLs in `tldw_Server_API/Config_Files/.env` before `make start-docker-multi`:
 
 ```bash
-DATABASE_URL=postgresql://your_user:your_pass@your-host:5432/your_db
+TLDW_DATABASE_URL_OVERRIDE=postgresql://your_user:your_pass@your-host:5432/tldw_users
+TLDW_JOBS_DB_URL_OVERRIDE=postgresql://your_user:your_pass@your-host:5432/tldw_jobs
 ```
 
 The user must have `CREATE TABLE` permissions.
@@ -232,15 +235,26 @@ curl -sS http://localhost:8000/api/v1/config/quickstart
 curl -sS http://localhost:8080 > /dev/null && echo "webui-ok"
 ```
 
-### Try your first API call
+### Try first-value ingest/search
 
 ```bash
 API_KEY=$(make show-api-key)
 
-curl http://localhost:8000/api/v1/chat/completions \
+printf '# tldw onboarding verification\n\nThis sample verifies ingest and search with tldw-onboarding-verification-unique.\n' > /tmp/tldw-onboarding-verification.md
+
+curl -sS -X POST http://localhost:8000/api/v1/media/add \
+  -H "X-API-Key: $API_KEY" \
+  -F "media_type=document" \
+  -F "title=tldw onboarding verification" \
+  -F "keywords=onboarding,verification" \
+  -F "perform_analysis=false" \
+  -F "perform_chunking=true" \
+  -F "files=@/tmp/tldw-onboarding-verification.md;type=text/markdown"
+
+curl -sS -X POST http://localhost:8000/api/v1/media/search \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hello!"}]}'
+  -d '{"query": "tldw-onboarding-verification-unique", "fields": ["title", "content"]}'
 ```
 
 ---
@@ -283,7 +297,7 @@ Stop the conflicting process, or change the host port mapping in the compose fil
 
 ### Multi-user: cannot connect to Postgres
 
-- Confirm `DATABASE_URL` is correct and the Postgres container (or external instance) is reachable
+- Confirm the bundled Postgres container is healthy, or verify `TLDW_DATABASE_URL_OVERRIDE` / `TLDW_JOBS_DB_URL_OVERRIDE` if you intentionally use external databases
 - Check: `docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml logs postgres --tail=50`
 
 ### Docker ignores host config changes
