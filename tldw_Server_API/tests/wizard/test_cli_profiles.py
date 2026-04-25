@@ -98,6 +98,16 @@ def test_multi_user_session_key_is_fernet_compatible() -> None:
     Fernet(defaults["SESSION_ENCRYPTION_KEY"])
 
 
+def test_invalid_existing_session_key_is_regenerated() -> None:
+    defaults = profiles.build_profile_env(
+        profile=profiles.normalize_profile("docker-multi-postgres"),
+        existing_env={"SESSION_ENCRYPTION_KEY": "abc"},
+    )
+
+    assert defaults["SESSION_ENCRYPTION_KEY"] != "abc"
+    Fernet(defaults["SESSION_ENCRYPTION_KEY"])
+
+
 @pytest.mark.parametrize(
     "key",
     (

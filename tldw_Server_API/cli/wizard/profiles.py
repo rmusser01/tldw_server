@@ -96,6 +96,14 @@ def _fernet_key() -> str:
     return Fernet.generate_key().decode("ascii")
 
 
+def _is_valid_fernet_key(value: str) -> bool:
+    try:
+        Fernet(value.encode("ascii"))
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def _byok_key() -> str:
     return base64.urlsafe_b64encode(os.urandom(32)).decode("ascii")
 
@@ -115,6 +123,8 @@ def _is_placeholder(value: str | None) -> bool:
 def _existing_or_generated(existing_env: Mapping[str, str], key: str, generator: Callable[[], str]) -> str:
     value = existing_env.get(key)
     if not _is_placeholder(value):
+        if key == "SESSION_ENCRYPTION_KEY" and not _is_valid_fernet_key(value):
+            return generator()
         return value
     return generator()
 
