@@ -535,6 +535,52 @@ def test_entrypoint_honors_compose_process_env_when_env_file_missing(tmp_path: P
     assert "ERROR: Multi-user mode refuses DATABASE_URL" not in result.stderr
 
 
+def test_entrypoint_rejects_process_env_stale_database_url_without_env_file(tmp_path: Path) -> None:
+    env_file = tmp_path / "missing.env"
+    marker_dir = tmp_path / "markers"
+    marker_dir.mkdir()
+
+    result = subprocess.run(  # nosec B603
+        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_compose_process_env(
+            env_file,
+            marker_dir,
+            extra={"DATABASE_URL": "sqlite:///./Databases/users.db"},
+        ),
+    )
+
+    assert result.returncode != 0
+    assert "ERROR: Multi-user mode refuses DATABASE_URL from the docker env file." in result.stderr
+    assert "TLDW_DATABASE_URL_OVERRIDE" in result.stderr
+    assert not env_file.exists()
+
+
+def test_entrypoint_rejects_process_env_stale_jobs_database_url_without_env_file(tmp_path: Path) -> None:
+    env_file = tmp_path / "missing.env"
+    marker_dir = tmp_path / "markers"
+    marker_dir.mkdir()
+
+    result = subprocess.run(  # nosec B603
+        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_compose_process_env(
+            env_file,
+            marker_dir,
+            extra={"JOBS_DB_URL": "sqlite:///./Databases/jobs.db"},
+        ),
+    )
+
+    assert result.returncode != 0
+    assert "ERROR: Multi-user mode refuses JOBS_DB_URL from the docker env file." in result.stderr
+    assert "TLDW_JOBS_DB_URL_OVERRIDE" in result.stderr
+    assert not env_file.exists()
+
+
 def test_entrypoint_rejects_existing_env_file_stale_database_urls_with_compose_process_env(
     tmp_path: Path,
 ) -> None:
