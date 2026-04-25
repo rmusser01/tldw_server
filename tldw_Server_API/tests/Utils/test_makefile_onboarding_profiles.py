@@ -117,6 +117,23 @@ def test_quickstart_install_is_install_only_and_does_not_start_local_server() ->
     _require("uvicorn" not in quickstart_install, "quickstart-install should not start uvicorn")
 
 
+def test_quickstart_docker_is_api_only_and_skips_webui_verify() -> None:
+    """API-only Docker quickstart should not verify a WebUI it did not start."""
+    text = _read_makefile()
+    quickstart_docker = _target_block(text, "quickstart-docker")
+
+    _require("$(DOCKER_SINGLE_COMPOSE)" in quickstart_docker, "quickstart-docker should use API compose")
+    _require(
+        "$(DOCKER_WEBUI_COMPOSE)" not in quickstart_docker,
+        "quickstart-docker should not include the WebUI compose overlay",
+    )
+    _require("$(TLDW_SETUP) verify" in quickstart_docker, "quickstart-docker should verify the API")
+    _require(
+        '--webui-url ""' in quickstart_docker,
+        "quickstart-docker should explicitly skip WebUI verification",
+    )
+
+
 def test_default_output_targets_do_not_print_full_api_keys() -> None:
     """Default quickstart/start output should point users to explicit secret printing."""
     text = _read_makefile()

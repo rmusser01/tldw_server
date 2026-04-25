@@ -168,7 +168,7 @@ quickstart-docker-webui: quickstart
 quickstart-docker: setup-docker-single
 	@command -v docker >/dev/null 2>&1 || (echo "[quickstart-docker] docker not found. Install Docker and retry." && exit 1)
 	docker compose --env-file $(TLDW_ENV_FILE) -f $(DOCKER_SINGLE_COMPOSE) up -d $(DOCKER_BUILD_FLAG)
-	@$(TLDW_SETUP) verify --profile docker-single-webui --env-file "$(TLDW_ENV_FILE)" --base-url "$(TLDW_BASE_URL)"
+	@$(TLDW_SETUP) verify --profile docker-single-webui --env-file "$(TLDW_ENV_FILE)" --base-url "$(TLDW_BASE_URL)" --webui-url ""
 
 quickstart-install: install-local
 
