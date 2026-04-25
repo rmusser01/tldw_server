@@ -1,7 +1,9 @@
 import pytest
 
-import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as agentic_chunker
+import tldw_Server_API.app.core.RAG.rag_service.agentic_execution as agentic_execution
 from tldw_Server_API.app.core.RAG.rag_service.agentic_execution import (
+    AgenticConfig,
+    AgenticToolbox,
     build_agentic_derived_evidence,
     build_agentic_execution_context,
 )
@@ -48,7 +50,7 @@ def test_agentic_toolbox_open_section_prefers_db_structure_lookup(monkeypatch: p
         "tldw_Server_API.app.core.config.rag_enable_structure_index",
         lambda default=True: True,
     )
-    monkeypatch.setattr(agentic_chunker, "_get_media_db_for_structure", lambda: FakeDb())
+    monkeypatch.setattr(agentic_execution, "_get_media_db_for_structure", lambda: FakeDb())
 
     doc = Document(
         id="doc-1",
@@ -56,7 +58,7 @@ def test_agentic_toolbox_open_section_prefers_db_structure_lookup(monkeypatch: p
         metadata={"title": "Paper", "media_id": 42},
         source=DataSource.MEDIA_DB,
     )
-    toolbox = agentic_chunker.AgenticToolbox([doc], agentic_chunker.AgenticConfig(enable_section_index=True))
+    toolbox = AgenticToolbox([doc], AgenticConfig(enable_section_index=True))
 
     assert toolbox.open_section(doc, "Results") == (7, 21)
     assert captured == {"media_id": 42, "heading": "Results"}

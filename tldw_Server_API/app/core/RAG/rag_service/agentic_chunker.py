@@ -24,19 +24,16 @@ import contextlib
 import hashlib
 import re
 import time
-from dataclasses import dataclass
 from typing import Any, Literal
 
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.media_db.api import (
-    create_media_database,
-)
-
 from . import agentic_execution as _agentic_execution
 from .advanced_cache import AGENTIC_CACHE
 from .agentic_execution import (
+    AgenticConfig,
     AgenticToolbox,
+    _get_media_db_for_structure,
     assemble_ephemeral_chunk as _assemble_ephemeral_chunk,
     build_agentic_derived_evidence,
     decompose_query as _decompose_query,
@@ -59,89 +56,11 @@ except ImportError:
     AnswerGenerator = None
 
 
-@dataclass
-class AgenticConfig:
-    """Configuration for agentic chunking.
-
-    The defaults aim to be conservative and CI-friendly. Callers can tune
-    budgets without changing global behavior.
-    """
-
-    top_k_docs: int = 3
-    window_chars: int = 1200
-    max_tokens_read: int = 6000
-    max_tool_calls: int = 8
-    extractive_only: bool = True
-    quote_spans: bool = True
-    # Tool loop (ReAct-like)
-    enable_tools: bool = False
-    use_llm_planner: bool = False
-    time_budget_sec: float | None = None
-    # Caching
-    cache_ttl_sec: int = 600
-    debug_trace: bool = False
-    # Query decomposition
-    enable_query_decomposition: bool = False
-    subgoal_max: int = 3
-    # Intra-doc semantic search
-    enable_semantic_within: bool = True
-    semantic_dim: int = 2048
-    # Structural anchors
-    enable_section_index: bool = True
-    prefer_structural_anchors: bool = True
-    # Table/figure support
-    enable_table_support: bool = True
-    table_trigger_keywords: tuple[str, ...] = ("table", "figure", "tabular", "dataset")
-    table_min_bar_count: int = 3  # '|' count heuristic
-    # VLM late chunking (agentic path)
-    agentic_enable_vlm_late_chunking: bool = False
-    agentic_vlm_backend: str | None = None
-    agentic_vlm_detect_tables_only: bool = True
-    agentic_vlm_max_pages: int | None = None
-    agentic_vlm_late_chunk_top_k_docs: int = 2
-    # Provider embeddings for intra-doc vectors
-    agentic_use_provider_embeddings_within: bool = False
-    agentic_provider_embedding_model_id: str | None = None
-    # Adaptive budgets & stopping criteria
-    adaptive_budgets: bool = True
-    coverage_target: float = 0.8
-    min_corroborating_docs: int = 2
-    max_redundancy: float = 0.9
-    # Metrics control
-    enable_metrics: bool = True
-
-
 # Simple in-process caches (namespaced via adapter)
 _EPHEMERAL_CACHE: dict[str, Any] = {}
 _INTRA_DOC_VEC_CACHE = _agentic_execution._INTRA_DOC_VEC_CACHE
 
-# Lazy DB handle for structure index lookups
-_STRUCT_DB: Any = None
 
-def _get_media_db_for_structure() -> Any:
-    """Return a MediaDatabase instance bound to the configured content backend.
-
-    Uses a singleton to avoid repeated initialization. Returns None on failure.
-    """
-    global _STRUCT_DB
-    if _STRUCT_DB is not None:
-        return _STRUCT_DB
-    try:
-        from tldw_Server_API.app.core.config import load_comprehensive_config as _load_cfg
-        from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend as _get_cb
-        cfg = _load_cfg()
-        backend = _get_cb(cfg) if cfg else None
-        if backend is None:
-            return None
-        # Use in-memory path; backend drives the actual connection
-        _STRUCT_DB = create_media_database(
-            "agentic_toolbox",
-            db_path=":memory:",
-            backend=backend,
-        )
-    except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
-        return None
-    return _STRUCT_DB
 def _cache_get(key: str) -> dict[str, Any] | None:
     v = AGENTIC_CACHE.get("ephemeral_chunk", key)
     if isinstance(v, dict):
@@ -919,3 +838,15 @@ async def agentic_rag_pipeline(
         pass
 
     return result
+
+
+__all__ = [
+    "AgenticConfig",
+    "AgenticToolbox",
+    "AnswerGenerator",
+    "_decompose_query",
+    "_get_media_db_for_structure",
+    "agentic_rag_pipeline",
+    "clear_agentic_caches",
+    "invalidate_intra_doc_vectors",
+]

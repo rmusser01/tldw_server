@@ -1,17 +1,17 @@
 """Agentic execution helpers for RAG evidence assembly.
 
-This module owns the agentic-only execution helpers that used to live inside
-`agentic_chunker.py`: query decomposition, deterministic tool-loop assembly,
-ephemeral chunk construction, and the derived-evidence boundary.
+This module owns the agentic-only execution helpers: query decomposition,
+deterministic tool-loop assembly, ephemeral chunk construction, and the
+derived-evidence boundary.
 """
 
 from __future__ import annotations
 
 import contextlib
 import hashlib
-import sys
 import re
 import time
+from dataclasses import dataclass
 from typing import Any, Sequence
 
 import numpy as np
@@ -39,6 +39,47 @@ except ImportError:
 _INTRA_DOC_VEC_CACHE: dict[str, Any] = {}
 
 
+@dataclass
+class AgenticConfig:
+    """Configuration for agentic execution and evidence assembly."""
+
+    top_k_docs: int = 3
+    window_chars: int = 1200
+    max_tokens_read: int = 6000
+    max_tool_calls: int = 8
+    extractive_only: bool = True
+    quote_spans: bool = True
+    enable_tools: bool = False
+    use_llm_planner: bool = False
+    time_budget_sec: float | None = None
+    cache_ttl_sec: int = 600
+    debug_trace: bool = False
+    enable_query_decomposition: bool = False
+    subgoal_max: int = 3
+    enable_semantic_within: bool = True
+    semantic_dim: int = 2048
+    enable_section_index: bool = True
+    prefer_structural_anchors: bool = True
+    enable_table_support: bool = True
+    table_trigger_keywords: tuple[str, ...] = ("table", "figure", "tabular", "dataset")
+    table_min_bar_count: int = 3
+    agentic_enable_vlm_late_chunking: bool = False
+    agentic_vlm_backend: str | None = None
+    agentic_vlm_detect_tables_only: bool = True
+    agentic_vlm_max_pages: int | None = None
+    agentic_vlm_late_chunk_top_k_docs: int = 2
+    agentic_use_provider_embeddings_within: bool = False
+    agentic_provider_embedding_model_id: str | None = None
+    adaptive_budgets: bool = True
+    coverage_target: float = 0.8
+    min_corroborating_docs: int = 2
+    max_redundancy: float = 0.9
+    enable_metrics: bool = True
+
+
+_STRUCT_DB: Any = None
+
+
 def build_agentic_execution_context(
     *,
     resolved_request: Any,
@@ -46,8 +87,6 @@ def build_agentic_execution_context(
     payload_override: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], Any]:
     """Build effective agentic payload/config from canonical request contracts."""
-    from .agentic_chunker import AgenticConfig
-
     effective_payload = dict(payload_override or getattr(resolved_request, "payload", {}) or {})
     effective_payload["sources"] = list(getattr(retrieval_plan, "sources", ()) or ())
     effective_payload["search_mode"] = getattr(retrieval_plan, "search_mode", "hybrid")
@@ -229,19 +268,6 @@ def _find_spans(text: str, terms: list[str], max_spans: int = 6, window: int = 3
     return sorted(merged[:max_spans], key=lambda span: span[0])
 
 
-def _resolve_answer_generator() -> Any:
-    chunker_module = sys.modules.get("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker")
-    if chunker_module is not None:
-        chunker_answer_generator = getattr(chunker_module, "AnswerGenerator", None)
-        if chunker_answer_generator is not None:
-            return chunker_answer_generator
-    return AnswerGenerator
-
-
-def _resolve_chunker_module() -> Any:
-    return sys.modules.get("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker")
-
-
 def _should_use_structure_index(default: bool = True) -> bool:
     try:
         from tldw_Server_API.app.core.config import rag_enable_structure_index
@@ -249,6 +275,34 @@ def _should_use_structure_index(default: bool = True) -> bool:
         return bool(rag_enable_structure_index(default=default))
     except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
         return default
+
+
+def _get_media_db_for_structure() -> Any:
+    """Return a MediaDatabase instance bound to the configured content backend."""
+    global _STRUCT_DB
+    if _STRUCT_DB is not None:
+        return _STRUCT_DB
+
+    try:
+        from tldw_Server_API.app.core.config import load_comprehensive_config as _load_cfg
+        from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend as _get_cb
+        from tldw_Server_API.app.core.DB_Management.media_db.api import (
+            create_media_database,
+        )
+
+        cfg = _load_cfg()
+        backend = _get_cb(cfg) if cfg else None
+        if backend is None:
+            return None
+
+        _STRUCT_DB = create_media_database(
+            "agentic_toolbox",
+            db_path=":memory:",
+            backend=backend,
+        )
+    except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return None
+    return _STRUCT_DB
 
 
 def _lookup_section_from_structure_index(doc: Document, heading: str) -> tuple[int, int] | None:
@@ -260,17 +314,20 @@ def _lookup_section_from_structure_index(doc: Document, heading: str) -> tuple[i
     if media_id is None:
         return None
 
-    chunker_module = _resolve_chunker_module()
-    getter = getattr(chunker_module, "_get_media_db_for_structure", None) if chunker_module is not None else None
-    if not callable(getter):
-        return None
-
     try:
-        db = getter()
+        db = _get_media_db_for_structure()
         if db is None:
             return None
         result = db.lookup_section_by_heading(int(str(media_id)), heading)
-    except (AttributeError, DatabaseError, OSError, RuntimeError, TypeError, ValueError):
+    except DatabaseError as exc:
+        logger.warning(
+            "Structure index lookup failed for document_id={} section_title={}: {}",
+            doc.id,
+            heading,
+            exc,
+        )
+        return None
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return None
 
     if not isinstance(result, tuple) or len(result) < 2:
@@ -507,7 +564,9 @@ async def tool_loop(docs: list[Document], query: str, cfg: Any) -> tuple[str, li
     planned_terms: list[str] = []
     if getattr(cfg, "use_llm_planner", False):
         try:
-            planner_cls = _resolve_answer_generator()
+            planner_cls = AnswerGenerator
+            if planner_cls is None:
+                raise RuntimeError("AnswerGenerator is unavailable")
             planner = planner_cls(model=None)
             gen = await planner.generate(query=query, context="", prompt_template="default", max_tokens=200)
             text = gen.get("answer", "") if isinstance(gen, dict) else str(gen)
@@ -677,10 +736,13 @@ async def tool_loop(docs: list[Document], query: str, cfg: Any) -> tuple[str, li
 
 
 __all__ = [
+    "AgenticConfig",
     "AgenticToolbox",
     "AnswerGenerator",
+    "_get_media_db_for_structure",
     "assemble_ephemeral_chunk",
     "build_agentic_derived_evidence",
+    "build_agentic_execution_context",
     "decompose_query",
     "tool_loop",
 ]
