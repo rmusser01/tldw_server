@@ -282,6 +282,7 @@ if [ "$AUTH_MODE" = "multi_user" ]; then
 
   if [ -n "${TLDW_DATABASE_URL_OVERRIDE:-}" ]; then
     DATABASE_URL="$TLDW_DATABASE_URL_OVERRIDE"
+    database_url_derived=1
   elif [ -n "${POSTGRES_PASSWORD:-}" ]; then
     DATABASE_URL="$(derive_postgres_database_url)"
     database_url_derived=1
@@ -299,6 +300,7 @@ if [ "$AUTH_MODE" = "multi_user" ]; then
 
   if [ -n "${TLDW_JOBS_DB_URL_OVERRIDE:-}" ]; then
     JOBS_DB_URL="$TLDW_JOBS_DB_URL_OVERRIDE"
+    jobs_db_url_derived=1
   elif [ "$database_url_derived" = "1" ]; then
     JOBS_DB_URL="$DATABASE_URL"
     jobs_db_url_derived=1
