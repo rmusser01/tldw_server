@@ -1,7 +1,7 @@
 # Public Onboarding Remediation Design
 
 Date: 2026-04-25
-Status: Approved for planning
+Status: Revised for user review
 Owner: Codex brainstorming session
 
 ## Summary
@@ -45,6 +45,7 @@ These are public readiness issues, not polish issues. A new user should not need
 - Make each profile reach the same bar: first auth success, first chat readiness, first ingest/search success, and aligned audio guidance.
 - Split install, prepare, start, and verify behavior so command names match what they do.
 - Replace silent or late failures with clear diagnostics and recovery instructions.
+- Preserve equal support for macOS, Linux, and Windows/WSL public setup paths.
 - Add tests that lock down command boundaries, Docker compose contract, CLI wizard behavior, and onboarding docs.
 
 ## Non-Goals
@@ -67,6 +68,18 @@ The standard is not "a developer can eventually debug it." The fixed state shoul
 - run or clearly skip first chat because provider credentials are missing
 - ingest and search a repo-local sample item
 - understand how audio verification works for their auth mode
+
+## Cross-Platform Contract
+
+All three public profiles should be documented and supported for macOS, Linux, and Windows/WSL.
+
+Expected behavior:
+
+- Docker profile commands work from a normal POSIX shell on macOS/Linux and from WSL on Windows.
+- Windows documentation states WSL as the supported terminal path when a command depends on POSIX shell behavior.
+- Local profile docs call out platform-specific prerequisites where they differ, especially Python, FFmpeg, and shell activation commands.
+- Make targets remain the canonical repo checkout commands, but docs should include the direct `tldw-setup` command underneath when that improves Windows/WSL troubleshooting.
+- Verification should not rely on macOS-only behavior.
 
 ## Public Profile Contract
 
@@ -113,6 +126,7 @@ Expected behavior:
 - single-user verifies an authenticated request with `X-API-KEY`
 - multi-user verifies admin creation/login and a bearer-token authenticated request
 - diagnostics distinguish "server not running", "database unavailable", "auth bootstrap failed", "provider missing", and "port in use"
+- the verifier uses one documented endpoint contract per profile instead of mixing `/health`, `/ready`, and `/api/v1/healthz` assumptions in different places
 
 ### First Value
 
@@ -160,6 +174,7 @@ Design changes:
 - Remove or replace scaffold language from user-facing output once behavior is real.
 - Add profile-aware modes if needed, for example `--profile docker-single-webui`, `--profile docker-multi-postgres`, and `--profile local-single`.
 - Make `doctor`, `init`, `auth`, `db`, and `verify` agree on env file location for repo-local setup (`tldw_Server_API/Config_Files/.env`) versus package-local `.env`.
+- For public repo-checkout onboarding, `tldw_Server_API/Config_Files/.env` is the default env file. A cwd `.env` is allowed only when explicitly supplied with `--env-file` or when running in a package-local/advanced layout.
 - Extend `verify` so it can validate running Docker profiles without trying to spawn an unrelated ephemeral local server.
 - Extend `verify` so first auth, first ingest/search, and provider/chat readiness are explicit checks.
 - Keep JSON output for tests and automation.
@@ -196,7 +211,10 @@ Compatibility aliases:
 - `make quickstart` may call the Docker single-user profile sequence.
 - `make quickstart-docker-webui` may call the Docker single-user profile sequence.
 - `make quickstart-docker` may call the Docker single-user API-only subset if still supported.
-- `make quickstart-install` must become install-only or be replaced in public docs by `make install-local`.
+- `make quickstart-install` must become install-only or fail early with replacement guidance. It must not start runtime services.
+- No compatibility alias may print success before the matching profile verifier passes.
+- If an old alias no longer maps cleanly to a supported profile, it should fail early with a short message pointing to the replacement commands.
+- Default output should not print full secrets. If an API key or generated password is needed after setup, provide an explicit reveal command or masked output with recovery instructions.
 
 ## Docker Remediation
 
@@ -217,9 +235,8 @@ Fixes required:
 - Fix the PostgreSQL 18 volume layout by mounting named storage at the path expected by the image, or pin to a Postgres version whose data directory matches the existing mount contract.
 - Ensure `DATABASE_URL=postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users` resolves from the app container and points to the bundled service.
 - Include `SESSION_ENCRYPTION_KEY` in the profile setup path.
-- Decide one first-admin creation mechanism and document it:
-  - preferred: env-driven `ADMIN_USERNAME`, `ADMIN_PASSWORD`, optional `ADMIN_EMAIL`, verified by `tldw-setup verify`
-  - acceptable: manual CLI step, but only if the app remains running and the step is reachable
+- Use one public first-admin creation mechanism: env-driven `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and optional `ADMIN_EMAIL`, verified by `tldw-setup verify`.
+- Keep manual admin creation only as an advanced or recovery path. It must not be required for the documented first-run sequence.
 - Make auth bootstrap idempotent and make failure messages point to DB readiness, secrets, or admin bootstrap specifically.
 
 ## Local Remediation
@@ -250,6 +267,19 @@ Update the public onboarding surface:
 - `Docs/Website/index.html`, if it mirrors public quickstart commands
 
 Docs should show all three public profiles as peers, with the same lifecycle headings and the same success bar.
+Docs should also include Windows/WSL notes anywhere a command sequence assumes POSIX shell behavior.
+
+## Implementation Staging
+
+Keep the umbrella remediation as one plan, but stage implementation so each profile can be fixed and verified independently.
+
+Recommended stages:
+
+1. CLI and command contract: profile flags, env-file resolution, verifier modes, compatibility alias behavior, and tests.
+2. Docker single-user + WebUI: compose path, volume writability, startup readiness, and profile verification.
+3. Docker multi-user + Postgres: Postgres volume path, required secrets, env-driven first admin, and bearer-token verification.
+4. Local single-user: install-only behavior, deterministic setup, plain `uvicorn` startup, and local verifier.
+5. Documentation and runtime validation: peer profile docs, audio auth examples, cross-platform notes, and clean-state validation logs.
 
 ## Testing Strategy
 
@@ -261,20 +291,26 @@ Unit and doc tests:
   - install target is install-only
   - local start target does not use `--reload`
   - public profile targets call the expected setup/start/verify helpers
+  - compatibility aliases either route through the new verifier-backed profile flow or fail with replacement guidance
+  - default setup output does not print full generated secrets
 - CLI wizard tests:
   - profile-aware prepare writes required env keys
   - multi-user requires or generates `SESSION_ENCRYPTION_KEY`
   - Docker verify mode does not spawn an ephemeral local server
   - verify reports provider-missing distinctly from endpoint failure
+  - repo-checkout onboarding defaults to `tldw_Server_API/Config_Files/.env`
+  - explicit `--env-file` overrides default env discovery
 - Docker contract tests:
   - default single-user compose does not require Postgres health
   - Postgres volume path matches the selected Postgres image
   - app/user database volumes do not overlap in a way that makes `user_databases` unwritable
+  - multi-user compose exposes or documents the selected WebUI overlay behavior without making optional WebUI availability block API-first verification
 - Documentation tests:
   - all three profile docs use the same lifecycle headings
   - audio docs include both `X-API-KEY` and bearer-token examples
   - multi-user docs include `SESSION_ENCRYPTION_KEY`
   - setup/restart/rebuild guidance is consistent across Docker profile and audio docs
+  - Windows/WSL notes are present for POSIX-dependent command sequences
 
 Runtime validation:
 
@@ -282,6 +318,7 @@ Runtime validation:
 - Execute Docker multi-user + Postgres from clean volumes.
 - Execute local single-user from a clean venv/env.
 - For each profile, verify health/docs/auth, sample ingest/search, provider-missing or first chat, and audio guidance endpoint shape.
+- Capture the validated command transcript or log summary so future regressions can be compared against the public flow.
 
 ## Risks
 
@@ -290,6 +327,7 @@ Runtime validation:
 - Provider/chat success depends on credentials; tests should support a deterministic provider-missing result and optional live-provider validation.
 - Fixing Docker volumes may require a migration note for existing named volumes.
 - The CLI wizard currently mixes repo-local and cwd-local env behavior; making it the public contract may require careful path handling.
+- Windows support is easiest to overclaim. The public contract should explicitly support WSL for shell-heavy flows unless native PowerShell commands are also validated.
 
 ## Design Decisions For Planning
 
@@ -297,19 +335,26 @@ Runtime validation:
 - Keep compatibility aliases where they do not preserve misleading behavior.
 - Make Docker single-user use a profile-specific compose path that does not start or depend on Postgres.
 - Keep `postgres:18-bookworm` only if the compose volume is moved to `/var/lib/postgresql`; otherwise pin to a version compatible with `/var/lib/postgresql/data`. The preferred implementation is to keep the modern image and fix the mount path.
+- Use env-driven first-admin bootstrap for the public Docker multi-user path. Manual admin creation remains recovery/advanced documentation only.
 - Add profile options to existing `tldw-setup` commands instead of adding a new top-level `profile` subcommand. Example: `tldw-setup init --profile docker-single-webui`.
 - Put first-value checks behind `tldw-setup verify --first-value` so the default verifier remains usable for quick health checks while public profile docs can use the stricter onboarding verifier.
 - Make `tldw-setup` resolve the repo root and default to `tldw_Server_API/Config_Files/.env` for repo checkout onboarding. A separate `--env-file` option can support package-local or advanced layouts.
+- Normalize the documented readiness endpoints used by `tldw-setup verify` so implementation, tests, and docs do not drift across endpoint names.
+- Do not print full generated secrets in default setup output. Use masked output or an explicit reveal command for intentional secret display.
+- Treat Docker multi-user as API-first with bundled Postgres. WebUI may be documented as an overlay, but the multi-user verifier should not fail solely because an optional WebUI overlay was not selected.
 
 ## Acceptance Criteria
 
 - All three public profile docs present peer setup paths with the same lifecycle.
 - Each profile has documented prepare, start, verify, first-value, and audio guidance.
-- `quickstart-install` no longer starts runtime behavior, or public docs no longer route users to it as an install command.
+- `quickstart-install` no longer starts runtime behavior. It either performs install-only work or exits early with replacement guidance.
+- No public compatibility alias reports success before its profile verifier passes.
+- Default setup output does not expose full generated secrets.
 - Docker single-user reaches API and WebUI readiness from clean state.
 - Docker multi-user reaches Postgres readiness, first admin/login, and bearer-auth readiness from clean state.
 - Local single-user reaches API readiness from clean venv/env using the documented command sequence.
 - First ingest/search is verified for each profile.
 - Provider-missing state is clear when no live LLM credentials are supplied.
 - Audio docs include both single-user and multi-user auth examples.
+- Public docs include Windows/WSL guidance for commands that assume POSIX shell behavior.
 - Tests cover command boundaries, CLI wizard profile behavior, Docker compose contract, and documentation consistency.
