@@ -3,16 +3,25 @@
 Choose exactly one base setup profile and follow it end-to-end.
 
 Recommended default:
-- Run `make quickstart` from the repo root for the Docker single-user + WebUI path. That default browser flow uses same-origin browser API requests through the WebUI proxy.
-- Use `make quickstart-docker` if you want the API-only Docker path.
-- Use `Docker multi-user + Postgres` when you need a team or public deployment.
+- Run `make quickstart` from the repo root for the Docker single-user + WebUI path. That is the shortest alias for `make setup-docker-single`, `make start-docker-single`, and `make verify-docker-single`.
+- Use `Docker multi-user + Postgres` when you need JWT auth, a first admin account, and bundled Postgres.
 - Use `Local single-user` for development, debugging, or contributor workflows.
 
 Canonical base profiles:
 
-1. [Local single-user](./Profile_Local_Single_User.md)
-2. [Docker single-user](./Profile_Docker_Single_User.md)
-3. [Docker multi-user + Postgres](./Profile_Docker_Multi_User_Postgres.md)
+1. [Docker single-user + WebUI](./Profile_Docker_Single_User.md)
+   - Prepare: `make setup-docker-single`
+   - Start: `make start-docker-single`
+   - Verify: `make verify-docker-single`
+2. [Docker multi-user + Postgres](./Profile_Docker_Multi_User_Postgres.md)
+   - Prepare: `ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi`
+   - Start: `make start-docker-multi`
+   - Verify: `make verify-docker-multi`
+3. [Local single-user](./Profile_Local_Single_User.md)
+   - Install: `make install-local`
+   - Prepare: `make setup-local-single`
+   - Start: `make start-local-single`
+   - Verify: `make verify-local-single`
 
 Optional add-ons:
 
@@ -25,7 +34,7 @@ Optional add-ons:
 - Pick the profile that matches your target environment.
 - For most users, start with the `quickstart-docker-webui` path via `make quickstart`.
 - Treat LAN/custom-host browser access as advanced configuration and stay on the default same-origin browser API requests through the WebUI proxy unless you specifically need another device or origin to reach the API.
-- Complete the guide sections in order: prerequisites, install, run, verify, troubleshoot, then follow the "What to Do Next" section for first API calls and provider setup.
+- Complete the guide sections in order: prepare, start, verify, first value, audio path, troubleshoot, and optional add-ons.
 - Do not mix setup commands from other docs unless the guide explicitly links to them.
 - Apply add-ons only after your chosen base profile is healthy.
 - If speech is part of day-one setup, switch to the CPU or GPU/accelerated audio guide after the base profile is healthy instead of starting with the older STT/TTS reference pages.

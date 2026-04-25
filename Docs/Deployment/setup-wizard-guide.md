@@ -14,6 +14,18 @@ It now covers both configuration review and curated audio provisioning, so the d
 
 Use this guide when you want the shortest supported path to a working local or hybrid speech stack without hand-picking every STT/TTS provider.
 
+## Public Setup Profiles
+
+The public onboarding docs present three peer profiles. Use one profile end-to-end before opening `/setup`:
+
+| Profile | Prepare | Start | Verify |
+| --- | --- | --- | --- |
+| Docker single-user + WebUI | `make setup-docker-single` | `make start-docker-single` | `make verify-docker-single` |
+| Docker multi-user + Postgres | `ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi` | `make start-docker-multi` | `make verify-docker-multi` |
+| Local single-user | `make install-local` then `make setup-local-single` | `make start-local-single` | `make verify-local-single` |
+
+`make quickstart` remains the shortest alias for Docker single-user + WebUI. It is not the multi-user or local start command.
+
 ## Before You Start
 
 Make sure the machine can run the installer and any local speech backends you want:
@@ -147,9 +159,25 @@ The bundle stage is only considered healthy after verification succeeds. Use the
 
 For API-level verification after the setup UI completes:
 
+Single-user auth mode:
+
 ```bash
 curl -s http://127.0.0.1:8000/api/v1/audio/voices/catalog \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" | jq
+```
+
+Multi-user auth mode:
+
+```bash
+JWT=$(
+  curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/login \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=$ADMIN_USERNAME" \
+    -d "password=$ADMIN_PASSWORD" | jq -r '.access_token'
+)
+
+curl -s http://127.0.0.1:8000/api/v1/audio/voices/catalog \
+  -H "Authorization: Bearer $JWT" | jq
 ```
 
 ```bash
@@ -171,6 +199,8 @@ curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/speech \
       }' \
   --output setup-check.mp3
 ```
+
+Stock Docker CPU/default audio works with bundled dependencies. If you edit host-side audio config or add host-side model files, rebuild the image or use the documented host-storage/custom image path so those changes are visible inside the container.
 
 ## Troubleshooting
 

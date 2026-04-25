@@ -4,32 +4,39 @@ This folder contains the base Compose stack for tldw_server, optional overlays, 
 
 ## Base Stack
 
-- File: `Dockerfiles/docker-compose.yml`
-- Services: `app` (FastAPI), `postgres`, `redis`
-- Start (single-user, SQLite users DB):
-  - `docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.yml up -d --build`
+- Public single-user file: `Dockerfiles/docker-compose.single-user.yml`
+- Public multi-user file: `Dockerfiles/docker-compose.multi-user-postgres.yml`
+- Shared WebUI overlay: `Dockerfiles/docker-compose.webui.yml`
+- Legacy base file: `Dockerfiles/docker-compose.yml`
+- Services:
+  - Single-user: `app` (FastAPI), `redis`
+  - Multi-user: `app` (FastAPI), `postgres`, `redis`
+- Start (single-user + WebUI):
+  - `make setup-docker-single`
+  - `make start-docker-single`
+  - `make verify-docker-single`
   - First start in `single_user` mode auto-generates a secure `SINGLE_USER_API_KEY` if missing/placeholder and runs `AuthNZ.initialize --non-interactive` only when `/app/Databases/.authnz_initialized_single_user` is absent in the attached Docker volume.
   - If that marker exists in the volume, AuthNZ initialization is skipped on container restart; it runs again only if the volume is replaced or the marker is removed.
 - Start (multi-user, Postgres users DB):
-  - `export AUTH_MODE=multi_user`
-  - `export DATABASE_URL=postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users`
-  - `docker compose -f Dockerfiles/docker-compose.yml up -d --build`
+  - `ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi`
+  - `make start-docker-multi`
+  - `make verify-docker-multi`
 - Logs and status:
-  - `docker compose -f Dockerfiles/docker-compose.yml ps`
-  - `docker compose -f Dockerfiles/docker-compose.yml logs -f app`
+  - `docker compose -f Dockerfiles/docker-compose.single-user.yml ps`
+  - `docker compose -f Dockerfiles/docker-compose.single-user.yml logs -f app`
 
 ## Persistence and Backups
 
 - Default quickstart persistence uses Docker named volumes, not repo-local folders.
-- `app-data` backs `/app/Databases`, which includes the default SQLite AuthNZ DB, first-run marker files, and filesystem-backed uploads such as `Databases/user_files`.
-- `chroma-data` backs `/app/Databases/user_databases`, which is the full per-user data tree used by `USER_DB_BASE_DIR`, not just Chroma embeddings.
+- `app-data` backs `/app/Databases`, which includes the default SQLite AuthNZ DB, per-user databases, first-run marker files, vector stores, and filesystem-backed uploads such as `Databases/user_files`.
+- No nested named volume is mounted under /app/Databases/user_databases.
 - `postgres_data` and `redis_data` back the bundled Postgres and Redis services.
 - Startup configuration is also persisted in `tldw_Server_API/Config_Files/.env`; keep that file with your volume backups.
 - `docker compose down` keeps named volumes. `docker compose down -v` deletes them and will remove the persisted databases, user files, and vector stores.
 - If you want host-visible storage for easier inspection or external backups, use `Dockerfiles/docker-compose.host-storage.yml` instead of the default compose file:
   - `docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.host-storage.yml up -d --build`
   - Optional WebUI: `docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.host-storage.yml -f Dockerfiles/docker-compose.webui.yml up -d --build`
-- The host-storage variant writes under `docker-data/` in the repo root and is optional; the default named-volume quickstart remains unchanged for backwards compatibility.
+- The host-storage variant writes under `docker-data/` in the repo root and is optional; the default named-volume quickstart remains the recommended first path.
 
 ## Overlays & Profiles
 
@@ -63,7 +70,7 @@ This folder contains the base Compose stack for tldw_server, optional overlays, 
   - Use this instead of the default base compose file when you want bind mounts under `docker-data/`.
 
 - WebUI overlay: `Dockerfiles/docker-compose.webui.yml`
-  - `docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.webui.yml up -d --build`
+  - `docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --build`
   - Adds `webui` (Next.js standalone) on `http://localhost:8080`.
 
 - Embeddings workers + monitoring: `Dockerfiles/docker-compose.embeddings.yml`

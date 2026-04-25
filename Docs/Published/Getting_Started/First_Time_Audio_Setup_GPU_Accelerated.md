@@ -29,7 +29,7 @@ Important current-repo realities:
 
 - current config defaults still ship with explicit STT defaults of `parakeet-onnx`
 - current `/setup` bundle docs may recommend a different first-run STT path for some hardware classes
-- the stock Docker profile does not expose GPU runtime configuration for the main app container by default
+- Stock Docker CPU/default audio works with bundled dependencies, but the stock Docker profile is not a ready-made GPU-accelerated audio path. Host-side config or model edits require a rebuild, `Dockerfiles/docker-compose.host-storage.yml`, or a custom image path.
 
 ## Choose Your Hardware Lane First
 
@@ -113,8 +113,9 @@ If your server is already running, skip to [Step 2](#step-2-configure-accelerate
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-make quickstart-install
-make quickstart-local
+make install-local
+make setup-local-single
+make start-local-single
 ```
 
 ### Option B: Manual / Local Python Setup
@@ -155,16 +156,17 @@ Set `AUTH_MODE=single_user` and `SINGLE_USER_API_KEY=...`, then:
 
 ```bash
 docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml \
+  -f Dockerfiles/docker-compose.single-user.yml \
   -f Dockerfiles/docker-compose.webui.yml \
   up -d --build
 ```
 
 Important Docker note:
 
+- stock Docker CPU/default audio works with bundled dependencies
 - the default compose profile is not a ready-made accelerated audio profile
 - the app service does not declare GPU runtime reservations in the stock compose file
-- host-side `Config_Files` and `models/` changes are not visible inside the container until rebuild/customization
+- host-side `Config_Files` and `models/` changes require a rebuild, `Dockerfiles/docker-compose.host-storage.yml`, or a custom image path
 
 For accelerated audio, local/manual or `make` is the recommended first path.
 
@@ -274,9 +276,25 @@ curl -sS http://127.0.0.1:8000/api/v1/audio/health \
   -H "X-API-KEY: $SINGLE_USER_API_KEY"
 ```
 
+Single-user auth mode uses `X-API-KEY` for the voice catalog:
+
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/audio/voices/catalog \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" | jq '.supertonic'
+```
+
+Multi-user auth mode uses a login token:
+
+```bash
+JWT=$(
+  curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/login \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=$ADMIN_USERNAME" \
+    -d "password=$ADMIN_PASSWORD" | jq -r '.access_token'
+)
+
+curl -sS http://127.0.0.1:8000/api/v1/audio/voices/catalog \
+  -H "Authorization: Bearer $JWT" | jq '.supertonic'
 ```
 
 ### 4B. Generate a short test file with TTS

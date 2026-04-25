@@ -17,10 +17,10 @@ def test_dockerfiles_readme_documents_persistence_contract() -> None:
 
     for snippet in (
         "app-data",
-        "chroma-data",
         "docker-compose.host-storage.yml",
         "docker compose down -v",
         "tldw_Server_API/Config_Files/.env",
+        "No nested named volume is mounted under /app/Databases/user_databases",
     ):
         _require(
             snippet in text,
@@ -39,7 +39,7 @@ def test_docker_single_user_profile_documents_named_volumes_and_overlay() -> Non
         "docker-compose.host-storage.yml",
         "docker compose down -v",
         "app-data",
-        "chroma-data",
+        "No nested named volume is mounted under /app/Databases/user_databases",
     ):
         _require(
             snippet in text,

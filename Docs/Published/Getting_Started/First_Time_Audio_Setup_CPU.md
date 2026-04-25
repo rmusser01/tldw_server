@@ -28,7 +28,7 @@ Important current-repo realities:
 
 - The shipped explicit STT defaults are currently `parakeet-onnx` for batch and streaming.
 - The current `/setup` audio bundle docs still describe a different first-run path in some places.
-- The stock Docker profile does not bind-mount `Config_Files` or `models/`, so host-side audio config/model changes are not visible inside the container until you rebuild or customize the container path.
+- Stock Docker CPU/default audio works with bundled dependencies. Host-side config or model edits are not visible inside the container until you rebuild, use `Dockerfiles/docker-compose.host-storage.yml`, or build a custom image path.
 
 If your only goal is "make sound come out as fast as possible", the current `/setup` bundle path may still be less manual than the exact `supertonic` path in this guide. This guide is the better fit when you want a local-first stack that you understand and can control.
 
@@ -98,8 +98,9 @@ Use this when you want a local Python install but do not want to do the venv/boo
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-make quickstart-install
-make quickstart-local
+make install-local
+make setup-local-single
+make start-local-single
 ```
 
 ### Option B: Manual / Local Python Setup
@@ -144,7 +145,7 @@ Set `AUTH_MODE=single_user` and `SINGLE_USER_API_KEY=...` in `tldw_Server_API/Co
 
 ```bash
 docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml \
+  -f Dockerfiles/docker-compose.single-user.yml \
   -f Dockerfiles/docker-compose.webui.yml \
   up -d --build
 ```
@@ -157,10 +158,10 @@ make quickstart
 
 Important Docker note:
 
+- Stock Docker CPU/default audio works with bundled dependencies.
 - The stock container image does not bind-mount `Config_Files` or `models/`.
-- Host-side edits to `tldw_Server_API/Config_Files/config.txt` or local model assets do not affect the running container until you rebuild the image.
-- If you change audio configuration on the host, rebuild with `docker compose ... up -d --build`.
-- If you use `/setup` inside the running container, those changes are container-local unless you also update the host files.
+- Host-side edits to `tldw_Server_API/Config_Files/config.txt` or local model assets require a rebuild, `Dockerfiles/docker-compose.host-storage.yml`, or a custom image path.
+- If you use `/setup` inside the running container, those changes are container-local unless you also persist or reproduce them in your chosen image/storage path.
 
 ## Step 2: Set the CPU STT Defaults
 
@@ -183,7 +184,7 @@ If you are on the stock Docker path, rebuild the app image after editing the fil
 
 ```bash
 docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml \
+  -f Dockerfiles/docker-compose.single-user.yml \
   -f Dockerfiles/docker-compose.webui.yml \
   up -d --build
 ```
@@ -258,7 +259,7 @@ Local / `make` paths:
 
 ```bash
 # stop the server, then start it again
-make quickstart-local
+make start-local-single
 ```
 
 or
@@ -271,7 +272,7 @@ Docker paths:
 
 ```bash
 docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml \
+  -f Dockerfiles/docker-compose.single-user.yml \
   -f Dockerfiles/docker-compose.webui.yml \
   up -d --build
 ```
@@ -294,9 +295,25 @@ What you want to see:
 
 ### 4B. Confirm the Supertonic voice catalog
 
+Single-user auth mode uses `X-API-KEY`:
+
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/audio/voices/catalog \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" | jq '.supertonic'
+```
+
+Multi-user auth mode uses a login token:
+
+```bash
+JWT=$(
+  curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/login \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=$ADMIN_USERNAME" \
+    -d "password=$ADMIN_PASSWORD" | jq -r '.access_token'
+)
+
+curl -sS http://127.0.0.1:8000/api/v1/audio/voices/catalog \
+  -H "Authorization: Bearer $JWT" | jq '.supertonic'
 ```
 
 You should see voices such as `supertonic_m1` and `supertonic_f1`.
@@ -405,7 +422,7 @@ Treat it as a second-step upgrade, not the first-run baseline.
 
 ```bash
 docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml \
+  -f Dockerfiles/docker-compose.single-user.yml \
   -f Dockerfiles/docker-compose.webui.yml \
   up -d --build
 ```
