@@ -206,6 +206,38 @@ def test_init_multi_user_profile_masks_admin_password_in_dry_run(
     assert str(set_env["ADMIN_PASSWORD"]).startswith("*")
 
 
+def test_init_multi_user_profile_reads_admin_env_and_masks_password(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
+    (repo / "pyproject.toml").write_text("[project]\nname='tldw-server'\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("ADMIN_USERNAME", "env-admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "EnvPasswordWith$Dollar1!")
+    monkeypatch.setenv("ADMIN_EMAIL", "env-admin@example.com")
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "--profile",
+            "docker-multi-postgres",
+            "--dry-run",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "EnvPasswordWith$Dollar1!" not in result.output
+    payload = assert_wizard_json(result.output, command="init", status="ok")
+    actions = payload.get("actions") or []
+    set_env = next(action["set_env"] for action in actions if "set_env" in action)
+    assert_action_field(actions, "set_env", "ADMIN_USERNAME", "env-admin")
+    assert_action_field(actions, "set_env", "ADMIN_EMAIL", "env-admin@example.com")
+    assert str(set_env["ADMIN_PASSWORD"]).startswith("*")
+
+
 def test_init_invalid_profile_returns_json_error() -> None:
     result = runner.invoke(
         app,

@@ -445,9 +445,9 @@ def init(
             profile_utils.build_profile_env(
                 profile=setup_profile,
                 existing_env=existing_env,
-                admin_username=admin_username,
-                admin_password=admin_password,
-                admin_email=admin_email,
+                admin_username=admin_username or os.getenv("ADMIN_USERNAME"),
+                admin_password=admin_password or os.getenv("ADMIN_PASSWORD"),
+                admin_email=admin_email or os.getenv("ADMIN_EMAIL"),
             )
         )
         auth_mode = updates["AUTH_MODE"]

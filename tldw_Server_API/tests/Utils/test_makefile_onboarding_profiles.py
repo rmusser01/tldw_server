@@ -133,7 +133,7 @@ def test_quickstart_local_installs_before_setup_and_start() -> None:
 
 
 def test_setup_docker_multi_uses_shell_env_for_admin_bootstrap_secrets() -> None:
-    """Multi-user setup should not make-expand admin bootstrap values."""
+    """Multi-user setup should keep admin bootstrap secrets out of process argv."""
     text = _read_makefile()
     setup_docker_multi = _target_block(text, "setup-docker-multi")
 
@@ -142,9 +142,20 @@ def test_setup_docker_multi_uses_shell_env_for_admin_bootstrap_secrets() -> None
 
     _require('test -n "$$ADMIN_USERNAME"' in setup_docker_multi, "Expected shell env username check")
     _require('test -n "$$ADMIN_PASSWORD"' in setup_docker_multi, "Expected shell env password check")
-    _require('--admin-username "$$ADMIN_USERNAME"' in setup_docker_multi, "Expected shell env username arg")
-    _require('--admin-password "$$ADMIN_PASSWORD"' in setup_docker_multi, "Expected shell env password arg")
-    _require('--admin-email "$$ADMIN_EMAIL"' in setup_docker_multi, "Expected shell env email arg")
+    _require(
+        'ADMIN_USERNAME="$$ADMIN_USERNAME"' in setup_docker_multi,
+        "Expected shell env username assignment",
+    )
+    _require(
+        'ADMIN_PASSWORD="$$ADMIN_PASSWORD"' in setup_docker_multi,
+        "Expected shell env password assignment",
+    )
+    _require(
+        'ADMIN_EMAIL="$$ADMIN_EMAIL"' in setup_docker_multi,
+        "Expected shell env email assignment",
+    )
+    for flag in ("--admin-username", "--admin-password", "--admin-email"):
+        _require(flag not in setup_docker_multi, f"setup-docker-multi should not pass {flag} in argv")
 
 
 def test_public_docker_start_paths_quote_paths_and_wait_for_readiness() -> None:

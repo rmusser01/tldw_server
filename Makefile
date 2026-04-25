@@ -127,11 +127,7 @@ setup-docker-multi: setup-wizard-tools
 	@command -v docker >/dev/null 2>&1 || (echo "[setup-docker-multi] docker not found. Install Docker and retry." && exit 1)
 	@test -n "$$ADMIN_USERNAME" || (echo "[setup-docker-multi] Set ADMIN_USERNAME=<admin> ADMIN_PASSWORD=<password> in the shell environment for first admin bootstrap." && exit 1)
 	@test -n "$$ADMIN_PASSWORD" || (echo "[setup-docker-multi] Set ADMIN_PASSWORD=<password> in the shell environment for first admin bootstrap." && exit 1)
-	@if [ -n "$$ADMIN_EMAIL" ]; then \
-		$(TLDW_SETUP) init --profile docker-multi-postgres --env-file "$(TLDW_ENV_FILE)" --admin-username "$$ADMIN_USERNAME" --admin-password "$$ADMIN_PASSWORD" --admin-email "$$ADMIN_EMAIL" --default --yes; \
-	else \
-		$(TLDW_SETUP) init --profile docker-multi-postgres --env-file "$(TLDW_ENV_FILE)" --admin-username "$$ADMIN_USERNAME" --admin-password "$$ADMIN_PASSWORD" --default --yes; \
-	fi
+	@ADMIN_USERNAME="$$ADMIN_USERNAME" ADMIN_PASSWORD="$$ADMIN_PASSWORD" ADMIN_EMAIL="$$ADMIN_EMAIL" $(TLDW_SETUP) init --profile docker-multi-postgres --env-file "$(TLDW_ENV_FILE)" --default --yes
 	@echo "[setup-docker-multi] Next: make start-docker-multi"
 
 start-docker-multi:
