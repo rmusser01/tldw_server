@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess  # nosec B404
+import sys
 from pathlib import Path
 
 import pytest
@@ -700,6 +701,46 @@ def test_multi_user_entrypoint_does_not_persist_explicit_database_url_overrides(
     assert "\nJOBS_DB_URL=" not in content
     assert "TLDW_DATABASE_URL_OVERRIDE=postgresql://override_user:override_pass@postgres:5432/override_db" in content
     assert "TLDW_JOBS_DB_URL_OVERRIDE=postgresql://override_user:override_pass@postgres:5432/override_jobs" in content
+
+
+def test_multi_user_entrypoint_fails_when_admin_bootstrap_fails(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    marker_dir = tmp_path / "markers"
+    wrapper_dir = tmp_path / "bin"
+    marker_dir.mkdir()
+    wrapper_dir.mkdir()
+    _write_entrypoint_env(env_file)
+    (marker_dir / ".authnz_initialized_multi_user").write_text("", encoding="utf-8")
+    python_wrapper = wrapper_dir / "python"
+    python_wrapper.write_text(
+        "\n".join(
+            (
+                "#!/bin/sh",
+                'if [ "$1" = "-m" ] && [ "$2" = "tldw_Server_API.app.core.AuthNZ.create_admin" ]; then',
+                '  echo "[test-wrapper] create_admin failed" >&2',
+                "  exit 42",
+                "fi",
+                f'exec "{sys.executable}" "$@"',
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    python_wrapper.chmod(0o700)
+    env = _entrypoint_process_env(env_file, marker_dir)
+    env["PATH"] = f"{wrapper_dir}{os.pathsep}{env['PATH']}"
+
+    result = subprocess.run(  # nosec B603
+        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "uvicorn"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "[test-wrapper] create_admin failed" in result.stdout
+    assert "ERROR: Admin bootstrap failed; refusing to continue startup." in result.stderr
 
 
 def test_multi_user_entrypoint_rejects_stale_env_database_url_when_structured_postgres_exists() -> None:

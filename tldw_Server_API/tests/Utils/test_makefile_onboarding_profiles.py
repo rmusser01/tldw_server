@@ -172,9 +172,10 @@ def test_public_docker_start_paths_quote_paths_and_wait_for_readiness() -> None:
             "$(DOCKER_WAIT_FLAG)",
         ),
         "start-docker-multi": (
-            '--env-file "$(TLDW_ENV_FILE)"',
+            'TLDW_ENV_FILE="$$TLDW_ENV_FILE_ABS"',
             '-f "$(DOCKER_MULTI_COMPOSE)"',
             "$(DOCKER_WAIT_FLAG)",
+            "config >/dev/null",
         ),
         "quickstart-docker": (
             '--env-file "$(TLDW_ENV_FILE)"',
@@ -186,6 +187,17 @@ def test_public_docker_start_paths_quote_paths_and_wait_for_readiness() -> None:
         block = _target_block(text, target)
         for fragment in fragments:
             _require(fragment in block, f"{target} should include {fragment}")
+
+    start_docker_multi = _target_block(text, "start-docker-multi")
+    _require(
+        '--env-file "$(TLDW_ENV_FILE)"' not in start_docker_multi,
+        "start-docker-multi should use raw service env_file, not compose --env-file",
+    )
+    _require(
+        "config >/dev/null" in start_docker_multi
+        and start_docker_multi.index("config >/dev/null") < start_docker_multi.index(" up -d "),
+        "start-docker-multi should validate compose config before starting services",
+    )
 
 
 def test_quickstart_docker_is_api_only_and_skips_webui_verify() -> None:

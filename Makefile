@@ -134,6 +134,7 @@ start-docker-multi:
 	@command -v docker >/dev/null 2>&1 || (echo "[start-docker-multi] docker not found. Install Docker and retry." && exit 1)
 	@test -f "$(TLDW_ENV_FILE)" || (echo "[start-docker-multi] $(TLDW_ENV_FILE) not found. Run: make setup-docker-multi" && exit 1)
 	@TLDW_ENV_FILE_ABS="$$(cd "$$(dirname "$(TLDW_ENV_FILE)")" && pwd)/$$(basename "$(TLDW_ENV_FILE)")"; \
+		TLDW_ENV_FILE="$$TLDW_ENV_FILE_ABS" docker compose -f "$(DOCKER_MULTI_COMPOSE)" config >/dev/null; \
 		TLDW_ENV_FILE="$$TLDW_ENV_FILE_ABS" docker compose -f "$(DOCKER_MULTI_COMPOSE)" up -d $(DOCKER_BUILD_FLAG) $(DOCKER_WAIT_FLAG)
 	@echo "[start-docker-multi] API:  $(TLDW_BASE_URL)"
 	@echo "[start-docker-multi] Next: make verify-docker-multi"

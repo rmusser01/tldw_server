@@ -404,7 +404,8 @@ if [ "$RUN_AUTH_INIT_ON_START" != "0" ] && [ "$should_run_auth_init" = "1" ]; th
         --password "$ADMIN_PASSWORD" \
         ${ADMIN_EMAIL:+--email "$ADMIN_EMAIL"} \
         --non-interactive 2>&1 || {
-          echo "[first-run] WARNING: Admin user creation returned non-zero (see above)." >&2
+          echo "[first-run] ERROR: Admin bootstrap failed; refusing to continue startup." >&2
+          exit 1
         }
     else
       # Check whether users exist; fail separately if account state cannot be verified.
