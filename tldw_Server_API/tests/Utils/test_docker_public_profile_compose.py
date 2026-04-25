@@ -61,7 +61,11 @@ def test_single_user_compose_app_contract() -> None:
         "app should build from the production Dockerfile at repo root",
     )
     _require_equal(app["image"], "tldw-server:prod", "app image should match the production tag")
-    _require_equal(app["ports"], ["8000:8000"], "app should publish API port 8000")
+    _require_equal(
+        app["ports"],
+        ["127.0.0.1:8000:8000"],
+        "app should publish API port 8000 on localhost only",
+    )
     _require_equal(
         app["depends_on"]["redis"]["condition"],
         "service_healthy",
@@ -128,14 +132,20 @@ def test_single_user_compose_declares_only_required_volumes() -> None:
     _require_equal(set(volumes), {"app-data", "redis_data"}, "single-user compose should only define required volumes")
 
 
-def test_single_user_compose_does_not_pin_container_names() -> None:
-    services = _compose("Dockerfiles/docker-compose.single-user.yml")["services"]
+def test_single_user_and_webui_compose_do_not_pin_container_names() -> None:
+    compose_paths = (
+        "Dockerfiles/docker-compose.single-user.yml",
+        "Dockerfiles/docker-compose.webui.yml",
+    )
 
-    for service_name, service in services.items():
-        _require(
-            "container_name" not in service,
-            f"{service_name} should not set container_name so COMPOSE_PROJECT_NAME isolation works",
-        )
+    for compose_path in compose_paths:
+        services = _compose(compose_path)["services"]
+        for service_name, service in services.items():
+            _require(
+                "container_name" not in service,
+                f"{compose_path} service {service_name} should not set container_name "
+                "so COMPOSE_PROJECT_NAME isolation works",
+            )
 
 
 def test_webui_overlay_depends_on_app_health() -> None:
@@ -144,4 +154,14 @@ def test_webui_overlay_depends_on_app_health() -> None:
         webui["depends_on"]["app"]["condition"],
         "service_healthy",
         "WebUI overlay should wait for app health",
+    )
+
+
+def test_webui_overlay_publishes_localhost_only() -> None:
+    webui = _compose("Dockerfiles/docker-compose.webui.yml")["services"]["webui"]
+
+    _require_equal(
+        webui["ports"],
+        ["127.0.0.1:8080:3000"],
+        "WebUI should publish port 8080 on localhost only",
     )

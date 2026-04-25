@@ -11,7 +11,7 @@ services:
       dockerfile: Dockerfiles/Dockerfile.prod
     image: tldw-server:prod
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - AUTH_MODE=${AUTH_MODE:-single_user}
       - SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}
