@@ -108,6 +108,10 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
             media_ingest_heavy_jobs_task="media-heavy-task",
             reading_digest_jobs_stop_event="reading-stop",
             reading_digest_jobs_task="reading-task",
+            vn_asset_jobs_stop_event="vn-asset-stop",
+            vn_asset_jobs_task="vn-asset-task",
+            vn_asset_generation_jobs_stop_event="vn-generation-stop",
+            vn_asset_generation_jobs_task="vn-generation-task",
             companion_reflection_jobs_stop_event="companion-stop",
             companion_reflection_jobs_task="companion-task",
         )
@@ -203,5 +207,7 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
     assert handles.study_pack_jobs_task == "study-pack-task"
     assert handles.embeddings_compactor_task == "embeddings-task"
     assert handles.audio_jobs_task == "audio-task"
+    assert handles.vn_asset_jobs_task == "vn-asset-task"
+    assert handles.vn_asset_generation_jobs_task == "vn-generation-task"
     assert handles.recipe_run_jobs_task == "recipe-task"
     assert handles.evals_abtest_jobs_task == "abtest-task"

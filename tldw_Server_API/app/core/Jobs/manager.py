@@ -29,12 +29,14 @@ from tldw_Server_API.app.core.Security.crypto import (
 )
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _is_test_mode,
+)
+from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 
 from .audit_bridge import submit_job_audit_event
-from .fair_share import FairShareScheduler
 from .event_stream import emit_job_event
+from .fair_share import FairShareScheduler
 from .metrics import (
     ensure_jobs_metrics_registered,
     increment_cancelled,
@@ -253,6 +255,7 @@ class JobManager:
     STANDARD_QUEUES = ("default", "high", "low")
     DOMAIN_ALLOWED_QUEUES: ClassVar[dict[str, tuple[str, ...]]] = {
         "reading": ("reading-digest",),
+        "vn_assets": ("generation",),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---

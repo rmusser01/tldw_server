@@ -51,6 +51,10 @@ class StartupWorkerGroupHandles:
     media_ingest_heavy_jobs_task: Any | None = None
     reading_digest_jobs_stop_event: Any | None = None
     reading_digest_jobs_task: Any | None = None
+    vn_asset_jobs_stop_event: Any | None = None
+    vn_asset_jobs_task: Any | None = None
+    vn_asset_generation_jobs_stop_event: Any | None = None
+    vn_asset_generation_jobs_task: Any | None = None
     companion_reflection_jobs_stop_event: Any | None = None
     companion_reflection_jobs_task: Any | None = None
     reminder_jobs_stop_event: Any | None = None
@@ -184,6 +188,14 @@ async def start_worker_groups(
         media_ingest_heavy_jobs_task=content_jobs_poller_handles.media_ingest_heavy_jobs_task,
         reading_digest_jobs_stop_event=content_jobs_poller_handles.reading_digest_jobs_stop_event,
         reading_digest_jobs_task=content_jobs_poller_handles.reading_digest_jobs_task,
+        vn_asset_jobs_stop_event=content_jobs_poller_handles.vn_asset_jobs_stop_event,
+        vn_asset_jobs_task=content_jobs_poller_handles.vn_asset_jobs_task,
+        vn_asset_generation_jobs_stop_event=(
+            content_jobs_poller_handles.vn_asset_generation_jobs_stop_event
+        ),
+        vn_asset_generation_jobs_task=(
+            content_jobs_poller_handles.vn_asset_generation_jobs_task
+        ),
         companion_reflection_jobs_stop_event=(
             content_jobs_poller_handles.companion_reflection_jobs_stop_event
         ),

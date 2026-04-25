@@ -35,6 +35,10 @@ class ContentJobsPollerHandles:
     media_ingest_heavy_jobs_task: Any | None = None
     reading_digest_jobs_stop_event: Any | None = None
     reading_digest_jobs_task: Any | None = None
+    vn_asset_jobs_stop_event: Any | None = None
+    vn_asset_jobs_task: Any | None = None
+    vn_asset_generation_jobs_stop_event: Any | None = None
+    vn_asset_generation_jobs_task: Any | None = None
     companion_reflection_jobs_stop_event: Any | None = None
     companion_reflection_jobs_task: Any | None = None
 
@@ -85,6 +89,17 @@ async def start_content_jobs_pollers(
         register_owned_job_poller=register_owned_job_poller,
         should_start_worker=should_start_worker,
     )
+    (
+        vn_asset_jobs_stop_event,
+        vn_asset_jobs_task,
+        vn_asset_generation_jobs_stop_event,
+        vn_asset_generation_jobs_task,
+    ) = await _start_vn_asset_jobs_workers(
+        app=app,
+        owned_job_pollers=owned_job_pollers,
+        register_owned_job_poller=register_owned_job_poller,
+        should_start_worker=should_start_worker,
+    )
     companion_reflection_jobs_stop_event, companion_reflection_jobs_task = (
         await _start_companion_reflection_jobs_worker(
             app=app,
@@ -106,6 +121,10 @@ async def start_content_jobs_pollers(
         media_ingest_heavy_jobs_task=media_ingest_heavy_jobs_task,
         reading_digest_jobs_stop_event=reading_digest_jobs_stop_event,
         reading_digest_jobs_task=reading_digest_jobs_task,
+        vn_asset_jobs_stop_event=vn_asset_jobs_stop_event,
+        vn_asset_jobs_task=vn_asset_jobs_task,
+        vn_asset_generation_jobs_stop_event=vn_asset_generation_jobs_stop_event,
+        vn_asset_generation_jobs_task=vn_asset_generation_jobs_task,
         companion_reflection_jobs_stop_event=companion_reflection_jobs_stop_event,
         companion_reflection_jobs_task=companion_reflection_jobs_task,
     )
@@ -317,6 +336,84 @@ async def _start_reading_digest_jobs_worker(
         return None, None
 
 
+async def _start_vn_asset_jobs_workers(
+    *,
+    app: Any,
+    owned_job_pollers: list[Any],
+    register_owned_job_poller: Callable[..., None],
+    should_start_worker: Callable[..., bool],
+) -> tuple[Any | None, Any | None, Any | None, Any | None]:
+    vn_asset_jobs_stop_event = None
+    vn_asset_jobs_task = None
+    vn_asset_generation_jobs_stop_event = None
+    vn_asset_generation_jobs_task = None
+
+    try:
+        enabled = should_start_worker(
+            "VN_ASSET_JOBS_WORKER_ENABLED",
+            "vn-assets",
+            default_stable=True,
+        )
+        if enabled:
+            vn_asset_jobs_stop_event = _make_event()
+            vn_asset_jobs_task = _create_task(
+                _run_vn_asset_jobs_worker_service(vn_asset_jobs_stop_event)
+            )
+            logger.info("VN asset Jobs worker started with explicit stop_event signal")
+            register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="vn_asset_jobs_task",
+                task=vn_asset_jobs_task,
+                stop_event=vn_asset_jobs_stop_event,
+            )
+        else:
+            logger.info("VN asset Jobs worker disabled by flag (VN_ASSET_JOBS_WORKER_ENABLED)")
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        _safe_cancel_task(vn_asset_jobs_task)
+        logger.warning(f"Failed to start VN asset Jobs worker: {exc}")
+        return None, None, None, None
+
+    try:
+        generation_enabled = should_start_worker(
+            "VN_ASSET_GENERATION_JOBS_WORKER_ENABLED",
+            "vn-assets-generation",
+            default_stable=True,
+        )
+        if generation_enabled:
+            vn_asset_generation_jobs_stop_event = _make_event()
+            vn_asset_generation_jobs_task = _create_task(
+                _run_vn_asset_generation_jobs_worker_service(
+                    vn_asset_generation_jobs_stop_event
+                )
+            )
+            logger.info("VN asset generation Jobs worker started with explicit stop_event signal")
+            register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="vn_asset_generation_jobs_task",
+                task=vn_asset_generation_jobs_task,
+                stop_event=vn_asset_generation_jobs_stop_event,
+            )
+        else:
+            logger.info(
+                "VN asset generation Jobs worker disabled by flag "
+                "(VN_ASSET_GENERATION_JOBS_WORKER_ENABLED)"
+            )
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        _safe_cancel_task(vn_asset_generation_jobs_task)
+        logger.warning(f"Failed to start VN asset generation Jobs worker: {exc}")
+        vn_asset_generation_jobs_stop_event = None
+        vn_asset_generation_jobs_task = None
+
+    return (
+        vn_asset_jobs_stop_event,
+        vn_asset_jobs_task,
+        vn_asset_generation_jobs_stop_event,
+        vn_asset_generation_jobs_task,
+    )
+
+
 async def _start_companion_reflection_jobs_worker(
     *,
     app: Any,
@@ -394,6 +491,22 @@ def _run_reading_digest_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_reading_digest_jobs_worker(stop_event)
+
+
+def _run_vn_asset_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.vn_asset_jobs_worker import (
+        run_vn_asset_jobs_worker as _run_vn_asset_jobs_worker,
+    )
+
+    return _run_vn_asset_jobs_worker(stop_event)
+
+
+def _run_vn_asset_generation_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.vn_asset_jobs_worker import (
+        run_vn_asset_generation_jobs_worker as _run_vn_asset_generation_jobs_worker,
+    )
+
+    return _run_vn_asset_generation_jobs_worker(stop_event)
 
 
 def _run_companion_reflection_jobs_worker_service(stop_event: Any) -> Any:
