@@ -1,0 +1,76 @@
+import configparser
+from dataclasses import dataclass
+
+import pytest
+
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.RAG.rag_service import analytics_db
+
+
+@dataclass(frozen=True)
+class FakeBackendConfig:
+    connection_string: str
+
+
+class FakePostgresBackend:
+    backend_type = BackendType.POSTGRESQL
+
+    def __init__(self, name: str):
+        self.name = name
+        self.config = FakeBackendConfig(connection_string=f"postgresql://example/{name}")
+        self.bootstrap_calls = 0
+
+    def execute(self, *args, **kwargs):
+        return []
+
+    def fetch_all(self, *args, **kwargs):
+        return []
+
+    def fetch_one(self, *args, **kwargs):
+        return None
+
+    def transaction(self):
+        class Transaction:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        return Transaction()
+
+
+def test_analytics_database_refreshes_shared_content_backend(monkeypatch, tmp_path):
+    first_backend = FakePostgresBackend("first")
+    second_backend = FakePostgresBackend("second")
+    backend_calls = iter([first_backend, second_backend])
+
+    monkeypatch.setattr(analytics_db, "get_content_backend", lambda config: next(backend_calls))
+    monkeypatch.setattr(analytics_db, "load_comprehensive_config", lambda: configparser.ConfigParser())
+    monkeypatch.setattr(analytics_db.AnalyticsDatabase, "_initialize_database", lambda self: None)
+    monkeypatch.setattr(
+        analytics_db.AnalyticsDatabase,
+        "_ensure_bootstrap_for_backend",
+        lambda self, backend: setattr(backend, "bootstrap_calls", backend.bootstrap_calls + 1),
+    )
+
+    db = analytics_db.AnalyticsDatabase(db_path=str(tmp_path / "analytics.db"))
+
+    assert db.backend is first_backend
+    assert first_backend.bootstrap_calls == 1
+    assert db.backend is second_backend
+    assert second_backend.bootstrap_calls == 1
+
+
+def test_analytics_database_tracks_bootstrap_per_backend_target(monkeypatch, tmp_path):
+    backend = FakePostgresBackend("stable")
+
+    monkeypatch.setattr(analytics_db, "get_content_backend", lambda config: backend)
+    monkeypatch.setattr(analytics_db, "load_comprehensive_config", lambda: configparser.ConfigParser())
+    monkeypatch.setattr(analytics_db.AnalyticsDatabase, "_initialize_database", lambda self: None)
+
+    db = analytics_db.AnalyticsDatabase(db_path=str(tmp_path / "analytics.db"))
+    db._ensure_bootstrap_for_backend(backend)
+    db._ensure_bootstrap_for_backend(backend)
+
+    assert len(db._bootstrapped_backend_targets) == 1
