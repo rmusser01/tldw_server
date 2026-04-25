@@ -61,12 +61,38 @@ def test_analytics_database_refreshes_shared_content_backend(monkeypatch, tmp_pa
     assert second_backend.bootstrap_calls == 1
 
 
+def test_analytics_database_bootstraps_refreshed_backend_before_publish(monkeypatch, tmp_path):
+    first_backend = FakePostgresBackend("first")
+    second_backend = FakePostgresBackend("second")
+    backend_calls = iter([first_backend, second_backend])
+    bootstrap_targets: list[str | None] = []
+
+    def fake_bootstrap(self, backend, target_identifier=None):  # noqa: ANN001
+        bootstrap_targets.append(target_identifier)
+        if backend is second_backend:
+            assert self._backend is first_backend
+
+    monkeypatch.setattr(analytics_db, "get_content_backend", lambda config: next(backend_calls))
+    monkeypatch.setattr(analytics_db, "load_comprehensive_config", lambda: configparser.ConfigParser())
+    monkeypatch.setattr(analytics_db.AnalyticsDatabase, "_bootstrap_backend_schema", fake_bootstrap)
+
+    db = analytics_db.AnalyticsDatabase(db_path=str(tmp_path / "analytics.db"))
+
+    assert db.backend is second_backend
+    assert db._backend is second_backend
+    assert bootstrap_targets[-1] == "postgresql://example/second"
+
+
 def test_analytics_database_tracks_bootstrap_per_backend_target(monkeypatch, tmp_path):
     backend = FakePostgresBackend("stable")
 
     monkeypatch.setattr(analytics_db, "get_content_backend", lambda config: backend)
     monkeypatch.setattr(analytics_db, "load_comprehensive_config", lambda: configparser.ConfigParser())
-    monkeypatch.setattr(analytics_db.AnalyticsDatabase, "_initialize_database", lambda self: None)
+    monkeypatch.setattr(
+        analytics_db.AnalyticsDatabase,
+        "_bootstrap_backend_schema",
+        lambda self, backend, target_identifier=None: None,
+    )
 
     db = analytics_db.AnalyticsDatabase(db_path=str(tmp_path / "analytics.db"))
     db._ensure_bootstrap_for_backend(backend)
