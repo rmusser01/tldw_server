@@ -182,13 +182,32 @@ def test_multi_user_compose_exposes_required_auth_env() -> None:
     env = "\n".join(app["environment"])
     for key in (
         "AUTH_MODE=${AUTH_MODE:-multi_user}",
-        "DATABASE_URL=${DATABASE_URL:-postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users}",
+        "DATABASE_URL=postgresql://${POSTGRES_USER:-tldw_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-tldw_users}",
+        "JOBS_DB_URL=postgresql://${POSTGRES_USER:-tldw_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-tldw_users}",
         "JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}",
         "SESSION_ENCRYPTION_KEY=${SESSION_ENCRYPTION_KEY:?SESSION_ENCRYPTION_KEY is required}",
         "ADMIN_USERNAME=${ADMIN_USERNAME:?ADMIN_USERNAME is required}",
         "ADMIN_PASSWORD=${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}",
     ):
         _require(key in env, f"multi-user app environment should include {key}")
+
+
+def test_multi_user_compose_requires_single_postgres_password_source() -> None:
+    compose_path = Path("Dockerfiles/docker-compose.multi-user-postgres.yml")
+    compose_text = compose_path.read_text(encoding="utf-8")
+    compose = _compose(str(compose_path))
+    postgres_env = "\n".join(compose["services"]["postgres"]["environment"])
+    app_env = "\n".join(compose["services"]["app"]["environment"])
+
+    _require("TestPassword123!" not in compose_text, "public multi-user compose should not embed a known password")
+    _require(
+        "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}" in postgres_env,
+        "postgres should require the shared POSTGRES_PASSWORD",
+    )
+    _require(
+        "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}" in app_env,
+        "app database URLs should derive from the shared POSTGRES_PASSWORD",
+    )
 
 
 def test_multi_user_compose_publishes_api_localhost_only() -> None:
@@ -256,3 +275,24 @@ def test_multi_user_entrypoint_errors_when_no_admin_env_and_no_users() -> None:
 
     _require(error_message in no_users_branch, "entrypoint should explain missing admin bootstrap")
     _require("exit 1" in no_users_branch, "entrypoint should exit when no users and no admin env exist")
+
+
+def test_multi_user_entrypoint_distinguishes_user_probe_failure() -> None:
+    script = Path("Dockerfiles/entrypoints/tldw-app-first-run.sh").read_text(encoding="utf-8")
+
+    _require(
+        "ERROR: Could not verify whether existing multi-user accounts exist." in script,
+        "entrypoint should report user probe failures separately from zero users",
+    )
+    _require(
+        "except Exception as exc:" in script and "sys.exit(1)" in script,
+        "entrypoint user probe should print exceptions and fail nonzero",
+    )
+    _require(
+        '2>/dev/null || echo "0"' not in script,
+        "entrypoint should not suppress probe errors and convert them to zero users",
+    )
+    _require(
+        "return False" not in script,
+        "entrypoint user probe should not convert exceptions into false",
+    )

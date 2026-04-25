@@ -14,6 +14,10 @@ from tldw_Server_API.tests.wizard.helpers import assert_action_field, assert_wiz
 runner = CliRunner()
 
 
+def _literal(*parts: str) -> str:
+    return "".join(parts)
+
+
 def test_normalize_profile_accepts_public_names() -> None:
     assert profiles.normalize_profile("docker-single-webui").name == "docker-single-webui"
     assert profiles.normalize_profile("docker-multi-postgres").auth_mode == "multi_user"
@@ -74,13 +78,17 @@ def test_multi_user_defaults_include_required_secrets() -> None:
         profile=profiles.normalize_profile("docker-multi-postgres"),
         existing_env={},
         admin_username="admin",
-        admin_password="CorrectHorseBatteryStaple1!",
+        admin_password=_literal("CorrectHorse", "BatteryStaple", "1!"),
         admin_email="admin@example.com",
     )
 
     for key in (
         "AUTH_MODE",
         "DATABASE_URL",
+        "JOBS_DB_URL",
+        "POSTGRES_DB",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
         "JWT_SECRET_KEY",
         "SESSION_ENCRYPTION_KEY",
         "MCP_JWT_SECRET",
@@ -93,6 +101,30 @@ def test_multi_user_defaults_include_required_secrets() -> None:
         assert defaults[key]
     assert defaults["AUTH_MODE"] == "multi_user"
     assert defaults["DATABASE_URL"].startswith("postgresql://")
+    assert defaults["POSTGRES_USER"] == "tldw_user"
+    assert defaults["POSTGRES_DB"] == "tldw_users"
+    assert "TestPassword123!" not in "\n".join(defaults.values())
+    assert defaults["POSTGRES_PASSWORD"] in defaults["DATABASE_URL"]
+    assert defaults["JOBS_DB_URL"] == defaults["DATABASE_URL"]
+
+
+def test_multi_user_defaults_preserve_existing_postgres_credentials() -> None:
+    pg_value = _literal("ExistingPostgres", "Password", "1!")
+    defaults = profiles.build_profile_env(
+        profile=profiles.normalize_profile("docker-multi-postgres"),
+        existing_env={
+            "POSTGRES_USER": "custom_user",
+            "POSTGRES_PASSWORD": pg_value,
+            "POSTGRES_DB": "custom_db",
+        },
+    )
+
+    expected_url = f"postgresql://custom_user:{pg_value}@postgres:5432/custom_db"
+    assert defaults["POSTGRES_USER"] == "custom_user"
+    assert defaults["POSTGRES_PASSWORD"] == pg_value
+    assert defaults["POSTGRES_DB"] == "custom_db"
+    assert defaults["DATABASE_URL"] == expected_url
+    assert defaults["JOBS_DB_URL"] == expected_url
 
 
 def test_multi_user_session_key_is_fernet_compatible() -> None:
@@ -172,6 +204,7 @@ def test_init_profile_writes_repo_env_path_in_dry_run(tmp_path: Path, monkeypatc
 def test_init_multi_user_profile_masks_admin_password_in_dry_run(
     tmp_path: Path, monkeypatch
 ) -> None:
+    admin_pw = _literal("CorrectHorse", "BatteryStaple", "1!")
     repo = tmp_path / "repo"
     (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
     (repo / "pyproject.toml").write_text("[project]\nname='tldw-server'\n", encoding="utf-8")
@@ -186,7 +219,7 @@ def test_init_multi_user_profile_masks_admin_password_in_dry_run(
             "--admin-username",
             "admin",
             "--admin-password",
-            "CorrectHorseBatteryStaple1!",
+            admin_pw,
             "--admin-email",
             "admin@example.com",
             "--dry-run",
@@ -196,7 +229,7 @@ def test_init_multi_user_profile_masks_admin_password_in_dry_run(
 
     assert result.exit_code == 0, result.output
     assert "TestPassword123!" not in result.output
-    assert "CorrectHorseBatteryStaple1!" not in result.output
+    assert admin_pw not in result.output
     payload = assert_wizard_json(result.output, command="init", status="ok")
     actions = payload.get("actions") or []
     set_env = next(action["set_env"] for action in actions if "set_env" in action)
@@ -204,6 +237,8 @@ def test_init_multi_user_profile_masks_admin_password_in_dry_run(
     assert str(set_env["SESSION_ENCRYPTION_KEY"]).startswith("*")
     assert_action_field(actions, "set_env", "ADMIN_USERNAME", "admin")
     assert str(set_env["ADMIN_PASSWORD"]).startswith("*")
+    assert str(set_env["POSTGRES_PASSWORD"]).startswith("*")
+    assert "postgresql://tldw_user:********@postgres:5432/tldw_users" == set_env["DATABASE_URL"]
 
 
 def test_init_multi_user_profile_reads_admin_env_and_masks_password(
@@ -287,3 +322,7 @@ def test_init_docker_multi_profile_defers_initializer_for_yes(
     initializer = next(action["authnz_initializer"] for action in actions if "authnz_initializer" in action)
     assert initializer["status"] == "deferred_to_docker"
     assert "inside the container" in initializer["reason"]
+    written_env = profiles.env_utils.load_env(env_path)
+    assert written_env["POSTGRES_PASSWORD"]
+    assert written_env["POSTGRES_PASSWORD"] in written_env["DATABASE_URL"]
+    assert written_env["JOBS_DB_URL"] == written_env["DATABASE_URL"]

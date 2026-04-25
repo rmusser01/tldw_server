@@ -92,6 +92,10 @@ def _secret_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def _postgres_password() -> str:
+    return secrets.token_urlsafe(32)
+
+
 def _fernet_key() -> str:
     return Fernet.generate_key().decode("ascii")
 
@@ -147,9 +151,15 @@ def build_profile_env(
         )
         return values
 
-    values["DATABASE_URL"] = (
-        existing_env.get("DATABASE_URL") or "postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users"
-    )
+    postgres_user = existing_env.get("POSTGRES_USER") or "tldw_user"
+    postgres_db = existing_env.get("POSTGRES_DB") or "tldw_users"
+    postgres_password = _existing_or_generated(existing_env, "POSTGRES_PASSWORD", _postgres_password)
+    database_url = f"postgresql://{postgres_user}:{postgres_password}@postgres:5432/{postgres_db}"
+    values["POSTGRES_USER"] = postgres_user
+    values["POSTGRES_DB"] = postgres_db
+    values["POSTGRES_PASSWORD"] = postgres_password
+    values["DATABASE_URL"] = database_url
+    values["JOBS_DB_URL"] = database_url
     values["JWT_SECRET_KEY"] = _existing_or_generated(existing_env, "JWT_SECRET_KEY", _secret_token)
     values["SESSION_ENCRYPTION_KEY"] = _existing_or_generated(existing_env, "SESSION_ENCRYPTION_KEY", _fernet_key)
     values["MCP_JWT_SECRET"] = _existing_or_generated(existing_env, "MCP_JWT_SECRET", _secret_token)

@@ -248,8 +248,9 @@ if [ "$RUN_AUTH_INIT_ON_START" != "0" ] && [ "$should_run_auth_init" = "1" ]; th
           echo "[first-run] WARNING: Admin user creation returned non-zero (see above)." >&2
         }
     else
-      # Check if any users exist; warn if not
-      has_users=$(python -c "
+      # Check whether users exist; fail separately if account state cannot be verified.
+      probe_err="$(mktemp)"
+      if has_users=$(python -c "
 import asyncio, sys
 async def check():
     try:
@@ -257,10 +258,27 @@ async def check():
         db = await get_users_db()
         users = await db.list_users(limit=1)
         return len(users) > 0
-    except Exception:
-        return False
+    except Exception as exc:
+        print(f'[first-run] Failed to verify existing users: {exc}', file=sys.stderr)
+        sys.exit(1)
 sys.stdout.write('1' if asyncio.run(check()) else '0')
-" 2>/dev/null || echo "0")
+" 2>"$probe_err"); then
+        rm -f "$probe_err"
+      else
+        echo "" >&2
+        echo "======================================================================" >&2
+        echo "  ERROR: Could not verify whether existing multi-user accounts exist." >&2
+        echo "" >&2
+        echo "  Check DATABASE_URL and database connectivity before retrying startup." >&2
+        if [ -s "$probe_err" ]; then
+          echo "" >&2
+          sed 's/^/  /' "$probe_err" >&2
+        fi
+        echo "======================================================================" >&2
+        echo "" >&2
+        rm -f "$probe_err"
+        exit 1
+      fi
 
       if [ "$has_users" = "0" ]; then
         echo "" >&2
