@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess  # nosec B404
 from pathlib import Path
 
 import pytest
@@ -181,27 +184,54 @@ def test_multi_user_compose_exposes_required_auth_env() -> None:
     app = _compose("Dockerfiles/docker-compose.multi-user-postgres.yml")["services"]["app"]
     env = "\n".join(app["environment"])
     for key in (
-        "AUTH_MODE=${AUTH_MODE:-multi_user}",
-        "DATABASE_URL=${DATABASE_URL:-}",
-        "JOBS_DB_URL=${JOBS_DB_URL:-}",
-        "POSTGRES_HOST=${POSTGRES_HOST:-postgres}",
-        "POSTGRES_PORT=${POSTGRES_PORT:-5432}",
-        "POSTGRES_USER=${POSTGRES_USER:-tldw_user}",
-        "POSTGRES_DB=${POSTGRES_DB:-tldw_users}",
-        "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}",
-        "JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}",
-        "SESSION_ENCRYPTION_KEY=${SESSION_ENCRYPTION_KEY:?SESSION_ENCRYPTION_KEY is required}",
-        "ADMIN_USERNAME=${ADMIN_USERNAME:?ADMIN_USERNAME is required}",
-        "ADMIN_PASSWORD=${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}",
+        "AUTH_MODE=multi_user",
+        "POSTGRES_HOST=postgres",
+        "POSTGRES_PORT=5432",
+        "REDIS_URL=redis://redis:6379",
+        "tldw_production=${tldw_production:-false}",
+        "UVICORN_WORKERS=${UVICORN_WORKERS:-2}",
+        "LOG_LEVEL=${LOG_LEVEL:-info}",
     ):
         _require(key in env, f"multi-user app environment should include {key}")
+
+
+def test_multi_user_compose_uses_raw_env_file_for_app_and_postgres() -> None:
+    services = _compose("Dockerfiles/docker-compose.multi-user-postgres.yml")["services"]
+    expected = [
+        {
+            "path": "${TLDW_ENV_FILE:-../tldw_Server_API/Config_Files/.env}",
+            "required": True,
+            "format": "raw",
+        }
+    ]
+
+    _require_equal(services["app"].get("env_file"), expected, "app should load generated env as raw env_file")
+    _require_equal(
+        services["postgres"].get("env_file"),
+        expected,
+        "postgres should load generated env as raw env_file",
+    )
+
+
+def test_multi_user_compose_does_not_interpolate_secret_env_vars() -> None:
+    compose_text = Path("Dockerfiles/docker-compose.multi-user-postgres.yml").read_text(encoding="utf-8")
+
+    for forbidden in (
+        "${ADMIN_PASSWORD",
+        "${POSTGRES_PASSWORD",
+        "${JWT_SECRET_KEY",
+        "${SESSION_ENCRYPTION_KEY",
+        "${MCP_JWT_SECRET",
+        "${MCP_API_KEY_SALT",
+        "${BYOK_ENCRYPTION_KEY",
+    ):
+        _require(forbidden not in compose_text, f"compose should not interpolate secret {forbidden}")
 
 
 def test_multi_user_compose_requires_single_postgres_password_source() -> None:
     compose_path = Path("Dockerfiles/docker-compose.multi-user-postgres.yml")
     compose_text = compose_path.read_text(encoding="utf-8")
     compose = _compose(str(compose_path))
-    postgres_env = "\n".join(compose["services"]["postgres"]["environment"])
     app_env = "\n".join(compose["services"]["app"]["environment"])
 
     _require("TestPassword123!" not in compose_text, "public multi-user compose should not embed a known password")
@@ -210,12 +240,12 @@ def test_multi_user_compose_requires_single_postgres_password_source() -> None:
         "compose should not construct app DB URLs with raw POSTGRES_PASSWORD interpolation",
     )
     _require(
-        "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}" in postgres_env,
-        "postgres should require the shared POSTGRES_PASSWORD",
+        "POSTGRES_PASSWORD" not in app_env,
+        "app should receive POSTGRES_PASSWORD only through raw env_file",
     )
     _require(
-        "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}" in app_env,
-        "app should receive the shared POSTGRES_PASSWORD for runtime URL quoting",
+        "environment" not in compose["services"]["postgres"],
+        "postgres should receive POSTGRES_* only through raw env_file",
     )
 
 
@@ -255,7 +285,7 @@ def test_multi_user_compose_app_includes_redis_url() -> None:
     env = "\n".join(app["environment"])
 
     _require(
-        "REDIS_URL=${REDIS_URL:-redis://redis:6379}" in env,
+        "REDIS_URL=redis://redis:6379" in env,
         "multi-user app should point at internal Redis by default",
     )
 
@@ -311,6 +341,8 @@ def test_multi_user_entrypoint_derives_postgres_urls_with_runtime_quoting() -> N
     script = Path("Dockerfiles/entrypoints/tldw-app-first-run.sh").read_text(encoding="utf-8")
 
     for expected in (
+        "TLDW_DATABASE_URL_OVERRIDE",
+        "TLDW_JOBS_DB_URL_OVERRIDE",
         "from urllib.parse import quote",
         "POSTGRES_PASSWORD",
         "POSTGRES_HOST",
@@ -322,6 +354,36 @@ def test_multi_user_entrypoint_derives_postgres_urls_with_runtime_quoting() -> N
     _require(
         "quote(" in script,
         "entrypoint should URL-quote structured Postgres credentials before deriving DATABASE_URL",
+    )
+
+
+def test_multi_user_entrypoint_ignores_stale_env_database_url_when_structured_postgres_exists() -> None:
+    script = Path("Dockerfiles/entrypoints/tldw-app-first-run.sh").read_text(encoding="utf-8")
+
+    _require(
+        'elif [ -n "${POSTGRES_PASSWORD:-}" ]; then' in script,
+        "entrypoint should prefer structured Postgres credentials when POSTGRES_PASSWORD is present",
+    )
+    _require(
+        'DATABASE_URL="$TLDW_DATABASE_URL_OVERRIDE"' in script,
+        "entrypoint should expose an explicit advanced database URL override",
+    )
+    _require(
+        '[ -z "$incoming_database_url" ]' not in script,
+        "entrypoint should not let stale env-file DATABASE_URL block structured Postgres derivation",
+    )
+
+
+def test_multi_user_entrypoint_requires_postgres_or_explicit_database_override() -> None:
+    script = Path("Dockerfiles/entrypoints/tldw-app-first-run.sh").read_text(encoding="utf-8")
+
+    _require(
+        "ERROR: Multi-user mode requires POSTGRES_PASSWORD or TLDW_DATABASE_URL_OVERRIDE." in script,
+        "entrypoint should fail clearly instead of falling back to SQLite in multi-user mode",
+    )
+    _require(
+        "for the bundled docker-multi-postgres profile" in script,
+        "entrypoint should explain the bundled profile requirement",
     )
 
 
@@ -360,3 +422,65 @@ def test_multi_user_entrypoint_does_not_persist_derived_database_urls() -> None:
         '[ "$env_file_had_database_url" = "0" ]' not in script,
         "entrypoint should not let stale env-file DATABASE_URL block structured Postgres derivation",
     )
+
+
+def test_start_docker_multi_uses_raw_service_env_file_not_compose_env_file() -> None:
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+    start = makefile.index("\nstart-docker-multi:")
+    end = makefile.index("\nverify-docker-multi:", start)
+    target = makefile[start:end]
+
+    _require('--env-file "$(TLDW_ENV_FILE)"' not in target, "start-docker-multi should not use compose --env-file")
+    _require("Run: make setup-docker-multi" in target, "start-docker-multi should preflight missing env file")
+    _require(
+        'TLDW_ENV_FILE="$$TLDW_ENV_FILE_ABS" docker compose',
+        "start-docker-multi should pass an absolute TLDW_ENV_FILE path to compose",
+    )
+
+
+def test_multi_user_compose_raw_env_file_preserves_dollar_signs(tmp_path: Path) -> None:
+    docker = shutil.which("docker")
+    if docker is None:
+        pytest.skip("docker is not installed")
+    compose_version = subprocess.run(  # nosec B603
+        [docker, "compose", "version"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if compose_version.returncode != 0:
+        pytest.skip("docker compose is not available")
+
+    env_file = tmp_path / "compose.env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "AUTH_MODE=multi_user",
+                "POSTGRES_USER=tldw_user",
+                "POSTGRES_DB=tldw_users",
+                "POSTGRES_PASSWORD=abc$def:ghi/with#chars%",
+                "ADMIN_USERNAME=admin",
+                "ADMIN_PASSWORD=Admin$Dollar1!",
+                "JWT_SECRET_KEY=jwt_secret_key_for_compose_config_32_chars",
+                "SESSION_ENCRYPTION_KEY=session_secret_for_compose_config_32_chars",
+                "MCP_JWT_SECRET=mcp_jwt_secret_for_compose_config_32_chars",
+                "MCP_API_KEY_SALT=mcp_api_salt_for_compose_config_32_chars",
+                "BYOK_ENCRYPTION_KEY=byok_secret_for_compose_config_32_chars",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    env = {**os.environ, "TLDW_ENV_FILE": str(env_file)}
+
+    result = subprocess.run(  # nosec B603
+        [docker, "compose", "-f", "Dockerfiles/docker-compose.multi-user-postgres.yml", "config"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Admin$$Dollar1!" in result.stdout
+    assert "abc$$def:ghi/with#chars%" in result.stdout

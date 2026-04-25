@@ -12,6 +12,8 @@ incoming_auth_mode="${AUTH_MODE:-}"
 incoming_api_key="${SINGLE_USER_API_KEY:-}"
 incoming_database_url="${DATABASE_URL:-}"
 incoming_jobs_db_url="${JOBS_DB_URL:-}"
+incoming_database_url_override="${TLDW_DATABASE_URL_OVERRIDE:-}"
+incoming_jobs_db_url_override="${TLDW_JOBS_DB_URL_OVERRIDE:-}"
 
 generate_key() {
   if command -v openssl >/dev/null 2>&1; then
@@ -183,20 +185,49 @@ fi
 if [ -n "$incoming_jobs_db_url" ]; then
   JOBS_DB_URL="$incoming_jobs_db_url"
 fi
+if [ -n "$incoming_database_url_override" ]; then
+  TLDW_DATABASE_URL_OVERRIDE="$incoming_database_url_override"
+fi
+if [ -n "$incoming_jobs_db_url_override" ]; then
+  TLDW_JOBS_DB_URL_OVERRIDE="$incoming_jobs_db_url_override"
+fi
 
 AUTH_MODE="${AUTH_MODE:-single_user}"
 database_url_derived=0
 jobs_db_url_derived=0
-if [ "$AUTH_MODE" = "multi_user" ] && \
-  [ -z "$incoming_database_url" ] && \
-  [ -n "${POSTGRES_PASSWORD:-}" ]; then
-  DATABASE_URL="$(derive_postgres_database_url)"
-  database_url_derived=1
-fi
-DATABASE_URL="${DATABASE_URL:-sqlite:///./Databases/users.db}"
-if [ "$AUTH_MODE" = "multi_user" ] && [ -z "$incoming_jobs_db_url" ]; then
-  JOBS_DB_URL="$DATABASE_URL"
-  jobs_db_url_derived=1
+if [ "$AUTH_MODE" = "multi_user" ]; then
+  if [ -n "${TLDW_DATABASE_URL_OVERRIDE:-}" ]; then
+    DATABASE_URL="$TLDW_DATABASE_URL_OVERRIDE"
+  elif [ -n "${POSTGRES_PASSWORD:-}" ]; then
+    DATABASE_URL="$(derive_postgres_database_url)"
+    database_url_derived=1
+  elif [ -n "$incoming_database_url" ]; then
+    DATABASE_URL="$incoming_database_url"
+  else
+    echo "" >&2
+    echo "======================================================================" >&2
+    echo "  ERROR: Multi-user mode requires POSTGRES_PASSWORD or TLDW_DATABASE_URL_OVERRIDE." >&2
+    echo "" >&2
+    echo "  Set POSTGRES_PASSWORD for the bundled docker-multi-postgres profile," >&2
+    echo "  or set TLDW_DATABASE_URL_OVERRIDE for an external database." >&2
+    echo "======================================================================" >&2
+    echo "" >&2
+    exit 1
+  fi
+
+  if [ -n "${TLDW_JOBS_DB_URL_OVERRIDE:-}" ]; then
+    JOBS_DB_URL="$TLDW_JOBS_DB_URL_OVERRIDE"
+  elif [ "$database_url_derived" = "1" ]; then
+    JOBS_DB_URL="$DATABASE_URL"
+    jobs_db_url_derived=1
+  elif [ -n "$incoming_jobs_db_url" ]; then
+    JOBS_DB_URL="$incoming_jobs_db_url"
+  else
+    JOBS_DB_URL="$DATABASE_URL"
+    jobs_db_url_derived=1
+  fi
+else
+  DATABASE_URL="${DATABASE_URL:-sqlite:///./Databases/users.db}"
 fi
 export DATABASE_URL
 if [ -n "${JOBS_DB_URL:-}" ]; then

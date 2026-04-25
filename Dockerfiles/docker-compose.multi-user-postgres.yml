@@ -1,8 +1,13 @@
 # docker-compose.multi-user-postgres.yml for local multi-user tldw_server deployments.
 #
 # Usage (from repo root):
-#   docker compose --env-file tldw_Server_API/Config_Files/.env \
+#   TLDW_ENV_FILE="$PWD/tldw_Server_API/Config_Files/.env" docker compose \
 #     -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --build
+
+x-tldw-env-file: &tldw-env-file
+  path: ${TLDW_ENV_FILE:-../tldw_Server_API/Config_Files/.env}
+  required: true
+  format: raw
 
 services:
   app:
@@ -12,24 +17,13 @@ services:
     image: tldw-server:prod
     ports:
       - "127.0.0.1:8000:8000"
+    env_file:
+      - *tldw-env-file
     environment:
-      - "AUTH_MODE=${AUTH_MODE:-multi_user}"
-      - "DATABASE_URL=${DATABASE_URL:-}"
-      - "JOBS_DB_URL=${JOBS_DB_URL:-}"
-      - "POSTGRES_HOST=${POSTGRES_HOST:-postgres}"
-      - "POSTGRES_PORT=${POSTGRES_PORT:-5432}"
-      - "POSTGRES_USER=${POSTGRES_USER:-tldw_user}"
-      - "POSTGRES_DB=${POSTGRES_DB:-tldw_users}"
-      - "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
-      - "REDIS_URL=${REDIS_URL:-redis://redis:6379}"
-      - "JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}"
-      - "SESSION_ENCRYPTION_KEY=${SESSION_ENCRYPTION_KEY:?SESSION_ENCRYPTION_KEY is required}"
-      - "MCP_JWT_SECRET=${MCP_JWT_SECRET:?MCP_JWT_SECRET is required}"
-      - "MCP_API_KEY_SALT=${MCP_API_KEY_SALT:?MCP_API_KEY_SALT is required}"
-      - "BYOK_ENCRYPTION_KEY=${BYOK_ENCRYPTION_KEY:?BYOK_ENCRYPTION_KEY is required}"
-      - "ADMIN_USERNAME=${ADMIN_USERNAME:?ADMIN_USERNAME is required}"
-      - "ADMIN_PASSWORD=${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}"
-      - "ADMIN_EMAIL=${ADMIN_EMAIL:-}"
+      - "AUTH_MODE=multi_user"
+      - "POSTGRES_HOST=postgres"
+      - "POSTGRES_PORT=5432"
+      - "REDIS_URL=redis://redis:6379"
       - "tldw_production=${tldw_production:-false}"
       - "UVICORN_WORKERS=${UVICORN_WORKERS:-2}"
       - "LOG_LEVEL=${LOG_LEVEL:-info}"
@@ -50,10 +44,8 @@ services:
   postgres:
     image: postgres:18-bookworm
     restart: unless-stopped
-    environment:
-      - "POSTGRES_DB=${POSTGRES_DB:-tldw_users}"
-      - "POSTGRES_USER=${POSTGRES_USER:-tldw_user}"
-      - "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
+    env_file:
+      - *tldw-env-file
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
