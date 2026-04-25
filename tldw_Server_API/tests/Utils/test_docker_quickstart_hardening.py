@@ -63,15 +63,15 @@ def test_makefile_quickstart_docker_targets_use_opt_in_build_flag():
     _require("DOCKER_BUILD_FLAG" in text, "Expected DOCKER_BUILD_FLAG helper definition")
 
     quickstart_docker = _target_block(text, "quickstart-docker")
-    quickstart_webui = _target_block(text, "quickstart-docker-webui")
+    start_docker_single = _target_block(text, "start-docker-single")
 
     _require("up -d $(DOCKER_BUILD_FLAG)" in quickstart_docker, "Expected opt-in build flag in quickstart-docker")
     _require(
-        "up -d $(DOCKER_BUILD_FLAG)" in quickstart_webui,
-        "Expected opt-in build flag in quickstart-docker-webui",
+        "up -d $(DOCKER_BUILD_FLAG)" in start_docker_single,
+        "Expected opt-in build flag in start-docker-single",
     )
     _require("--build" not in quickstart_docker, "Expected no hardcoded --build in quickstart-docker target")
-    _require("--build" not in quickstart_webui, "Expected no hardcoded --build in quickstart-docker-webui target")
+    _require("--build" not in start_docker_single, "Expected no hardcoded --build in start-docker-single target")
 
 
 def test_api_dockerfile_avoids_expensive_copy_and_recursive_chown_layers():
