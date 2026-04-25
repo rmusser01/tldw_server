@@ -11,7 +11,6 @@ import inspect
 import json
 import os
 import time
-import types
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -73,7 +72,7 @@ from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
     rag_result_from_unified_search_result,
     rag_result_to_response,
 )
-from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import stream_rag_events
 from tldw_Server_API.app.core.config import get_config_value
 
 # Unified Pipeline
@@ -329,31 +328,6 @@ def _resolve_kanban_db_path(current_user: Optional[User], request_user_id: Optio
         return None
 
 
-def _normalize_documents_for_generation(docs: list[Any]) -> list[Document]:
-    normalized: list[Document] = []
-    for doc in docs or []:
-        if isinstance(doc, Document):
-            normalized.append(doc)
-            continue
-        if isinstance(doc, dict):
-            metadata = doc.get("metadata") or {}
-            source_val = metadata.get("source")
-            source = DataSource.MEDIA_DB
-            if source_val is not None:
-                try:
-                    source = DataSource(str(source_val))
-                except (ValueError, TypeError):
-                    source = DataSource.MEDIA_DB
-            normalized.append(
-                Document(
-                    id=str(doc.get("id")),
-                    content=str(doc.get("content") or ""),
-                    metadata=metadata if isinstance(metadata, dict) else {},
-                    source=source,
-                    score=float(doc.get("score") or 0.0),
-                )
-            )
-    return normalized
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.RAG.rag_service.analytics_system import UnifiedFeedbackSystem
 
@@ -1747,266 +1721,45 @@ async def unified_search_stream_endpoint(
         chacha_db=chacha_db,
     )
     resolved_request = stream_bundle.resolved_request
-    shared_payload = dict(resolved_request.payload)
     kanban_db_path = _resolve_kanban_db_path(current_user, resolved_request.user_id)
-    shared_db_paths["kanban_db_path"] = kanban_db_path
     stream_pipeline_kwargs = dict(stream_bundle.pipeline_kwargs)
     stream_pipeline_kwargs["kanban_db_path"] = kanban_db_path
     stream_pipeline_kwargs["resolved_request"] = resolved_request
     stream_pipeline_kwargs["retrieval_plan"] = stream_bundle.retrieval_plan
+    request_defaults = {
+        "claims_concurrency": request.claims_concurrency,
+        "claims_max": request.claims_max,
+        "claims_top_k": request.claims_top_k,
+        "debug_mode": request.debug_mode,
+        "enable_claims": request.enable_claims,
+        "explain_only": getattr(request, "explain_only", False),
+        "fts_level": request.fts_level,
+        "generation_model": request.generation_model,
+        "generation_prompt": request.generation_prompt,
+        "generation_provider": request.generation_provider,
+        "hybrid_alpha": request.hybrid_alpha,
+        "max_generation_tokens": request.max_generation_tokens,
+        "top_k": request.top_k,
+    }
+    stream_context = {
+        **stream_pipeline_kwargs,
+        "build_agentic_execution_context": build_agentic_execution_context,
+        "generate_streaming_response": generate_streaming_response,
+        "request_defaults": request_defaults,
+        "sync_retriever_overrides": _sync_retriever_overrides_to_pipeline,
+    }
 
-    async def event_stream():
-        try:
-            docs = []
+    async def event_generator():
+        async for event in stream_rag_events(
+            resolved_request=resolved_request,
+            retrieval_plan=stream_bundle.retrieval_plan,
+            standard_pipeline=unified_rag_pipeline,
+            agentic_pipeline=agentic_rag_pipeline,
+            extra_context=stream_context,
+        ):
+            yield json.dumps(event) + "\n"
 
-            def _normalize_research_event(event: Any) -> dict[str, Any]:
-                event_type_raw = getattr(event, "event_type", "research_update")
-                event_type = str(event_type_raw) if event_type_raw is not None else "research_update"
-                if not event_type.startswith("research_"):
-                    event_type = f"research_{event_type}"
-                data = getattr(event, "data", {})
-                if not isinstance(data, dict):
-                    data = {"value": data}
-                return {"type": event_type, "data": data}
-
-            async def _run_streaming_retrieval(
-                *,
-                progress_queue: Optional[asyncio.Queue[Any]] = None,
-                done_marker: Any = None,
-            ) -> None:
-                nonlocal docs
-                try:
-                    if any(shared_db_paths.values()) or media_db is not None or chacha_db is not None:
-                        _sync_retriever_overrides_to_pipeline()
-                        kwargs = dict(stream_pipeline_kwargs)
-                        kwargs["enable_generation"] = False
-
-                        if (
-                            progress_queue is not None
-                            and bool(shared_payload.get("enable_research_progress", False))
-                        ):
-                            async def _stream_research_progress(event: Any) -> None:
-                                await progress_queue.put(_normalize_research_event(event))
-
-                            kwargs["research_progress_callback"] = _stream_research_progress
-                            kwargs["enable_research_progress"] = True
-
-                        retrieval_result = await unified_rag_pipeline(**kwargs)
-                        docs = _normalize_documents_for_generation(
-                            getattr(retrieval_result, "documents", []) or []
-                        )
-                except Exception:  # noqa: BLE001 - streaming prefetch should be best-effort
-                    docs = []
-                finally:
-                    if progress_queue is not None and done_marker is not None:
-                        await progress_queue.put(done_marker)
-
-            if bool(shared_payload.get("enable_research_progress", False)) and (
-                any(shared_db_paths.values()) or media_db is not None or chacha_db is not None
-            ):
-                progress_queue: asyncio.Queue[Any] = asyncio.Queue()
-                done_marker = object()
-                retrieval_task = asyncio.create_task(
-                    _run_streaming_retrieval(
-                        progress_queue=progress_queue,
-                        done_marker=done_marker,
-                    )
-                )
-                try:
-                    while True:
-                        queued = await progress_queue.get()
-                        if queued is done_marker:
-                            break
-                        yield json.dumps(queued) + "\n"
-                finally:
-                    if not retrieval_task.done():
-                        retrieval_task.cancel()
-                        try:
-                            await retrieval_task
-                        except asyncio.CancelledError:
-                            pass
-                try:
-                    await retrieval_task
-                except asyncio.CancelledError:
-                    pass
-            else:
-                await _run_streaming_retrieval()
-
-            # If strategy=agentic, assemble ephemeral chunk and emit plan + spans first
-            strategy_value = str(resolved_request.strategy).strip().lower()
-            if strategy_value == "agentic":
-                try:
-                    agentic_resolved_request = stream_bundle.resolved_request
-                    retrieval_plan = stream_bundle.retrieval_plan
-                    agentic_payload, a_cfg = build_agentic_execution_context(
-                        resolved_request=agentic_resolved_request,
-                        retrieval_plan=retrieval_plan,
-                        payload_override=shared_payload,
-                    )
-                    ares = await agentic_rag_pipeline(
-                        query=agentic_resolved_request.query,
-                        sources=list(retrieval_plan.sources),
-                        media_db=media_db,
-                        chacha_db=chacha_db,
-                        media_db_path=(media_db.db_path if media_db else None),
-                        notes_db_path=(chacha_db.db_path if chacha_db else None),
-                        character_db_path=(chacha_db.db_path if chacha_db else None),
-                        kanban_db_path=kanban_db_path,
-                        search_mode=retrieval_plan.search_mode,
-                        fts_level=agentic_payload.get("fts_level", request.fts_level),
-                        hybrid_alpha=agentic_payload.get("hybrid_alpha", request.hybrid_alpha),
-                        top_k=retrieval_plan.top_k,
-                        min_score=retrieval_plan.min_score,
-                        index_namespace=retrieval_plan.index_namespace,
-                        agentic=a_cfg,
-                        enable_generation=False,
-                        enable_citations=False,
-                        include_chunk_citations=False,
-                        debug_mode=bool(agentic_payload.get("debug_mode", request.debug_mode)),
-                        explain_only=bool(agentic_payload.get("explain_only", getattr(request, "explain_only", False))),
-                        resolved_request=agentic_resolved_request,
-                        retrieval_plan=retrieval_plan,
-                    )
-                    # Emit plan + spans
-                    plan = ares.metadata.get('agentic_metrics', {}) if isinstance(ares.metadata, dict) else {}
-                    yield json.dumps({"type": "plan", "plan": plan}) + "\n"
-                    prov = ares.metadata.get('provenance') if isinstance(ares.metadata, dict) else None
-                    if prov:
-                        yield json.dumps({"type": "spans", "count": len(prov), "provenance": prov[:50]}) + "\n"
-                    # Use synthetic chunk as the sole document for streaming generation
-                    docs = _normalize_documents_for_generation(ares.documents)
-                except Exception as agentic_stream_error:  # noqa: BLE001 - agentic streaming should be best-effort
-                    logger.debug("Agentic streaming prefetch failed; continuing standard stream", exc_info=agentic_stream_error)
-
-            # Emit initial contexts (top-k with minimal fields) + a safe rationale plan (standard path)
-            try:
-                top_k_requested = shared_payload.get("top_k", request.top_k or 10)
-                try:
-                    top_k_limit = min(10, int(top_k_requested))
-                except (TypeError, ValueError):
-                    top_k_limit = min(10, (request.top_k or 10))
-
-                top_contexts = []
-                for doc in (docs or [])[:top_k_limit]:
-                    md = getattr(doc, 'metadata', None) or (doc.get('metadata') if isinstance(doc, dict) else {}) or {}
-                    top_contexts.append({
-                        "id": getattr(doc, 'id', doc.get('id') if isinstance(doc, dict) else None),
-                        "title": (md.get('title') if isinstance(md, dict) else None),
-                        "score": float(getattr(doc, 'score', md.get('score', 0.0) if isinstance(md, dict) else 0.0) or 0.0),
-                        "url": md.get('url') if isinstance(md, dict) else None,
-                        "source": md.get('source') if isinstance(md, dict) else None,
-                    })
-                # Lightweight "why these sources" summary
-                def _safe_float(x):
-                    try:
-                        return float(x)
-                    except (TypeError, ValueError):
-                        return 0.0
-                scores = [_safe_float(getattr(d, 'score', (getattr(d, 'metadata', {}) or {}).get('score', 0.0))) for d in (docs or [])]
-                topicality = 0.0
-                if scores:
-                    smin, smax = min(scores), max(scores)
-                    topicality = (sum((s - smin) / (smax - smin) if smax > smin else 1.0 for s in scores) / len(scores)) if scores else 0.0
-                why = {
-                    "topicality": round(float(topicality), 4),
-                    "diversity": None,  # full computation available in non-streaming pipeline metadata
-                    "freshness": None,
-                }
-                yield json.dumps({"type": "contexts", "contexts": top_contexts, "why": why}) + "\n"
-                # Safe partial rationale (no chain leakage)
-                rationale = {
-                    "plan": [
-                        "Gather top-k contexts",
-                        f"Rerank using strategy={shared_payload.get('reranking_strategy', 'flashrank')}",
-                        "Ground claims from sources",
-                        "Synthesize final answer",
-                    ]
-                }
-                yield json.dumps({"type": "reasoning", **rationale}) + "\n"
-            except Exception as rationale_error:  # noqa: BLE001 - safe rationale should never break stream
-                logger.debug("Streaming rationale payload failed; continuing without rationale", exc_info=rationale_error)
-
-            # Minimal context for generation
-            try:
-                from tldw_Server_API.app.core.config import load_and_log_configs  # type: ignore
-                cfg = load_and_log_configs() or {}
-            except Exception:  # noqa: BLE001 - config load is best-effort in streaming path
-                cfg = {}
-
-            import os as _os
-            request_provider_raw = shared_payload.get("generation_provider")
-            request_provider = request_provider_raw if isinstance(request_provider_raw, str) else None
-            env_provider = _os.getenv("RAG_DEFAULT_LLM_PROVIDER")
-            provider_value = request_provider if request_provider is not None else (
-                env_provider if env_provider is not None else cfg.get("RAG_DEFAULT_LLM_PROVIDER")
-            )
-            provider = (
-                provider_value.strip()
-                if isinstance(provider_value, str) and provider_value.strip()
-                else "openai"
-            )
-
-            model_value_raw = shared_payload.get("generation_model")
-            model_value = model_value_raw if isinstance(model_value_raw, str) else None
-            if not model_value:
-                env_model = _os.getenv("RAG_DEFAULT_LLM_MODEL")
-                model_value = env_model if env_model is not None else cfg.get("RAG_DEFAULT_LLM_MODEL")
-            model = (
-                model_value.strip()
-                if isinstance(model_value, str) and model_value.strip()
-                else "gpt-4o-mini"
-            )
-
-            max_tokens = 500
-            if shared_payload.get("max_generation_tokens") is not None:
-                try:
-                    max_tokens = int(shared_payload.get("max_generation_tokens"))
-                except (TypeError, ValueError):
-                    max_tokens = 500
-
-            generation_config = {
-                "streaming": True,
-                "provider": provider,
-                "model": model,
-                "max_tokens": max_tokens,
-            }
-            prompt_template = shared_payload.get("generation_prompt")
-            if isinstance(prompt_template, str) and prompt_template:
-                generation_config["prompt_template"] = prompt_template
-
-            context = types.SimpleNamespace()
-            context.documents = docs
-            context.query = resolved_request.query
-            context.config = {"generation": generation_config}
-            context.metadata = {}
-
-            # Initialize streaming generator with claims overlay enabled per request
-            await generate_streaming_response(
-                context,
-                enable_claims=bool(shared_payload.get("enable_claims", request.enable_claims)),
-                claims_top_k=shared_payload.get("claims_top_k", request.claims_top_k),
-                claims_max=shared_payload.get("claims_max", request.claims_max),
-                claims_concurrency=shared_payload.get("claims_concurrency", request.claims_concurrency),
-            )
-
-            last_overlay = None
-            async for chunk in context.stream_generator:
-                # Emit text chunks as NDJSON
-                yield json.dumps({"type": "delta", "text": chunk}) + "\n"
-                overlay = context.metadata.get("claims_overlay")
-                if overlay and overlay != last_overlay:
-                    yield json.dumps({"type": "claims_overlay", **overlay}) + "\n"
-                    last_overlay = overlay
-
-            # Final payload
-            final_overlay = context.metadata.get("claims_overlay")
-            if final_overlay:
-                yield json.dumps({"type": "final_claims", **final_overlay}) + "\n"
-
-        except Exception:  # noqa: BLE001 - streaming should surface error payload instead of crashing
-            yield json.dumps({"type": "error", "message": "Search failed due to an internal error."}) + "\n"
-
-    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 
 @router.get(

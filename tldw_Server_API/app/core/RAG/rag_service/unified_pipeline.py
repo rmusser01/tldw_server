@@ -1164,6 +1164,34 @@ def _sources_to_data_sources(sources: list[str]) -> list[DataSource]:
     return data_sources
 
 
+def normalize_documents_for_generation(docs: list[Any]) -> list[Document]:
+    """Normalize retrieval outputs into generation-compatible documents."""
+    normalized: list[Document] = []
+    for doc in docs or []:
+        if isinstance(doc, Document):
+            normalized.append(doc)
+            continue
+        if isinstance(doc, dict):
+            metadata = doc.get("metadata") or {}
+            source_val = metadata.get("source") if isinstance(metadata, dict) else None
+            source = DataSource.MEDIA_DB
+            if source_val is not None:
+                try:
+                    source = DataSource(str(source_val))
+                except (ValueError, TypeError):
+                    source = DataSource.MEDIA_DB
+            normalized.append(
+                Document(
+                    id=str(doc.get("id")),
+                    content=str(doc.get("content") or ""),
+                    metadata=metadata if isinstance(metadata, dict) else {},
+                    source=source,
+                    score=float(doc.get("score") or 0.0),
+                )
+            )
+    return normalized
+
+
 def _resolve_sqlite_rag_db_path(
     explicit_path: Optional[str],
     *,

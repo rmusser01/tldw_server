@@ -22,6 +22,16 @@ def test_standard_endpoint_does_not_import_core_evidence_coordinator():
     assert "post_retrieval_coordinator" not in source  # nosec B101
 
 
+def test_streaming_endpoint_delegates_event_generation_to_core():
+    source = inspect.getsource(rag_unified)
+    stream_source = source[source.find("async def unified_search_stream_endpoint") :]
+
+    assert "stream_rag_events" in source  # nosec B101
+    assert "yield json.dumps" in source  # nosec B101
+    assert "unified_rag_pipeline(" not in stream_source  # nosec B101
+    assert "agentic_rag_pipeline(" not in stream_source  # nosec B101
+
+
 def test_rag_endpoint_no_longer_exports_transitional_shim_helpers() -> None:
     shim_names = (
         "_apply_search_agent_defaults",
