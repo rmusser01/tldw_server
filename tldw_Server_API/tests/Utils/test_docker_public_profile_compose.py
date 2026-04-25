@@ -438,19 +438,29 @@ def test_entrypoint_loads_raw_env_file_values_without_dotenv_rewriting(tmp_path:
 
 
 def _entrypoint_process_env(env_file: Path, marker_dir: Path) -> dict[str, str]:
-    env = {**os.environ}
-    for key in (
-        "AUTH_MODE",
-        "SINGLE_USER_API_KEY",
-        "DATABASE_URL",
-        "JOBS_DB_URL",
-        "TLDW_DATABASE_URL_OVERRIDE",
-        "TLDW_JOBS_DB_URL_OVERRIDE",
-    ):
-        env.pop(key, None)
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin"),
+    }
+    for key in ("PYTHONPATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL"):
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
     env["TLDW_ENV_FILE"] = str(env_file)
     env["TLDW_AUTH_MARKER_DIR"] = str(marker_dir)
     return env
+
+
+def test_entrypoint_process_env_does_not_copy_host_environment(tmp_path: Path, monkeypatch) -> None:
+    env_file = tmp_path / ".env"
+    marker_dir = tmp_path / "markers"
+    marker_dir.mkdir()
+    monkeypatch.setenv("ENTRYPOINT_TEST_HOST_SECRET", "must-not-leak")
+
+    env = _entrypoint_process_env(env_file, marker_dir)
+
+    assert "ENTRYPOINT_TEST_HOST_SECRET" not in env
+    assert env["TLDW_ENV_FILE"] == str(env_file)
+    assert env["TLDW_AUTH_MARKER_DIR"] == str(marker_dir)
 
 
 def _compose_process_env(env_file: Path, marker_dir: Path, extra: dict[str, str] | None = None) -> dict[str, str]:
