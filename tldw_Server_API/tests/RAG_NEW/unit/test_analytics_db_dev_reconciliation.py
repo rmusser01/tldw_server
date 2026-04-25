@@ -56,7 +56,6 @@ def test_analytics_database_refreshes_shared_content_backend(monkeypatch, tmp_pa
 
     db = analytics_db.AnalyticsDatabase(db_path=str(tmp_path / "analytics.db"))
 
-    assert db.backend is first_backend
     assert first_backend.bootstrap_calls == 1
     assert db.backend is second_backend
     assert second_backend.bootstrap_calls == 1
