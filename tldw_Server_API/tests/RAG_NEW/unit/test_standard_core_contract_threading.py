@@ -196,6 +196,41 @@ async def test_unified_pipeline_coordinates_retrieval_only_result(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_unified_pipeline_coordinates_cache_hit_generation_enabled(monkeypatch):
+    resolved = _resolved_request()
+    plan = _retrieval_plan()
+
+    class FakeCache:
+        def get(self, query):  # noqa: ANN001
+            return {
+                "answer": "cached answer",
+                "documents": [{"id": "cached-doc", "content": "cached evidence"}],
+                "cached": True,
+            }
+
+    monkeypatch.setattr(unified_pipeline, "SemanticCache", lambda *args, **kwargs: FakeCache())
+    monkeypatch.setattr(unified_pipeline, "AdaptiveCache", None)
+    monkeypatch.setattr(unified_pipeline, "get_shared_cache", None)
+
+    result = await unified_pipeline.unified_rag_pipeline(
+        query=resolved.query,
+        sources=list(plan.sources),
+        top_k=plan.top_k,
+        search_mode=plan.search_mode,
+        enable_generation=True,
+        enable_cache=True,
+        adaptive_cache=False,
+        enable_reranking=False,
+        resolved_request=resolved,
+        retrieval_plan=plan,
+    )
+
+    assert result.cache_hit is True
+    assert result.generated_answer == "cached answer"
+    assert result.metadata["retrieval_plan"]["top_k"] == plan.top_k
+
+
+@pytest.mark.asyncio
 async def test_unified_pipeline_threads_effective_query_to_generation(monkeypatch):
     resolved = _resolved_request()
     plan = _retrieval_plan()

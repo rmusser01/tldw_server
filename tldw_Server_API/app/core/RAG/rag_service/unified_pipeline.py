@@ -1768,6 +1768,7 @@ async def unified_rag_pipeline(
         query=query,
         metadata={"original_query": query}
     )
+    standard_evidence_coordinated = False
     claims_payload = None
     factuality_payload = None
     # Merge inbound metadata if provided (API pattern)
@@ -5212,6 +5213,7 @@ async def unified_rag_pipeline(
                 resolved_request,
                 retrieval_plan=retrieval_plan,
             )
+            standard_evidence_coordinated = True
             result.documents = list(retrieval_only_result.documents)
             result.metadata.update(dict(retrieval_only_result.metadata or {}))
 
@@ -5444,6 +5446,7 @@ async def unified_rag_pipeline(
                             resolved_request,
                             retrieval_plan=retrieval_plan,
                         )
+                        standard_evidence_coordinated = True
                         result.generated_answer = generation_result.generated_answer
                         result.metadata.update(dict(generation_result.metadata or {}))
                         result.metadata["chunk_citations"] = list(generation_result.chunk_citations or [])
@@ -6733,6 +6736,13 @@ async def unified_rag_pipeline(
             logger.debug(f"Cache hit: {result.cache_hit}")
             logger.debug(f"Timings: {result.timings}")
             logger.debug(f"Errors: {result.errors}")
+
+    if not standard_evidence_coordinated:
+        result = coordinate_standard_result_evidence(
+            result,
+            resolved_request,
+            retrieval_plan=retrieval_plan,
+        )
 
     # Convert to Pydantic response
     try:
