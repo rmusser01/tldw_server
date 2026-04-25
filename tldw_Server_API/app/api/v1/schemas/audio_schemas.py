@@ -279,7 +279,8 @@ class OpenAITranscriptionRequest(BaseModel):
     model: Optional[str] = Field(
         default=None,
         description=(
-            "ID of the model to use. Options: whisper-1, parakeet, canary, qwen2audio. "
+            "ID of the model to use. Options: parakeet-tdt-0.6b-v3-onnx, "
+            "parakeet-onnx, whisper-1, parakeet, canary, qwen2audio. "
             "Defaults to the configured STT provider when omitted."
         ),
     )

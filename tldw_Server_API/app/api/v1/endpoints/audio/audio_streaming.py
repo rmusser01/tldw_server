@@ -496,7 +496,7 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
     Returns:
         tuple[str, str, str]: (model, variant, whisper_model_size)
     """
-    default_model_id = "parakeet-onnx"
+    default_model_id = "parakeet-tdt-0.6b-v3-onnx"
     default_variant = "standard"
     default_whisper_model_size = "distil-large-v3"
 
@@ -539,7 +539,8 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
             model = provider_name
         else:
             logger.warning(
-                "Unsupported streaming default model '{}'; falling back to parakeet-onnx".format(default_model_id)
+                "Unsupported streaming default model '{}'; falling back to parakeet-tdt-0.6b-v3-onnx"
+                .format(default_model_id)
             )
             model = "parakeet"
             resolved_variant = "onnx"
@@ -551,7 +552,7 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
             variant = candidate_variant
     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(
-            "Could not resolve configured streaming model '{}'; falling back to parakeet-onnx. Error: {}"
+            "Could not resolve configured streaming model '{}'; falling back to parakeet-tdt-0.6b-v3-onnx. Error: {}"
             .format(default_model_id, exc)
         )
         model = "parakeet"
@@ -3657,7 +3658,7 @@ async def streaming_status():
     Returns:
         StreamingStatusResponse with the following keys:
           - `status` (str): "available" if at least one streaming model is present, "unavailable" otherwise, or "error" on failure.
-          - `available_models` (list[str]): Names of detected streaming model variants (e.g., "parakeet-mlx", "parakeet-standard", "parakeet-onnx").
+          - `available_models` (list[str]): Names of detected streaming model variants (e.g., "parakeet-mlx", "parakeet-standard", "parakeet-tdt-0.6b-v3-onnx").
           - `websocket_endpoint` (str): URL path of the streaming transcription WebSocket.
           - `supported_features` (dict): Feature flags indicating supported streaming capabilities (boolean values).
     """
@@ -3683,7 +3684,7 @@ async def streaming_status():
         if _importlib_util.find_spec("onnxruntime") and _importlib_util.find_spec(
             "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX"
         ):
-            available_models.append("parakeet-onnx")
+            available_models.extend(["parakeet-tdt-0.6b-v3-onnx", "parakeet-onnx"])
 
         return {
             "status": "available" if available_models else "unavailable",

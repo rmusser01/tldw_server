@@ -3995,19 +3995,19 @@ def load_and_log_configs():
             config_parser_object.get(
                 'STT-Settings',
                 'default_batch_transcription_model',
-                fallback='parakeet-onnx',
+                fallback='parakeet-tdt-0.6b-v3-onnx',
             ).strip()
-            or 'parakeet-onnx'
+            or 'parakeet-tdt-0.6b-v3-onnx'
         )
         default_streaming_transcription_model = (
             config_parser_object.get(
                 'STT-Settings',
                 'default_streaming_transcription_model',
-                fallback='parakeet-onnx',
+                fallback='parakeet-tdt-0.6b-v3-onnx',
             ).strip()
-            or 'parakeet-onnx'
+            or 'parakeet-tdt-0.6b-v3-onnx'
         )
-        nemo_model_variant = config_parser_object.get('STT-Settings', 'nemo_model_variant', fallback='standard')
+        nemo_model_variant = config_parser_object.get('STT-Settings', 'nemo_model_variant', fallback='onnx')
         nemo_device = config_parser_object.get('STT-Settings', 'nemo_device', fallback='cuda')
         nemo_cache_dir = config_parser_object.get('STT-Settings', 'nemo_cache_dir', fallback='./models/nemo')
         # STT custom vocabulary (optional)

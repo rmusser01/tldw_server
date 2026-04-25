@@ -17,8 +17,8 @@ Important: the stock Docker quickstart is not a turnkey GPU-enabled audio profil
 
 | Hardware | Recommended STT | Fallback STT | Recommended TTS | Why |
 | --- | --- | --- | --- | --- |
-| NVIDIA | faster-whisper | `parakeet-onnx` | `supertonic` | best first-run accelerated STT path in current repo, with a simpler local TTS path |
-| Apple Silicon | `parakeet-mlx` | `parakeet-onnx` | `supertonic` | makes MLX the primary speech acceleration path while keeping TTS local-first |
+| NVIDIA | faster-whisper | `parakeet-tdt-0.6b-v3-onnx` | `supertonic` | best first-run accelerated STT path in current repo, with a simpler local TTS path |
+| Apple Silicon | `parakeet-mlx` | `parakeet-tdt-0.6b-v3-onnx` | `supertonic` | makes MLX the primary speech acceleration path while keeping TTS local-first |
 
 Alternatives:
 
@@ -27,7 +27,7 @@ Alternatives:
 
 Important current-repo realities:
 
-- current config defaults still ship with explicit STT defaults of `parakeet-onnx`
+- current config defaults still ship with explicit STT defaults of `parakeet-tdt-0.6b-v3-onnx`; the shorter `parakeet-onnx` alias remains supported for older configs
 - current `/setup` bundle docs may recommend a different first-run STT path for some hardware classes
 - Stock Docker CPU/default audio works with bundled dependencies, but the stock Docker profile is not a ready-made GPU-accelerated audio path. Host-side config or model edits require a rebuild, `Dockerfiles/docker-compose.host-storage.yml`, or a custom image path.
 
@@ -187,7 +187,7 @@ Notes:
 
 - `whisper-1` is the simplest OpenAI-compatible starting point and maps to the faster-whisper Whisper path.
 - If your GPU is smaller and `whisper-1` is too heavy, switch both defaults to a smaller faster-whisper model such as `medium`.
-- If accelerated Whisper setup becomes unstable, fall back to `parakeet-onnx`.
+- If accelerated Whisper setup becomes unstable, fall back to `parakeet-tdt-0.6b-v3-onnx`.
 
 ## Apple Silicon: `parakeet-mlx` first
 
@@ -207,14 +207,14 @@ default_transcriber = parakeet
 nemo_model_variant = mlx
 ```
 
-## Accelerated fallback: `parakeet-onnx`
+## Accelerated fallback: `parakeet-tdt-0.6b-v3-onnx`
 
 If your accelerated path is not stable yet, use:
 
 ```ini
 [STT-Settings]
-default_batch_transcription_model = parakeet-onnx
-default_streaming_transcription_model = parakeet-onnx
+default_batch_transcription_model = parakeet-tdt-0.6b-v3-onnx
+default_streaming_transcription_model = parakeet-tdt-0.6b-v3-onnx
 default_transcriber = parakeet
 nemo_model_variant = onnx
 ```
@@ -404,7 +404,7 @@ Treat it as the advanced upgrade path, not the baseline.
 
 - verify `nvidia-smi` on the host first
 - keep `whisper-1` only if your card can handle it; otherwise switch to `medium`
-- if the accelerated Whisper path is still unstable, switch to `parakeet-onnx` and get speech working first
+- if the accelerated Whisper path is still unstable, switch to `parakeet-tdt-0.6b-v3-onnx` and get speech working first
 
 ### Apple Silicon path fails on `parakeet-mlx`
 
@@ -415,7 +415,7 @@ pip install -e '.[STT_Parakeet_MLX]'
 ```
 
 - verify the config really says `parakeet-mlx`
-- if MLX still does not initialize, fall back to `parakeet-onnx`
+- if MLX still does not initialize, fall back to `parakeet-tdt-0.6b-v3-onnx`
 
 ### The server is using the wrong STT model
 

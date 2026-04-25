@@ -20,13 +20,13 @@ For a local-first CPU setup in the current repo:
 
 | Goal | STT | TTS | Why |
 | --- | --- | --- | --- |
-| Recommended first local stack | `parakeet-onnx` | `supertonic` | Keeps the stack local-first and avoids mandatory voice-cloning input on every TTS request |
-| If you need local voice cloning immediately | `parakeet-onnx` | `pocket_tts` | Still local-first, but every request needs reference audio |
-| Better but more demanding | `parakeet-onnx` or `faster-whisper` | `qwen3_tts` | Strong upgrade path after the basic stack already works |
+| Recommended first local stack | `parakeet-tdt-0.6b-v3-onnx` | `supertonic` | Keeps the stack local-first and avoids mandatory voice-cloning input on every TTS request |
+| If you need local voice cloning immediately | `parakeet-tdt-0.6b-v3-onnx` | `pocket_tts` | Still local-first, but every request needs reference audio |
+| Better but more demanding | `parakeet-tdt-0.6b-v3-onnx` or `faster-whisper` | `qwen3_tts` | Strong upgrade path after the basic stack already works |
 
 Important current-repo realities:
 
-- The shipped explicit STT defaults are currently `parakeet-onnx` for batch and streaming.
+- The shipped explicit STT defaults are currently `parakeet-tdt-0.6b-v3-onnx` for batch and streaming. The shorter `parakeet-onnx` alias remains supported for older configs.
 - The current `/setup` audio bundle docs still describe a different first-run path in some places.
 - Stock Docker CPU/default audio works with bundled dependencies. Host-side config or model edits are not visible inside the container until you rebuild, use `Dockerfiles/docker-compose.host-storage.yml`, or build a custom image path.
 
@@ -169,8 +169,8 @@ Edit [config.txt](../../../tldw_Server_API/Config_Files/config.txt) and make the
 
 ```ini
 [STT-Settings]
-default_batch_transcription_model = parakeet-onnx
-default_streaming_transcription_model = parakeet-onnx
+default_batch_transcription_model = parakeet-tdt-0.6b-v3-onnx
+default_streaming_transcription_model = parakeet-tdt-0.6b-v3-onnx
 default_transcriber = parakeet
 nemo_model_variant = onnx
 ```
@@ -341,14 +341,14 @@ curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/speech \
 ### 4D. Confirm STT health
 
 ```bash
-curl -sS "http://127.0.0.1:8000/api/v1/audio/transcriptions/health?model=parakeet-onnx" \
+curl -sS "http://127.0.0.1:8000/api/v1/audio/transcriptions/health?model=parakeet-tdt-0.6b-v3-onnx" \
   "${AUTH_HEADER[@]}"
 ```
 
 What you want to see:
 
 - `"provider": "parakeet"`
-- `"alias": "parakeet-onnx"`
+- `"alias": "parakeet-tdt-0.6b-v3-onnx"` or `"alias": "parakeet-onnx"`
 - `"usable": true` or `"available": true`
 
 ### 4E. Transcribe the generated audio back through STT
@@ -357,7 +357,7 @@ What you want to see:
 curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/transcriptions \
   "${AUTH_HEADER[@]}" \
   -F "file=@cpu_audio_smoke.wav" \
-  -F "model=parakeet-onnx"
+  -F "model=parakeet-tdt-0.6b-v3-onnx"
 ```
 
 Success means:
@@ -415,7 +415,7 @@ Treat it as a second-step upgrade, not the first-run baseline.
 ### STT health shows the wrong model/provider
 
 - re-open [config.txt](../../../tldw_Server_API/Config_Files/config.txt)
-- make sure both `default_batch_transcription_model` and `default_streaming_transcription_model` are set to `parakeet-onnx`
+- make sure both `default_batch_transcription_model` and `default_streaming_transcription_model` are set to `parakeet-tdt-0.6b-v3-onnx`
 - make sure `default_transcriber = parakeet`
 - restart the server
 
@@ -437,7 +437,7 @@ Use `/setup`, accept the current recommended audio bundle, and verify speech fir
 
 Then come back to this guide if you want to move from the bundle defaults to:
 
-- `parakeet-onnx`
+- `parakeet-tdt-0.6b-v3-onnx` (`parakeet-onnx` remains accepted as a legacy alias)
 - `supertonic`
 - `pocket_tts`
 - `qwen3_tts`

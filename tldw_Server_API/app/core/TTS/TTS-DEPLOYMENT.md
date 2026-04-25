@@ -135,8 +135,9 @@ api_token = your-secure-token-here
 
 [STT-Settings]
 # For transcription services
-whisper_model = large-v3
-nemo_model_variant = standard  # For Parakeet/Canary
+default_batch_transcription_model = parakeet-tdt-0.6b-v3-onnx
+default_streaming_transcription_model = parakeet-tdt-0.6b-v3-onnx
+nemo_model_variant = onnx  # For Parakeet ONNX
 enable_mlx = true  # For Apple Silicon acceleration
 ```
 
