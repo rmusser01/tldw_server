@@ -73,6 +73,10 @@ def test_setup_targets_delegate_to_tldw_setup_profiles_and_setup_venv() -> None:
     _require("$(PYTHON) -m venv $(SETUP_VENV_DIR)" in setup_wizard_tools, "Expected setup venv creation")
     _require("typer>=0.12.0" in setup_wizard_tools, "Expected wizard runtime dependency install")
     _require("httpx>=0.24.0" in setup_wizard_tools, "Expected wizard verify dependency install")
+    _require(
+        "cryptography>=41.0.0" in setup_wizard_tools,
+        "Expected wizard profile encryption dependency install",
+    )
 
     expected_profiles = {
         "setup-docker-single": "docker-single-webui",
@@ -115,6 +119,62 @@ def test_quickstart_install_is_install_only_and_does_not_start_local_server() ->
         "quickstart-install should not chain into quickstart-local",
     )
     _require("uvicorn" not in quickstart_install, "quickstart-install should not start uvicorn")
+
+
+def test_quickstart_local_installs_before_setup_and_start() -> None:
+    """Local quickstart should be runnable from a clean checkout."""
+    text = _read_makefile()
+    quickstart_local = _target_block(text, "quickstart-local")
+
+    _require(
+        "install-local setup-local-single start-local-single" in quickstart_local,
+        "quickstart-local should install before setup/start",
+    )
+
+
+def test_setup_docker_multi_uses_shell_env_for_admin_bootstrap_secrets() -> None:
+    """Multi-user setup should not make-expand admin bootstrap values."""
+    text = _read_makefile()
+    setup_docker_multi = _target_block(text, "setup-docker-multi")
+
+    for name in ("ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_EMAIL"):
+        _require(f"$({name})" not in setup_docker_multi, f"setup-docker-multi should not expand $({name})")
+
+    _require('test -n "$$ADMIN_USERNAME"' in setup_docker_multi, "Expected shell env username check")
+    _require('test -n "$$ADMIN_PASSWORD"' in setup_docker_multi, "Expected shell env password check")
+    _require('--admin-username "$$ADMIN_USERNAME"' in setup_docker_multi, "Expected shell env username arg")
+    _require('--admin-password "$$ADMIN_PASSWORD"' in setup_docker_multi, "Expected shell env password arg")
+    _require('--admin-email "$$ADMIN_EMAIL"' in setup_docker_multi, "Expected shell env email arg")
+
+
+def test_public_docker_start_paths_quote_paths_and_wait_for_readiness() -> None:
+    """Public Docker start commands should handle paths with spaces and wait before verify."""
+    text = _read_makefile()
+
+    _require("DOCKER_WAIT_FLAG ?= --wait" in text, "Expected Docker readiness wait helper variable")
+
+    expected_fragments = {
+        "start-docker-single": (
+            '--env-file "$(TLDW_ENV_FILE)"',
+            '-f "$(DOCKER_SINGLE_COMPOSE)"',
+            '-f "$(DOCKER_WEBUI_COMPOSE)"',
+            "$(DOCKER_WAIT_FLAG)",
+        ),
+        "start-docker-multi": (
+            '--env-file "$(TLDW_ENV_FILE)"',
+            '-f "$(DOCKER_MULTI_COMPOSE)"',
+            "$(DOCKER_WAIT_FLAG)",
+        ),
+        "quickstart-docker": (
+            '--env-file "$(TLDW_ENV_FILE)"',
+            '-f "$(DOCKER_SINGLE_COMPOSE)"',
+            "$(DOCKER_WAIT_FLAG)",
+        ),
+    }
+    for target, fragments in expected_fragments.items():
+        block = _target_block(text, target)
+        for fragment in fragments:
+            _require(fragment in block, f"{target} should include {fragment}")
 
 
 def test_quickstart_docker_is_api_only_and_skips_webui_verify() -> None:

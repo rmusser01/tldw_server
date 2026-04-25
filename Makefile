@@ -69,6 +69,7 @@ NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE ?= quickstart
 TLDW_INTERNAL_API_ORIGIN ?= http://app:8000
 DOCKER_BUILD ?= false
 DOCKER_BUILD_FLAG = $(if $(filter true TRUE 1 yes YES,$(DOCKER_BUILD)),--build,)
+DOCKER_WAIT_FLAG ?= --wait
 PYPI_BUILD_ARGS ?= --no-isolation
 MODEL_CYCLE_FIRST ?=
 MODEL_CYCLE_SECOND ?=
@@ -105,7 +106,7 @@ setup-wizard-tools:
 		$(PYTHON) -m venv $(SETUP_VENV_DIR); \
 	fi
 	@$(SETUP_VENV_PYTHON) -m pip install --upgrade pip setuptools wheel >/dev/null
-	@$(SETUP_VENV_PYTHON) -m pip install "typer>=0.12.0" "loguru>=0.7.0" "httpx>=0.24.0" "python-dotenv>=1.0.0" >/dev/null
+	@$(SETUP_VENV_PYTHON) -m pip install "typer>=0.12.0" "loguru>=0.7.0" "httpx>=0.24.0" "python-dotenv>=1.0.0" "cryptography>=41.0.0" >/dev/null
 
 setup-docker-single: setup-wizard-tools
 	@command -v docker >/dev/null 2>&1 || (echo "[setup-docker-single] docker not found. Install Docker and retry." && exit 1)
@@ -114,7 +115,7 @@ setup-docker-single: setup-wizard-tools
 
 start-docker-single:
 	@command -v docker >/dev/null 2>&1 || (echo "[start-docker-single] docker not found. Install Docker and retry." && exit 1)
-	docker compose --env-file $(TLDW_ENV_FILE) -f $(DOCKER_SINGLE_COMPOSE) -f $(DOCKER_WEBUI_COMPOSE) up -d $(DOCKER_BUILD_FLAG)
+	docker compose --env-file "$(TLDW_ENV_FILE)" -f "$(DOCKER_SINGLE_COMPOSE)" -f "$(DOCKER_WEBUI_COMPOSE)" up -d $(DOCKER_BUILD_FLAG) $(DOCKER_WAIT_FLAG)
 	@echo "[start-docker-single] API:   $(TLDW_BASE_URL)"
 	@echo "[start-docker-single] WebUI: $(TLDW_WEBUI_URL)"
 	@echo "[start-docker-single] Next:  make verify-docker-single"
@@ -124,14 +125,18 @@ verify-docker-single: setup-wizard-tools
 
 setup-docker-multi: setup-wizard-tools
 	@command -v docker >/dev/null 2>&1 || (echo "[setup-docker-multi] docker not found. Install Docker and retry." && exit 1)
-	@test -n "$(ADMIN_USERNAME)" || (echo "[setup-docker-multi] Set ADMIN_USERNAME=<admin> ADMIN_PASSWORD=<password> for first admin bootstrap." && exit 1)
-	@test -n "$(ADMIN_PASSWORD)" || (echo "[setup-docker-multi] Set ADMIN_PASSWORD=<password> for first admin bootstrap." && exit 1)
-	@$(TLDW_SETUP) init --profile docker-multi-postgres --env-file "$(TLDW_ENV_FILE)" --admin-username "$(ADMIN_USERNAME)" --admin-password "$(ADMIN_PASSWORD)" $(if $(ADMIN_EMAIL),--admin-email "$(ADMIN_EMAIL)",) --default --yes
+	@test -n "$$ADMIN_USERNAME" || (echo "[setup-docker-multi] Set ADMIN_USERNAME=<admin> ADMIN_PASSWORD=<password> in the shell environment for first admin bootstrap." && exit 1)
+	@test -n "$$ADMIN_PASSWORD" || (echo "[setup-docker-multi] Set ADMIN_PASSWORD=<password> in the shell environment for first admin bootstrap." && exit 1)
+	@if [ -n "$$ADMIN_EMAIL" ]; then \
+		$(TLDW_SETUP) init --profile docker-multi-postgres --env-file "$(TLDW_ENV_FILE)" --admin-username "$$ADMIN_USERNAME" --admin-password "$$ADMIN_PASSWORD" --admin-email "$$ADMIN_EMAIL" --default --yes; \
+	else \
+		$(TLDW_SETUP) init --profile docker-multi-postgres --env-file "$(TLDW_ENV_FILE)" --admin-username "$$ADMIN_USERNAME" --admin-password "$$ADMIN_PASSWORD" --default --yes; \
+	fi
 	@echo "[setup-docker-multi] Next: make start-docker-multi"
 
 start-docker-multi:
 	@command -v docker >/dev/null 2>&1 || (echo "[start-docker-multi] docker not found. Install Docker and retry." && exit 1)
-	docker compose --env-file $(TLDW_ENV_FILE) -f $(DOCKER_MULTI_COMPOSE) up -d $(DOCKER_BUILD_FLAG)
+	docker compose --env-file "$(TLDW_ENV_FILE)" -f "$(DOCKER_MULTI_COMPOSE)" up -d $(DOCKER_BUILD_FLAG) $(DOCKER_WAIT_FLAG)
 	@echo "[start-docker-multi] API:  $(TLDW_BASE_URL)"
 	@echo "[start-docker-multi] Next: make verify-docker-multi"
 
@@ -167,12 +172,12 @@ quickstart-docker-webui: quickstart
 
 quickstart-docker: setup-docker-single
 	@command -v docker >/dev/null 2>&1 || (echo "[quickstart-docker] docker not found. Install Docker and retry." && exit 1)
-	docker compose --env-file $(TLDW_ENV_FILE) -f $(DOCKER_SINGLE_COMPOSE) up -d $(DOCKER_BUILD_FLAG)
+	docker compose --env-file "$(TLDW_ENV_FILE)" -f "$(DOCKER_SINGLE_COMPOSE)" up -d $(DOCKER_BUILD_FLAG) $(DOCKER_WAIT_FLAG)
 	@$(TLDW_SETUP) verify --profile docker-single-webui --env-file "$(TLDW_ENV_FILE)" --base-url "$(TLDW_BASE_URL)" --webui-url ""
 
 quickstart-install: install-local
 
-quickstart-local: setup-local-single start-local-single
+quickstart-local: install-local setup-local-single start-local-single
 
 tooling-install:
 	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[tooling-install] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
