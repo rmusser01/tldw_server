@@ -70,3 +70,49 @@ def test_verify_first_value_reports_provider_missing(monkeypatch, tmp_path: Path
     actions = payload.get("actions") or []
     assert_action_field(actions, "chat", "status", "provider_missing")
     assert_action_field(actions, "first_value", "search", "ok")
+
+
+def test_provider_check_reports_missing_when_provider_entries_are_unconfigured(monkeypatch) -> None:
+    def fake_request(*_args, **_kwargs):
+        return {
+            "url": "http://127.0.0.1:8000/api/v1/llm/providers",
+            "status_code": 200,
+            "ok": True,
+            "body": {
+                "total_configured": 2,
+                "providers": [
+                    {"name": "openai", "is_configured": False},
+                    {"name": "anthropic", "is_configured": False},
+                ],
+            },
+        }
+
+    monkeypatch.setattr(profile_verify, "_request", fake_request)
+
+    result = profile_verify._provider_check("http://127.0.0.1:8000", {}, 5.0)
+
+    assert result["status"] == "provider_missing"
+    assert result["configured"] == 0
+
+
+def test_provider_check_reports_configured_when_any_provider_entry_is_configured(monkeypatch) -> None:
+    def fake_request(*_args, **_kwargs):
+        return {
+            "url": "http://127.0.0.1:8000/api/v1/llm/providers",
+            "status_code": 200,
+            "ok": True,
+            "body": {
+                "total_configured": 2,
+                "providers": {
+                    "openai": {"is_configured": False},
+                    "anthropic": {"is_configured": True},
+                },
+            },
+        }
+
+    monkeypatch.setattr(profile_verify, "_request", fake_request)
+
+    result = profile_verify._provider_check("http://127.0.0.1:8000", {}, 5.0)
+
+    assert result["status"] == "provider_configured"
+    assert result["configured"] == 1

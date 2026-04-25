@@ -111,14 +111,29 @@ def _login_multi_user(
 def _configured_provider_count(body: Any) -> int:
     if not isinstance(body, dict):
         return 0
+    providers = body.get("providers")
+    provider_entries: list[Any] = []
+    if isinstance(providers, list):
+        provider_entries = providers
+    elif isinstance(providers, dict):
+        provider_entries = list(providers.values())
+
+    has_config_status = any(
+        isinstance(provider, dict) and "is_configured" in provider
+        for provider in provider_entries
+    )
+    if has_config_status:
+        return sum(
+            1
+            for provider in provider_entries
+            if isinstance(provider, dict) and bool(provider.get("is_configured"))
+        )
+
     total = body.get("total_configured")
     if isinstance(total, int):
         return total
-    providers = body.get("providers")
-    if isinstance(providers, list):
-        return len(providers)
-    if isinstance(providers, dict):
-        return len(providers)
+    if provider_entries:
+        return len(provider_entries)
     return 0
 
 
