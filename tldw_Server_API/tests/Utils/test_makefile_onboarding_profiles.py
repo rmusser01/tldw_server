@@ -198,6 +198,11 @@ def test_public_docker_start_paths_quote_paths_and_wait_for_readiness() -> None:
         and start_docker_multi.index("config >/dev/null") < start_docker_multi.index(" up -d "),
         "start-docker-multi should validate compose config before starting services",
     )
+    _require(
+        "config >/dev/null &&" in start_docker_multi
+        or "config >/dev/null || exit 1" in start_docker_multi,
+        "start-docker-multi should fail fast when compose config validation fails",
+    )
 
 
 def test_quickstart_docker_is_api_only_and_skips_webui_verify() -> None:
