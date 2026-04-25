@@ -459,11 +459,18 @@ def init(
     if auth_mode:
         updates["AUTH_MODE"] = auth_mode
     if auth_mode == "single_user":
-        existing_key = (
-            os.getenv("SINGLE_USER_API_KEY")
-            or os.getenv("API_KEY")
-            or existing_env.get("SINGLE_USER_API_KEY")
-        )
+        if env_file is not None:
+            existing_key = (
+                existing_env.get("SINGLE_USER_API_KEY")
+                or os.getenv("SINGLE_USER_API_KEY")
+                or os.getenv("API_KEY")
+            )
+        else:
+            existing_key = (
+                os.getenv("SINGLE_USER_API_KEY")
+                or os.getenv("API_KEY")
+                or existing_env.get("SINGLE_USER_API_KEY")
+            )
         if not existing_key:
             existing_key = env_utils.generate_single_user_api_key()
         updates["SINGLE_USER_API_KEY"] = existing_key

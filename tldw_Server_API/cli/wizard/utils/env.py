@@ -125,16 +125,31 @@ def mask_value(value: str) -> str:
     return "*" * (len(value) - 4) + value[-4:]
 
 
+def _fallback_mask_url_credentials(value: str) -> str:
+    marker = "://"
+    marker_index = value.find(marker)
+    if marker_index < 0:
+        return value
+    authority_start = marker_index + len(marker)
+    at_index = value.find("@", authority_start)
+    if at_index < 0:
+        return value
+    userinfo = value[authority_start:at_index]
+    username = userinfo.split(":", 1)[0]
+    credentials = f"{username}:********" if username else "********"
+    return f"{value[:authority_start]}{credentials}{value[at_index:]}"
+
+
 def _mask_url_credentials(value: str) -> str:
     try:
         parsed = urlsplit(value)
     except ValueError:
-        return value
+        return _fallback_mask_url_credentials(value)
     if not parsed.scheme or not parsed.netloc or parsed.password is None:
-        return value
+        return _fallback_mask_url_credentials(value)
 
     if "@" not in parsed.netloc:
-        return value
+        return _fallback_mask_url_credentials(value)
     userinfo, hostinfo = parsed.netloc.rsplit("@", 1)
     username = userinfo.split(":", 1)[0]
     credentials = f"{username}:********" if username else "********"

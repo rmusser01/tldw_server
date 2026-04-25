@@ -35,6 +35,24 @@ def test_init_dry_run_honors_env_file_without_profile(tmp_path):
     assert data["paths"]["env"] == str(env_path)
 
 
+def test_init_dry_run_env_file_preserves_single_user_key_over_shell(tmp_path):
+    env_path = tmp_path / "custom.env"
+    env_path.write_text("AUTH_MODE=single_user\nSINGLE_USER_API_KEY=file-key-1234567890\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["init", "--env-file", str(env_path), "--dry-run", "--json"],
+        env={"SINGLE_USER_API_KEY": "shell-key-should-not-write"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "shell-key-should-not-write" not in result.output
+    payload = assert_wizard_json(result.output, command="init", status="ok")
+    actions = payload.get("actions") or []
+    set_env = next(action["set_env"] for action in actions if "set_env" in action)
+    assert set_env["SINGLE_USER_API_KEY"] == "***************7890"
+
+
 def test_auth_single_user_json():
     result = runner.invoke(app, ["auth", "--mode", "single_user", "--json", "--dry-run"])  # type: ignore[arg-type]
     assert result.exit_code == 0, result.output

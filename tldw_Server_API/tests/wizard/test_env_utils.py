@@ -73,6 +73,22 @@ def test_mask_env_values_masks_url_credentials_with_malformed_port():
     assert "TestPassword123!" not in masked["DATABASE_URL"]
 
 
+def test_mask_env_values_fallback_masks_credentials_when_urlsplit_raises(monkeypatch):
+    values = {
+        "DATABASE_URL": "postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users",
+    }
+
+    def fail_urlsplit(_value):
+        raise ValueError("malformed URL")
+
+    monkeypatch.setattr(env_utils, "urlsplit", fail_urlsplit)
+
+    masked = env_utils.mask_env_values(values)
+
+    assert masked["DATABASE_URL"] == "postgresql://tldw_user:********@postgres:5432/tldw_users"
+    assert "TestPassword123!" not in masked["DATABASE_URL"]
+
+
 def test_ensure_env_dry_run_does_not_write_or_backup(tmp_path):
     env_path = tmp_path / ".env"
     original = "AUTH_MODE=single_user\n"

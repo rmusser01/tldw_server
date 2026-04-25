@@ -169,7 +169,7 @@ def test_init_profile_writes_repo_env_path_in_dry_run(tmp_path: Path, monkeypatc
     assert str(set_env["SINGLE_USER_API_KEY"]).startswith("*")
 
 
-def test_init_multi_user_profile_requires_admin_password_or_generates_recovery_note(
+def test_init_multi_user_profile_masks_admin_password_in_dry_run(
     tmp_path: Path, monkeypatch
 ) -> None:
     repo = tmp_path / "repo"
