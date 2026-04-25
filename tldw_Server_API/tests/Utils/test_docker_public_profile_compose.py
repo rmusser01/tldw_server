@@ -372,10 +372,21 @@ def test_multi_user_entrypoint_ignores_stale_env_database_url_when_structured_po
         '[ -z "$incoming_database_url" ]' not in script,
         "entrypoint should not let stale env-file DATABASE_URL block structured Postgres derivation",
     )
+    _require(
+        'elif [ -n "$incoming_database_url" ]; then' not in script,
+        "entrypoint should not accept stale env-file DATABASE_URL as a multi-user fallback",
+    )
+    _require(
+        'elif [ -n "$incoming_jobs_db_url" ]; then' not in script,
+        "entrypoint should not accept stale env-file JOBS_DB_URL as a multi-user fallback",
+    )
 
 
 def test_multi_user_entrypoint_requires_postgres_or_explicit_database_override() -> None:
     script = Path("Dockerfiles/entrypoints/tldw-app-first-run.sh").read_text(encoding="utf-8")
+    multi_user_start = script.index('if [ "$AUTH_MODE" = "multi_user" ]; then')
+    single_user_else = script.index("\nelse\n  DATABASE_URL=", multi_user_start)
+    multi_user_branch = script[multi_user_start:single_user_else]
 
     _require(
         "ERROR: Multi-user mode requires POSTGRES_PASSWORD or TLDW_DATABASE_URL_OVERRIDE." in script,
@@ -384,6 +395,10 @@ def test_multi_user_entrypoint_requires_postgres_or_explicit_database_override()
     _require(
         "for the bundled docker-multi-postgres profile" in script,
         "entrypoint should explain the bundled profile requirement",
+    )
+    _require(
+        "sqlite:///./Databases/users.db" not in multi_user_branch,
+        "entrypoint should not use SQLite fallback in the multi-user branch",
     )
 
 

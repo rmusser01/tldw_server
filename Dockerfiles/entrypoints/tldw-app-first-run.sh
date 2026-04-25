@@ -201,8 +201,6 @@ if [ "$AUTH_MODE" = "multi_user" ]; then
   elif [ -n "${POSTGRES_PASSWORD:-}" ]; then
     DATABASE_URL="$(derive_postgres_database_url)"
     database_url_derived=1
-  elif [ -n "$incoming_database_url" ]; then
-    DATABASE_URL="$incoming_database_url"
   else
     echo "" >&2
     echo "======================================================================" >&2
@@ -220,8 +218,6 @@ if [ "$AUTH_MODE" = "multi_user" ]; then
   elif [ "$database_url_derived" = "1" ]; then
     JOBS_DB_URL="$DATABASE_URL"
     jobs_db_url_derived=1
-  elif [ -n "$incoming_jobs_db_url" ]; then
-    JOBS_DB_URL="$incoming_jobs_db_url"
   else
     JOBS_DB_URL="$DATABASE_URL"
     jobs_db_url_derived=1
