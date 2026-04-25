@@ -639,6 +639,9 @@ docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --bui
 docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.dev.yml up -d --build
 
 # WebUI overlay with single-user profile (Next.js container on :8080)
+# PowerShell advanced/custom-host browser access:
+# $env:NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE="advanced"
+# $env:NEXT_PUBLIC_API_URL="http://YOUR_HOST_OR_DOMAIN:8000"
 docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --build
 
 # Check status

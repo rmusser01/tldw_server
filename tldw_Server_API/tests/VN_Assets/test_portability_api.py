@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -147,6 +148,32 @@ def client(
 def test_export_request_rejects_coerced_booleans() -> None:
     with pytest.raises(ValidationError):
         VNPackExportRequest(strict="true")
+
+
+def test_vn_asset_job_start_routes_include_rbac_rate_limits() -> None:
+    expected = {
+        ("POST", "/vn-assets/packs/{pack_id}/export"): "vn_assets.export",
+        ("POST", "/vn-assets/import/previews"): "vn_assets.import",
+        ("POST", "/vn-assets/import/commit"): "vn_assets.import",
+        ("POST", "/vn-assets/packs/{pack_id}/generate"): "vn_assets.generate",
+        ("POST", "/vn-assets/packs/{pack_id}/slots/{slot_id}/retry"): "vn_assets.generate",
+    }
+    routes = {
+        (method, route.path): route
+        for route in vn_assets_router.routes
+        if isinstance(route, APIRoute)
+        for method in route.methods
+    }
+
+    for key, resource in expected.items():
+        route = routes.get(key)
+        assert route is not None
+        resources = [
+            str(limit_resource)
+            for dep in route.dependant.dependencies
+            if (limit_resource := getattr(dep.call, "_tldw_rate_limit_resource", None))
+        ]
+        assert resource in resources
 
 
 def test_start_export_creates_jobs_backed_portability_row(
@@ -382,6 +409,7 @@ def test_import_preview_cancel_routes_through_jobs_manager(
 
 def test_import_preview_delete_marks_preview_and_removes_uploaded_archive(
     client: TestClient,
+    fake_jobs: FakeJobManager,
     repo: VNAssetPacksRepository,
     tmp_path: Path,
 ) -> None:
@@ -392,6 +420,7 @@ def test_import_preview_delete_marks_preview_and_removes_uploaded_archive(
             files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
         )
     preview_id = started.json()["preview_id"]
+    job_id = started.json()["job_id"]
     preview = repo.get_import_preview(preview_id, owner_user_id=42)
     assert preview is not None
     uploaded_archive_path = Path(preview["archive_path"])
@@ -404,6 +433,7 @@ def test_import_preview_delete_marks_preview_and_removes_uploaded_archive(
     deleted_preview = repo.get_import_preview(preview_id, owner_user_id=42)
     assert deleted_preview is not None
     assert deleted_preview["status"] == "deleted"
+    assert fake_jobs.cancelled == [(int(job_id), "vn_pack_import_preview_delete_requested")]
 
 
 def test_start_import_commit_creates_jobs_backed_journal_row(

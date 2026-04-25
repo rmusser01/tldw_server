@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { VNAssetPack } from '@web/types/vn-assets';
 
@@ -28,6 +28,7 @@ const pack: VNAssetPack = {
 
 describe('PortabilityPanel', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     mocks.exportVNAssetPack.mockResolvedValue({
       job_id: 'export-job',
@@ -103,6 +104,10 @@ describe('PortabilityPanel', () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('renders backup warning and explicit export toggles', () => {
     render(<PortabilityPanel selectedPack={pack} />);
 
@@ -163,6 +168,81 @@ describe('PortabilityPanel', () => {
         conflict_decisions: { confirm_all_risky_diffs: true },
       });
     });
+  });
+
+  it('polls an import preview until it reaches a terminal status', async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((handler, _timeout, ...args) => {
+      if (typeof handler === 'function') {
+        queueMicrotask(() => handler(...args));
+      }
+      return 0 as ReturnType<typeof globalThis.setTimeout>;
+    });
+    mocks.getVNPackImportPreview
+      .mockResolvedValueOnce({
+        preview_id: 33,
+        job_id: 'preview-job',
+        portability_job_id: 2,
+        operation: 'import_preview',
+        status: 'queued',
+        vn_status: 'queued',
+        stage: 'queued',
+        bundle_summary: {},
+        required_choices: [],
+        proposed_plan: {},
+        conflicts: [],
+        validation_warnings: [],
+        quota_estimate: {},
+      })
+      .mockResolvedValueOnce({
+        preview_id: 33,
+        job_id: 'preview-job',
+        portability_job_id: 2,
+        operation: 'import_preview',
+        status: 'processing',
+        vn_status: 'processing',
+        stage: 'validating_archive',
+        bundle_summary: {},
+        required_choices: [],
+        proposed_plan: {},
+        conflicts: [],
+        validation_warnings: [],
+        quota_estimate: {},
+      })
+      .mockResolvedValueOnce({
+        preview_id: 33,
+        job_id: 'preview-job',
+        portability_job_id: 2,
+        operation: 'import_preview',
+        status: 'completed',
+        vn_status: 'completed',
+        stage: 'completed',
+        bundle_summary: { pack_title: 'Imported Backup', item_count: 2 },
+        required_choices: [],
+        proposed_plan: {},
+        conflicts: [],
+        validation_warnings: [],
+        quota_estimate: { asset_bytes: 1024 },
+      });
+
+    try {
+      render(<PortabilityPanel selectedPack={pack} />);
+
+      const archive = new File(['vnpack'], 'orbital.tldw-vnpack', { type: 'application/zip' });
+      await act(async () => {
+        fireEvent.change(screen.getByLabelText('Import VN pack archive'), {
+          target: { files: [archive] },
+        });
+        for (let index = 0; index < 8; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(setTimeoutSpy).toHaveBeenCalledTimes(2);
+      expect(mocks.getVNPackImportPreview).toHaveBeenCalledTimes(3);
+      expect(screen.getByText('Preview status: completed')).toBeInTheDocument();
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
   });
 
   it('requires confirmation before committing risky update-existing diffs', async () => {

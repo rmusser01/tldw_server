@@ -239,6 +239,35 @@ async def test_preview_rejects_checksum_mismatch(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_preview_streams_asset_members_for_checksum_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    archive_path = _write_vnpack(tmp_path / "streamed-assets.tldw-vnpack")
+    original_read = zipfile.ZipFile.read
+
+    def reject_asset_read(
+        archive: zipfile.ZipFile,
+        name: str | zipfile.ZipInfo,
+        pwd: bytes | None = None,
+    ) -> bytes:
+        filename = name.filename if isinstance(name, zipfile.ZipInfo) else str(name)
+        if filename.startswith("assets/"):
+            pytest.fail(f"asset member should be streamed instead of read fully: {filename}")
+        return original_read(archive, name, pwd)
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", reject_asset_read)
+
+    preview = await VNPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id=42,
+    )
+
+    assert preview["bundle_summary"]["assets_with_bytes"] == 1
+    assert preview["quota_estimate"]["asset_bytes"] == len(PNG_BYTES)
+
+
+@pytest.mark.asyncio
 async def test_preview_rejects_malformed_metadata(tmp_path: Path) -> None:
     archive_path = _write_vnpack(
         tmp_path / "malformed.tldw-vnpack",
@@ -363,6 +392,57 @@ async def test_import_preview_worker_updates_preview_and_portability_rows(
     assert updated_job is not None
     assert updated_job["status"] == "completed"
     assert updated_job["stage"] == "completed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_status", ["deleted", "cancelled"])
+async def test_import_preview_worker_does_not_resurrect_terminal_preview(
+    repo: VNAssetPacksRepository,
+    tmp_path: Path,
+    terminal_status: str,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    archive_path = tmp_path / f"{terminal_status}.tldw-vnpack"
+    preview = repo.create_import_preview(
+        owner_user_id=42,
+        job_id="123",
+        status=terminal_status,
+        archive_path=str(archive_path),
+    )
+    repo.create_portability_job(
+        owner_user_id=42,
+        job_id="123",
+        operation="import_preview",
+        status="cancelled",
+        stage=terminal_status,
+        preview_id=int(preview["id"]),
+        archive_path=str(archive_path),
+    )
+    worker = VNAssetGenerationWorker(repo=repo, jobs_manager=object())
+
+    result = await worker.handle_job_async(
+        {
+            "id": "123",
+            "job_type": VN_PACK_IMPORT_PREVIEW_JOB_TYPE,
+            "owner_user_id": "42",
+            "payload": {
+                "preview_id": int(preview["id"]),
+                "archive_path": str(archive_path),
+                "request_id": "req-worker",
+                "user_id": 42,
+            },
+        }
+    )
+
+    updated_preview = repo.get_import_preview(int(preview["id"]), owner_user_id=42)
+    updated_job = repo.get_portability_job_by_job_id("123", owner_user_id=42)
+    assert result["status"] == "cancelled"
+    assert updated_preview is not None
+    assert updated_preview["status"] == terminal_status
+    assert updated_job is not None
+    assert updated_job["status"] == "cancelled"
+    assert updated_job["stage"] == terminal_status
 
 
 @pytest.mark.asyncio

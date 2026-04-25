@@ -409,30 +409,34 @@ class VNAssetPackService:
             source="uploaded",
         )
         item_id = int(item["id"])
-        record = await generated_file_helpers.save_and_register_vn_asset_image(
-            user_id=self.owner_user_id,
-            image_bytes=image_bytes,
-            image_format=image_format,
-            pack_id=pack_id,
-            item_id=item_id,
-            asset_type=str(slot["asset_type"]),
-            labels=_loads_json(slot["labels_json"], {}),
-        )
-        updated_item = self.repo.update_item_storage(
-            item_id,
-            generated_file_id=int(record["id"]),
-            storage_ref=record.get("storage_path"),
-            mime_type=str(record.get("mime_type") or mime_type),
-            width=width,
-            height=height,
-            bytes=len(image_bytes),
-            backend_metadata={
-                "upload": {
-                    "original_mime_type": mime_type,
-                    "image_format": image_format,
-                }
-            },
-        )
+        try:
+            record = await generated_file_helpers.save_and_register_vn_asset_image(
+                user_id=self.owner_user_id,
+                image_bytes=image_bytes,
+                image_format=image_format,
+                pack_id=pack_id,
+                item_id=item_id,
+                asset_type=str(slot["asset_type"]),
+                labels=_loads_json(slot["labels_json"], {}),
+            )
+            updated_item = self.repo.update_item_storage(
+                item_id,
+                generated_file_id=int(record["id"]),
+                storage_ref=record.get("storage_path"),
+                mime_type=str(record.get("mime_type") or mime_type),
+                width=width,
+                height=height,
+                bytes=len(image_bytes),
+                backend_metadata={
+                    "upload": {
+                        "original_mime_type": mime_type,
+                        "image_format": image_format,
+                    }
+                },
+            )
+        except Exception:
+            self.repo.delete_item(item_id)
+            raise
         return self._item_response(updated_item or item)
 
     def review_item_for_pack(

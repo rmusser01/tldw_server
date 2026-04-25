@@ -9,10 +9,13 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import aiofiles
+import aiofiles.os
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetBulkReviewRequest,
@@ -69,6 +72,8 @@ CONFLICT_ERROR_CODES = {
     "slot_has_dependents",
 }
 TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
+UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
+DEFAULT_MAX_IMAGE_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024
 
 
 class VNAssetMatrixApplyRequest(BaseModel):
@@ -374,9 +379,10 @@ def _validated_export_archive_path(owner_user_id: int, archive_path: str | None)
 async def _save_import_preview_archive(archive: UploadFile, archive_path: Path) -> int:
     total_bytes = 0
     try:
-        with archive_path.open("wb") as output:
+        await aiofiles.os.makedirs(archive_path.parent, exist_ok=True)
+        async with aiofiles.open(archive_path, "wb") as output:
             while True:
-                chunk = await archive.read(1024 * 1024)
+                chunk = await archive.read(UPLOAD_CHUNK_SIZE_BYTES)
                 if not chunk:
                     break
                 total_bytes += len(chunk)
@@ -385,17 +391,47 @@ async def _save_import_preview_archive(archive: UploadFile, archive_path: Path) 
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                         detail="import_archive_too_large",
                     )
-                output.write(chunk)
+                await output.write(chunk)
     except Exception:
-        if archive_path.exists():
-            archive_path.unlink()
+        await _remove_file_if_exists(archive_path)
         raise
 
     if total_bytes <= 0:
-        if archive_path.exists():
-            archive_path.unlink()
+        await _remove_file_if_exists(archive_path)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="import_archive_empty")
     return total_bytes
+
+
+async def _read_upload_file_with_limit(
+    upload: UploadFile,
+    *,
+    max_bytes: int,
+    empty_detail: str,
+    too_large_detail: str,
+) -> bytes:
+    total_bytes = 0
+    chunks: list[bytes] = []
+    while True:
+        chunk = await upload.read(UPLOAD_CHUNK_SIZE_BYTES)
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        if total_bytes > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=too_large_detail,
+            )
+        chunks.append(chunk)
+    if total_bytes <= 0:
+        raise ValueError(empty_detail)
+    return b"".join(chunks)
+
+
+async def _remove_file_if_exists(path: Path) -> None:
+    try:
+        await aiofiles.os.remove(path)
+    except FileNotFoundError:
+        return
 
 
 def _content_not_found() -> HTTPException:
@@ -491,6 +527,7 @@ async def cleanup_pack(
     "/packs/{pack_id}/export",
     response_model=VNPackExportResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(rbac_rate_limit("vn_assets.export"))],
 )
 async def start_pack_export(
     pack_id: int,
@@ -640,6 +677,7 @@ async def cancel_pack_export(
     "/import/previews",
     response_model=VNPackImportPreviewStartResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(rbac_rate_limit("vn_assets.import"))],
 )
 async def start_pack_import_preview(
     archive: UploadFile = File(...),
@@ -650,7 +688,6 @@ async def start_pack_import_preview(
     owner_user_id = _current_user_id(current_user)
     request_id = uuid.uuid4().hex
     archive_root = _vn_pack_import_preview_staging_root(owner_user_id)
-    archive_root.mkdir(parents=True, exist_ok=True)
     archive_path = archive_root / f"{request_id}{VNPACK_EXTENSION}"
     uploaded_bytes = await _save_import_preview_archive(archive, archive_path)
 
@@ -770,6 +807,7 @@ async def delete_pack_import_preview(
     preview_id: int,
     service: VNAssetPackService = Depends(_service),
     current_user: User = Depends(get_request_user),
+    jobs_manager: JobManager = Depends(_job_manager),
 ) -> Response:
     owner_user_id = _current_user_id(current_user)
     preview, portability_job = _portability_import_preview_or_404(
@@ -779,6 +817,11 @@ async def delete_pack_import_preview(
     )
     if str(preview["status"]) == "processing":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_processing")
+    job_id = str(preview["job_id"])
+    try:
+        jobs_manager.cancel_job(int(job_id), reason="vn_pack_import_preview_delete_requested")
+    except (TypeError, ValueError):
+        pass
     archive_path = Path(str(preview.get("archive_path") or ""))
     preview_root = _vn_pack_import_preview_staging_root(owner_user_id).resolve()
     try:
@@ -787,7 +830,7 @@ async def delete_pack_import_preview(
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="import_preview_archive_outside_user_root") from exc
     if resolved_archive_path.is_file():
-        resolved_archive_path.unlink()
+        await _remove_file_if_exists(resolved_archive_path)
     service.repo.update_import_preview(
         preview_id,
         {"status": "deleted"},
@@ -805,6 +848,7 @@ async def delete_pack_import_preview(
     "/import/commit",
     response_model=VNPackImportCommitStartResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(rbac_rate_limit("vn_assets.import"))],
 )
 async def start_pack_import_commit(
     request: VNPackImportCommitRequest,
@@ -1172,6 +1216,7 @@ async def bulk_review_items(
     "/packs/{pack_id}/items/upload",
     response_model=VNAssetItemResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rbac_rate_limit("vn_assets.upload"))],
 )
 async def upload_item(
     pack_id: int,
@@ -1183,9 +1228,12 @@ async def upload_item(
     try:
         mime_type = file.content_type or "application/octet-stream"
         image_format_from_mime_type(mime_type)
-        image_bytes = await file.read()
-        if not image_bytes:
-            raise ValueError("vn_asset_upload_empty")
+        image_bytes = await _read_upload_file_with_limit(
+            file,
+            max_bytes=DEFAULT_MAX_IMAGE_UPLOAD_SIZE_BYTES,
+            empty_detail="vn_asset_upload_empty",
+            too_large_detail="vn_asset_upload_too_large",
+        )
         return await service.upload_item(
             pack_id,
             slot_id=slot_id,
@@ -1247,6 +1295,7 @@ async def prompt_preview(
     "/packs/{pack_id}/generate",
     response_model=VNAssetGenerationStatusResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(rbac_rate_limit("vn_assets.generate"))],
 )
 async def start_generation(
     pack_id: int,
@@ -1292,6 +1341,7 @@ async def cancel_generation(
     "/packs/{pack_id}/slots/{slot_id}/retry",
     response_model=VNAssetGenerationStatusResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(rbac_rate_limit("vn_assets.generate"))],
 )
 async def retry_slot_generation(
     pack_id: int,

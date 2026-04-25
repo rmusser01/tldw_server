@@ -1162,6 +1162,12 @@ class VNAssetPacksRepository:
         row = cursor.fetchone()
         return dict(row) if row is not None else None
 
+    def delete_item(self, item_id: int) -> bool:
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            cursor = conn.execute("DELETE FROM vn_asset_items WHERE id = ?", (item_id,))
+            return cursor.rowcount > 0
+
     def update_item_storage(
         self,
         item_id: int,

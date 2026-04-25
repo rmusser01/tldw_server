@@ -28,4 +28,10 @@ describe("sidepanel chat compact toolbar contract", () => {
     expect(chatFormSource).toContain("playground:actions.speechShort")
     expect(chatFormSource).toContain("playground:composer.stopShort")
   })
+
+  it("keeps a visible pro-mode image attachment control outside overflow menus", () => {
+    expect(chatFormSource).toContain('data-testid="chat-upload-image-inline"')
+    expect(chatFormSource).toContain('aria-label={t(\n                                          "playground:actions.upload",\n                                          "Attach image"\n                                        )}')
+    expect(chatFormSource).toContain("min-h-[44px] min-w-[44px]")
+  })
 })

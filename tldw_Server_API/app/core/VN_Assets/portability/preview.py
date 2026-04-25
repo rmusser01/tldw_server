@@ -26,8 +26,8 @@ from tldw_Server_API.app.core.VN_Assets.portability.constants import (
 )
 from tldw_Server_API.app.core.VN_Assets.portability.fingerprints import (
     canonical_payload_fingerprint,
-    sha256_bytes,
     sha256_file,
+    sha256_stream,
 )
 
 
@@ -228,7 +228,8 @@ def _validate_checksums(
             raise ValueError(f"checksum_member_missing: {normalized_path}")
         if not isinstance(expected, str) or len(expected) != 64:
             raise ValueError(f"checksum_malformed: {normalized_path}")
-        actual = sha256_bytes(archive.read(members[normalized_path]))
+        with archive.open(members[normalized_path]) as stream:
+            actual = sha256_stream(stream)
         if actual != expected:
             raise ValueError(f"checksum_mismatch: {normalized_path}")
 
@@ -256,12 +257,14 @@ def _validate_items_and_assets(
             normalized_path = normalize_member_name(str(asset_path))
             if normalized_path not in members:
                 raise ValueError(f"missing_asset_file: {normalized_path}")
-            content = archive.read(members[normalized_path])
             asset_sha256 = item.get("asset_sha256")
-            if asset_sha256 and sha256_bytes(content) != str(asset_sha256):
-                raise ValueError(f"asset_checksum_mismatch: {normalized_path}")
+            asset_info = members[normalized_path]
+            if asset_sha256:
+                with archive.open(asset_info) as stream:
+                    if sha256_stream(stream) != str(asset_sha256):
+                        raise ValueError(f"asset_checksum_mismatch: {normalized_path}")
             present_asset_items += 1
-            present_asset_bytes += len(content)
+            present_asset_bytes += int(asset_info.file_size)
         else:
             item["asset_bytes_status"] = ASSET_BYTES_STATUS_MISSING
             item.pop("asset_path", None)

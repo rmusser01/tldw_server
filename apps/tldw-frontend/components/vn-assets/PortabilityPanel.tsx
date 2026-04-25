@@ -66,6 +66,36 @@ function statusVariant(status?: string): 'danger' | 'info' | 'neutral' | 'succes
   return 'neutral';
 }
 
+const IMPORT_PREVIEW_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'quarantined', 'deleted']);
+const IMPORT_PREVIEW_POLL_INTERVAL_MS = 1000;
+const IMPORT_PREVIEW_MAX_POLLS = 60;
+
+function waitForImportPreviewPoll(): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, IMPORT_PREVIEW_POLL_INTERVAL_MS);
+  });
+}
+
+async function pollVNPackImportPreview(
+  previewId: number,
+  onPreview: (preview: VNPackImportPreview) => void
+): Promise<VNPackImportPreview> {
+  let preview = await getVNPackImportPreview(previewId);
+  onPreview(preview);
+
+  for (
+    let attempts = 1;
+    !IMPORT_PREVIEW_TERMINAL_STATUSES.has(preview.status) && attempts < IMPORT_PREVIEW_MAX_POLLS;
+    attempts += 1
+  ) {
+    await waitForImportPreviewPoll();
+    preview = await getVNPackImportPreview(previewId);
+    onPreview(preview);
+  }
+
+  return preview;
+}
+
 export default function PortabilityPanel({ selectedPack }: PortabilityPanelProps) {
   const [includeCharacterPayload, setIncludeCharacterPayload] = useState(false);
   const [includeWorldBookPayloads, setIncludeWorldBookPayloads] = useState(false);
@@ -119,8 +149,7 @@ export default function PortabilityPanel({ selectedPack }: PortabilityPanelProps
     setConfirmRiskyDiffs(false);
     try {
       const previewStart = await createVNPackImportPreview(archive);
-      const preview = await getVNPackImportPreview(previewStart.preview_id);
-      setImportPreview(preview);
+      await pollVNPackImportPreview(previewStart.preview_id, setImportPreview);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : 'Failed to create import preview');
     } finally {

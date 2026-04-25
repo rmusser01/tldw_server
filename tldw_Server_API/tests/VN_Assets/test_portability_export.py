@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.VN_Assets.portability.constants import (
     REQUIRED_MEMBERS,
     VNPACK_SCHEMA_VERSION,
 )
+from tldw_Server_API.app.core.VN_Assets.portability import exporter as portability_exporter
 from tldw_Server_API.app.core.VN_Assets.portability.exporter import VNPackExporter
 from tldw_Server_API.app.core.VN_Assets.portability.fingerprints import sha256_file
 from tldw_Server_API.app.core.VN_Assets.portability.models import VNPackExportOptions
@@ -222,6 +223,56 @@ async def test_export_pack_writes_backup_archive_with_redacted_missing_assets(
         )
         assert present_provenance["prompt"]["prompt_present"] is True
         assert present_provenance["prompt"]["prompt_sha256"]
+
+
+@pytest.mark.asyncio
+async def test_export_pack_writes_asset_bytes_without_final_payload_accumulation(
+    repo: VNAssetPacksRepository,
+    pack_with_export_items: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    present_item = pack_with_export_items["present_item"]
+    files_repo = FakeGeneratedFilesRepo(
+        {
+            700: {
+                "id": 700,
+                "user_id": USER_ID,
+                "filename": "present.png",
+                "original_filename": "present.png",
+                "storage_path": "vn_assets/present.png",
+                "mime_type": "image/png",
+                "source_feature": "vn_assets",
+                "source_ref": f"vn_asset_item:{present_item['id']}",
+            }
+        }
+    )
+    exporter = VNPackExporter(
+        repo=repo,
+        owner_user_id=USER_ID,
+        generated_files_repo=files_repo,
+        read_generated_file_bytes=lambda _record: PNG_BYTES,
+        staging_root=tmp_path / "exports",
+    )
+    payload_paths_written_at_end: list[str] = []
+    original_write_payloads = portability_exporter._write_payloads_to_archive
+
+    def spy_write_payloads(archive: zipfile.ZipFile, payloads: dict[str, bytes]) -> None:
+        payload_paths_written_at_end.extend(payloads)
+        original_write_payloads(archive, payloads)
+
+    monkeypatch.setattr(portability_exporter, "_write_payloads_to_archive", spy_write_payloads)
+
+    result = await exporter.export_pack(
+        pack_id=int(pack_with_export_items["pack"]["id"]),
+        options=VNPackExportOptions(),
+    )
+
+    assert all(not path.startswith("assets/") for path in payload_paths_written_at_end)
+    with zipfile.ZipFile(result.archive_path) as archive:
+        items = json.loads(archive.read("metadata/items.json"))["items"]
+        present_export = next(item for item in items if item["source_item_id"] == present_item["id"])
+        assert archive.read(present_export["asset_path"]) == PNG_BYTES
 
 
 @pytest.mark.asyncio

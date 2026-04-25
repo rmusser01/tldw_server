@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints import vn_assets as vn_assets_endpoint
 from tldw_Server_API.app.api.v1.endpoints.vn_assets import router as vn_assets_router
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetBulkReviewRequest,
@@ -23,12 +24,20 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
+from tldw_Server_API.app.core.Storage import generated_file_helpers
 from tldw_Server_API.app.core.VN_Assets.constants import (
     ERROR_ITEM_LIMIT_EXCEEDED,
     ERROR_SLOT_VARIANT_LIMIT_EXCEEDED,
 )
 from tldw_Server_API.app.core.VN_Assets.matrix import expand_starter_matrix
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
+
+VALID_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR"
+    b"\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00"
+)
 
 
 @pytest.fixture
@@ -408,6 +417,56 @@ def test_prompt_preview_rejects_unknown_budget_keys(
     assert response.json()["detail"] == "invalid_prompt_budget"
 
 
+def test_upload_item_rejects_payload_larger_than_configured_limit(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    character_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        vn_assets_endpoint,
+        "DEFAULT_MAX_IMAGE_UPLOAD_SIZE_BYTES",
+        len(VALID_PNG_BYTES) - 1,
+        raising=False,
+    )
+
+    async def fake_upload(_self, pack_id: int, *, slot_id: int, **_kwargs):
+        return {
+            "id": 99,
+            "pack_id": pack_id,
+            "slot_id": slot_id,
+            "variant_index": 0,
+            "review_status": "draft",
+            "preferred": False,
+            "source": "uploaded",
+            "trim_status": "unknown",
+            "quality_flags": [],
+        }
+
+    monkeypatch.setattr(VNAssetPackService, "upload_item", fake_upload)
+    pack_response = client.post(
+        "/api/v1/vn-assets/packs",
+        json={"title": "Starter", "primary_character_id": character_id},
+        headers=auth_headers,
+    )
+    pack_id = pack_response.json()["id"]
+    slot = client.post(
+        f"/api/v1/vn-assets/packs/{pack_id}/slots",
+        json={"asset_type": "sprite", "slot_key": "sprite.upload"},
+        headers=auth_headers,
+    ).json()
+
+    response = client.post(
+        f"/api/v1/vn-assets/packs/{pack_id}/items/upload",
+        data={"slot_id": str(slot["id"]), "variant_index": "0"},
+        files={"file": ("large.png", VALID_PNG_BYTES, "image/png")},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "vn_asset_upload_too_large"
+
+
 @pytest.mark.parametrize("budget_value", [True, 1.0, "1"])
 def test_prompt_preview_rejects_coerced_budget_values(
     client: TestClient,
@@ -543,6 +602,36 @@ def test_service_creates_pack_from_existing_character(
     assert pack.primary_character_id == character_id
     assert pack.style_prompt == "watercolor"
     assert pack.planned_output_count == 0
+
+
+@pytest.mark.asyncio
+async def test_service_upload_item_rolls_back_metadata_when_storage_registration_fails(
+    service: VNAssetPackService,
+    character_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pack = service.create_pack(
+        VNAssetPackCreate(title="Starter Pack", primary_character_id=character_id)
+    )
+    slot = service.create_slot(
+        pack.id,
+        VNAssetSlotCreate(asset_type="sprite", slot_key="sprite.upload"),
+    )
+
+    async def fail_register(**_kwargs):
+        raise RuntimeError("storage offline")
+
+    monkeypatch.setattr(generated_file_helpers, "save_and_register_vn_asset_image", fail_register)
+
+    with pytest.raises(RuntimeError, match="storage offline"):
+        await service.upload_item(
+            pack.id,
+            slot_id=slot.id,
+            image_bytes=VALID_PNG_BYTES,
+            mime_type="image/png",
+        )
+
+    assert service.repo.list_items(pack.id) == []
 
 
 def test_service_rejects_missing_character(service: VNAssetPackService) -> None:

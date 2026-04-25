@@ -77,100 +77,106 @@ class VNPackExporter:
 
         warnings: list[str] = []
         self._progress(progress, "collecting_assets", {"item_count": len(items)})
-        exported_items, asset_payloads, asset_fingerprints = await self._export_items(
-            items,
-            slot_by_id=slot_by_id,
-            options=options,
-            warnings=warnings,
-        )
-
-        sections: dict[str, Any] = {
-            "metadata/pack.json": {"pack": self._export_pack_row(pack)},
-            "metadata/slots.json": {
-                "slots": [self._export_slot_row(slot, slot_by_id=slot_by_id) for slot in slots]
-            },
-            "metadata/items.json": {"items": exported_items},
-            "metadata/batches.json": {"batches": [self._export_batch_row(batch) for batch in batches]},
-            "metadata/provenance.json": {
-                "mode": "full" if options.include_full_provenance else "redacted",
-                "items": [
-                    self._export_item_provenance(item, include_full=options.include_full_provenance)
-                    for item in items
-                ],
-            },
-            "metadata/runtime_manifest.json": self._runtime_manifest(pack, slots, items),
-        }
-        if options.include_character_payload:
-            sections["metadata/character.json"] = {
-                "character": self._export_character_row(
-                    self._require_character(int(pack["primary_character_id"]))
-                )
-            }
-        if options.include_world_book_payloads:
-            sections["metadata/world_books.json"] = {
-                "world_books": [],
-                "source_world_book_ids": source_world_book_ids,
-            }
-
-        fingerprint_payload = {
-            "pack": _canonical_pack_for_fingerprint(sections["metadata/pack.json"]["pack"]),
-            "slots": [
-                _canonical_slot_for_fingerprint(slot)
-                for slot in sections["metadata/slots.json"]["slots"]
-            ],
-            "items": [
-                _canonical_item_for_fingerprint(item)
-                for item in sections["metadata/items.json"]["items"]
-            ],
-            "batches": [
-                _canonical_batch_for_fingerprint(batch)
-                for batch in sections["metadata/batches.json"]["batches"]
-            ],
-            "provenance": [
-                _canonical_provenance_for_fingerprint(item)
-                for item in sections["metadata/provenance.json"]["items"]
-            ],
-            "assets": asset_fingerprints,
-        }
-        if "metadata/character.json" in sections:
-            fingerprint_payload["character"] = _canonical_character_for_fingerprint(
-                sections["metadata/character.json"]["character"]
-            )
-        if "metadata/world_books.json" in sections:
-            fingerprint_payload["world_books"] = sections["metadata/world_books.json"]
-        payload_fingerprint = canonical_payload_fingerprint(fingerprint_payload)
-        metadata_payloads = {
-            path: canonical_json_bytes(payload)
-            for path, payload in sorted(sections.items())
-        }
-        checksums = {
-            path: sha256_bytes(content)
-            for path, content in {**metadata_payloads, **asset_payloads}.items()
-        }
-        manifest = self._manifest(
-            pack=pack,
-            slots=slots,
-            items=exported_items,
-            options=options,
-            warnings=warnings,
-            checksums=checksums,
-            canonical_fingerprint=payload_fingerprint,
-        )
-        manifest_payload = canonical_json_bytes(manifest)
-        checksums[MANIFEST_PATH] = sha256_bytes(manifest_payload)
-        checksums_payload = canonical_json_bytes(dict(sorted(checksums.items())))
-
-        self._progress(progress, "writing_archive", {"asset_count": len(asset_payloads)})
         archive_path = self._archive_path(pack)
-        archive_payloads = {
-            MANIFEST_PATH: manifest_payload,
-            **metadata_payloads,
-            **asset_payloads,
-            CHECKSUMS_PATH: checksums_payload,
-            "README.md": self._readme_payload(pack),
-            "signatures/README.md": b"Signatures are reserved for future VN pack versions.\n",
-        }
-        self._write_archive(archive_path, archive_payloads)
+        try:
+            with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                exported_items, asset_checksums, asset_fingerprints = await self._export_items(
+                    items,
+                    slot_by_id=slot_by_id,
+                    options=options,
+                    warnings=warnings,
+                    archive=archive,
+                )
+
+                sections: dict[str, Any] = {
+                    "metadata/pack.json": {"pack": self._export_pack_row(pack)},
+                    "metadata/slots.json": {
+                        "slots": [self._export_slot_row(slot, slot_by_id=slot_by_id) for slot in slots]
+                    },
+                    "metadata/items.json": {"items": exported_items},
+                    "metadata/batches.json": {"batches": [self._export_batch_row(batch) for batch in batches]},
+                    "metadata/provenance.json": {
+                        "mode": "full" if options.include_full_provenance else "redacted",
+                        "items": [
+                            self._export_item_provenance(item, include_full=options.include_full_provenance)
+                            for item in items
+                        ],
+                    },
+                    "metadata/runtime_manifest.json": self._runtime_manifest(pack, slots, items),
+                }
+                if options.include_character_payload:
+                    sections["metadata/character.json"] = {
+                        "character": self._export_character_row(
+                            self._require_character(int(pack["primary_character_id"]))
+                        )
+                    }
+                if options.include_world_book_payloads:
+                    sections["metadata/world_books.json"] = {
+                        "world_books": [],
+                        "source_world_book_ids": source_world_book_ids,
+                    }
+
+                fingerprint_payload = {
+                    "pack": _canonical_pack_for_fingerprint(sections["metadata/pack.json"]["pack"]),
+                    "slots": [
+                        _canonical_slot_for_fingerprint(slot)
+                        for slot in sections["metadata/slots.json"]["slots"]
+                    ],
+                    "items": [
+                        _canonical_item_for_fingerprint(item)
+                        for item in sections["metadata/items.json"]["items"]
+                    ],
+                    "batches": [
+                        _canonical_batch_for_fingerprint(batch)
+                        for batch in sections["metadata/batches.json"]["batches"]
+                    ],
+                    "provenance": [
+                        _canonical_provenance_for_fingerprint(item)
+                        for item in sections["metadata/provenance.json"]["items"]
+                    ],
+                    "assets": asset_fingerprints,
+                }
+                if "metadata/character.json" in sections:
+                    fingerprint_payload["character"] = _canonical_character_for_fingerprint(
+                        sections["metadata/character.json"]["character"]
+                    )
+                if "metadata/world_books.json" in sections:
+                    fingerprint_payload["world_books"] = sections["metadata/world_books.json"]
+                payload_fingerprint = canonical_payload_fingerprint(fingerprint_payload)
+                metadata_payloads = {
+                    path: canonical_json_bytes(payload)
+                    for path, payload in sorted(sections.items())
+                }
+                checksums = {
+                    path: sha256_bytes(content)
+                    for path, content in metadata_payloads.items()
+                }
+                checksums.update(asset_checksums)
+                manifest = self._manifest(
+                    pack=pack,
+                    slots=slots,
+                    items=exported_items,
+                    options=options,
+                    warnings=warnings,
+                    checksums=checksums,
+                    canonical_fingerprint=payload_fingerprint,
+                )
+                manifest_payload = canonical_json_bytes(manifest)
+                checksums[MANIFEST_PATH] = sha256_bytes(manifest_payload)
+                checksums_payload = canonical_json_bytes(dict(sorted(checksums.items())))
+
+                self._progress(progress, "writing_archive", {"asset_count": len(asset_checksums)})
+                archive_payloads = {
+                    MANIFEST_PATH: manifest_payload,
+                    **metadata_payloads,
+                    CHECKSUMS_PATH: checksums_payload,
+                    "README.md": self._readme_payload(pack),
+                    "signatures/README.md": b"Signatures are reserved for future VN pack versions.\n",
+                }
+                _write_payloads_to_archive(archive, archive_payloads)
+        except Exception:
+            archive_path.unlink(missing_ok=True)
+            raise
         validate_archive_members(archive_path)
 
         archive_hash = sha256_file(archive_path)
@@ -198,9 +204,10 @@ class VNPackExporter:
         slot_by_id: Mapping[int, Mapping[str, Any]],
         options: VNPackExportOptions,
         warnings: list[str],
-    ) -> tuple[list[dict[str, Any]], dict[str, bytes], list[dict[str, Any]]]:
+        archive: zipfile.ZipFile,
+    ) -> tuple[list[dict[str, Any]], dict[str, str], list[dict[str, Any]]]:
         exported_items: list[dict[str, Any]] = []
-        asset_payloads: dict[str, bytes] = {}
+        asset_checksums: dict[str, str] = {}
         asset_fingerprints: list[dict[str, Any]] = []
 
         for item in items:
@@ -228,7 +235,8 @@ class VNPackExporter:
                 exported["asset_path"] = asset_path
                 exported["asset_sha256"] = asset_sha256
                 exported["asset_size_bytes"] = len(asset_bytes)
-                asset_payloads[asset_path] = asset_bytes
+                archive.writestr(asset_path, asset_bytes)
+                asset_checksums[asset_path] = asset_sha256
                 asset_fingerprints.append(
                     {
                         "asset_type": slot["asset_type"],
@@ -244,7 +252,7 @@ class VNPackExporter:
                     raise ValueError(f"missing_asset_bytes:item:{item_id}")
             exported_items.append(exported)
 
-        return exported_items, asset_payloads, asset_fingerprints
+        return exported_items, asset_checksums, asset_fingerprints
 
     async def _get_file_record(self, item: Mapping[str, Any]) -> dict[str, Any] | None:
         raw_file_id = item.get("generated_file_id")
@@ -314,11 +322,6 @@ class VNPackExporter:
         ).strip("-")
         safe_title = safe_title[:64] or "vn-pack"
         return self.staging_root / f"{safe_title}-{uuid.uuid4().hex[:12]}{VNPACK_EXTENSION}"
-
-    def _write_archive(self, archive_path: Path, payloads: Mapping[str, bytes]) -> None:
-        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for path in sorted(payloads):
-                archive.writestr(path, payloads[path])
 
     def _export_pack_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
         return {
@@ -589,6 +592,14 @@ def _item_model(row: Mapping[str, Any]) -> VNAssetItem:
         trim_status=str(row.get("trim_status") or "unknown"),
         quality_flags=_loads_json(row.get("quality_flags_json"), []),
     )
+
+
+def _write_payloads_to_archive(
+    archive: zipfile.ZipFile,
+    payloads: Mapping[str, bytes],
+) -> None:
+    for path in sorted(payloads):
+        archive.writestr(path, payloads[path])
 
 
 async def _maybe_await(value: Any) -> Any:

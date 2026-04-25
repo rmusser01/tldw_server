@@ -59,13 +59,18 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def sha256_stream(stream: Any, *, chunk_size: int = 1024 * 1024) -> str:
+    """Return the SHA-256 hex digest for a readable binary stream."""
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(chunk_size), b""):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
 def sha256_file(path: Path) -> str:
     """Return the SHA-256 hex digest for a file without loading it all at once."""
-    digest = hashlib.sha256()
     with Path(path).open("rb") as file_obj:
-        for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+        return sha256_stream(file_obj)
 
 
 def canonical_json_bytes(payload: Any) -> bytes:

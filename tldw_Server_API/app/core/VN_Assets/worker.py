@@ -312,12 +312,28 @@ class VNAssetGenerationWorker:
         preview = self.repo.get_import_preview(preview_id, owner_user_id=user_id)
         if preview is None:
             raise ValueError("vn_pack_import_preview_not_found")
+        job_id = str(preview["job_id"])
+        portability_job = self.repo.get_portability_job_by_job_id(job_id, owner_user_id=user_id)
+        preview_status = str(preview["status"])
+        if preview_status in {"deleted", "cancelled"}:
+            if portability_job is not None and (
+                str(portability_job["status"]) != "cancelled"
+                or str(portability_job["stage"]) != preview_status
+            ):
+                self.repo.update_portability_job(
+                    job_id,
+                    {"status": "cancelled", "stage": preview_status},
+                    owner_user_id=user_id,
+                )
+            return {
+                "status": "cancelled",
+                "preview_id": preview_id,
+                "archive_path": str(preview.get("archive_path") or ""),
+            }
         archive_path = Path(str(payload.get("archive_path") or preview.get("archive_path") or ""))
         if not archive_path.is_file():
             raise ValueError("vn_pack_import_archive_not_found")
 
-        job_id = str(preview["job_id"])
-        portability_job = self.repo.get_portability_job_by_job_id(job_id, owner_user_id=user_id)
         self.repo.update_import_preview(
             preview_id,
             {"status": "processing", "archive_path": str(archive_path)},

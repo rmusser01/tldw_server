@@ -86,12 +86,76 @@ jobs:
             return 1
           }
 
+          gen_from_pyproject() {
+            local pyproject="$1"
+            local out_file="$repo_root/sbom-python.cdx.json"
+            echo "Generating Python SBOM from ${pyproject}"
+
+            python - "$pyproject" "$out_file" <<'PY'
+          import json
+          import re
+          import sys
+          import tomllib
+          import uuid
+          from pathlib import Path
+
+          pyproject = Path(sys.argv[1])
+          out_file = Path(sys.argv[2])
+          data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+          project = data.get("project", {})
+
+          dependencies = list(project.get("dependencies", []))
+          for optional_group in project.get("optional-dependencies", {}).values():
+              dependencies.extend(optional_group)
+
+          components = []
+          seen = set()
+          for dependency in dependencies:
+              name = dependency.split(" @ ", 1)[0]
+              name = re.split(r"\s*(?:===|==|~=|!=|<=|>=|<|>|\[|;)", name, maxsplit=1)[0].strip()
+              if not name:
+                  continue
+              key = name.lower().replace("_", "-")
+              if key in seen:
+                  continue
+              seen.add(key)
+
+              component = {
+                  "type": "library",
+                  "name": name,
+                  "purl": f"pkg:pypi/{key}",
+              }
+              version_match = re.search(r"(?:===|==)\s*([^,;\s]+)", dependency)
+              if version_match:
+                  component["version"] = version_match.group(1)
+              components.append(component)
+
+          bom = {
+              "bomFormat": "CycloneDX",
+              "specVersion": "1.5",
+              "serialNumber": f"urn:uuid:{uuid.uuid4()}",
+              "version": 1,
+              "metadata": {
+                  "component": {
+                      "type": "application",
+                      "name": project.get("name", pyproject.parent.name),
+                      "version": project.get("version", "0.0.0"),
+                  }
+              },
+              "components": sorted(components, key=lambda item: item["name"].lower()),
+          }
+          out_file.write_text(json.dumps(bom, indent=2) + "\n", encoding="utf-8")
+          PY
+          }
+
           if [ -f "$repo_root/tldw_Server_API/requirements.txt" ]; then
             gen_from_requirements "$repo_root/tldw_Server_API/requirements.txt"
           elif [ -f "$repo_root/requirements.txt" ]; then
             gen_from_requirements "$repo_root/requirements.txt"
+          elif [ -f "$repo_root/pyproject.toml" ]; then
+            gen_from_pyproject "$repo_root/pyproject.toml"
           else
-            echo "No requirements file found; cannot generate SBOM" >&2
+            echo "No requirements file or pyproject.toml found; cannot generate SBOM" >&2
             exit 1
           fi
 
