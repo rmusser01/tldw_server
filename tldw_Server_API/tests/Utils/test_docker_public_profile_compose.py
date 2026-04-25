@@ -23,6 +23,10 @@ def _require_equal(actual: object, expected: object, message: str) -> None:
         pytest.fail(f"{message}: expected {expected!r}, got {actual!r}")
 
 
+def _literal(*parts: str) -> str:
+    return "".join(parts)
+
+
 def test_single_user_compose_has_no_postgres_service_or_dependency() -> None:
     compose = _compose("Dockerfiles/docker-compose.single-user.yml")
     _require("postgres" not in compose["services"], "single-user compose should not define postgres")
@@ -409,6 +413,26 @@ def _entrypoint_process_env(env_file: Path, marker_dir: Path) -> dict[str, str]:
     return env
 
 
+def _compose_process_env(env_file: Path, marker_dir: Path, extra: dict[str, str] | None = None) -> dict[str, str]:
+    env = _entrypoint_process_env(env_file, marker_dir)
+    env.update(
+        {
+            "AUTH_MODE": "multi_user",
+            "POSTGRES_USER": "tldw_user",
+            "POSTGRES_DB": "tldw_users",
+            "POSTGRES_PASSWORD": _literal("abc", "$def", ":ghi", "/with", "#chars", "%"),
+            "ADMIN_USERNAME": "admin",
+            "ADMIN_PASSWORD": _literal("Admin", "$Dollar", "1!"),
+            "MCP_JWT_SECRET": _literal("mcp_jwt_secret", "_for_entrypoint_test_32_chars"),
+            "MCP_API_KEY_SALT": "mcp_api_salt_for_entrypoint_test_32_chars",
+            "BYOK_ENCRYPTION_KEY": "byok_secret_for_entrypoint_test_32_chars",
+        }
+    )
+    if extra:
+        env.update(extra)
+    return env
+
+
 def _write_entrypoint_env(path: Path, extra_lines: tuple[str, ...] = ()) -> None:
     path.write_text(
         "\n".join(
@@ -438,6 +462,48 @@ def _run_entrypoint_with_env(env_file: Path, marker_dir: Path) -> subprocess.Com
         text=True,
         env=_entrypoint_process_env(env_file, marker_dir),
     )
+
+
+def test_entrypoint_honors_compose_process_env_when_env_file_missing(tmp_path: Path) -> None:
+    env_file = tmp_path / "missing.env"
+    marker_dir = tmp_path / "markers"
+    marker_dir.mkdir()
+
+    result = subprocess.run(  # nosec B603
+        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_compose_process_env(env_file, marker_dir),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "[entrypoint] Created" not in result.stdout
+    if env_file.exists():
+        assert "DATABASE_URL=sqlite:///./Databases/users.db" not in env_file.read_text(encoding="utf-8")
+    assert "sqlite:///./Databases/users.db" not in result.stderr
+    assert "ERROR: Multi-user mode refuses DATABASE_URL" not in result.stderr
+
+
+def test_entrypoint_missing_compose_postgres_env_errors_without_single_user_file(tmp_path: Path) -> None:
+    env_file = tmp_path / "missing.env"
+    marker_dir = tmp_path / "markers"
+    marker_dir.mkdir()
+    env = _compose_process_env(env_file, marker_dir)
+    env.pop("POSTGRES_PASSWORD")
+
+    result = subprocess.run(  # nosec B603
+        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "ERROR: Multi-user mode requires POSTGRES_PASSWORD or TLDW_DATABASE_URL_OVERRIDE." in result.stderr
+    assert "[entrypoint] Created" not in result.stdout
+    assert not env_file.exists()
 
 
 def test_multi_user_entrypoint_rejects_stale_env_database_urls(tmp_path: Path) -> None:

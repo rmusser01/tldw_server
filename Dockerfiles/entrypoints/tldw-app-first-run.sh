@@ -111,11 +111,7 @@ upsert_env() {
       END { if (!updated) print k "=" v }
     ' "$ENV_FILE" > "$tmp_file"
   else
-    {
-      echo "AUTH_MODE=single_user"
-      echo "SINGLE_USER_API_KEY=$value"
-      echo "DATABASE_URL=sqlite:///./Databases/users.db"
-    } > "$tmp_file"
+    echo "$key=$value" > "$tmp_file"
   fi
   mv "$tmp_file" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
@@ -209,9 +205,18 @@ EOF
   echo "[entrypoint] Created $ENV_FILE with generated SINGLE_USER_API_KEY."
 }
 
-ensure_env_file
+process_env_multi_user=0
+if [ "$incoming_auth_mode" = "multi_user" ]; then
+  process_env_multi_user=1
+fi
 
-load_env_file
+if [ "$process_env_multi_user" = "0" ]; then
+  ensure_env_file
+fi
+
+if [ -f "$ENV_FILE" ] && ! { [ "$process_env_multi_user" = "1" ] && { [ -n "${POSTGRES_PASSWORD:-}" ] || [ -n "$incoming_database_url_override" ]; }; }; then
+  load_env_file
+fi
 
 if [ -n "$incoming_auth_mode" ]; then
   AUTH_MODE="$incoming_auth_mode"
